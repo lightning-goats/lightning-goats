@@ -21,12 +21,14 @@ jobs:
           components: rustfmt, clippy
       - name: Generate Rust 1.88 lockfile
         run: cargo generate-lockfile
-      - name: Verify RSA advisory crate is absent from resolved graph
+      - name: Verify advisory RSA crate is unreachable
         shell: bash
         run: |
-          if grep -q '^name = "rsa"$' Cargo.lock; then
-            echo "rsa remains in Cargo.lock after removing unused SQLx macros" >&2
-            cargo tree -i rsa --target all || true
+          set -euo pipefail
+          TREE="$(cargo tree --locked -i rsa --all-features 2>&1 || true)"
+          printf '%s\n' "$TREE"
+          if printf '%s\n' "$TREE" | grep -Eq '^rsa v|^[[:space:]│├└─]*rsa v'; then
+            echo "rsa is active in the dependency graph" >&2
             exit 1
           fi
       - name: Verify build and tests against lockfile

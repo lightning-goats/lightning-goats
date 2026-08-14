@@ -47,7 +47,10 @@ async fn main() -> Result<()> {
             let cursor = ledger.last_pay_index().await?;
             println!("mode={}", config.service.mode.as_str());
             println!("herd_user={}", config.lightning.herd_user);
-            println!("last_pay_index={}", cursor.map_or_else(|| "uninitialized".to_owned(), |value| value.to_string()));
+            println!(
+                "last_pay_index={}",
+                cursor.map_or_else(|| "uninitialized".to_owned(), |value| value.to_string())
+            );
             println!("feed_credit_sats={credit}");
             println!("threshold_sats={threshold}");
             println!("feeds_due={}", credit / threshold);

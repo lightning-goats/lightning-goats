@@ -1,0 +1,53 @@
+name: Release Linux binaries
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust 1.88
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.88"
+
+      - name: Build release binaries
+        run: cargo build --release --locked --bins
+
+      - name: Assemble release archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          ARCHIVE="lightning-goats-${TAG}-x86_64-linux-gnu.tar.gz"
+          STAGE="release-${TAG}"
+
+          mkdir -p "$STAGE"
+          install -m 0755 target/release/lightning-goatsd "$STAGE/lightning-goatsd"
+          install -m 0755 target/release/lightning-goatsctl "$STAGE/lightning-goatsctl"
+
+          tar -C "$STAGE" -czf "$ARCHIVE" lightning-goatsd lightning-goatsctl
+          sha256sum "$ARCHIVE" > SHA256SUMS
+
+          sha256sum target/release/lightning-goatsd >> SHA256SUMS
+          sha256sum target/release/lightning-goatsctl >> SHA256SUMS
+
+          cat SHA256SUMS
+
+      - name: Publish GitHub release
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: "lightning-goats-${{ github.ref_name }}-x86_64-linux-gnu.tar.gz,SHA256SUMS"
+          artifactErrorsFailBuild: true
+          allowUpdates: false
+          immutableCreate: true
+          generateReleaseNotes: true

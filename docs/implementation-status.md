@@ -2,9 +2,33 @@
 
 This file tracks the current implementation state while the existing LNbits production stack remains authoritative.
 
+## Cutover accounting decision
+
+The standalone Lightning Goats ledger starts at **exactly zero** at production cutover.
+
+There is no migration or synchronization of the old LNbits herd-wallet balance, and there is no late-LNbits invoice reconciliation. Pre-cutover LNbits state remains historical LNbits state.
+
+The production accounting epoch is established by the explicitly initialized CLN `pay_index` cursor and the switch of `herd@lightning-goats.com` to the canonical `clnaddress` path. Only qualifying settlements with labels matching:
+
+```text
+clnaddress:v1:herd:<uuid>
+```
+
+can create feed credit in the new system.
+
+Consequences:
+
+- initial `feed_credit_sats = 0`;
+- no LNbits wallet balance import;
+- no LNbits invoice key in the new service stack;
+- no pending-invoice allowlist;
+- no migration timer or grace-period reconciler;
+- an old LNbits invoice that settles after cutover does not create new Lightning Goats feed credit;
+- the old LNbits database may be retained read-only for historical audit, but is outside the new accounting boundary.
+
 ## Canonical `clnaddress` dependency
 
-The canonical Lightning Goats fork is now:
+The canonical Lightning Goats fork is:
 
 ```text
 lightning-goats/clnaddress
@@ -24,7 +48,7 @@ clnaddress:v1:<user>:<uuid>
 
 and includes strict usernames, per-address min/max policy, LUD-12 comment validation, per-address Nostr policy, protected file-based Zap signer loading, atomic registry/cursor persistence, privacy hardening, and integration tests.
 
-The fork passed its full inherited PR matrix across CLN 25.09.3, 25.12.1, 26.04, and 26.06.6, including Rust 1.85 MSRV verification, Rust build/unit tests, and integration pytest on all eight matrix jobs.
+The fork passed its inherited compatibility matrix across CLN 25.09.3, 25.12.1, 26.04, and 26.06.6, including Rust MSRV verification, Rust build/unit tests, and integration pytest.
 
 ## Implemented in `lightning-goatsd`
 
@@ -61,6 +85,17 @@ The fork passed its full inherited PR matrix across CLN 25.09.3, 25.12.1, 26.04,
 - nginx canary configuration example.
 - server setup runbook.
 
+## Release model
+
+This is a single-operator deployment. Release automation should stay simple:
+
+- tagged Linux binaries for `lightning-goatsd` and `lightning-goatsctl`;
+- a compressed release archive;
+- SHA-256 checksums;
+- deployment configuration/systemd/nginx assets remain in Git and are installed manually.
+
+`lightning-goats/clnaddress` already has an upstream-style binary release workflow and does not need an additional package format.
+
 ## Verification
 
 The integrated Rust runtime, including durable overlay and Nostr/outbox workers, has been verified with:
@@ -71,16 +106,14 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-features
 ```
 
-The obsolete local `clnaddress` patch artifact has been removed now that the canonical org fork is merged.
-
 ## Next
 
-1. Add idempotent legacy LNbits opening-credit import.
-2. Add idempotent late-LNbits settlement import and audit records.
-3. Build the temporary legacy reconciliation command/timer used only during cutover grace.
-4. Port/finalize the production Phase 1 message templates and remaining read-only overlay data needed by the existing presentation.
-5. Add `cargo audit` / `cargo deny` security CI after the dependency set stabilizes.
-6. Inventory the live server and create the restricted CLN rune/credential material without changing production routes.
-7. Deploy the org `clnaddress` fork and `lightning-goatsd` in canary/shadow mode.
-8. Exercise `herd-canary@lightning-goats.com` and the OpenHAB test rule while LNbits remains authoritative.
-9. Produce and execute the final controlled cutover only after canary acceptance.
+1. Finalize production Phase 1 message templates and remaining read-only overlay data needed by the existing presentation.
+2. Add `cargo audit` / `cargo deny` security CI after the dependency set stabilizes.
+3. Add tagged Linux binary releases and checksums for `lightning-goats`.
+4. Inventory the live server and create the restricted CLN rune/credential material without changing production routes.
+5. Deploy `lightning-goats/clnaddress` and `lightning-goatsd` in canary/shadow mode.
+6. Exercise `herd-canary@lightning-goats.com` and the OpenHAB test rule while LNbits remains authoritative.
+7. Initialize the production CLN cursor while the daemon is still in shadow mode.
+8. Execute the zero-based cutover: disable old side effects, switch nginx Lightning Address routing to `clnaddress`, verify a real herd payment, then activate the new daemon.
+9. Keep the old LNbits data read-only for audit until the operator chooses to archive/remove it; it has no accounting role after cutover.

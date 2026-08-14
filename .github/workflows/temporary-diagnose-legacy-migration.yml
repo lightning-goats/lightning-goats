@@ -1,0 +1,78 @@
+name: Temporary diagnose legacy migration
+
+on:
+  push:
+    branches:
+      - feat/legacy-lnbits-reconciler
+
+permissions:
+  contents: write
+
+concurrency:
+  group: temporary-diagnose-legacy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/legacy-lnbits-reconciler
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.88"
+          components: rustfmt, clippy
+      - name: Apply rustfmt
+        run: cargo fmt --all
+      - name: Run diagnostic gate and commit result
+        shell: bash
+        run: |
+          set +e
+          rm -rf .ci/legacy-fail-*
+          mkdir -p .ci
+
+          cargo clippy --all-targets --all-features -- -D warnings
+          CLIPPY=$?
+          if [ "$CLIPPY" -ne 0 ]; then
+            touch .ci/legacy-fail-clippy
+          fi
+
+          cargo test --all-features
+          TEST=$?
+          if [ "$TEST" -ne 0 ]; then
+            touch .ci/legacy-fail-test
+          fi
+
+          sh -n deploy/scripts/run-nak-bunker
+          SHELL1=$?
+          sh -n deploy/scripts/run-lnbits-snapshot
+          SHELL2=$?
+          sh -n deploy/scripts/run-lnbits-reconcile
+          SHELL3=$?
+          if [ "$SHELL1" -ne 0 ] || [ "$SHELL2" -ne 0 ] || [ "$SHELL3" -ne 0 ]; then
+            touch .ci/legacy-fail-shell
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if [ "$CLIPPY" -eq 0 ] && [ "$TEST" -eq 0 ] && [ "$SHELL1" -eq 0 ] && [ "$SHELL2" -eq 0 ] && [ "$SHELL3" -eq 0 ]; then
+            rm -f .github/workflows/temporary-harden-legacy-reconcile.yml
+            rm -f .github/workflows/temporary-finalize-legacy-migration.yml
+            rm -f .github/workflows/temporary-diagnose-legacy-migration.yml
+            rm -rf .ci/legacy-fail-*
+            git add -A
+            if ! git diff --cached --quiet; then
+              git commit -m "ci: finalize green legacy migration bridge"
+              git push origin HEAD:feat/legacy-lnbits-reconciler
+            fi
+            exit 0
+          fi
+
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "ci: record legacy migration diagnostic failure"
+            git push origin HEAD:feat/legacy-lnbits-reconciler
+          fi
+          exit 1

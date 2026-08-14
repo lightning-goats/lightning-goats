@@ -34,13 +34,7 @@ impl OpenHabClient {
         feeder_rule_id: &str,
         override_item: &str,
     ) -> Result<Self> {
-        Self::new_with_temperature(
-            base_url,
-            auth_token,
-            feeder_rule_id,
-            override_item,
-            None,
-        )
+        Self::new_with_temperature(base_url, auth_token, feeder_rule_id, override_item, None)
     }
 
     pub fn new_with_temperature(
@@ -227,7 +221,10 @@ mod tests {
     async fn spawn_mock(state: MockState) -> String {
         let app = Router::new()
             .route("/rest/items/FeederOverride/state", get(override_handler))
-            .route("/rest/items/AmbientTemperature/state", get(temperature_handler))
+            .route(
+                "/rest/items/AmbientTemperature/state",
+                get(temperature_handler),
+            )
             .route("/rest/rules/rule123/runnow", post(feeder_handler))
             .with_state(state);
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

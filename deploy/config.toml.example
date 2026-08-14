@@ -1,8 +1,10 @@
-# Non-secret Lightning Goats configuration.
+# Non-secret Lightning Goats production configuration.
 # Secrets are loaded through systemd credentials, not this file.
 
 [service]
 listen = "127.0.0.1:8787"
+# Use shadow during production ingress verification. Change to active only after
+# the zero-based cutover acceptance checks pass.
 mode = "shadow"
 
 [database]
@@ -21,8 +23,11 @@ inter_feed_delay_seconds = 30
 
 [openhab]
 url = "http://127.0.0.1:8080"
-feeder_rule_id = "88bd9ec4de"
+# Production automatic feeder rule. Manual feeding remains outside this app.
+feeder_rule_id = "REPLACE_WITH_PRODUCTION_FEEDER_RULE_ID"
 override_item = "FeederOverride"
+# Optional read-only Fahrenheit item used by /api/v1/status and the overlay.
+temperature_item = "AmbientWeatherWS2902A_WeatherDataWs2902a_Temperature"
 
 [nostr]
 nak_path = "/usr/local/bin/nak"

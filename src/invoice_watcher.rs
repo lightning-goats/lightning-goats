@@ -46,7 +46,9 @@ pub async fn run_invoice_watcher(
             }
             Ok(Some(SettlementOutcome::Ignored)) => {
                 consecutive_transport_errors = 0;
-                tracing::debug!("observed non-herd paid invoice; cursor advanced without feed credit");
+                tracing::debug!(
+                    "observed non-herd paid invoice; cursor advanced without feed credit"
+                );
             }
             Ok(Some(SettlementOutcome::Duplicate)) => {
                 consecutive_transport_errors = 0;
@@ -61,14 +63,18 @@ pub async fn run_invoice_watcher(
                 tracing::warn!(%error, ?delay, "CLNRest polling failed; preserving cursor and retrying");
                 sleep(delay).await;
             }
-            Err(error) => return Err(error).context("paid-invoice watcher stopped on ledger/invariant error"),
+            Err(error) => {
+                return Err(error).context("paid-invoice watcher stopped on ledger/invariant error");
+            }
         }
     }
 }
 
 fn is_retryable_cln_error(error: &anyhow::Error) -> bool {
     error.chain().any(|cause| cause.is::<reqwest::Error>())
-        || error.to_string().starts_with("CLNRest waitanyinvoice failed with HTTP")
+        || error
+            .to_string()
+            .starts_with("CLNRest waitanyinvoice failed with HTTP")
 }
 
 fn retry_delay(consecutive_errors: u32) -> Duration {

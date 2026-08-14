@@ -1,0 +1,13 @@
+[Unit]
+Description=Periodically reconcile allowlisted legacy LNbits invoices
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+RandomizedDelaySec=30s
+Persistent=true
+Unit=lightning-goats-lnbits-reconcile.service
+
+[Install]
+WantedBy=timers.target

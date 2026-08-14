@@ -13,11 +13,22 @@ use crate::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FeedWorkerStep {
     Idle,
-    ShadowBlocked { feeds_due: u64 },
-    OverrideBlocked { feeds_due: u64 },
-    OverrideUnavailable { feeds_due: u64 },
-    UnknownFeedBlocked { attempt_id: Uuid },
-    Fed { attempt_id: Uuid, remaining_sats: u64 },
+    ShadowBlocked {
+        feeds_due: u64,
+    },
+    OverrideBlocked {
+        feeds_due: u64,
+    },
+    OverrideUnavailable {
+        feeds_due: u64,
+    },
+    UnknownFeedBlocked {
+        attempt_id: Uuid,
+    },
+    Fed {
+        attempt_id: Uuid,
+        remaining_sats: u64,
+    },
 }
 
 pub async fn run_feed_step(
@@ -110,7 +121,10 @@ pub async fn run_feed_worker(
                 sleep(Duration::from_secs(5)).await;
             }
             Ok(FeedWorkerStep::OverrideUnavailable { feeds_due }) => {
-                tracing::warn!(feeds_due, "automatic feeding blocked because FeederOverride state is unavailable");
+                tracing::warn!(
+                    feeds_due,
+                    "automatic feeding blocked because FeederOverride state is unavailable"
+                );
                 sleep(Duration::from_secs(5)).await;
             }
             Ok(FeedWorkerStep::OverrideBlocked { feeds_due }) => {
@@ -118,7 +132,10 @@ pub async fn run_feed_worker(
                 sleep(Duration::from_secs(2)).await;
             }
             Ok(FeedWorkerStep::ShadowBlocked { feeds_due }) => {
-                tracing::debug!(feeds_due, "shadow mode: feed would be due but actuation is disabled");
+                tracing::debug!(
+                    feeds_due,
+                    "shadow mode: feed would be due but actuation is disabled"
+                );
                 sleep(Duration::from_secs(2)).await;
             }
             Ok(FeedWorkerStep::Idle) => sleep(Duration::from_secs(2)).await,
@@ -195,9 +212,7 @@ mod tests {
         let invoice = PaidInvoice {
             pay_index: 101,
             payment_hash: "worker-test-hash".to_owned(),
-            label: Some(
-                "clnaddress:v1:herd:550e8400-e29b-41d4-a716-446655440000".to_owned(),
-            ),
+            label: Some("clnaddress:v1:herd:550e8400-e29b-41d4-a716-446655440000".to_owned()),
             amount_msat: sats * 1_000,
             settled_at: Some(1_700_000_000),
         };
@@ -223,13 +238,19 @@ mod tests {
             run_feed_step(&ledger, &openhab, 1_000, RuntimeMode::Active)
                 .await
                 .unwrap(),
-            FeedWorkerStep::Fed { remaining_sats: 1_340, .. }
+            FeedWorkerStep::Fed {
+                remaining_sats: 1_340,
+                ..
+            }
         ));
         assert!(matches!(
             run_feed_step(&ledger, &openhab, 1_000, RuntimeMode::Active)
                 .await
                 .unwrap(),
-            FeedWorkerStep::Fed { remaining_sats: 340, .. }
+            FeedWorkerStep::Fed {
+                remaining_sats: 340,
+                ..
+            }
         ));
         assert_eq!(
             run_feed_step(&ledger, &openhab, 1_000, RuntimeMode::Active)

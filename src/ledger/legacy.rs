@@ -5,10 +5,8 @@ use serde_json::json;
 use sqlx::Row;
 
 use super::{
-    LedgerStore,
-    events::append_event_in_transaction,
-    feed::feed_credit_in_transaction,
-    to_i64, to_u64,
+    LedgerStore, events::append_event_in_transaction, feed::feed_credit_in_transaction, to_i64,
+    to_u64,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,8 +78,7 @@ impl LedgerStore {
             let existing_pending = load_pending_invoices(&mut transaction).await?;
 
             if existing_wallet == manifest.wallet_id
-                && to_u64(existing_amount, "legacy opening credit")?
-                    == manifest.opening_credit_sats
+                && to_u64(existing_amount, "legacy opening credit")? == manifest.opening_credit_sats
                 && existing_cutover == manifest.cutover_at
                 && existing_snapshot == manifest.snapshot_at
                 && pending_sets_equal(&existing_pending, &manifest.pending_invoices)
@@ -93,10 +90,9 @@ impl LedgerStore {
             bail!("a different legacy LNbits cutover manifest is already installed");
         }
 
-        let existing_imports: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM legacy_imports")
-                .fetch_one(&mut *transaction)
-                .await?;
+        let existing_imports: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM legacy_imports")
+            .fetch_one(&mut *transaction)
+            .await?;
         if existing_imports != 0 {
             bail!("legacy settlement imports exist before a cutover manifest was installed");
         }
@@ -161,12 +157,11 @@ impl LedgerStore {
         }
 
         let mut transaction = self.pool.begin().await?;
-        let opening = sqlx::query(
-            "SELECT legacy_wallet_id FROM legacy_opening_credit WHERE singleton = 1",
-        )
-        .fetch_optional(&mut *transaction)
-        .await?
-        .context("legacy LNbits cutover manifest is not installed")?;
+        let opening =
+            sqlx::query("SELECT legacy_wallet_id FROM legacy_opening_credit WHERE singleton = 1")
+                .fetch_optional(&mut *transaction)
+                .await?
+                .context("legacy LNbits cutover manifest is not installed")?;
         let manifest_wallet: String = opening.try_get("legacy_wallet_id")?;
         if settled.wallet_id != manifest_wallet {
             bail!(
@@ -224,12 +219,11 @@ impl LedgerStore {
             return Ok(LegacySettlementOutcome::AlreadyImported);
         }
 
-        if let Some(row) = sqlx::query(
-            "SELECT credited_sats FROM settled_invoices WHERE payment_hash = ?",
-        )
-        .bind(&settled.payment_hash)
-        .fetch_optional(&mut *transaction)
-        .await?
+        if let Some(row) =
+            sqlx::query("SELECT credited_sats FROM settled_invoices WHERE payment_hash = ?")
+                .bind(&settled.payment_hash)
+                .fetch_optional(&mut *transaction)
+                .await?
         {
             let credited_sats: i64 = row.try_get("credited_sats")?;
             if credited_sats > 0 {
@@ -386,7 +380,10 @@ fn validate_manifest(manifest: &LegacyCutoverManifest) -> Result<()> {
         if pending.amount_sats == 0 {
             bail!("pending legacy invoice amount must be greater than zero");
         }
-        if pending.created_at.is_some_and(|created| created > manifest.snapshot_at) {
+        if pending
+            .created_at
+            .is_some_and(|created| created > manifest.snapshot_at)
+        {
             bail!("pending legacy invoice was created after the stable cutover snapshot");
         }
         if let (Some(created), Some(expiry)) = (pending.created_at, pending.expiry_at) {
@@ -619,9 +616,7 @@ mod tests {
         let observed = PaidInvoice {
             pay_index: 101,
             payment_hash: payment_hash.clone(),
-            label: Some(
-                "clnaddress:v1:herd:550e8400-e29b-41d4-a716-446655440000".to_owned(),
-            ),
+            label: Some("clnaddress:v1:herd:550e8400-e29b-41d4-a716-446655440000".to_owned()),
             amount_msat: 500_000,
             settled_at: Some(1_700_000_200),
         };

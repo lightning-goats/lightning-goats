@@ -11,10 +11,10 @@ use crate::domain::invoice::ClnAddressInvoiceLabel;
 
 mod events;
 mod feed;
-pub use events::DurableEvent;
-pub use feed::{StoredFeedAttempt, StoredFeedAttemptStatus};
 use events::append_event_in_transaction;
+pub use events::DurableEvent;
 use feed::feed_credit_in_transaction;
+pub use feed::{StoredFeedAttempt, StoredFeedAttemptStatus};
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 

@@ -25,6 +25,9 @@ impl AppConfig {
     }
 
     pub fn validate(&self) -> Result<()> {
+        if !self.service.listen.ip().is_loopback() {
+            bail!("service.listen must use a loopback address; nginx is the public boundary");
+        }
         if self.feeder.threshold_sats == 0 {
             bail!("feeder.threshold_sats must be greater than zero");
         }
@@ -38,6 +41,11 @@ impl AppConfig {
         }
         if self.nostr.nak_path.trim().is_empty() {
             bail!("nostr.nak_path must not be empty");
+        }
+        if self.nostr.bunker_pubkey.len() != 64
+            || !self.nostr.bunker_pubkey.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            bail!("nostr.bunker_pubkey must be a 32-byte hex public key");
         }
         Ok(())
     }
@@ -54,6 +62,16 @@ pub struct ServiceConfig {
 pub enum RuntimeMode {
     Shadow,
     Active,
+}
+
+impl RuntimeMode {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Shadow => "shadow",
+            Self::Active => "active",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -117,6 +135,13 @@ mod tests {
     #[test]
     fn accepts_valid_config() {
         valid_config().validate().unwrap();
+    }
+
+    #[test]
+    fn rejects_public_listener() {
+        let mut config = valid_config();
+        config.service.listen = "0.0.0.0:8787".parse().unwrap();
+        assert!(config.validate().is_err());
     }
 
     #[test]

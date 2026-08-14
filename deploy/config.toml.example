@@ -1,0 +1,30 @@
+# Non-secret Lightning Goats configuration.
+# Secrets are loaded through systemd credentials, not this file.
+
+[service]
+listen = "127.0.0.1:8787"
+mode = "shadow"
+
+[database]
+url = "sqlite:///var/lib/lightning-goats/lightning-goats.db"
+
+[lightning]
+clnrest_url = "https://127.0.0.1:3010"
+herd_user = "herd"
+
+[feeder]
+threshold_sats = 1000
+inter_feed_delay_seconds = 30
+
+[openhab]
+url = "http://127.0.0.1:8080"
+feeder_rule_id = "88bd9ec4de"
+override_item = "FeederOverride"
+
+[nostr]
+nak_path = "/usr/local/bin/nak"
+# Main Lightning Goats signer pubkey hosted by the NIP-46 bunker.
+bunker_pubkey = "REPLACE_WITH_64_CHAR_HEX_PUBKEY"
+relays = [
+  "wss://relay.example",
+]

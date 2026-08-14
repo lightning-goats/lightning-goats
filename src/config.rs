@@ -53,7 +53,11 @@ impl AppConfig {
             bail!("nostr.nak_path must not be empty");
         }
         if self.nostr.bunker_pubkey.len() != 64
-            || !self.nostr.bunker_pubkey.bytes().all(|byte| byte.is_ascii_hexdigit())
+            || !self
+                .nostr
+                .bunker_pubkey
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
         {
             bail!("nostr.bunker_pubkey must be a 32-byte hex public key");
         }

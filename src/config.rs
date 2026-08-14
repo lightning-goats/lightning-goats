@@ -54,6 +54,11 @@ impl AppConfig {
         if self.openhab.override_item.trim().is_empty() {
             bail!("openhab.override_item must not be empty");
         }
+        if let Some(item) = &self.openhab.temperature_item {
+            if item.trim().is_empty() {
+                bail!("openhab.temperature_item must not be empty when configured");
+            }
+        }
         if !self.nostr.nak_path.is_absolute() {
             bail!("nostr.nak_path must be an absolute path");
         }
@@ -98,6 +103,7 @@ pub struct DatabaseConfig {
 #[serde(rename_all = "lowercase")]
 pub enum RuntimeMode {
     Shadow,
+    Canary,
     Active,
 }
 
@@ -106,8 +112,19 @@ impl RuntimeMode {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Shadow => "shadow",
+            Self::Canary => "canary",
             Self::Active => "active",
         }
+    }
+
+    #[must_use]
+    pub const fn feeder_enabled(self) -> bool {
+        matches!(self, Self::Canary | Self::Active)
+    }
+
+    #[must_use]
+    pub const fn nostr_enabled(self) -> bool {
+        matches!(self, Self::Active)
     }
 }
 
@@ -130,6 +147,8 @@ pub struct OpenHabConfig {
     pub url: String,
     pub feeder_rule_id: String,
     pub override_item: String,
+    #[serde(default)]
+    pub temperature_item: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -167,6 +186,7 @@ mod tests {
                 url: "http://127.0.0.1:8080".to_owned(),
                 feeder_rule_id: "88bd9ec4de".to_owned(),
                 override_item: "FeederOverride".to_owned(),
+                temperature_item: Some("AmbientTemperature".to_owned()),
             },
             nostr: NostrConfig {
                 nak_path: PathBuf::from("/usr/local/bin/nak"),
@@ -180,6 +200,12 @@ mod tests {
     #[test]
     fn accepts_valid_config() {
         valid_config().validate().unwrap();
+    }
+
+    #[test]
+    fn canary_actuates_without_enabling_nostr() {
+        assert!(RuntimeMode::Canary.feeder_enabled());
+        assert!(!RuntimeMode::Canary.nostr_enabled());
     }
 
     #[test]

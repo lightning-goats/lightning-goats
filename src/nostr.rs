@@ -1,10 +1,4 @@
-use std::{
-    ffi::OsStr,
-    path::PathBuf,
-    process::Stdio,
-    sync::Arc,
-    time::Duration,
-};
+use std::{ffi::OsStr, path::PathBuf, process::Stdio, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result, bail};
 use reqwest::Url;
@@ -59,7 +53,11 @@ impl NakClient {
         })
     }
 
-    pub async fn sign_kind1(&self, content: &str, tags: Vec<Vec<String>>) -> Result<SignedNostrEvent> {
+    pub async fn sign_kind1(
+        &self,
+        content: &str,
+        tags: Vec<Vec<String>>,
+    ) -> Result<SignedNostrEvent> {
         tokio::fs::create_dir_all(&self.nak_config_path)
             .await
             .with_context(|| {
@@ -95,10 +93,15 @@ impl NakClient {
         validate_signed_event(event, &self.project_pubkey)?;
         self.verify_event(event).await?;
 
-        let event_json = serde_json::to_string(event).context("failed serializing signed Nostr event")?;
-        let mut args = vec!["event".to_owned(), "--sec".to_owned(), PUBLISH_DUMMY_SECRET.to_owned()];
+        let event_json =
+            serde_json::to_string(event).context("failed serializing signed Nostr event")?;
+        let mut args = vec![
+            "event".to_owned(),
+            "--sec".to_owned(),
+            PUBLISH_DUMMY_SECRET.to_owned(),
+        ];
         args.extend(self.relays.iter().cloned());
-        self.run_nak(args.iter().map(AsRef::as_ref), &event_json, None)
+        self.run_nak(args.iter().map(String::as_str), &event_json, None)
             .await
             .context("nak failed publishing persisted signed Nostr event")?;
         Ok(())
@@ -106,7 +109,8 @@ impl NakClient {
 
     pub async fn verify_event(&self, event: &SignedNostrEvent) -> Result<()> {
         validate_signed_event(event, &self.project_pubkey)?;
-        let event_json = serde_json::to_string(event).context("failed serializing signed Nostr event")?;
+        let event_json =
+            serde_json::to_string(event).context("failed serializing signed Nostr event")?;
         self.run_nak([OsStr::new("verify")], &event_json, None)
             .await
             .context("nak rejected persisted Nostr event signature")?;
@@ -161,7 +165,11 @@ impl NakClient {
             .context("failed waiting for nak")?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("nak exited with {}: {}", output.status, sanitize_stderr(&stderr));
+            bail!(
+                "nak exited with {}: {}",
+                output.status,
+                sanitize_stderr(&stderr)
+            );
         }
         String::from_utf8(output.stdout).context("nak stdout was not UTF-8")
     }

@@ -50,9 +50,7 @@ impl LedgerStore {
         let mut transaction = self.pool.begin().await?;
         let current = message_cursor_in_transaction(&mut transaction).await?;
         if source_event_seq_i64 <= current {
-            bail!(
-                "source event {source_event_seq} is not ahead of message cursor {current}"
-            );
+            bail!("source event {source_event_seq} is not ahead of message cursor {current}");
         }
 
         sqlx::query(
@@ -198,7 +196,10 @@ mod tests {
             .enqueue_signed_message(1, "event-a", signed)
             .await
             .unwrap();
-        store.mark_outbox_failed("event-a", "relay down").await.unwrap();
+        store
+            .mark_outbox_failed("event-a", "relay down")
+            .await
+            .unwrap();
 
         let entry = store.next_outbox_entry().await.unwrap().unwrap();
         assert_eq!(entry.event_id, "event-a");

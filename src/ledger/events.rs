@@ -90,11 +90,10 @@ impl LedgerStore {
         let seq_row = sqlx::query("SELECT COALESCE(MAX(seq), 0) AS seq FROM event_log")
             .fetch_one(&mut *transaction)
             .await?;
-        let credit_row = sqlx::query(
-            "SELECT COALESCE(SUM(delta_sats), 0) AS credit FROM ledger_entries",
-        )
-        .fetch_one(&mut *transaction)
-        .await?;
+        let credit_row =
+            sqlx::query("SELECT COALESCE(SUM(delta_sats), 0) AS credit FROM ledger_entries")
+                .fetch_one(&mut *transaction)
+                .await?;
         let attempt_row = sqlx::query(
             r#"
             SELECT id, status, threshold_sats
@@ -144,7 +143,8 @@ pub(super) async fn append_event_in_transaction<T: Serialize>(
     event_type: &str,
     payload: &T,
 ) -> Result<u64> {
-    let payload_json = serde_json::to_string(payload).context("failed serializing durable event")?;
+    let payload_json =
+        serde_json::to_string(payload).context("failed serializing durable event")?;
     let result = sqlx::query("INSERT INTO event_log (event_type, payload_json) VALUES (?, ?)")
         .bind(event_type)
         .bind(payload_json)

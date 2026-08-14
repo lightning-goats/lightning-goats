@@ -73,7 +73,8 @@ impl AppConfig {
             bail!("nostr.relays must contain at least one relay");
         }
         for relay in &self.nostr.relays {
-            let parsed = Url::parse(relay).with_context(|| format!("invalid Nostr relay URL {relay}"))?;
+            let parsed =
+                Url::parse(relay).with_context(|| format!("invalid Nostr relay URL {relay}"))?;
             if parsed.scheme() != "wss" || parsed.host_str().is_none() {
                 bail!("Nostr relay URLs must use wss:// with a host: {relay}");
             }

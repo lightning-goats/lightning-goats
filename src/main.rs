@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{future::pending, path::PathBuf, sync::Arc, time::Duration};
 
 use anyhow::{Result, anyhow, bail};
 use axum::{
@@ -12,8 +12,14 @@ use axum::{
 };
 use clap::Parser;
 use lightning_goats::{
-    cln::ClnRestClient, config::AppConfig, feeder::run_feed_worker,
-    invoice_watcher::run_invoice_watcher, ledger::LedgerStore, openhab::OpenHabClient,
+    cln::ClnRestClient,
+    config::{AppConfig, RuntimeMode},
+    feeder::run_feed_worker,
+    invoice_watcher::run_invoice_watcher,
+    ledger::LedgerStore,
+    messaging::{run_message_processor, run_outbox_publisher},
+    nostr::NakClient,
+    openhab::OpenHabClient,
     overlay::serve_overlay_socket,
 };
 use serde::Serialize;
@@ -63,8 +69,7 @@ async fn main() -> Result<()> {
     let config = Arc::new(AppConfig::load(&args.config)?);
     let ledger = LedgerStore::connect(&config.database.url).await?;
 
-    let last_pay_index = ledger.last_pay_index().await?;
-    if last_pay_index.is_none() {
+    if ledger.last_pay_index().await?.is_none() {
         bail!(
             "CLN pay-index cursor is uninitialized; run lightning-goatsctl init-cursor before starting lightning-goatsd"
         );
@@ -80,6 +85,11 @@ async fn main() -> Result<()> {
 
     let cln = ClnRestClient::from_config(&config.lightning).await?;
     let openhab = OpenHabClient::from_config(&config.openhab).await?;
+    let nostr = if config.service.mode == RuntimeMode::Active {
+        Some(NakClient::from_config(&config.nostr).await?)
+    } else {
+        None
+    };
 
     let state = AppState {
         config: Arc::clone(&config),
@@ -109,12 +119,28 @@ async fn main() -> Result<()> {
         config.lightning.herd_user.clone(),
     ));
     let mut feeder = tokio::spawn(run_feed_worker(
-        ledger,
+        ledger.clone(),
         openhab,
         config.feeder.threshold_sats,
         Duration::from_secs(config.feeder.inter_feed_delay_seconds),
         config.service.mode,
     ));
+    let mut message_processor = tokio::spawn(run_message_processor(
+        ledger.clone(),
+        nostr.clone(),
+        config.feeder.threshold_sats,
+        config.service.mode,
+    ));
+    let mut publisher = tokio::spawn({
+        let ledger = ledger.clone();
+        async move {
+            if let Some(nak) = nostr {
+                run_outbox_publisher(ledger, nak).await
+            } else {
+                pending::<Result<()>>().await
+            }
+        }
+    });
 
     let result = tokio::select! {
         _ = shutdown_signal() => {
@@ -124,11 +150,15 @@ async fn main() -> Result<()> {
         result = &mut server => task_exit("HTTP server", result),
         result = &mut watcher => task_exit("paid-invoice watcher", result),
         result = &mut feeder => task_exit("feed worker", result),
+        result = &mut message_processor => task_exit("Nostr message processor", result),
+        result = &mut publisher => task_exit("Nostr outbox publisher", result),
     };
 
     server.abort();
     watcher.abort();
     feeder.abort();
+    message_processor.abort();
+    publisher.abort();
     result
 }
 

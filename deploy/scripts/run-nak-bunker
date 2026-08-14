@@ -1,0 +1,39 @@
+#!/bin/sh
+set -eu
+
+: "${CREDENTIALS_DIRECTORY:?systemd credentials directory is not set}"
+: "${RUNTIME_DIRECTORY:?systemd runtime directory is not set}"
+: "${LG_NOSTR_CLIENT_PUBKEY:?authorized NIP-46 client pubkey is not configured}"
+: "${LG_NOSTR_RELAYS:?Nostr relays are not configured}"
+
+NAK_BIN="${NAK_BIN:-/usr/local/bin/nak}"
+
+if [ ! -x "$NAK_BIN" ]; then
+    echo "nak executable not found or not executable: $NAK_BIN" >&2
+    exit 1
+fi
+
+NOSTR_KEY_FILE="$CREDENTIALS_DIRECTORY/nostr-key"
+if [ ! -r "$NOSTR_KEY_FILE" ]; then
+    echo "Nostr signer credential is not readable" >&2
+    exit 1
+fi
+
+IFS= read -r NOSTR_SECRET_KEY < "$NOSTR_KEY_FILE"
+if [ -z "$NOSTR_SECRET_KEY" ]; then
+    echo "Nostr signer credential is empty" >&2
+    exit 1
+fi
+export NOSTR_SECRET_KEY
+
+# Relay values are administrator-controlled whitespace-separated URLs from
+# /etc/lightning-goats/bunker.env. Convert them to positional arguments while
+# keeping the signer key out of argv.
+# shellcheck disable=SC2086
+set -- $LG_NOSTR_RELAYS
+
+exec "$NAK_BIN" \
+    --config-path "$RUNTIME_DIRECTORY" \
+    bunker \
+    --authorized-keys "$LG_NOSTR_CLIENT_PUBKEY" \
+    "$@"

@@ -1,6 +1,7 @@
 use std::{str::FromStr, time::Duration};
 
 use anyhow::{Context, Result, bail};
+use serde_json::json;
 use sqlx::{
     Row, SqlitePool,
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
@@ -8,8 +9,12 @@ use sqlx::{
 
 use crate::domain::invoice::ClnAddressInvoiceLabel;
 
+mod events;
 mod feed;
+pub use events::DurableEvent;
 pub use feed::{StoredFeedAttempt, StoredFeedAttemptStatus};
+use events::append_event_in_transaction;
+use feed::feed_credit_in_transaction;
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
@@ -186,6 +191,17 @@ impl LedgerStore {
             .bind(&invoice.payment_hash)
             .execute(&mut *transaction)
             .await?;
+
+            let feed_credit_sats = feed_credit_in_transaction(&mut transaction).await?;
+            append_event_in_transaction(
+                &mut transaction,
+                "payment_received",
+                &json!({
+                    "amount_sats": credited_sats,
+                    "feed_credit_sats": feed_credit_sats
+                }),
+            )
+            .await?;
         }
 
         sqlx::query(
@@ -278,6 +294,9 @@ mod tests {
         );
         assert_eq!(store.feed_credit_sats().await.unwrap(), 2_340);
         assert_eq!(store.last_pay_index().await.unwrap(), Some(101));
+        let events = store.events_after(0, 10).await.unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_type, "payment_received");
     }
 
     #[tokio::test]
@@ -296,6 +315,7 @@ mod tests {
         );
         assert_eq!(store.feed_credit_sats().await.unwrap(), 0);
         assert_eq!(store.last_pay_index().await.unwrap(), Some(101));
+        assert!(store.events_after(0, 10).await.unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -314,6 +334,7 @@ mod tests {
             SettlementOutcome::Duplicate
         );
         assert_eq!(store.feed_credit_sats().await.unwrap(), 1_000);
+        assert_eq!(store.events_after(0, 10).await.unwrap().len(), 1);
     }
 
     #[tokio::test]

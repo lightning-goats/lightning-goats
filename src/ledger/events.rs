@@ -90,10 +90,11 @@ impl LedgerStore {
         let seq_row = sqlx::query("SELECT COALESCE(MAX(seq), 0) AS seq FROM event_log")
             .fetch_one(&mut *transaction)
             .await?;
-        let credit_row =
-            sqlx::query("SELECT COALESCE(SUM(delta_sats), 0) AS credit FROM ledger_entries")
-                .fetch_one(&mut *transaction)
-                .await?;
+        let credit_row = sqlx::query(
+            "SELECT COALESCE(SUM(delta_sats), 0) AS credit FROM ledger_entries",
+        )
+        .fetch_one(&mut *transaction)
+        .await?;
         let attempt_row = sqlx::query(
             r#"
             SELECT id, status, threshold_sats

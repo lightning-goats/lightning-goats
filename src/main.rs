@@ -78,9 +78,7 @@ async fn healthz() -> Json<HealthResponse> {
     Json(HealthResponse { status: "ok" })
 }
 
-async fn status(
-    State(state): State<AppState>,
-) -> Result<Json<StatusResponse>, StatusCode> {
+async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse>, StatusCode> {
     let feed_credit_sats = state.ledger.feed_credit_sats().await.map_err(|error| {
         tracing::error!(%error, "failed reading feed credit for status endpoint");
         StatusCode::INTERNAL_SERVER_ERROR

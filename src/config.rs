@@ -5,6 +5,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
+use reqwest::Url;
 use serde::Deserialize;
 
 use crate::domain::invoice::validate_user;
@@ -53,8 +54,11 @@ impl AppConfig {
         if self.openhab.override_item.trim().is_empty() {
             bail!("openhab.override_item must not be empty");
         }
-        if self.nostr.nak_path.trim().is_empty() {
-            bail!("nostr.nak_path must not be empty");
+        if !self.nostr.nak_path.is_absolute() {
+            bail!("nostr.nak_path must be an absolute path");
+        }
+        if !self.nostr.nak_config_path.is_absolute() {
+            bail!("nostr.nak_config_path must be an absolute path");
         }
         if self.nostr.bunker_pubkey.len() != 64
             || !self
@@ -64,6 +68,15 @@ impl AppConfig {
                 .all(|byte| byte.is_ascii_hexdigit())
         {
             bail!("nostr.bunker_pubkey must be a 32-byte hex public key");
+        }
+        if self.nostr.relays.is_empty() {
+            bail!("nostr.relays must contain at least one relay");
+        }
+        for relay in &self.nostr.relays {
+            let parsed = Url::parse(relay).with_context(|| format!("invalid Nostr relay URL {relay}"))?;
+            if parsed.scheme() != "wss" || parsed.host_str().is_none() {
+                bail!("Nostr relay URLs must use wss:// with a host: {relay}");
+            }
         }
         Ok(())
     }
@@ -120,7 +133,8 @@ pub struct OpenHabConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct NostrConfig {
-    pub nak_path: String,
+    pub nak_path: PathBuf,
+    pub nak_config_path: PathBuf,
     pub bunker_pubkey: String,
     #[serde(default)]
     pub relays: Vec<String>,
@@ -154,7 +168,8 @@ mod tests {
                 override_item: "FeederOverride".to_owned(),
             },
             nostr: NostrConfig {
-                nak_path: "/usr/local/bin/nak".to_owned(),
+                nak_path: PathBuf::from("/usr/local/bin/nak"),
+                nak_config_path: PathBuf::from("/run/lightning-goats/nak"),
                 bunker_pubkey: "00".repeat(32),
                 relays: vec!["wss://relay.example".to_owned()],
             },
@@ -191,6 +206,13 @@ mod tests {
     fn rejects_non_file_sqlite_database() {
         let mut config = valid_config();
         config.database.url = "sqlite::memory:".to_owned();
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_insecure_nostr_relay() {
+        let mut config = valid_config();
+        config.nostr.relays = vec!["ws://relay.example".to_owned()];
         assert!(config.validate().is_err());
     }
 }

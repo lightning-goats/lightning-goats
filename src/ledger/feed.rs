@@ -18,6 +18,20 @@ pub struct StoredFeedAttempt {
 }
 
 impl LedgerStore {
+    pub async fn mark_interrupted_feed_intents_unknown(&self) -> Result<u64> {
+        let result = sqlx::query(
+            r#"
+            UPDATE feed_attempts
+            SET status = 'unknown',
+                error = 'daemon restarted with an unresolved feed intent'
+            WHERE status = 'intent_committed'
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected())
+    }
+
     pub async fn begin_feed_attempt(&self, threshold_sats: u64) -> Result<Option<Uuid>> {
         if threshold_sats == 0 {
             bail!("feeder threshold must be greater than zero");
@@ -246,6 +260,18 @@ mod tests {
         store.confirm_feed_attempt(second).await.unwrap();
         assert_eq!(store.feed_credit_sats().await.unwrap(), 340);
         assert!(store.begin_feed_attempt(1_000).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn interrupted_intent_becomes_unknown_without_debit() {
+        let (_directory, store) = credited_store(1_340).await;
+        let attempt = store.begin_feed_attempt(1_000).await.unwrap().unwrap();
+
+        assert_eq!(store.mark_interrupted_feed_intents_unknown().await.unwrap(), 1);
+        assert_eq!(store.feed_credit_sats().await.unwrap(), 1_340);
+        let unresolved = store.unresolved_feed_attempt().await.unwrap().unwrap();
+        assert_eq!(unresolved.id, attempt);
+        assert_eq!(unresolved.status, StoredFeedAttemptStatus::Unknown);
     }
 
     #[tokio::test]

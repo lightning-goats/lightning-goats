@@ -11,7 +11,7 @@ use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use lightning_goats::{
     config::AppConfig,
-    ledger::{LegacySettledInvoice, LegacySettlementOutcome, LedgerStore},
+    ledger::{LedgerStore, LegacySettledInvoice, LegacySettlementOutcome},
     secrets::read_systemd_credential,
 };
 use reqwest::{Client, Url};

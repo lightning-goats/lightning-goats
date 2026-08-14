@@ -1,6 +1,6 @@
 # Phase 1 Server Setup
 
-This document prepares the production host for the Phase 1 Lightning Goats Rust migration without replacing the current LNbits-based production path until cutover.
+This document prepares the production host for the Phase 1 Lightning Goats Rust migration without replacing the current LNbits production path until cutover.
 
 ## Safety rule
 
@@ -8,12 +8,13 @@ Until the production cutover is explicitly executed:
 
 - LNbits remains authoritative for `herd@lightning-goats.com`;
 - existing production Lightning Address nginx routes remain unchanged;
-- `lightning-goatsd` runs in `shadow` mode;
-- shadow mode must not actuate the feeder;
-- shadow mode must not publish production Nostr events;
-- only `herd-canary@lightning-goats.com` is routed to `clnaddress` during canary validation.
+- only `herd-canary@lightning-goats.com` is routed to `clnaddress`;
+- the canary daemon uses its own SQLite database and loopback port;
+- canary mode may invoke only a harmless OpenHAB test/counter rule;
+- canary mode never initializes the NIP-46 signer and never publishes Nostr;
+- the physical feeder remains under the existing production system until cutover.
 
-At cutover the new Lightning Goats feed ledger begins at **zero**. No LNbits balance or pending invoice state is imported.
+At production cutover the new feed-credit ledger begins at **zero**. No LNbits balance or pending invoice state is imported.
 
 ## 1. Record current host state
 
@@ -36,58 +37,69 @@ Do not copy secrets into the report.
 
 ## 2. Install reviewed release binaries
 
-For normal production deployment, download the tagged Linux release archive and `SHA256SUMS`, verify the checksum, then install the two binaries directly:
+Download the tagged Linux release artifacts and `SHA256SUMS`.
 
 ```bash
 sha256sum -c SHA256SUMS
-
-tar -xzf lightning-goats-<tag>-x86_64-linux-gnu.tar.gz
 sudo install -o root -g root -m 0755 lightning-goatsd /usr/local/bin/lightning-goatsd
 sudo install -o root -g root -m 0755 lightning-goatsctl /usr/local/bin/lightning-goatsctl
 ```
 
-Deployment assets such as systemd units, nginx examples, helper scripts, and the configuration example remain versioned in the repository and should be reviewed/copied manually.
-
-If building directly from source for development/canary work:
-
-```bash
-git clone https://github.com/lightning-goats/lightning-goats.git
-cd lightning-goats
-cargo build --release --locked
-sudo install -o root -g root -m 0755 target/release/lightning-goatsd /usr/local/bin/lightning-goatsd
-sudo install -o root -g root -m 0755 target/release/lightning-goatsctl /usr/local/bin/lightning-goatsctl
-```
+The release also contains a tarball with both binaries. Deployment assets remain versioned in Git and are copied manually.
 
 Record the deployed tag/commit and binary hashes.
 
-## 3. Service account
+## 3. Create the service account
 
 ```bash
 sudo useradd --system --home-dir /var/lib/lightning-goats --shell /usr/sbin/nologin lightning-goats
 ```
 
-Do **not** add the account to a group that grants unrestricted `lightning-rpc` access.
+Do **not** add this account to any group that grants unrestricted `lightning-rpc` access.
 
-## 4. Non-secret configuration
+## 4. Install configuration and units
 
 ```bash
 sudo install -d -o root -g lightning-goats -m 0750 /etc/lightning-goats
-sudo install -o root -g lightning-goats -m 0640 deploy/config.toml.example /etc/lightning-goats/config.toml
+sudo install -o root -g lightning-goats -m 0640 deploy/config.toml.example \
+  /etc/lightning-goats/config.toml
+sudo install -o root -g lightning-goats -m 0640 deploy/config.canary.toml.example \
+  /etc/lightning-goats/config.canary.toml
+
+sudo install -o root -g root -m 0644 deploy/systemd/lightning-goats.service \
+  /etc/systemd/system/lightning-goats.service
+sudo install -o root -g root -m 0644 deploy/systemd/lightning-goats-canary.service \
+  /etc/systemd/system/lightning-goats-canary.service
+sudo systemctl daemon-reload
 ```
 
-Keep during canary:
+Production begins in `shadow`; canary uses `canary`.
 
 ```toml
+# /etc/lightning-goats/config.toml
 [service]
 listen = "127.0.0.1:8787"
 mode = "shadow"
+
+# /etc/lightning-goats/config.canary.toml
+[service]
+listen = "127.0.0.1:8788"
+mode = "canary"
 ```
 
-Do not place secrets in TOML.
+The canary config **must** use:
 
-## 5. Restricted CLN rune
+```text
+herd_user = herd-canary
+separate SQLite DB
+harmless OpenHAB feeder_rule_id
+```
 
-Create a dedicated rune that permits only:
+Never point `config.canary.toml` at the physical feeder rule.
+
+## 5. Create the restricted CLN rune
+
+Create one dedicated rune that permits only:
 
 ```text
 waitanyinvoice
@@ -111,17 +123,22 @@ fundchannel
 
 The daemon uses CLNRest and must not read the unrestricted Unix RPC socket.
 
-## 6. systemd credentials
+## 6. Install systemd credentials
 
-Required daemon credentials:
+Both production and canary require:
 
 ```text
 cln-rune
 openhab-token
+```
+
+Only production active mode requires:
+
+```text
 nostr-client-key
 ```
 
-Required bunker credential:
+The NIP-46 bunker service separately receives:
 
 ```text
 nostr-key
@@ -129,7 +146,7 @@ nostr-key
 
 There is intentionally **no LNbits credential** in the new stack.
 
-Use the host's encrypted systemd credential workflow, for example:
+Example encrypted credential setup:
 
 ```bash
 sudo install -d -m 0700 /etc/credstore.encrypted
@@ -139,9 +156,9 @@ sudo systemd-creds encrypt - /etc/credstore.encrypted/lightning-goats-nostr-clie
 sudo systemd-creds encrypt - /etc/credstore.encrypted/lightning-goats-nostr.key
 ```
 
-Never put secret values on command lines or in shell history.
+Never place secret values on command lines or in shell history.
 
-## 7. NIP-46 client identity
+## 7. Prepare the NIP-46 identity for production
 
 Generate a dedicated client key:
 
@@ -151,9 +168,11 @@ nak key generate
 
 Store the secret as the `nostr-client-key` systemd credential. Record only its public key for bunker authorization.
 
-This client identity is not the Lightning Goats project identity.
+The client identity is not the Lightning Goats project identity.
 
-## 8. `nak` bunker
+Canary mode does not read this credential. Test NIP-46 signing separately without publishing before production activation.
+
+## 8. Prepare the `nak` bunker
 
 Configure the non-secret bunker environment with:
 
@@ -163,21 +182,11 @@ LG_NOSTR_RELAYS="<space-separated relay URLs>"
 NAK_BIN=<output of command -v nak>
 ```
 
-The bunker wrapper obtains the project signer key from the systemd credential, never places it on argv, and does not use `nak bunker --persist`.
+The bunker wrapper obtains the project signer key from a systemd credential, never places it on argv, and does not use `nak bunker --persist`.
 
-Install/enable the hardened bunker unit only after reviewing the paths for this host.
+The bunker does not need to run for canary payment/feed testing.
 
-## 9. `lightning-goatsd` unit
-
-Install the hardened systemd unit and reload systemd:
-
-```bash
-sudo systemctl daemon-reload
-```
-
-Do not enable active side effects yet.
-
-## 10. Canonical `clnaddress`
+## 9. Deploy canonical `clnaddress`
 
 Use:
 
@@ -185,19 +194,15 @@ Use:
 lightning-goats/clnaddress
 ```
 
-The required invoice-label contract is:
+Verify the release checksum before installing the optimized plugin binary.
+
+Required invoice-label contract:
 
 ```text
 clnaddress:v1:<user>:<uuid>
 ```
 
-For production herd payments:
-
-```text
-clnaddress:v1:herd:<uuid>
-```
-
-Create a canary address first:
+Create the canary address:
 
 ```bash
 lightning-cli clnaddress-adduser herd-canary false "Lightning Goats Phase 1 canary"
@@ -205,67 +210,147 @@ lightning-cli clnaddress-adduser herd-canary false "Lightning Goats Phase 1 cana
 
 Do not migrate the production `herd` route yet.
 
-## 11. nginx canary routing
+## 10. Install nginx canary routing
 
 Review `deploy/nginx/lightning-goats-canary.conf.example` against the existing `lightning-goats.com` server block.
 
-Always:
+It exposes only:
+
+```text
+/.well-known/lnurlp/herd-canary -> clnaddress
+/invoice/...                    -> clnaddress callback
+/canary/api/v1/status           -> 127.0.0.1:8788
+/canary/healthz                 -> 127.0.0.1:8788
+/canary/ws/overlay              -> 127.0.0.1:8788/ws/overlay
+```
+
+Before reload:
 
 ```bash
 sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-Only `herd-canary@lightning-goats.com` points at `clnaddress` during canary testing. Existing production addresses remain on LNbits.
+Production `herd@lightning-goats.com` remains on LNbits.
 
-## 12. Canary database and cursor
+## 11. Initialize the canary database
 
-Canary testing uses a separate SQLite database that is never promoted to production.
+Canary uses:
 
-Initialize its `pay_index` deliberately with `lightning-goatsctl init-cursor`; never replay the node from zero automatically.
+```text
+/var/lib/lightning-goats/lightning-goats-canary.db
+```
 
-## 13. Start bunker and daemon in shadow mode
+Determine an operator-reviewed current CLN `pay_index`, then initialize the canary DB exactly once using the canary config:
 
-Verify:
+```bash
+sudo -u lightning-goats \
+  /usr/local/bin/lightning-goatsctl \
+  --config /etc/lightning-goats/config.canary.toml \
+  init-cursor --pay-index <CURRENT_PAY_INDEX>
+```
 
-- both services are healthy;
-- listener is loopback only;
-- no physical feeder actuation occurs;
-- no public production Nostr event is emitted;
-- no unrestricted CLN RPC socket is accessible to the daemon user.
+Never initialize from zero automatically.
 
-## 14. Canary tests
+## 12. Start the canary daemon
 
-Use `herd-canary@lightning-goats.com` and an OpenHAB test rule/counter.
+Verify the configured OpenHAB rule is a harmless counter/test rule first.
+
+```bash
+sudo systemctl enable --now lightning-goats-canary.service
+sudo systemctl status lightning-goats-canary.service
+curl --fail https://lightning-goats.com/canary/healthz
+curl --fail https://lightning-goats.com/canary/api/v1/status
+```
+
+Expected status includes:
+
+```text
+mode = canary
+herd_user = herd-canary
+feed_credit_sats
+threshold_sats
+feeds_due
+remainder_sats
+feeder_override_active
+temperature_f (when configured)
+```
+
+Confirm the canary process does not have a `nostr-client-key` credential.
+
+## 13. Use the canary overlay
+
+Use the Phase 1 overlay with:
+
+```text
+progress3.html?canary=1
+```
+
+It connects only to:
+
+```text
+https://lightning-goats.com/canary/api/v1/status
+wss://lightning-goats.com/canary/ws/overlay
+```
+
+The same overlay without `?canary=1` is the production configuration.
+
+## 14. Canary acceptance tests
+
+Use `herd-canary@lightning-goats.com` and the OpenHAB test counter.
 
 Required case:
 
 ```text
 2340 sats received
 threshold = 1000
-expected test actuations = 2
+expected OpenHAB test-rule executions = 2
 expected remainder = 340 sats
+expected public Nostr events = 0
 ```
 
 Also test:
 
-- 1 / 999 / 1000 / 1250 / 2000 / 10550 sats;
-- concurrent settlements;
-- daemon restart;
-- CLNRest interruption;
-- duplicate/replayed settlement;
-- payment to another Lightning Address;
-- ordinary non-clnaddress CLN invoice;
-- malformed labels;
-- override ON/OFF and override enabled during backlog draining;
-- NIP-57 Zap;
-- NIP-46 signing;
-- websocket reconnect;
-- OpenHAB timeout and `FEED_UNKNOWN` reconciliation.
+```text
+1
+999
+1000
+1250
+2000
+10550 sats
+```
 
-## 15. Production zero-based cutover
+Verify:
 
-Do this only after canary acceptance.
+- payment to another Lightning Address adds zero herd credit;
+- ordinary CLN invoice adds zero herd credit;
+- duplicate settlement never double-credits;
+- daemon restart preserves cursor/ledger;
+- CLNRest interruption recovers without replay;
+- override ON blocks all rule invocations while preserving credit;
+- override OFF drains each complete threshold sequentially;
+- enabling override during backlog drain stops before the next feed;
+- OpenHAB timeout/error produces `FEED_UNKNOWN` and no automatic retry;
+- operator reconciliation behaves correctly;
+- WebSocket reconnect begins from a durable snapshot;
+- a deliberate event-sequence gap forces overlay resync;
+- feeder animation appears only after `feeder_confirmed`;
+- canary never publishes Nostr.
+
+Archive the canary DB/results. Never promote the canary DB to production.
+
+## 15. Prepare production shadow
+
+After canary acceptance:
+
+1. create a fresh production SQLite DB;
+2. initialize its CLN cursor to an operator-reviewed current value while routing still uses LNbits;
+3. verify `feed_credit_sats = 0`;
+4. start `lightning-goats.service` with `mode = shadow`;
+5. verify it follows CLN settlements with no feeder or Nostr side effects;
+6. verify production `/api/v1/status` and `/ws/overlay` locally before nginx cutover.
+
+## 16. Production zero-based cutover
 
 ### A. Enable `FeederOverride`
 
@@ -275,62 +360,69 @@ FeederOverride = ON
 
 ### B. Disable old Lightning Goats side effects
 
-Disable the LNbits-based Lightning Goats/CyberHerd actuation/messaging path as appropriate for Phase 1. LNbits itself may stay running for unrelated uses/history.
+Disable the LNbits-based Lightning Goats/CyberHerd actuation and messaging paths. LNbits itself may remain running for unrelated uses/history.
 
-### C. Initialize the production accounting epoch
+### C. Switch nginx Lightning Address ingress
 
-With production routing still on LNbits:
+Route production Lightning Addresses to `clnaddress` and reload nginx successfully.
 
-1. create a fresh production SQLite database;
-2. initialize its CLN `pay_index` to an operator-reviewed current value;
-3. verify `feed_credit_sats=0`;
-4. start `lightning-goatsd` in `shadow` mode;
-5. confirm it follows new CLN settlements with no side effects.
+From this point forward, only trusted:
 
-### D. Switch nginx
+```text
+clnaddress:v1:herd:<uuid>
+```
 
-Route the production Lightning Addresses to `clnaddress` and reload nginx successfully.
-
-From this point forward, only trusted `clnaddress:v1:herd:*` settlements create Lightning Goats feed credit.
+settlements create new Lightning Goats feed credit.
 
 Old LNbits wallet balance and late LNbits settlements are ignored by design.
 
-### E. Verify real production ingress
+### D. Verify one real production payment while shadowed
 
-Send a small payment to `herd@lightning-goats.com` and verify:
+Send a small payment to:
+
+```text
+herd@lightning-goats.com
+```
+
+Verify:
 
 ```text
 Lightning Address
  -> clnaddress
- -> clnaddress:v1:herd:<uuid>
+ -> attributed label
  -> CLN settlement
- -> lightning-goatsd
  -> SQLite credit/event
- -> overlay
+ -> production overlay
 ```
 
-### F. Activate
+No physical feed or Nostr publication occurs in shadow.
 
-Switch the daemon to `active`, then verify Nostr and overlay behavior.
+### E. Start production NIP-46 services
 
-### G. Release override
+Start/verify the bunker and switch the production daemon configuration to `active` only after signer connectivity is confirmed.
 
-Set `FeederOverride = OFF` only after all checks pass. Complete thresholds drain sequentially and any remainder stays as feed credit.
+### F. Release override
 
-## 16. Post-cutover LNbits handling
+Set:
 
-There is no migration/reconciliation grace period.
+```text
+FeederOverride = OFF
+```
 
-The old LNbits database can remain read-only for historical audit. Old invoices that settle there do not become new Lightning Goats feed credit.
+Complete thresholds drain sequentially and any remainder remains as feed credit.
 
-When the operator is satisfied that LNbits is no longer needed for other purposes:
+## 17. Post-cutover
+
+There is no LNbits accounting migration or reconciliation grace period.
+
+The old LNbits database can remain read-only for historical audit. Old invoices that settle there do not become new feed credit.
+
+When LNbits is no longer needed for anything else:
 
 - stop/disable it;
 - archive its DB/configuration as desired;
 - revoke obsolete keys;
 - remove obsolete nginx paths;
-- remove old overlay LNbits websocket dependencies.
-
-## 17. Do not add CyberHerd payouts in Phase 1
+- remove any legacy deployment artifacts.
 
 CyberHerd remains offline until Phase 2. No outbound Lightning spend capability belongs in the Phase 1 daemon.

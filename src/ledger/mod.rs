@@ -11,11 +11,16 @@ use crate::domain::invoice::ClnAddressInvoiceLabel;
 
 mod events;
 mod feed;
+mod legacy;
 mod outbox;
 pub use events::DurableEvent;
 use events::append_event_in_transaction;
 use feed::feed_credit_in_transaction;
 pub use feed::{StoredFeedAttempt, StoredFeedAttemptStatus};
+pub use legacy::{
+    LegacyCutoverManifest, LegacyManifestOutcome, LegacyPendingInvoice, LegacySettledInvoice,
+    LegacySettlementOutcome,
+};
 pub use outbox::OutboxEntry;
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");

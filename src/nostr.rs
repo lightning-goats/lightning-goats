@@ -101,7 +101,7 @@ impl NakClient {
             PUBLISH_DUMMY_SECRET.to_owned(),
         ];
         args.extend(self.relays.iter().cloned());
-        self.run_nak(args.iter().map(AsRef::as_ref), &event_json, None)
+        self.run_nak(args.iter().map(String::as_str), &event_json, None)
             .await
             .context("nak failed publishing persisted signed Nostr event")?;
         Ok(())

@@ -3,11 +3,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use anyhow::Result;
-use axum::{
-    Json, Router,
-    extract::State,
-    routing::get,
-};
+use axum::{Json, Router, extract::State, routing::get};
 use clap::Parser;
 use lightning_goats::config::AppConfig;
 use serde::Serialize;
@@ -28,9 +24,9 @@ struct HealthResponse {
 }
 
 #[derive(Debug, Serialize)]
-struct StatusResponse<'a> {
+struct StatusResponse {
     mode: &'static str,
-    herd_user: &'a str,
+    herd_user: String,
     threshold_sats: u64,
 }
 
@@ -68,10 +64,10 @@ async fn healthz() -> Json<HealthResponse> {
     Json(HealthResponse { status: "ok" })
 }
 
-async fn status(State(config): State<Arc<AppConfig>>) -> Json<StatusResponse<'static>> {
+async fn status(State(config): State<Arc<AppConfig>>) -> Json<StatusResponse> {
     Json(StatusResponse {
         mode: config.service.mode.as_str(),
-        herd_user: Box::leak(config.lightning.herd_user.clone().into_boxed_str()),
+        herd_user: config.lightning.herd_user.clone(),
         threshold_sats: config.feeder.threshold_sats,
     })
 }

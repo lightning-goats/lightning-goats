@@ -8,6 +8,7 @@ use crate::domain::invoice::validate_user;
 #[derive(Debug, Clone, Deserialize)]
 pub struct AppConfig {
     pub service: ServiceConfig,
+    pub database: DatabaseConfig,
     pub lightning: LightningConfig,
     pub feeder: FeederConfig,
     pub openhab: OpenHabConfig,
@@ -28,11 +29,20 @@ impl AppConfig {
         if !self.service.listen.ip().is_loopback() {
             bail!("service.listen must use a loopback address; nginx is the public boundary");
         }
+        if !self.database.url.starts_with("sqlite://") {
+            bail!("database.url must be a file-backed sqlite:// URL");
+        }
+        if self.lightning.clnrest_url.trim().is_empty() {
+            bail!("lightning.clnrest_url must not be empty");
+        }
         if self.feeder.threshold_sats == 0 {
             bail!("feeder.threshold_sats must be greater than zero");
         }
         validate_user(&self.lightning.herd_user)
             .context("lightning.herd_user must be a canonical clnaddress user")?;
+        if self.openhab.url.trim().is_empty() {
+            bail!("openhab.url must not be empty");
+        }
         if self.openhab.feeder_rule_id.trim().is_empty() {
             bail!("openhab.feeder_rule_id must not be empty");
         }
@@ -55,6 +65,11 @@ impl AppConfig {
 pub struct ServiceConfig {
     pub listen: SocketAddr,
     pub mode: RuntimeMode,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DatabaseConfig {
+    pub url: String,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -111,6 +126,9 @@ mod tests {
                 listen: "127.0.0.1:8787".parse().unwrap(),
                 mode: RuntimeMode::Shadow,
             },
+            database: DatabaseConfig {
+                url: "sqlite:///var/lib/lightning-goats/lightning-goats.db".to_owned(),
+            },
             lightning: LightningConfig {
                 clnrest_url: "https://127.0.0.1:3010".to_owned(),
                 herd_user: "herd".to_owned(),
@@ -155,6 +173,13 @@ mod tests {
     fn rejects_zero_threshold() {
         let mut config = valid_config();
         config.feeder.threshold_sats = 0;
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_non_file_sqlite_database() {
+        let mut config = valid_config();
+        config.database.url = "sqlite::memory:".to_owned();
         assert!(config.validate().is_err());
     }
 }

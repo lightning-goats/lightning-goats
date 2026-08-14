@@ -1,0 +1,104 @@
+name: Temporary finalize legacy migration
+
+on:
+  push:
+    branches:
+      - feat/legacy-lnbits-reconciler
+
+permissions:
+  contents: write
+
+concurrency:
+  group: temporary-finalize-legacy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/legacy-lnbits-reconciler
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.88"
+          components: rustfmt, clippy
+      - name: Ensure final hardening is present
+        shell: python
+        run: |
+          from pathlib import Path
+
+          verify = Path("src/ledger/legacy_verify.rs")
+          text = verify.read_text()
+          ledger_block = '''        let opening_ledger = sqlx::query(\n            "SELECT entry_type, delta_sats FROM ledger_entries WHERE source_key = 'legacy:opening-credit'",\n        )\n        .fetch_optional(&mut *transaction)\n        .await?\n        .context("legacy opening-credit metadata exists without its ledger entry")?;\n        let opening_entry_type: String = opening_ledger.try_get("entry_type")?;\n        let opening_delta: i64 = opening_ledger.try_get("delta_sats")?;\n        if opening_entry_type != "LEGACY_OPENING_CREDIT"\n            || to_u64(opening_delta, "legacy opening credit ledger entry")?\n                != manifest.opening_credit_sats\n        {\n            bail!("installed legacy opening-credit ledger entry does not match the manifest");\n        }\n\n'''
+          if ledger_block not in text:
+              marker = '''        let database_count: i64 =\n            sqlx::query_scalar("SELECT COUNT(*) FROM legacy_pending_invoices")\n'''
+              if marker not in text:
+                  raise SystemExit("legacy verifier insertion point not found")
+              text = text.replace(marker, ledger_block + marker, 1)
+              verify.write_text(text)
+
+          migrator = Path("src/bin/lightning-goats-lnbits-migrate.rs")
+          text = migrator.read_text()
+          if "LegacyCutoverManifest" not in text:
+              candidates = [
+                  '''    ledger::{LegacySettledInvoice, LegacySettlementOutcome, LedgerStore},\n''',
+                  '''    ledger::{LegacySettlementOutcome, LegacySettledInvoice, LedgerStore},\n''',
+              ]
+              replacement = '''    ledger::{\n        LegacyCutoverManifest, LegacyPendingInvoice, LegacySettledInvoice,\n        LegacySettlementOutcome, LedgerStore,\n    },\n'''
+              for candidate in candidates:
+                  if candidate in text:
+                      text = text.replace(candidate, replacement, 1)
+                      break
+              else:
+                  raise SystemExit("migrator legacy import insertion point not found")
+
+          if "let installed_manifest = to_library_manifest(&manifest);" not in text:
+              marker = '''            let ledger = LedgerStore::connect(&config.database.url).await?;\n            let mut credited = 0u64;\n'''
+              replacement = '''            let ledger = LedgerStore::connect(&config.database.url).await?;\n            let installed_manifest = to_library_manifest(&manifest);\n            ledger\n                .verify_legacy_cutover_manifest(&installed_manifest)\n                .await?;\n            let mut credited = 0u64;\n'''
+              if marker not in text:
+                  raise SystemExit("migrator reconcile insertion point not found")
+              text = text.replace(marker, replacement, 1)
+
+          helper = '''\nfn to_library_manifest(manifest: &ManifestFile) -> LegacyCutoverManifest {\n    LegacyCutoverManifest {\n        wallet_id: manifest.wallet_id.clone(),\n        opening_credit_sats: manifest.opening_credit_sats,\n        cutover_at: manifest.cutover_at,\n        snapshot_at: manifest.snapshot_at,\n        pending_invoices: manifest\n            .pending_invoices\n            .iter()\n            .map(|pending| LegacyPendingInvoice {\n                payment_hash: pending.payment_hash.clone(),\n                checking_id: pending.checking_id.clone(),\n                wallet_id: pending.wallet_id.clone(),\n                amount_sats: pending.amount_sats,\n                created_at: pending.created_at,\n                expiry_at: pending.expiry_at,\n            })\n            .collect(),\n    }\n}\n'''
+          if "fn to_library_manifest(" not in text:
+              marker = "\n#[cfg(test)]\nmod tests {\n"
+              if marker not in text:
+                  raise SystemExit("migrator helper insertion point not found")
+              text = text.replace(marker, helper + marker, 1)
+
+          if ".no_proxy()" not in text:
+              marker = '''        let client = Client::builder()\n            .connect_timeout(Duration::from_secs(3))\n'''
+              replacement = '''        let client = Client::builder()\n            .no_proxy()\n            .connect_timeout(Duration::from_secs(3))\n'''
+              if marker not in text:
+                  raise SystemExit("LNbits client builder insertion point not found")
+              text = text.replace(marker, replacement, 1)
+          migrator.write_text(text)
+      - name: Apply rustfmt
+        run: cargo fmt --all
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Test
+        run: cargo test --all-features
+      - name: Validate deployment shell syntax
+        run: |
+          sh -n deploy/scripts/run-nak-bunker
+          sh -n deploy/scripts/run-lnbits-snapshot
+          sh -n deploy/scripts/run-lnbits-reconcile
+      - name: Remove temporary workflows
+        shell: bash
+        run: |
+          rm -f .github/workflows/temporary-harden-legacy-reconcile.yml
+          rm -f .github/workflows/temporary-finalize-legacy-migration.yml
+      - name: Commit verified final state
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/ledger/legacy_verify.rs src/bin/lightning-goats-lnbits-migrate.rs .github/workflows deploy/scripts
+          if git diff --cached --quiet; then
+            echo "No finalization changes required"
+            exit 0
+          fi
+          git commit -m "hardening: finalize verified legacy LNbits migration bridge"
+          git push origin HEAD:feat/legacy-lnbits-reconciler

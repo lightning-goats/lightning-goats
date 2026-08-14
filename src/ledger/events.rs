@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
+use serde_json::json;
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -13,10 +14,10 @@ pub struct DurableEvent {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct OverlaySnapshotState {
-    pub seq: u64,
-    pub feed_credit_sats: u64,
-    pub unresolved_feed_attempt: Option<StoredFeedAttempt>,
+struct OverlaySnapshotState {
+    seq: u64,
+    feed_credit_sats: u64,
+    unresolved_feed_attempt: Option<StoredFeedAttempt>,
 }
 
 impl LedgerStore {
@@ -64,7 +65,27 @@ impl LedgerStore {
         to_u64(seq, "event sequence")
     }
 
-    pub async fn overlay_snapshot_state(&self) -> Result<OverlaySnapshotState> {
+    pub async fn overlay_snapshot_message(&self, threshold_sats: u64) -> Result<(u64, String)> {
+        if threshold_sats == 0 {
+            bail!("feeder threshold must be greater than zero");
+        }
+        let snapshot = self.overlay_snapshot_state().await?;
+        let message = serde_json::to_string(&json!({
+            "type": "snapshot",
+            "seq": snapshot.seq,
+            "feed_credit_sats": snapshot.feed_credit_sats,
+            "threshold_sats": threshold_sats,
+            "feeds_due": snapshot.feed_credit_sats / threshold_sats,
+            "remainder_sats": snapshot.feed_credit_sats % threshold_sats,
+            "unresolved_feed_attempt": snapshot
+                .unresolved_feed_attempt
+                .map(|attempt| attempt.id.to_string())
+        }))
+        .context("failed serializing overlay snapshot")?;
+        Ok((snapshot.seq, message))
+    }
+
+    async fn overlay_snapshot_state(&self) -> Result<OverlaySnapshotState> {
         let mut transaction = self.pool.begin().await?;
         let seq_row = sqlx::query("SELECT COALESCE(MAX(seq), 0) AS seq FROM event_log")
             .fetch_one(&mut *transaction)
@@ -133,7 +154,7 @@ pub(super) async fn append_event_in_transaction<T: Serialize>(
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    use serde_json::{Value, json};
     use tempfile::TempDir;
 
     use super::*;
@@ -170,16 +191,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn snapshot_state_uses_current_durable_sequence_and_credit() {
+    async fn snapshot_message_uses_current_durable_sequence_and_credit() {
         let (_directory, store) = store().await;
         store
             .append_event("test", &json!({"value": 1}))
             .await
             .unwrap();
 
-        let snapshot = store.overlay_snapshot_state().await.unwrap();
-        assert_eq!(snapshot.seq, 1);
-        assert_eq!(snapshot.feed_credit_sats, 0);
-        assert!(snapshot.unresolved_feed_attempt.is_none());
+        let (seq, message) = store.overlay_snapshot_message(1_000).await.unwrap();
+        let message: Value = serde_json::from_str(&message).unwrap();
+        assert_eq!(seq, 1);
+        assert_eq!(message["seq"], 1);
+        assert_eq!(message["feed_credit_sats"], 0);
+        assert_eq!(message["feeds_due"], 0);
     }
 }

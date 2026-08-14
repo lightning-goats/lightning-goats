@@ -26,8 +26,12 @@ override_item = "FeederOverride"
 
 [nostr]
 nak_path = "/usr/local/bin/nak"
+# Runtime-only nak client state. The systemd unit's RuntimeDirectory creates
+# /run/lightning-goats; no signer secret is persisted here.
+nak_config_path = "/run/lightning-goats/nak"
 # Main Lightning Goats signer pubkey hosted by the NIP-46 bunker.
 bunker_pubkey = "REPLACE_WITH_64_CHAR_HEX_PUBKEY"
+# Production publishing/signing relays must be encrypted wss:// endpoints.
 relays = [
   "wss://relay.example",
 ]

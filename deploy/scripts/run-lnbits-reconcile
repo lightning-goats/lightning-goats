@@ -6,6 +6,11 @@ set -eu
 MANIFEST=/var/lib/lightning-goats/legacy-lnbits-manifest.json
 CONFIG=/etc/lightning-goats/config.toml
 
+/usr/local/bin/lightning-goatsctl \
+  --config "$CONFIG" \
+  legacy-verify-manifest \
+  --manifest "$MANIFEST"
+
 exec /usr/local/bin/lightning-goats-lnbits-migrate reconcile \
   --lnbits-url "$LNBITS_URL" \
   --manifest "$MANIFEST" \

@@ -82,10 +82,11 @@ The fork passed its inherited compatibility matrix across CLN 25.09.3, 25.12.1, 
 - Canary and production nginx configuration examples.
 - Detailed server/canary/cutover runbook.
 - `SECURITY.md` and weekly/PR `cargo audit` workflow.
+- Rust-1.88-generated `Cargo.lock` committed and used by release/verification builds.
 
 ## Overlay
 
-The Phase 1 overlay lives in `lightning-goats/overlay` and has been ported to the standalone service contract:
+The Phase 1 overlay lives in `lightning-goats/overlay` and is merged to its `main` branch on the standalone service contract:
 
 - one WebSocket only: `wss://lightning-goats.com/ws/overlay`;
 - read-only `/api/v1/status` for mode/override/temperature/fallback state;
@@ -100,7 +101,7 @@ The Phase 1 overlay lives in `lightning-goats/overlay` and has been ported to th
 - `?canary=1` selects the isolated `/canary/...` endpoints;
 - CyberHerd presentation intentionally deferred to Phase 2.
 
-The overlay repository has CI that rejects reintroduction of legacy LNbits/CyberHerd runtime endpoints and enforces a single WebSocket construction path.
+The overlay repository has CI that rejects reintroduction of legacy LNbits/CyberHerd runtime endpoints, enforces one WebSocket construction path, and syntax-checks the inline JavaScript.
 
 ## Release model
 
@@ -117,24 +118,28 @@ Deployment configuration/systemd/nginx assets remain in Git and are installed ma
 
 ## Verification gates
 
-Required Rust gate:
+Required locked Rust gate:
 
 ```text
 cargo fmt --all --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test --all-features
-cargo audit
+cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo test --locked --all-features
+cargo audit --ignore RUSTSEC-2023-0071
 ```
 
-The canary acceptance suite additionally requires real production-node testing with a harmless OpenHAB counter rule. The critical case is:
+`RUSTSEC-2023-0071` affects `rsa 0.9.10`, for which RustSec currently reports no fixed upgrade. SQLx causes that package to remain in Cargo's resolved lock metadata, but it is not in this application's active dependency graph. The security workflow therefore first runs a reverse dependency-tree assertion and **fails immediately if `rsa` ever becomes reachable**; only after that assertion does it apply the single advisory ignore. This exception must be removed when SQLx or `rsa` provides a clean resolution.
+
+The canary integration suite additionally verifies in-process that:
 
 ```text
-2340 sats -> exactly 2 canary rule invocations -> 340 sats remainder -> 0 Nostr events
+2340 sats -> exactly 2 canary rule invocations -> 340 sats remainder -> no Nostr capability
 ```
+
+Real production-node canary validation is still required before cutover.
 
 ## Remaining before deployment
 
-Code-side work should be considered complete when the current backend and overlay PRs are green and merged.
+Application coding is complete when the current backend PR is green and merged. The overlay port is already merged.
 
 Then the remaining work is host-specific deployment/validation:
 

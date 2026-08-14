@@ -1,0 +1,100 @@
+diff --git a/src/lnurl.rs b/src/lnurl.rs
+index cf5e68f..0000000 100644
+--- a/src/lnurl.rs
++++ b/src/lnurl.rs
+@@ -53,6 +53,8 @@ pub async fn get_invoice(
+     Query(params): Query<InvoiceQueryParams>,
+     State(state): State<PluginState>,
+ ) -> Result<Json<LnurlpCallback>, axum::response::Response> {
++    let user_name = maybe_user.as_ref().map(|path| path.0.as_str());
++
+     validate_invoice_amount(
+         params.amount,
+         state.min_sendable_msat,
+@@ -83,8 +85,8 @@ pub async fn get_invoice(
+             zap_request_json
+         }
+         None => {
+-            if let Some(user) = maybe_user {
+-                serde_json::to_string(&generate_user_metadata(&state, &user).map_err(|e| {
++            if let Some(user) = user_name {
++                serde_json::to_string(&generate_user_metadata(&state, user).map_err(|e| {
+                     (StatusCode::NOT_FOUND, lnurl_error(&e.to_string())).into_response()
+                 })?)
+                 .unwrap()
+@@ -109,6 +111,10 @@ pub async fn get_invoice(
+         AmountOrAny::Any
+     };
+ 
++    let invoice_id = Uuid::new_v4();
++    let label_user = user_name.unwrap_or("_default");
++    let label = format!("clnaddress:v1:{label_user}:{invoice_id}");
++
+     let cln_response = cln_client
+         .call_typed(&InvoiceRequest {
+             amount_msat,
+             description,
+-            label: Uuid::new_v4().to_string(),
++            label,
+             expiry: None,
+             fallbacks: None,
+             preimage: None,
+@@ -157,7 +163,7 @@ fn validate_invoice_amount(
+ 
+ fn generate_user_metadata(
+     state: &PluginState,
+-    user: &String,
++    user: &str,
+ ) -> Result<Vec<Vec<String>>, anyhow::Error> {
+     let users = state.users.lock();
+     let Some(user_meta) = users.get(user) else {
+diff --git a/tests/test_clnaddress.py b/tests/test_clnaddress.py
+index 732bf68..0000000 100644
+--- a/tests/test_clnaddress.py
++++ b/tests/test_clnaddress.py
+@@ -99,6 +99,13 @@ async def fetch_info_event(
+     return events[0]
+ 
+ 
++def assert_clnaddress_label(invoice: dict[str, Any], expected_user: str) -> None:
++    parts = invoice["label"].split(":")
++    assert parts[:3] == ["clnaddress", "v1", expected_user]
++    assert len(parts) == 4
++    uuid.UUID(parts[3])
++
++
+ def test_clnaddress(node_factory, get_plugin):  # noqa: F811
+     port = node_factory.get_unused_port()
+     url = f"localhost:{port}"
+@@ -139,6 +146,7 @@ def test_clnaddress(node_factory, get_plugin):  # noqa: F811
+     invoice = l2.rpc.call("listinvoices", {"invstring": invstring})["invoices"][0]
+     assert invoice["status"] == "paid"
+     assert invoice["amount_received_msat"] == 2
++    assert_clnaddress_label(invoice, "_default")
+     assert json.loads(invoice["description"]) == [["text/plain", "Thank you :)"]]
+ 
+     result = l2.rpc.call("clnaddress-adduser", [user_name, False, "MONEY, NOW!"])
+@@ -169,6 +177,7 @@ def test_clnaddress(node_factory, get_plugin):  # noqa: F811
+     invoice = l2.rpc.call("listinvoices", {"invstring": invstring})["invoices"][0]
+     assert invoice["status"] == "paid"
+     assert invoice["amount_received_msat"] == 2100
++    assert_clnaddress_label(invoice, user_name)
+     assert json.loads(invoice["description"]) == [
+         ["text/plain", "MONEY, NOW!"],
+         ["text/identifier", f"testuser@{url}"],
+@@ -225,6 +234,7 @@ def test_clnaddress(node_factory, get_plugin):  # noqa: F811
+     invoice = l2.rpc.call("listinvoices", {"invstring": invstring})["invoices"][0]
+     assert invoice["status"] == "paid"
+     assert invoice["amount_received_msat"] == 3000
++    assert_clnaddress_label(invoice, user_name)
+     assert json.loads(invoice["description"]) == [
+         ["text/plain", "MONEY, LATER!"],
+         ["text/email", f"testuser@{url}"],
+@@ -295,6 +305,7 @@ async def test_nostr(nostr_relay, node_factory, get_plugin):  # noqa: F811
+     invoice = l2.rpc.call("listinvoices", {"invstring": invstring})["invoices"][0]
+     assert invoice["status"] == "paid"
+     assert invoice["amount_received_msat"] == 2100
++    assert_clnaddress_label(invoice, user_name)
+     assert json.loads(invoice["description"]) == json.loads(zap_request.as_json())
+     invoice = l2.rpc.call("decode", [response_invoice.json()["pr"]])
+     assert (

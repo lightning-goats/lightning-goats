@@ -12,6 +12,7 @@ use crate::domain::invoice::ClnAddressInvoiceLabel;
 mod events;
 mod feed;
 mod legacy;
+mod legacy_verify;
 mod outbox;
 pub use events::DurableEvent;
 use events::append_event_in_transaction;

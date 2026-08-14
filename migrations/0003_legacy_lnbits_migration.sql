@@ -6,6 +6,18 @@ CREATE TABLE IF NOT EXISTS legacy_opening_credit (
     imported_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
 
+CREATE TABLE IF NOT EXISTS legacy_pending_invoices (
+    payment_hash TEXT PRIMARY KEY CHECK (length(payment_hash) = 64),
+    legacy_checking_id TEXT UNIQUE,
+    legacy_wallet_id TEXT NOT NULL CHECK (length(legacy_wallet_id) > 0),
+    amount_sats INTEGER NOT NULL CHECK (amount_sats > 0),
+    legacy_created_at INTEGER,
+    legacy_expiry_at INTEGER,
+    snapshot_at INTEGER NOT NULL CHECK (snapshot_at > 0),
+    imported_at INTEGER,
+    CHECK (legacy_expiry_at IS NULL OR legacy_created_at IS NULL OR legacy_expiry_at >= legacy_created_at)
+);
+
 ALTER TABLE legacy_imports ADD COLUMN legacy_wallet_id TEXT;
 ALTER TABLE legacy_imports ADD COLUMN legacy_created_at INTEGER;
 

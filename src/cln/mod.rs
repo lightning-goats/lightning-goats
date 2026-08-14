@@ -1,9 +1,10 @@
 use std::{net::IpAddr, str::FromStr, time::Duration};
 
 use anyhow::{Context, Result, bail};
-use reqwest::{Certificate, Client, StatusCode, Url};
+use reqwest::{Certificate, Client, Url};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use zeroize::Zeroizing;
 
 use crate::{
     config::LightningConfig,
@@ -17,26 +18,20 @@ const WAITANYINVOICE_TIMEOUT_CODE: i64 = 904;
 pub struct ClnRestClient {
     client: Client,
     base_url: Url,
-    rune: String,
+    rune: Zeroizing<String>,
 }
 
 impl ClnRestClient {
     pub async fn from_config(config: &LightningConfig) -> Result<Self> {
         let rune = read_systemd_credential("cln-rune").await?;
         let ca_certificate = match &config.clnrest_ca_certificate {
-            Some(path) => Some(
-                tokio::fs::read(path)
-                    .await
-                    .with_context(|| format!("failed reading CLNRest CA certificate {}", path.display()))?,
-            ),
+            Some(path) => Some(tokio::fs::read(path).await.with_context(|| {
+                format!("failed reading CLNRest CA certificate {}", path.display())
+            })?),
             None => None,
         };
 
-        Self::new(
-            &config.clnrest_url,
-            rune,
-            ca_certificate.as_deref(),
-        )
+        Self::new(&config.clnrest_url, rune, ca_certificate.as_deref())
     }
 
     pub fn new(base_url: &str, rune: String, ca_certificate_pem: Option<&[u8]>) -> Result<Self> {
@@ -59,15 +54,18 @@ impl ClnRestClient {
             .connect_timeout(Duration::from_secs(5));
 
         if let Some(pem) = ca_certificate_pem {
-            let certificate = Certificate::from_pem(pem).context("invalid CLNRest CA certificate PEM")?;
+            let certificate =
+                Certificate::from_pem(pem).context("invalid CLNRest CA certificate PEM")?;
             builder = builder.add_root_certificate(certificate);
         }
 
-        let client = builder.build().context("failed building CLNRest HTTP client")?;
+        let client = builder
+            .build()
+            .context("failed building CLNRest HTTP client")?;
         Ok(Self {
             client,
             base_url,
-            rune,
+            rune: Zeroizing::new(rune),
         })
     }
 
@@ -83,8 +81,10 @@ impl ClnRestClient {
         let response = self
             .client
             .post(endpoint)
-            .header("Rune", &self.rune)
-            .timeout(Duration::from_secs(timeout_seconds.saturating_add(15).max(15)))
+            .header("Rune", self.rune.as_str())
+            .timeout(Duration::from_secs(
+                timeout_seconds.saturating_add(15).max(15),
+            ))
             .json(&WaitAnyInvoiceRequest {
                 lastpay_index: last_pay_index,
                 timeout: timeout_seconds,
@@ -122,7 +122,9 @@ impl ClnRestClient {
             payment_hash: response.payment_hash,
             label: Some(response.label),
             amount_msat: response.amount_received_msat.into_msat()?,
-            settled_at: Some(i64::try_from(response.paid_at).context("paid_at exceeds i64 range")?),
+            settled_at: Some(
+                i64::try_from(response.paid_at).context("paid_at exceeds i64 range")?,
+            ),
         }))
     }
 }
@@ -286,7 +288,13 @@ mod tests {
     #[test]
     fn parses_common_msat_representations() {
         assert_eq!(MsatValue::Integer(1000).into_msat().unwrap(), 1000);
-        assert_eq!(MsatValue::Text("1000msat".to_owned()).into_msat().unwrap(), 1000);
-        assert_eq!(MsatValue::Object { msat: 1000 }.into_msat().unwrap(), 1000);
+        assert_eq!(
+            MsatValue::Text("1000msat".to_owned()).into_msat().unwrap(),
+            1000
+        );
+        assert_eq!(
+            MsatValue::Object { msat: 1000 }.into_msat().unwrap(),
+            1000
+        );
     }
 }

@@ -1,0 +1,20 @@
+name: Diagnose RSA dependency
+
+on:
+  push:
+    branches:
+      - feat/canary-deployment-ready
+
+permissions:
+  contents: read
+
+jobs:
+  tree:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.88"
+      - name: Show reverse RSA dependency tree
+        run: cargo tree -i rsa --all-features

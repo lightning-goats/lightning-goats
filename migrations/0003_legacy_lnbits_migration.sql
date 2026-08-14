@@ -3,6 +3,7 @@ CREATE TABLE IF NOT EXISTS legacy_opening_credit (
     legacy_wallet_id TEXT NOT NULL CHECK (length(legacy_wallet_id) > 0),
     amount_sats INTEGER NOT NULL CHECK (amount_sats >= 0),
     cutover_at INTEGER NOT NULL CHECK (cutover_at > 0),
+    snapshot_at INTEGER NOT NULL CHECK (snapshot_at >= cutover_at),
     imported_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
 

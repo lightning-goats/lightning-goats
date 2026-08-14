@@ -1,8 +1,13 @@
 use anyhow::{Context, Result, bail};
+use serde_json::json;
 use sqlx::Row;
 use uuid::Uuid;
 
-use super::{LedgerStore, to_i64, to_u64};
+use super::{
+    LedgerStore,
+    events::append_event_in_transaction,
+    to_i64, to_u64,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StoredFeedAttemptStatus {
@@ -19,6 +24,7 @@ pub struct StoredFeedAttempt {
 
 impl LedgerStore {
     pub async fn mark_interrupted_feed_intents_unknown(&self) -> Result<u64> {
+        let mut transaction = self.pool.begin().await?;
         let result = sqlx::query(
             r#"
             UPDATE feed_attempts
@@ -27,9 +33,21 @@ impl LedgerStore {
             WHERE status = 'intent_committed'
             "#,
         )
-        .execute(&self.pool)
+        .execute(&mut *transaction)
         .await?;
-        Ok(result.rows_affected())
+        let affected = result.rows_affected();
+        if affected > 0 {
+            append_event_in_transaction(
+                &mut transaction,
+                "processing_error",
+                &json!({
+                    "message": "An automatic feed was interrupted and requires operator reconciliation."
+                }),
+            )
+            .await?;
+        }
+        transaction.commit().await?;
+        Ok(affected)
     }
 
     pub async fn begin_feed_attempt(&self, threshold_sats: u64) -> Result<Option<Uuid>> {
@@ -77,6 +95,7 @@ impl LedgerStore {
     }
 
     pub async fn mark_feed_unknown(&self, id: Uuid, error: &str) -> Result<()> {
+        let mut transaction = self.pool.begin().await?;
         let result = sqlx::query(
             r#"
             UPDATE feed_attempts
@@ -86,12 +105,23 @@ impl LedgerStore {
         )
         .bind(truncate_error(error))
         .bind(id.to_string())
-        .execute(&self.pool)
+        .execute(&mut *transaction)
         .await?;
 
         if result.rows_affected() != 1 {
             bail!("feed attempt {id} is not in intent_committed state");
         }
+
+        append_event_in_transaction(
+            &mut transaction,
+            "processing_error",
+            &json!({
+                "feed_attempt_id": id,
+                "message": "An automatic feed could not be confirmed. Operator reconciliation is required."
+            }),
+        )
+        .await?;
+        transaction.commit().await?;
         Ok(())
     }
 
@@ -100,6 +130,7 @@ impl LedgerStore {
     }
 
     pub async fn reconcile_unknown_as_not_fed(&self, id: Uuid) -> Result<()> {
+        let mut transaction = self.pool.begin().await?;
         let result = sqlx::query(
             r#"
             UPDATE feed_attempts
@@ -108,12 +139,24 @@ impl LedgerStore {
             "#,
         )
         .bind(id.to_string())
-        .execute(&self.pool)
+        .execute(&mut *transaction)
         .await?;
 
         if result.rows_affected() != 1 {
             bail!("feed attempt {id} is not in unknown state");
         }
+
+        let feed_credit_sats = feed_credit_in_transaction(&mut transaction).await?;
+        append_event_in_transaction(
+            &mut transaction,
+            "feed_reconciled_not_fed",
+            &json!({
+                "feed_attempt_id": id,
+                "feed_credit_sats": feed_credit_sats
+            }),
+        )
+        .await?;
+        transaction.commit().await?;
         Ok(())
     }
 
@@ -195,12 +238,24 @@ impl LedgerStore {
         .execute(&mut *transaction)
         .await?;
 
+        let feed_credit_sats = feed_credit_in_transaction(&mut transaction).await?;
+        append_event_in_transaction(
+            &mut transaction,
+            "feeder_confirmed",
+            &json!({
+                "feed_attempt_id": id,
+                "threshold_sats": threshold_sats,
+                "feed_credit_sats": feed_credit_sats
+            }),
+        )
+        .await?;
+
         transaction.commit().await?;
         Ok(())
     }
 }
 
-async fn feed_credit_in_transaction(
+pub(super) async fn feed_credit_in_transaction(
     transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
 ) -> Result<u64> {
     let row = sqlx::query("SELECT COALESCE(SUM(delta_sats), 0) AS credit FROM ledger_entries")
@@ -257,6 +312,12 @@ mod tests {
         store.confirm_feed_attempt(second).await.unwrap();
         assert_eq!(store.feed_credit_sats().await.unwrap(), 340);
         assert!(store.begin_feed_attempt(1_000).await.unwrap().is_none());
+
+        let events = store.events_after(0, 100).await.unwrap();
+        assert_eq!(
+            events.iter().filter(|event| event.event_type == "feeder_confirmed").count(),
+            2
+        );
     }
 
     #[tokio::test]
@@ -264,10 +325,7 @@ mod tests {
         let (_directory, store) = credited_store(1_340).await;
         let attempt = store.begin_feed_attempt(1_000).await.unwrap().unwrap();
 
-        assert_eq!(
-            store.mark_interrupted_feed_intents_unknown().await.unwrap(),
-            1
-        );
+        assert_eq!(store.mark_interrupted_feed_intents_unknown().await.unwrap(), 1);
         assert_eq!(store.feed_credit_sats().await.unwrap(), 1_340);
         let unresolved = store.unresolved_feed_attempt().await.unwrap().unwrap();
         assert_eq!(unresolved.id, attempt);
@@ -285,16 +343,19 @@ mod tests {
         let unresolved = store.unresolved_feed_attempt().await.unwrap().unwrap();
         assert_eq!(unresolved.id, attempt);
         assert_eq!(unresolved.status, StoredFeedAttemptStatus::Unknown);
+        assert!(store
+            .events_after(0, 100)
+            .await
+            .unwrap()
+            .iter()
+            .any(|event| event.event_type == "processing_error"));
     }
 
     #[tokio::test]
     async fn unknown_reconciled_as_fed_debits_exactly_once() {
         let (_directory, store) = credited_store(1_340).await;
         let attempt = store.begin_feed_attempt(1_000).await.unwrap().unwrap();
-        store
-            .mark_feed_unknown(attempt, "connection reset")
-            .await
-            .unwrap();
+        store.mark_feed_unknown(attempt, "connection reset").await.unwrap();
         store.reconcile_unknown_as_fed(attempt).await.unwrap();
 
         assert_eq!(store.feed_credit_sats().await.unwrap(), 340);
@@ -306,10 +367,7 @@ mod tests {
     async fn unknown_reconciled_not_fed_preserves_credit() {
         let (_directory, store) = credited_store(1_340).await;
         let attempt = store.begin_feed_attempt(1_000).await.unwrap().unwrap();
-        store
-            .mark_feed_unknown(attempt, "connection reset")
-            .await
-            .unwrap();
+        store.mark_feed_unknown(attempt, "connection reset").await.unwrap();
         store.reconcile_unknown_as_not_fed(attempt).await.unwrap();
 
         assert_eq!(store.feed_credit_sats().await.unwrap(), 1_340);

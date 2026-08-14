@@ -1,0 +1,50 @@
+[Unit]
+Description=Lightning Goats Canary
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lightning-goats
+Group=lightning-goats
+
+ExecStart=/usr/local/bin/lightning-goatsd --config /etc/lightning-goats/config.canary.toml
+
+# Canary uses a separate SQLite file inside the same protected state directory.
+StateDirectory=lightning-goats
+StateDirectoryMode=0700
+RuntimeDirectory=lightning-goats-canary
+RuntimeDirectoryMode=0700
+ConfigurationDirectory=lightning-goats
+UMask=0077
+
+Environment=RUST_LOG=info
+# Canary needs only read-only CLN observation plus the OpenHAB test-rule credential.
+# It intentionally receives no NIP-46 client credential.
+LoadCredentialEncrypted=cln-rune:/etc/credstore.encrypted/lightning-goats-cln-rune
+LoadCredentialEncrypted=openhab-token:/etc/credstore.encrypted/lightning-goats-openhab
+
+Restart=on-failure
+RestartSec=5s
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectKernelLogs=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,70 @@
+# Production Phase 1 routes for the existing lightning-goats.com HTTPS server.
+# Apply only after canary acceptance and while FeederOverride is ON.
+#
+# If request limiting is desired, define this once in nginx's http{} context:
+#   limit_req_zone $binary_remote_addr zone=lightning_goats_read:10m rate=30r/m;
+# Then uncomment the limit_req lines below.
+
+upstream clnaddress_backend {
+    server 127.0.0.1:9797;
+    keepalive 8;
+}
+
+upstream lightning_goats_backend {
+    server 127.0.0.1:8787;
+    keepalive 8;
+}
+
+# Add one exact location per production Lightning Address user. The herd route
+# is shown explicitly because its server-generated label is the accounting
+# trust boundary consumed by lightning-goatsd.
+location = /.well-known/lnurlp/herd {
+    proxy_pass http://clnaddress_backend;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    add_header Access-Control-Allow-Origin "*" always;
+}
+
+# Repeat exact /.well-known/lnurlp/<user> blocks for every other configured
+# clnaddress user before removing their legacy LNbits routes.
+
+# clnaddress callback for invoices created through any configured user.
+location ^~ /invoice/ {
+    # limit_req zone=lightning_goats_read burst=20 nodelay;
+    proxy_pass http://clnaddress_backend;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    add_header Access-Control-Allow-Origin "*" always;
+}
+
+# Read-only operational status used by the overlay.
+location = /api/v1/status {
+    # limit_req zone=lightning_goats_read burst=10 nodelay;
+    proxy_pass http://lightning_goats_backend/api/v1/status;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+location = /healthz {
+    # Prefer keeping health local-only unless an external monitor needs it.
+    proxy_pass http://lightning_goats_backend/healthz;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+# Single server-to-client overlay websocket.
+location = /ws/overlay {
+    proxy_pass http://lightning_goats_backend/ws/overlay;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 75s;
+    proxy_send_timeout 75s;
+}
+
+# Never proxy CLNRest, OpenHAB, the local operator control path, or any systemd
+# credential material through nginx.

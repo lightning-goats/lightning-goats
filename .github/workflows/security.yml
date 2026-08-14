@@ -1,0 +1,40 @@
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 8 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  cargo-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.88"
+      - name: Require committed lockfile
+        run: test -f Cargo.lock
+      - name: Assert advisory RSA crate is unreachable
+        shell: bash
+        run: |
+          set -euo pipefail
+          TREE="$(cargo tree --locked -i rsa --all-features 2>&1 || true)"
+          printf '%s\n' "$TREE"
+          if printf '%s\n' "$TREE" | grep -Eq '^rsa v|^[[:space:]│├└─]*rsa v'; then
+            echo "RUSTSEC-2023-0071 can no longer be ignored: rsa entered the active dependency graph" >&2
+            exit 1
+          fi
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Audit locked dependencies
+        # RUSTSEC-2023-0071 has no fixed rsa release. Cargo's lock resolution
+        # contains rsa through SQLx metadata, but the preceding reverse-tree
+        # assertion proves it is not in the active build graph. If that changes,
+        # this workflow fails before reaching the scoped ignore.
+        run: cargo audit --ignore RUSTSEC-2023-0071

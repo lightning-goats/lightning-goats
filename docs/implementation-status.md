@@ -34,13 +34,7 @@ The canonical Lightning Goats fork is:
 lightning-goats/clnaddress
 ```
 
-The Phase 1 v1 contract was squash-merged to `master` at:
-
-```text
-33117e85d39d137161dd3e4342c5296f2c1da911
-```
-
-That commit defines the server-generated invoice-label contract consumed by `lightning-goatsd`:
+The Phase 1 v1 contract defines:
 
 ```text
 clnaddress:v1:<user>:<uuid>
@@ -48,7 +42,7 @@ clnaddress:v1:<user>:<uuid>
 
 and includes strict usernames, per-address min/max policy, LUD-12 comment validation, per-address Nostr policy, protected file-based Zap signer loading, atomic registry/cursor persistence, privacy hardening, and integration tests.
 
-The fork passed its inherited compatibility matrix across CLN 25.09.3, 25.12.1, 26.04, and 26.06.6, including Rust MSRV verification, Rust build/unit tests, and integration pytest.
+The fork passed its inherited compatibility matrix across CLN 25.09.3, 25.12.1, 26.04, and 26.06.6. Its release workflow publishes binary archives plus `SHA256SUMS`.
 
 ## Implemented in `lightning-goatsd`
 
@@ -63,57 +57,101 @@ The fork passed its inherited compatibility matrix across CLN 25.09.3, 25.12.1, 
 - Persistent feed intents and confirmed feed debits.
 - Restart reconciliation from interrupted intent to `unknown` without debit.
 - Local-only ambiguous feed reconciliation (`fed` / `not-fed`) with no feeder actuation path.
-- Restricted CLNRest `waitanyinvoice` adapter using the systemd rune credential.
-- CLNRest loopback-only enforcement and verified TLS with optional local CA.
-- OpenHAB override reader and automatic feeder adapter.
-- Shadow mode that never actuates the feeder.
-- Active feed worker that checks override before every feed.
+- Restricted CLNRest `waitanyinvoice` adapter using a systemd rune credential.
+- CLNRest loopback-only enforcement, verified TLS with optional local CA, and proxy discovery disabled.
+- OpenHAB override reader and automatic feeder adapter with proxy discovery disabled.
+- Optional read-only OpenHAB ambient-temperature item for presentation status.
+- `shadow` mode: observes/accounting only; no feeder actuation and no Nostr.
+- `canary` mode: may invoke only the configured OpenHAB rule; Nostr remains disabled.
+- `active` mode: production feeder plus NIP-46 Nostr processing.
 - Ambiguous OpenHAB outcome fails to `unknown` and never automatically retries.
 - Durable overlay event log.
 - Payment/feed/error events committed atomically with the state changes they describe.
 - Race-free overlay snapshot state and event sequence.
 - Read-only `/ws/overlay` durable replay stream.
 - Read-only `/healthz` and `/api/v1/status` endpoints.
+- Status includes mode, feed credit, feeds due, remainder, unresolved feed ID, feeder override state, and optional temperature.
 - Local operator CLI for cursor initialization/status/feed reconciliation.
 - `nak` NIP-46 signing adapter.
-- Shadow-safe durable Nostr message cursor.
+- Shadow/canary-safe durable Nostr message cursor.
 - Transactional signed-event outbox.
 - Exact signed Nostr event retry rather than re-signing/re-IDing failed publications.
 - Active-mode-only access to the NIP-46 client credential.
-- Hardened `lightning-goatsd` systemd unit.
-- Hardened `nak` NIP-46 bunker systemd unit and wrapper.
-- nginx canary configuration example.
-- server setup runbook.
+- Hardened production daemon and NIP-46 bunker systemd units.
+- Hardened signer-free canary systemd unit with separate SQLite DB/port.
+- Canary and production nginx configuration examples.
+- Detailed server/canary/cutover runbook.
+- `SECURITY.md` and weekly/PR `cargo audit` workflow.
+- Rust-1.88-generated `Cargo.lock` committed and used by release/verification builds.
+
+## Overlay
+
+The Phase 1 overlay lives in `lightning-goats/overlay` and is merged to its `main` branch on the standalone service contract:
+
+- one WebSocket only: `wss://lightning-goats.com/ws/overlay`;
+- read-only `/api/v1/status` for mode/override/temperature/fallback state;
+- no LNbits WebSocket or API calls;
+- no legacy FastAPI/CyberHerd API calls;
+- durable sequence-gap detection and reconnect/resnapshot;
+- multi-feed backlog and retained remainder display;
+- payment QR/sats animation from `payment_received`;
+- feeder animation **only** from committed `feeder_confirmed`;
+- no browser-side feeder inference from the progress bar reaching 100%;
+- no external GSAP dependency;
+- `?canary=1` selects the isolated `/canary/...` endpoints;
+- CyberHerd presentation intentionally deferred to Phase 2.
+
+The overlay repository has CI that rejects reintroduction of legacy LNbits/CyberHerd runtime endpoints, enforces one WebSocket construction path, and syntax-checks the inline JavaScript.
 
 ## Release model
 
-This is a single-operator deployment. Release automation should stay simple:
+This is a single-operator deployment. Tagged `lightning-goats` releases publish:
 
-- tagged Linux binaries for `lightning-goatsd` and `lightning-goatsctl`;
-- a compressed release archive;
-- SHA-256 checksums;
-- deployment configuration/systemd/nginx assets remain in Git and are installed manually.
+```text
+lightning-goatsd
+lightning-goatsctl
+lightning-goats-<tag>-x86_64-linux-gnu.tar.gz
+SHA256SUMS
+```
 
-`lightning-goats/clnaddress` already has an upstream-style binary release workflow and does not need an additional package format.
+Deployment configuration/systemd/nginx assets remain in Git and are installed manually.
 
-## Verification
+## Verification gates
 
-The integrated Rust runtime, including durable overlay and Nostr/outbox workers, has been verified with:
+Required locked Rust gate:
 
 ```text
 cargo fmt --all --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test --all-features
+cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo test --locked --all-features
+cargo audit --ignore RUSTSEC-2023-0071
 ```
 
-## Next
+`RUSTSEC-2023-0071` affects `rsa 0.9.10`, for which RustSec currently reports no fixed upgrade. SQLx causes that package to remain in Cargo's resolved lock metadata, but it is not in this application's active dependency graph. The security workflow therefore first runs a reverse dependency-tree assertion and **fails immediately if `rsa` ever becomes reachable**; only after that assertion does it apply the single advisory ignore. This exception must be removed when SQLx or `rsa` provides a clean resolution.
 
-1. Finalize production Phase 1 message templates and remaining read-only overlay data needed by the existing presentation.
-2. Add `cargo audit` / `cargo deny` security CI after the dependency set stabilizes.
-3. Add tagged Linux binary releases and checksums for `lightning-goats`.
-4. Inventory the live server and create the restricted CLN rune/credential material without changing production routes.
-5. Deploy `lightning-goats/clnaddress` and `lightning-goatsd` in canary/shadow mode.
-6. Exercise `herd-canary@lightning-goats.com` and the OpenHAB test rule while LNbits remains authoritative.
-7. Initialize the production CLN cursor while the daemon is still in shadow mode.
-8. Execute the zero-based cutover: disable old side effects, switch nginx Lightning Address routing to `clnaddress`, verify a real herd payment, then activate the new daemon.
-9. Keep the old LNbits data read-only for audit until the operator chooses to archive/remove it; it has no accounting role after cutover.
+The canary integration suite additionally verifies in-process that:
+
+```text
+2340 sats -> exactly 2 canary rule invocations -> 340 sats remainder -> no Nostr capability
+```
+
+Real production-node canary validation is still required before cutover.
+
+## Remaining before deployment
+
+Application coding is complete when the current backend PR is green and merged. The overlay port is already merged.
+
+Then the remaining work is host-specific deployment/validation:
+
+1. Inventory the live server and record exact CLN, CLNRest, LNbits, nginx, OpenHAB, `nak`, and existing service configuration.
+2. Create/test the restricted CLN rune (`waitanyinvoice` / `listinvoices` only).
+3. Set the real production and canary OpenHAB rule/item IDs in configuration.
+4. Deploy the reviewed `clnaddress` and Lightning Goats binaries.
+5. Configure `herd-canary@lightning-goats.com` plus the isolated canary nginx routes.
+6. Initialize the canary cursor and run the full mainnet canary matrix with the harmless OpenHAB rule.
+7. Prepare the NIP-46 bunker/client credentials and verify signing without public publication.
+8. After canary acceptance, initialize a fresh production DB/cursor and run production ingress in `shadow`.
+9. Execute the zero-based cutover with `FeederOverride=ON`, switch production Lightning Address routes, verify one real herd payment, then move to `active` and release the override.
+10. Keep old LNbits data read-only for audit until the operator chooses to archive/remove it. It has no accounting role after cutover.
+
+CyberHerd remains offline until Phase 2. No outbound Lightning spend capability belongs in Phase 1.

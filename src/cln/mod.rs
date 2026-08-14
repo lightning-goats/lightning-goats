@@ -46,6 +46,7 @@ impl ClnRestClient {
         }
 
         let mut builder = Client::builder()
+            .no_proxy()
             .https_only(base_url.scheme() == "https")
             .connect_timeout(Duration::from_secs(5));
 

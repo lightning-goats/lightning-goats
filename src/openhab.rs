@@ -13,16 +13,18 @@ pub struct OpenHabClient {
     auth_token: Zeroizing<String>,
     feeder_rule_id: String,
     override_item: String,
+    temperature_item: Option<String>,
 }
 
 impl OpenHabClient {
     pub async fn from_config(config: &OpenHabConfig) -> Result<Self> {
         let token = read_systemd_credential("openhab-token").await?;
-        Self::new(
+        Self::new_with_temperature(
             &config.url,
             token,
             &config.feeder_rule_id,
             &config.override_item,
+            config.temperature_item.as_deref(),
         )
     }
 
@@ -32,11 +34,30 @@ impl OpenHabClient {
         feeder_rule_id: &str,
         override_item: &str,
     ) -> Result<Self> {
+        Self::new_with_temperature(
+            base_url,
+            auth_token,
+            feeder_rule_id,
+            override_item,
+            None,
+        )
+    }
+
+    pub fn new_with_temperature(
+        base_url: &str,
+        auth_token: String,
+        feeder_rule_id: &str,
+        override_item: &str,
+        temperature_item: Option<&str>,
+    ) -> Result<Self> {
         if auth_token.trim().is_empty() {
             bail!("OpenHAB authentication token is empty");
         }
         validate_identifier(feeder_rule_id, "OpenHAB feeder rule ID")?;
         validate_identifier(override_item, "OpenHAB override item")?;
+        if let Some(item) = temperature_item {
+            validate_identifier(item, "OpenHAB temperature item")?;
+        }
 
         let mut base_url = Url::parse(base_url).context("invalid OpenHAB URL")?;
         match base_url.scheme() {
@@ -57,6 +78,7 @@ impl OpenHabClient {
         }
 
         let client = Client::builder()
+            .no_proxy()
             .connect_timeout(Duration::from_secs(3))
             .timeout(Duration::from_secs(5))
             .build()
@@ -68,33 +90,52 @@ impl OpenHabClient {
             auth_token: Zeroizing::new(auth_token),
             feeder_rule_id: feeder_rule_id.to_owned(),
             override_item: override_item.to_owned(),
+            temperature_item: temperature_item.map(str::to_owned),
         })
     }
 
     pub async fn feeder_override_enabled(&self) -> Result<bool> {
-        let endpoint = self
-            .base_url
-            .join(&format!("rest/items/{}/state", self.override_item))
-            .context("failed constructing OpenHAB override URL")?;
-        let response = self
-            .client
-            .get(endpoint)
-            .basic_auth(self.auth_token.as_str(), Some(""))
-            .send()
-            .await
-            .context("failed requesting OpenHAB feeder override state")?
-            .error_for_status()
-            .context("OpenHAB feeder override request returned an error status")?;
-        let state = response
-            .text()
-            .await
-            .context("failed reading OpenHAB feeder override state")?;
-
+        let state = self.item_state(&self.override_item).await?;
         match state.trim() {
             "ON" => Ok(true),
             "OFF" => Ok(false),
             other => bail!("OpenHAB feeder override returned unexpected state {other:?}"),
         }
+    }
+
+    pub async fn temperature_f(&self) -> Result<Option<f64>> {
+        let Some(item) = &self.temperature_item else {
+            return Ok(None);
+        };
+        let state = self.item_state(item).await?;
+        let number = state
+            .split_whitespace()
+            .next()
+            .context("OpenHAB temperature state is empty")?
+            .parse::<f64>()
+            .with_context(|| format!("OpenHAB temperature state is not numeric: {state:?}"))?;
+        if !number.is_finite() {
+            bail!("OpenHAB temperature state is not finite");
+        }
+        Ok(Some(number))
+    }
+
+    async fn item_state(&self, item: &str) -> Result<String> {
+        let endpoint = self
+            .base_url
+            .join(&format!("rest/items/{item}/state"))
+            .context("failed constructing OpenHAB item state URL")?;
+        self.client
+            .get(endpoint)
+            .basic_auth(self.auth_token.as_str(), Some(""))
+            .send()
+            .await
+            .context("failed requesting OpenHAB item state")?
+            .error_for_status()
+            .context("OpenHAB item state request returned an error status")?
+            .text()
+            .await
+            .context("failed reading OpenHAB item state")
     }
 
     pub async fn trigger_feeder(&self) -> Result<()> {
@@ -148,6 +189,7 @@ mod tests {
     #[derive(Clone)]
     struct MockState {
         override_state: &'static str,
+        temperature_state: &'static str,
         triggers: Arc<AtomicUsize>,
     }
 
@@ -159,6 +201,16 @@ mod tests {
             return (StatusCode::UNAUTHORIZED, "missing auth").into_response();
         }
         (StatusCode::OK, state.override_state).into_response()
+    }
+
+    async fn temperature_handler(
+        State(state): State<MockState>,
+        headers: HeaderMap,
+    ) -> impl IntoResponse {
+        if headers.get("authorization").is_none() {
+            return (StatusCode::UNAUTHORIZED, "missing auth").into_response();
+        }
+        (StatusCode::OK, state.temperature_state).into_response()
     }
 
     async fn feeder_handler(
@@ -175,6 +227,7 @@ mod tests {
     async fn spawn_mock(state: MockState) -> String {
         let app = Router::new()
             .route("/rest/items/FeederOverride/state", get(override_handler))
+            .route("/rest/items/AmbientTemperature/state", get(temperature_handler))
             .route("/rest/rules/rule123/runnow", post(feeder_handler))
             .with_state(state);
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -186,17 +239,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reads_override_and_triggers_rule() {
+    async fn reads_override_temperature_and_triggers_rule() {
         let triggers = Arc::new(AtomicUsize::new(0));
         let base_url = spawn_mock(MockState {
             override_state: "OFF",
+            temperature_state: "67.4 °F",
             triggers: Arc::clone(&triggers),
         })
         .await;
-        let client =
-            OpenHabClient::new(&base_url, "token".to_owned(), "rule123", "FeederOverride").unwrap();
+        let client = OpenHabClient::new_with_temperature(
+            &base_url,
+            "token".to_owned(),
+            "rule123",
+            "FeederOverride",
+            Some("AmbientTemperature"),
+        )
+        .unwrap();
 
         assert!(!client.feeder_override_enabled().await.unwrap());
+        assert_eq!(client.temperature_f().await.unwrap(), Some(67.4));
         client.trigger_feeder().await.unwrap();
         assert_eq!(triggers.load(Ordering::SeqCst), 1);
     }
@@ -205,6 +266,7 @@ mod tests {
     async fn unexpected_override_state_fails_closed_to_caller() {
         let base_url = spawn_mock(MockState {
             override_state: "UNDEF",
+            temperature_state: "67.4 °F",
             triggers: Arc::new(AtomicUsize::new(0)),
         })
         .await;

@@ -1,0 +1,18 @@
+#!/bin/sh
+set -eu
+
+: "${LNBITS_URL:?LNBITS_URL is required}"
+: "${CUTOVER_AT:?CUTOVER_AT is required}"
+
+STABLE_ROUNDS="${STABLE_ROUNDS:-2}"
+SNAPSHOT_INTERVAL_SECONDS="${SNAPSHOT_INTERVAL_SECONDS:-2}"
+SNAPSHOT_MAX_ROUNDS="${SNAPSHOT_MAX_ROUNDS:-30}"
+MANIFEST=/var/lib/lightning-goats/legacy-lnbits-manifest.json
+
+exec /usr/local/bin/lightning-goats-lnbits-migrate snapshot \
+  --lnbits-url "$LNBITS_URL" \
+  --cutover-at "$CUTOVER_AT" \
+  --output "$MANIFEST" \
+  --stable-rounds "$STABLE_ROUNDS" \
+  --interval-seconds "$SNAPSHOT_INTERVAL_SECONDS" \
+  --max-rounds "$SNAPSHOT_MAX_ROUNDS"

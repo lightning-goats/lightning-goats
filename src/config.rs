@@ -1,4 +1,8 @@
-use std::{fs, net::SocketAddr, path::Path};
+use std::{
+    fs,
+    net::SocketAddr,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
@@ -96,6 +100,8 @@ impl RuntimeMode {
 #[derive(Debug, Clone, Deserialize)]
 pub struct LightningConfig {
     pub clnrest_url: String,
+    #[serde(default)]
+    pub clnrest_ca_certificate: Option<PathBuf>,
     pub herd_user: String,
 }
 
@@ -135,6 +141,9 @@ mod tests {
             },
             lightning: LightningConfig {
                 clnrest_url: "https://127.0.0.1:3010".to_owned(),
+                clnrest_ca_certificate: Some(PathBuf::from(
+                    "/etc/lightning-goats/clnrest-ca.pem",
+                )),
                 herd_user: "herd".to_owned(),
             },
             feeder: FeederConfig {

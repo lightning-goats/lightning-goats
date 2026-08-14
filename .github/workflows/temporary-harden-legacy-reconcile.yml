@@ -1,0 +1,79 @@
+name: Temporary legacy reconciliation hardening
+
+on:
+  push:
+    branches:
+      - feat/legacy-lnbits-reconciler
+
+permissions:
+  contents: write
+
+concurrency:
+  group: temporary-legacy-hardening-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/legacy-lnbits-reconciler
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.88"
+          components: rustfmt
+      - name: Apply hardening patch
+        shell: python
+        run: |
+          from pathlib import Path
+
+          verify = Path("src/ledger/legacy_verify.rs")
+          text = verify.read_text()
+          needle = '''        let database_count: i64 =\n            sqlx::query_scalar("SELECT COUNT(*) FROM legacy_pending_invoices")\n'''
+          block = '''        let opening_ledger = sqlx::query(\n            "SELECT entry_type, delta_sats FROM ledger_entries WHERE source_key = 'legacy:opening-credit'",\n        )\n        .fetch_optional(&mut *transaction)\n        .await?\n        .context("legacy opening-credit metadata exists without its ledger entry")?;\n        let opening_entry_type: String = opening_ledger.try_get("entry_type")?;\n        let opening_delta: i64 = opening_ledger.try_get("delta_sats")?;\n        if opening_entry_type != "LEGACY_OPENING_CREDIT"\n            || to_u64(opening_delta, "legacy opening credit ledger entry")?\n                != manifest.opening_credit_sats\n        {\n            bail!("installed legacy opening-credit ledger entry does not match the manifest");\n        }\n\n'''
+          if block not in text:
+              if needle not in text:
+                  raise SystemExit("legacy verifier insertion point not found")
+              text = text.replace(needle, block + needle, 1)
+              verify.write_text(text)
+
+          migrator = Path("src/bin/lightning-goats-lnbits-migrate.rs")
+          text = migrator.read_text()
+          old_import = '''    ledger::{LegacySettledInvoice, LegacySettlementOutcome, LedgerStore},\n'''
+          new_import = '''    ledger::{\n        LegacyCutoverManifest, LegacyPendingInvoice, LegacySettledInvoice,\n        LegacySettlementOutcome, LedgerStore,\n    },\n'''
+          if "LegacyCutoverManifest" not in text:
+              if old_import not in text:
+                  raise SystemExit("migrator import insertion point not found")
+              text = text.replace(old_import, new_import, 1)
+
+          old_reconcile = '''            let ledger = LedgerStore::connect(&config.database.url).await?;\n            let mut credited = 0u64;\n'''
+          new_reconcile = '''            let ledger = LedgerStore::connect(&config.database.url).await?;\n            let installed_manifest = to_library_manifest(&manifest);\n            ledger\n                .verify_legacy_cutover_manifest(&installed_manifest)\n                .await?;\n            let mut credited = 0u64;\n'''
+          if "let installed_manifest = to_library_manifest(&manifest);" not in text:
+              if old_reconcile not in text:
+                  raise SystemExit("migrator reconcile insertion point not found")
+              text = text.replace(old_reconcile, new_reconcile, 1)
+
+          helper = '''\nfn to_library_manifest(manifest: &ManifestFile) -> LegacyCutoverManifest {\n    LegacyCutoverManifest {\n        wallet_id: manifest.wallet_id.clone(),\n        opening_credit_sats: manifest.opening_credit_sats,\n        cutover_at: manifest.cutover_at,\n        snapshot_at: manifest.snapshot_at,\n        pending_invoices: manifest\n            .pending_invoices\n            .iter()\n            .map(|pending| LegacyPendingInvoice {\n                payment_hash: pending.payment_hash.clone(),\n                checking_id: pending.checking_id.clone(),\n                wallet_id: pending.wallet_id.clone(),\n                amount_sats: pending.amount_sats,\n                created_at: pending.created_at,\n                expiry_at: pending.expiry_at,\n            })\n            .collect(),\n    }\n}\n'''
+          if helper.strip() not in text:
+              marker = "\n#[cfg(test)]\nmod tests {\n"
+              if marker not in text:
+                  raise SystemExit("migrator test module insertion point not found")
+              text = text.replace(marker, helper + marker, 1)
+          migrator.write_text(text)
+      - name: Format patched Rust
+        run: cargo fmt --all
+      - name: Remove this temporary workflow
+        run: rm .github/workflows/temporary-harden-legacy-reconcile.yml
+      - name: Commit patch and self-removal
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/ledger/legacy_verify.rs src/bin/lightning-goats-lnbits-migrate.rs .github/workflows/temporary-harden-legacy-reconcile.yml
+          if git diff --cached --quiet; then
+            echo "No hardening changes required"
+            exit 0
+          fi
+          git commit -m "hardening: verify installed legacy accounting before reconciliation"
+          git push origin HEAD:feat/legacy-lnbits-reconciler

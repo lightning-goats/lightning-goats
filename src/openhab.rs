@@ -118,9 +118,10 @@ fn validate_identifier(value: &str, field: &str) -> Result<()> {
     if value.is_empty() || value.len() > 128 {
         bail!("{field} must contain 1 to 128 characters");
     }
-    if !value.bytes().all(|byte| {
-        byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.')
-    }) {
+    if !value
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
+    {
         bail!("{field} contains unsupported characters");
     }
     Ok(())
@@ -192,8 +193,8 @@ mod tests {
             triggers: Arc::clone(&triggers),
         })
         .await;
-        let client = OpenHabClient::new(&base_url, "token".to_owned(), "rule123", "FeederOverride")
-            .unwrap();
+        let client =
+            OpenHabClient::new(&base_url, "token".to_owned(), "rule123", "FeederOverride").unwrap();
 
         assert!(!client.feeder_override_enabled().await.unwrap());
         client.trigger_feeder().await.unwrap();
@@ -207,20 +208,22 @@ mod tests {
             triggers: Arc::new(AtomicUsize::new(0)),
         })
         .await;
-        let client = OpenHabClient::new(&base_url, "token".to_owned(), "rule123", "FeederOverride")
-            .unwrap();
+        let client =
+            OpenHabClient::new(&base_url, "token".to_owned(), "rule123", "FeederOverride").unwrap();
 
         assert!(client.feeder_override_enabled().await.is_err());
     }
 
     #[test]
     fn rejects_path_injection_identifiers() {
-        assert!(OpenHabClient::new(
-            "http://127.0.0.1:8080/",
-            "token".to_owned(),
-            "../rule",
-            "FeederOverride"
-        )
-        .is_err());
+        assert!(
+            OpenHabClient::new(
+                "http://127.0.0.1:8080/",
+                "token".to_owned(),
+                "../rule",
+                "FeederOverride"
+            )
+            .is_err()
+        );
     }
 }

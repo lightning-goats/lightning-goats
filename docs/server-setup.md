@@ -34,21 +34,19 @@ sha256sum "$(command -v nak)"
 
 Do not copy secrets into the report.
 
-## 2. Install reviewed release packages
+## 2. Install reviewed release binaries
 
-Prefer the signed/checksummed native package produced by the repository release workflow.
-
-Fedora/RHEL-family example:
+For normal production deployment, download the tagged Linux release archive and `SHA256SUMS`, verify the checksum, then install the two binaries directly:
 
 ```bash
-sudo dnf install ./lightning-goats-<version>-1.x86_64.rpm
+sha256sum -c SHA256SUMS
+
+tar -xzf lightning-goats-<tag>-x86_64-linux-gnu.tar.gz
+sudo install -o root -g root -m 0755 lightning-goatsd /usr/local/bin/lightning-goatsd
+sudo install -o root -g root -m 0755 lightning-goatsctl /usr/local/bin/lightning-goatsctl
 ```
 
-Debian/Ubuntu-family example:
-
-```bash
-sudo apt install ./lightning-goats_<version>_amd64.deb
-```
+Deployment assets such as systemd units, nginx examples, helper scripts, and the configuration example remain versioned in the repository and should be reviewed/copied manually.
 
 If building directly from source for development/canary work:
 
@@ -60,7 +58,7 @@ sudo install -o root -g root -m 0755 target/release/lightning-goatsd /usr/local/
 sudo install -o root -g root -m 0755 target/release/lightning-goatsctl /usr/local/bin/lightning-goatsctl
 ```
 
-Record the deployed commit/package version and binary hash.
+Record the deployed tag/commit and binary hashes.
 
 ## 3. Service account
 

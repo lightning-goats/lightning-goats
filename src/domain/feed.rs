@@ -156,7 +156,9 @@ impl FeedRuntime {
         expected_status: FeedAttemptStatus,
     ) -> Result<(), FeedError> {
         match self.active_attempt {
-            Some(attempt) if attempt.id == attempt_id && attempt.status == expected_status => Ok(()),
+            Some(attempt) if attempt.id == attempt_id && attempt.status == expected_status => {
+                Ok(())
+            }
             Some(attempt) if attempt.id != attempt_id => Err(FeedError::AttemptIdMismatch),
             Some(_) => Err(FeedError::InvalidAttemptState),
             None => Err(FeedError::NoActiveAttempt),

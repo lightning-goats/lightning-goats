@@ -1,0 +1,12 @@
+#!/bin/sh
+set -eu
+
+: "${LNBITS_URL:?LNBITS_URL is required}"
+
+MANIFEST=/var/lib/lightning-goats/legacy-lnbits-manifest.json
+CONFIG=/etc/lightning-goats/config.toml
+
+exec /usr/local/bin/lightning-goats-lnbits-migrate reconcile \
+  --lnbits-url "$LNBITS_URL" \
+  --manifest "$MANIFEST" \
+  --config "$CONFIG"

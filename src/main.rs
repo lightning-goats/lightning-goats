@@ -3,11 +3,18 @@
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use anyhow::{Result, anyhow, bail};
-use axum::{Json, Router, extract::State, http::StatusCode, routing::get};
+use axum::{
+    Json, Router,
+    extract::{State, ws::WebSocketUpgrade},
+    http::StatusCode,
+    response::Response,
+    routing::get,
+};
 use clap::Parser;
 use lightning_goats::{
     cln::ClnRestClient, config::AppConfig, feeder::run_feed_worker,
     invoice_watcher::run_invoice_watcher, ledger::LedgerStore, openhab::OpenHabClient,
+    overlay::serve_overlay_socket,
 };
 use serde::Serialize;
 use tracing::info;
@@ -81,6 +88,7 @@ async fn main() -> Result<()> {
     let app = Router::new()
         .route("/healthz", get(healthz))
         .route("/api/v1/status", get(status))
+        .route("/ws/overlay", get(overlay_ws))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(config.service.listen).await?;
@@ -171,6 +179,16 @@ async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse>, S
         remainder_sats: feed_credit_sats % threshold_sats,
         unresolved_feed_attempt,
     }))
+}
+
+async fn overlay_ws(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
+    let ledger = state.ledger.clone();
+    let threshold_sats = state.config.feeder.threshold_sats;
+    ws.on_upgrade(move |socket| async move {
+        if let Err(error) = serve_overlay_socket(socket, ledger, threshold_sats).await {
+            tracing::warn!(%error, "overlay websocket disconnected after server-side error");
+        }
+    })
 }
 
 async fn shutdown_signal() {

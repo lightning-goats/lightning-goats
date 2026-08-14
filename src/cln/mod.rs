@@ -6,11 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use zeroize::Zeroizing;
 
-use crate::{
-    config::LightningConfig,
-    ledger::PaidInvoice,
-    secrets::read_systemd_credential,
-};
+use crate::{config::LightningConfig, ledger::PaidInvoice, secrets::read_systemd_credential};
 
 const WAITANYINVOICE_TIMEOUT_CODE: i64 = 904;
 
@@ -122,9 +118,7 @@ impl ClnRestClient {
             payment_hash: response.payment_hash,
             label: Some(response.label),
             amount_msat: response.amount_received_msat.into_msat()?,
-            settled_at: Some(
-                i64::try_from(response.paid_at).context("paid_at exceeds i64 range")?,
-            ),
+            settled_at: Some(i64::try_from(response.paid_at).context("paid_at exceeds i64 range")?),
         }))
     }
 }
@@ -280,9 +274,7 @@ mod tests {
 
     #[test]
     fn refuses_non_loopback_clnrest() {
-        assert!(
-            ClnRestClient::new("https://example.com:3010", "rune".to_owned(), None).is_err()
-        );
+        assert!(ClnRestClient::new("https://example.com:3010", "rune".to_owned(), None).is_err());
     }
 
     #[test]
@@ -292,9 +284,6 @@ mod tests {
             MsatValue::Text("1000msat".to_owned()).into_msat().unwrap(),
             1000
         );
-        assert_eq!(
-            MsatValue::Object { msat: 1000 }.into_msat().unwrap(),
-            1000
-        );
+        assert_eq!(MsatValue::Object { msat: 1000 }.into_msat().unwrap(), 1000);
     }
 }

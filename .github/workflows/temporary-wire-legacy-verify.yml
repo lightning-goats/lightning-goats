@@ -1,0 +1,42 @@
+name: Temporary legacy verifier wiring
+
+on:
+  push:
+    branches:
+      - feat/legacy-lnbits-reconciler
+
+permissions:
+  contents: write
+
+concurrency:
+  group: temporary-legacy-verifier-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  wire:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/legacy-lnbits-reconciler
+      - name: Wire verifier module
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path("src/ledger/mod.rs")
+          text = path.read_text()
+          if "mod legacy_verify;" not in text:
+              text = text.replace("mod legacy;\n", "mod legacy;\nmod legacy_verify;\n", 1)
+              path.write_text(text)
+      - name: Commit if changed
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "Verifier already wired"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/ledger/mod.rs
+          git commit -m "hardening: compile legacy manifest verifier"
+          git push origin HEAD:feat/legacy-lnbits-reconciler

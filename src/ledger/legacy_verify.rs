@@ -94,7 +94,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
-    use crate::ledger::{LegacyPendingInvoice, LegacyManifestOutcome};
+    use crate::ledger::{LegacyManifestOutcome, LegacyPendingInvoice};
 
     async fn store() -> (TempDir, LedgerStore) {
         let directory = TempDir::new().unwrap();
@@ -126,7 +126,12 @@ mod tests {
     async fn verification_requires_prior_exact_installation() {
         let (_directory, store) = store().await;
         let manifest = manifest();
-        assert!(store.verify_legacy_cutover_manifest(&manifest).await.is_err());
+        assert!(
+            store
+                .verify_legacy_cutover_manifest(&manifest)
+                .await
+                .is_err()
+        );
         assert_eq!(
             store
                 .install_legacy_cutover_manifest(&manifest)
@@ -134,10 +139,18 @@ mod tests {
                 .unwrap(),
             LegacyManifestOutcome::Installed
         );
-        store.verify_legacy_cutover_manifest(&manifest).await.unwrap();
+        store
+            .verify_legacy_cutover_manifest(&manifest)
+            .await
+            .unwrap();
 
         let mut changed = manifest;
         changed.opening_credit_sats += 1;
-        assert!(store.verify_legacy_cutover_manifest(&changed).await.is_err());
+        assert!(
+            store
+                .verify_legacy_cutover_manifest(&changed)
+                .await
+                .is_err()
+        );
     }
 }

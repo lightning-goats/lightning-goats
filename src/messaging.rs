@@ -13,7 +13,7 @@ use crate::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MessageProcessorStep {
     Idle,
-    ShadowSkipped { seq: u64 },
+    PublicationDisabled { seq: u64 },
     NonPublicSkipped { seq: u64 },
     Enqueued { seq: u64 },
 }
@@ -32,9 +32,9 @@ pub async fn process_next_message(
         return Ok(MessageProcessorStep::Idle);
     };
 
-    if mode == RuntimeMode::Shadow {
+    if !mode.nostr_enabled() {
         ledger.advance_message_cursor(event.seq).await?;
-        return Ok(MessageProcessorStep::ShadowSkipped { seq: event.seq });
+        return Ok(MessageProcessorStep::PublicationDisabled { seq: event.seq });
     }
 
     let Some(message) = build_public_message(&event, threshold_sats)? else {
@@ -69,8 +69,12 @@ pub async fn run_message_processor(
     loop {
         match process_next_message(&ledger, nak.as_ref(), threshold_sats, mode).await {
             Ok(MessageProcessorStep::Idle) => sleep(Duration::from_millis(250)).await,
-            Ok(MessageProcessorStep::ShadowSkipped { seq }) => {
-                tracing::debug!(seq, "shadow mode: skipped Nostr side effect");
+            Ok(MessageProcessorStep::PublicationDisabled { seq }) => {
+                tracing::debug!(
+                    seq,
+                    mode = mode.as_str(),
+                    "Nostr publication disabled for runtime mode"
+                );
             }
             Ok(MessageProcessorStep::NonPublicSkipped { seq }) => {
                 tracing::debug!(seq, "durable event has no public Phase 1 Nostr message");
@@ -276,7 +280,28 @@ mod tests {
             process_next_message(&store, None, 1_000, RuntimeMode::Shadow)
                 .await
                 .unwrap(),
-            MessageProcessorStep::ShadowSkipped { seq: 1 }
+            MessageProcessorStep::PublicationDisabled { seq: 1 }
+        );
+        assert_eq!(store.message_cursor().await.unwrap(), 1);
+        assert!(store.next_outbox_entry().await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn canary_mode_advances_cursor_without_signing_or_outbox() {
+        let (_directory, store) = store().await;
+        store
+            .append_event(
+                "payment_received",
+                &json!({"amount_sats": 100, "feed_credit_sats": 100}),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            process_next_message(&store, None, 1_000, RuntimeMode::Canary)
+                .await
+                .unwrap(),
+            MessageProcessorStep::PublicationDisabled { seq: 1 }
         );
         assert_eq!(store.message_cursor().await.unwrap(), 1);
         assert!(store.next_outbox_entry().await.unwrap().is_none());

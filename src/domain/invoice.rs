@@ -52,9 +52,7 @@ pub fn validate_user(user: &str) -> Result<(), InvoiceLabelError> {
     }
 
     if user.bytes().all(|byte| {
-        byte.is_ascii_lowercase()
-            || byte.is_ascii_digit()
-            || matches!(byte, b'.' | b'_' | b'-')
+        byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'_' | b'-')
     }) {
         Ok(())
     } else {

@@ -6,9 +6,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use lightning_goats::{
     config::AppConfig,
-    ledger::{
-        LegacyCutoverManifest, LegacyPendingInvoice, LegacySettledInvoice, LedgerStore,
-    },
+    ledger::{LedgerStore, LegacyCutoverManifest, LegacyPendingInvoice, LegacySettledInvoice},
 };
 use serde::Deserialize;
 use uuid::Uuid;

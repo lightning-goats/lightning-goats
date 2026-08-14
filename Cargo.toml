@@ -14,6 +14,10 @@ path = "src/main.rs"
 name = "lightning-goatsctl"
 path = "src/bin/lightning-goatsctl.rs"
 
+[[bin]]
+name = "lightning-goats-lnbits-migrate"
+path = "src/bin/lightning-goats-lnbits-migrate.rs"
+
 [dependencies]
 anyhow = "1"
 axum = { version = "0.8", features = ["ws"] }

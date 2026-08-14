@@ -85,6 +85,17 @@ The fork passed its inherited compatibility matrix across CLN 25.09.3, 25.12.1, 
 - nginx canary configuration example.
 - server setup runbook.
 
+## Release model
+
+This is a single-operator deployment. Release automation should stay simple:
+
+- tagged Linux binaries for `lightning-goatsd` and `lightning-goatsctl`;
+- a compressed release archive;
+- SHA-256 checksums;
+- deployment configuration/systemd/nginx assets remain in Git and are installed manually.
+
+`lightning-goats/clnaddress` already has an upstream-style binary release workflow and does not need an additional package format.
+
 ## Verification
 
 The integrated Rust runtime, including durable overlay and Nostr/outbox workers, has been verified with:
@@ -99,7 +110,7 @@ cargo test --all-features
 
 1. Finalize production Phase 1 message templates and remaining read-only overlay data needed by the existing presentation.
 2. Add `cargo audit` / `cargo deny` security CI after the dependency set stabilizes.
-3. Add native release packages for the daemon/operator/deployment assets.
+3. Add tagged Linux binary releases and checksums for `lightning-goats`.
 4. Inventory the live server and create the restricted CLN rune/credential material without changing production routes.
 5. Deploy `lightning-goats/clnaddress` and `lightning-goatsd` in canary/shadow mode.
 6. Exercise `herd-canary@lightning-goats.com` and the OpenHAB test rule while LNbits remains authoritative.

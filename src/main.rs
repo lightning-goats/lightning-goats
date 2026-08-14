@@ -13,7 +13,7 @@ use axum::{
 use clap::Parser;
 use lightning_goats::{
     cln::ClnRestClient,
-    config::{AppConfig, RuntimeMode},
+    config::AppConfig,
     feeder::run_feed_worker,
     invoice_watcher::run_invoice_watcher,
     ledger::LedgerStore,
@@ -38,6 +38,7 @@ struct Args {
 struct AppState {
     config: Arc<AppConfig>,
     ledger: LedgerStore,
+    openhab: OpenHabClient,
 }
 
 #[derive(Debug, Serialize)]
@@ -55,6 +56,8 @@ struct StatusResponse {
     feeds_due: u64,
     remainder_sats: u64,
     unresolved_feed_attempt: Option<String>,
+    feeder_override_active: Option<bool>,
+    temperature_f: Option<f64>,
 }
 
 #[tokio::main]
@@ -85,7 +88,7 @@ async fn main() -> Result<()> {
 
     let cln = ClnRestClient::from_config(&config.lightning).await?;
     let openhab = OpenHabClient::from_config(&config.openhab).await?;
-    let nostr = if config.service.mode == RuntimeMode::Active {
+    let nostr = if config.service.mode.nostr_enabled() {
         Some(NakClient::from_config(&config.nostr).await?)
     } else {
         None
@@ -94,6 +97,7 @@ async fn main() -> Result<()> {
     let state = AppState {
         config: Arc::clone(&config),
         ledger: ledger.clone(),
+        openhab: openhab.clone(),
     };
     let app = Router::new()
         .route("/healthz", get(healthz))
@@ -199,6 +203,21 @@ async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse>, S
         .map(|attempt| attempt.id.to_string());
     let threshold_sats = state.config.feeder.threshold_sats;
 
+    let feeder_override_active = match state.openhab.feeder_override_enabled().await {
+        Ok(value) => Some(value),
+        Err(error) => {
+            tracing::warn!(%error, "OpenHAB FeederOverride unavailable for status endpoint");
+            None
+        }
+    };
+    let temperature_f = match state.openhab.temperature_f().await {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::warn!(%error, "OpenHAB temperature unavailable for status endpoint");
+            None
+        }
+    };
+
     Ok(Json(StatusResponse {
         mode: state.config.service.mode.as_str(),
         herd_user: state.config.lightning.herd_user.clone(),
@@ -208,6 +227,8 @@ async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse>, S
         feeds_due: feed_credit_sats / threshold_sats,
         remainder_sats: feed_credit_sats % threshold_sats,
         unresolved_feed_attempt,
+        feeder_override_active,
+        temperature_f,
     }))
 }
 

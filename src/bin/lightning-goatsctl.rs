@@ -3,8 +3,9 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use lightning_goats::{config::AppConfig, ledger::LedgerStore};
+use uuid::Uuid;
 
 #[derive(Debug, Parser)]
 #[command(name = "lightning-goatsctl")]
@@ -26,8 +27,21 @@ enum Command {
         #[arg(long)]
         pay_index: u64,
     },
+    /// Resolve an ambiguous feed attempt without directly actuating the feeder.
+    ReconcileFeed {
+        #[arg(long)]
+        id: Uuid,
+        #[arg(long, value_enum)]
+        outcome: ReconcileOutcome,
+    },
     /// Print the current durable feed-credit accounting state.
     Status,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum ReconcileOutcome {
+    Fed,
+    NotFed,
 }
 
 #[tokio::main]
@@ -41,10 +55,21 @@ async fn main() -> Result<()> {
             ledger.initialize_cursor(pay_index).await?;
             println!("initialized CLN pay-index cursor at {pay_index}");
         }
+        Command::ReconcileFeed { id, outcome } => match outcome {
+            ReconcileOutcome::Fed => {
+                ledger.reconcile_unknown_as_fed(id).await?;
+                println!("reconciled feed attempt {id} as physically fed");
+            }
+            ReconcileOutcome::NotFed => {
+                ledger.reconcile_unknown_as_not_fed(id).await?;
+                println!("reconciled feed attempt {id} as not physically fed");
+            }
+        },
         Command::Status => {
             let credit = ledger.feed_credit_sats().await?;
             let threshold = config.feeder.threshold_sats;
             let cursor = ledger.last_pay_index().await?;
+            let unresolved = ledger.unresolved_feed_attempt().await?;
             println!("mode={}", config.service.mode.as_str());
             println!("herd_user={}", config.lightning.herd_user);
             println!(
@@ -55,6 +80,12 @@ async fn main() -> Result<()> {
             println!("threshold_sats={threshold}");
             println!("feeds_due={}", credit / threshold);
             println!("remainder_sats={}", credit % threshold);
+            if let Some(attempt) = unresolved {
+                println!("unresolved_feed_attempt_id={}", attempt.id);
+                println!("unresolved_feed_attempt_status={:?}", attempt.status);
+            } else {
+                println!("unresolved_feed_attempt_id=none");
+            }
         }
     }
 

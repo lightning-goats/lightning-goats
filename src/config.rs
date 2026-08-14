@@ -141,9 +141,7 @@ mod tests {
             },
             lightning: LightningConfig {
                 clnrest_url: "https://127.0.0.1:3010".to_owned(),
-                clnrest_ca_certificate: Some(PathBuf::from(
-                    "/etc/lightning-goats/clnrest-ca.pem",
-                )),
+                clnrest_ca_certificate: Some(PathBuf::from("/etc/lightning-goats/clnrest-ca.pem")),
                 herd_user: "herd".to_owned(),
             },
             feeder: FeederConfig {

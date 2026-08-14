@@ -23,7 +23,7 @@ Phase 1 must provide:
 - Nostr publishing through `nak`;
 - project Nostr signing through a NIP-46 bunker;
 - a restricted Core Lightning rune with no spending authority;
-- native release packages for supported Linux deployments;
+- reviewed tagged release binaries with SHA-256 checksums;
 - CyberHerd offline until Phase 2;
 - no outbound Lightning payouts/splits in Phase 1.
 
@@ -418,37 +418,26 @@ The browser never receives CLN, LNbits, OpenHAB, or Nostr credentials.
 
 ---
 
-## 13. Packaging and releases
+## 13. Releases
 
-Both project repositories must produce installable release artifacts.
+Because this is a single-operator deployment, package-manager integration is intentionally out of scope.
 
 ### `lightning-goats/lightning-goats`
 
-Tagged releases should publish:
-
-- release binaries;
-- SHA-256 checksums;
-- `.deb` package;
-- `.rpm` package.
-
-The native package should install:
+Tagged releases should publish a small Linux release archive containing:
 
 ```text
-/usr/bin/lightning-goatsd
-/usr/bin/lightning-goatsctl
-/usr/libexec/lightning-goats/run-nak-bunker
-/usr/lib/systemd/system/lightning-goats.service
-/usr/lib/systemd/system/lightning-goats-nostr-bunker.service
-/usr/share/doc/lightning-goats/config.toml.example
+lightning-goatsd
+lightning-goatsctl
 ```
 
-The package must not install secrets or automatically enable/start the service.
+and a SHA-256 checksum file.
+
+Deployment assets such as systemd units, nginx examples, configuration examples, and helper scripts remain versioned in the repository and are installed/reviewed manually.
 
 ### `lightning-goats/clnaddress`
 
-Preserve upstream-compatible release tarballs and add native Linux `.deb`/`.rpm` packages containing the optimized plugin binary and installation documentation.
-
-Do not force a container runtime on the CLN plugin merely to populate GitHub Packages.
+Keep the existing upstream-style binary release workflow. No `.deb`, `.rpm`, container image, or additional package format is required.
 
 ---
 
@@ -646,7 +635,7 @@ Phase 1 is complete only when:
 - the overlay uses one normalized WebSocket;
 - Nostr uses `nak` + NIP-46 for the project identity;
 - project nsec is absent from the daemon;
-- native release packages are produced and checksummed;
+- tagged release binaries and checksums are produced;
 - nginx remains the Internet-facing TLS/reverse-proxy boundary;
 - systemd units and credentials are hardened;
 - production canary/shadow testing has passed;

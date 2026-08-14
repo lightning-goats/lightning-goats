@@ -11,10 +11,7 @@ use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use lightning_goats::{
     config::AppConfig,
-    ledger::{
-        LegacyCutoverManifest, LegacyPendingInvoice, LegacySettledInvoice, LegacySettlementOutcome,
-        LedgerStore,
-    },
+    ledger::{LegacySettledInvoice, LegacySettlementOutcome, LedgerStore},
     secrets::read_systemd_credential,
 };
 use reqwest::{Client, Url};
@@ -472,7 +469,10 @@ fn unix_now() -> Result<i64> {
 
 async fn write_manifest_exclusive(path: &Path, manifest: &ManifestFile) -> Result<()> {
     if path.exists() {
-        bail!("refusing to overwrite existing migration manifest {}", path.display());
+        bail!(
+            "refusing to overwrite existing migration manifest {}",
+            path.display()
+        );
     }
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let file_name = path
@@ -480,7 +480,8 @@ async fn write_manifest_exclusive(path: &Path, manifest: &ManifestFile) -> Resul
         .and_then(|name| name.to_str())
         .context("manifest output path has invalid filename")?;
     let temporary = parent.join(format!(".{file_name}.tmp-{}", std::process::id()));
-    let json = serde_json::to_vec_pretty(manifest).context("failed serializing migration manifest")?;
+    let json =
+        serde_json::to_vec_pretty(manifest).context("failed serializing migration manifest")?;
     tokio::fs::write(&temporary, json)
         .await
         .with_context(|| format!("failed writing temporary manifest {}", temporary.display()))?;
@@ -508,27 +509,6 @@ where
         .with_context(|| format!("failed parsing JSON from {}", path.display()))
 }
 
-fn to_library_manifest(manifest: &ManifestFile) -> LegacyCutoverManifest {
-    LegacyCutoverManifest {
-        wallet_id: manifest.wallet_id.clone(),
-        opening_credit_sats: manifest.opening_credit_sats,
-        cutover_at: manifest.cutover_at,
-        snapshot_at: manifest.snapshot_at,
-        pending_invoices: manifest
-            .pending_invoices
-            .iter()
-            .map(|pending| LegacyPendingInvoice {
-                payment_hash: pending.payment_hash.clone(),
-                checking_id: pending.checking_id.clone(),
-                wallet_id: pending.wallet_id.clone(),
-                amount_sats: pending.amount_sats,
-                created_at: pending.created_at,
-                expiry_at: pending.expiry_at,
-            })
-            .collect(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -545,27 +525,5 @@ mod tests {
         assert_eq!(exact_sats(2_000, "amount").unwrap(), 2);
         assert!(exact_sats(2_001, "amount").is_err());
         assert!(exact_sats(-1, "amount").is_err());
-    }
-
-    #[test]
-    fn manifest_conversion_preserves_allowlist() {
-        let file = ManifestFile {
-            wallet_id: "wallet".to_owned(),
-            opening_credit_sats: 340,
-            cutover_at: 100,
-            snapshot_at: 110,
-            pending_invoices: vec![PendingInvoiceFile {
-                payment_hash: "ab".repeat(32),
-                checking_id: Some("checking".to_owned()),
-                wallet_id: "wallet".to_owned(),
-                amount_sats: 500,
-                created_at: None,
-                expiry_at: None,
-            }],
-        };
-        let converted = to_library_manifest(&file);
-        assert_eq!(converted.wallet_id, "wallet");
-        assert_eq!(converted.pending_invoices.len(), 1);
-        assert_eq!(converted.pending_invoices[0].amount_sats, 500);
     }
 }

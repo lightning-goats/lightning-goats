@@ -59,7 +59,7 @@ pub async fn run_feed_step(
         return Ok(FeedWorkerStep::Idle);
     }
 
-    if mode == RuntimeMode::Shadow {
+    if !mode.feeder_enabled() {
         return Ok(FeedWorkerStep::ShadowBlocked { feeds_due });
     }
 

@@ -23,7 +23,7 @@ jobs:
       - name: Build release binaries
         run: cargo build --release --locked --bins
 
-      - name: Assemble release archive
+      - name: Assemble release artifacts
         shell: bash
         run: |
           set -euo pipefail
@@ -32,21 +32,19 @@ jobs:
           STAGE="release-${TAG}"
 
           mkdir -p "$STAGE"
-          install -m 0755 target/release/lightning-goatsd "$STAGE/lightning-goatsd"
-          install -m 0755 target/release/lightning-goatsctl "$STAGE/lightning-goatsctl"
+          install -m 0755 target/release/lightning-goatsd ./lightning-goatsd
+          install -m 0755 target/release/lightning-goatsctl ./lightning-goatsctl
+          install -m 0755 ./lightning-goatsd "$STAGE/lightning-goatsd"
+          install -m 0755 ./lightning-goatsctl "$STAGE/lightning-goatsctl"
 
           tar -C "$STAGE" -czf "$ARCHIVE" lightning-goatsd lightning-goatsctl
-          sha256sum "$ARCHIVE" > SHA256SUMS
-
-          sha256sum target/release/lightning-goatsd >> SHA256SUMS
-          sha256sum target/release/lightning-goatsctl >> SHA256SUMS
-
+          sha256sum lightning-goatsd lightning-goatsctl "$ARCHIVE" > SHA256SUMS
           cat SHA256SUMS
 
       - name: Publish GitHub release
         uses: ncipollo/release-action@v1
         with:
-          artifacts: "lightning-goats-${{ github.ref_name }}-x86_64-linux-gnu.tar.gz,SHA256SUMS"
+          artifacts: "lightning-goatsd,lightning-goatsctl,lightning-goats-${{ github.ref_name }}-x86_64-linux-gnu.tar.gz,SHA256SUMS"
           artifactErrorsFailBuild: true
           allowUpdates: false
           immutableCreate: true

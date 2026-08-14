@@ -13,15 +13,10 @@ pub struct DurableEvent {
 
 impl LedgerStore {
     pub async fn append_event<T: Serialize>(&self, event_type: &str, payload: &T) -> Result<u64> {
-        let payload_json = serde_json::to_string(payload).context("failed serializing durable event")?;
-        let result = sqlx::query(
-            "INSERT INTO event_log (event_type, payload_json) VALUES (?, ?)",
-        )
-        .bind(event_type)
-        .bind(payload_json)
-        .execute(&self.pool)
-        .await?;
-        to_u64(result.last_insert_rowid(), "event sequence")
+        let mut transaction = self.pool.begin().await?;
+        let seq = append_event_in_transaction(&mut transaction, event_type, payload).await?;
+        transaction.commit().await?;
+        Ok(seq)
     }
 
     pub async fn events_after(&self, after_seq: u64, limit: u32) -> Result<Vec<DurableEvent>> {
@@ -60,6 +55,20 @@ impl LedgerStore {
         let seq: i64 = row.try_get("seq")?;
         to_u64(seq, "event sequence")
     }
+}
+
+pub(super) async fn append_event_in_transaction<T: Serialize>(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    event_type: &str,
+    payload: &T,
+) -> Result<u64> {
+    let payload_json = serde_json::to_string(payload).context("failed serializing durable event")?;
+    let result = sqlx::query("INSERT INTO event_log (event_type, payload_json) VALUES (?, ?)")
+        .bind(event_type)
+        .bind(payload_json)
+        .execute(&mut **transaction)
+        .await?;
+    to_u64(result.last_insert_rowid(), "event sequence")
 }
 
 #[cfg(test)]

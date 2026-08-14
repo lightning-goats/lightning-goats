@@ -3,11 +3,7 @@ use serde_json::json;
 use sqlx::Row;
 use uuid::Uuid;
 
-use super::{
-    LedgerStore,
-    events::append_event_in_transaction,
-    to_i64, to_u64,
-};
+use super::{LedgerStore, events::append_event_in_transaction, to_i64, to_u64};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StoredFeedAttemptStatus {
@@ -315,7 +311,10 @@ mod tests {
 
         let events = store.events_after(0, 100).await.unwrap();
         assert_eq!(
-            events.iter().filter(|event| event.event_type == "feeder_confirmed").count(),
+            events
+                .iter()
+                .filter(|event| event.event_type == "feeder_confirmed")
+                .count(),
             2
         );
     }
@@ -325,7 +324,10 @@ mod tests {
         let (_directory, store) = credited_store(1_340).await;
         let attempt = store.begin_feed_attempt(1_000).await.unwrap().unwrap();
 
-        assert_eq!(store.mark_interrupted_feed_intents_unknown().await.unwrap(), 1);
+        assert_eq!(
+            store.mark_interrupted_feed_intents_unknown().await.unwrap(),
+            1
+        );
         assert_eq!(store.feed_credit_sats().await.unwrap(), 1_340);
         let unresolved = store.unresolved_feed_attempt().await.unwrap().unwrap();
         assert_eq!(unresolved.id, attempt);
@@ -343,19 +345,24 @@ mod tests {
         let unresolved = store.unresolved_feed_attempt().await.unwrap().unwrap();
         assert_eq!(unresolved.id, attempt);
         assert_eq!(unresolved.status, StoredFeedAttemptStatus::Unknown);
-        assert!(store
-            .events_after(0, 100)
-            .await
-            .unwrap()
-            .iter()
-            .any(|event| event.event_type == "processing_error"));
+        assert!(
+            store
+                .events_after(0, 100)
+                .await
+                .unwrap()
+                .iter()
+                .any(|event| event.event_type == "processing_error")
+        );
     }
 
     #[tokio::test]
     async fn unknown_reconciled_as_fed_debits_exactly_once() {
         let (_directory, store) = credited_store(1_340).await;
         let attempt = store.begin_feed_attempt(1_000).await.unwrap().unwrap();
-        store.mark_feed_unknown(attempt, "connection reset").await.unwrap();
+        store
+            .mark_feed_unknown(attempt, "connection reset")
+            .await
+            .unwrap();
         store.reconcile_unknown_as_fed(attempt).await.unwrap();
 
         assert_eq!(store.feed_credit_sats().await.unwrap(), 340);
@@ -367,7 +374,10 @@ mod tests {
     async fn unknown_reconciled_not_fed_preserves_credit() {
         let (_directory, store) = credited_store(1_340).await;
         let attempt = store.begin_feed_attempt(1_000).await.unwrap().unwrap();
-        store.mark_feed_unknown(attempt, "connection reset").await.unwrap();
+        store
+            .mark_feed_unknown(attempt, "connection reset")
+            .await
+            .unwrap();
         store.reconcile_unknown_as_not_fed(attempt).await.unwrap();
 
         assert_eq!(store.feed_credit_sats().await.unwrap(), 1_340);

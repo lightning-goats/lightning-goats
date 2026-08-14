@@ -8,6 +8,9 @@ use sqlx::{
 
 use crate::domain::invoice::ClnAddressInvoiceLabel;
 
+mod feed;
+pub use feed::{StoredFeedAttempt, StoredFeedAttemptStatus};
+
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
 #[derive(Debug, Clone)]

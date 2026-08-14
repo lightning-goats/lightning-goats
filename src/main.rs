@@ -6,12 +6,8 @@ use anyhow::{Result, anyhow, bail};
 use axum::{Json, Router, extract::State, http::StatusCode, routing::get};
 use clap::Parser;
 use lightning_goats::{
-    cln::ClnRestClient,
-    config::AppConfig,
-    feeder::run_feed_worker,
-    invoice_watcher::run_invoice_watcher,
-    ledger::LedgerStore,
-    openhab::OpenHabClient,
+    cln::ClnRestClient, config::AppConfig, feeder::run_feed_worker,
+    invoice_watcher::run_invoice_watcher, ledger::LedgerStore, openhab::OpenHabClient,
 };
 use serde::Serialize;
 use tracing::info;
@@ -128,13 +124,10 @@ async fn main() -> Result<()> {
     result
 }
 
-fn task_exit(
-    name: &str,
-    result: Result<Result<()>, tokio::task::JoinError>,
-) -> Result<()> {
+fn task_exit(name: &str, result: Result<Result<()>, tokio::task::JoinError>) -> Result<()> {
     match result {
         Ok(Ok(())) => Err(anyhow!("{name} exited unexpectedly")),
-        Ok(Err(error)) => Err(error).map_err(|error| anyhow!("{name} failed: {error:#}")),
+        Ok(Err(error)) => Err(anyhow!("{name} failed: {error:#}")),
         Err(error) => Err(anyhow!("{name} task failed: {error}")),
     }
 }

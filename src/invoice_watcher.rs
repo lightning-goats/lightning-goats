@@ -64,7 +64,8 @@ pub async fn run_invoice_watcher(
                 sleep(delay).await;
             }
             Err(error) => {
-                return Err(error).context("paid-invoice watcher stopped on ledger/invariant error");
+                return Err(error)
+                    .context("paid-invoice watcher stopped on ledger/invariant error");
             }
         }
     }

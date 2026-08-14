@@ -46,8 +46,14 @@ pub async fn process_next_message(
     let signed = nak
         .sign_kind1(&message.content, message.tags)
         .await
-        .with_context(|| format!("failed signing Nostr message for durable event {}", event.seq))?;
-    let signed_json = serde_json::to_string(&signed).context("failed serializing signed outbox event")?;
+        .with_context(|| {
+            format!(
+                "failed signing Nostr message for durable event {}",
+                event.seq
+            )
+        })?;
+    let signed_json =
+        serde_json::to_string(&signed).context("failed serializing signed outbox event")?;
     ledger
         .enqueue_signed_message(event.seq, &signed.id, &signed_json)
         .await?;
@@ -91,7 +97,10 @@ pub async fn run_outbox_publisher(ledger: LedgerStore, nak: NakClient) -> Result
             Ok(event) => event,
             Err(error) => {
                 ledger
-                    .mark_outbox_failed(&entry.event_id, &format!("invalid signed event JSON: {error}"))
+                    .mark_outbox_failed(
+                        &entry.event_id,
+                        &format!("invalid signed event JSON: {error}"),
+                    )
                     .await?;
                 tracing::error!(
                     event_id = %entry.event_id,
@@ -127,7 +136,10 @@ struct PublicMessage {
     tags: Vec<Vec<String>>,
 }
 
-fn build_public_message(event: &DurableEvent, threshold_sats: u64) -> Result<Option<PublicMessage>> {
+fn build_public_message(
+    event: &DurableEvent,
+    threshold_sats: u64,
+) -> Result<Option<PublicMessage>> {
     let payload: Value = serde_json::from_str(&event.payload_json)
         .context("durable event contains invalid JSON for message rendering")?;
 

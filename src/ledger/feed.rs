@@ -149,14 +149,13 @@ impl LedgerStore {
 
     async fn resolve_as_fed(&self, id: Uuid, expected_status: &str) -> Result<()> {
         let mut transaction = self.pool.begin().await?;
-        let row = sqlx::query(
-            "SELECT threshold_sats FROM feed_attempts WHERE id = ? AND status = ?",
-        )
-        .bind(id.to_string())
-        .bind(expected_status)
-        .fetch_optional(&mut *transaction)
-        .await?
-        .with_context(|| format!("feed attempt {id} is not in {expected_status} state"))?;
+        let row =
+            sqlx::query("SELECT threshold_sats FROM feed_attempts WHERE id = ? AND status = ?")
+                .bind(id.to_string())
+                .bind(expected_status)
+                .fetch_optional(&mut *transaction)
+                .await?
+                .with_context(|| format!("feed attempt {id} is not in {expected_status} state"))?;
 
         let threshold_i64: i64 = row.try_get("threshold_sats")?;
         let threshold_sats = to_u64(threshold_i64, "threshold_sats")?;
@@ -234,9 +233,7 @@ mod tests {
         let invoice = PaidInvoice {
             pay_index: 101,
             payment_hash: "feed-test-hash".to_owned(),
-            label: Some(
-                "clnaddress:v1:herd:550e8400-e29b-41d4-a716-446655440000".to_owned(),
-            ),
+            label: Some("clnaddress:v1:herd:550e8400-e29b-41d4-a716-446655440000".to_owned()),
             amount_msat: sats * 1_000,
             settled_at: Some(1_700_000_000),
         };
@@ -267,7 +264,10 @@ mod tests {
         let (_directory, store) = credited_store(1_340).await;
         let attempt = store.begin_feed_attempt(1_000).await.unwrap().unwrap();
 
-        assert_eq!(store.mark_interrupted_feed_intents_unknown().await.unwrap(), 1);
+        assert_eq!(
+            store.mark_interrupted_feed_intents_unknown().await.unwrap(),
+            1
+        );
         assert_eq!(store.feed_credit_sats().await.unwrap(), 1_340);
         let unresolved = store.unresolved_feed_attempt().await.unwrap().unwrap();
         assert_eq!(unresolved.id, attempt);
@@ -291,7 +291,10 @@ mod tests {
     async fn unknown_reconciled_as_fed_debits_exactly_once() {
         let (_directory, store) = credited_store(1_340).await;
         let attempt = store.begin_feed_attempt(1_000).await.unwrap().unwrap();
-        store.mark_feed_unknown(attempt, "connection reset").await.unwrap();
+        store
+            .mark_feed_unknown(attempt, "connection reset")
+            .await
+            .unwrap();
         store.reconcile_unknown_as_fed(attempt).await.unwrap();
 
         assert_eq!(store.feed_credit_sats().await.unwrap(), 340);
@@ -303,7 +306,10 @@ mod tests {
     async fn unknown_reconciled_not_fed_preserves_credit() {
         let (_directory, store) = credited_store(1_340).await;
         let attempt = store.begin_feed_attempt(1_000).await.unwrap().unwrap();
-        store.mark_feed_unknown(attempt, "connection reset").await.unwrap();
+        store
+            .mark_feed_unknown(attempt, "connection reset")
+            .await
+            .unwrap();
         store.reconcile_unknown_as_not_fed(attempt).await.unwrap();
 
         assert_eq!(store.feed_credit_sats().await.unwrap(), 1_340);

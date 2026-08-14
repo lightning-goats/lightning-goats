@@ -10,6 +10,9 @@ url = "sqlite:///var/lib/lightning-goats/lightning-goats.db"
 
 [lightning]
 clnrest_url = "https://127.0.0.1:3010"
+# Copy the public CLNRest CA/certificate here when the existing CLNRest uses a
+# private/self-signed CA. Do not disable TLS verification.
+clnrest_ca_certificate = "/etc/lightning-goats/clnrest-ca.pem"
 herd_user = "herd"
 
 [feeder]

@@ -74,12 +74,10 @@ impl LedgerStore {
             return Ok(());
         }
 
-        sqlx::query(
-            "INSERT INTO cln_cursor (singleton, last_pay_index) VALUES (1, ?)",
-        )
-        .bind(last_pay_index)
-        .execute(&mut *transaction)
-        .await?;
+        sqlx::query("INSERT INTO cln_cursor (singleton, last_pay_index) VALUES (1, ?)")
+            .bind(last_pay_index)
+            .execute(&mut *transaction)
+            .await?;
 
         transaction.commit().await?;
         Ok(())
@@ -113,12 +111,11 @@ impl LedgerStore {
         let current_cursor: i64 = cursor_row.try_get("last_pay_index")?;
 
         if pay_index <= current_cursor {
-            let existing = sqlx::query(
-                "SELECT payment_hash FROM settled_invoices WHERE pay_index = ?",
-            )
-            .bind(pay_index)
-            .fetch_optional(&mut *transaction)
-            .await?;
+            let existing =
+                sqlx::query("SELECT payment_hash FROM settled_invoices WHERE pay_index = ?")
+                    .bind(pay_index)
+                    .fetch_optional(&mut *transaction)
+                    .await?;
 
             if let Some(existing) = existing {
                 let existing_hash: String = existing.try_get("payment_hash")?;
@@ -134,12 +131,11 @@ impl LedgerStore {
             );
         }
 
-        let existing_hash = sqlx::query(
-            "SELECT pay_index FROM settled_invoices WHERE payment_hash = ?",
-        )
-        .bind(&invoice.payment_hash)
-        .fetch_optional(&mut *transaction)
-        .await?;
+        let existing_hash =
+            sqlx::query("SELECT pay_index FROM settled_invoices WHERE payment_hash = ?")
+                .bind(&invoice.payment_hash)
+                .fetch_optional(&mut *transaction)
+                .await?;
         if let Some(existing_hash) = existing_hash {
             let existing_pay_index: i64 = existing_hash.try_get("pay_index")?;
             bail!(
@@ -208,11 +204,9 @@ impl LedgerStore {
     }
 
     pub async fn feed_credit_sats(&self) -> Result<u64> {
-        let row = sqlx::query(
-            "SELECT COALESCE(SUM(delta_sats), 0) AS credit FROM ledger_entries",
-        )
-        .fetch_one(&self.pool)
-        .await?;
+        let row = sqlx::query("SELECT COALESCE(SUM(delta_sats), 0) AS credit FROM ledger_entries")
+            .fetch_one(&self.pool)
+            .await?;
         let credit: i64 = row.try_get("credit")?;
         if credit < 0 {
             bail!("ledger invariant violated: feed credit is negative ({credit})");
@@ -223,7 +217,9 @@ impl LedgerStore {
 
 fn classify(label: Option<&str>, herd_user: &str) -> Option<String> {
     let parsed = ClnAddressInvoiceLabel::parse(label?).ok()?;
-    parsed.is_for_user(herd_user).then(|| parsed.user().to_owned())
+    parsed
+        .is_for_user(herd_user)
+        .then(|| parsed.user().to_owned())
 }
 
 fn to_i64(value: u64, field: &str) -> Result<i64> {

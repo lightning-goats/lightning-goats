@@ -7,4 +7,5 @@ pub mod feeder;
 pub mod invoice_watcher;
 pub mod ledger;
 pub mod openhab;
+pub mod overlay;
 pub mod secrets;

@@ -10,6 +10,10 @@ description = "Standalone Lightning Goats payment accounting and feeder automati
 name = "lightning-goatsd"
 path = "src/main.rs"
 
+[[bin]]
+name = "lightning-goatsctl"
+path = "src/bin/lightning-goatsctl.rs"
+
 [dependencies]
 anyhow = "1"
 axum = { version = "0.8", features = ["ws"] }

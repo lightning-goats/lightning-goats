@@ -43,6 +43,11 @@ enum Command {
         #[arg(long)]
         manifest: PathBuf,
     },
+    /// Verify that a saved cutover manifest exactly matches the one installed in SQLite.
+    LegacyVerifyManifest {
+        #[arg(long)]
+        manifest: PathBuf,
+    },
     /// Import one paid legacy invoice that was allowlisted in the cutover manifest.
     LegacyImportSettlement {
         #[arg(long)]
@@ -111,28 +116,15 @@ async fn main() -> Result<()> {
             }
         },
         Command::LegacyInstallManifest { manifest } => {
-            let manifest: LegacyManifestFile = read_json_file(&manifest).await?;
-            let manifest = LegacyCutoverManifest {
-                wallet_id: manifest.wallet_id,
-                opening_credit_sats: manifest.opening_credit_sats,
-                cutover_at: manifest.cutover_at,
-                snapshot_at: manifest.snapshot_at,
-                pending_invoices: manifest
-                    .pending_invoices
-                    .into_iter()
-                    .map(|pending| LegacyPendingInvoice {
-                        payment_hash: pending.payment_hash,
-                        checking_id: pending.checking_id,
-                        wallet_id: pending.wallet_id,
-                        amount_sats: pending.amount_sats,
-                        created_at: pending.created_at,
-                        expiry_at: pending.expiry_at,
-                    })
-                    .collect(),
-            };
+            let manifest = read_legacy_manifest(&manifest).await?;
             let outcome = ledger.install_legacy_cutover_manifest(&manifest).await?;
             println!("legacy_cutover_manifest={outcome:?}");
             println!("feed_credit_sats={}", ledger.feed_credit_sats().await?);
+        }
+        Command::LegacyVerifyManifest { manifest } => {
+            let manifest = read_legacy_manifest(&manifest).await?;
+            ledger.verify_legacy_cutover_manifest(&manifest).await?;
+            println!("legacy_cutover_manifest=verified");
         }
         Command::LegacyImportSettlement { settlement } => {
             let settlement: LegacySettlementFile = read_json_file(&settlement).await?;
@@ -172,6 +164,28 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+async fn read_legacy_manifest(path: &PathBuf) -> Result<LegacyCutoverManifest> {
+    let manifest: LegacyManifestFile = read_json_file(path).await?;
+    Ok(LegacyCutoverManifest {
+        wallet_id: manifest.wallet_id,
+        opening_credit_sats: manifest.opening_credit_sats,
+        cutover_at: manifest.cutover_at,
+        snapshot_at: manifest.snapshot_at,
+        pending_invoices: manifest
+            .pending_invoices
+            .into_iter()
+            .map(|pending| LegacyPendingInvoice {
+                payment_hash: pending.payment_hash,
+                checking_id: pending.checking_id,
+                wallet_id: pending.wallet_id,
+                amount_sats: pending.amount_sats,
+                created_at: pending.created_at,
+                expiry_at: pending.expiry_at,
+            })
+            .collect(),
+    })
 }
 
 async fn read_json_file<T>(path: &PathBuf) -> Result<T>

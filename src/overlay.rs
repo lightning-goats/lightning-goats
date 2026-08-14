@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
@@ -60,9 +60,9 @@ pub async fn serve_overlay_socket(
                             .context("failed replying to overlay websocket ping")?;
                     }
                     Some(Ok(Message::Close(_))) | None => return Ok(()),
-                    Some(Ok(Message::Text(_)
-                        | Message::Binary(_)
-                        | Message::Pong(_))) => {
+                    Some(Ok(
+                        Message::Text(_) | Message::Binary(_) | Message::Pong(_),
+                    )) => {
                         // The overlay websocket is intentionally server-to-client only.
                     }
                     Some(Err(error)) => return Err(error).context("overlay websocket receive failed"),
@@ -111,11 +111,13 @@ mod tests {
 
     #[test]
     fn durable_event_rejects_non_object_payloads() {
-        assert!(durable_event_message(DurableEvent {
-            seq: 1,
-            event_type: "bad".to_owned(),
-            payload_json: "[]".to_owned(),
-        })
-        .is_err());
+        assert!(
+            durable_event_message(DurableEvent {
+                seq: 1,
+                event_type: "bad".to_owned(),
+                payload_json: "[]".to_owned(),
+            })
+            .is_err()
+        );
     }
 }

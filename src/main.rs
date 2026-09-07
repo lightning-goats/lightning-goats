@@ -110,7 +110,11 @@ async fn main() -> Result<()> {
             ledger.clone(),
         )?),
         (None, _) => None,
-        (Some(_), None) => return Err(anyhow!("validated LNURL configuration is missing Strike runtime")),
+        (Some(_), None) => {
+            return Err(anyhow!(
+                "validated LNURL configuration is missing Strike runtime"
+            ));
+        }
     };
     let nostr = if config.service.mode.nostr_enabled() {
         Some(NakClient::from_config(&config.nostr).await?)
@@ -285,7 +289,10 @@ async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse>, S
 
 async fn lnurl_discovery(Path(user): Path<String>, State(state): State<AppState>) -> Response {
     let Some(lnurl) = state.lnurl.as_ref() else {
-        return lnurl_error(StatusCode::SERVICE_UNAVAILABLE, "Lightning Address service unavailable");
+        return lnurl_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Lightning Address service unavailable",
+        );
     };
     match lnurl.discovery(&user) {
         Ok(response) => (StatusCode::OK, Json(response)).into_response(),
@@ -307,7 +314,10 @@ async fn lnurl_callback(
     Query(query): Query<LnurlCallbackQuery>,
 ) -> Response {
     let Some(lnurl) = state.lnurl.as_ref() else {
-        return lnurl_error(StatusCode::SERVICE_UNAVAILABLE, "Lightning Address service unavailable");
+        return lnurl_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Lightning Address service unavailable",
+        );
     };
     let Some(raw_amount) = query.amount.as_deref() else {
         return lnurl_error(StatusCode::OK, "Missing amount");

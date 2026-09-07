@@ -140,6 +140,8 @@ Behavioral references:
 lightning-goats/middlware/weather.py
 lightning-goats/lightning_goats_extension/services/weather.py
 lightning-goats/lightning_goats_extension/services/messaging.py
+lightning-goats/lightning_goats_extension/tasks.py
+lightning-goats/lightning_goats_extension/config.py
 ```
 
 Current weather read source:
@@ -150,14 +152,14 @@ http://10.8.0.6:5000/get_received_data
 
 The gateway on/trusted to `10.8.0.6` reads this locally and exposes only normalized `/v1/weather` to the VPS.
 
-Preserve the Lightning Goats extension defaults as configurable starting behavior:
+Current code defaults are the migration baseline:
 
 ```text
-weather evaluation interval = 60 seconds
-broadcast probability        = 0.30
+informational evaluation interval = 60 seconds
+weather broadcast probability     = 0.40 per interval
 ```
 
-See `docs/architecture/weather-overlay.md`.
+When interface-info and weather are both enabled, current behavior evaluates interface info first, emits at most one informational message per cycle, and adjusts the conditional weather draw so weather retains its 40% unconditional chance. See `docs/architecture/weather-overlay.md`.
 
 ## Staging milestones
 
@@ -197,7 +199,7 @@ See `docs/architecture/weather-overlay.md`.
 - Nostr durable outbox works;
 - overlay reconnect/replay works;
 - informational messages are overlay-only;
-- sanitized weather messages reproduce the existing Lightning Goats extension style;
+- sanitized weather messages reproduce the existing Lightning Goats extension style and 60-second/40% default scheduling behavior;
 - direct VPS access to `10.8.0.6:5000` remains blocked.
 
 ### M4 — In-house security boundary established

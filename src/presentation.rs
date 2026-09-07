@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use anyhow::{Context, Result, bail};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
@@ -22,9 +22,10 @@ pub struct RenderedPresentation {
     pub overlay_goats: Vec<OverlayGoat>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct OverlayGoat {
     pub name: String,
+    #[serde(rename = "imageUrl")]
     pub image_url: String,
 }
 
@@ -116,9 +117,15 @@ impl MessageRenderer {
         let template = select_template(&self.catalog.sats_received, event, "sats_received")?;
 
         let mut overlay_values = common_values(amount, &difference_message, goat.name);
-        overlay_values.insert("difference".to_owned(), remaining_sats(credit, threshold_sats).to_string());
+        overlay_values.insert(
+            "difference".to_owned(),
+            remaining_sats(credit, threshold_sats).to_string(),
+        );
         let mut nostr_values = common_values(amount, &difference_message, goat.nostr_profile);
-        nostr_values.insert("difference".to_owned(), remaining_sats(credit, threshold_sats).to_string());
+        nostr_values.insert(
+            "difference".to_owned(),
+            remaining_sats(credit, threshold_sats).to_string(),
+        );
 
         Ok(RenderedPresentation {
             nostr_content: Some(safe_substitute(template, &nostr_values)?),
@@ -218,7 +225,9 @@ fn validate_template_syntax(template: &str) -> Result<()> {
     let mut rest = template;
     while let Some(open) = rest.find('{') {
         let after_open = &rest[open + 1..];
-        let close = after_open.find('}').context("template contains an unmatched opening brace")?;
+        let close = after_open
+            .find('}')
+            .context("template contains an unmatched opening brace")?;
         let field = &after_open[..close];
         if field.is_empty()
             || !field
@@ -243,7 +252,9 @@ fn safe_substitute(template: &str, values: &HashMap<String, String>) -> Result<S
     while let Some(open) = rest.find('{') {
         rendered.push_str(&rest[..open]);
         let after_open = &rest[open + 1..];
-        let close = after_open.find('}').context("template contains an unmatched opening brace")?;
+        let close = after_open
+            .find('}')
+            .context("template contains an unmatched opening brace")?;
         let field = &after_open[..close];
         let value = values
             .get(field)
@@ -295,10 +306,17 @@ fn overlay_goat(goat: &Goat) -> OverlayGoat {
     }
 }
 
-fn common_values(amount: u64, difference_message: &str, goat_name: &str) -> HashMap<String, String> {
+fn common_values(
+    amount: u64,
+    difference_message: &str,
+    goat_name: &str,
+) -> HashMap<String, String> {
     HashMap::from([
         ("new_amount".to_owned(), amount.to_string()),
-        ("difference_message".to_owned(), difference_message.to_owned()),
+        (
+            "difference_message".to_owned(),
+            difference_message.to_owned(),
+        ),
         ("goat_name".to_owned(), goat_name.to_owned()),
     ])
 }
@@ -359,7 +377,10 @@ mod tests {
                 "address_user": "herd"
             }),
         );
-        assert_eq!(renderer.render(&event, 1_000).unwrap(), renderer.render(&event, 1_000).unwrap());
+        assert_eq!(
+            renderer.render(&event, 1_000).unwrap(),
+            renderer.render(&event, 1_000).unwrap()
+        );
     }
 
     #[test]
@@ -396,7 +417,11 @@ mod tests {
 
         let weather = renderer
             .render(
-                &event(4, "weather_status", json!({"message": "Sunny and 72°F"})),
+                &event(
+                    4,
+                    "weather_status",
+                    json!({"message": "Sunny and 72°F"}),
+                ),
                 1_000,
             )
             .unwrap();

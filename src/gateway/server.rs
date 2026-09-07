@@ -2,7 +2,7 @@ use std::{
     fs,
     net::{IpAddr, SocketAddr},
     path::Path,
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{Context, Result, bail};
@@ -54,6 +54,8 @@ pub struct GatewayWeatherConfig {
 pub struct GatewayFeederConfig {
     pub ack_timeout_seconds: u64,
     pub ack_poll_milliseconds: u64,
+    pub min_feed_interval_seconds: u64,
+    pub max_feeds_per_hour: u64,
 }
 
 #[derive(Clone)]
@@ -69,6 +71,8 @@ struct GatewayState {
     weather: WeatherAdapter,
     ack_timeout: Duration,
     ack_poll: Duration,
+    min_feed_interval: Duration,
+    max_feeds_per_hour: u64,
 }
 
 #[derive(Serialize)]
@@ -100,7 +104,9 @@ impl GatewayServerConfig {
     pub fn validate(&self) -> Result<()> {
         let ip = self.service.listen.ip();
         if ip.is_unspecified() || (!ip.is_loopback() && !is_private_ip(ip)) {
-            bail!("gateway service.listen must use a private/loopback address, never a public/unspecified address");
+            bail!(
+                "gateway service.listen must use a private/loopback address, never a public/unspecified address"
+            );
         }
         if !self.database.url.starts_with("sqlite://") || self.database.url == "sqlite::memory:" {
             bail!("gateway database.url must be a file-backed sqlite:// URL");
@@ -113,6 +119,14 @@ impl GatewayServerConfig {
         }
         if self.feeder.ack_poll_milliseconds < 50 || self.feeder.ack_poll_milliseconds > 5_000 {
             bail!("gateway feeder.ack_poll_milliseconds must be between 50 and 5000");
+        }
+        if self.feeder.min_feed_interval_seconds < 5
+            || self.feeder.min_feed_interval_seconds > 86_400
+        {
+            bail!("gateway feeder.min_feed_interval_seconds must be between 5 and 86400");
+        }
+        if self.feeder.max_feeds_per_hour == 0 || self.feeder.max_feeds_per_hour > 60 {
+            bail!("gateway feeder.max_feeds_per_hour must be between 1 and 60");
         }
         Ok(())
     }
@@ -134,12 +148,15 @@ impl TrustedGateway {
                 weather,
                 ack_timeout: Duration::from_secs(config.feeder.ack_timeout_seconds),
                 ack_poll: Duration::from_millis(config.feeder.ack_poll_milliseconds),
+                min_feed_interval: Duration::from_secs(config.feeder.min_feed_interval_seconds),
+                max_feeds_per_hour: config.feeder.max_feeds_per_hour,
             },
             listen: config.service.listen,
         })
     }
 
-    pub fn listen(&self) -> SocketAddr {
+    #[must_use]
+    pub const fn listen(&self) -> SocketAddr {
         self.listen
     }
 
@@ -188,6 +205,20 @@ async fn feed_request(
     AxumPath(request_id): AxumPath<Uuid>,
     State(state): State<GatewayState>,
 ) -> Response {
+    // Duplicate/recovery queries are handled before new-request safety limits so
+    // an already acknowledged UUID remains idempotently queryable even when the
+    // local rate cap is currently closed.
+    match state.store.status(request_id).await {
+        Ok(Some(StoredRequestStatus::Acknowledged)) => {
+            return StatusCode::NO_CONTENT.into_response();
+        }
+        Ok(Some(StoredRequestStatus::Pending)) => {
+            return handle_existing_pending(&state, request_id).await;
+        }
+        Ok(None) => {}
+        Err(error) => return internal_failure("Unable to read feeder request status", error),
+    }
+
     let safety = match state.openhab.feeder_safety().await {
         Ok((override_enabled, remote_enabled)) => FeederSafety {
             override_enabled,
@@ -199,33 +230,24 @@ async fn feed_request(
         return public_error(StatusCode::LOCKED, "FeederOverride is ON");
     }
     if !safety.remote_enabled {
-        return public_error(StatusCode::LOCKED, "Lightning Goats remote feeding is disabled");
+        return public_error(
+            StatusCode::LOCKED,
+            "Lightning Goats remote feeding is disabled",
+        );
+    }
+    if let Err(reason) = enforce_local_rate_safety(&state).await {
+        return public_error(StatusCode::TOO_MANY_REQUESTS, &reason);
     }
 
-    let begin = match state.store.begin_request(request_id).await {
-        Ok(outcome) => outcome,
-        Err(error) => return internal_failure("Unable to persist feeder request", error),
-    };
-    match begin {
-        BeginRequestOutcome::Acknowledged => return StatusCode::NO_CONTENT.into_response(),
-        BeginRequestOutcome::Pending => {
-            match ack_matches(&state, request_id).await {
-                Ok(true) => {
-                    if let Err(error) = state.store.mark_acknowledged(request_id).await {
-                        return internal_failure("Unable to persist feeder acknowledgement", error);
-                    }
-                    return StatusCode::NO_CONTENT.into_response();
-                }
-                Ok(false) => {
-                    return public_error(
-                        StatusCode::CONFLICT,
-                        "Feeder request already exists in pending/ambiguous state; command was not resent",
-                    );
-                }
-                Err(error) => return internal_failure("OpenHAB feeder acknowledgement unavailable", error),
-            }
+    match state.store.begin_request(request_id).await {
+        Ok(BeginRequestOutcome::New) => {}
+        Ok(BeginRequestOutcome::Acknowledged) => return StatusCode::NO_CONTENT.into_response(),
+        Ok(BeginRequestOutcome::Pending) => {
+            // Another concurrent request won the insert. Never send the command
+            // again; interrogate the existing pending intent instead.
+            return handle_existing_pending(&state, request_id).await;
         }
-        BeginRequestOutcome::New => {}
+        Err(error) => return internal_failure("Unable to persist feeder request", error),
     }
 
     // The UUID intent is durable before this command. No code path resends a
@@ -237,9 +259,29 @@ async fn feed_request(
         );
     }
 
+    wait_for_ack(&state, request_id).await
+}
+
+async fn handle_existing_pending(state: &GatewayState, request_id: Uuid) -> Response {
+    match ack_matches(state, request_id).await {
+        Ok(true) => {
+            if let Err(error) = state.store.mark_acknowledged(request_id).await {
+                return internal_failure("Unable to persist feeder acknowledgement", error);
+            }
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Ok(false) => public_error(
+            StatusCode::CONFLICT,
+            "Feeder request already exists in pending/ambiguous state; command was not resent",
+        ),
+        Err(error) => internal_failure("OpenHAB feeder acknowledgement unavailable", error),
+    }
+}
+
+async fn wait_for_ack(state: &GatewayState, request_id: Uuid) -> Response {
     let deadline = Instant::now() + state.ack_timeout;
     loop {
-        match ack_matches(&state, request_id).await {
+        match ack_matches(state, request_id).await {
             Ok(true) => {
                 if let Err(error) = state.store.mark_acknowledged(request_id).await {
                     return internal_failure("Unable to persist feeder acknowledgement", error);
@@ -282,7 +324,9 @@ async fn feed_request_status(
                 status = StoredRequestStatus::Acknowledged;
             }
             Ok(false) => {}
-            Err(error) => return internal_failure("OpenHAB feeder acknowledgement unavailable", error),
+            Err(error) => {
+                return internal_failure("OpenHAB feeder acknowledgement unavailable", error);
+            }
         }
     }
     (
@@ -302,8 +346,41 @@ async fn weather(State(state): State<GatewayState>) -> Response {
     }
 }
 
+async fn enforce_local_rate_safety(state: &GatewayState) -> std::result::Result<(), String> {
+    let now = unix_now().map_err(|error| format!("local clock unavailable: {error:#}"))?;
+    if let Some(last) = state
+        .store
+        .last_acknowledged_at()
+        .await
+        .map_err(|error| format!("feed history unavailable: {error:#}"))?
+    {
+        let min_interval = i64::try_from(state.min_feed_interval.as_secs())
+            .map_err(|_| "configured feed interval is out of range".to_owned())?;
+        if now.saturating_sub(last) < min_interval {
+            return Err("local minimum feed interval has not elapsed".to_owned());
+        }
+    }
+    let count = state
+        .store
+        .acknowledged_since(now.saturating_sub(3_600))
+        .await
+        .map_err(|error| format!("recent feed history unavailable: {error:#}"))?;
+    if count >= state.max_feeds_per_hour {
+        return Err("local maximum feeds-per-hour safety cap reached".to_owned());
+    }
+    Ok(())
+}
+
 async fn ack_matches(state: &GatewayState, request_id: Uuid) -> Result<bool> {
     Ok(state.openhab.acknowledged_request().await? == Some(request_id))
+}
+
+fn unix_now() -> Result<i64> {
+    let seconds = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .context("system clock is before Unix epoch")?
+        .as_secs();
+    i64::try_from(seconds).context("Unix time exceeds i64 range")
 }
 
 fn public_error(status: StatusCode, reason: &str) -> Response {
@@ -333,9 +410,8 @@ fn is_private_ip(ip: IpAddr) -> bool {
 mod tests {
     use super::*;
 
-    #[test]
-    fn refuses_public_or_unspecified_listener() {
-        let mut config = GatewayServerConfig {
+    fn config() -> GatewayServerConfig {
+        GatewayServerConfig {
             service: GatewayServiceConfig {
                 listen: "10.8.0.6:8789".parse().unwrap(),
             },
@@ -344,8 +420,8 @@ mod tests {
             },
             openhab: TrustedOpenHabConfig {
                 url: "http://127.0.0.1:8080/".to_owned(),
-                request_item: "LightningGoatsFeederRequest".to_owned(),
-                ack_item: "LightningGoatsFeederAck".to_owned(),
+                request_item: "GoatFeeder_ManualRequest".to_owned(),
+                ack_item: "GoatFeeder_Result".to_owned(),
                 override_item: "FeederOverride".to_owned(),
                 remote_enabled_item: "LightningGoatsRemoteEnabled".to_owned(),
                 temperature_item: None,
@@ -355,14 +431,31 @@ mod tests {
                 max_stale_seconds: 300,
             },
             feeder: GatewayFeederConfig {
-                ack_timeout_seconds: 10,
+                ack_timeout_seconds: 20,
                 ack_poll_milliseconds: 250,
+                min_feed_interval_seconds: 30,
+                max_feeds_per_hour: 10,
             },
-        };
+        }
+    }
+
+    #[test]
+    fn refuses_public_or_unspecified_listener() {
+        let mut config = config();
         config.validate().unwrap();
         config.service.listen = "0.0.0.0:8789".parse().unwrap();
         assert!(config.validate().is_err());
         config.service.listen = "8.8.8.8:8789".parse().unwrap();
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_unsafe_local_rate_configuration() {
+        let mut config = config();
+        config.feeder.min_feed_interval_seconds = 0;
+        assert!(config.validate().is_err());
+        let mut config = config();
+        config.feeder.max_feeds_per_hour = 0;
         assert!(config.validate().is_err());
     }
 }

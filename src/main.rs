@@ -16,12 +16,13 @@ use lightning_goats::{
     cln::ClnRestClient,
     config::AppConfig,
     feeder::run_feed_worker,
+    gateway::GatewayClient,
+    informational::run_informational_worker,
     invoice_watcher::run_invoice_watcher,
     ledger::{LedgerStore, SettlementOutcome},
     lnurl::{LnurlErrorResponse, LnurlService, LnurlServiceError},
     messaging::{run_message_processor, run_outbox_publisher},
     nostr::NakClient,
-    openhab::OpenHabClient,
     overlay::serve_overlay_socket,
     presentation::MessageRenderer,
     strike::StrikeRuntime,
@@ -44,7 +45,7 @@ struct Args {
 struct AppState {
     config: Arc<AppConfig>,
     ledger: LedgerStore,
-    openhab: OpenHabClient,
+    gateway: GatewayClient,
     strike: Option<StrikeRuntime>,
     lnurl: Option<LnurlService>,
     renderer: MessageRenderer,
@@ -62,6 +63,7 @@ struct StatusResponse {
     strike_enabled: bool,
     lnurl_enabled: bool,
     lightning_address_users: Vec<String>,
+    gateway_reachable: bool,
     /// Transitional compatibility state; `None` means the legacy CLN watcher is disabled.
     last_pay_index: Option<u64>,
     feed_credit_sats: u64,
@@ -70,6 +72,7 @@ struct StatusResponse {
     remainder_sats: u64,
     unresolved_feed_attempt: Option<String>,
     feeder_override_active: Option<bool>,
+    remote_feeding_enabled: Option<bool>,
     temperature_f: Option<f64>,
 }
 
@@ -100,7 +103,7 @@ async fn main() -> Result<()> {
     }
 
     let legacy_cln_cursor = ledger.last_legacy_cln_pay_index().await?;
-    let openhab = OpenHabClient::from_config(&config.openhab).await?;
+    let gateway = GatewayClient::new(&config.gateway.url)?;
     let strike = match &config.strike {
         Some(strike_config) => Some(StrikeRuntime::from_config(strike_config).await?),
         None => None,
@@ -128,7 +131,7 @@ async fn main() -> Result<()> {
     let state = AppState {
         config: Arc::clone(&config),
         ledger: ledger.clone(),
-        openhab: openhab.clone(),
+        gateway: gateway.clone(),
         strike,
         lnurl,
         renderer: renderer.clone(),
@@ -148,6 +151,7 @@ async fn main() -> Result<()> {
         mode = config.service.mode.as_str(),
         strike_enabled = config.strike.is_some(),
         lnurl_enabled = config.lnurl.is_some(),
+        gateway = %config.gateway.url,
         "lightning-goatsd listening"
     );
 
@@ -177,10 +181,15 @@ async fn main() -> Result<()> {
     });
     let mut feeder = tokio::spawn(run_feed_worker(
         ledger.clone(),
-        openhab,
+        gateway.clone(),
         config.feeder.threshold_sats,
         Duration::from_secs(config.feeder.inter_feed_delay_seconds),
         config.service.mode,
+    ));
+    let mut informational = tokio::spawn(run_informational_worker(
+        ledger.clone(),
+        gateway,
+        config.informational.clone(),
     ));
     let mut message_processor = tokio::spawn(run_message_processor(
         ledger.clone(),
@@ -208,6 +217,7 @@ async fn main() -> Result<()> {
         result = &mut server => task_exit("HTTP server", result),
         result = &mut watcher => task_exit("legacy paid-invoice watcher", result),
         result = &mut feeder => task_exit("feed worker", result),
+        result = &mut informational => task_exit("informational worker", result),
         result = &mut message_processor => task_exit("Nostr message processor", result),
         result = &mut publisher => task_exit("Nostr outbox publisher", result),
     };
@@ -215,6 +225,7 @@ async fn main() -> Result<()> {
     server.abort();
     watcher.abort();
     feeder.abort();
+    informational.abort();
     message_processor.abort();
     publisher.abort();
     result
@@ -256,17 +267,22 @@ async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse>, S
         .map(|attempt| attempt.id.to_string());
     let threshold_sats = state.config.feeder.threshold_sats;
 
-    let feeder_override_active = match state.openhab.feeder_override_enabled().await {
-        Ok(value) => Some(value),
-        Err(error) => {
-            tracing::warn!(%error, "OpenHAB FeederOverride unavailable for status endpoint");
-            None
-        }
-    };
-    let temperature_f = match state.openhab.temperature_f().await {
+    let (gateway_reachable, feeder_override_active, remote_feeding_enabled) =
+        match state.gateway.feeder_safety().await {
+            Ok(safety) => (
+                true,
+                Some(safety.override_enabled),
+                Some(safety.remote_enabled),
+            ),
+            Err(error) => {
+                tracing::warn!(%error, "trusted feeder gateway unavailable for status endpoint");
+                (false, None, None)
+            }
+        };
+    let temperature_f = match state.gateway.temperature_f().await {
         Ok(value) => value,
         Err(error) => {
-            tracing::warn!(%error, "OpenHAB temperature unavailable for status endpoint");
+            tracing::warn!(%error, "trusted gateway temperature unavailable for status endpoint");
             None
         }
     };
@@ -281,6 +297,7 @@ async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse>, S
         strike_enabled: state.strike.is_some(),
         lnurl_enabled: state.lnurl.is_some(),
         lightning_address_users,
+        gateway_reachable,
         last_pay_index,
         feed_credit_sats,
         threshold_sats,
@@ -288,6 +305,7 @@ async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse>, S
         remainder_sats: feed_credit_sats % threshold_sats,
         unresolved_feed_attempt,
         feeder_override_active,
+        remote_feeding_enabled,
         temperature_f,
     }))
 }

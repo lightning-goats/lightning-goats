@@ -10,7 +10,6 @@ Group=lightning-goats
 
 ExecStart=/usr/local/bin/lightning-goatsd --config /etc/lightning-goats/config.canary.toml
 
-# Canary uses a separate SQLite file inside the same protected state directory.
 StateDirectory=lightning-goats
 StateDirectoryMode=0700
 RuntimeDirectory=lightning-goats-canary
@@ -19,10 +18,13 @@ ConfigurationDirectory=lightning-goats
 UMask=0077
 
 Environment=RUST_LOG=info
-# Canary needs only read-only CLN observation plus the OpenHAB test-rule credential.
-# It intentionally receives no NIP-46 client credential.
+# Canary Strike credentials must also be receive/read only. Prefer sandbox.
+LoadCredentialEncrypted=strike-api-key:/etc/credstore.encrypted/lightning-goats-canary-strike-api-key
+LoadCredentialEncrypted=strike-webhook-secret:/etc/credstore.encrypted/lightning-goats-canary-strike-webhook-secret
+# Transitional CLN/OpenHAB compatibility during Phase 1 development.
 LoadCredentialEncrypted=cln-rune:/etc/credstore.encrypted/lightning-goats-cln-rune
 LoadCredentialEncrypted=openhab-token:/etc/credstore.encrypted/lightning-goats-openhab
+# Canary intentionally receives no NIP-46 client credential.
 
 Restart=on-failure
 RestartSec=5s

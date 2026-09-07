@@ -5,10 +5,11 @@ use std::{future::pending, path::PathBuf, sync::Arc, time::Duration};
 use anyhow::{Result, anyhow};
 use axum::{
     Json, Router,
+    body::Bytes,
     extract::{State, ws::WebSocketUpgrade},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::Response,
-    routing::get,
+    routing::{get, post},
 };
 use clap::Parser;
 use lightning_goats::{
@@ -16,15 +17,18 @@ use lightning_goats::{
     config::AppConfig,
     feeder::run_feed_worker,
     invoice_watcher::run_invoice_watcher,
-    ledger::LedgerStore,
+    ledger::{LedgerStore, SettlementOutcome},
     messaging::{run_message_processor, run_outbox_publisher},
     nostr::NakClient,
     openhab::OpenHabClient,
     overlay::serve_overlay_socket,
+    strike::StrikeRuntime,
 };
 use serde::Serialize;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
+
+const MAX_STRIKE_WEBHOOK_BODY: usize = 32 * 1024;
 
 #[derive(Debug, Parser)]
 #[command(name = "lightning-goatsd")]
@@ -39,6 +43,7 @@ struct AppState {
     config: Arc<AppConfig>,
     ledger: LedgerStore,
     openhab: OpenHabClient,
+    strike: Option<StrikeRuntime>,
 }
 
 #[derive(Debug, Serialize)]
@@ -50,6 +55,7 @@ struct HealthResponse {
 struct StatusResponse {
     mode: &'static str,
     herd_user: String,
+    strike_enabled: bool,
     /// Transitional compatibility state; `None` means the legacy CLN watcher is disabled.
     last_pay_index: Option<u64>,
     feed_credit_sats: u64,
@@ -83,6 +89,10 @@ async fn main() -> Result<()> {
 
     let legacy_cln_cursor = ledger.last_legacy_cln_pay_index().await?;
     let openhab = OpenHabClient::from_config(&config.openhab).await?;
+    let strike = match &config.strike {
+        Some(strike_config) => Some(StrikeRuntime::from_config(strike_config).await?),
+        None => None,
+    };
     let nostr = if config.service.mode.nostr_enabled() {
         Some(NakClient::from_config(&config.nostr).await?)
     } else {
@@ -93,10 +103,12 @@ async fn main() -> Result<()> {
         config: Arc::clone(&config),
         ledger: ledger.clone(),
         openhab: openhab.clone(),
+        strike,
     };
     let app = Router::new()
         .route("/healthz", get(healthz))
         .route("/api/v1/status", get(status))
+        .route("/api/v1/strike/webhook", post(strike_webhook))
         .route("/ws/overlay", get(overlay_ws))
         .with_state(state);
 
@@ -104,6 +116,7 @@ async fn main() -> Result<()> {
     info!(
         listen = %config.service.listen,
         mode = config.service.mode.as_str(),
+        strike_enabled = config.strike.is_some(),
         "lightning-goatsd listening"
     );
 
@@ -229,6 +242,7 @@ async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse>, S
     Ok(Json(StatusResponse {
         mode: state.config.service.mode.as_str(),
         herd_user: state.config.lightning.herd_user.clone(),
+        strike_enabled: state.strike.is_some(),
         last_pay_index,
         feed_credit_sats,
         threshold_sats,
@@ -238,6 +252,73 @@ async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse>, S
         feeder_override_active,
         temperature_f,
     }))
+}
+
+async fn strike_webhook(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> StatusCode {
+    if body.len() > MAX_STRIKE_WEBHOOK_BODY {
+        tracing::warn!(body_len = body.len(), "rejected oversized Strike webhook");
+        return StatusCode::PAYLOAD_TOO_LARGE;
+    }
+    let Some(strike) = state.strike.as_ref() else {
+        return StatusCode::SERVICE_UNAVAILABLE;
+    };
+    let Some(signature) = headers
+        .get("x-webhook-signature")
+        .and_then(|value| value.to_str().ok())
+    else {
+        tracing::warn!("rejected Strike webhook without a valid signature header");
+        return StatusCode::UNAUTHORIZED;
+    };
+
+    if let Err(error) = strike.verify_webhook_signature(&body, signature) {
+        tracing::warn!(%error, "rejected Strike webhook with invalid signature");
+        return StatusCode::UNAUTHORIZED;
+    }
+    let event = match strike.parse_completed_event(&body) {
+        Ok(event) => event,
+        Err(error) => {
+            tracing::warn!(%error, "rejected unsupported or malformed signed Strike webhook");
+            return StatusCode::BAD_REQUEST;
+        }
+    };
+
+    match strike.reconcile_and_credit(&state.ledger, &event).await {
+        Ok(SettlementOutcome::Credited {
+            sats,
+            address_user,
+            credit_pool,
+        }) => {
+            tracing::info!(
+                sats,
+                %address_user,
+                %credit_pool,
+                receive_request_id = %event.receive_request_id,
+                receive_id = %event.receive_id,
+                "credited authoritative Strike receive"
+            );
+            StatusCode::NO_CONTENT
+        }
+        Ok(SettlementOutcome::Duplicate) => {
+            tracing::debug!(
+                receive_id = %event.receive_id,
+                "duplicate Strike completed-receive webhook was idempotent"
+            );
+            StatusCode::NO_CONTENT
+        }
+        Err(error) => {
+            tracing::error!(
+                %error,
+                receive_request_id = %event.receive_request_id,
+                receive_id = %event.receive_id,
+                "Strike webhook could not be reconciled; returning retryable failure"
+            );
+            StatusCode::BAD_GATEWAY
+        }
+    }
 }
 
 async fn overlay_ws(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {

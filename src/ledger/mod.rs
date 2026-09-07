@@ -293,10 +293,9 @@ fn validate_source(source: &str) -> Result<()> {
     if source.is_empty() || source.len() > 32 {
         bail!("payment source must contain 1 to 32 characters");
     }
-    if !source
-        .bytes()
-        .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'-' | b'_'))
-    {
+    if !source.bytes().all(|byte| {
+        byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'-' | b'_')
+    }) {
         bail!("payment source contains unsupported characters");
     }
     Ok(())
@@ -316,10 +315,9 @@ fn validate_user(value: &str, field: &str) -> Result<()> {
     if value.is_empty() || value.len() > 64 {
         bail!("{field} must contain 1 to 64 characters");
     }
-    if !value
-        .bytes()
-        .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'-' | b'_'))
-    {
+    if !value.bytes().all(|byte| {
+        byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'-' | b'_')
+    }) {
         bail!("{field} must be a canonical lowercase identifier");
     }
     Ok(())

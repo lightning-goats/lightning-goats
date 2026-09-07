@@ -130,7 +130,10 @@ impl StrikeClient {
         };
 
         let response: ReceiveRequestResponse = self
-            .send_json(self.client.post(endpoint).json(&body), "create receive request")
+            .send_json(
+                self.client.post(endpoint).json(&body),
+                "create receive request",
+            )
             .await?;
         validate_receive_request_response(&response, amount_msat, description_hash)?;
 
@@ -228,7 +231,10 @@ impl StrikeClient {
                     .as_ref()
                     .context("Strike LIGHTNING receive omitted lightning details")?;
                 validate_hex32(&lightning.payment_hash, "Strike receive paymentHash")?;
-                if !lightning.payment_hash.eq_ignore_ascii_case(&stored.payment_hash) {
+                if !lightning
+                    .payment_hash
+                    .eq_ignore_ascii_case(&stored.payment_hash)
+                {
                     bail!("Strike completed receive payment hash does not match issued invoice");
                 }
                 if lightning.invoice != stored.invoice {
@@ -237,7 +243,9 @@ impl StrikeClient {
                 if let Some(hash) = lightning.description_hash.as_deref()
                     && !hash.eq_ignore_ascii_case(&stored.description_hash)
                 {
-                    bail!("Strike completed receive description hash does not match issued invoice");
+                    bail!(
+                        "Strike completed receive description hash does not match issued invoice"
+                    );
                 }
                 Some(lightning.payment_hash.to_ascii_lowercase())
             }
@@ -272,7 +280,8 @@ impl StrikeClient {
             .await
             .with_context(|| format!("failed reading Strike {operation} response"))?;
         if !status.is_success() {
-            let safe_body = String::from_utf8_lossy(&body[..body.len().min(MAX_PROVIDER_ERROR_BODY)]);
+            let safe_body =
+                String::from_utf8_lossy(&body[..body.len().min(MAX_PROVIDER_ERROR_BODY)]);
             if status == StatusCode::TOO_MANY_REQUESTS {
                 bail!("Strike {operation} was rate limited (HTTP 429): {safe_body}");
             }
@@ -601,7 +610,10 @@ fn validate_stored_request(
     if bolt11.invoice != stored.invoice {
         bail!("Strike authoritative invoice differs from stored issued invoice");
     }
-    if !bolt11.payment_hash.eq_ignore_ascii_case(&stored.payment_hash) {
+    if !bolt11
+        .payment_hash
+        .eq_ignore_ascii_case(&stored.payment_hash)
+    {
         bail!("Strike authoritative payment hash differs from stored issued invoice");
     }
     Ok(())
@@ -632,7 +644,9 @@ fn btc_decimal_to_msat(value: &str) -> Result<u64> {
     if parts.next().is_some() || whole.is_empty() || !whole.bytes().all(|b| b.is_ascii_digit()) {
         bail!("BTC amount has invalid decimal syntax");
     }
-    let whole = whole.parse::<u64>().context("BTC whole amount is too large")?;
+    let whole = whole
+        .parse::<u64>()
+        .context("BTC whole amount is too large")?;
     let fraction = fraction.unwrap_or("");
     if fraction.len() > 11 || !fraction.bytes().all(|b| b.is_ascii_digit()) {
         bail!("BTC amount has more than 11 decimal places or invalid digits");
@@ -902,7 +916,11 @@ mod tests {
         );
         let (_directory, ledger) = ledger().await;
         let body = webhook_body(&state);
-        assert!(runtime.verify_webhook_signature(&body, &"00".repeat(32)).is_err());
+        assert!(
+            runtime
+                .verify_webhook_signature(&body, &"00".repeat(32))
+                .is_err()
+        );
         assert_eq!(calls.load(Ordering::SeqCst), 0);
         assert_eq!(ledger.feed_credit_sats().await.unwrap(), 0);
     }

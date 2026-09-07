@@ -19,11 +19,8 @@ pub const REQUIRED_PHASE1_LIGHTNING_USERS: [&str; 6] =
 pub struct AppConfig {
     pub service: ServiceConfig,
     pub database: DatabaseConfig,
-    pub lightning: LightningConfig,
-    #[serde(default)]
-    pub strike: Option<StrikeConfig>,
-    #[serde(default)]
-    pub lnurl: Option<LnurlConfig>,
+    pub strike: StrikeConfig,
+    pub lnurl: LnurlConfig,
     #[serde(default)]
     pub lightning_address: Vec<LightningAddressConfig>,
     pub feeder: FeederConfig,
@@ -49,22 +46,19 @@ impl AppConfig {
         if !self.database.url.starts_with("sqlite://") || self.database.url == "sqlite::memory:" {
             bail!("database.url must be a file-backed sqlite:// URL");
         }
-        if self.lightning.clnrest_url.trim().is_empty() {
-            bail!("lightning.clnrest_url must not be empty while legacy CLN compatibility remains");
+
+        let strike_url = Url::parse(&self.strike.api_url).context("invalid strike.api_url")?;
+        if strike_url.scheme() != "https" || strike_url.host_str().is_none() {
+            bail!("strike.api_url must use https:// with a host");
         }
-        if let Some(strike) = &self.strike {
-            let url = Url::parse(&strike.api_url).context("invalid strike.api_url")?;
-            if url.scheme() != "https" || url.host_str().is_none() {
-                bail!("strike.api_url must use https:// with a host");
-            }
-            if !url.username().is_empty()
-                || url.password().is_some()
-                || url.query().is_some()
-                || url.fragment().is_some()
-            {
-                bail!("strike.api_url must not contain credentials, query, or fragment");
-            }
+        if !strike_url.username().is_empty()
+            || strike_url.password().is_some()
+            || strike_url.query().is_some()
+            || strike_url.fragment().is_some()
+        {
+            bail!("strike.api_url must not contain credentials, query, or fragment");
         }
+
         self.validate_lnurl()?;
         if self.feeder.threshold_sats == 0 {
             bail!("feeder.threshold_sats must be greater than zero");
@@ -72,54 +66,18 @@ impl AppConfig {
         if self.feeder.inter_feed_delay_seconds == 0 {
             bail!("feeder.inter_feed_delay_seconds must be greater than zero");
         }
-        validate_user(&self.lightning.herd_user)
-            .context("lightning.herd_user must be a canonical legacy CLN address user")?;
         validate_gateway_origin(&self.gateway.url)?;
         self.validate_informational()?;
-        if !self.nostr.nak_path.is_absolute() {
-            bail!("nostr.nak_path must be an absolute path");
-        }
-        if !self.nostr.nak_config_path.is_absolute() {
-            bail!("nostr.nak_config_path must be an absolute path");
-        }
-        if self.nostr.bunker_pubkey.len() != 64
-            || !self
-                .nostr
-                .bunker_pubkey
-                .bytes()
-                .all(|byte| byte.is_ascii_hexdigit())
-        {
-            bail!("nostr.bunker_pubkey must be a 32-byte hex public key");
-        }
-        if self.nostr.relays.is_empty() {
-            bail!("nostr.relays must contain at least one relay");
-        }
-        for relay in &self.nostr.relays {
-            let parsed =
-                Url::parse(relay).with_context(|| format!("invalid Nostr relay URL {relay}"))?;
-            if parsed.scheme() != "wss" || parsed.host_str().is_none() {
-                bail!("Nostr relay URLs must use wss:// with a host: {relay}");
-            }
-        }
+        self.validate_nostr()?;
         Ok(())
     }
 
     fn validate_lnurl(&self) -> Result<()> {
-        let Some(lnurl) = &self.lnurl else {
-            if !self.lightning_address.is_empty() {
-                bail!("lightning_address entries require [lnurl] configuration");
-            }
-            return Ok(());
-        };
-        if self.strike.is_none() {
-            bail!("[lnurl] requires [strike]; LNURL invoice creation is Strike-backed");
-        }
-        if lnurl.invoice_expiry_seconds == 0 || lnurl.invoice_expiry_seconds > 86_400 {
+        if self.lnurl.invoice_expiry_seconds == 0 || self.lnurl.invoice_expiry_seconds > 86_400 {
             bail!("lnurl.invoice_expiry_seconds must be between 1 and 86400 seconds");
         }
-
         let public_url =
-            Url::parse(&lnurl.public_base_url).context("invalid lnurl.public_base_url")?;
+            Url::parse(&self.lnurl.public_base_url).context("invalid lnurl.public_base_url")?;
         if public_url.scheme() != "https" || public_url.host_str().is_none() {
             bail!("lnurl.public_base_url must use https:// with a host");
         }
@@ -135,7 +93,7 @@ impl AppConfig {
         }
 
         if self.lightning_address.is_empty() {
-            bail!("[lnurl] requires at least one [[lightning_address]] entry");
+            bail!("Phase 1 requires configured Lightning Addresses");
         }
         let mut users = HashSet::new();
         for address in &self.lightning_address {
@@ -206,6 +164,35 @@ impl AppConfig {
         }
         Ok(())
     }
+
+    fn validate_nostr(&self) -> Result<()> {
+        if !self.nostr.nak_path.is_absolute() {
+            bail!("nostr.nak_path must be an absolute path");
+        }
+        if !self.nostr.nak_config_path.is_absolute() {
+            bail!("nostr.nak_config_path must be an absolute path");
+        }
+        if self.nostr.bunker_pubkey.len() != 64
+            || !self
+                .nostr
+                .bunker_pubkey
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
+        {
+            bail!("nostr.bunker_pubkey must be a 32-byte hex public key");
+        }
+        if self.nostr.relays.is_empty() {
+            bail!("nostr.relays must contain at least one relay");
+        }
+        for relay in &self.nostr.relays {
+            let parsed =
+                Url::parse(relay).with_context(|| format!("invalid Nostr relay URL {relay}"))?;
+            if parsed.scheme() != "wss" || parsed.host_str().is_none() {
+                bail!("Nostr relay URLs must use wss:// with a host: {relay}");
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -246,14 +233,6 @@ impl RuntimeMode {
     pub const fn nostr_enabled(self) -> bool {
         matches!(self, Self::Active)
     }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct LightningConfig {
-    pub clnrest_url: String,
-    #[serde(default)]
-    pub clnrest_ca_certificate: Option<PathBuf>,
-    pub herd_user: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -373,18 +352,13 @@ mod tests {
             database: DatabaseConfig {
                 url: "sqlite:///var/lib/lightning-goats/lightning-goats.db".to_owned(),
             },
-            lightning: LightningConfig {
-                clnrest_url: "https://127.0.0.1:3010".to_owned(),
-                clnrest_ca_certificate: Some(PathBuf::from("/etc/lightning-goats/clnrest-ca.pem")),
-                herd_user: "herd".to_owned(),
-            },
-            strike: Some(StrikeConfig {
+            strike: StrikeConfig {
                 api_url: "https://api.strike.me/".to_owned(),
-            }),
-            lnurl: Some(LnurlConfig {
+            },
+            lnurl: LnurlConfig {
                 public_base_url: "https://lightning-goats.com/".to_owned(),
                 invoice_expiry_seconds: 300,
-            }),
+            },
             lightning_address: phase1_addresses(),
             feeder: FeederConfig {
                 threshold_sats: 1_000,
@@ -435,16 +409,9 @@ mod tests {
     }
 
     #[test]
-    fn rejects_noncanonical_herd_user() {
-        let mut config = valid_config();
-        config.lightning.herd_user = "Herd".to_owned();
-        assert!(config.validate().is_err());
-    }
-
-    #[test]
     fn rejects_insecure_strike_api_url() {
         let mut config = valid_config();
-        config.strike.as_mut().unwrap().api_url = "http://api.strike.me/".to_owned();
+        config.strike.api_url = "http://api.strike.me/".to_owned();
         assert!(config.validate().is_err());
     }
 
@@ -470,14 +437,6 @@ mod tests {
     fn rejects_non_herd_credit_pool_in_phase1() {
         let mut config = valid_config();
         config.lightning_address[1].credit_pool = "dexter".to_owned();
-        assert!(config.validate().is_err());
-    }
-
-    #[test]
-    fn rejects_invalid_informational_probabilities() {
-        let mut config = valid_config();
-        config.informational.interface_info_probability = 0.7;
-        config.informational.weather_probability = 0.5;
         assert!(config.validate().is_err());
     }
 

@@ -227,66 +227,6 @@ impl LedgerStore {
         }
         to_u64(credit, "feed credit")
     }
-
-    // Transitional CLN compatibility cursor. This is deliberately separate
-    // from payment identity/accounting and is removed with the CLN watcher in
-    // Phase 1 issue #13.
-    pub async fn initialize_legacy_cln_cursor(&self, last_pay_index: u64) -> Result<()> {
-        let last_pay_index = to_i64(last_pay_index, "last_pay_index")?;
-        let mut transaction = self.pool.begin().await?;
-
-        let existing = sqlx::query("SELECT last_pay_index FROM cln_cursor WHERE singleton = 1")
-            .fetch_optional(&mut *transaction)
-            .await?;
-
-        if let Some(row) = existing {
-            let current: i64 = row.try_get("last_pay_index")?;
-            if current != last_pay_index {
-                bail!(
-                    "legacy CLN cursor is already initialized at {current}; refusing to replace it with {last_pay_index}"
-                );
-            }
-            transaction.commit().await?;
-            return Ok(());
-        }
-
-        sqlx::query("INSERT INTO cln_cursor (singleton, last_pay_index) VALUES (1, ?)")
-            .bind(last_pay_index)
-            .execute(&mut *transaction)
-            .await?;
-        transaction.commit().await?;
-        Ok(())
-    }
-
-    pub async fn last_legacy_cln_pay_index(&self) -> Result<Option<u64>> {
-        let row = sqlx::query("SELECT last_pay_index FROM cln_cursor WHERE singleton = 1")
-            .fetch_optional(&self.pool)
-            .await?;
-        row.map(|row| {
-            let value: i64 = row.try_get("last_pay_index")?;
-            to_u64(value, "last_pay_index")
-        })
-        .transpose()
-    }
-
-    pub async fn advance_legacy_cln_cursor(&self, expected: u64, next: u64) -> Result<()> {
-        if next <= expected {
-            bail!("legacy CLN cursor must advance monotonically ({expected} -> {next})");
-        }
-        let expected = to_i64(expected, "expected CLN cursor")?;
-        let next = to_i64(next, "next CLN cursor")?;
-        let result = sqlx::query(
-            "UPDATE cln_cursor SET last_pay_index = ?, updated_at = unixepoch() WHERE singleton = 1 AND last_pay_index = ?",
-        )
-        .bind(next)
-        .bind(expected)
-        .execute(&self.pool)
-        .await?;
-        if result.rows_affected() != 1 {
-            bail!("legacy CLN cursor changed concurrently; refusing blind advance");
-        }
-        Ok(())
-    }
 }
 
 fn validate_source(source: &str) -> Result<()> {

@@ -20,13 +20,6 @@ struct Args {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Initialize the transitional legacy CLN pay-index cursor exactly once.
-    /// This compatibility command is removed with the CLN watcher in Phase 1 #13.
-    InitCursor {
-        /// Last legacy CLN pay_index already accounted for.
-        #[arg(long)]
-        pay_index: u64,
-    },
     /// Resolve an ambiguous feed attempt without directly actuating the feeder.
     ReconcileFeed {
         #[arg(long)]
@@ -51,10 +44,6 @@ async fn main() -> Result<()> {
     let ledger = LedgerStore::connect(&config.database.url).await?;
 
     match args.command {
-        Command::InitCursor { pay_index } => {
-            ledger.initialize_legacy_cln_cursor(pay_index).await?;
-            println!("initialized legacy CLN pay-index cursor at {pay_index}");
-        }
         Command::ReconcileFeed { id, outcome } => match outcome {
             ReconcileOutcome::Fed => {
                 ledger.reconcile_unknown_as_fed(id).await?;
@@ -68,14 +57,9 @@ async fn main() -> Result<()> {
         Command::Status => {
             let credit = ledger.feed_credit_sats().await?;
             let threshold = config.feeder.threshold_sats;
-            let cursor = ledger.last_legacy_cln_pay_index().await?;
             let unresolved = ledger.unresolved_feed_attempt().await?;
             println!("mode={}", config.service.mode.as_str());
-            println!("herd_user={}", config.lightning.herd_user);
-            println!(
-                "legacy_cln_pay_index={}",
-                cursor.map_or_else(|| "disabled".to_owned(), |value| value.to_string())
-            );
+            println!("payment_backend=strike");
             println!("feed_credit_sats={credit}");
             println!("threshold_sats={threshold}");
             println!("feeds_due={}", credit / threshold);

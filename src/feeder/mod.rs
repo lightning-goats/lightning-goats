@@ -13,12 +13,25 @@ use crate::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FeedWorkerStep {
     Idle,
-    ShadowBlocked { feeds_due: u64 },
-    OverrideBlocked { feeds_due: u64 },
-    RemoteDisabled { feeds_due: u64 },
-    SafetyUnavailable { feeds_due: u64 },
-    UnknownFeedBlocked { attempt_id: Uuid },
-    Fed { attempt_id: Uuid, remaining_sats: u64 },
+    ShadowBlocked {
+        feeds_due: u64,
+    },
+    OverrideBlocked {
+        feeds_due: u64,
+    },
+    RemoteDisabled {
+        feeds_due: u64,
+    },
+    SafetyUnavailable {
+        feeds_due: u64,
+    },
+    UnknownFeedBlocked {
+        attempt_id: Uuid,
+    },
+    Fed {
+        attempt_id: Uuid,
+        remaining_sats: u64,
+    },
 }
 
 pub async fn run_feed_step(
@@ -117,7 +130,10 @@ pub async fn run_feed_worker(
                 sleep(Duration::from_secs(5)).await;
             }
             Ok(FeedWorkerStep::SafetyUnavailable { feeds_due }) => {
-                tracing::warn!(feeds_due, "automatic feeding blocked because trusted gateway safety state is unavailable");
+                tracing::warn!(
+                    feeds_due,
+                    "automatic feeding blocked because trusted gateway safety state is unavailable"
+                );
                 sleep(Duration::from_secs(5)).await;
             }
             Ok(FeedWorkerStep::OverrideBlocked { feeds_due }) => {
@@ -125,11 +141,17 @@ pub async fn run_feed_worker(
                 sleep(Duration::from_secs(2)).await;
             }
             Ok(FeedWorkerStep::RemoteDisabled { feeds_due }) => {
-                tracing::info!(feeds_due, "automatic feeding blocked because LightningGoatsRemoteEnabled is OFF");
+                tracing::info!(
+                    feeds_due,
+                    "automatic feeding blocked because LightningGoatsRemoteEnabled is OFF"
+                );
                 sleep(Duration::from_secs(2)).await;
             }
             Ok(FeedWorkerStep::ShadowBlocked { feeds_due }) => {
-                tracing::debug!(feeds_due, "shadow mode: feed would be due but actuation is disabled");
+                tracing::debug!(
+                    feeds_due,
+                    "shadow mode: feed would be due but actuation is disabled"
+                );
                 sleep(Duration::from_secs(2)).await;
             }
             Ok(FeedWorkerStep::Idle) => sleep(Duration::from_secs(2)).await,

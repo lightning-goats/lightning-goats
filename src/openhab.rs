@@ -52,7 +52,10 @@ impl OpenHabClient {
         }
         for (value, field) in [
             (&config.request_item, "OpenHAB feeder request item"),
-            (&config.ack_item, "OpenHAB feeder acknowledgement/result item"),
+            (
+                &config.ack_item,
+                "OpenHAB feeder acknowledgement/result item",
+            ),
             (&config.override_item, "OpenHAB override item"),
             (&config.remote_enabled_item, "OpenHAB remote-enabled item"),
         ] {
@@ -241,8 +244,9 @@ fn parse_acknowledgement(raw: &str) -> Result<Option<Uuid>> {
         .find_map(|key| object.get(key).and_then(Value::as_str))
         .context("OpenHAB feeder result JSON lacks an explicit success outcome")?;
     match outcome.trim().to_ascii_lowercase().as_str() {
-        "acknowledged" | "completed" | "confirmed" | "success" | "succeeded" | "fed"
-        | "done" => Ok(Some(id)),
+        "acknowledged" | "completed" | "confirmed" | "success" | "succeeded" | "fed" | "done" => {
+            Ok(Some(id))
+        }
         "failed" | "failure" | "rejected" | "error" | "blocked" => {
             bail!("OpenHAB feeder result reports {outcome:?} for request {id}")
         }
@@ -278,22 +282,14 @@ mod tests {
     #[test]
     fn parses_exact_uuid_and_correlated_json_success() {
         let id = Uuid::new_v4();
+        assert_eq!(parse_acknowledgement(&id.to_string()).unwrap(), Some(id));
         assert_eq!(
-            parse_acknowledgement(&id.to_string()).unwrap(),
+            parse_acknowledgement(&format!(r#"{{"requestId":"{id}","status":"completed"}}"#))
+                .unwrap(),
             Some(id)
         );
         assert_eq!(
-            parse_acknowledgement(&format!(
-                r#"{{"requestId":"{id}","status":"completed"}}"#
-            ))
-            .unwrap(),
-            Some(id)
-        );
-        assert_eq!(
-            parse_acknowledgement(&format!(
-                r#"{{"request_id":"{id}","success":true}}"#
-            ))
-            .unwrap(),
+            parse_acknowledgement(&format!(r#"{{"request_id":"{id}","success":true}}"#)).unwrap(),
             Some(id)
         );
     }
@@ -302,20 +298,16 @@ mod tests {
     fn correlated_failure_or_unknown_shape_fails_closed() {
         let id = Uuid::new_v4();
         assert!(
-            parse_acknowledgement(&format!(
-                r#"{{"requestId":"{id}","status":"failed"}}"#
-            ))
-            .is_err()
+            parse_acknowledgement(&format!(r#"{{"requestId":"{id}","status":"failed"}}"#)).is_err()
         );
-        assert!(
-            parse_acknowledgement(&format!(r#"{{"requestId":"{id}"}}"#)).is_err()
-        );
+        assert!(parse_acknowledgement(&format!(r#"{{"requestId":"{id}"}}"#)).is_err());
     }
 
     #[test]
     fn request_template_is_narrow_and_deterministic() {
         validate_request_payload_template("{request_id}").unwrap();
-        validate_request_payload_template(r#"request={request_id};source=lightning-goats"#).unwrap();
+        validate_request_payload_template(r#"request={request_id};source=lightning-goats"#)
+            .unwrap();
         assert!(validate_request_payload_template("missing-id").is_err());
         assert!(validate_request_payload_template("{request_id}{request_id}").is_err());
         assert!(validate_request_payload_template("{request_id}{other}").is_err());

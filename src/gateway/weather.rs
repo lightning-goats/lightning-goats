@@ -73,9 +73,13 @@ impl WeatherAdapter {
         if body.len() as u64 > MAX_WEATHER_BODY {
             bail!("trusted weather response exceeded size limit");
         }
-        let value: Value = serde_json::from_slice(&body).context("trusted weather JSON is malformed")?;
+        let value: Value =
+            serde_json::from_slice(&body).context("trusted weather JSON is malformed")?;
         let latest = match value {
-            Value::Array(items) => items.into_iter().last().context("trusted weather array is empty")?,
+            Value::Array(items) => items
+                .into_iter()
+                .last()
+                .context("trusted weather array is empty")?,
             Value::Object(_) => value,
             _ => bail!("trusted weather response must be an object or non-empty array"),
         };
@@ -99,9 +103,19 @@ impl WeatherAdapter {
             wind_speed,
             wind_direction,
             uv_index,
-            apparent_temperature: optional_number(object, &["feelslikef", "feelslike"], -100.0, 150.0)?,
+            apparent_temperature: optional_number(
+                object,
+                &["feelslikef", "feelslike"],
+                -100.0,
+                150.0,
+            )?,
             wind_gust: optional_number(object, &["windgustmph"], 0.0, 300.0)?,
-            pressure_relative: optional_number(object, &["baromrelin", "baromrelinin"], 20.0, 40.0)?,
+            pressure_relative: optional_number(
+                object,
+                &["baromrelin", "baromrelinin"],
+                20.0,
+                40.0,
+            )?,
             pressure_trend: optional_bounded_string(object, &["pressuretrend"], 32)?,
             rain_hourly: optional_number(object, &["hourlyrainin"], 0.0, 20.0)?,
             rain_daily: optional_number(object, &["dailyrainin"], 0.0, 100.0)?,
@@ -318,8 +332,8 @@ fn degrees_to_cardinal(degrees: f64) -> Result<String> {
         bail!("weather wind direction is out of range");
     }
     const DIRECTIONS: [&str; 16] = [
-        "N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW",
-        "W", "WNW", "NW", "NNW",
+        "N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW",
+        "NW", "NNW",
     ];
     let normalized = if degrees == 360.0 { 0.0 } else { degrees };
     let index = ((normalized / 22.5) + 0.5).floor() as usize % DIRECTIONS.len();

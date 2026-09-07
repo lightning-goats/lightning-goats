@@ -12,10 +12,7 @@ use tracing_subscriber::EnvFilter;
 #[command(name = "lightning-goats-gateway")]
 #[command(about = "Trusted in-house OpenHAB and weather gateway for Lightning Goats")]
 struct Args {
-    #[arg(
-        long,
-        default_value = "/etc/lightning-goats-gateway/config.toml"
-    )]
+    #[arg(long, default_value = "/etc/lightning-goats-gateway/config.toml")]
     config: PathBuf,
 }
 

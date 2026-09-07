@@ -94,7 +94,10 @@ impl GatewayClient {
         }
         let endpoint = self.base_url.join("v1/temperature")?;
         let response: TemperatureResponse = self.get_json(endpoint, "temperature").await?;
-        if response.temperature_f.is_some_and(|value| !value.is_finite()) {
+        if response
+            .temperature_f
+            .is_some_and(|value| !value.is_finite())
+        {
             bail!("integration gateway returned non-finite temperature");
         }
         Ok(response.temperature_f)
@@ -129,7 +132,11 @@ impl GatewayClient {
         self.get_json(endpoint, "weather").await
     }
 
-    async fn get_json<T: for<'de> Deserialize<'de>>(&self, endpoint: Url, operation: &str) -> Result<T> {
+    async fn get_json<T: for<'de> Deserialize<'de>>(
+        &self,
+        endpoint: Url,
+        operation: &str,
+    ) -> Result<T> {
         let response = self
             .client
             .get(endpoint)
@@ -151,15 +158,18 @@ fn validate_gateway_url(url: &Url) -> Result<()> {
     if !url.username().is_empty() || url.password().is_some() {
         bail!("integration gateway URL must not contain credentials");
     }
-    let host = url.host_str().context("integration gateway URL is missing a host")?;
+    let host = url
+        .host_str()
+        .context("integration gateway URL is missing a host")?;
     match url.scheme() {
         "https" => Ok(()),
         "http" => {
             if host.eq_ignore_ascii_case("localhost") {
                 return Ok(());
             }
-            let ip = IpAddr::from_str(host)
-                .context("plain HTTP integration gateway URL must use a literal private/loopback IP")?;
+            let ip = IpAddr::from_str(host).context(
+                "plain HTTP integration gateway URL must use a literal private/loopback IP",
+            )?;
             if ip.is_loopback() || is_private_ip(ip) {
                 Ok(())
             } else {

@@ -4,23 +4,22 @@
 [service]
 listen = "127.0.0.1:8787"
 # Use shadow during production ingress verification. Change to active only after
-# the zero-based cutover acceptance checks pass.
+# the operator-gated cutover acceptance checks pass.
 mode = "shadow"
 
 [database]
 url = "sqlite:///var/lib/lightning-goats/lightning-goats.db"
 
-# Transitional CLN compatibility only; removed by Phase 1 issue #13.
+# Transitional CLN compatibility only; removed by Phase 1 issue #13 before
+# deployment handoff is complete.
 [lightning]
 clnrest_url = "https://127.0.0.1:3010"
 clnrest_ca_certificate = "/etc/lightning-goats/clnrest-ca.pem"
 herd_user = "herd"
 
-# Phase 1 receive-only payment backend. The API key is loaded from the
-# `strike-api-key` systemd credential and must have only:
+# Runtime API key must have only:
 #   partner.receive-request.create
 #   partner.receive-request.read
-# Webhook management should use a separate temporary/admin key when needed.
 [strike]
 api_url = "https://api.strike.me/"
 
@@ -28,9 +27,6 @@ api_url = "https://api.strike.me/"
 public_base_url = "https://lightning-goats.com/"
 invoice_expiry_seconds = 300
 
-# All Phase 1 Lightning Addresses are explicitly allowlisted and credit one
-# common `herd` feeder pool. `address_user` remains durable payment metadata.
-# The callback rejects non-whole-satoshi amounts before contacting Strike.
 [[lightning_address]]
 user = "herd"
 display_name = "Lightning Goats"
@@ -83,13 +79,21 @@ max_sendable_msat = 1000000000
 threshold_sats = 1000
 inter_feed_delay_seconds = 30
 
-# Transitional direct OpenHAB integration; replaced by the in-house gateway in
-# Phase 1 issue #17. Do not use this direct path in the final architecture.
-[openhab]
-url = "http://127.0.0.1:8080"
-feeder_rule_id = "REPLACE_WITH_PRODUCTION_FEEDER_RULE_ID"
-override_item = "FeederOverride"
-temperature_item = "AmbientWeatherWS2902A_WeatherDataWs2902a_Temperature"
+# This is the ONLY trusted-side origin available to lightning-goatsd. The VPS
+# holds no OpenHAB credential and must be firewalled from direct 10.8.0.6
+# OpenHAB/weather/SSH access.
+[gateway]
+url = "http://10.8.0.6:8789/"
+
+# Preserve current Lightning Goats extension presentation cadence: one
+# informational evaluation every 60 seconds, interface info considered first,
+# at most one message per cycle, 40% unconditional chance for each category.
+[informational]
+interval_seconds = 60
+interface_info_enabled = true
+weather_enabled = true
+interface_info_probability = 0.4
+weather_probability = 0.4
 
 [nostr]
 nak_path = "/usr/local/bin/nak"

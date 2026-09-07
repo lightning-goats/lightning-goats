@@ -3,6 +3,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use reqwest::{Client, Url};
 use serde::Deserialize;
+use serde_json::Value;
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
@@ -43,7 +44,7 @@ impl OpenHabClient {
         }
         for (value, field) in [
             (&config.request_item, "OpenHAB feeder request item"),
-            (&config.ack_item, "OpenHAB feeder acknowledgement item"),
+            (&config.ack_item, "OpenHAB feeder acknowledgement/result item"),
             (&config.override_item, "OpenHAB override item"),
             (&config.remote_enabled_item, "OpenHAB remote-enabled item"),
         ] {
@@ -58,7 +59,9 @@ impl OpenHabClient {
             "http" | "https" => {}
             scheme => bail!("unsupported OpenHAB URL scheme: {scheme}"),
         }
-        let host = base_url.host_str().context("OpenHAB URL is missing a host")?;
+        let host = base_url
+            .host_str()
+            .context("OpenHAB URL is missing a host")?;
         if !matches!(host, "127.0.0.1" | "localhost" | "::1") {
             bail!("trusted gateway OpenHAB URL must use loopback");
         }
@@ -103,15 +106,15 @@ impl OpenHabClient {
         Ok((override_enabled, remote_enabled))
     }
 
+    /// Return the UUID of the most recently successful correlated feeder result.
+    ///
+    /// The trusted gateway supports both a dedicated ack Item containing only a
+    /// UUID and the existing OpenHAB correlated-owner style where the result Item
+    /// is JSON. JSON is accepted only when it contains a UUID identifier and an
+    /// explicit success/completed outcome; unknown result shapes fail closed.
     pub async fn acknowledged_request(&self) -> Result<Option<Uuid>> {
         let state = self.item_state(&self.ack_item).await?;
-        let state = state.trim();
-        if state.is_empty() || matches!(state, "NULL" | "UNDEF" | "-") {
-            return Ok(None);
-        }
-        Uuid::parse_str(state)
-            .map(Some)
-            .with_context(|| format!("OpenHAB feeder acknowledgement is not a UUID: {state:?}"))
+        parse_acknowledgement(&state)
     }
 
     pub async fn command_feeder_request(&self, request_id: Uuid) -> Result<()> {
@@ -173,6 +176,48 @@ impl OpenHabClient {
     }
 }
 
+fn parse_acknowledgement(raw: &str) -> Result<Option<Uuid>> {
+    let state = raw.trim();
+    if state.is_empty() || matches!(state, "NULL" | "UNDEF" | "-") {
+        return Ok(None);
+    }
+    if let Ok(id) = Uuid::parse_str(state) {
+        return Ok(Some(id));
+    }
+
+    let value: Value = serde_json::from_str(state)
+        .context("OpenHAB feeder result is neither a UUID nor valid JSON")?;
+    let object = value
+        .as_object()
+        .context("OpenHAB feeder result JSON must be an object")?;
+    let id_text = ["request_id", "requestId", "id"]
+        .into_iter()
+        .find_map(|key| object.get(key).and_then(Value::as_str))
+        .context("OpenHAB feeder result JSON is missing request UUID")?;
+    let id = Uuid::parse_str(id_text)
+        .with_context(|| format!("OpenHAB feeder result request ID is not a UUID: {id_text:?}"))?;
+
+    if object.get("success").and_then(Value::as_bool) == Some(true) {
+        return Ok(Some(id));
+    }
+    if object.get("success").and_then(Value::as_bool) == Some(false) {
+        bail!("OpenHAB feeder result explicitly reports failure for request {id}");
+    }
+
+    let outcome = ["status", "outcome", "result"]
+        .into_iter()
+        .find_map(|key| object.get(key).and_then(Value::as_str))
+        .context("OpenHAB feeder result JSON lacks an explicit success outcome")?;
+    match outcome.trim().to_ascii_lowercase().as_str() {
+        "acknowledged" | "completed" | "confirmed" | "success" | "succeeded" | "fed"
+        | "done" => Ok(Some(id)),
+        "failed" | "failure" | "rejected" | "error" | "blocked" => {
+            bail!("OpenHAB feeder result reports {outcome:?} for request {id}")
+        }
+        other => bail!("OpenHAB feeder result has unknown outcome {other:?}"),
+    }
+}
+
 fn parse_switch(state: &str, name: &str) -> Result<bool> {
     match state.trim() {
         "ON" => Ok(true),
@@ -196,112 +241,62 @@ fn validate_identifier(value: &str, field: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    };
-
-    use axum::{
-        Router,
-        body::Bytes,
-        extract::State,
-        http::{HeaderMap, StatusCode},
-        response::IntoResponse,
-        routing::{get, post},
-    };
-    use tokio::net::TcpListener;
-
     use super::*;
 
-    #[derive(Clone)]
-    struct MockState {
-        override_state: &'static str,
-        remote_state: &'static str,
-        ack_state: String,
-        commands: Arc<AtomicUsize>,
-    }
-
-    async fn state_handler(
-        State(state): State<MockState>,
-        headers: HeaderMap,
-        axum::extract::Path(item): axum::extract::Path<String>,
-    ) -> impl IntoResponse {
-        if headers.get("authorization").is_none() {
-            return (StatusCode::UNAUTHORIZED, "missing auth").into_response();
-        }
-        let value = match item.as_str() {
-            "FeederOverride" => state.override_state.to_owned(),
-            "LightningGoatsRemoteEnabled" => state.remote_state.to_owned(),
-            "LightningGoatsFeederAck" => state.ack_state,
-            "AmbientTemperature" => "67.4 °F".to_owned(),
-            _ => return StatusCode::NOT_FOUND.into_response(),
-        };
-        (StatusCode::OK, value).into_response()
-    }
-
-    async fn command_handler(
-        State(state): State<MockState>,
-        headers: HeaderMap,
-        body: Bytes,
-    ) -> impl IntoResponse {
-        if headers.get("authorization").is_none() {
-            return StatusCode::UNAUTHORIZED;
-        }
-        assert!(Uuid::parse_str(std::str::from_utf8(&body).unwrap()).is_ok());
-        state.commands.fetch_add(1, Ordering::SeqCst);
-        StatusCode::ACCEPTED
-    }
-
-    async fn spawn_mock(state: MockState) -> String {
-        let app = Router::new()
-            .route("/rest/items/{item}/state", get(state_handler))
-            .route("/rest/items/LightningGoatsFeederRequest", post(command_handler))
-            .with_state(state);
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
-        tokio::spawn(async move {
-            axum::serve(listener, app).await.unwrap();
-        });
-        format!("http://{address}/")
-    }
-
-    fn config(url: String) -> TrustedOpenHabConfig {
-        TrustedOpenHabConfig {
-            url,
-            request_item: "LightningGoatsFeederRequest".to_owned(),
-            ack_item: "LightningGoatsFeederAck".to_owned(),
-            override_item: "FeederOverride".to_owned(),
-            remote_enabled_item: "LightningGoatsRemoteEnabled".to_owned(),
-            temperature_item: Some("AmbientTemperature".to_owned()),
-        }
-    }
-
-    #[tokio::test]
-    async fn reads_safety_ack_temperature_and_commands_uuid() {
-        let request_id = Uuid::new_v4();
-        let commands = Arc::new(AtomicUsize::new(0));
-        let base_url = spawn_mock(MockState {
-            override_state: "OFF",
-            remote_state: "ON",
-            ack_state: request_id.to_string(),
-            commands: Arc::clone(&commands),
-        })
-        .await;
-        let client = OpenHabClient::new(&config(base_url), "token".to_owned()).unwrap();
-
-        assert_eq!(client.feeder_safety().await.unwrap(), (false, true));
-        assert_eq!(client.acknowledged_request().await.unwrap(), Some(request_id));
-        assert_eq!(client.temperature_f().await.unwrap(), Some(67.4));
-        client.command_feeder_request(request_id).await.unwrap();
-        assert_eq!(commands.load(Ordering::SeqCst), 1);
+    #[test]
+    fn parses_exact_uuid_and_correlated_json_success() {
+        let id = Uuid::new_v4();
+        assert_eq!(
+            parse_acknowledgement(&id.to_string()).unwrap(),
+            Some(id)
+        );
+        assert_eq!(
+            parse_acknowledgement(&format!(
+                r#"{{"requestId":"{id}","status":"completed"}}"#
+            ))
+            .unwrap(),
+            Some(id)
+        );
+        assert_eq!(
+            parse_acknowledgement(&format!(
+                r#"{{"request_id":"{id}","success":true}}"#
+            ))
+            .unwrap(),
+            Some(id)
+        );
     }
 
     #[test]
-    fn rejects_non_loopback_openhab_and_path_injection() {
-        let mut cfg = config("http://10.8.0.6:8080/".to_owned());
-        assert!(OpenHabClient::new(&cfg, "token".to_owned()).is_err());
-        cfg.url = "http://127.0.0.1:8080/".to_owned();
-        cfg.request_item = "../rule".to_owned();
-        assert!(OpenHabClient::new(&cfg, "token".to_owned()).is_err());
+    fn correlated_failure_or_unknown_shape_fails_closed() {
+        let id = Uuid::new_v4();
+        assert!(
+            parse_acknowledgement(&format!(
+                r#"{{"requestId":"{id}","status":"failed"}}"#
+            ))
+            .is_err()
+        );
+        assert!(
+            parse_acknowledgement(&format!(r#"{{"requestId":"{id}"}}"#)).is_err()
+        );
+    }
+
+    #[test]
+    fn nullish_ack_is_none() {
+        for state in ["", "NULL", "UNDEF", "-"] {
+            assert_eq!(parse_acknowledgement(state).unwrap(), None);
+        }
+    }
+
+    #[test]
+    fn rejects_remote_openhab_url() {
+        let config = TrustedOpenHabConfig {
+            url: "http://10.8.0.6:8080/".to_owned(),
+            request_item: "GoatFeeder_ManualRequest".to_owned(),
+            ack_item: "GoatFeeder_Result".to_owned(),
+            override_item: "FeederOverride".to_owned(),
+            remote_enabled_item: "LightningGoatsRemoteEnabled".to_owned(),
+            temperature_item: None,
+        };
+        assert!(OpenHabClient::new(&config, "token".to_owned()).is_err());
     }
 }

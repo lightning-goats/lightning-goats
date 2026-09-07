@@ -28,8 +28,7 @@ jobs:
               let mut config = config();
               config.feeder.max_feeds_per_hour = 0;
               assert!(config.validate().is_err());
-          }
-          '''
+          }'''.replace('              ', '        ')
           new = '''    fn rejects_unsafe_local_rate_configuration() {
               let mut interval_config = config();
               interval_config.feeder.min_feed_interval_seconds = 0;
@@ -37,8 +36,7 @@ jobs:
               let mut rate_config = config();
               rate_config.feeder.max_feeds_per_hour = 0;
               assert!(rate_config.validate().is_err());
-          }
-          '''
+          }'''.replace('              ', '        ')
           if old not in s:
               raise SystemExit('expected test snippet not found')
           p.write_text(s.replace(old, new, 1))

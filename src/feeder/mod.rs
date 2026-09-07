@@ -165,10 +165,7 @@ mod tests {
     use tokio::net::TcpListener;
 
     use super::*;
-    use crate::{
-        domain::payment::SettledPayment,
-        ledger::SettlementOutcome,
-    };
+    use crate::{domain::payment::SettledPayment, ledger::SettlementOutcome};
 
     #[derive(Clone)]
     struct MockOpenHabState {

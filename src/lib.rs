@@ -1,12 +1,10 @@
 #![forbid(unsafe_code)]
 
-pub mod cln;
 pub mod config;
 pub mod domain;
 pub mod feeder;
 pub mod gateway;
 pub mod informational;
-pub mod invoice_watcher;
 pub mod ledger;
 pub mod lnurl;
 pub mod messaging;

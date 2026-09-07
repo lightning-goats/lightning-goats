@@ -1,0 +1,36 @@
+# Trusted in-house Lightning Goats gateway configuration for 10.8.0.6.
+# The OpenHAB token is NOT stored here; systemd supplies `openhab-token`.
+
+[service]
+listen = "10.8.0.6:8789"
+
+[database]
+url = "sqlite:///var/lib/lightning-goats-gateway/gateway.db"
+
+[openhab]
+# Gateway runs on the OpenHAB host and is deliberately restricted to loopback.
+url = "http://127.0.0.1:8080/"
+
+# The live feeder owner rule 88bd9ec4de is already triggered by
+# GoatFeeder_ManualRequest. Prefer reusing that correlated owner rather than
+# creating a second physical actuator owner. Before deployment, inspect the live
+# feeder-owner.js/result Item and set ack_item to the actual persisted correlated
+# result Item. The Rust adapter accepts either an exact UUID or a JSON object
+# containing requestId/request_id/id plus an explicit successful outcome.
+request_item = "GoatFeeder_ManualRequest"
+ack_item = "REPLACE_WITH_LIVE_CORRELATED_FEEDER_RESULT_ITEM"
+
+override_item = "FeederOverride"
+# This is a new local administrative kill switch for the Lightning Goats remote
+# integration. It does not replace FeederOverride or the existing owner safety.
+remote_enabled_item = "LightningGoatsRemoteEnabled"
+temperature_item = "AmbientWeatherWS2902A_WeatherDataWs2902a_Temperature"
+
+[weather]
+# Exact local read endpoint. The mutating /weather endpoint is never exposed.
+url = "http://127.0.0.1:5000/get_received_data"
+max_stale_seconds = 300
+
+[feeder]
+ack_timeout_seconds = 20
+ack_poll_milliseconds = 250

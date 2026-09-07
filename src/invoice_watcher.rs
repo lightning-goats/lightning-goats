@@ -55,9 +55,7 @@ pub async fn poll_once(
             };
             match ledger.record_payment(&payment).await? {
                 SettlementOutcome::Credited {
-                    sats,
-                    address_user,
-                    ..
+                    sats, address_user, ..
                 } => LegacyClnPollOutcome::Credited { sats, address_user },
                 SettlementOutcome::Duplicate => LegacyClnPollOutcome::Duplicate,
             }

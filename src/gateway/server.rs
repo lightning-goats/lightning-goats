@@ -205,9 +205,6 @@ async fn feed_request(
     AxumPath(request_id): AxumPath<Uuid>,
     State(state): State<GatewayState>,
 ) -> Response {
-    // Duplicate/recovery queries are handled before new-request safety limits so
-    // an already acknowledged UUID remains idempotently queryable even when the
-    // local rate cap is currently closed.
     match state.store.status(request_id).await {
         Ok(Some(StoredRequestStatus::Acknowledged)) => {
             return StatusCode::NO_CONTENT.into_response();
@@ -243,15 +240,11 @@ async fn feed_request(
         Ok(BeginRequestOutcome::New) => {}
         Ok(BeginRequestOutcome::Acknowledged) => return StatusCode::NO_CONTENT.into_response(),
         Ok(BeginRequestOutcome::Pending) => {
-            // Another concurrent request won the insert. Never send the command
-            // again; interrogate the existing pending intent instead.
             return handle_existing_pending(&state, request_id).await;
         }
         Err(error) => return internal_failure("Unable to persist feeder request", error),
     }
 
-    // The UUID intent is durable before this command. No code path resends a
-    // persisted pending UUID, including after gateway restart.
     if let Err(error) = state.openhab.command_feeder_request(request_id).await {
         return internal_failure(
             "OpenHAB feeder command failed after durable intent; outcome is ambiguous",
@@ -422,6 +415,7 @@ mod tests {
                 url: "http://127.0.0.1:8080/".to_owned(),
                 request_item: "GoatFeeder_ManualRequest".to_owned(),
                 ack_item: "GoatFeeder_Result".to_owned(),
+                request_payload_template: "{request_id}".to_owned(),
                 override_item: "FeederOverride".to_owned(),
                 remote_enabled_item: "LightningGoatsRemoteEnabled".to_owned(),
                 temperature_item: None,

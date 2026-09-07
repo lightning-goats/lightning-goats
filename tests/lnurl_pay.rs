@@ -75,9 +75,7 @@ fn addresses() -> Vec<LightningAddressConfig> {
         .collect()
 }
 
-async fn service(
-    state: StrikeMockState,
-) -> (TempDir, LnurlService) {
+async fn service(state: StrikeMockState) -> (TempDir, LnurlService) {
     let base_url = spawn_strike_mock(state).await;
     let directory = TempDir::new().unwrap();
     let ledger = LedgerStore::connect(&format!(

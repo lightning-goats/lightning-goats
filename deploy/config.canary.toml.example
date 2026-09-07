@@ -1,5 +1,5 @@
 # Non-secret Lightning Goats canary configuration.
-# Use a separate database and a harmless OpenHAB counter/test rule.
+# Use a separate database and a harmless feeder counter/test path.
 # Canary mode allows feeder-rule invocation but never enables Nostr signing/publication.
 
 [service]
@@ -9,10 +9,16 @@ mode = "canary"
 [database]
 url = "sqlite:///var/lib/lightning-goats/lightning-goats-canary.db"
 
+# Transitional CLN compatibility only; removed by Phase 1 issue #13.
 [lightning]
 clnrest_url = "https://127.0.0.1:3010"
 clnrest_ca_certificate = "/etc/lightning-goats/clnrest-ca.pem"
 herd_user = "herd-canary"
+
+# Use Strike sandbox (`https://api.dev.strike.me/`) when available, otherwise a
+# receive/read-only production key with tiny canary amounts.
+[strike]
+api_url = "https://api.dev.strike.me/"
 
 [feeder]
 threshold_sats = 1000
@@ -27,7 +33,6 @@ temperature_item = "AmbientWeatherWS2902A_WeatherDataWs2902a_Temperature"
 
 [nostr]
 # Canary mode does not construct NakClient and does not read nostr-client-key.
-# These non-secret fields remain syntactically valid so the same config schema is used.
 nak_path = "/usr/local/bin/nak"
 nak_config_path = "/run/lightning-goats-canary/nak"
 bunker_pubkey = "0000000000000000000000000000000000000000000000000000000000000000"

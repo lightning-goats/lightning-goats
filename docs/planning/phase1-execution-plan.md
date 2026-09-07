@@ -12,10 +12,11 @@ Replace the production LNbits/Core Lightning path with a small standalone `light
 - individual goat Lightning Addresses: `dexter`, `rowan`, `cosmo`, `newton`, `nova`;
 - Strike-backed Lightning receive requests;
 - durable exactly-once feed-credit accounting;
-- the existing feeder and `FeederOverride` safety behavior, strengthened by an in-house feeder gateway and local OpenHAB command/ack safeguards;
+- the existing feeder and `FeederOverride` safety behavior, strengthened by an in-house integration gateway and local OpenHAB command/ack safeguards;
 - payment-received and feeder-triggered Nostr messages;
 - the production video overlay;
-- informational/interface/weather messages on the overlay only.
+- informational/interface/weather messages on the overlay only;
+- the existing weather message behavior sourced from the in-house weather receiver.
 
 Phase 1 intentionally excludes CyberHerd membership, headbutts, NIP-05 verification, rewards/distributions, and spend-capable Lightning/Strike authority.
 
@@ -23,11 +24,26 @@ Phase 1 intentionally excludes CyberHerd membership, headbutts, NIP-05 verificat
 
 Build the replacement stack on a **new VPS in parallel** with the current production VPS. The old VPS stays authoritative until the replacement passes the full verification matrix.
 
-The new VPS receives its own WireGuard identity during staging. Existing WireGuard clients continue using the old VPS while testing proceeds. At production cutover, client peer configuration is changed to the new VPS public key/endpoint (unless the operator explicitly chooses a different topology).
+Reuse the established WireGuard network:
 
-For the Lightning Goats application-to-home feeder path, prefer a dedicated WireGuard interface/key/subnet or equivalently strong per-peer firewall isolation. The VPS must not have generic OpenHAB/LAN access.
+```text
+10.8.0.0/24
+```
 
-Do not reuse the old VPS WireGuard private key while both hosts are online.
+Known nodes:
+
+```text
+10.8.0.1   existing production VPS / WireGuard hub
+10.8.0.6   in-house OpenHAB + weather host
+```
+
+The new VPS receives its own WireGuard keypair and an unused temporary `10.8.0.x` address during staging. Existing WireGuard clients continue using the old VPS while testing proceeds.
+
+Do not reuse the old VPS WireGuard private key and do not assign `10.8.0.1` to the new VPS while both hosts are online.
+
+Preferred production cutover preserves `10.8.0.1` as the hub address: stop old WireGuard first, then move the reviewed hub configuration/address to the new VPS while clients update the hub public key and Internet endpoint. See `docs/deployment/wireguard-topology.md`.
+
+The VPS must not have generic OpenHAB/LAN access. The only normal application path to `10.8.0.6` is the dedicated in-house Lightning Goats integration gateway port.
 
 Production DNS remains pointed at the old VPS until the new stack is accepted.
 
@@ -68,7 +84,7 @@ It must:
 - receive only the runtime credentials required by `lightning-goatsd`;
 - run via a system-level systemd service using `User=lightning-goats`.
 
-It must **not** receive an OpenHAB token. OpenHAB credentials live only on the trusted in-house feeder gateway.
+It must **not** receive an OpenHAB token. OpenHAB credentials live only on the trusted in-house integration gateway.
 
 Do not run Codex as the production runtime identity.
 
@@ -82,16 +98,17 @@ The GitHub issues are the executable work queue.
 4. #18 — configured registry for herd + five individual goat Lightning Addresses.
 5. #10 — Phase 1 message templates.
 6. #11 — templated durable events to Nostr + overlay.
-7. #12 — CyberHerd-ready service/event boundaries.
-8. #17 — in-house OpenHAB feeder gateway + dedicated WireGuard/UFW boundary.
-9. #13 — remove CLN/LNbits/clnaddress runtime assumptions.
-10. #14 — VPS/nginx/WireGuard/credential hardening.
-11. #19 — domain/DNS, SSH, deployment provenance and operational Strike balance hardening.
-12. #20 — LNURL/webhook abuse controls.
-13. #15 — full end-to-end verification matrix.
-14. #16 — production cutover and rollback runbook.
+7. #21 — preserve weather overlay behavior through the sanitized in-house gateway path.
+8. #12 — CyberHerd-ready service/event boundaries.
+9. #17 — in-house OpenHAB/weather integration gateway + WireGuard/UFW boundary.
+10. #13 — remove CLN/LNbits/clnaddress runtime assumptions.
+11. #14 — VPS/nginx/WireGuard/credential hardening.
+12. #19 — domain/DNS, SSH, deployment provenance and operational Strike balance hardening.
+13. #20 — LNURL/webhook abuse controls.
+14. #15 — full end-to-end verification matrix.
+15. #16 — production cutover and rollback runbook.
 
-Issues #10, #12, #17, #19 and much of #14 may proceed in parallel with the payment work. #18 follows the generic LNURL work in #9. #16 is gated on #15 and the completion/operator acceptance of the security-boundary issues.
+Issues #10, #12, #17, #19, #21 and much of #14 may proceed in parallel with the payment work. #18 follows the generic LNURL work in #9. #16 is gated on #15 and the completion/operator acceptance of the security-boundary issues.
 
 ## Phase 1 architecture invariants
 
@@ -106,12 +123,41 @@ Issues #10, #12, #17, #19 and much of #14 may proceed in parallel with the payme
 - `lightning-goatsd` holds no OpenHAB token and has no generic OpenHAB REST access.
 - Local OpenHAB safety rules enforce remote-enable, `FeederOverride`, duplicate suppression, minimum physical-feed interval and an absolute safety/feed cap.
 - An ambiguous physical feeder outcome becomes `unknown` and is never automatically retried with a new actuation.
+- The VPS cannot connect directly to the legacy weather receiver on `10.8.0.6:5000`; weather is obtained only through sanitized gateway `/v1/weather`.
+- Weather is presentation-only and never enters the Nostr outbox.
 - Presentation failures never roll back or duplicate financial/feed state.
 - Payment and feeder messages go to Nostr + overlay.
 - Informational/interface/weather messages go to overlay only.
 - Nostr signing remains isolated through `nak`/NIP-46.
 - Public LNURL callback and webhook ingress is method/body/rate constrained.
 - No production LNbits, CLNRest, Core Lightning, `clnaddress`, or CLN `pay_index` dependency remains after cutover.
+
+## Weather compatibility
+
+Behavioral references:
+
+```text
+lightning-goats/middlware/weather.py
+lightning-goats/lightning_goats_extension/services/weather.py
+lightning-goats/lightning_goats_extension/services/messaging.py
+```
+
+Current weather read source:
+
+```text
+http://10.8.0.6:5000/get_received_data
+```
+
+The gateway on/trusted to `10.8.0.6` reads this locally and exposes only normalized `/v1/weather` to the VPS.
+
+Preserve the Lightning Goats extension defaults as configurable starting behavior:
+
+```text
+weather evaluation interval = 60 seconds
+broadcast probability        = 0.30
+```
+
+See `docs/architecture/weather-overlay.md`.
 
 ## Staging milestones
 
@@ -122,8 +168,9 @@ Issues #10, #12, #17, #19 and much of #14 may proceed in parallel with the payme
 - temporary sudo enabled;
 - Codex and Rust toolchain installed;
 - repo cloned;
-- new VPS added to WireGuard with its own keypair;
-- dedicated/narrow feeder application tunnel design prepared;
+- live `10.8.0.0/24` peer/address inventory captured;
+- new VPS added to the existing WireGuard network with its own keypair and unused temporary `10.8.0.x` address;
+- final future hub config for `10.8.0.1` prepared separately but not activated;
 - no production DNS changes;
 - no final production secrets installed.
 
@@ -144,21 +191,25 @@ Issues #10, #12, #17, #19 and much of #14 may proceed in parallel with the payme
 
 ### M3 — Production-visible behavior reproduced
 
-- #10 and #11 merged;
+- #10, #11 and #21 merged;
 - fun goat-fact payment messages work;
 - feeder-trigger messages work;
 - Nostr durable outbox works;
 - overlay reconnect/replay works;
-- informational messages are overlay-only.
+- informational messages are overlay-only;
+- sanitized weather messages reproduce the existing Lightning Goats extension style;
+- direct VPS access to `10.8.0.6:5000` remains blocked.
 
-### M4 — Feeder security boundary established
+### M4 — In-house security boundary established
 
 - #17 complete;
 - dedicated OpenHAB integration USER/token exists only on trusted gateway host;
-- VPS can reach feeder gateway but cannot reach generic OpenHAB REST/admin/LAN services;
+- gateway on `10.8.0.6` (or explicitly approved adjacent host) is the only application ingress from VPS;
+- VPS can reach gateway but cannot reach generic OpenHAB REST/admin, weather port 5000, SSH or unrelated LAN services;
 - request UUID/ack path works;
 - duplicate UUID does not actuate twice;
-- local physical safety gates are authoritative.
+- local physical safety gates are authoritative;
+- `/v1/weather` is read-only/sanitized and cannot expose legacy `/weather` mutation.
 
 ### M5 — Legacy runtime removed and host hardened
 
@@ -179,6 +230,7 @@ Issues #10, #12, #17, #19 and much of #14 may proceed in parallel with the payme
 - tiny real Strike payment succeeds on staging path;
 - exactly-once ledger event and address metadata verified;
 - Nostr + overlay verified;
+- weather overlay path verified through gateway;
 - harmless/simulated feeder gateway path verified;
 - controlled physical feeder test verified with duplicate UUID replay protection;
 - negative trusted-network reachability tests pass.
@@ -186,6 +238,14 @@ Issues #10, #12, #17, #19 and much of #14 may proceed in parallel with the payme
 ### M7 — Production cutover
 
 Execute #16 only after operator approval.
+
+Preferred WireGuard portion of cutover:
+
+1. stop old VPS WireGuard and verify `10.8.0.1` is no longer active;
+2. activate new hub configuration using `10.8.0.1/24` on new VPS;
+3. repoint existing clients to the new VPS public key/public endpoint while preserving client keys/addresses;
+4. replace temporary staging UFW allowances on `10.8.0.6` with final production source `10.8.0.1` gateway-only rule;
+5. remove temporary staging WireGuard address/rules.
 
 ## Required verification commands
 
@@ -205,6 +265,7 @@ Codex must stop and require operator action before:
 
 - changing production DNS;
 - changing existing clients to the new WireGuard hub;
+- stopping old hub/assigning `10.8.0.1` to the new VPS;
 - disabling the old production VPS;
 - installing/rotating final production secrets if broad temporary sudo is still present;
 - releasing the local OpenHAB remote-enable/`FeederOverride` gates for a real physical feed;

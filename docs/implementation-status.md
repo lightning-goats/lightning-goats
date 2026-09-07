@@ -4,130 +4,63 @@ Last implementation update: 2026-09-07.
 
 Tracker: https://github.com/lightning-goats/lightning-goats/issues/6
 
-## Current direction
+Deployment handoff: [`docs/deployment/codex-handoff.md`](deployment/codex-handoff.md)
 
-The earlier CLNRest + `clnaddress` production cutover design has been superseded.
+## Target now implemented in the Phase 1 PR stack
 
-The approved Phase 1 target is now:
-
-- native Lightning Address / LNURL-pay endpoints in `lightning-goatsd`;
-- configured Lightning Addresses for `herd`, `dexter`, `rowan`, `cosmo`, `newton`, and `nova`;
-- all configured Phase 1 addresses credit the same `herd` feeder pool while preserving the actual paid `address_user`;
-- Strike API as the only Lightning/payment backend;
-- receive/read-only Strike authority only;
-- no LNbits production dependency;
-- no Core Lightning / CLNRest / `clnaddress` production dependency;
-- no OpenHAB API token on the public VPS;
-- a narrow in-house feeder gateway with a dedicated OpenHAB USER/token, request UUID/ack protocol, local duplicate suppression, `FeederOverride`, remote-enable, minimum interval and safety/feed-cap enforcement;
-- dedicated WireGuard/UFW containment so the VPS can reach only the required feeder gateway rather than general OpenHAB/LAN services;
-- existing durable feed accounting, Nostr outbox, and video overlay preserved;
-- payment and feeder messages rendered from the existing fun goat-fact template style;
-- informational/interface/weather messages sent to the overlay only;
-- public `lightning-goats.com` static site served by the new VPS, with NIP-05/legacy LNbits UI removed and Phase-2-only leaderboard disabled until CyberHerd returns;
-- public LNURL/webhook abuse controls;
-- domain/DNS, SSH, deployment provenance, and operational Strike-balance hardening before cutover;
-- clean Phase 2 seam for future CyberHerd functionality.
-
-See `docs/README.md` for the canonical documentation set.
-
-## Implemented / in review
-
-- #7 backend-neutral payment/ledger domain: implemented and merged via PR #22.
-- #8 receive-only Strike integration and settlement reconciliation: implemented; mainline PR #24 is green and ready for review.
-- #9 + #18 native LNURL-pay and the six-address registry: implemented in PR #25; CI and Security are green and the PR is ready for review.
-- #10 + #11 deterministic data-driven payment/feeder/interface templates and shared Nostr/overlay rendering: implemented in draft PR #27; CI/Security are the current gate.
-- #26 public-site migration/simplification: requirements documented; authoritative current `index.html` and assets must be copied from the old VPS into the repo during new-VPS staging before modification/deployment.
-
-## Existing implementation that should be preserved
-
-The repository already contains substantial reusable Phase 1 functionality:
-
-- Rust service with `#![forbid(unsafe_code)]`;
-- durable SQLite database using WAL, `synchronous=FULL`, foreign keys, and migrations;
-- feed-credit ledger;
-- serialized multi-threshold feed accounting;
-- persistent feed intents;
-- ambiguous/interrupted feed handling that blocks automatic retry;
-- local operator feed reconciliation;
-- durable event log;
-- read-only overlay WebSocket with snapshot/replay/sequence behavior;
-- read-only health/status endpoints;
-- NIP-46/`nak` signing adapter;
-- transactional signed-event Nostr outbox;
-- exact signed-event retry semantics;
-- shadow/canary/active safety concepts;
-- hardened system-level systemd unit examples;
-- release workflow and locked Rust verification gates.
-
-These are assets to refactor around, not reasons to preserve the CLN-specific payment ingress or direct OpenHAB credential placement.
-
-## CLN/LNbits-specific implementation to retire
-
-Once the Strike/LNURL path is merged and verified, remove or migrate away from:
-
-- `src/cln/`;
-- `invoice_watcher` / CLNRest `waitanyinvoice`;
-- CLN `pay_index` cursor/startup requirement;
-- `clnaddress:v1:*` label classification;
-- CLN rune/TLS credential requirements;
-- `lightning-goatsctl init-cursor`;
-- CLN-specific database columns/tables where no longer useful;
-- production deployment/runbook assumptions requiring LNbits, CLNRest, Core Lightning, or `clnaddress`.
-
-Issue #13 tracks this cleanup.
-
-## Direct OpenHAB integration to replace
-
-The current Rust client directly reads OpenHAB Items and executes a rule. That implementation is no longer the approved production trust boundary.
-
-Issue #17 replaces production direct access with:
+The final Phase 1 runtime is:
 
 ```text
-lightning-goatsd (VPS, no OpenHAB token)
-    -> narrow WireGuard/UFW path
-    -> in-house feeder gateway
-    -> dedicated OpenHAB USER/token
-    -> dedicated request/ack Items and local safety rule
+Internet
+  -> nginx/TLS + static lightning-goats.com on new VPS
+  -> lightning-goatsd on 127.0.0.1
+       -> Strike receive/read only
+       -> native LNURL-pay / six Lightning Addresses
+       -> durable SQLite feed accounting
+       -> NIP-46/NAK Nostr publishing
+       -> overlay websocket
+       -> narrow GatewayClient
+  -> WireGuard 10.8.0.0/24
+       -> 10.8.0.6:8789 lightning-goats-gateway
+            -> dedicated OpenHAB USER token
+            -> existing correlated feeder owner
+            -> local feeder safety/rate history
+            -> localhost weather read
 ```
 
-The existing durable `unknown`/no-blind-retry feeder behavior must be preserved and strengthened by local duplicate UUID suppression.
+There is no intended production runtime dependency on LNbits, Core Lightning, CLNRest, `clnaddress`, a CLN rune, or a VPS-side OpenHAB token.
 
-## Remaining Phase 1 work queue
+## Implementation / PR stack
 
-- [ ] #12 CyberHerd-ready service/event boundaries
-- [ ] #17 Narrow OpenHAB feeder gateway + dedicated WireGuard/UFW boundary
-- [ ] #21 Weather overlay compatibility through the in-house gateway
-- [ ] #26 Migrate/simplify public `lightning-goats.com` site
-- [ ] #13 Remove CLN/LNbits/clnaddress runtime assumptions
-- [ ] #14 Harden new VPS/nginx/WireGuard/credentials
-- [ ] #19 Harden domain/DNS, SSH, deployment provenance, and operational Strike balance
-- [ ] #20 Public LNURL/webhook abuse controls
-- [ ] #15 End-to-end verification matrix
-- [ ] #16 Production cutover and rollback runbook execution
+- **#7 backend-neutral ledger** — implemented and merged in PR #22.
+- **#8 Strike receive/reconciliation** — implemented in PR #24; CI/Security green and ready for review.
+- **#9 + #18 native LNURL-pay + six-address registry** — implemented in PR #25; CI/Security green and ready for review.
+- **#10 + #11 Phase 1 templates + Nostr/overlay fan-out** — implemented in PR #27; deterministic data-driven rendering, Nostr/overlay audience separation, and durable outbox semantics preserved.
+- **#17 + #21 trusted OpenHAB/weather gateway** — implemented in PR #28; CI cleanup/final verification is the current gate.
+- **#13 remove CLN/LNbits runtime compatibility** — implemented in PR #29; makes Strike/LNURL mandatory, removes CLN source/config/secrets/cursor/watcher, and adds an upgrade migration dropping obsolete CLN tables. CI cleanup/final verification is the current gate.
+- **Deployment handoff / final documentation** — `phase1/deployment-handoff`; includes Codex handoff, host preflights and final documentation consistency work.
+- **#26 public-site migration** — requirements are implemented as a deployment plan, but the actual current production `index.html` and assets intentionally cannot be finalized from GitHub alone. Codex must copy the authoritative source from the old VPS during staging, commit/review it under `web/`, and apply the documented Phase 1 edits.
 
-## Deployment state
+Do not merge or deploy a stacked child PR while its required parent changes are absent from the target branch.
 
-Approved deployment method:
+## Durable financial/feeder invariants
 
-1. provision a new VPS;
-2. add it to the existing `10.8.0.0/24` WireGuard network using a **new WireGuard keypair/peer identity** and temporary unused `10.8.0.x` address;
-3. create a separate Codex/deployment Unix account with temporary sudo;
-4. implement/test the replacement stack on the new VPS in parallel while old `10.8.0.1` and production DNS remain authoritative;
-5. copy the authoritative existing `lightning-goats.com` static source/assets from the old VPS into this repository, then apply #26 changes and stage them on the new VPS;
-6. build the in-house feeder/weather gateway and dedicated OpenHAB integration identity/token without copying that token to the VPS;
-7. run production `lightning-goatsd` as a system-level systemd service under a separate non-admin runtime account;
-8. capture privileged host configuration in reviewed/reproducible repo assets where practical;
-9. revoke/narrow broad deploy/Codex sudo before final production secrets/cutover;
-10. harden SSH/domain/DNS/public ingress and record deployment provenance;
-11. pass the complete verification matrix in `docs/testing/phase1-verification-matrix.md`;
-12. with explicit operator approval, stop old hub WireGuard, move the new hub to `10.8.0.1` if retaining that address, update clients to the new hub key/Internet endpoint, and switch production DNS;
-13. verify the public site, all six Lightning Addresses, one tiny real payment, Nostr + overlay presentation, weather, and a controlled gateway-mediated feeder cycle;
-14. keep the old VPS intact as rollback/archive during an observation period;
-15. retire/destroy the old VPS only after successful observation and backup verification.
+Implemented behavior includes:
 
-## Phase 1 Lightning Address scope
+- provider-neutral `(source, source_id)` settlement identity;
+- payment-hash collision protection;
+- exact duplicate delivery is idempotent;
+- non-sat-aligned settlement is rejected rather than truncated;
+- settlement + `HERD_RECEIPT` + `payment_received` event is atomic;
+- shared `herd` credit pool while preserving `address_user`;
+- serialized feed intents and multi-threshold drain;
+- `2340 sats -> 2 confirmed feeds -> 340 sats remainder` behavior;
+- interrupted/ambiguous physical action becomes `unknown` and blocks automatic retry;
+- operator reconciliation never directly actuates the feeder.
 
-Required addresses:
+## Strike / Lightning Address boundary
+
+Required configured addresses:
 
 ```text
 herd@lightning-goats.com
@@ -138,109 +71,126 @@ newton@lightning-goats.com
 nova@lightning-goats.com
 ```
 
-All six use `credit_pool=herd` while preserving `address_user`.
+All six use `credit_pool=herd` and preserve the actual user. Unknown users and invalid/non-whole-sat callback amounts fail before provider contact.
 
-Nginx can route generic LNURL user paths, but the application registry is authoritative. Unknown users fail before provider contact.
+Runtime Strike credential scope is receive/read only. Webhook-management authority is separate and temporary. A webhook is only a signed notification; authoritative receive state is fetched from Strike before durable credit.
 
-See `docs/architecture/lightning-address-registry.md`.
+## Trusted physical/weather boundary
 
-## Phase 1 message scope
-
-Only these presentation categories are implemented:
-
-- `sats_received` — payment-received goat-fact templates;
-- `feeder_trigger` — feeder-trigger goat-fact templates;
-- `interface_info` — overlay-only informational templates;
-- `weather_status` — overlay-only preformatted weather messages (construction/polling remains #21).
-
-Audience:
+The approved production boundary is implemented in the gateway code:
 
 ```text
-payment_received  -> Nostr + overlay
-feeder_confirmed  -> Nostr + overlay
-interface_info    -> overlay only
-weather_status    -> overlay only
+lightning-goatsd (VPS; no OpenHAB token)
+    -> source-restricted WireGuard/UFW path
+    -> 10.8.0.6:8789 lightning-goats-gateway
+    -> dedicated OpenHAB USER token on trusted host only
+    -> existing correlated feeder owner + sanitized local weather
 ```
 
-Template/goat selection is deterministic from the durable event identity so restart/retry renders the same presentation. Individual goat-address payments use the paid goat. Nostr uses goat Nostr profile mentions; the overlay uses human-readable names/image metadata.
+The gateway:
 
-See `docs/architecture/phase1-messaging.md`.
+- persists the feeder UUID before issuing any command;
+- never automatically resends a pending/ambiguous UUID;
+- accepts an authoritative ack only when it matches the request UUID and reports explicit successful/completed outcome;
+- supports a tightly validated `{request_id}` request payload template so deployment can bind to the exact live `GoatFeeder_ManualRequest` contract;
+- enforces a local minimum feed interval and rolling feeds-per-hour cap in addition to the existing OpenHAB owner policy;
+- fails closed on `FeederOverride`, `LightningGoatsRemoteEnabled`, malformed result state, OpenHAB failure, or unavailable trusted state;
+- reads weather only from `http://127.0.0.1:5000/get_received_data` and never exposes the legacy mutating `/weather` endpoint.
 
-## Public website scope
+The live OpenHAB feeder owner must be inspected during deployment to resolve the exact correlated result Item and request JSON format. This is environment binding, not unfinished architecture.
 
-Issue #26 owns migration of the current production site to the new VPS. The original production `index.html`/assets should be copied from the old VPS rather than reconstructed from the public rendering.
+## Messaging / presentation
 
-Phase 1 removes NIP-05 verification and legacy LNbits/CyberHerd requests. Contact becomes a Nostr DM/pubkey path using an operator-confirmed public key. The live CyberHerd leaderboard is hidden/disabled until Phase 2. Live stream and Nostr chat should remain where independent of retired services.
+Implemented Phase 1 presentation categories:
 
-See `docs/deployment/public-site-migration.md`.
+```text
+payment_received -> sats_received  -> Nostr + overlay
+feeder_confirmed -> feeder_trigger -> Nostr + overlay
+interface_info   -> overlay only
+weather_status   -> overlay only
+```
 
-## Security hardening state
+Template and goat selection are deterministic from durable event identity so restart/retry gives the same presentation. Individual goat-address payments use the paid goat. Nostr gets goat Nostr references; the overlay gets display names and image metadata.
 
-Required before production:
+The informational scheduler preserves the current implementation behavior:
 
-- #17 physical feeder/OpenHAB boundary;
-- #14 VPS/network/credential/systemd hardening;
-- #19 domain/DNS/SSH/deployment provenance/operational balance controls;
-- #20 public LNURL/webhook abuse controls;
-- #15 functional/security verification matrix.
+- default interval 60 seconds;
+- interface-info unconditional probability 0.40;
+- weather unconditional probability 0.40;
+- interface-info considered first;
+- at most one informational message per cycle.
 
-Canonical controls are documented in:
+## Public website
 
-- `docs/security/phase1-threat-model.md`;
-- `docs/security/openhab-feeder-gateway.md`;
-- `docs/security/phase1-hardening-checklist.md`;
-- `docs/testing/phase1-verification-matrix.md`.
+Issue #26 is a deployment-time migration because the authoritative page exists on the old VPS rather than in this repository.
 
-## Phase 2 boundary
+During staging Codex must copy the current source/assets into `web/`, then:
 
-Phase 1 must remain extensible so CyberHerd can later be implemented either as:
+- remove NIP-05 Verify UI/modal/iframe and all legacy NIP-05/LNbits calls;
+- hide/disable the Phase-2 CyberHerd leaderboard and all legacy CyberHerd requests;
+- keep live stream and Nostr chat where independent of retired services;
+- keep browser-extension signing; never request raw nsec;
+- replace email contact with an operator-confirmed Nostr DM/pubkey path;
+- use native Lightning Address/LNURL payment paths;
+- retain zap controls only when the replacement invoice flow is verified independent of LNbits/CLN.
 
-- a separate service such as `cyberherdd`; or
-- an internal module in the Lightning Goats codebase.
+## Deployment artifacts present
 
-Do not grant spend-capable Strike authority to `lightning-goatsd` in anticipation of Phase 2. If future rewards require outbound payments, prefer a separately privileged payout component.
+The Phase 1 branches contain:
 
-Future CyberHerd logic must not bypass the feeder gateway or gain direct OpenHAB credentials.
+- production/canary `lightning-goatsd` configs and systemd units;
+- production/canary trusted gateway configs and systemd units;
+- nginx production/canary route examples and public ingress rate limits;
+- source-specific trusted-host UFW template;
+- `deploy/checks/gateway-preflight.sh`;
+- `deploy/checks/vps-preflight.sh`;
+- parallel staging, WireGuard, hardening, website, verification, cutover and rollback docs;
+- `docs/deployment/codex-handoff.md` as the deployment entry point.
 
-See `docs/architecture/cyberherd-phase2-boundary.md`.
+Neither preflight performs a physical feeder action.
 
-## Required locked Rust gate
+## Work that remains by design for Codex / operator deployment
 
-Run for implementation changes:
+The remaining tasks require live host/account state rather than more architectural design:
+
+1. provision the new VPS and inventory an unused staging `10.8.0.x` address;
+2. install the reviewed binaries/units/nginx/WireGuard configuration;
+3. create the dedicated OpenHAB USER/token on the trusted host;
+4. inspect the live feeder owner and bind its exact result Item/request payload in gateway config;
+5. create/verify the remote-enable and harmless canary Items/rule;
+6. apply and verify source-specific UFW containment;
+7. configure Strike sandbox, then production receive/read credentials and webhook;
+8. configure the existing NIP-46 client values;
+9. copy and modify the authoritative public website source;
+10. execute the full staging matrix and produce the deployment evidence report;
+11. revoke/narrow temporary Codex/deploy sudo before final production secrets/cutover;
+12. obtain explicit operator approval for production WireGuard/DNS switch and the one controlled physical feeder canary;
+13. observe production before retiring the old VPS.
+
+## Operator gates
+
+Do not execute without explicit operator direction:
+
+- stop old production WireGuard;
+- move/reassign `10.8.0.1` or repoint production clients;
+- change production DNS;
+- enable a physical feeder request from the new stack;
+- change safety limits or the operator-defined Strike balance ceiling;
+- grant spend-capable Strike authority;
+- destroy old VPS state/backups/CLN recovery material.
+
+## Required software gate
 
 ```sh
 cargo fmt --all --check
 cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo test --locked --all-features
-```
-
-Security audit gate:
-
-```sh
 cargo tree -i rsa --locked
 cargo audit --ignore RUSTSEC-2023-0071
 ```
 
-`RUSTSEC-2023-0071` should only remain ignored while `rsa` is unreachable from the active application dependency graph. Remove the exception when the dependency resolution permits it. If `rsa` becomes reachable, fail the security gate rather than relying on the ignore.
+`RUSTSEC-2023-0071` may remain ignored only while `rsa` is unreachable from the active application dependency graph. If `rsa` becomes reachable, fail the security gate rather than relying on the exception.
 
-## Definition of done
+## Deployment gate
 
-Phase 1 is complete when:
-
-- all six configured Lightning Addresses resolve natively through LNURL-pay;
-- unknown users fail closed before provider contact;
-- Strike is the only Lightning backend;
-- a completed receive is independently reconciled and credited exactly once with correct recipient metadata;
-- `lightning-goatsd` has no OpenHAB token/direct generic OpenHAB access;
-- feeder threshold/remainder/ambiguity semantics are preserved through the narrow gateway;
-- duplicate feeder request UUID cannot actuate twice;
-- local OpenHAB physical safety gates are verified;
-- payment and feeder events produce the intended Nostr + overlay messages;
-- informational/weather messages are overlay-only;
-- the migrated static website is live from the new VPS without legacy NIP-05/LNbits/CyberHerd requests;
-- public ingress/network/SSH/domain/deployment hardening checks pass;
-- an operator-approved operational Strike balance ceiling/sweep policy is active;
-- the new VPS passes the full staging matrix;
-- production WireGuard/DNS cutover has been performed using the runbook;
-- LNbits/CLN/clnaddress are no longer in the live production payment path;
-- old VPS state and CLN recovery material are archived as required.
+A deployment is not ready for cutover until both preflights and every mandatory item in `docs/testing/phase1-verification-matrix.md` pass and the evidence package required by `docs/deployment/codex-handoff.md` is complete.

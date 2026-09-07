@@ -149,11 +149,17 @@ Test:
 - restart after intent but before ack;
 - unresolved feed blocks subsequent automatic feed.
 
-## 7. OpenHAB feeder gateway
+## 7. In-house integration gateway / OpenHAB
 
 Follow `docs/security/openhab-feeder-gateway.md`.
 
-### Positive path
+Production host context:
+
+```text
+10.8.0.6   OpenHAB/weather/integration host
+```
+
+### Positive feeder path
 
 - gateway health reachable from VPS;
 - override read works;
@@ -194,27 +200,90 @@ Requirement:
 - later same-UUID acknowledgement may reconcile safely;
 - otherwise operator reconciliation required.
 
-## 8. WireGuard / UFW containment
+## 8. Weather overlay compatibility
 
-From new VPS verify expected positive path:
+Follow `docs/architecture/weather-overlay.md` and issue #21.
 
-```text
-feeder-gateway-host:gateway-port -> reachable
-```
-
-Verify negative paths are blocked:
+Existing trusted source:
 
 ```text
-OpenHAB REST/admin port          -> blocked
-trusted host SSH                 -> blocked unless explicitly approved
-PostgreSQL                       -> blocked
-unrelated LAN hosts              -> blocked
-unrelated WireGuard peers        -> blocked unless explicitly approved
+http://10.8.0.6:5000/get_received_data
 ```
 
-If the VPS is also a WireGuard hub, verify routed peer traffic separately from local-process-originated traffic.
+But the VPS must use only:
 
-## 9. Messaging
+```text
+integration gateway GET /v1/weather
+```
+
+Verify:
+
+- gateway can read the legacy weather source locally/trusted-side;
+- normalized response includes correct available temperature/humidity/wind/UV and optional pressure/rain/solar values;
+- invalid types/out-of-range fields are rejected/omitted safely;
+- empty response is safe;
+- malformed response is safe;
+- stale response policy is enforced when timestamp parsing is available;
+- weather failure does not affect payment/feed state;
+- weather scheduler interval is configurable (initial default 60 seconds);
+- broadcast probability is configurable (initial default 0.30);
+- deterministic tests control randomness;
+- `weather_status` renders in the expected `🌤️ Weather Update:` style;
+- `weather_status` goes to overlay only;
+- weather never enters Nostr outbox.
+
+Security negative checks:
+
+```text
+VPS -> 10.8.0.6:5000                     blocked
+VPS -> legacy /weather mutation           impossible
+VPS -> generic weather proxy path         nonexistent
+```
+
+## 9. WireGuard / UFW containment
+
+Existing network:
+
+```text
+10.8.0.0/24
+10.8.0.1 = old production hub during staging
+10.8.0.6 = in-house integration/OpenHAB/weather host
+```
+
+### Staging
+
+Verify:
+
+- new VPS has a new WireGuard keypair;
+- new VPS uses an inventoried unused temporary `10.8.0.x` address;
+- new VPS does not claim `10.8.0.1`;
+- old production clients continue using old hub;
+- gateway port on `10.8.0.6` is reachable from staging source.
+
+Verify negative paths from staging VPS:
+
+```text
+10.8.0.6:5000                    blocked
+OpenHAB REST/admin               blocked
+trusted-host SSH                 blocked unless explicitly approved
+PostgreSQL                       blocked
+unrelated LAN hosts              blocked
+unrelated WireGuard peers        blocked unless explicitly approved
+```
+
+### Production hub cutover rehearsal/config check
+
+Without activating it during staging, inspect/validate the prepared production config where the new VPS will assume:
+
+```text
+10.8.0.1/24
+```
+
+Verify the documented procedure requires old hub shutdown before activation.
+
+If the VPS is also a WireGuard router/hub, verify routed peer traffic separately from local-process-originated traffic.
+
+## 10. Messaging
 
 Payment event:
 
@@ -232,10 +301,10 @@ Feeder event:
 
 Informational events:
 
-- visible on overlay;
+- interface/weather visible on overlay;
 - never enter Nostr outbox.
 
-## 10. Nostr durable outbox
+## 11. Nostr durable outbox
 
 Test:
 
@@ -246,7 +315,7 @@ Test:
 
 Requirement: retry publishes the exact persisted signed event; no new event ID is generated for the same logical message.
 
-## 11. Overlay
+## 12. Overlay
 
 Verify:
 
@@ -257,10 +326,10 @@ Verify:
 - multi-feed backlog;
 - payment animation/message;
 - feeder animation only on `feeder_confirmed`;
-- informational queue;
+- informational/weather queue;
 - client messages cannot cause server-side state changes.
 
-## 12. VPS host hardening
+## 13. VPS host hardening
 
 Verify:
 
@@ -275,7 +344,7 @@ Verify:
 - service systemd sandbox settings load successfully;
 - deployed binary SHA-256 matches recorded release artifact.
 
-## 13. Domain / DNS readiness
+## 14. Domain / DNS readiness
 
 Record status of:
 
@@ -291,7 +360,7 @@ Controls unsupported by the provider should be marked `N/A` with rationale.
 
 Do not change production DNS as part of staging tests.
 
-## 14. Operational Strike balance
+## 15. Operational Strike balance
 
 Before production acceptance define and record:
 
@@ -302,28 +371,32 @@ Before production acceptance define and record:
 
 Verify staging/production account balance is below the approved maximum before cutover.
 
-## 15. Parallel VPS real canary
+## 16. Parallel VPS real canary
 
 Before DNS cutover:
 
 1. use staging hostname/direct SNI/hosts override;
-2. resolve all six configured Lightning Addresses;
-3. prove unknown address rejection;
-4. pay one tiny real Strike invoice;
-5. confirm exactly one durable payment credit/event;
-6. verify recipient metadata;
-7. verify Nostr + overlay;
-8. test harmless/simulated feeder gateway path;
-9. with explicit operator approval, perform one controlled physical feed;
-10. replay same feed UUID and prove no second actuation.
+2. verify staging `10.8.0.x` WireGuard peer and gateway-only trusted path;
+3. resolve all six configured Lightning Addresses;
+4. prove unknown address rejection;
+5. pay one tiny real Strike invoice;
+6. confirm exactly one durable payment credit/event;
+7. verify recipient metadata;
+8. verify Nostr + overlay;
+9. fetch/weather-render one sanitized overlay-only weather event;
+10. confirm direct `10.8.0.6:5000` failure;
+11. test harmless/simulated feeder gateway path;
+12. with explicit operator approval, perform one controlled physical feed;
+13. replay same feed UUID and prove no second actuation.
 
-## 16. Cutover gate
+## 17. Cutover gate
 
 Issue #16 may begin only when:
 
 - all required issue #15 checks pass;
-- issues #17, #18, #19 and #20 are complete or explicitly waived by the operator with rationale;
+- issues #17–#21 are complete or explicitly waived by the operator with rationale where applicable;
 - broad Codex/deploy sudo is revoked/narrowed;
 - production secrets/access review is complete;
-- old VPS remains recoverable;
+- old VPS remains recoverable and is still the only active `10.8.0.1` hub;
+- final new-VPS `10.8.0.1` hub config is prepared but inactive;
 - production DNS remains unchanged until operator starts the cutover runbook.

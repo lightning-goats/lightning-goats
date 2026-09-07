@@ -31,12 +31,16 @@ The current read URL is:
 http://10.8.0.6:5000/get_received_data
 ```
 
-The existing Lightning Goats LNbits extension contains the canonical Phase 1 weather normalization/message behavior in:
+The current Lightning Goats LNbits extension contains the canonical Phase 1 weather normalization/message/scheduling behavior in:
 
 ```text
 lightning-goats/lightning_goats_extension/services/weather.py
 lightning-goats/lightning_goats_extension/services/messaging.py
+lightning-goats/lightning_goats_extension/tasks.py
+lightning-goats/lightning_goats_extension/config.py
 ```
+
+Where README/comments disagree with current code constants/behavior, current code is canonical for the migration baseline.
 
 ## Security decision
 
@@ -151,27 +155,43 @@ weather_status -> overlay only
 
 A weather event must never enter the Nostr outbox in Phase 1.
 
-## Scheduling
+## Periodic informational-message scheduling
 
-The existing LNbits Lightning Goats extension documents these defaults:
+The current code defines:
 
 ```text
 DEFAULT_WEATHER_BROADCAST_INTERVAL = 60 seconds
-DEFAULT_WEATHER_BROADCAST_PROBABILITY = 0.3
+DEFAULT_WEATHER_BROADCAST_PROBABILITY = 0.4
 ```
 
-Preserve these as initial defaults unless the operator chooses different values, but make them explicit configuration:
+So the migration baseline is:
 
 ```toml
+[informational]
+interval_seconds = 60
+
 [weather]
 enabled = true
-interval_seconds = 60
-broadcast_probability = 0.30
+broadcast_probability = 0.40
 ```
 
-The scheduler should evaluate at the configured interval and probabilistically emit an informational weather message only when valid current data is available.
+When both interface-info and weather messaging are enabled, current `tasks.py` behavior is:
 
-Tests must use deterministic randomness/selection.
+1. sleep/evaluate once per configured interval;
+2. evaluate interface-info first using the same configured probability;
+3. if interface-info is emitted, send no weather message that cycle;
+4. if interface-info is not emitted, adjust the conditional weather probability so weather still has the configured 40% **unconditional** chance;
+5. emit at most one informational message per cycle.
+
+With the current 0.40 default and both categories enabled, the effective per-cycle outcomes are approximately:
+
+```text
+interface info: 40%
+weather:        40%
+no message:     20%
+```
+
+Preserve this user-visible behavior unless the operator explicitly chooses a new policy. Make interval/probability configuration explicit and make tests deterministic by controlling randomness.
 
 ## WireGuard/UFW
 

@@ -83,7 +83,10 @@ pub async fn run_message_processor(
                 );
             }
             Ok(MessageProcessorStep::NonPublicSkipped { seq }) => {
-                tracing::debug!(seq, "durable event is overlay-only or has no Phase 1 public message");
+                tracing::debug!(
+                    seq,
+                    "durable event is overlay-only or has no Phase 1 public message"
+                );
             }
             Ok(MessageProcessorStep::Enqueued { seq }) => {
                 tracing::info!(seq, "signed Nostr event committed to durable outbox");

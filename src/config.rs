@@ -125,7 +125,8 @@ impl AppConfig {
             bail!("lnurl.invoice_expiry_seconds must be between 1 and 86400 seconds");
         }
 
-        let public_url = Url::parse(&lnurl.public_base_url).context("invalid lnurl.public_base_url")?;
+        let public_url =
+            Url::parse(&lnurl.public_base_url).context("invalid lnurl.public_base_url")?;
         if public_url.scheme() != "https" || public_url.host_str().is_none() {
             bail!("lnurl.public_base_url must use https:// with a host");
         }
@@ -157,7 +158,10 @@ impl AppConfig {
                 bail!("Lightning Address description must contain 1 to 250 characters");
             }
             validate_user(&address.credit_pool).with_context(|| {
-                format!("invalid Lightning Address credit_pool {}", address.credit_pool)
+                format!(
+                    "invalid Lightning Address credit_pool {}",
+                    address.credit_pool
+                )
             })?;
             if address.credit_pool != "herd" {
                 bail!(
@@ -376,14 +380,18 @@ mod tests {
     #[test]
     fn rejects_missing_required_goat_address() {
         let mut config = valid_config();
-        config.lightning_address.retain(|address| address.user != "nova");
+        config
+            .lightning_address
+            .retain(|address| address.user != "nova");
         assert!(config.validate().is_err());
     }
 
     #[test]
     fn rejects_duplicate_goat_address() {
         let mut config = valid_config();
-        config.lightning_address.push(config.lightning_address[0].clone());
+        config
+            .lightning_address
+            .push(config.lightning_address[0].clone());
         assert!(config.validate().is_err());
     }
 

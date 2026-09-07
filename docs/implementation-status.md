@@ -1,157 +1,161 @@
 # Phase 1 Implementation Status
 
-This file tracks the current implementation state while the existing LNbits production stack remains authoritative.
+Last planning update: 2026-09-07.
 
-## Cutover accounting decision
+Tracker: https://github.com/lightning-goats/lightning-goats/issues/6
 
-The standalone Lightning Goats ledger starts at **exactly zero** at production cutover.
+## Current direction
 
-There is no migration or synchronization of the old LNbits herd-wallet balance, and there is no late-LNbits invoice reconciliation. Pre-cutover LNbits state remains historical LNbits state.
+The earlier CLNRest + `clnaddress` production cutover design has been superseded.
 
-The production accounting epoch is established by the explicitly initialized CLN `pay_index` cursor and the switch of `herd@lightning-goats.com` to the canonical `clnaddress` path. Only qualifying settlements with labels matching:
+The approved Phase 1 target is now:
+
+- native Lightning Address / LNURL-pay endpoints in `lightning-goatsd`;
+- Strike API as the only Lightning/payment backend;
+- receive/read-only Strike authority only;
+- no LNbits production dependency;
+- no Core Lightning / CLNRest / `clnaddress` production dependency;
+- existing durable feed accounting and OpenHAB feeder safety preserved;
+- existing durable Nostr outbox and video overlay preserved;
+- payment and feeder messages rendered from the existing fun goat-fact template style;
+- informational/interface/weather messages sent to the overlay only;
+- clean Phase 2 seam for future CyberHerd functionality.
+
+See `docs/README.md` for the canonical documentation set.
+
+## Existing implementation that should be preserved
+
+The repository already contains substantial reusable Phase 1 functionality:
+
+- Rust service with `#![forbid(unsafe_code)]`;
+- durable SQLite database using WAL, `synchronous=FULL`, foreign keys, and migrations;
+- feed-credit ledger;
+- serialized multi-threshold feed accounting;
+- persistent feed intents;
+- ambiguous/interrupted feed handling that blocks automatic retry;
+- local operator feed reconciliation;
+- OpenHAB feeder adapter and `FeederOverride` safety behavior;
+- optional OpenHAB status/temperature reads;
+- durable event log;
+- read-only overlay WebSocket with snapshot/replay/sequence behavior;
+- read-only health/status endpoints;
+- NIP-46/`nak` signing adapter;
+- transactional signed-event Nostr outbox;
+- exact signed-event retry semantics;
+- shadow/canary/active safety concepts;
+- hardened system-level systemd unit examples;
+- release workflow and locked Rust verification gates.
+
+These are assets to refactor around, not reasons to preserve the CLN-specific payment ingress.
+
+## CLN-specific implementation to retire
+
+Once the Strike path is implemented and verified, remove or migrate away from:
+
+- `src/cln/`;
+- `invoice_watcher` / CLNRest `waitanyinvoice`;
+- CLN `pay_index` cursor/startup requirement;
+- `clnaddress:v1:*` label classification;
+- CLN rune/TLS credential requirements;
+- `lightning-goatsctl init-cursor`;
+- CLN-specific database columns/tables where no longer useful;
+- production deployment/runbook assumptions requiring LNbits, CLNRest, Core Lightning, or `clnaddress`.
+
+Issue #13 tracks this cleanup.
+
+## Phase 1 work status
+
+At this planning checkpoint, the new Strike-backed implementation work has not begun.
+
+Open work queue:
+
+- [ ] #7 Backend-neutral payment/ledger domain
+- [ ] #8 Receive-only Strike integration and settlement reconciliation
+- [ ] #9 Native Lightning Address/LNURL-pay endpoints
+- [ ] #10 Port Phase 1 message templates
+- [ ] #11 Wire templates to Nostr + video overlay
+- [ ] #12 CyberHerd-ready service/event boundaries
+- [ ] #13 Remove CLN/LNbits/clnaddress runtime assumptions
+- [ ] #14 Harden new VPS/nginx/WireGuard/credentials
+- [ ] #15 End-to-end verification matrix
+- [ ] #16 Production cutover and rollback runbook execution
+
+## Deployment state
+
+Approved deployment method:
+
+1. provision a new VPS;
+2. add it to the existing WireGuard network using a **new WireGuard keypair/peer identity**;
+3. create a separate Codex/deployment Unix account with temporary sudo;
+4. implement and test the replacement stack on the new VPS in parallel;
+5. keep the old VPS and production DNS authoritative during staging;
+6. run production `lightning-goatsd` as a system-level systemd service under a separate non-admin runtime account;
+7. revoke broad deploy/Codex sudo before final production secrets/cutover;
+8. pass the complete canary/verification matrix;
+9. with explicit operator approval, repoint required WireGuard clients and production DNS to the new VPS;
+10. verify one tiny real payment and controlled feeder cycle;
+11. keep the old VPS intact as rollback/archive during an observation period;
+12. retire/destroy the old VPS only after successful observation and backup verification.
+
+## Phase 1 message scope
+
+Port only:
+
+- `sats_received` — payment-received fun goat-fact templates;
+- `feeder_trigger` — feeder-trigger fun goat-fact templates;
+- informational/interface/weather templates needed by the overlay.
+
+Audience:
 
 ```text
-clnaddress:v1:herd:<uuid>
+payment_received  -> Nostr + overlay
+feeder_confirmed  -> Nostr + overlay
+informational     -> overlay only
 ```
 
-can create feed credit in the new system.
+Do not port CyberHerd membership/headbutt/reward/distribution templates in Phase 1.
 
-Consequences:
+## Phase 2 boundary
 
-- initial `feed_credit_sats = 0`;
-- no LNbits wallet balance import;
-- no LNbits invoice key in the new service stack;
-- no pending-invoice allowlist;
-- no migration timer or grace-period reconciler;
-- an old LNbits invoice that settles after cutover does not create new Lightning Goats feed credit;
-- the old LNbits database may be retained read-only for historical audit, but is outside the new accounting boundary.
+Phase 1 must remain extensible so CyberHerd can later be implemented either as:
 
-## Canonical `clnaddress` dependency
+- a separate service such as `cyberherdd`; or
+- an internal module in the Lightning Goats codebase.
 
-The canonical Lightning Goats fork is:
+Do not grant spend-capable Strike authority to `lightning-goatsd` in anticipation of Phase 2. If future rewards require outbound payments, prefer a separately privileged payout component.
 
-```text
-lightning-goats/clnaddress
-```
+See `docs/architecture/cyberherd-phase2-boundary.md`.
 
-The Phase 1 v1 contract defines:
+## Required locked Rust gate
 
-```text
-clnaddress:v1:<user>:<uuid>
-```
+Run for implementation changes:
 
-and includes strict usernames, per-address min/max policy, LUD-12 comment validation, per-address Nostr policy, protected file-based Zap signer loading, atomic registry/cursor persistence, privacy hardening, and integration tests.
-
-The fork passed its inherited compatibility matrix across CLN 25.09.3, 25.12.1, 26.04, and 26.06.6. Its release workflow publishes binary archives plus `SHA256SUMS`.
-
-## Implemented in `lightning-goatsd`
-
-- Rust 1.88 crate with `#![forbid(unsafe_code)]`.
-- Strict `clnaddress:v1:<user>:<uuid>` invoice classifier.
-- Durable SQLite database with WAL, `synchronous=FULL`, foreign keys, and migrations.
-- Explicit one-time CLN `pay_index` cursor initialization.
-- Atomic paid-invoice recording, herd crediting, event creation, and cursor advancement.
-- Duplicate and out-of-order settlement protection.
-- Durable feed-credit ledger.
-- Serialized multi-threshold feed accounting.
-- Persistent feed intents and confirmed feed debits.
-- Restart reconciliation from interrupted intent to `unknown` without debit.
-- Local-only ambiguous feed reconciliation (`fed` / `not-fed`) with no feeder actuation path.
-- Restricted CLNRest `waitanyinvoice` adapter using a systemd rune credential.
-- CLNRest loopback-only enforcement, verified TLS with optional local CA, and proxy discovery disabled.
-- OpenHAB override reader and automatic feeder adapter with proxy discovery disabled.
-- Optional read-only OpenHAB ambient-temperature item for presentation status.
-- `shadow` mode: observes/accounting only; no feeder actuation and no Nostr.
-- `canary` mode: may invoke only the configured OpenHAB rule; Nostr remains disabled.
-- `active` mode: production feeder plus NIP-46 Nostr processing.
-- Ambiguous OpenHAB outcome fails to `unknown` and never automatically retries.
-- Durable overlay event log.
-- Payment/feed/error events committed atomically with the state changes they describe.
-- Race-free overlay snapshot state and event sequence.
-- Read-only `/ws/overlay` durable replay stream.
-- Read-only `/healthz` and `/api/v1/status` endpoints.
-- Status includes mode, feed credit, feeds due, remainder, unresolved feed ID, feeder override state, and optional temperature.
-- Local operator CLI for cursor initialization/status/feed reconciliation.
-- `nak` NIP-46 signing adapter.
-- Shadow/canary-safe durable Nostr message cursor.
-- Transactional signed-event outbox.
-- Exact signed Nostr event retry rather than re-signing/re-IDing failed publications.
-- Active-mode-only access to the NIP-46 client credential.
-- Hardened production daemon and NIP-46 bunker systemd units.
-- Hardened signer-free canary systemd unit with separate SQLite DB/port.
-- Canary and production nginx configuration examples.
-- Detailed server/canary/cutover runbook.
-- `SECURITY.md` and weekly/PR `cargo audit` workflow.
-- Rust-1.88-generated `Cargo.lock` committed and used by release/verification builds.
-
-## Overlay
-
-The Phase 1 overlay lives in `lightning-goats/overlay` and is merged to its `main` branch on the standalone service contract:
-
-- one WebSocket only: `wss://lightning-goats.com/ws/overlay`;
-- read-only `/api/v1/status` for mode/override/temperature/fallback state;
-- no LNbits WebSocket or API calls;
-- no legacy FastAPI/CyberHerd API calls;
-- durable sequence-gap detection and reconnect/resnapshot;
-- multi-feed backlog and retained remainder display;
-- payment QR/sats animation from `payment_received`;
-- feeder animation **only** from committed `feeder_confirmed`;
-- no browser-side feeder inference from the progress bar reaching 100%;
-- no external GSAP dependency;
-- `?canary=1` selects the isolated `/canary/...` endpoints;
-- CyberHerd presentation intentionally deferred to Phase 2.
-
-The overlay repository has CI that rejects reintroduction of legacy LNbits/CyberHerd runtime endpoints, enforces one WebSocket construction path, and syntax-checks the inline JavaScript.
-
-## Release model
-
-This is a single-operator deployment. Tagged `lightning-goats` releases publish:
-
-```text
-lightning-goatsd
-lightning-goatsctl
-lightning-goats-<tag>-x86_64-linux-gnu.tar.gz
-SHA256SUMS
-```
-
-Deployment configuration/systemd/nginx assets remain in Git and are installed manually.
-
-## Verification gates
-
-Required locked Rust gate:
-
-```text
+```sh
 cargo fmt --all --check
 cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo test --locked --all-features
+```
+
+Security audit gate:
+
+```sh
+cargo tree -i rsa --locked
 cargo audit --ignore RUSTSEC-2023-0071
 ```
 
-`RUSTSEC-2023-0071` affects `rsa 0.9.10`, for which RustSec currently reports no fixed upgrade. SQLx causes that package to remain in Cargo's resolved lock metadata, but it is not in this application's active dependency graph. The security workflow therefore first runs a reverse dependency-tree assertion and **fails immediately if `rsa` ever becomes reachable**; only after that assertion does it apply the single advisory ignore. This exception must be removed when SQLx or `rsa` provides a clean resolution.
+`RUSTSEC-2023-0071` should only remain ignored while `rsa` is unreachable from the active application dependency graph. Remove the exception when the dependency resolution permits it. If `rsa` becomes reachable, fail the security gate rather than relying on the ignore.
 
-The canary integration suite additionally verifies in-process that:
+## Definition of done
 
-```text
-2340 sats -> exactly 2 canary rule invocations -> 340 sats remainder -> no Nostr capability
-```
+Phase 1 is complete when:
 
-Real production-node canary validation is still required before cutover.
-
-## Remaining before deployment
-
-Application coding is complete when the current backend PR is green and merged. The overlay port is already merged.
-
-Then the remaining work is host-specific deployment/validation:
-
-1. Inventory the live server and record exact CLN, CLNRest, LNbits, nginx, OpenHAB, `nak`, and existing service configuration.
-2. Create/test the restricted CLN rune (`waitanyinvoice` / `listinvoices` only).
-3. Set the real production and canary OpenHAB rule/item IDs in configuration.
-4. Deploy the reviewed `clnaddress` and Lightning Goats binaries.
-5. Configure `herd-canary@lightning-goats.com` plus the isolated canary nginx routes.
-6. Initialize the canary cursor and run the full mainnet canary matrix with the harmless OpenHAB rule.
-7. Prepare the NIP-46 bunker/client credentials and verify signing without public publication.
-8. After canary acceptance, initialize a fresh production DB/cursor and run production ingress in `shadow`.
-9. Execute the zero-based cutover with `FeederOverride=ON`, switch production Lightning Address routes, verify one real herd payment, then move to `active` and release the override.
-10. Keep old LNbits data read-only for audit until the operator chooses to archive/remove it. It has no accounting role after cutover.
-
-CyberHerd remains offline until Phase 2. No outbound Lightning spend capability belongs in Phase 1.
+- `herd@lightning-goats.com` resolves natively through LNURL-pay;
+- Strike is the only Lightning backend;
+- a completed receive is independently reconciled and credited exactly once;
+- feeder threshold/remainder/ambiguity semantics are preserved;
+- payment and feeder events produce the intended Nostr + overlay messages;
+- informational messages are overlay-only;
+- the new VPS passes the full staging matrix;
+- production WireGuard/DNS cutover has been performed using the runbook;
+- LNbits/CLN/clnaddress are no longer in the live production payment path;
+- old VPS state and CLN recovery material are archived as required.

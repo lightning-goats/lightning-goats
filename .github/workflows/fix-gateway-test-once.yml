@@ -21,14 +21,10 @@ jobs:
           from pathlib import Path
           p = Path('src/gateway/server.rs')
           s = p.read_text()
-          old = '''    fn rejects_unsafe_local_rate_configuration() {
-              let mut config = config();
-              config.feeder.min_feed_interval_seconds = 0;
-              assert!(config.validate().is_err());
-              let mut config = config();
-              config.feeder.max_feeds_per_hour = 0;
-              assert!(config.validate().is_err());
-          }'''.replace('              ', '        ')
+          marker = '    fn rejects_unsafe_local_rate_configuration() {'
+          start = s.index(marker)
+          end = s.index('\n    }', start) + len('\n    }')
+          old = s[start:end]
           new = '''    fn rejects_unsafe_local_rate_configuration() {
               let mut interval_config = config();
               interval_config.feeder.min_feed_interval_seconds = 0;
@@ -37,9 +33,7 @@ jobs:
               rate_config.feeder.max_feeds_per_hour = 0;
               assert!(rate_config.validate().is_err());
           }'''.replace('              ', '        ')
-          if old not in s:
-              raise SystemExit('expected test snippet not found')
-          p.write_text(s.replace(old, new, 1))
+          p.write_text(s[:start] + new + s[end:])
           PY
           cargo fmt --all
       - name: Commit fix

@@ -6,9 +6,18 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use zeroize::Zeroizing;
 
-use crate::{config::LightningConfig, ledger::PaidInvoice, secrets::read_systemd_credential};
+use crate::{config::LightningConfig, secrets::read_systemd_credential};
 
 const WAITANYINVOICE_TIMEOUT_CODE: i64 = 904;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClnPaidInvoice {
+    pub pay_index: u64,
+    pub payment_hash: String,
+    pub label: String,
+    pub amount_msat: u64,
+    pub settled_at: i64,
+}
 
 #[derive(Clone)]
 pub struct ClnRestClient {
@@ -70,7 +79,7 @@ impl ClnRestClient {
         &self,
         last_pay_index: u64,
         timeout_seconds: u64,
-    ) -> Result<Option<PaidInvoice>> {
+    ) -> Result<Option<ClnPaidInvoice>> {
         let endpoint = self
             .base_url
             .join("v1/waitanyinvoice")
@@ -114,12 +123,12 @@ impl ClnRestClient {
             );
         }
 
-        Ok(Some(PaidInvoice {
+        Ok(Some(ClnPaidInvoice {
             pay_index: response.pay_index,
             payment_hash: response.payment_hash,
-            label: Some(response.label),
+            label: response.label,
             amount_msat: response.amount_received_msat.into_msat()?,
-            settled_at: Some(i64::try_from(response.paid_at).context("paid_at exceeds i64 range")?),
+            settled_at: i64::try_from(response.paid_at).context("paid_at exceeds i64 range")?,
         }))
     }
 }

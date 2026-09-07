@@ -1,6 +1,6 @@
 # Non-secret Lightning Goats canary configuration.
-# Use a separate database and a harmless feeder counter/test path.
-# Canary mode allows feeder-rule invocation but never enables Nostr signing/publication.
+# Use a separate database, Strike sandbox credentials, and a harmless feeder
+# counter/test path. Canary mode never enables Nostr signing/publication.
 
 [service]
 listen = "127.0.0.1:8788"
@@ -15,10 +15,63 @@ clnrest_url = "https://127.0.0.1:3010"
 clnrest_ca_certificate = "/etc/lightning-goats/clnrest-ca.pem"
 herd_user = "herd-canary"
 
-# Use Strike sandbox (`https://api.dev.strike.me/`) when available, otherwise a
-# receive/read-only production key with tiny canary amounts.
+# Strike documents https://api.dev.strike.me/ as its sandbox API. Use a sandbox
+# key with only partner.receive-request.create and partner.receive-request.read.
 [strike]
 api_url = "https://api.dev.strike.me/"
+
+# Replace this with the temporary HTTPS hostname used to exercise the new VPS.
+[lnurl]
+public_base_url = "https://staging.lightning-goats.com/"
+invoice_expiry_seconds = 300
+
+[[lightning_address]]
+user = "herd"
+display_name = "Lightning Goats"
+description = "Feed the Lightning Goats"
+credit_pool = "herd"
+min_sendable_msat = 1000
+max_sendable_msat = 1000000000
+
+[[lightning_address]]
+user = "dexter"
+display_name = "Dexter"
+description = "Feed Dexter and the Lightning Goats"
+credit_pool = "herd"
+min_sendable_msat = 1000
+max_sendable_msat = 1000000000
+
+[[lightning_address]]
+user = "rowan"
+display_name = "Rowan"
+description = "Feed Rowan and the Lightning Goats"
+credit_pool = "herd"
+min_sendable_msat = 1000
+max_sendable_msat = 1000000000
+
+[[lightning_address]]
+user = "cosmo"
+display_name = "Cosmo"
+description = "Feed Cosmo and the Lightning Goats"
+credit_pool = "herd"
+min_sendable_msat = 1000
+max_sendable_msat = 1000000000
+
+[[lightning_address]]
+user = "newton"
+display_name = "Newton"
+description = "Feed Newton and the Lightning Goats"
+credit_pool = "herd"
+min_sendable_msat = 1000
+max_sendable_msat = 1000000000
+
+[[lightning_address]]
+user = "nova"
+display_name = "Nova"
+description = "Feed Nova and the Lightning Goats"
+credit_pool = "herd"
+min_sendable_msat = 1000
+max_sendable_msat = 1000000000
 
 [feeder]
 threshold_sats = 1000

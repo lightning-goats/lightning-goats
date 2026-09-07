@@ -6,9 +6,9 @@ use anyhow::{Result, anyhow};
 use axum::{
     Json, Router,
     body::Bytes,
-    extract::{State, ws::WebSocketUpgrade},
+    extract::{Path, Query, State, ws::WebSocketUpgrade},
     http::{HeaderMap, StatusCode},
-    response::Response,
+    response::{IntoResponse, Response},
     routing::{get, post},
 };
 use clap::Parser;
@@ -18,13 +18,14 @@ use lightning_goats::{
     feeder::run_feed_worker,
     invoice_watcher::run_invoice_watcher,
     ledger::{LedgerStore, SettlementOutcome},
+    lnurl::{LnurlErrorResponse, LnurlService, LnurlServiceError},
     messaging::{run_message_processor, run_outbox_publisher},
     nostr::NakClient,
     openhab::OpenHabClient,
     overlay::serve_overlay_socket,
     strike::StrikeRuntime,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
@@ -44,6 +45,7 @@ struct AppState {
     ledger: LedgerStore,
     openhab: OpenHabClient,
     strike: Option<StrikeRuntime>,
+    lnurl: Option<LnurlService>,
 }
 
 #[derive(Debug, Serialize)]
@@ -56,6 +58,8 @@ struct StatusResponse {
     mode: &'static str,
     herd_user: String,
     strike_enabled: bool,
+    lnurl_enabled: bool,
+    lightning_address_users: Vec<String>,
     /// Transitional compatibility state; `None` means the legacy CLN watcher is disabled.
     last_pay_index: Option<u64>,
     feed_credit_sats: u64,
@@ -65,6 +69,11 @@ struct StatusResponse {
     unresolved_feed_attempt: Option<String>,
     feeder_override_active: Option<bool>,
     temperature_f: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LnurlCallbackQuery {
+    amount: Option<String>,
 }
 
 #[tokio::main]
@@ -93,6 +102,20 @@ async fn main() -> Result<()> {
         Some(strike_config) => Some(StrikeRuntime::from_config(strike_config).await?),
         None => None,
     };
+    let lnurl = match (&config.lnurl, strike.as_ref()) {
+        (Some(lnurl_config), Some(strike_runtime)) => Some(LnurlService::new(
+            lnurl_config,
+            &config.lightning_address,
+            strike_runtime.clone(),
+            ledger.clone(),
+        )?),
+        (None, _) => None,
+        (Some(_), None) => {
+            return Err(anyhow!(
+                "validated LNURL configuration is missing Strike runtime"
+            ));
+        }
+    };
     let nostr = if config.service.mode.nostr_enabled() {
         Some(NakClient::from_config(&config.nostr).await?)
     } else {
@@ -104,11 +127,14 @@ async fn main() -> Result<()> {
         ledger: ledger.clone(),
         openhab: openhab.clone(),
         strike,
+        lnurl,
     };
     let app = Router::new()
         .route("/healthz", get(healthz))
         .route("/api/v1/status", get(status))
         .route("/api/v1/strike/webhook", post(strike_webhook))
+        .route("/.well-known/lnurlp/{user}", get(lnurl_discovery))
+        .route("/lnurlp/{user}/callback", get(lnurl_callback))
         .route("/ws/overlay", get(overlay_ws))
         .with_state(state);
 
@@ -117,6 +143,7 @@ async fn main() -> Result<()> {
         listen = %config.service.listen,
         mode = config.service.mode.as_str(),
         strike_enabled = config.strike.is_some(),
+        lnurl_enabled = config.lnurl.is_some(),
         "lightning-goatsd listening"
     );
 
@@ -238,11 +265,17 @@ async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse>, S
             None
         }
     };
+    let lightning_address_users = state
+        .lnurl
+        .as_ref()
+        .map_or_else(Vec::new, LnurlService::configured_users);
 
     Ok(Json(StatusResponse {
         mode: state.config.service.mode.as_str(),
         herd_user: state.config.lightning.herd_user.clone(),
         strike_enabled: state.strike.is_some(),
+        lnurl_enabled: state.lnurl.is_some(),
+        lightning_address_users,
         last_pay_index,
         feed_credit_sats,
         threshold_sats,
@@ -252,6 +285,65 @@ async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse>, S
         feeder_override_active,
         temperature_f,
     }))
+}
+
+async fn lnurl_discovery(Path(user): Path<String>, State(state): State<AppState>) -> Response {
+    let Some(lnurl) = state.lnurl.as_ref() else {
+        return lnurl_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Lightning Address service unavailable",
+        );
+    };
+    match lnurl.discovery(&user) {
+        Ok(response) => (StatusCode::OK, Json(response)).into_response(),
+        Err(error) if error.is_unknown_user() => {
+            lnurl_error(StatusCode::NOT_FOUND, error.public_reason())
+        }
+        Err(error) => {
+            if let Some(internal) = error.internal_error() {
+                tracing::error!(%internal, %user, "failed constructing LNURL discovery response");
+            }
+            lnurl_error(StatusCode::INTERNAL_SERVER_ERROR, error.public_reason())
+        }
+    }
+}
+
+async fn lnurl_callback(
+    Path(user): Path<String>,
+    State(state): State<AppState>,
+    Query(query): Query<LnurlCallbackQuery>,
+) -> Response {
+    let Some(lnurl) = state.lnurl.as_ref() else {
+        return lnurl_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Lightning Address service unavailable",
+        );
+    };
+    let Some(raw_amount) = query.amount.as_deref() else {
+        return lnurl_error(StatusCode::OK, "Missing amount");
+    };
+    let amount_msat = match raw_amount.parse::<u64>() {
+        Ok(amount) => amount,
+        Err(_) => return lnurl_error(StatusCode::OK, "Invalid amount"),
+    };
+
+    match lnurl.callback(&user, amount_msat).await {
+        Ok(response) => (StatusCode::OK, Json(response)).into_response(),
+        Err(LnurlServiceError::UnknownUser) => {
+            lnurl_error(StatusCode::NOT_FOUND, "Unknown Lightning Address")
+        }
+        Err(LnurlServiceError::InvalidAmount(reason)) => lnurl_error(StatusCode::OK, reason),
+        Err(error @ LnurlServiceError::Provider(_)) => {
+            if let Some(internal) = error.internal_error() {
+                tracing::error!(%internal, %user, amount_msat, "Strike-backed LNURL invoice creation failed");
+            }
+            lnurl_error(StatusCode::BAD_GATEWAY, error.public_reason())
+        }
+    }
+}
+
+fn lnurl_error(status: StatusCode, reason: &str) -> Response {
+    (status, Json(LnurlErrorResponse::new(reason))).into_response()
 }
 
 async fn strike_webhook(

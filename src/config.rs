@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     fs,
     net::SocketAddr,
     path::{Path, PathBuf},
@@ -10,6 +11,9 @@ use serde::Deserialize;
 
 use crate::domain::invoice::validate_user;
 
+pub const REQUIRED_PHASE1_LIGHTNING_USERS: [&str; 6] =
+    ["herd", "dexter", "rowan", "cosmo", "newton", "nova"];
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct AppConfig {
     pub service: ServiceConfig,
@@ -17,6 +21,10 @@ pub struct AppConfig {
     pub lightning: LightningConfig,
     #[serde(default)]
     pub strike: Option<StrikeConfig>,
+    #[serde(default)]
+    pub lnurl: Option<LnurlConfig>,
+    #[serde(default)]
+    pub lightning_address: Vec<LightningAddressConfig>,
     pub feeder: FeederConfig,
     pub openhab: OpenHabConfig,
     pub nostr: NostrConfig,
@@ -55,11 +63,12 @@ impl AppConfig {
                 bail!("strike.api_url must not contain credentials, query, or fragment");
             }
         }
+        self.validate_lnurl()?;
         if self.feeder.threshold_sats == 0 {
             bail!("feeder.threshold_sats must be greater than zero");
         }
         validate_user(&self.lightning.herd_user)
-            .context("lightning.herd_user must be a canonical clnaddress user")?;
+            .context("lightning.herd_user must be a canonical legacy CLN address user")?;
         if self.openhab.url.trim().is_empty() {
             bail!("openhab.url must not be empty");
         }
@@ -97,6 +106,81 @@ impl AppConfig {
                 Url::parse(relay).with_context(|| format!("invalid Nostr relay URL {relay}"))?;
             if parsed.scheme() != "wss" || parsed.host_str().is_none() {
                 bail!("Nostr relay URLs must use wss:// with a host: {relay}");
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_lnurl(&self) -> Result<()> {
+        let Some(lnurl) = &self.lnurl else {
+            if !self.lightning_address.is_empty() {
+                bail!("lightning_address entries require [lnurl] configuration");
+            }
+            return Ok(());
+        };
+        if self.strike.is_none() {
+            bail!("[lnurl] requires [strike]; LNURL invoice creation is Strike-backed");
+        }
+        if lnurl.invoice_expiry_seconds == 0 || lnurl.invoice_expiry_seconds > 86_400 {
+            bail!("lnurl.invoice_expiry_seconds must be between 1 and 86400 seconds");
+        }
+
+        let public_url =
+            Url::parse(&lnurl.public_base_url).context("invalid lnurl.public_base_url")?;
+        if public_url.scheme() != "https" || public_url.host_str().is_none() {
+            bail!("lnurl.public_base_url must use https:// with a host");
+        }
+        if !public_url.username().is_empty()
+            || public_url.password().is_some()
+            || public_url.query().is_some()
+            || public_url.fragment().is_some()
+            || public_url.path() != "/"
+        {
+            bail!(
+                "lnurl.public_base_url must be a root HTTPS origin without credentials, query, fragment, or path"
+            );
+        }
+
+        if self.lightning_address.is_empty() {
+            bail!("[lnurl] requires at least one [[lightning_address]] entry");
+        }
+        let mut users = HashSet::new();
+        for address in &self.lightning_address {
+            validate_user(&address.user)
+                .with_context(|| format!("invalid Lightning Address user {}", address.user))?;
+            if !users.insert(address.user.as_str()) {
+                bail!("duplicate Lightning Address user {}", address.user);
+            }
+            if address.display_name.trim().is_empty() || address.display_name.len() > 80 {
+                bail!("Lightning Address display_name must contain 1 to 80 characters");
+            }
+            if address.description.trim().is_empty() || address.description.len() > 250 {
+                bail!("Lightning Address description must contain 1 to 250 characters");
+            }
+            validate_user(&address.credit_pool).with_context(|| {
+                format!(
+                    "invalid Lightning Address credit_pool {}",
+                    address.credit_pool
+                )
+            })?;
+            if address.credit_pool != "herd" {
+                bail!(
+                    "Phase 1 Lightning Address {} must credit the herd pool",
+                    address.user
+                );
+            }
+            if address.min_sendable_msat == 0
+                || address.max_sendable_msat < address.min_sendable_msat
+            {
+                bail!(
+                    "Lightning Address {} has an invalid min/max sendable range",
+                    address.user
+                );
+            }
+        }
+        for required in REQUIRED_PHASE1_LIGHTNING_USERS {
+            if !users.contains(required) {
+                bail!("Phase 1 Lightning Address registry is missing required user {required}");
             }
         }
         Ok(())
@@ -157,6 +241,22 @@ pub struct StrikeConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct LnurlConfig {
+    pub public_base_url: String,
+    pub invoice_expiry_seconds: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct LightningAddressConfig {
+    pub user: String,
+    pub display_name: String,
+    pub description: String,
+    pub credit_pool: String,
+    pub min_sendable_msat: u64,
+    pub max_sendable_msat: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct FeederConfig {
     pub threshold_sats: u64,
     pub inter_feed_delay_seconds: u64,
@@ -184,6 +284,26 @@ pub struct NostrConfig {
 mod tests {
     use super::*;
 
+    fn phase1_addresses() -> Vec<LightningAddressConfig> {
+        REQUIRED_PHASE1_LIGHTNING_USERS
+            .into_iter()
+            .map(|user| LightningAddressConfig {
+                user: user.to_owned(),
+                display_name: if user == "herd" {
+                    "Lightning Goats".to_owned()
+                } else {
+                    let mut chars = user.chars();
+                    let first = chars.next().unwrap().to_ascii_uppercase();
+                    format!("{first}{}", chars.as_str())
+                },
+                description: format!("Feed the Lightning Goats via {user}"),
+                credit_pool: "herd".to_owned(),
+                min_sendable_msat: 1_000,
+                max_sendable_msat: 1_000_000_000,
+            })
+            .collect()
+    }
+
     fn valid_config() -> AppConfig {
         AppConfig {
             service: ServiceConfig {
@@ -201,6 +321,11 @@ mod tests {
             strike: Some(StrikeConfig {
                 api_url: "https://api.strike.me/".to_owned(),
             }),
+            lnurl: Some(LnurlConfig {
+                public_base_url: "https://lightning-goats.com/".to_owned(),
+                invoice_expiry_seconds: 300,
+            }),
+            lightning_address: phase1_addresses(),
             feeder: FeederConfig {
                 threshold_sats: 1_000,
                 inter_feed_delay_seconds: 30,
@@ -249,6 +374,31 @@ mod tests {
     fn rejects_insecure_strike_api_url() {
         let mut config = valid_config();
         config.strike.as_mut().unwrap().api_url = "http://api.strike.me/".to_owned();
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_missing_required_goat_address() {
+        let mut config = valid_config();
+        config
+            .lightning_address
+            .retain(|address| address.user != "nova");
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_duplicate_goat_address() {
+        let mut config = valid_config();
+        config
+            .lightning_address
+            .push(config.lightning_address[0].clone());
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_non_herd_credit_pool_in_phase1() {
+        let mut config = valid_config();
+        config.lightning_address[1].credit_pool = "dexter".to_owned();
         assert!(config.validate().is_err());
     }
 

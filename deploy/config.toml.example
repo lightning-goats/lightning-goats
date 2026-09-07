@@ -24,6 +24,61 @@ herd_user = "herd"
 [strike]
 api_url = "https://api.strike.me/"
 
+[lnurl]
+public_base_url = "https://lightning-goats.com/"
+invoice_expiry_seconds = 300
+
+# All Phase 1 Lightning Addresses are explicitly allowlisted and credit one
+# common `herd` feeder pool. `address_user` remains durable payment metadata.
+# The callback rejects non-whole-satoshi amounts before contacting Strike.
+[[lightning_address]]
+user = "herd"
+display_name = "Lightning Goats"
+description = "Feed the Lightning Goats"
+credit_pool = "herd"
+min_sendable_msat = 1000
+max_sendable_msat = 1000000000
+
+[[lightning_address]]
+user = "dexter"
+display_name = "Dexter"
+description = "Feed Dexter and the Lightning Goats"
+credit_pool = "herd"
+min_sendable_msat = 1000
+max_sendable_msat = 1000000000
+
+[[lightning_address]]
+user = "rowan"
+display_name = "Rowan"
+description = "Feed Rowan and the Lightning Goats"
+credit_pool = "herd"
+min_sendable_msat = 1000
+max_sendable_msat = 1000000000
+
+[[lightning_address]]
+user = "cosmo"
+display_name = "Cosmo"
+description = "Feed Cosmo and the Lightning Goats"
+credit_pool = "herd"
+min_sendable_msat = 1000
+max_sendable_msat = 1000000000
+
+[[lightning_address]]
+user = "newton"
+display_name = "Newton"
+description = "Feed Newton and the Lightning Goats"
+credit_pool = "herd"
+min_sendable_msat = 1000
+max_sendable_msat = 1000000000
+
+[[lightning_address]]
+user = "nova"
+display_name = "Nova"
+description = "Feed Nova and the Lightning Goats"
+credit_pool = "herd"
+min_sendable_msat = 1000
+max_sendable_msat = 1000000000
+
 [feeder]
 threshold_sats = 1000
 inter_feed_delay_seconds = 30

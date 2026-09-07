@@ -1,5 +1,10 @@
+use std::{str::FromStr, time::Duration};
+
 use anyhow::{Context, Result, bail};
-use sqlx::{Row, SqlitePool, sqlite::SqlitePoolOptions};
+use sqlx::{
+    Row, SqlitePool,
+    sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
+};
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -34,19 +39,18 @@ impl GatewayStore {
         if !database_url.starts_with("sqlite://") || database_url == "sqlite::memory:" {
             bail!("gateway database must use a file-backed sqlite:// URL");
         }
+        let options = SqliteConnectOptions::from_str(database_url)
+            .context("invalid integration gateway SQLite URL")?
+            .create_if_missing(true)
+            .journal_mode(SqliteJournalMode::Wal)
+            .synchronous(SqliteSynchronous::Full)
+            .foreign_keys(true)
+            .busy_timeout(Duration::from_secs(5));
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
-            .connect(database_url)
+            .connect_with(options)
             .await
             .context("failed opening integration gateway SQLite database")?;
-        sqlx::query("PRAGMA journal_mode=WAL")
-            .execute(&pool)
-            .await
-            .context("failed enabling gateway SQLite WAL")?;
-        sqlx::query("PRAGMA synchronous=FULL")
-            .execute(&pool)
-            .await
-            .context("failed enabling gateway SQLite FULL synchronous mode")?;
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS feeder_requests (

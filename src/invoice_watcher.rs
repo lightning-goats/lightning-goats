@@ -66,7 +66,9 @@ pub async fn poll_once(
     // Advance only after any qualifying settlement has been durably recorded.
     // If we crash between record_payment and this cursor update, replay is safe
     // because provider-neutral settlement identity is idempotent.
-    ledger.advance_legacy_cln_cursor(invoice.pay_index).await?;
+    ledger
+        .advance_legacy_cln_cursor(cursor, invoice.pay_index)
+        .await?;
     Ok(Some(outcome))
 }
 

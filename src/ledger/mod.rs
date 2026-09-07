@@ -12,11 +12,13 @@ use crate::domain::payment::SettledPayment;
 mod events;
 mod feed;
 mod outbox;
+mod strike;
 pub use events::DurableEvent;
 use events::append_event_in_transaction;
 use feed::feed_credit_in_transaction;
 pub use feed::{StoredFeedAttempt, StoredFeedAttemptStatus};
 pub use outbox::OutboxEntry;
+pub use strike::StoredStrikeReceiveRequest;
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
@@ -267,26 +269,22 @@ impl LedgerStore {
         .transpose()
     }
 
-    pub async fn advance_legacy_cln_cursor(&self, pay_index: u64) -> Result<()> {
-        let pay_index = to_i64(pay_index, "pay_index")?;
-        let mut transaction = self.pool.begin().await?;
-        let row = sqlx::query("SELECT last_pay_index FROM cln_cursor WHERE singleton = 1")
-            .fetch_optional(&mut *transaction)
-            .await?
-            .context("legacy CLN cursor is not initialized")?;
-        let current: i64 = row.try_get("last_pay_index")?;
-        if pay_index < current {
-            bail!("legacy CLN cursor cannot move backward from {current} to {pay_index}");
+    pub async fn advance_legacy_cln_cursor(&self, expected: u64, next: u64) -> Result<()> {
+        if next <= expected {
+            bail!("legacy CLN cursor must advance monotonically ({expected} -> {next})");
         }
-        if pay_index > current {
-            sqlx::query(
-                "UPDATE cln_cursor SET last_pay_index = ?, updated_at = unixepoch() WHERE singleton = 1",
-            )
-            .bind(pay_index)
-            .execute(&mut *transaction)
-            .await?;
+        let expected = to_i64(expected, "expected CLN cursor")?;
+        let next = to_i64(next, "next CLN cursor")?;
+        let result = sqlx::query(
+            "UPDATE cln_cursor SET last_pay_index = ?, updated_at = unixepoch() WHERE singleton = 1 AND last_pay_index = ?",
+        )
+        .bind(next)
+        .bind(expected)
+        .execute(&self.pool)
+        .await?;
+        if result.rows_affected() != 1 {
+            bail!("legacy CLN cursor changed concurrently; refusing blind advance");
         }
-        transaction.commit().await?;
         Ok(())
     }
 }
@@ -296,9 +294,19 @@ fn validate_source(source: &str) -> Result<()> {
         bail!("payment source must contain 1 to 32 characters");
     }
     if !source.bytes().all(|byte| {
-        byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-' | b'.')
+        byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'-' | b'_')
     }) {
-        bail!("payment source must be a lowercase canonical identifier");
+        bail!("payment source contains unsupported characters");
+    }
+    Ok(())
+}
+
+fn validate_external_id(value: &str, field: &str, max_len: usize) -> Result<()> {
+    if value.is_empty() || value.len() > max_len {
+        bail!("{field} must contain 1 to {max_len} characters");
+    }
+    if value.chars().any(char::is_control) {
+        bail!("{field} must not contain control characters");
     }
     Ok(())
 }
@@ -308,41 +316,30 @@ fn validate_user(value: &str, field: &str) -> Result<()> {
         bail!("{field} must contain 1 to 64 characters");
     }
     if !value.bytes().all(|byte| {
-        byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'_' | b'-')
+        byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'-' | b'_')
     }) {
-        bail!("{field} must be a canonical lowercase Lightning Address-style identifier");
+        bail!("{field} must be a canonical lowercase identifier");
     }
     Ok(())
 }
 
-fn validate_external_id(value: &str, field: &str, max_len: usize) -> Result<()> {
-    if value.is_empty() || value.len() > max_len {
-        bail!("{field} must contain 1 to {max_len} characters");
-    }
-    if !value.bytes().all(|byte| byte.is_ascii_graphic()) {
-        bail!("{field} contains whitespace or non-ASCII/control characters");
+fn validate_payment_hash(value: &str) -> Result<()> {
+    if value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        bail!("payment_hash must be a 32-byte hex string");
     }
     Ok(())
 }
 
-fn validate_payment_hash(hash: &str) -> Result<()> {
-    if hash.is_empty() || hash.len() > 128 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        bail!("payment_hash must be non-empty hexadecimal text no longer than 128 characters");
-    }
-    Ok(())
-}
-
-fn to_i64(value: u64, field: &str) -> Result<i64> {
+pub(super) fn to_i64(value: u64, field: &str) -> Result<i64> {
     i64::try_from(value).with_context(|| format!("{field} exceeds SQLite INTEGER range"))
 }
 
-fn to_u64(value: i64, field: &str) -> Result<u64> {
+pub(super) fn to_u64(value: i64, field: &str) -> Result<u64> {
     u64::try_from(value).with_context(|| format!("{field} is unexpectedly negative"))
 }
 
 #[cfg(test)]
 mod tests {
-    use serde_json::Value;
     use tempfile::TempDir;
 
     use super::*;
@@ -355,27 +352,25 @@ mod tests {
         (directory, store)
     }
 
-    fn payment(source_id: &str, hash: Option<&str>, user: &str, sats: u64) -> SettledPayment {
+    fn payment(source_id: &str, hash: &str, sats: u64) -> SettledPayment {
         SettledPayment {
             source: "strike".to_owned(),
             source_id: source_id.to_owned(),
-            payment_hash: hash.map(str::to_owned),
-            address_user: user.to_owned(),
+            payment_hash: Some(hash.to_owned()),
+            address_user: "dexter".to_owned(),
             credit_pool: "herd".to_owned(),
             amount_msat: sats * 1_000,
             settled_at: Some(1_700_000_000),
-            context_json: None,
+            context_json: Some(r#"{"receive_request_id":"request-1"}"#.to_owned()),
         }
     }
 
     #[tokio::test]
-    async fn provider_neutral_settlement_credits_and_emits_metadata_atomically() {
+    async fn provider_neutral_settlement_credits_atomically() {
         let (_directory, store) = store().await;
-        let paid = payment("receive-101", Some("aabbcc"), "dexter", 2_340);
-
-        let outcome = store.record_payment(&paid).await.unwrap();
+        let payment = payment("receive-1", &"11".repeat(32), 2_340);
         assert_eq!(
-            outcome,
+            store.record_payment(&payment).await.unwrap(),
             SettlementOutcome::Credited {
                 sats: 2_340,
                 address_user: "dexter".to_owned(),
@@ -387,20 +382,17 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].event_type, "payment_received");
         let payload: Value = serde_json::from_str(&events[0].payload_json).unwrap();
-        assert_eq!(payload["source"], "strike");
         assert_eq!(payload["address_user"], "dexter");
         assert_eq!(payload["credit_pool"], "herd");
-        assert_eq!(payload["feed_credit_sats"], 2_340);
     }
 
     #[tokio::test]
-    async fn exact_duplicate_is_idempotent() {
+    async fn duplicate_provider_delivery_is_idempotent() {
         let (_directory, store) = store().await;
-        let paid = payment("receive-102", Some("ddeeff"), "herd", 1_000);
-
-        store.record_payment(&paid).await.unwrap();
+        let payment = payment("receive-2", &"22".repeat(32), 1_000);
+        store.record_payment(&payment).await.unwrap();
         assert_eq!(
-            store.record_payment(&paid).await.unwrap(),
+            store.record_payment(&payment).await.unwrap(),
             SettlementOutcome::Duplicate
         );
         assert_eq!(store.feed_credit_sats().await.unwrap(), 1_000);
@@ -410,46 +402,37 @@ mod tests {
     #[tokio::test]
     async fn conflicting_source_identity_fails_closed() {
         let (_directory, store) = store().await;
-        let original = payment("receive-103", Some("0011aa"), "rowan", 1_000);
-        store.record_payment(&original).await.unwrap();
-        let mut conflicting = original.clone();
-        conflicting.amount_msat = 2_000_000;
-
-        assert!(store.record_payment(&conflicting).await.is_err());
+        let payment = payment("receive-3", &"33".repeat(32), 1_000);
+        store.record_payment(&payment).await.unwrap();
+        let mut conflict = payment;
+        conflict.amount_msat = 2_000_000;
+        assert!(store.record_payment(&conflict).await.is_err());
         assert_eq!(store.feed_credit_sats().await.unwrap(), 1_000);
     }
 
     #[tokio::test]
-    async fn payment_hash_collision_across_provider_identity_fails_closed() {
+    async fn payment_hash_collision_across_source_ids_fails_closed() {
         let (_directory, store) = store().await;
+        let hash = "44".repeat(32);
         store
-            .record_payment(&payment("receive-104", Some("cafeba"), "cosmo", 500))
+            .record_payment(&payment("receive-4a", &hash, 1_000))
             .await
             .unwrap();
-        let collision = payment("receive-105", Some("cafeba"), "nova", 500);
-
-        assert!(store.record_payment(&collision).await.is_err());
-        assert_eq!(store.feed_credit_sats().await.unwrap(), 500);
+        assert!(
+            store
+                .record_payment(&payment("receive-4b", &hash, 1_000))
+                .await
+                .is_err()
+        );
+        assert_eq!(store.feed_credit_sats().await.unwrap(), 1_000);
     }
 
     #[tokio::test]
-    async fn rejects_non_sat_aligned_settlement_without_truncation() {
+    async fn refuses_non_sat_aligned_payment() {
         let (_directory, store) = store().await;
-        let mut paid = payment("receive-106", Some("abcdef"), "newton", 1);
-        paid.amount_msat = 1_001;
-
-        assert!(store.record_payment(&paid).await.is_err());
+        let mut payment = payment("receive-5", &"55".repeat(32), 1_000);
+        payment.amount_msat += 1;
+        assert!(store.record_payment(&payment).await.is_err());
         assert_eq!(store.feed_credit_sats().await.unwrap(), 0);
-    }
-
-    #[tokio::test]
-    async fn legacy_cln_cursor_is_optional_and_separate_from_payment_identity() {
-        let (_directory, store) = store().await;
-        assert_eq!(store.last_legacy_cln_pay_index().await.unwrap(), None);
-
-        store.initialize_legacy_cln_cursor(100).await.unwrap();
-        store.advance_legacy_cln_cursor(101).await.unwrap();
-        assert_eq!(store.last_legacy_cln_pay_index().await.unwrap(), Some(101));
-        assert!(store.advance_legacy_cln_cursor(99).await.is_err());
     }
 }

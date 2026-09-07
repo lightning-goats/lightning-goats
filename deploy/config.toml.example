@@ -10,33 +10,36 @@ mode = "shadow"
 [database]
 url = "sqlite:///var/lib/lightning-goats/lightning-goats.db"
 
+# Transitional CLN compatibility only; removed by Phase 1 issue #13.
 [lightning]
 clnrest_url = "https://127.0.0.1:3010"
-# Copy the public CLNRest CA/certificate here when the existing CLNRest uses a
-# private/self-signed CA. Do not disable TLS verification.
 clnrest_ca_certificate = "/etc/lightning-goats/clnrest-ca.pem"
 herd_user = "herd"
+
+# Phase 1 receive-only payment backend. The API key is loaded from the
+# `strike-api-key` systemd credential and must have only:
+#   partner.receive-request.create
+#   partner.receive-request.read
+# Webhook management should use a separate temporary/admin key when needed.
+[strike]
+api_url = "https://api.strike.me/"
 
 [feeder]
 threshold_sats = 1000
 inter_feed_delay_seconds = 30
 
+# Transitional direct OpenHAB integration; replaced by the in-house gateway in
+# Phase 1 issue #17. Do not use this direct path in the final architecture.
 [openhab]
 url = "http://127.0.0.1:8080"
-# Production automatic feeder rule. Manual feeding remains outside this app.
 feeder_rule_id = "REPLACE_WITH_PRODUCTION_FEEDER_RULE_ID"
 override_item = "FeederOverride"
-# Optional read-only Fahrenheit item used by /api/v1/status and the overlay.
 temperature_item = "AmbientWeatherWS2902A_WeatherDataWs2902a_Temperature"
 
 [nostr]
 nak_path = "/usr/local/bin/nak"
-# Runtime-only nak client state. The systemd unit's RuntimeDirectory creates
-# /run/lightning-goats; no signer secret is persisted here.
 nak_config_path = "/run/lightning-goats/nak"
-# Main Lightning Goats signer pubkey hosted by the NIP-46 bunker.
 bunker_pubkey = "REPLACE_WITH_64_CHAR_HEX_PUBKEY"
-# Production publishing/signing relays must be encrypted wss:// endpoints.
 relays = [
   "wss://relay.example",
 ]

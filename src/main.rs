@@ -23,6 +23,7 @@ use lightning_goats::{
     nostr::NakClient,
     openhab::OpenHabClient,
     overlay::serve_overlay_socket,
+    presentation::MessageRenderer,
     strike::StrikeRuntime,
 };
 use serde::{Deserialize, Serialize};
@@ -46,6 +47,7 @@ struct AppState {
     openhab: OpenHabClient,
     strike: Option<StrikeRuntime>,
     lnurl: Option<LnurlService>,
+    renderer: MessageRenderer,
 }
 
 #[derive(Debug, Serialize)]
@@ -87,6 +89,7 @@ async fn main() -> Result<()> {
     let args = Args::parse();
     let config = Arc::new(AppConfig::load(&args.config)?);
     let ledger = LedgerStore::connect(&config.database.url).await?;
+    let renderer = MessageRenderer::embedded()?;
 
     let interrupted = ledger.mark_interrupted_feed_intents_unknown().await?;
     if interrupted > 0 {
@@ -128,6 +131,7 @@ async fn main() -> Result<()> {
         openhab: openhab.clone(),
         strike,
         lnurl,
+        renderer: renderer.clone(),
     };
     let app = Router::new()
         .route("/healthz", get(healthz))
@@ -181,6 +185,7 @@ async fn main() -> Result<()> {
     let mut message_processor = tokio::spawn(run_message_processor(
         ledger.clone(),
         nostr.clone(),
+        renderer,
         config.feeder.threshold_sats,
         config.service.mode,
     ));
@@ -415,9 +420,10 @@ async fn strike_webhook(
 
 async fn overlay_ws(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
     let ledger = state.ledger.clone();
+    let renderer = state.renderer.clone();
     let threshold_sats = state.config.feeder.threshold_sats;
     ws.on_upgrade(move |socket| async move {
-        if let Err(error) = serve_overlay_socket(socket, ledger, threshold_sats).await {
+        if let Err(error) = serve_overlay_socket(socket, ledger, renderer, threshold_sats).await {
             tracing::warn!(%error, "overlay websocket disconnected after server-side error");
         }
     })

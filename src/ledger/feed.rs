@@ -273,10 +273,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
-    use crate::{
-        domain::payment::SettledPayment,
-        ledger::SettlementOutcome,
-    };
+    use crate::{domain::payment::SettledPayment, ledger::SettlementOutcome};
 
     async fn credited_store(sats: u64) -> (TempDir, LedgerStore) {
         let directory = TempDir::new().unwrap();

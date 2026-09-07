@@ -1,0 +1,53 @@
+name: Fix gateway test once
+
+on:
+  push:
+    branches: [phase1/integration-gateway]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: phase1/integration-gateway
+      - name: Fix shadowed config helper
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/gateway/server.rs')
+          s = p.read_text()
+          old = '''    fn rejects_unsafe_local_rate_configuration() {
+              let mut config = config();
+              config.feeder.min_feed_interval_seconds = 0;
+              assert!(config.validate().is_err());
+              let mut config = config();
+              config.feeder.max_feeds_per_hour = 0;
+              assert!(config.validate().is_err());
+          }
+          '''
+          new = '''    fn rejects_unsafe_local_rate_configuration() {
+              let mut interval_config = config();
+              interval_config.feeder.min_feed_interval_seconds = 0;
+              assert!(interval_config.validate().is_err());
+              let mut rate_config = config();
+              rate_config.feeder.max_feeds_per_hour = 0;
+              assert!(rate_config.validate().is_err());
+          }
+          '''
+          if old not in s:
+              raise SystemExit('expected test snippet not found')
+          p.write_text(s.replace(old, new, 1))
+          PY
+          cargo fmt --all
+      - name: Commit fix
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/gateway/server.rs
+          git commit -m 'Fix gateway safety configuration test'
+          git push origin HEAD:phase1/integration-gateway

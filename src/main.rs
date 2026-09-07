@@ -2,7 +2,7 @@
 
 use std::{future::pending, path::PathBuf, sync::Arc, time::Duration};
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Result, anyhow};
 use axum::{
     Json, Router,
     extract::{State, ws::WebSocketUpgrade},
@@ -50,7 +50,8 @@ struct HealthResponse {
 struct StatusResponse {
     mode: &'static str,
     herd_user: String,
-    last_pay_index: u64,
+    /// Transitional compatibility state; `None` means the legacy CLN watcher is disabled.
+    last_pay_index: Option<u64>,
     feed_credit_sats: u64,
     threshold_sats: u64,
     feeds_due: u64,
@@ -72,12 +73,6 @@ async fn main() -> Result<()> {
     let config = Arc::new(AppConfig::load(&args.config)?);
     let ledger = LedgerStore::connect(&config.database.url).await?;
 
-    if ledger.last_pay_index().await?.is_none() {
-        bail!(
-            "CLN pay-index cursor is uninitialized; run lightning-goatsctl init-cursor before starting lightning-goatsd"
-        );
-    }
-
     let interrupted = ledger.mark_interrupted_feed_intents_unknown().await?;
     if interrupted > 0 {
         tracing::error!(
@@ -86,7 +81,7 @@ async fn main() -> Result<()> {
         );
     }
 
-    let cln = ClnRestClient::from_config(&config.lightning).await?;
+    let legacy_cln_cursor = ledger.last_legacy_cln_pay_index().await?;
     let openhab = OpenHabClient::from_config(&config.openhab).await?;
     let nostr = if config.service.mode.nostr_enabled() {
         Some(NakClient::from_config(&config.nostr).await?)
@@ -117,11 +112,25 @@ async fn main() -> Result<()> {
             .await
             .map_err(anyhow::Error::from)
     });
-    let mut watcher = tokio::spawn(run_invoice_watcher(
-        cln,
-        ledger.clone(),
-        config.lightning.herd_user.clone(),
-    ));
+
+    let watcher_config = Arc::clone(&config);
+    let watcher_ledger = ledger.clone();
+    let mut watcher = tokio::spawn(async move {
+        if legacy_cln_cursor.is_some() {
+            let cln = ClnRestClient::from_config(&watcher_config.lightning).await?;
+            run_invoice_watcher(
+                cln,
+                watcher_ledger,
+                watcher_config.lightning.herd_user.clone(),
+            )
+            .await
+        } else {
+            tracing::info!(
+                "legacy CLN cursor is uninitialized; compatibility watcher disabled while provider-neutral service remains available"
+            );
+            pending::<Result<()>>().await
+        }
+    });
     let mut feeder = tokio::spawn(run_feed_worker(
         ledger.clone(),
         openhab,
@@ -152,7 +161,7 @@ async fn main() -> Result<()> {
             Ok(())
         }
         result = &mut server => task_exit("HTTP server", result),
-        result = &mut watcher => task_exit("paid-invoice watcher", result),
+        result = &mut watcher => task_exit("legacy paid-invoice watcher", result),
         result = &mut feeder => task_exit("feed worker", result),
         result = &mut message_processor => task_exit("Nostr message processor", result),
         result = &mut publisher => task_exit("Nostr outbox publisher", result),
@@ -185,13 +194,12 @@ async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse>, S
     })?;
     let last_pay_index = state
         .ledger
-        .last_pay_index()
+        .last_legacy_cln_pay_index()
         .await
         .map_err(|error| {
-            tracing::error!(%error, "failed reading CLN cursor for status endpoint");
+            tracing::error!(%error, "failed reading legacy CLN cursor for status endpoint");
             StatusCode::INTERNAL_SERVER_ERROR
-        })?
-        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+        })?;
     let unresolved_feed_attempt = state
         .ledger
         .unresolved_feed_attempt()

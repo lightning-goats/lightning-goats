@@ -1,13 +1,13 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use serde_json::Value;
 use tokio::time::sleep;
 
 use crate::{
     config::RuntimeMode,
-    ledger::{DurableEvent, LedgerStore},
+    ledger::LedgerStore,
     nostr::{NakClient, SignedNostrEvent},
+    presentation::MessageRenderer,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,6 +21,7 @@ pub enum MessageProcessorStep {
 pub async fn process_next_message(
     ledger: &LedgerStore,
     nak: Option<&NakClient>,
+    renderer: &MessageRenderer,
     threshold_sats: u64,
     mode: RuntimeMode,
 ) -> Result<MessageProcessorStep> {
@@ -37,14 +38,18 @@ pub async fn process_next_message(
         return Ok(MessageProcessorStep::PublicationDisabled { seq: event.seq });
     }
 
-    let Some(message) = build_public_message(&event, threshold_sats)? else {
+    let rendered = renderer.render(&event, threshold_sats)?;
+    let Some(content) = rendered.nostr_content else {
         ledger.advance_message_cursor(event.seq).await?;
         return Ok(MessageProcessorStep::NonPublicSkipped { seq: event.seq });
     };
 
     let nak = nak.context("active messaging requires a configured NIP-46 nak client")?;
     let signed = nak
-        .sign_kind1(&message.content, message.tags)
+        .sign_kind1(
+            &content,
+            vec![vec!["t".to_owned(), "LightningGoats".to_owned()]],
+        )
         .await
         .with_context(|| {
             format!(
@@ -63,11 +68,12 @@ pub async fn process_next_message(
 pub async fn run_message_processor(
     ledger: LedgerStore,
     nak: Option<NakClient>,
+    renderer: MessageRenderer,
     threshold_sats: u64,
     mode: RuntimeMode,
 ) -> Result<()> {
     loop {
-        match process_next_message(&ledger, nak.as_ref(), threshold_sats, mode).await {
+        match process_next_message(&ledger, nak.as_ref(), &renderer, threshold_sats, mode).await {
             Ok(MessageProcessorStep::Idle) => sleep(Duration::from_millis(250)).await,
             Ok(MessageProcessorStep::PublicationDisabled { seq }) => {
                 tracing::debug!(
@@ -77,7 +83,10 @@ pub async fn run_message_processor(
                 );
             }
             Ok(MessageProcessorStep::NonPublicSkipped { seq }) => {
-                tracing::debug!(seq, "durable event has no public Phase 1 Nostr message");
+                tracing::debug!(
+                    seq,
+                    "durable event is overlay-only or has no Phase 1 public message"
+                );
             }
             Ok(MessageProcessorStep::Enqueued { seq }) => {
                 tracing::info!(seq, "signed Nostr event committed to durable outbox");
@@ -135,63 +144,6 @@ pub async fn run_outbox_publisher(ledger: LedgerStore, nak: NakClient) -> Result
     }
 }
 
-struct PublicMessage {
-    content: String,
-    tags: Vec<Vec<String>>,
-}
-
-fn build_public_message(
-    event: &DurableEvent,
-    threshold_sats: u64,
-) -> Result<Option<PublicMessage>> {
-    let payload: Value = serde_json::from_str(&event.payload_json)
-        .context("durable event contains invalid JSON for message rendering")?;
-
-    let content = match event.event_type.as_str() {
-        "payment_received" => {
-            let amount = required_u64(&payload, "amount_sats")?;
-            let credit = required_u64(&payload, "feed_credit_sats")?;
-            if credit < threshold_sats {
-                let remaining = threshold_sats - credit;
-                format!(
-                    "⚡ {amount} sats received for the Lightning Goats. {remaining} sats until the next feeding."
-                )
-            } else {
-                let feeds_due = credit / threshold_sats;
-                let remainder = credit % threshold_sats;
-                format!(
-                    "⚡ {amount} sats received for the Lightning Goats. {feeds_due} feeding(s) earned; {remainder} sats remain toward the next feeding."
-                )
-            }
-        }
-        "feeder_confirmed" => {
-            let remaining = required_u64(&payload, "feed_credit_sats")?;
-            if remaining >= threshold_sats {
-                format!(
-                    "⚡ The Lightning Goats have been fed! {remaining} sats remain credited and another feeding is due."
-                )
-            } else {
-                format!(
-                    "⚡ The Lightning Goats have been fed! {remaining} sats remain toward the next feeding."
-                )
-            }
-        }
-        _ => return Ok(None),
-    };
-
-    Ok(Some(PublicMessage {
-        content,
-        tags: vec![vec!["t".to_owned(), "LightningGoats".to_owned()]],
-    }))
-}
-
-fn required_u64(payload: &Value, field: &str) -> Result<u64> {
-    payload
-        .get(field)
-        .and_then(Value::as_u64)
-        .with_context(|| format!("durable event is missing unsigned integer field {field}"))
-}
-
 fn publish_retry_delay(previous_attempts: u64) -> Duration {
     let exponent = previous_attempts.min(5) as u32;
     Duration::from_secs((1u64 << exponent).min(30))
@@ -204,14 +156,6 @@ mod tests {
 
     use super::*;
 
-    fn event(seq: u64, event_type: &str, payload: Value) -> DurableEvent {
-        DurableEvent {
-            seq,
-            event_type: event_type.to_owned(),
-            payload_json: payload.to_string(),
-        }
-    }
-
     async fn store() -> (TempDir, LedgerStore) {
         let directory = TempDir::new().unwrap();
         let path = directory.path().join("lightning-goats.db");
@@ -221,63 +165,24 @@ mod tests {
         (directory, store)
     }
 
-    #[test]
-    fn renders_payment_below_threshold() {
-        let message = build_public_message(
-            &event(
-                1,
-                "payment_received",
-                json!({"amount_sats": 250, "feed_credit_sats": 750}),
-            ),
-            1_000,
-        )
-        .unwrap()
-        .unwrap();
-        assert!(message.content.contains("250 sats received"));
-        assert!(message.content.contains("250 sats until"));
-    }
-
-    #[test]
-    fn renders_multiple_feeds_due() {
-        let message = build_public_message(
-            &event(
-                1,
-                "payment_received",
-                json!({"amount_sats": 2340, "feed_credit_sats": 2340}),
-            ),
-            1_000,
-        )
-        .unwrap()
-        .unwrap();
-        assert!(message.content.contains("2 feeding(s) earned"));
-        assert!(message.content.contains("340 sats remain"));
-    }
-
-    #[test]
-    fn processing_errors_are_not_public_nostr_messages() {
-        assert!(
-            build_public_message(
-                &event(1, "processing_error", json!({"message": "internal"})),
-                1_000
-            )
-            .unwrap()
-            .is_none()
-        );
-    }
-
     #[tokio::test]
     async fn shadow_mode_advances_cursor_without_signing_or_outbox() {
         let (_directory, store) = store().await;
         store
             .append_event(
                 "payment_received",
-                &json!({"amount_sats": 100, "feed_credit_sats": 100}),
+                &json!({
+                    "amount_sats": 100,
+                    "feed_credit_sats": 100,
+                    "address_user": "herd"
+                }),
             )
             .await
             .unwrap();
+        let renderer = MessageRenderer::embedded().unwrap();
 
         assert_eq!(
-            process_next_message(&store, None, 1_000, RuntimeMode::Shadow)
+            process_next_message(&store, None, &renderer, 1_000, RuntimeMode::Shadow)
                 .await
                 .unwrap(),
             MessageProcessorStep::PublicationDisabled { seq: 1 }
@@ -292,16 +197,40 @@ mod tests {
         store
             .append_event(
                 "payment_received",
-                &json!({"amount_sats": 100, "feed_credit_sats": 100}),
+                &json!({
+                    "amount_sats": 100,
+                    "feed_credit_sats": 100,
+                    "address_user": "herd"
+                }),
             )
             .await
             .unwrap();
+        let renderer = MessageRenderer::embedded().unwrap();
 
         assert_eq!(
-            process_next_message(&store, None, 1_000, RuntimeMode::Canary)
+            process_next_message(&store, None, &renderer, 1_000, RuntimeMode::Canary)
                 .await
                 .unwrap(),
             MessageProcessorStep::PublicationDisabled { seq: 1 }
+        );
+        assert_eq!(store.message_cursor().await.unwrap(), 1);
+        assert!(store.next_outbox_entry().await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn active_overlay_only_event_advances_without_nostr_client() {
+        let (_directory, store) = store().await;
+        store
+            .append_event("interface_info", &json!({}))
+            .await
+            .unwrap();
+        let renderer = MessageRenderer::embedded().unwrap();
+
+        assert_eq!(
+            process_next_message(&store, None, &renderer, 1_000, RuntimeMode::Active)
+                .await
+                .unwrap(),
+            MessageProcessorStep::NonPublicSkipped { seq: 1 }
         );
         assert_eq!(store.message_cursor().await.unwrap(), 1);
         assert!(store.next_outbox_entry().await.unwrap().is_none());

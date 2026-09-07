@@ -11,5 +11,6 @@ pub mod messaging;
 pub mod nostr;
 pub mod openhab;
 pub mod overlay;
+pub mod presentation;
 pub mod secrets;
 pub mod strike;

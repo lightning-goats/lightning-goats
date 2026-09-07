@@ -3,10 +3,13 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
-use serde_json::Value;
+use serde_json::{Value, json};
 use tokio::time::{MissedTickBehavior, interval};
 
-use crate::ledger::{DurableEvent, LedgerStore};
+use crate::{
+    ledger::{DurableEvent, LedgerStore},
+    presentation::MessageRenderer,
+};
 
 const EVENT_BATCH_SIZE: u32 = 100;
 const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(250);
@@ -14,6 +17,7 @@ const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(250);
 pub async fn serve_overlay_socket(
     socket: WebSocket,
     ledger: LedgerStore,
+    renderer: MessageRenderer,
     threshold_sats: u64,
 ) -> Result<()> {
     let (mut sender, mut receiver) = socket.split();
@@ -38,7 +42,7 @@ pub async fn serve_overlay_socket(
 
                     for event in events {
                         let seq = event.seq;
-                        let message = durable_event_message(event)?;
+                        let message = durable_event_message(event, &renderer, threshold_sats)?;
                         sender
                             .send(Message::Text(message.into()))
                             .await
@@ -72,14 +76,31 @@ pub async fn serve_overlay_socket(
     }
 }
 
-fn durable_event_message(event: DurableEvent) -> Result<String> {
+fn durable_event_message(
+    event: DurableEvent,
+    renderer: &MessageRenderer,
+    threshold_sats: u64,
+) -> Result<String> {
+    let presentation = renderer.render(&event, threshold_sats)?;
     let mut payload: Value = serde_json::from_str(&event.payload_json)
         .context("durable overlay event contains invalid JSON")?;
     let object = payload
         .as_object_mut()
         .context("durable overlay event payload must be a JSON object")?;
-    object.insert("type".to_owned(), Value::String(event.event_type));
+
+    let overlay_type = presentation
+        .overlay_type
+        .unwrap_or_else(|| event.event_type.clone());
+    object.insert("type".to_owned(), Value::String(overlay_type));
+    object.insert("source_type".to_owned(), Value::String(event.event_type));
     object.insert("seq".to_owned(), Value::from(event.seq));
+    if let Some(message) = presentation.overlay_message {
+        object.insert("message".to_owned(), Value::String(message));
+    }
+    if !presentation.overlay_goats.is_empty() {
+        object.insert("goats".to_owned(), json!(presentation.overlay_goats));
+    }
+
     serde_json::to_string(&payload).context("failed serializing overlay event")
 }
 
@@ -89,34 +110,95 @@ mod tests {
 
     use super::*;
 
+    fn renderer() -> MessageRenderer {
+        MessageRenderer::embedded().unwrap()
+    }
+
     #[test]
-    fn durable_event_adds_server_controlled_type_and_sequence() {
-        let message = durable_event_message(DurableEvent {
-            seq: 42,
-            event_type: "payment_received".to_owned(),
-            payload_json: json!({
-                "amount_sats": 250,
-                "type": "attacker-supplied",
-                "seq": 999
-            })
-            .to_string(),
-        })
+    fn payment_event_is_presented_as_legacy_sats_received_message() {
+        let message = durable_event_message(
+            DurableEvent {
+                seq: 42,
+                event_type: "payment_received".to_owned(),
+                payload_json: json!({
+                    "amount_sats": 250,
+                    "feed_credit_sats": 750,
+                    "address_user": "dexter",
+                    "type": "attacker-supplied",
+                    "seq": 999
+                })
+                .to_string(),
+            },
+            &renderer(),
+            1_000,
+        )
         .unwrap();
         let value: Value = serde_json::from_str(&message).unwrap();
 
-        assert_eq!(value["type"], "payment_received");
+        assert_eq!(value["type"], "sats_received");
+        assert_eq!(value["source_type"], "payment_received");
         assert_eq!(value["seq"], 42);
         assert_eq!(value["amount_sats"], 250);
+        assert!(value["message"].as_str().unwrap().contains("Dexter"));
+        assert_eq!(value["goats"][0]["name"], "Dexter");
+        assert_eq!(value["goats"][0]["imageUrl"], "images/dexter.png");
+    }
+
+    #[test]
+    fn informational_event_is_overlay_only_message() {
+        let message = durable_event_message(
+            DurableEvent {
+                seq: 9,
+                event_type: "interface_info".to_owned(),
+                payload_json: json!({}).to_string(),
+            },
+            &renderer(),
+            1_000,
+        )
+        .unwrap();
+        let value: Value = serde_json::from_str(&message).unwrap();
+        assert_eq!(value["type"], "interface_info");
+        assert!(
+            value["message"]
+                .as_str()
+                .is_some_and(|message| !message.is_empty())
+        );
+    }
+
+    #[test]
+    fn weather_payload_preserves_structured_data_and_adds_message() {
+        let message = durable_event_message(
+            DurableEvent {
+                seq: 10,
+                event_type: "weather_status".to_owned(),
+                payload_json: json!({
+                    "message": "Sunny and 72°F",
+                    "data": {"temperature_f": 72.0}
+                })
+                .to_string(),
+            },
+            &renderer(),
+            1_000,
+        )
+        .unwrap();
+        let value: Value = serde_json::from_str(&message).unwrap();
+        assert_eq!(value["type"], "weather_status");
+        assert_eq!(value["message"], "Sunny and 72°F");
+        assert_eq!(value["data"]["temperature_f"], 72.0);
     }
 
     #[test]
     fn durable_event_rejects_non_object_payloads() {
         assert!(
-            durable_event_message(DurableEvent {
-                seq: 1,
-                event_type: "bad".to_owned(),
-                payload_json: "[]".to_owned(),
-            })
+            durable_event_message(
+                DurableEvent {
+                    seq: 1,
+                    event_type: "bad".to_owned(),
+                    payload_json: "[]".to_owned(),
+                },
+                &renderer(),
+                1_000,
+            )
             .is_err()
         );
     }

@@ -48,7 +48,9 @@ async fn canary_mode_drains_test_rule_without_nostr_capability() {
     let payment = SettledPayment {
         source: "test".to_owned(),
         source_id: "canary-mode-payment".to_owned(),
-        payment_hash: Some("ca11a7ca11a7ca11a7ca11a7ca11a7ca11a7ca11a7ca11a7ca11a7ca11a7ca11".to_owned()),
+        payment_hash: Some(
+            "ca11a7ca11a7ca11a7ca11a7ca11a7ca11a7ca11a7ca11a7ca11a7ca11a7ca11".to_owned(),
+        ),
         address_user: "herd-canary".to_owned(),
         credit_pool: "herd".to_owned(),
         amount_msat: 2_340_000,

@@ -21,16 +21,18 @@ request_item = "GoatFeeder_ManualRequest"
 ack_item = "REPLACE_WITH_LIVE_CORRELATED_FEEDER_RESULT_ITEM"
 
 override_item = "FeederOverride"
-# This is a new local administrative kill switch for the Lightning Goats remote
-# integration. It does not replace FeederOverride or the existing owner safety.
+# New local administrative kill switch for the Lightning Goats remote path.
 remote_enabled_item = "LightningGoatsRemoteEnabled"
 temperature_item = "AmbientWeatherWS2902A_WeatherDataWs2902a_Temperature"
 
 [weather]
-# Exact local read endpoint. The mutating /weather endpoint is never exposed.
 url = "http://127.0.0.1:5000/get_received_data"
 max_stale_seconds = 300
 
 [feeder]
 ack_timeout_seconds = 20
 ack_poll_milliseconds = 250
+# Defense in depth in the trusted gateway, in addition to the live OpenHAB
+# owner rule's own safety policy and lightning-goatsd's inter-feed delay.
+min_feed_interval_seconds = 30
+max_feeds_per_hour = 10

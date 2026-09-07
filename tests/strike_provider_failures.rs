@@ -1,17 +1,11 @@
 use std::time::Duration;
 
-use axum::{
-    Json, Router,
-    http::StatusCode,
-    response::IntoResponse,
-    routing::post,
-};
+use axum::{Json, Router, http::StatusCode, response::IntoResponse, routing::post};
 use lightning_goats::strike::StrikeClient;
 use serde_json::json;
 use tokio::{net::TcpListener, time::sleep};
 
-const DESCRIPTION_HASH: &str =
-    "1111111111111111111111111111111111111111111111111111111111111111";
+const DESCRIPTION_HASH: &str = "1111111111111111111111111111111111111111111111111111111111111111";
 
 async fn spawn(app: Router) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -54,7 +48,8 @@ async fn receive_request_rate_limit_fails_closed() {
 
 #[tokio::test]
 async fn receive_request_timeout_fails_closed() {
-    let base_url = spawn(Router::new().route("/v1/receive-requests", post(deliberately_slow))).await;
+    let base_url =
+        spawn(Router::new().route("/v1/receive-requests", post(deliberately_slow))).await;
     let client = StrikeClient::new(&base_url, "test-receive-only-key".to_owned()).unwrap();
 
     let started = tokio::time::Instant::now();

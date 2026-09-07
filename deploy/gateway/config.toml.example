@@ -20,6 +20,12 @@ url = "http://127.0.0.1:8080/"
 request_item = "GoatFeeder_ManualRequest"
 ack_item = "REPLACE_WITH_LIVE_CORRELATED_FEEDER_RESULT_ITEM"
 
+# This template is the exact OpenHAB command body. It MUST contain exactly one
+# {request_id}. The bare UUID is a safe placeholder for code testing; Codex must
+# inspect the deployed feeder-owner.js and replace this value if the live owner
+# expects structured JSON or another correlated command shape.
+request_payload_template = "{request_id}"
+
 override_item = "FeederOverride"
 # New local administrative kill switch for the Lightning Goats remote path.
 remote_enabled_item = "LightningGoatsRemoteEnabled"

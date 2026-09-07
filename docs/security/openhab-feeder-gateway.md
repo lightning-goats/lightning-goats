@@ -1,33 +1,49 @@
 # OpenHAB Feeder Gateway Security Design
 
-Status: required Phase 1 architecture.
-
-Tracker: issue #17.
+Status: required Phase 1 architecture. Tracker: #17; weather: #21.
 
 ## Purpose
 
-The public VPS and `lightning-goatsd` must not hold a generic OpenHAB API token or have broad access to the in-house OpenHAB server/LAN.
-
-OpenHAB's current authorization model is not sufficiently fine-grained to treat an API token as a per-item/per-rule ACL. Phase 1 therefore enforces least privilege with a dedicated integration identity, a narrow in-house integration gateway, explicit OpenHAB Items/rules, and WireGuard/UFW containment.
+The public VPS and `lightning-goatsd` must not hold an OpenHAB API token or have broad access to the in-house OpenHAB/LAN environment. Phase 1 enforces least privilege with a purpose-built trusted gateway on the existing WireGuard network plus host firewall policy.
 
 ## Existing network
 
-The established WireGuard subnet is:
-
 ```text
 10.8.0.0/24
-```
-
-Relevant production addresses:
-
-```text
 10.8.0.1   current/old VPS WireGuard hub
 10.8.0.6   in-house OpenHAB + weather host
 ```
 
-During staging, the new VPS receives its own new WireGuard keypair and an unused temporary `10.8.0.x` address. It must not claim `10.8.0.1` while the old VPS remains active.
+During parallel staging, the new VPS gets a new keypair and an inventoried unused temporary `10.8.0.x`. It must not claim `10.8.0.1` while the old hub is active.
 
-See `docs/deployment/wireguard-topology.md`.
+## Existing feeder authority must be reused
+
+A 2026-08-20 live-system audit in `santyr/Solar_PV` found that OpenHAB rule `88bd9ec4de` is already the correlated feeder owner. It is triggered by commands to:
+
+```text
+GoatFeeder_ManualRequest
+```
+
+and the deployed owner maintains a persisted request ledger/result Item for completed UI requests. Its legacy `/runnow` compatibility path is explicitly **not** authoritative proof of physical completion.
+
+Therefore Phase 1 should **reuse the existing correlated owner**, not create a second competing physical feeder owner, unless a new live audit proves that contract has changed.
+
+Before configuring production, Codex must inspect the deployed source and OpenHAB runtime on `10.8.0.6` and record:
+
+1. current SHA-256 of the deployed feeder-owner script;
+2. exact request Item (expected `GoatFeeder_ManualRequest`);
+3. exact persisted correlated result Item;
+4. exact request command payload shape;
+5. exact successful result JSON/state shape;
+6. the owner's current duplicate/rate/safety behavior.
+
+The historical audit recorded rule-script SHA-256:
+
+```text
+730053e0f3245cb83461e3fe6e3b05d49c8b508631e8cdb4a889c8be8d915978
+```
+
+Treat that as historical evidence, not a value to force. If the live SHA differs, inspect and document the change before proceeding.
 
 ## Trust boundary
 
@@ -37,231 +53,195 @@ Internet
    v
 new VPS / lightning-goatsd
    |
-   | existing 10.8.0.0/24 WireGuard network
-   | narrowly firewalled application path
+   | 10.8.0.0/24 WireGuard
+   | UFW: gateway port only
    | NO OpenHAB token
    v
-10.8.0.6 in-house Lightning Goats integration gateway
+10.8.0.6 :8789 lightning-goats-gateway
    |
-   +-- dedicated OpenHAB USER token -> dedicated Items/rule
-   +-- trusted local weather read -> 127.0.0.1:5000/get_received_data
+   +-- dedicated OpenHAB USER token -> loopback OpenHAB REST
+   |      reads FeederOverride
+   |      reads LightningGoatsRemoteEnabled
+   |      writes only correlated feeder request Item
+   |      reads only correlated result Item
+   |      optional temperature read
+   |
+   +-- local read-only weather -> 127.0.0.1:5000/get_received_data
    |
    v
-physical feeder / sanitized status data
+existing OpenHAB feeder owner -> physical feeder
 ```
 
-A complete compromise of the VPS should provide no generic OpenHAB credential and no general LAN reachability.
+A complete compromise of the VPS should yield neither a generic OpenHAB credential nor general trusted-side network access.
 
 ## Dedicated OpenHAB identity
 
-Create a dedicated OpenHAB USER account for this project, for example:
+Create a dedicated OpenHAB USER account/token for the gateway. The token:
 
-```text
-lightning_goats
-```
+- exists only on `10.8.0.6`;
+- is injected with systemd credentials;
+- is never copied to Vultr or committed to Git;
+- is rotated if the gateway host/deployment path is suspected compromised.
 
-Create a dedicated API token associated with that account, for example:
-
-```text
-lightning-goats-gateway
-```
-
-Requirements:
-
-- token is stored only on the in-house integration gateway host;
-- use a restricted systemd credential or root-managed secret file;
-- do not copy the token to the VPS;
-- do not commit it to Git;
-- rotate/revoke the token if the gateway host or deployment process is suspected compromised;
-- audit OpenHAB's `Implicit User Role` setting and disable unauthenticated LAN USER access if doing so is compatible with the rest of the house automation deployment.
+OpenHAB USER authorization is coarse, so the effective least-privilege boundary is the gateway code + loopback-only OpenHAB client + systemd/UFW containment, not a claimed per-Item token scope.
 
 ## Gateway API
 
-The gateway must be a purpose-built API, not a generic OpenHAB or weather-service reverse proxy.
-
-Recommended minimal surface:
+The implemented gateway exposes only:
 
 ```text
 GET  /healthz
 GET  /v1/feeder/override
-GET  /v1/temperature                 # optional
+GET  /v1/temperature
 POST /v1/feeder/request/<uuid>
 GET  /v1/feeder/request/<uuid>
-GET  /v1/weather                     # sanitized/read-only
+GET  /v1/weather
 ```
 
-The gateway should:
+It is not an OpenHAB reverse proxy. Unknown paths/methods are not forwarded.
 
-- listen only on the intended WireGuard address/interface;
-- accept requests only from the approved VPS WireGuard source;
-- impose small request/body/time limits;
-- reject unknown paths/methods;
-- never expose arbitrary OpenHAB REST paths;
-- never proxy the legacy weather `/weather` mutation endpoint;
-- disable HTTP proxy discovery for credential-bearing OpenHAB requests;
-- log request IDs and outcomes without logging the OpenHAB token.
-
-If practical, authenticate VPS-to-gateway requests in addition to WireGuard source identity with a separate low-value gateway secret or mTLS. This is defense in depth; the WireGuard/UFW boundary remains mandatory.
-
-## Command / acknowledgement protocol
-
-Prefer dedicated OpenHAB Items over remote rule execution.
-
-Recommended Items:
+Production listener:
 
 ```text
-LightningGoatsFeederRequest   String
-LightningGoatsFeederAck       String
-LightningGoatsRemoteEnabled   Switch
-FeederOverride                existing
-AmbientTemperature            existing/optional
+10.8.0.6:8789
 ```
 
-The `lightning-goatsd` durable feed-attempt UUID becomes the request ID.
+A separate canary listener on `10.8.0.6:8790` must use harmless canary request/ack Items and must never target the physical feeder owner.
 
-### Request flow
+## Correlated request compatibility
 
-1. `lightning-goatsd` durably commits a feed intent with UUID `X`.
-2. It sends `POST /v1/feeder/request/X` to the in-house gateway.
-3. Gateway validates request shape and submits `X` to `LightningGoatsFeederRequest`.
-4. OpenHAB rule evaluates all local safety conditions.
-5. If it performs the physical actuation and knows the outcome, it records `LightningGoatsFeederAck = X` (or equivalent structured status).
-6. Gateway exposes that status through `GET /v1/feeder/request/X`.
-7. `lightning-goatsd` marks the feed confirmed only after authoritative gateway/OpenHAB acknowledgement.
+The production gateway config contains:
 
-### Local OpenHAB safety gates
+```toml
+request_item = "GoatFeeder_ManualRequest"
+ack_item = "<live correlated result Item>"
+request_payload_template = "{request_id}"
+```
 
-The rule must fail closed unless all required conditions pass:
+`request_payload_template` is deployment-configurable because the deployed owner may expect structured JSON rather than a bare UUID. It must contain exactly one `{request_id}` and no other brace expansion. Codex must inspect the live owner and set this to the exact accepted command shape before physical testing.
 
-- `LightningGoatsRemoteEnabled == ON`;
+The acknowledgement parser accepts either:
+
+- an Item state that is exactly the request UUID; or
+- a JSON object containing `request_id`, `requestId`, or `id` plus explicit successful status (`success=true`, or a recognized completed/success outcome).
+
+Failure/unknown JSON shapes fail closed.
+
+## Exactly-once and ambiguity
+
+`lightning-goatsd` and the trusted gateway use the **same feed-attempt UUID**.
+
+1. `lightning-goatsd` commits feed intent UUID `X` in its durable ledger.
+2. Gateway persists `X` as `pending` in its own SQLite database **before** sending any OpenHAB command.
+3. Gateway submits the rendered correlated command to the existing owner.
+4. Gateway confirms only after the result Item authoritatively identifies `X` as successful.
+5. Gateway persists `X=acknowledged`.
+6. Only then does `lightning-goatsd` commit its feed debit/`feeder_confirmed` event.
+
+A persisted pending UUID is never automatically re-commanded, including after gateway restart. If a response is lost, the same UUID can be queried for later authoritative acknowledgement but cannot actuate twice through the gateway.
+
+Any ambiguous gateway/network error causes `lightning-goatsd` to mark its attempt `unknown` and block automatic feeding until reconciliation.
+
+## Local safety layers
+
+For every **new** feed UUID, the trusted gateway requires:
+
 - `FeederOverride == OFF`;
-- request UUID is valid and has not already been processed;
-- no unresolved/local feeder state prevents safe operation;
-- minimum physical-feed interval has elapsed;
-- configured absolute feed-frequency/safety cap is not exceeded;
-- feeder hardware/rule prerequisites are healthy.
+- `LightningGoatsRemoteEnabled == ON`;
+- local persisted minimum-feed interval elapsed;
+- local rolling `max_feeds_per_hour` not exceeded.
 
-The OpenHAB rule is the final authority on whether physical actuation is allowed.
-
-## Exactly-once / ambiguity behavior
-
-Duplicate UUIDs must never actuate twice.
-
-If the gateway or network returns an ambiguous result after the request may have reached OpenHAB:
-
-- `lightning-goatsd` marks the attempt `unknown`;
-- it does not automatically retry physical actuation;
-- operator reconciliation remains required unless the gateway can later return an authoritative acknowledgement for the same UUID.
-
-If a response is lost after a successful feed, querying the same UUID must reveal the prior outcome rather than causing another actuation.
-
-## Weather read path
-
-The legacy weather service runs on the same in-house host:
+Production examples currently use:
 
 ```text
-10.8.0.6:5000
+min_feed_interval_seconds = 30
+max_feeds_per_hour = 10
 ```
 
-It exposes both:
+These are defense-in-depth values and must be reviewed against the actual feeder/animal-care policy before deployment. The existing OpenHAB owner remains final physical authority and its own safety logic must not be weakened.
+
+## Remote kill switch
+
+Create/verify a local Switch Item:
+
+```text
+LightningGoatsRemoteEnabled
+```
+
+Production must start with this **OFF**. It is enabled only for the explicitly approved physical canary/cutover step. `FeederOverride` remains an independent existing control.
+
+## Weather path
+
+The legacy service on `10.8.0.6:5000` exposes both:
 
 ```text
 GET /get_received_data   # read
 GET /weather?...         # mutating ingestion
 ```
 
-Therefore the VPS must not receive direct access to port 5000.
-
-The integration gateway should read locally/trusted-side:
+The VPS must never access port 5000 directly. The gateway alone reads:
 
 ```text
 http://127.0.0.1:5000/get_received_data
 ```
 
-validate/sanitize the expected fields, and expose only:
+It validates payload size/types/ranges/staleness and exposes only sanitized `GET /v1/weather`. Weather failure affects presentation only, never payment/feed accounting.
+
+## WireGuard/UFW
+
+Use `deploy/ufw/lightning-goats-gateway.sh.example` as a reviewed template. Do not flush or replace unrelated firewall policy.
+
+During staging, allow only the new temporary VPS `10.8.0.x` to `10.8.0.6:8789` and (while canary is needed) `:8790`.
+
+At cutover, after the old hub is stopped, replace the temporary source with production `10.8.0.1 -> 10.8.0.6:8789`.
+
+Required negative tests from the VPS:
 
 ```text
-GET /v1/weather
+10.8.0.6:5000   blocked
+10.8.0.6:8080   blocked
+10.8.0.6:22     blocked unless separately/operator-approved
+10.8.0.6:5432   blocked
+unrelated LAN/WireGuard hosts/ports blocked
 ```
 
-See `docs/architecture/weather-overlay.md` and issue #21.
+Do not rely on WireGuard `AllowedIPs` alone as authorization.
 
-Weather failures affect presentation only and must never affect payment or feeder accounting.
+## System services
 
-## WireGuard and UFW policy
-
-Reuse the existing `10.8.0.0/24` WireGuard network.
-
-### During staging
-
-- old production hub remains `10.8.0.1`;
-- new VPS uses an inventoried unused temporary `10.8.0.x` address/new keypair;
-- UFW on `10.8.0.6` allows that temporary source only to the dedicated gateway TCP port;
-- direct access from the staging VPS to `10.8.0.6:5000`, OpenHAB REST, SSH and unrelated services stays blocked.
-
-### At production cutover
-
-After the old VPS WireGuard service is stopped, the new VPS may assume `10.8.0.1` to preserve the established hub topology. Replace/remove the temporary staging UFW rule and allow the final production hub source only to the gateway port.
-
-Illustrative policy shape on `10.8.0.6`:
+Gateway runtime identity:
 
 ```text
-new/staging VPS source -> gateway port     ALLOW during staging only
-10.8.0.1 -> gateway port                  ALLOW in production
-VPS -> 10.8.0.6:5000                      BLOCK
-VPS -> OpenHAB REST/admin                  BLOCK
-VPS -> SSH/Postgres/unrelated services     BLOCK
+lightning-goats-gateway
 ```
 
-Do not rely on WireGuard `AllowedIPs` alone as authorization. Enforce host/forward firewall rules.
-
-Required negative tests from the VPS include:
+Use the supplied system-level units:
 
 ```text
-10.8.0.6:5000              blocked
-OpenHAB REST/admin          blocked
-trusted-host SSH            blocked unless explicitly approved
-PostgreSQL                  blocked
-unrelated LAN hosts/ports   blocked
+deploy/systemd/lightning-goats-gateway.service
+deploy/systemd/lightning-goats-gateway-canary.service
 ```
 
-## Service identity and systemd
+They use systemd credential injection, no capabilities, filesystem protections, and `IPAddressDeny=any` with only localhost + `10.8.0.0/24` allowed. UFW provides peer-specific ingress authorization.
 
-Run the gateway as its own unprivileged in-house service identity, not as the OpenHAB OS account when practical.
+The VPS `lightning-goatsd` units intentionally contain **no OpenHAB credential**.
 
-Use a system-level systemd unit with:
+## Staging gates
 
-- `NoNewPrivileges=yes`;
-- filesystem and capability restrictions appropriate to the implementation;
-- credential injection for the OpenHAB token;
-- explicit WireGuard listen address;
-- no write access outside required runtime/state paths.
+Before any physical feeder test:
 
-## Required tests
+1. inspect and document live correlated owner contract;
+2. create dedicated OpenHAB USER/token;
+3. create `LightningGoatsRemoteEnabled`, default OFF;
+4. deploy production gateway with remote feeding still OFF;
+5. deploy canary gateway with harmless canary Items;
+6. verify canary duplicate UUID produces exactly one harmless action;
+7. verify gateway restart with pending UUID does not resend;
+8. verify `/v1/weather` and overlay weather formatting;
+9. run all UFW positive/negative tests;
+10. only with operator approval, enable remote feeding and run one controlled physical UUID test;
+11. replay/query the same UUID and prove no second actuation.
 
-Automated/unit tests:
+## Phase 2
 
-- valid/invalid UUID parsing;
-- duplicate request suppression;
-- override ON/OFF/invalid behavior;
-- remote-enable OFF behavior;
-- local minimum interval enforcement;
-- safety cap enforcement;
-- gateway timeout / ambiguous state;
-- authoritative later ack for the same UUID;
-- no generic OpenHAB path access through the gateway;
-- weather normalization/read-only behavior;
-- no route to legacy `/weather` mutation.
-
-Staging tests:
-
-- UFW/WireGuard positive and negative connectivity;
-- sanitized weather read through `/v1/weather`;
-- direct `10.8.0.6:5000` failure from VPS;
-- harmless canary/simulated feed request;
-- one controlled physical feeder test;
-- replay same UUID and prove no second physical actuation.
-
-## Phase 2 compatibility
-
-CyberHerd must not bypass this gateway. Any future feeder-triggering producer should emit durable credit/events through the same Lightning Goats feeder authority rather than gaining direct OpenHAB credentials.
+CyberHerd must not bypass this gateway or acquire OpenHAB credentials. Future feeder-producing logic must use the same durable feeder authority/boundary.

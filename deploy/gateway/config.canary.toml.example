@@ -1,0 +1,30 @@
+# Trusted in-house canary gateway configuration.
+# This instance MUST NOT target the physical feeder owner.
+
+[service]
+listen = "10.8.0.6:8790"
+
+[database]
+url = "sqlite:///var/lib/lightning-goats-gateway-canary/gateway.db"
+
+[openhab]
+url = "http://127.0.0.1:8080/"
+# Create harmless String Items and a local canary rule which echoes the UUID to
+# the ack Item (and optionally increments a test counter) without actuating any
+# feeder hardware.
+request_item = "LightningGoatsCanaryRequest"
+ack_item = "LightningGoatsCanaryAck"
+request_payload_template = "{request_id}"
+override_item = "FeederOverride"
+remote_enabled_item = "LightningGoatsCanaryRemoteEnabled"
+temperature_item = "AmbientWeatherWS2902A_WeatherDataWs2902a_Temperature"
+
+[weather]
+url = "http://127.0.0.1:5000/get_received_data"
+max_stale_seconds = 300
+
+[feeder]
+ack_timeout_seconds = 5
+ack_poll_milliseconds = 100
+min_feed_interval_seconds = 5
+max_feeds_per_hour = 60

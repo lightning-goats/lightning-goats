@@ -1,8 +1,9 @@
 use std::{
     collections::HashSet,
     fs,
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     path::{Path, PathBuf},
+    str::FromStr,
 };
 
 use anyhow::{Context, Result, bail};
@@ -18,15 +19,13 @@ pub const REQUIRED_PHASE1_LIGHTNING_USERS: [&str; 6] =
 pub struct AppConfig {
     pub service: ServiceConfig,
     pub database: DatabaseConfig,
-    pub lightning: LightningConfig,
-    #[serde(default)]
-    pub strike: Option<StrikeConfig>,
-    #[serde(default)]
-    pub lnurl: Option<LnurlConfig>,
+    pub strike: StrikeConfig,
+    pub lnurl: LnurlConfig,
     #[serde(default)]
     pub lightning_address: Vec<LightningAddressConfig>,
     pub feeder: FeederConfig,
-    pub openhab: OpenHabConfig,
+    pub gateway: IntegrationGatewayConfig,
+    pub informational: InformationalConfig,
     pub nostr: NostrConfig,
 }
 
@@ -44,89 +43,41 @@ impl AppConfig {
         if !self.service.listen.ip().is_loopback() {
             bail!("service.listen must use a loopback address; nginx is the public boundary");
         }
-        if !self.database.url.starts_with("sqlite://") {
+        if !self.database.url.starts_with("sqlite://") || self.database.url == "sqlite::memory:" {
             bail!("database.url must be a file-backed sqlite:// URL");
         }
-        if self.lightning.clnrest_url.trim().is_empty() {
-            bail!("lightning.clnrest_url must not be empty");
+
+        let strike_url = Url::parse(&self.strike.api_url).context("invalid strike.api_url")?;
+        if strike_url.scheme() != "https" || strike_url.host_str().is_none() {
+            bail!("strike.api_url must use https:// with a host");
         }
-        if let Some(strike) = &self.strike {
-            let url = Url::parse(&strike.api_url).context("invalid strike.api_url")?;
-            if url.scheme() != "https" || url.host_str().is_none() {
-                bail!("strike.api_url must use https:// with a host");
-            }
-            if !url.username().is_empty()
-                || url.password().is_some()
-                || url.query().is_some()
-                || url.fragment().is_some()
-            {
-                bail!("strike.api_url must not contain credentials, query, or fragment");
-            }
+        if !strike_url.username().is_empty()
+            || strike_url.password().is_some()
+            || strike_url.query().is_some()
+            || strike_url.fragment().is_some()
+        {
+            bail!("strike.api_url must not contain credentials, query, or fragment");
         }
+
         self.validate_lnurl()?;
         if self.feeder.threshold_sats == 0 {
             bail!("feeder.threshold_sats must be greater than zero");
         }
-        validate_user(&self.lightning.herd_user)
-            .context("lightning.herd_user must be a canonical legacy CLN address user")?;
-        if self.openhab.url.trim().is_empty() {
-            bail!("openhab.url must not be empty");
+        if self.feeder.inter_feed_delay_seconds == 0 {
+            bail!("feeder.inter_feed_delay_seconds must be greater than zero");
         }
-        if self.openhab.feeder_rule_id.trim().is_empty() {
-            bail!("openhab.feeder_rule_id must not be empty");
-        }
-        if self.openhab.override_item.trim().is_empty() {
-            bail!("openhab.override_item must not be empty");
-        }
-        if let Some(item) = &self.openhab.temperature_item {
-            if item.trim().is_empty() {
-                bail!("openhab.temperature_item must not be empty when configured");
-            }
-        }
-        if !self.nostr.nak_path.is_absolute() {
-            bail!("nostr.nak_path must be an absolute path");
-        }
-        if !self.nostr.nak_config_path.is_absolute() {
-            bail!("nostr.nak_config_path must be an absolute path");
-        }
-        if self.nostr.bunker_pubkey.len() != 64
-            || !self
-                .nostr
-                .bunker_pubkey
-                .bytes()
-                .all(|byte| byte.is_ascii_hexdigit())
-        {
-            bail!("nostr.bunker_pubkey must be a 32-byte hex public key");
-        }
-        if self.nostr.relays.is_empty() {
-            bail!("nostr.relays must contain at least one relay");
-        }
-        for relay in &self.nostr.relays {
-            let parsed =
-                Url::parse(relay).with_context(|| format!("invalid Nostr relay URL {relay}"))?;
-            if parsed.scheme() != "wss" || parsed.host_str().is_none() {
-                bail!("Nostr relay URLs must use wss:// with a host: {relay}");
-            }
-        }
+        validate_gateway_origin(&self.gateway.url)?;
+        self.validate_informational()?;
+        self.validate_nostr()?;
         Ok(())
     }
 
     fn validate_lnurl(&self) -> Result<()> {
-        let Some(lnurl) = &self.lnurl else {
-            if !self.lightning_address.is_empty() {
-                bail!("lightning_address entries require [lnurl] configuration");
-            }
-            return Ok(());
-        };
-        if self.strike.is_none() {
-            bail!("[lnurl] requires [strike]; LNURL invoice creation is Strike-backed");
-        }
-        if lnurl.invoice_expiry_seconds == 0 || lnurl.invoice_expiry_seconds > 86_400 {
+        if self.lnurl.invoice_expiry_seconds == 0 || self.lnurl.invoice_expiry_seconds > 86_400 {
             bail!("lnurl.invoice_expiry_seconds must be between 1 and 86400 seconds");
         }
-
         let public_url =
-            Url::parse(&lnurl.public_base_url).context("invalid lnurl.public_base_url")?;
+            Url::parse(&self.lnurl.public_base_url).context("invalid lnurl.public_base_url")?;
         if public_url.scheme() != "https" || public_url.host_str().is_none() {
             bail!("lnurl.public_base_url must use https:// with a host");
         }
@@ -142,7 +93,7 @@ impl AppConfig {
         }
 
         if self.lightning_address.is_empty() {
-            bail!("[lnurl] requires at least one [[lightning_address]] entry");
+            bail!("Phase 1 requires configured Lightning Addresses");
         }
         let mut users = HashSet::new();
         for address in &self.lightning_address {
@@ -181,6 +132,63 @@ impl AppConfig {
         for required in REQUIRED_PHASE1_LIGHTNING_USERS {
             if !users.contains(required) {
                 bail!("Phase 1 Lightning Address registry is missing required user {required}");
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_informational(&self) -> Result<()> {
+        if !(10..=3_600).contains(&self.informational.interval_seconds) {
+            bail!("informational.interval_seconds must be between 10 and 3600");
+        }
+        for (name, value) in [
+            (
+                "informational.interface_info_probability",
+                self.informational.interface_info_probability,
+            ),
+            (
+                "informational.weather_probability",
+                self.informational.weather_probability,
+            ),
+        ] {
+            if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+                bail!("{name} must be a finite probability between 0 and 1");
+            }
+        }
+        if self.informational.interface_info_probability + self.informational.weather_probability
+            > 1.0
+        {
+            bail!(
+                "informational interface + weather unconditional probabilities must not exceed 1"
+            );
+        }
+        Ok(())
+    }
+
+    fn validate_nostr(&self) -> Result<()> {
+        if !self.nostr.nak_path.is_absolute() {
+            bail!("nostr.nak_path must be an absolute path");
+        }
+        if !self.nostr.nak_config_path.is_absolute() {
+            bail!("nostr.nak_config_path must be an absolute path");
+        }
+        if self.nostr.bunker_pubkey.len() != 64
+            || !self
+                .nostr
+                .bunker_pubkey
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
+        {
+            bail!("nostr.bunker_pubkey must be a 32-byte hex public key");
+        }
+        if self.nostr.relays.is_empty() {
+            bail!("nostr.relays must contain at least one relay");
+        }
+        for relay in &self.nostr.relays {
+            let parsed =
+                Url::parse(relay).with_context(|| format!("invalid Nostr relay URL {relay}"))?;
+            if parsed.scheme() != "wss" || parsed.host_str().is_none() {
+                bail!("Nostr relay URLs must use wss:// with a host: {relay}");
             }
         }
         Ok(())
@@ -228,14 +236,6 @@ impl RuntimeMode {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct LightningConfig {
-    pub clnrest_url: String,
-    #[serde(default)]
-    pub clnrest_ca_certificate: Option<PathBuf>,
-    pub herd_user: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
 pub struct StrikeConfig {
     pub api_url: String,
 }
@@ -263,12 +263,17 @@ pub struct FeederConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct OpenHabConfig {
+pub struct IntegrationGatewayConfig {
     pub url: String,
-    pub feeder_rule_id: String,
-    pub override_item: String,
-    #[serde(default)]
-    pub temperature_item: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct InformationalConfig {
+    pub interval_seconds: u64,
+    pub interface_info_enabled: bool,
+    pub weather_enabled: bool,
+    pub interface_info_probability: f64,
+    pub weather_probability: f64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -278,6 +283,40 @@ pub struct NostrConfig {
     pub bunker_pubkey: String,
     #[serde(default)]
     pub relays: Vec<String>,
+}
+
+fn validate_gateway_origin(raw: &str) -> Result<()> {
+    let url = Url::parse(raw).context("invalid gateway.url")?;
+    if !url.username().is_empty() || url.password().is_some() {
+        bail!("gateway.url must not contain credentials");
+    }
+    if url.query().is_some() || url.fragment().is_some() || url.path() != "/" {
+        bail!("gateway.url must be a root origin without query, fragment, or path");
+    }
+    let host = url.host_str().context("gateway.url is missing a host")?;
+    match url.scheme() {
+        "https" => Ok(()),
+        "http" => {
+            if host.eq_ignore_ascii_case("localhost") {
+                return Ok(());
+            }
+            let ip = IpAddr::from_str(host)
+                .context("plain HTTP gateway.url must use a literal private/loopback IP")?;
+            if ip.is_loopback() || is_private_ip(ip) {
+                Ok(())
+            } else {
+                bail!("plain HTTP gateway.url must use a private/loopback address")
+            }
+        }
+        scheme => bail!("unsupported gateway.url scheme {scheme}"),
+    }
+}
+
+fn is_private_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => ip.is_private(),
+        IpAddr::V6(ip) => ip.is_unique_local(),
+    }
 }
 
 #[cfg(test)]
@@ -313,28 +352,27 @@ mod tests {
             database: DatabaseConfig {
                 url: "sqlite:///var/lib/lightning-goats/lightning-goats.db".to_owned(),
             },
-            lightning: LightningConfig {
-                clnrest_url: "https://127.0.0.1:3010".to_owned(),
-                clnrest_ca_certificate: Some(PathBuf::from("/etc/lightning-goats/clnrest-ca.pem")),
-                herd_user: "herd".to_owned(),
-            },
-            strike: Some(StrikeConfig {
+            strike: StrikeConfig {
                 api_url: "https://api.strike.me/".to_owned(),
-            }),
-            lnurl: Some(LnurlConfig {
+            },
+            lnurl: LnurlConfig {
                 public_base_url: "https://lightning-goats.com/".to_owned(),
                 invoice_expiry_seconds: 300,
-            }),
+            },
             lightning_address: phase1_addresses(),
             feeder: FeederConfig {
                 threshold_sats: 1_000,
                 inter_feed_delay_seconds: 30,
             },
-            openhab: OpenHabConfig {
-                url: "http://127.0.0.1:8080".to_owned(),
-                feeder_rule_id: "88bd9ec4de".to_owned(),
-                override_item: "FeederOverride".to_owned(),
-                temperature_item: Some("AmbientTemperature".to_owned()),
+            gateway: IntegrationGatewayConfig {
+                url: "http://10.8.0.6:8789/".to_owned(),
+            },
+            informational: InformationalConfig {
+                interval_seconds: 60,
+                interface_info_enabled: true,
+                weather_enabled: true,
+                interface_info_probability: 0.4,
+                weather_probability: 0.4,
             },
             nostr: NostrConfig {
                 nak_path: PathBuf::from("/usr/local/bin/nak"),
@@ -364,16 +402,16 @@ mod tests {
     }
 
     #[test]
-    fn rejects_noncanonical_herd_user() {
+    fn rejects_public_plain_http_gateway() {
         let mut config = valid_config();
-        config.lightning.herd_user = "Herd".to_owned();
+        config.gateway.url = "http://8.8.8.8:8789/".to_owned();
         assert!(config.validate().is_err());
     }
 
     #[test]
     fn rejects_insecure_strike_api_url() {
         let mut config = valid_config();
-        config.strike.as_mut().unwrap().api_url = "http://api.strike.me/".to_owned();
+        config.strike.api_url = "http://api.strike.me/".to_owned();
         assert!(config.validate().is_err());
     }
 

@@ -18,13 +18,12 @@ ConfigurationDirectory=lightning-goats
 UMask=0077
 
 Environment=RUST_LOG=info
-# Phase 1 Strike runtime credentials. The API key must be receive/read only.
+# Receive/read-only Strike runtime credentials.
 LoadCredentialEncrypted=strike-api-key:/etc/credstore.encrypted/lightning-goats-strike-api-key
 LoadCredentialEncrypted=strike-webhook-secret:/etc/credstore.encrypted/lightning-goats-strike-webhook-secret
-# Transitional credentials removed by Phase 1 issues #13 and #17.
-LoadCredentialEncrypted=cln-rune:/etc/credstore.encrypted/lightning-goats-cln-rune
-LoadCredentialEncrypted=openhab-token:/etc/credstore.encrypted/lightning-goats-openhab
+# NIP-46 client credential; the Nostr signing key remains in the separate bunker.
 LoadCredentialEncrypted=nostr-client-key:/etc/credstore.encrypted/lightning-goats-nostr-client
+# No OpenHAB, CLN, or LNbits credential belongs on this host/service.
 
 Restart=on-failure
 RestartSec=5s

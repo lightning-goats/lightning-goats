@@ -1,0 +1,44 @@
+#!/bin/sh
+# REVIEW BEFORE RUNNING. Example UFW policy for the in-house host 10.8.0.6.
+#
+# This script intentionally uses placeholders. Codex must inventory the existing
+# WireGuard interface, staging peer IP, and current UFW rules before applying
+# anything. Do not flush/replace unrelated house firewall policy.
+set -eu
+
+WG_IF="REPLACE_WITH_WIREGUARD_INTERFACE"       # e.g. wg0
+STAGING_VPS_IP="REPLACE_WITH_UNUSED_10.8.0.X"  # new VPS during parallel staging
+HOME_WG_IP="10.8.0.6"
+PROD_VPS_IP="10.8.0.1"
+PROD_GATEWAY_PORT="8789"
+CANARY_GATEWAY_PORT="8790"
+
+# Staging: allow the new VPS only to the two purpose-built gateway listeners.
+sudo ufw allow in on "$WG_IF" from "$STAGING_VPS_IP" to "$HOME_WG_IP" port "$PROD_GATEWAY_PORT" proto tcp comment 'LG staging gateway'
+sudo ufw allow in on "$WG_IF" from "$STAGING_VPS_IP" to "$HOME_WG_IP" port "$CANARY_GATEWAY_PORT" proto tcp comment 'LG staging canary gateway'
+
+# DO NOT add allowances from the VPS to these trusted services:
+#   10.8.0.6:5000   legacy weather receiver (contains mutating /weather endpoint)
+#   10.8.0.6:8080   OpenHAB REST/admin
+#   10.8.0.6:22     SSH
+#   10.8.0.6:5432   PostgreSQL
+# or unrelated home/WireGuard hosts.
+
+# Production cutover (ONLY after old 10.8.0.1 WireGuard hub is stopped):
+# 1. remove the temporary staging rules by their UFW rule numbers;
+# 2. add only the final production gateway allowance:
+# sudo ufw allow in on "$WG_IF" from "$PROD_VPS_IP" to "$HOME_WG_IP" port "$PROD_GATEWAY_PORT" proto tcp comment 'LG production gateway'
+#
+# Canary port 8790 does not need to remain reachable from production unless an
+# explicit post-cutover canary workflow is retained.
+
+sudo ufw status numbered
+
+# Required negative tests FROM THE VPS after applying policy:
+#   nc -vz -w3 10.8.0.6 5000   # must fail
+#   nc -vz -w3 10.8.0.6 8080   # must fail
+#   nc -vz -w3 10.8.0.6 22     # must fail unless separately/operator-approved
+#   nc -vz -w3 10.8.0.6 5432   # must fail
+# Positive staging tests:
+#   curl --max-time 5 http://10.8.0.6:8789/healthz
+#   curl --max-time 5 http://10.8.0.6:8790/healthz

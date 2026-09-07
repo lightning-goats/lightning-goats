@@ -1,0 +1,26 @@
+# Phase 1 presentation templates adapted from lightning-goats/cyberherd_messaging.
+# Only payment, feeder, and overlay-only informational categories belong here.
+
+sats_received = [
+  "💰 Payment received: {new_amount} sats added for the Lightning Goats. {difference_message} Scientific fact: Goats, such as {goat_name}, have uniquely shaped rectangular pupils, which provide them a wide field of vision, aiding in predator detection.\n\nhttps://lightning-goats.com",
+  "⚡ Contribution confirmed: {new_amount} sats received. {difference_message} Fun fact: {goat_name} and other goats are incredibly agile climbers, capable of scaling steep terrain with ease.\n\nhttps://lightning-goats.com",
+  "💎 Payment processed: {new_amount} sats contributed to the herd. {difference_message} Did you know? {goat_name} represents the curious and intelligent nature of goats in general.\n\nhttps://lightning-goats.com",
+  "🔥 Sats received: {new_amount} added to the feeder balance. {difference_message} Interesting: Goats like {goat_name} have excellent memories and can recognize other goats and humans for years.\n\nhttps://lightning-goats.com",
+  "⚡ The herd received {new_amount} sats. {difference_message} Goat trivia: {goat_name} exemplifies how goats use their prehensile tongues to selectively eat the most nutritious plants.\n\nhttps://lightning-goats.com",
+]
+
+feeder_trigger = [
+  "🎉 Feeder activated! {new_amount} sats triggered a feeding. {difference_message} Scientific fact: Goats, such as {goat_name}, have uniquely shaped rectangular pupils, which provide them a wide field of vision, aiding in predator detection.\n\nhttps://lightning-goats.com",
+  "⚡ Feeder trigger reached! {new_amount} sats were redeemed for treats. {difference_message} Fun fact: {goat_name} and other goats are incredibly agile climbers, capable of scaling steep terrain with ease.\n\nhttps://lightning-goats.com",
+  "🎊 Feeding time! The Lightning Goats just received treats funded by {new_amount} sats. {difference_message} Did you know? {goat_name} represents the curious and intelligent nature of goats in general.\n\nhttps://lightning-goats.com",
+  "🚀 Feeder activated with {new_amount} sats! {difference_message} Interesting: Goats like {goat_name} have excellent memories and can recognize other goats and humans for years.\n\nhttps://lightning-goats.com",
+  "⚡ Lightning Goats feeding initiated! {new_amount} sats were redeemed for treats. {difference_message} Goat trivia: {goat_name} exemplifies how goats use their prehensile tongues to be selective eaters, often choosing the most nutritious parts of a plant.\n\nhttps://lightning-goats.com",
+]
+
+interface_info = [
+  "To send the goats treats, use a Lightning Address or the payment control on lightning-goats.com. Once the feeder reaches 100%, the ⚡ Lightning Goats ⚡ get a mixture of timothy hay pellets and goat granola.",
+  "Support the herd on Nostr! Zaps and Lightning payments contribute toward triggering the feeder and dispensing treats to the ⚡ Lightning Goats ⚡.",
+  "Each goat has a Lightning Address. Payments to herd, Dexter, Rowan, Cosmo, Newton, or Nova all contribute to the same feeder balance.",
+  "Sats sent to the ⚡ Lightning Goats ⚡ feeder not only send the goats treats; they also help support hay, development, and other project operating costs.",
+  "By participating in the ⚡ Lightning Goats ⚡ experience, you are helping demonstrate a real-world use of Bitcoin Lightning microtransactions.",
+]

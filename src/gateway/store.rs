@@ -109,6 +109,29 @@ impl GatewayStore {
         }
     }
 
+    pub async fn last_acknowledged_at(&self) -> Result<Option<i64>> {
+        let row = sqlx::query(
+            "SELECT MAX(updated_at) AS last_ack FROM feeder_requests WHERE status='acknowledged'",
+        )
+        .fetch_one(&self.pool)
+        .await
+        .context("failed reading last gateway feeder acknowledgement")?;
+        row.try_get("last_ack")
+            .context("failed decoding last gateway feeder acknowledgement")
+    }
+
+    pub async fn acknowledged_since(&self, since_unix: i64) -> Result<u64> {
+        let row = sqlx::query(
+            "SELECT COUNT(*) AS count FROM feeder_requests WHERE status='acknowledged' AND updated_at >= ?",
+        )
+        .bind(since_unix)
+        .fetch_one(&self.pool)
+        .await
+        .context("failed counting recent gateway feeder acknowledgements")?;
+        let count: i64 = row.try_get("count")?;
+        u64::try_from(count).context("gateway acknowledged count is negative/out of range")
+    }
+
     async fn status_str<'a>(&self, request_id: &'a str) -> Result<Option<&'a str>> {
         let row = sqlx::query("SELECT status FROM feeder_requests WHERE request_id=?")
             .bind(request_id)
@@ -119,8 +142,6 @@ impl GatewayStore {
             return Ok(None);
         };
         let status: String = row.try_get("status")?;
-        // Keep the public helper allocation-free at its call sites by mapping through
-        // a small fixed vocabulary here rather than leaking arbitrary DB content.
         match status.as_str() {
             "pending" => Ok(Some("pending")),
             "acknowledged" => Ok(Some("acknowledged")),
@@ -145,7 +166,10 @@ mod tests {
     async fn duplicate_uuid_never_becomes_new_twice() {
         let (_directory, store) = store().await;
         let id = Uuid::new_v4();
-        assert_eq!(store.begin_request(id).await.unwrap(), BeginRequestOutcome::New);
+        assert_eq!(
+            store.begin_request(id).await.unwrap(),
+            BeginRequestOutcome::New
+        );
         assert_eq!(
             store.begin_request(id).await.unwrap(),
             BeginRequestOutcome::Pending
@@ -155,5 +179,7 @@ mod tests {
             store.begin_request(id).await.unwrap(),
             BeginRequestOutcome::Acknowledged
         );
+        assert!(store.last_acknowledged_at().await.unwrap().is_some());
+        assert_eq!(store.acknowledged_since(0).await.unwrap(), 1);
     }
 }

@@ -132,7 +132,10 @@ impl LnurlService {
                 metadata,
                 description_hash,
             };
-            if addresses.insert(configured.user.clone(), registered).is_some() {
+            if addresses
+                .insert(configured.user.clone(), registered)
+                .is_some()
+            {
                 bail!("duplicate Lightning Address user {}", configured.user);
             }
         }
@@ -168,10 +171,14 @@ impl LnurlService {
     ) -> Result<LnurlPayCallbackResponse, LnurlServiceError> {
         let address = self.address(user)?;
         if amount_msat < address.min_sendable_msat {
-            return Err(LnurlServiceError::InvalidAmount("Amount is below the minimum"));
+            return Err(LnurlServiceError::InvalidAmount(
+                "Amount is below the minimum",
+            ));
         }
         if amount_msat > address.max_sendable_msat {
-            return Err(LnurlServiceError::InvalidAmount("Amount exceeds the maximum"));
+            return Err(LnurlServiceError::InvalidAmount(
+                "Amount exceeds the maximum",
+            ));
         }
         if amount_msat % 1_000 != 0 {
             return Err(LnurlServiceError::InvalidAmount(
@@ -206,14 +213,18 @@ impl LnurlService {
 
     #[must_use]
     pub fn display_name(&self, user: &str) -> Option<&str> {
-        self.addresses.get(user).map(|address| address.display_name.as_str())
+        self.addresses
+            .get(user)
+            .map(|address| address.display_name.as_str())
     }
 
     fn address(&self, user: &str) -> Result<&RegisteredAddress, LnurlServiceError> {
         if validate_user(user).is_err() {
             return Err(LnurlServiceError::UnknownUser);
         }
-        self.addresses.get(user).ok_or(LnurlServiceError::UnknownUser)
+        self.addresses
+            .get(user)
+            .ok_or(LnurlServiceError::UnknownUser)
     }
 }
 
@@ -289,10 +300,7 @@ mod tests {
         let (_directory, service) = service().await;
         let discovery = service.discovery("dexter").unwrap();
         let expected = hex::encode(Sha256::digest(discovery.metadata.as_bytes()));
-        assert_eq!(
-            service.addresses["dexter"].description_hash,
-            expected
-        );
+        assert_eq!(service.addresses["dexter"].description_hash, expected);
     }
 
     #[tokio::test]

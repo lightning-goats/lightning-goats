@@ -8,7 +8,26 @@ Tracker: issue #17.
 
 The public VPS and `lightning-goatsd` must not hold a generic OpenHAB API token or have broad access to the in-house OpenHAB server/LAN.
 
-OpenHAB's current authorization model is not sufficiently fine-grained to treat an API token as a per-item/per-rule ACL. Phase 1 therefore enforces least privilege with a dedicated integration identity, a narrow in-house feeder gateway, explicit OpenHAB Items/rules, and WireGuard/UFW containment.
+OpenHAB's current authorization model is not sufficiently fine-grained to treat an API token as a per-item/per-rule ACL. Phase 1 therefore enforces least privilege with a dedicated integration identity, a narrow in-house integration gateway, explicit OpenHAB Items/rules, and WireGuard/UFW containment.
+
+## Existing network
+
+The established WireGuard subnet is:
+
+```text
+10.8.0.0/24
+```
+
+Relevant production addresses:
+
+```text
+10.8.0.1   current/old VPS WireGuard hub
+10.8.0.6   in-house OpenHAB + weather host
+```
+
+During staging, the new VPS receives its own new WireGuard keypair and an unused temporary `10.8.0.x` address. It must not claim `10.8.0.1` while the old VPS remains active.
+
+See `docs/deployment/wireguard-topology.md`.
 
 ## Trust boundary
 
@@ -18,18 +37,17 @@ Internet
    v
 new VPS / lightning-goatsd
    |
-   | narrow WireGuard path
+   | existing 10.8.0.0/24 WireGuard network
+   | narrowly firewalled application path
    | NO OpenHAB token
    v
-in-house feeder gateway
+10.8.0.6 in-house Lightning Goats integration gateway
    |
-   | localhost/trusted host
-   | dedicated OpenHAB USER token
-   v
-OpenHAB dedicated Items/rule
+   +-- dedicated OpenHAB USER token -> dedicated Items/rule
+   +-- trusted local weather read -> 127.0.0.1:5000/get_received_data
    |
    v
-physical feeder
+physical feeder / sanitized status data
 ```
 
 A complete compromise of the VPS should provide no generic OpenHAB credential and no general LAN reachability.
@@ -50,7 +68,7 @@ lightning-goats-gateway
 
 Requirements:
 
-- token is stored only on the in-house feeder gateway host;
+- token is stored only on the in-house integration gateway host;
 - use a restricted systemd credential or root-managed secret file;
 - do not copy the token to the VPS;
 - do not commit it to Git;
@@ -59,7 +77,7 @@ Requirements:
 
 ## Gateway API
 
-The gateway must be a purpose-built API, not a generic OpenHAB reverse proxy.
+The gateway must be a purpose-built API, not a generic OpenHAB or weather-service reverse proxy.
 
 Recommended minimal surface:
 
@@ -69,15 +87,17 @@ GET  /v1/feeder/override
 GET  /v1/temperature                 # optional
 POST /v1/feeder/request/<uuid>
 GET  /v1/feeder/request/<uuid>
+GET  /v1/weather                     # sanitized/read-only
 ```
 
 The gateway should:
 
-- listen only on the intended trusted/WireGuard interface or address;
-- accept requests only from the new VPS WireGuard peer;
+- listen only on the intended WireGuard address/interface;
+- accept requests only from the approved VPS WireGuard source;
 - impose small request/body/time limits;
 - reject unknown paths/methods;
 - never expose arbitrary OpenHAB REST paths;
+- never proxy the legacy weather `/weather` mutation endpoint;
 - disable HTTP proxy discovery for credential-bearing OpenHAB requests;
 - log request IDs and outcomes without logging the OpenHAB token.
 
@@ -135,38 +155,75 @@ If the gateway or network returns an ambiguous result after the request may have
 
 If a response is lost after a successful feed, querying the same UUID must reveal the prior outcome rather than causing another actuation.
 
+## Weather read path
+
+The legacy weather service runs on the same in-house host:
+
+```text
+10.8.0.6:5000
+```
+
+It exposes both:
+
+```text
+GET /get_received_data   # read
+GET /weather?...         # mutating ingestion
+```
+
+Therefore the VPS must not receive direct access to port 5000.
+
+The integration gateway should read locally/trusted-side:
+
+```text
+http://127.0.0.1:5000/get_received_data
+```
+
+validate/sanitize the expected fields, and expose only:
+
+```text
+GET /v1/weather
+```
+
+See `docs/architecture/weather-overlay.md` and issue #21.
+
+Weather failures affect presentation only and must never affect payment or feeder accounting.
+
 ## WireGuard and UFW policy
 
-Prefer a dedicated point-to-point or isolated WireGuard interface/subnet for the Lightning Goats application path.
+Reuse the existing `10.8.0.0/24` WireGuard network.
 
-Example only:
+### During staging
 
-```text
-VPS WG address:      10.77.77.2
-Gateway WG address:  10.77.77.1
-Gateway TCP port:    8789
-OpenHAB REST:        8080 (not reachable from VPS)
-```
+- old production hub remains `10.8.0.1`;
+- new VPS uses an inventoried unused temporary `10.8.0.x` address/new keypair;
+- UFW on `10.8.0.6` allows that temporary source only to the dedicated gateway TCP port;
+- direct access from the staging VPS to `10.8.0.6:5000`, OpenHAB REST, SSH and unrelated services stays blocked.
 
-Illustrative UFW allow rule on the trusted host:
+### At production cutover
 
-```sh
-ufw allow in on wg-lg from 10.77.77.2 to 10.77.77.1 port 8789 proto tcp comment 'Lightning Goats feeder gateway'
-```
+After the old VPS WireGuard service is stopped, the new VPS may assume `10.8.0.1` to preserve the established hub topology. Replace/remove the temporary staging UFW rule and allow the final production hub source only to the gateway port.
 
-Assume default-deny incoming/forwarding for anything not explicitly allowed.
-
-Required negative tests from the VPS:
+Illustrative policy shape on `10.8.0.6`:
 
 ```text
-gateway:8789                 reachable
-OpenHAB:8080                 blocked
-trusted-host SSH             blocked unless explicitly approved
-PostgreSQL                   blocked
-unrelated LAN hosts/ports    blocked
+new/staging VPS source -> gateway port     ALLOW during staging only
+10.8.0.1 -> gateway port                  ALLOW in production
+VPS -> 10.8.0.6:5000                      BLOCK
+VPS -> OpenHAB REST/admin                  BLOCK
+VPS -> SSH/Postgres/unrelated services     BLOCK
 ```
 
 Do not rely on WireGuard `AllowedIPs` alone as authorization. Enforce host/forward firewall rules.
+
+Required negative tests from the VPS include:
+
+```text
+10.8.0.6:5000              blocked
+OpenHAB REST/admin          blocked
+trusted-host SSH            blocked unless explicitly approved
+PostgreSQL                  blocked
+unrelated LAN hosts/ports   blocked
+```
 
 ## Service identity and systemd
 
@@ -177,7 +234,7 @@ Use a system-level systemd unit with:
 - `NoNewPrivileges=yes`;
 - filesystem and capability restrictions appropriate to the implementation;
 - credential injection for the OpenHAB token;
-- explicit listen address;
+- explicit WireGuard listen address;
 - no write access outside required runtime/state paths.
 
 ## Required tests
@@ -192,11 +249,15 @@ Automated/unit tests:
 - safety cap enforcement;
 - gateway timeout / ambiguous state;
 - authoritative later ack for the same UUID;
-- no generic OpenHAB path access through the gateway.
+- no generic OpenHAB path access through the gateway;
+- weather normalization/read-only behavior;
+- no route to legacy `/weather` mutation.
 
 Staging tests:
 
 - UFW/WireGuard positive and negative connectivity;
+- sanitized weather read through `/v1/weather`;
+- direct `10.8.0.6:5000` failure from VPS;
 - harmless canary/simulated feed request;
 - one controlled physical feeder test;
 - replay same UUID and prove no second physical actuation.

@@ -11,3 +11,4 @@ pub mod nostr;
 pub mod openhab;
 pub mod overlay;
 pub mod secrets;
+pub mod strike;

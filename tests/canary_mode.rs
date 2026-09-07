@@ -12,8 +12,9 @@ use axum::{
 };
 use lightning_goats::{
     config::RuntimeMode,
+    domain::payment::SettledPayment,
     feeder::{FeedWorkerStep, run_feed_step},
-    ledger::{LedgerStore, PaidInvoice, SettlementOutcome},
+    ledger::{LedgerStore, SettlementOutcome},
     openhab::OpenHabClient,
 };
 use tempfile::TempDir;
@@ -43,20 +44,19 @@ async fn canary_mode_drains_test_rule_without_nostr_capability() {
     let ledger = LedgerStore::connect(&format!("sqlite://{}", database.display()))
         .await
         .unwrap();
-    ledger.initialize_cursor(100).await.unwrap();
 
-    let invoice = PaidInvoice {
-        pay_index: 101,
-        payment_hash: "canary-mode-payment".to_owned(),
-        label: Some("clnaddress:v1:herd-canary:550e8400-e29b-41d4-a716-446655440000".to_owned()),
+    let payment = SettledPayment {
+        source: "test".to_owned(),
+        source_id: "canary-mode-payment".to_owned(),
+        payment_hash: Some("ca11a7ca11a7ca11a7ca11a7ca11a7ca11a7ca11a7ca11a7ca11a7ca11a7ca11".to_owned()),
+        address_user: "herd-canary".to_owned(),
+        credit_pool: "herd".to_owned(),
         amount_msat: 2_340_000,
         settled_at: Some(1_700_000_000),
+        context_json: None,
     };
     assert!(matches!(
-        ledger
-            .record_settlement(&invoice, "herd-canary")
-            .await
-            .unwrap(),
+        ledger.record_payment(&payment).await.unwrap(),
         SettlementOutcome::Credited { sats: 2_340, .. }
     ));
 

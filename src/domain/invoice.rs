@@ -33,7 +33,16 @@ mod tests {
 
     #[test]
     fn accepts_phase1_style_users() {
-        for user in ["herd", "dexter", "rowan", "cosmo", "newton", "nova", "goat-1", "goat.name"] {
+        for user in [
+            "herd",
+            "dexter",
+            "rowan",
+            "cosmo",
+            "newton",
+            "nova",
+            "goat-1",
+            "goat.name",
+        ] {
             validate_user(user).unwrap();
         }
     }

@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use clap::Parser;
 use lightning_goats::gateway::{GatewayServerConfig, TrustedGateway};
 use tracing::info;

@@ -1,8 +1,9 @@
 use std::{
     collections::HashSet,
     fs,
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     path::{Path, PathBuf},
+    str::FromStr,
 };
 
 use anyhow::{Context, Result, bail};
@@ -26,7 +27,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub lightning_address: Vec<LightningAddressConfig>,
     pub feeder: FeederConfig,
-    pub openhab: OpenHabConfig,
+    pub gateway: IntegrationGatewayConfig,
+    pub informational: InformationalConfig,
     pub nostr: NostrConfig,
 }
 
@@ -44,11 +46,11 @@ impl AppConfig {
         if !self.service.listen.ip().is_loopback() {
             bail!("service.listen must use a loopback address; nginx is the public boundary");
         }
-        if !self.database.url.starts_with("sqlite://") {
+        if !self.database.url.starts_with("sqlite://") || self.database.url == "sqlite::memory:" {
             bail!("database.url must be a file-backed sqlite:// URL");
         }
         if self.lightning.clnrest_url.trim().is_empty() {
-            bail!("lightning.clnrest_url must not be empty");
+            bail!("lightning.clnrest_url must not be empty while legacy CLN compatibility remains");
         }
         if let Some(strike) = &self.strike {
             let url = Url::parse(&strike.api_url).context("invalid strike.api_url")?;
@@ -67,22 +69,13 @@ impl AppConfig {
         if self.feeder.threshold_sats == 0 {
             bail!("feeder.threshold_sats must be greater than zero");
         }
+        if self.feeder.inter_feed_delay_seconds == 0 {
+            bail!("feeder.inter_feed_delay_seconds must be greater than zero");
+        }
         validate_user(&self.lightning.herd_user)
             .context("lightning.herd_user must be a canonical legacy CLN address user")?;
-        if self.openhab.url.trim().is_empty() {
-            bail!("openhab.url must not be empty");
-        }
-        if self.openhab.feeder_rule_id.trim().is_empty() {
-            bail!("openhab.feeder_rule_id must not be empty");
-        }
-        if self.openhab.override_item.trim().is_empty() {
-            bail!("openhab.override_item must not be empty");
-        }
-        if let Some(item) = &self.openhab.temperature_item {
-            if item.trim().is_empty() {
-                bail!("openhab.temperature_item must not be empty when configured");
-            }
-        }
+        validate_gateway_origin(&self.gateway.url)?;
+        self.validate_informational()?;
         if !self.nostr.nak_path.is_absolute() {
             bail!("nostr.nak_path must be an absolute path");
         }
@@ -185,6 +178,34 @@ impl AppConfig {
         }
         Ok(())
     }
+
+    fn validate_informational(&self) -> Result<()> {
+        if !(10..=3_600).contains(&self.informational.interval_seconds) {
+            bail!("informational.interval_seconds must be between 10 and 3600");
+        }
+        for (name, value) in [
+            (
+                "informational.interface_info_probability",
+                self.informational.interface_info_probability,
+            ),
+            (
+                "informational.weather_probability",
+                self.informational.weather_probability,
+            ),
+        ] {
+            if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+                bail!("{name} must be a finite probability between 0 and 1");
+            }
+        }
+        if self.informational.interface_info_probability + self.informational.weather_probability
+            > 1.0
+        {
+            bail!(
+                "informational interface + weather unconditional probabilities must not exceed 1"
+            );
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -263,12 +284,17 @@ pub struct FeederConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct OpenHabConfig {
+pub struct IntegrationGatewayConfig {
     pub url: String,
-    pub feeder_rule_id: String,
-    pub override_item: String,
-    #[serde(default)]
-    pub temperature_item: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct InformationalConfig {
+    pub interval_seconds: u64,
+    pub interface_info_enabled: bool,
+    pub weather_enabled: bool,
+    pub interface_info_probability: f64,
+    pub weather_probability: f64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -278,6 +304,40 @@ pub struct NostrConfig {
     pub bunker_pubkey: String,
     #[serde(default)]
     pub relays: Vec<String>,
+}
+
+fn validate_gateway_origin(raw: &str) -> Result<()> {
+    let url = Url::parse(raw).context("invalid gateway.url")?;
+    if !url.username().is_empty() || url.password().is_some() {
+        bail!("gateway.url must not contain credentials");
+    }
+    if url.query().is_some() || url.fragment().is_some() || url.path() != "/" {
+        bail!("gateway.url must be a root origin without query, fragment, or path");
+    }
+    let host = url.host_str().context("gateway.url is missing a host")?;
+    match url.scheme() {
+        "https" => Ok(()),
+        "http" => {
+            if host.eq_ignore_ascii_case("localhost") {
+                return Ok(());
+            }
+            let ip = IpAddr::from_str(host)
+                .context("plain HTTP gateway.url must use a literal private/loopback IP")?;
+            if ip.is_loopback() || is_private_ip(ip) {
+                Ok(())
+            } else {
+                bail!("plain HTTP gateway.url must use a private/loopback address")
+            }
+        }
+        scheme => bail!("unsupported gateway.url scheme {scheme}"),
+    }
+}
+
+fn is_private_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => ip.is_private(),
+        IpAddr::V6(ip) => ip.is_unique_local(),
+    }
 }
 
 #[cfg(test)]
@@ -330,11 +390,15 @@ mod tests {
                 threshold_sats: 1_000,
                 inter_feed_delay_seconds: 30,
             },
-            openhab: OpenHabConfig {
-                url: "http://127.0.0.1:8080".to_owned(),
-                feeder_rule_id: "88bd9ec4de".to_owned(),
-                override_item: "FeederOverride".to_owned(),
-                temperature_item: Some("AmbientTemperature".to_owned()),
+            gateway: IntegrationGatewayConfig {
+                url: "http://10.8.0.6:8789/".to_owned(),
+            },
+            informational: InformationalConfig {
+                interval_seconds: 60,
+                interface_info_enabled: true,
+                weather_enabled: true,
+                interface_info_probability: 0.4,
+                weather_probability: 0.4,
             },
             nostr: NostrConfig {
                 nak_path: PathBuf::from("/usr/local/bin/nak"),
@@ -360,6 +424,13 @@ mod tests {
     fn rejects_public_listener() {
         let mut config = valid_config();
         config.service.listen = "0.0.0.0:8787".parse().unwrap();
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_public_plain_http_gateway() {
+        let mut config = valid_config();
+        config.gateway.url = "http://8.8.8.8:8789/".to_owned();
         assert!(config.validate().is_err());
     }
 
@@ -399,6 +470,14 @@ mod tests {
     fn rejects_non_herd_credit_pool_in_phase1() {
         let mut config = valid_config();
         config.lightning_address[1].credit_pool = "dexter".to_owned();
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_invalid_informational_probabilities() {
+        let mut config = valid_config();
+        config.informational.interface_info_probability = 0.7;
+        config.informational.weather_probability = 0.5;
         assert!(config.validate().is_err());
     }
 

@@ -2,16 +2,37 @@
 
 ## Scope
 
-Phase 1 replaces LNbits/Core Lightning for the goat-feeder payment path while preserving the existing durable feeder, Nostr, and overlay behavior.
+Phase 1 replaces LNbits/Core Lightning for the goat-feeder payment path while preserving the existing durable feeder, Nostr, overlay, and weather-information behavior.
 
 CyberHerd business logic is explicitly deferred to Phase 2.
 
 Canonical companion documents:
 
 - `lightning-address-registry.md`
+- `weather-overlay.md`
 - `../security/openhab-feeder-gateway.md`
 - `../security/phase1-threat-model.md`
 - `../security/phase1-hardening-checklist.md`
+- `../deployment/wireguard-topology.md`
+
+## Existing WireGuard network
+
+Phase 1 reuses the established network:
+
+```text
+10.8.0.0/24
+```
+
+Known nodes:
+
+```text
+10.8.0.1   current/old VPS WireGuard hub
+10.8.0.6   in-house OpenHAB + weather host
+```
+
+During staging the new VPS uses a new keypair and an inventoried unused temporary `10.8.0.x` address. It never claims `10.8.0.1` while the old hub is active.
+
+At preferred production cutover, after the old hub is stopped, the new VPS assumes `10.8.0.1/24` and existing clients update the hub public key/public Internet endpoint while retaining their own keys/addresses.
 
 ## Production topology
 
@@ -19,7 +40,7 @@ Canonical companion documents:
 Internet
    |
    v
-new Vultr VPS
+new Vultr VPS / WireGuard hub 10.8.0.1
 +--------------------------------------------------+
 | nginx / TLS                                      |
 | static lightning-goats.com                      |
@@ -30,6 +51,7 @@ new Vultr VPS
 |   +-- Strike receive adapter                     |
 |   +-- SQLite durable ledger/event log            |
 |   +-- feeder worker                              |
+|   +-- weather/info scheduler                     |
 |   +-- template renderer                          |
 |   +-- Nostr durable outbox                       |
 |   +-- overlay WebSocket/status API               |
@@ -37,36 +59,31 @@ new Vultr VPS
 | nak / NIP-46 client as required                  |
 +---------------------------+----------------------+
                             |
-                  dedicated/narrow WireGuard path
+                  WireGuard 10.8.0.0/24
                             |
                             v
-              trusted in-house feeder gateway
+              10.8.0.6 in-house integration gateway
               +-----------------------------------+
-              | narrow feeder/status API          |
+              | narrow feeder/status/weather API  |
               | dedicated OpenHAB USER token      |
               | NO generic proxy                  |
               +----------------+------------------+
                                |
-                            localhost
-                               |
-                               v
-                           OpenHAB
-                               |
-                               +-- LightningGoatsFeederRequest
-                               +-- LightningGoatsFeederAck
-                               +-- LightningGoatsRemoteEnabled
-                               +-- FeederOverride
-                               +-- optional temperature/status
-                               |
-                               v
-                         physical feeder
+                  +------------+-------------+
+                  |                          |
+                  v                          v
+              OpenHAB                local weather receiver
+                  |                  127.0.0.1:5000
+                  |                  GET /get_received_data
+                  v
+           physical feeder
 ```
 
 External dependencies from the VPS:
 
 - Strike API over HTTPS;
 - Nostr relays / NIP-46 path;
-- narrow feeder-gateway API over the approved WireGuard path.
+- one narrow integration-gateway API over WireGuard.
 
 The Phase 1 VPS does **not** run or hold:
 
@@ -77,6 +94,7 @@ The Phase 1 VPS does **not** run or hold:
 - PostgreSQL for LNbits;
 - a spend-capable wallet service;
 - an OpenHAB API token;
+- direct access to the legacy weather service at `10.8.0.6:5000`;
 - generic OpenHAB/LAN access.
 
 ## Lightning Address registry
@@ -127,11 +145,7 @@ through:
 GET /.well-known/lnurlp/dexter
 ```
 
-`lightning-goatsd`:
-
-1. validates/canonicalizes the user;
-2. looks it up in the configured registry;
-3. returns LNURL-pay metadata, callback URL, and configured min/max amounts.
+`lightning-goatsd` validates/canonicalizes the user, looks it up in the configured registry, and returns LNURL-pay metadata, callback URL, and configured min/max amounts.
 
 Unknown users return a safe error/404 and create no Strike request.
 
@@ -158,15 +172,7 @@ Strike sends the configured webhook notification.
 
 The public edge restricts the webhook to the exact expected route/method/content type/body size.
 
-The webhook handler:
-
-1. reads the request body without mutating financial state;
-2. verifies the Strike webhook signature/HMAC using constant-time comparison;
-3. parses the supported event/entity reference defensively;
-4. fetches the authoritative receive/request state from Strike;
-5. validates that it is completed and matches a receive request issued/accepted by this service;
-6. converts it to the backend-neutral settlement domain object;
-7. commits exactly once.
+The webhook handler verifies the Strike signature/HMAC, fetches authoritative Strike state, validates completion against a request issued by this service, converts it to the backend-neutral settlement domain object, and commits exactly once.
 
 The webhook body itself is never authoritative financial state.
 
@@ -176,11 +182,11 @@ Phase 1 should converge on a model equivalent to:
 
 ```text
 SettledPayment
-- source              (Strike in Phase 1)
+- source              Strike in Phase 1
 - source_id            unique provider settlement/receive identifier
 - payment_hash         unique Lightning payment hash when available
 - address_user         configured paid Lightning Address user
-- credit_pool          `herd` for all Phase 1 addresses
+- credit_pool          herd for all Phase 1 addresses
 - amount_msat
 - settled_at
 - optional context     reserved for future identity/CyberHerd metadata
@@ -225,7 +231,7 @@ Each physical feeding:
 1. confirms no unresolved previous feed attempt;
 2. confirms enough durable feed credit exists;
 3. creates a durable feed-attempt UUID/intention;
-4. asks the in-house feeder gateway to process that exact UUID;
+4. asks the in-house gateway to process that exact UUID;
 5. the gateway/OpenHAB rule enforces local safety gates and duplicate suppression;
 6. `lightning-goatsd` waits for/queries the authoritative same-UUID acknowledgement;
 7. if the result is ambiguous, marks the attempt `unknown` (or remains safely pending for same-UUID resolution) and never submits a fresh automatic actuation;
@@ -241,7 +247,41 @@ Local OpenHAB authority must enforce at least:
 
 Multiple earned thresholds are drained serially with the configured delay, but local OpenHAB safety rules remain authoritative even if the VPS is compromised.
 
-See `../security/openhab-feeder-gateway.md`.
+## Weather flow
+
+The existing receiver is on `10.8.0.6:5000` and exposes both read and mutating routes, so it is not exposed to the VPS.
+
+Flow:
+
+```text
+legacy receiver
+127.0.0.1:5000/get_received_data
+        |
+        v
+10.8.0.6 integration gateway
+GET /v1/weather
+(normalize + validate + sanitize)
+        |
+        v
+lightning-goatsd weather scheduler
+        |
+        v
+weather_status durable informational event
+        |
+        v
+overlay only
+```
+
+Initial configurable defaults match the existing LNbits Lightning Goats extension:
+
+```text
+interval_seconds       = 60
+broadcast_probability  = 0.30
+```
+
+Weather failures must be presentation-only. Weather must never enter the Nostr outbox in Phase 1.
+
+See `weather-overlay.md` and issue #21.
 
 ## Messaging/event flow
 
@@ -260,25 +300,11 @@ Durable events are the source of presentation truth.
 
 Audience is determined by the server-side event/message type. Do not trust an arbitrary payload field to decide whether something may publish to Nostr.
 
-`address_user` may be retained in event context for future presentation, but HTTP requesters cannot choose template/event/Nostr authority.
-
 ## Template renderer
 
-Phase 1 ports only:
+Phase 1 ports only payment-received fun goat-fact templates, feeder-trigger fun goat-fact templates, and informational/interface/weather presentation needed by the overlay.
 
-- payment-received fun goat-fact templates;
-- feeder-trigger fun goat-fact templates;
-- informational/interface/weather templates needed by the overlay.
-
-Store templates as data (TOML/JSON/etc.) rather than large Rust source constants.
-
-Rendering requirements:
-
-- randomized selection;
-- deterministic selection available in tests;
-- only simple named placeholders;
-- missing/malformed template handling fails safely;
-- separate Nostr and overlay values are allowed (for example Nostr goat identity vs friendly overlay goat name/image).
+Store templates as data (TOML/JSON/etc.) rather than large Rust source constants. Rendering must support deterministic testing, simple named placeholders only, safe failure, and separate Nostr/overlay values where presentation differs.
 
 ## Nostr publication
 
@@ -293,22 +319,13 @@ durable event
   -> retry exact signed event on relay failure
 ```
 
-Do not regenerate a new signed Nostr event for a publication retry.
-
-The application must not store the Nostr private key directly.
+Do not regenerate a new signed Nostr event for a publication retry. The application must not store the Nostr private key directly.
 
 ## Overlay
 
 Retain one read-only WebSocket event stream and a read-only status/snapshot API.
 
-The overlay must be able to:
-
-- obtain a durable snapshot on connect;
-- consume ordered events with sequence numbers;
-- detect gaps and reconnect/resnapshot;
-- display payment and feeder messages;
-- display overlay-only informational messages;
-- never infer a physical feeding solely from a progress bar reaching a threshold.
+The overlay must obtain a durable snapshot on connect, consume ordered events, detect gaps/reconnect, display payment/feeder/informational/weather messages, and never infer physical feeding solely from progress reaching a threshold.
 
 Only committed `feeder_confirmed` events indicate physical feeder completion.
 
@@ -321,7 +338,7 @@ Receives only:
 - receive/read-only Strike API credential;
 - Strike webhook verification secret;
 - NIP-46 client credential/config as required;
-- optional low-value feeder-gateway client credential if implemented in addition to WireGuard.
+- optional low-value integration-gateway client credential if implemented in addition to WireGuard.
 
 It must not receive:
 
@@ -332,7 +349,7 @@ It must not receive:
 - WireGuard private keys through application configuration;
 - Nostr private signing key.
 
-### In-house feeder gateway
+### In-house integration gateway
 
 Receives only:
 
@@ -343,19 +360,17 @@ The gateway must not possess Strike or Nostr authority.
 
 ## Network boundaries
 
-The VPS-to-home application path should use a dedicated WireGuard interface/key/subnet where practical, or equivalent per-peer firewall isolation.
+The existing `10.8.0.0/24` network is reused. Trusted-side firewalling on `10.8.0.6` permits only the gateway host/port required by Phase 1 from the approved staging/production VPS source.
 
-The trusted-side firewall permits only the feeder-gateway host/port required by Phase 1.
+Direct VPS access to `10.8.0.6:5000`, generic OpenHAB REST/admin, Postgres, internal SSH, and unrelated LAN/WireGuard services is blocked.
 
-The VPS must not directly reach generic OpenHAB REST/admin endpoints, Postgres, internal SSH, or unrelated LAN/WireGuard services.
-
-If the VPS also becomes a general WireGuard hub, routed client traffic policy must remain distinct from traffic originated by local VPS processes.
+If the VPS also becomes the general WireGuard hub, routed client traffic policy must remain distinct from traffic originated by local VPS processes.
 
 ## Process boundaries
 
 Production `lightning-goatsd` runs as a system-level systemd service under an unprivileged `lightning-goats` account.
 
-The in-house feeder gateway runs as a separate unprivileged system service/identity.
+The in-house integration gateway runs as a separate unprivileged system service/identity.
 
 nginx and WireGuard remain system services.
 
@@ -363,13 +378,8 @@ The Codex/deployment account is a separate identity and must not be the runtime 
 
 ## Phase 2 compatibility
 
-The payment, feeder, event, messaging, overlay, address-registry, and feeder-gateway interfaces must not require CyberHerd state.
+The payment, feeder, weather, event, messaging, overlay, address-registry, and integration-gateway interfaces must not require CyberHerd state.
 
-Future CyberHerd functionality may be implemented either:
+Future CyberHerd functionality may be implemented either as a separate service consuming/producing durable Lightning Goats events or as an internal module in the same codebase.
 
-- as a separate service consuming/producing durable Lightning Goats events; or
-- as an internal module in the same codebase.
-
-Any future CyberHerd feeder action must use the same durable feeder authority/gateway; it must not gain direct OpenHAB credentials.
-
-Any future payout authority should remain separable from the receive-only Phase 1 daemon.
+Any future CyberHerd feeder action must use the same durable feeder authority/gateway; it must not gain direct OpenHAB credentials. Any future payout authority should remain separable from the receive-only Phase 1 daemon.

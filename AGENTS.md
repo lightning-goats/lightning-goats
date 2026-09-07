@@ -4,9 +4,29 @@ This repository is the standalone Lightning Goats payment-accounting, messaging,
 
 ## Source of truth
 
-Treat the GitHub Phase 1 tracker and the repository documentation under `docs/` as the source of truth. Keep this file concise and update the deeper docs when architecture or deployment decisions change.
+Treat the GitHub Phase 1 tracker and the canonical documentation under `docs/` as the source of truth. Keep this file concise and update deeper docs when architecture or deployment decisions change.
 
 Phase 1 tracker: https://github.com/lightning-goats/lightning-goats/issues/6
+
+Before beginning Phase 1 work, read in this order:
+
+1. `docs/README.md`
+2. `docs/planning/phase1-execution-plan.md`
+3. `docs/architecture/phase1-strike-architecture.md`
+4. `docs/security/phase1-threat-model.md`
+5. `docs/deployment/codex-vps-bootstrap.md`
+6. `docs/deployment/new-vps-staging.md`
+7. the GitHub issue being implemented
+
+Before any production cutover work also read:
+
+- `docs/deployment/production-cutover.md`
+
+For future CyberHerd work read:
+
+- `docs/architecture/cyberherd-phase2-boundary.md`
+
+`docs/phase1-lnbits-rust-migration-plan.md` and CLN-specific portions of the old `docs/server-setup.md` are historical/superseded. Do not use them as the current execution plan.
 
 ## Phase 1 objective
 
@@ -61,17 +81,20 @@ The replacement stack is built and tested on a new VPS in parallel with the curr
 - Do not change production DNS until the new stack passes the Phase 1 verification matrix.
 - Give the new VPS its own WireGuard identity during parallel testing.
 - Do not run the same WireGuard private key on both old and new VPSes simultaneously.
+- Existing production WireGuard clients stay on the old VPS during staging; repoint them to the new VPS only during the operator-approved cutover.
 - Keep the old VPS as a rollback/archive point until the new stack has been observed successfully in production.
-- The public edge should be minimal: nginx/TLS, WireGuard as required, static site, and explicitly required application ingress.
-- Restrict the VPS WireGuard peer at the trusted side to only explicitly required hosts/ports.
+- The public edge should be minimal: nginx/TLS, WireGuard, static site, and explicitly required application ingress.
+- Restrict locally originated VPS traffic into the trusted WireGuard network to explicitly required hosts/ports.
 
 ## Agent/server operations
 
-Prefer a separate temporary Codex/deployment account for coding and host provisioning. The production daemon should run under a dedicated non-admin runtime identity.
+Use a separate temporary Codex/deployment account (for example `lg-deploy`) for coding and host provisioning. The production daemon runs under a dedicated non-admin runtime identity (for example `lightning-goats`).
+
+Production application units should be system-level systemd services using `User=lightning-goats`, not `systemctl --user` services under the Codex/deployment account.
 
 Never load production secrets while a development account still has unnecessary broad privileges if that can be avoided. Before production cutover, revoke temporary sudo, verify ownership/permissions, and perform a secret/access review.
 
-Do not change production DNS, production WireGuard peer identity, or activate real feeder side effects without an explicit operator-directed cutover step.
+Do not change production DNS, repoint production WireGuard clients, disable the old VPS, or activate real feeder side effects without an explicit operator-directed cutover/test step.
 
 ## Rust and verification
 

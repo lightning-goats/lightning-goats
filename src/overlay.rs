@@ -158,7 +158,11 @@ mod tests {
         .unwrap();
         let value: Value = serde_json::from_str(&message).unwrap();
         assert_eq!(value["type"], "interface_info");
-        assert!(value["message"].as_str().is_some_and(|message| !message.is_empty()));
+        assert!(
+            value["message"]
+                .as_str()
+                .is_some_and(|message| !message.is_empty())
+        );
     }
 
     #[test]

@@ -13,12 +13,10 @@ use axum::{
 };
 use clap::Parser;
 use lightning_goats::{
-    cln::ClnRestClient,
     config::AppConfig,
     feeder::run_feed_worker,
     gateway::GatewayClient,
     informational::run_informational_worker,
-    invoice_watcher::run_invoice_watcher,
     ledger::{LedgerStore, SettlementOutcome},
     lnurl::{LnurlErrorResponse, LnurlService, LnurlServiceError},
     messaging::{run_message_processor, run_outbox_publisher},
@@ -35,7 +33,7 @@ const MAX_STRIKE_WEBHOOK_BODY: usize = 32 * 1024;
 
 #[derive(Debug, Parser)]
 #[command(name = "lightning-goatsd")]
-#[command(about = "Lightning Goats payment accounting and feeder automation service")]
+#[command(about = "Lightning Goats Strike payment accounting and feeder automation service")]
 struct Args {
     #[arg(long, default_value = "/etc/lightning-goats/config.toml")]
     config: PathBuf,
@@ -46,8 +44,8 @@ struct AppState {
     config: Arc<AppConfig>,
     ledger: LedgerStore,
     gateway: GatewayClient,
-    strike: Option<StrikeRuntime>,
-    lnurl: Option<LnurlService>,
+    strike: StrikeRuntime,
+    lnurl: LnurlService,
     renderer: MessageRenderer,
 }
 
@@ -59,13 +57,9 @@ struct HealthResponse {
 #[derive(Debug, Serialize)]
 struct StatusResponse {
     mode: &'static str,
-    herd_user: String,
-    strike_enabled: bool,
-    lnurl_enabled: bool,
+    payment_backend: &'static str,
     lightning_address_users: Vec<String>,
     gateway_reachable: bool,
-    /// Transitional compatibility state; `None` means the legacy CLN watcher is disabled.
-    last_pay_index: Option<u64>,
     feed_credit_sats: u64,
     threshold_sats: u64,
     feeds_due: u64,
@@ -102,26 +96,14 @@ async fn main() -> Result<()> {
         );
     }
 
-    let legacy_cln_cursor = ledger.last_legacy_cln_pay_index().await?;
     let gateway = GatewayClient::new(&config.gateway.url)?;
-    let strike = match &config.strike {
-        Some(strike_config) => Some(StrikeRuntime::from_config(strike_config).await?),
-        None => None,
-    };
-    let lnurl = match (&config.lnurl, strike.as_ref()) {
-        (Some(lnurl_config), Some(strike_runtime)) => Some(LnurlService::new(
-            lnurl_config,
-            &config.lightning_address,
-            strike_runtime.clone(),
-            ledger.clone(),
-        )?),
-        (None, _) => None,
-        (Some(_), None) => {
-            return Err(anyhow!(
-                "validated LNURL configuration is missing Strike runtime"
-            ));
-        }
-    };
+    let strike = StrikeRuntime::from_config(&config.strike).await?;
+    let lnurl = LnurlService::new(
+        &config.lnurl,
+        &config.lightning_address,
+        strike.clone(),
+        ledger.clone(),
+    )?;
     let nostr = if config.service.mode.nostr_enabled() {
         Some(NakClient::from_config(&config.nostr).await?)
     } else {
@@ -149,8 +131,7 @@ async fn main() -> Result<()> {
     info!(
         listen = %config.service.listen,
         mode = config.service.mode.as_str(),
-        strike_enabled = config.strike.is_some(),
-        lnurl_enabled = config.lnurl.is_some(),
+        payment_backend = "strike",
         gateway = %config.gateway.url,
         "lightning-goatsd listening"
     );
@@ -159,25 +140,6 @@ async fn main() -> Result<()> {
         axum::serve(listener, app)
             .await
             .map_err(anyhow::Error::from)
-    });
-
-    let watcher_config = Arc::clone(&config);
-    let watcher_ledger = ledger.clone();
-    let mut watcher = tokio::spawn(async move {
-        if legacy_cln_cursor.is_some() {
-            let cln = ClnRestClient::from_config(&watcher_config.lightning).await?;
-            run_invoice_watcher(
-                cln,
-                watcher_ledger,
-                watcher_config.lightning.herd_user.clone(),
-            )
-            .await
-        } else {
-            tracing::info!(
-                "legacy CLN cursor is uninitialized; compatibility watcher disabled while provider-neutral service remains available"
-            );
-            pending::<Result<()>>().await
-        }
     });
     let mut feeder = tokio::spawn(run_feed_worker(
         ledger.clone(),
@@ -215,7 +177,6 @@ async fn main() -> Result<()> {
             Ok(())
         }
         result = &mut server => task_exit("HTTP server", result),
-        result = &mut watcher => task_exit("legacy paid-invoice watcher", result),
         result = &mut feeder => task_exit("feed worker", result),
         result = &mut informational => task_exit("informational worker", result),
         result = &mut message_processor => task_exit("Nostr message processor", result),
@@ -223,7 +184,6 @@ async fn main() -> Result<()> {
     };
 
     server.abort();
-    watcher.abort();
     feeder.abort();
     informational.abort();
     message_processor.abort();
@@ -248,14 +208,6 @@ async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse>, S
         tracing::error!(%error, "failed reading feed credit for status endpoint");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
-    let last_pay_index = state
-        .ledger
-        .last_legacy_cln_pay_index()
-        .await
-        .map_err(|error| {
-            tracing::error!(%error, "failed reading legacy CLN cursor for status endpoint");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
     let unresolved_feed_attempt = state
         .ledger
         .unresolved_feed_attempt()
@@ -286,19 +238,12 @@ async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse>, S
             None
         }
     };
-    let lightning_address_users = state
-        .lnurl
-        .as_ref()
-        .map_or_else(Vec::new, LnurlService::configured_users);
 
     Ok(Json(StatusResponse {
         mode: state.config.service.mode.as_str(),
-        herd_user: state.config.lightning.herd_user.clone(),
-        strike_enabled: state.strike.is_some(),
-        lnurl_enabled: state.lnurl.is_some(),
-        lightning_address_users,
+        payment_backend: "strike",
+        lightning_address_users: state.lnurl.configured_users(),
         gateway_reachable,
-        last_pay_index,
         feed_credit_sats,
         threshold_sats,
         feeds_due: feed_credit_sats / threshold_sats,
@@ -311,13 +256,7 @@ async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse>, S
 }
 
 async fn lnurl_discovery(Path(user): Path<String>, State(state): State<AppState>) -> Response {
-    let Some(lnurl) = state.lnurl.as_ref() else {
-        return lnurl_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "Lightning Address service unavailable",
-        );
-    };
-    match lnurl.discovery(&user) {
+    match state.lnurl.discovery(&user) {
         Ok(response) => (StatusCode::OK, Json(response)).into_response(),
         Err(error) if error.is_unknown_user() => {
             lnurl_error(StatusCode::NOT_FOUND, error.public_reason())
@@ -336,12 +275,6 @@ async fn lnurl_callback(
     State(state): State<AppState>,
     Query(query): Query<LnurlCallbackQuery>,
 ) -> Response {
-    let Some(lnurl) = state.lnurl.as_ref() else {
-        return lnurl_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "Lightning Address service unavailable",
-        );
-    };
     let Some(raw_amount) = query.amount.as_deref() else {
         return lnurl_error(StatusCode::OK, "Missing amount");
     };
@@ -350,7 +283,7 @@ async fn lnurl_callback(
         Err(_) => return lnurl_error(StatusCode::OK, "Invalid amount"),
     };
 
-    match lnurl.callback(&user, amount_msat).await {
+    match state.lnurl.callback(&user, amount_msat).await {
         Ok(response) => (StatusCode::OK, Json(response)).into_response(),
         Err(LnurlServiceError::UnknownUser) => {
             lnurl_error(StatusCode::NOT_FOUND, "Unknown Lightning Address")
@@ -378,9 +311,6 @@ async fn strike_webhook(
         tracing::warn!(body_len = body.len(), "rejected oversized Strike webhook");
         return StatusCode::PAYLOAD_TOO_LARGE;
     }
-    let Some(strike) = state.strike.as_ref() else {
-        return StatusCode::SERVICE_UNAVAILABLE;
-    };
     let Some(signature) = headers
         .get("x-webhook-signature")
         .and_then(|value| value.to_str().ok())
@@ -389,11 +319,11 @@ async fn strike_webhook(
         return StatusCode::UNAUTHORIZED;
     };
 
-    if let Err(error) = strike.verify_webhook_signature(&body, signature) {
+    if let Err(error) = state.strike.verify_webhook_signature(&body, signature) {
         tracing::warn!(%error, "rejected Strike webhook with invalid signature");
         return StatusCode::UNAUTHORIZED;
     }
-    let event = match strike.parse_completed_event(&body) {
+    let event = match state.strike.parse_completed_event(&body) {
         Ok(event) => event,
         Err(error) => {
             tracing::warn!(%error, "rejected unsupported or malformed signed Strike webhook");
@@ -401,7 +331,7 @@ async fn strike_webhook(
         }
     };
 
-    match strike.reconcile_and_credit(&state.ledger, &event).await {
+    match state.strike.reconcile_and_credit(&state.ledger, &event).await {
         Ok(SettlementOutcome::Credited {
             sats,
             address_user,

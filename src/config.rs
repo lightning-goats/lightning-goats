@@ -15,6 +15,8 @@ pub struct AppConfig {
     pub service: ServiceConfig,
     pub database: DatabaseConfig,
     pub lightning: LightningConfig,
+    #[serde(default)]
+    pub strike: Option<StrikeConfig>,
     pub feeder: FeederConfig,
     pub openhab: OpenHabConfig,
     pub nostr: NostrConfig,
@@ -39,6 +41,19 @@ impl AppConfig {
         }
         if self.lightning.clnrest_url.trim().is_empty() {
             bail!("lightning.clnrest_url must not be empty");
+        }
+        if let Some(strike) = &self.strike {
+            let url = Url::parse(&strike.api_url).context("invalid strike.api_url")?;
+            if url.scheme() != "https" || url.host_str().is_none() {
+                bail!("strike.api_url must use https:// with a host");
+            }
+            if !url.username().is_empty()
+                || url.password().is_some()
+                || url.query().is_some()
+                || url.fragment().is_some()
+            {
+                bail!("strike.api_url must not contain credentials, query, or fragment");
+            }
         }
         if self.feeder.threshold_sats == 0 {
             bail!("feeder.threshold_sats must be greater than zero");
@@ -137,6 +152,11 @@ pub struct LightningConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct StrikeConfig {
+    pub api_url: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct FeederConfig {
     pub threshold_sats: u64,
     pub inter_feed_delay_seconds: u64,
@@ -178,6 +198,9 @@ mod tests {
                 clnrest_ca_certificate: Some(PathBuf::from("/etc/lightning-goats/clnrest-ca.pem")),
                 herd_user: "herd".to_owned(),
             },
+            strike: Some(StrikeConfig {
+                api_url: "https://api.strike.me/".to_owned(),
+            }),
             feeder: FeederConfig {
                 threshold_sats: 1_000,
                 inter_feed_delay_seconds: 30,
@@ -219,6 +242,13 @@ mod tests {
     fn rejects_noncanonical_herd_user() {
         let mut config = valid_config();
         config.lightning.herd_user = "Herd".to_owned();
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_insecure_strike_api_url() {
+        let mut config = valid_config();
+        config.strike.as_mut().unwrap().api_url = "http://api.strike.me/".to_owned();
         assert!(config.validate().is_err());
     }
 

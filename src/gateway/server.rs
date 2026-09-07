@@ -445,11 +445,11 @@ mod tests {
 
     #[test]
     fn rejects_unsafe_local_rate_configuration() {
-        let mut config = config();
-        config.feeder.min_feed_interval_seconds = 0;
-        assert!(config.validate().is_err());
-        let mut config = config();
-        config.feeder.max_feeds_per_hour = 0;
-        assert!(config.validate().is_err());
+        let mut interval_config = config();
+        interval_config.feeder.min_feed_interval_seconds = 0;
+        assert!(interval_config.validate().is_err());
+        let mut rate_config = config();
+        rate_config.feeder.max_feeds_per_hour = 0;
+        assert!(rate_config.validate().is_err());
     }
 }

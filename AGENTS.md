@@ -1,48 +1,51 @@
 # Lightning Goats Agent Guide
 
-This repository is the standalone Lightning Goats payment-accounting, messaging, overlay, and feeder-automation service.
-
-## Source of truth
-
-Treat the GitHub Phase 1 tracker and the canonical documentation under `docs/` as the source of truth. Keep this file concise and update deeper docs when architecture or deployment decisions change.
+This repository contains the standalone Strike-backed Lightning Goats payment, messaging, overlay, and feeder-automation stack.
 
 Phase 1 tracker: https://github.com/lightning-goats/lightning-goats/issues/6
 
-Before beginning Phase 1 work, read in this order:
+## Start here
 
-1. `docs/README.md`
-2. `docs/planning/phase1-execution-plan.md`
-3. `docs/architecture/phase1-strike-architecture.md`
-4. `docs/architecture/lightning-address-registry.md`
-5. `docs/security/phase1-threat-model.md`
-6. `docs/security/openhab-feeder-gateway.md`
-7. `docs/security/phase1-hardening-checklist.md`
-8. `docs/deployment/codex-vps-bootstrap.md`
-9. `docs/deployment/new-vps-staging.md`
-10. `docs/testing/phase1-verification-matrix.md`
-11. the GitHub issue being implemented
+For deployment/provisioning work, read in this order:
 
-Before any production cutover work also read:
+1. `docs/deployment/codex-handoff.md`
+2. `docs/README.md`
+3. `docs/implementation-status.md`
+4. `docs/security/phase1-threat-model.md`
+5. `docs/security/openhab-feeder-gateway.md`
+6. `docs/security/phase1-hardening-checklist.md`
+7. `docs/deployment/wireguard-topology.md`
+8. `docs/testing/phase1-verification-matrix.md`
+9. `docs/deployment/production-cutover.md`
 
-- `docs/deployment/production-cutover.md`
+For architecture work also read:
 
-For future CyberHerd work read:
-
+- `docs/architecture/phase1-strike-architecture.md`
+- `docs/architecture/lightning-address-registry.md`
+- `docs/architecture/messaging-phase1.md`
+- `docs/architecture/weather-overlay.md`
 - `docs/architecture/cyberherd-phase2-boundary.md`
 
-`docs/phase1-lnbits-rust-migration-plan.md` and CLN-specific portions of the old `docs/server-setup.md` are historical/superseded. Do not use them as the current execution plan.
+CLN/LNbits migration documents are historical. Do not use them as the current execution plan.
 
-## Phase 1 objective
+## Final Phase 1 boundary
 
-Replace the production LNbits/Core Lightning payment path with a standalone `lightning-goatsd` architecture using Strike for Lightning receives while preserving durable feeder accounting, Nostr publishing, and the video overlay.
+`lightning-goatsd` on the new VPS uses:
 
-The physical feeder boundary is strengthened: `lightning-goatsd` talks only to a narrow in-house feeder gateway over WireGuard. It does **not** hold an OpenHAB API token or directly invoke generic OpenHAB REST/rules.
+- Strike receive/read-only authority;
+- native LNURL-pay / Lightning Addresses;
+- durable SQLite accounting;
+- NIP-46/`nak` Nostr publication;
+- the overlay websocket;
+- one narrow `GatewayClient` to the trusted in-house gateway.
 
-Phase 1 does **not** implement CyberHerd membership/reward logic.
+It does **not** use LNbits, Core Lightning/CLNRest, `clnaddress`, a CLN rune, an OpenHAB token, or a spend-capable Strike key.
+
+The trusted `lightning-goats-gateway` runs on `10.8.0.6`, owns the dedicated OpenHAB USER token, reuses the existing correlated feeder-owner contract, exposes sanitized weather, and enforces additional local feed-rate limits.
 
 ## Required Lightning Addresses
 
-The configured Phase 1 registry contains:
+All six are mandatory and credit the common `herd` pool while preserving `address_user`:
 
 - `herd@lightning-goats.com`
 - `dexter@lightning-goats.com`
@@ -51,118 +54,63 @@ The configured Phase 1 registry contains:
 - `newton@lightning-goats.com`
 - `nova@lightning-goats.com`
 
-All six credit the same `herd` feed-credit pool while preserving the actual paid `address_user` in durable state.
+Unknown users and invalid amounts must fail before any Strike call.
 
-Nginx may route generic `/.well-known/lnurlp/<user>` paths to the service, but the application allowlist is authoritative. Unknown users must fail before any Strike API call.
+## Non-negotiable security invariants
 
-## Security invariants
+- Strike webhooks are notifications; verify HMAC then fetch authoritative Strike state before crediting.
+- Settlement and feed-credit/event creation remain exactly-once and durable.
+- `lightning-goatsd` never receives an OpenHAB credential.
+- The feeder-attempt UUID is the cross-boundary idempotency key; an ambiguous/pending UUID is never automatically re-actuated.
+- Existing OpenHAB physical-owner safety remains authoritative; the gateway adds, rather than replaces, local safety limits.
+- `FeederOverride` and `LightningGoatsRemoteEnabled` fail closed.
+- Payment/feed messages may go to Nostr + overlay; interface/weather messages are overlay-only.
+- Keep Nostr private signing authority outside the daemon through NIP-46; never place an nsec in source/config/browser code.
+- Never commit API keys, webhook secrets, OpenHAB tokens, WireGuard private keys, or Nostr credentials.
+- Production binaries/config/static files are root-owned and non-writable by runtime/deploy users.
+- Production runtime identities have no sudo/admin privileges.
+- DNS/domain control is payment-routing authority and must receive account-level hardening.
 
-- `lightning-goatsd` must never require a spend-capable Strike credential in Phase 1.
-- `lightning-goatsd` must never receive an OpenHAB API token.
-- The OpenHAB project token belongs only to the trusted in-house feeder gateway.
-- Do not reintroduce LNbits, Core Lightning, CLNRest, CLN `pay_index`, or `clnaddress` as production dependencies.
-- A Strike webhook is a notification, not authoritative settlement data; verify it and fetch authoritative Strike state before crediting.
-- Duplicate/replayed payment notifications must be idempotent.
-- Payment settlement, feed-credit accounting, and durable `payment_received` event creation must remain atomic.
-- Unknown Lightning Address users and invalid amounts must be rejected before provider contact.
-- Public invoice creation must be rate-limited/backpressured; webhook method/body/content type must be constrained.
-- Feeder actuation must remain serialized and ambiguity-safe.
-- The feeder request UUID is the cross-boundary idempotency key. Duplicate/replayed UUIDs must never cause a second physical actuation.
-- Local OpenHAB safety gates (`LightningGoatsRemoteEnabled`, `FeederOverride`, minimum interval, safety/feed cap) remain authoritative even if the VPS is compromised.
-- Never automatically submit a fresh feeder actuation after an ambiguous outcome.
-- Payment and feeder messages may publish to Nostr and the overlay. Informational/interface/weather messages are overlay-only and must never enter the Nostr outbox.
-- Keep Nostr signing isolated through the existing `nak`/NIP-46 architecture; do not place a Nostr private key in application configuration or source control.
-- Do not commit API keys, webhook secrets, OpenHAB tokens, WireGuard private keys, Nostr credentials, or other production secrets.
-- Production runtime identities must not retain sudo/admin privileges.
-- Production binaries/configuration must be root-owned and non-writable by runtime/deploy accounts.
-- Treat DNS/domain control as payment-routing authority and follow the documented registrar/DNS hardening checklist.
+## Network topology
 
-## Durable event contract
+Reuse the established `10.8.0.0/24` WireGuard network:
 
-Keep the ledger/event boundary backend-neutral and extensible for Phase 2. Phase 1 needs at least:
+- old production VPS/hub: `10.8.0.1` during staging;
+- trusted OpenHAB/weather host: `10.8.0.6`;
+- new VPS: new keypair + inventoried unused temporary `10.8.0.x` during parallel staging.
 
-- `payment_received`
-- `feeder_confirmed`
-- informational/interface/weather-style overlay events
+Do not reuse the old VPS private key during staging. Do not assign `10.8.0.1` to the new VPS until the old hub is stopped. Enforce the Lightning Goats trusted-side capability with source-specific UFW rules: VPS -> `10.8.0.6:8789` only (plus isolated canary port while staging), not generic LAN/OpenHAB/weather access.
 
-Settlement context must preserve at least provider/source identity, payment hash when available, `address_user`, `credit_pool`, amount, and settlement time.
+## Agent/server identities
 
-Future CyberHerd producers must be able to add new event types without redesigning Strike settlement or feeder accounting.
+Use a separate deployment/Codex account such as `lg-deploy` with temporary staging sudo. Run production services as system-level systemd units under dedicated non-admin accounts (`lightning-goats`, `lightning-goats-gateway`).
 
-## Messaging
+Before final production credentials/cutover, audit privileged changes and revoke/narrow broad deployment sudo. For maximum assurance, rebuild from reviewed artifacts before introducing final secrets.
 
-Phase 1 ports only these existing template categories:
+## Operator gates
 
-- `sats_received`
-- `feeder_trigger`
-- informational/interface/weather-style overlay messages
+Do not, without explicit operator direction:
 
-Canonical legacy behavior lives in:
+- stop the old production WireGuard hub;
+- move `10.8.0.1` to the new VPS or repoint production peers;
+- change production DNS;
+- enable a real physical feeder canary;
+- change feeder safety limits or the Strike operational-balance ceiling;
+- introduce spend-capable Strike authority;
+- destroy the old VPS/backups/CLN recovery material.
 
-- `lightning-goats/cyberherd_messaging`
-- `lightning-goats/lightning_goats_extension`
-- `lightning-goats/cyberherd_extension`
+## Verification
 
-Use safe simple-placeholder rendering only. Keep Nostr and overlay render targets distinct where presentation differs.
-
-## Feeder gateway
-
-Follow `docs/security/openhab-feeder-gateway.md` and issue #17.
-
-The VPS may access only the narrow feeder-gateway service over the approved WireGuard/UFW path. It must not directly reach generic OpenHAB REST/admin APIs or unrelated trusted-network services.
-
-The gateway uses a dedicated OpenHAB USER/token and dedicated request/ack Items/rule. It is not a generic proxy.
-
-Any future CyberHerd feeder action must use the same durable feeder authority/gateway; do not create a bypass path.
-
-## Deployment model
-
-The replacement stack is built and tested on a new VPS in parallel with the current production VPS.
-
-- Do not change production DNS until the new stack passes the Phase 1 verification matrix.
-- Give the new VPS its own WireGuard identity during parallel testing.
-- Do not run the same WireGuard private key on both old and new VPSes simultaneously.
-- Existing production WireGuard clients stay on the old VPS during staging; repoint them to the new VPS only during the operator-approved cutover.
-- Prefer a dedicated Lightning Goats application WireGuard interface/key/subnet for VPS -> home feeder gateway traffic.
-- Keep the old VPS as a rollback/archive point until the new stack has been observed successfully in production.
-- The public edge should be minimal: nginx/TLS, WireGuard, static site, and explicitly required application ingress.
-- Restrict locally originated VPS traffic into the trusted network to explicitly required hosts/ports.
-- SSH must be key-only with direct root login disabled before production.
-
-## Agent/server operations
-
-Use a separate temporary Codex/deployment account (for example `lg-deploy`) for coding and host provisioning. The production daemon runs under a dedicated non-admin runtime identity (for example `lightning-goats`).
-
-Production application units should be system-level systemd services using `User=lightning-goats`, not `systemctl --user` services under the Codex/deployment account.
-
-The in-house feeder gateway should likewise run as a separate non-admin system service identity.
-
-Capture privileged host changes in reproducible/reviewable repo scripts/configuration where practical.
-
-Never load final production secrets while a development account still has unnecessary broad privileges if that can be avoided. Before production cutover, revoke/narrow temporary sudo, verify ownership/permissions, and perform a secret/access review. For maximum assurance the operator may choose to rebuild/reimage the final VPS from reviewed deployment artifacts.
-
-Do not change production DNS, repoint production WireGuard clients, disable the old VPS, alter the operator-defined Strike balance ceiling/sweep policy, or activate real feeder side effects without an explicit operator-directed step.
-
-## Rust and verification
-
-- Preserve `#![forbid(unsafe_code)]`.
-- Keep the pinned/locked dependency model.
-- Run before completing code changes:
+Preserve `#![forbid(unsafe_code)]` and the locked dependency model. Before code completion run:
 
 ```sh
 cargo fmt --all --check
 cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo test --locked --all-features
+cargo tree -i rsa --locked
+cargo audit --ignore RUSTSEC-2023-0071
 ```
 
-Also run the repository security/audit gate documented in `docs/implementation-status.md` and the task-specific matrix in `docs/testing/phase1-verification-matrix.md`.
+The `RUSTSEC-2023-0071` exception is acceptable only while `rsa` is unreachable from the active application dependency graph, as documented in `docs/implementation-status.md`.
 
-## Engineering style
-
-- Prefer small explicit adapters over large SDK dependencies when practical.
-- Fail closed around payment authority, feeder ambiguity, network reach, identity, and message-audience decisions.
-- Keep financial state changes independent from best-effort presentation/publication failures.
-- Preserve exact-event/idempotency semantics across restarts and retries.
-- Reject invalid/unknown public input before invoking external providers.
-- Keep physical safety constraints authoritative on the trusted side, not solely in public-VPS software.
-- Update docs and tests in the same change when behavior or deployment contracts change.
+For deployment, run the appropriate preflight scripts and the complete `docs/testing/phase1-verification-matrix.md`. Neither preflight performs a physical feeder action.

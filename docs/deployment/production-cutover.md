@@ -9,12 +9,14 @@ Tracker: issue #16.
 Do not begin unless:
 
 - issue #15 verification matrix and `../testing/phase1-verification-matrix.md` have passed on the new VPS;
-- issues #17–#20 are complete or explicitly operator-waived with rationale;
+- issues #17–#21 are complete or explicitly operator-waived with rationale where applicable;
 - the old VPS remains intact and recoverable;
-- the new VPS has a distinct tested WireGuard identity;
-- the dedicated Lightning Goats feeder-gateway WireGuard/UFW boundary is tested;
-- `lightning-goatsd` has no OpenHAB token and cannot directly reach generic OpenHAB REST/admin endpoints;
-- the in-house feeder gateway has its dedicated OpenHAB USER/token and local safety rules;
+- the new VPS has a distinct tested WireGuard identity and temporary staging `10.8.0.x` address;
+- the reviewed production hub configuration for `10.8.0.1/24` is prepared but inactive;
+- the in-house integration-gateway WireGuard/UFW boundary on `10.8.0.6` is tested;
+- `lightning-goatsd` has no OpenHAB token and cannot directly reach generic OpenHAB REST/admin or `10.8.0.6:5000`;
+- the in-house gateway has its dedicated OpenHAB USER/token and local safety rules;
+- sanitized weather `/v1/weather` and overlay message behavior are verified;
 - final production systemd units run under non-admin runtime identities;
 - broad temporary Codex/deploy sudo has been revoked or narrowed;
 - final production credentials are installed and audited in the correct trust domains;
@@ -25,6 +27,26 @@ Do not begin unless:
 - operator-approved operational Strike balance ceiling/sweep policy exists and current balance is within it;
 - feeder operator is available to control `LightningGoatsRemoteEnabled` and `FeederOverride`;
 - a current archive exists of old LNbits/config/nginx/WireGuard/CLN recovery material.
+
+## Existing WireGuard topology
+
+Production network:
+
+```text
+10.8.0.0/24
+```
+
+Before cutover:
+
+```text
+10.8.0.1   old/current production VPS hub
+10.8.0.6   in-house OpenHAB/weather/integration host
+10.8.0.X   temporary staging address for new VPS
+```
+
+Preferred final state preserves `10.8.0.1` as the hub address, but with the **new VPS keypair/public endpoint**.
+
+See `wireguard-topology.md`.
 
 ## Required production Lightning Addresses
 
@@ -50,17 +72,19 @@ The old VPS stays production-authoritative until the final switch.
 The new VPS becomes authoritative only after:
 
 1. legacy side effects are stopped;
-2. required WireGuard clients are repointed;
-3. the feeder-gateway application path is healthy and tightly contained;
-4. DNS points to the new VPS;
-5. the new payment path is verified with tiny real payments before physical feeder enablement.
+2. old WireGuard hub is stopped and `10.8.0.1` is free;
+3. new VPS assumes the reviewed `10.8.0.1` hub configuration;
+4. required clients update to the new hub public key/public endpoint;
+5. the integration-gateway path is healthy and tightly contained;
+6. DNS points to the new VPS;
+7. the new payment path is verified with tiny real payments before physical feeder enablement.
 
 ## 1. Freeze old feeder/payment side effects
 
 Set local feeder safety gates so automatic physical feeding is blocked:
 
 ```text
-LightningGoatsRemoteEnabled = OFF (recommended during cutover)
+LightningGoatsRemoteEnabled = OFF
 FeederOverride = ON
 ```
 
@@ -80,34 +104,47 @@ On the new host confirm:
 - webhook route reachable;
 - Nostr signer/publisher healthy;
 - overlay status/WebSocket healthy;
-- WireGuard healthy;
+- staging WireGuard peer healthy;
 - configured address registry contains all six expected users;
 - public abuse/rate-limit configuration is loaded;
 - SQLite state is the intended fresh Phase 1 accounting epoch.
 
-On the trusted/home side confirm:
+On `10.8.0.6` confirm:
 
-- feeder gateway healthy;
+- integration gateway healthy;
 - dedicated OpenHAB token is present only there;
 - request UUID/ack path works;
 - local duplicate suppression and physical safety gates are enabled;
-- UFW/firewall rules allow only the expected VPS -> gateway path.
+- sanitized `/v1/weather` works;
+- local weather receiver remains available to the gateway at `127.0.0.1:5000/get_received_data`;
+- UFW/firewall rules are ready to transition from temporary staging source to production source `10.8.0.1`.
 
-From the VPS repeat negative reachability checks:
+From the staging VPS repeat negative reachability checks:
 
 ```text
-gateway port                  reachable
-OpenHAB REST/admin            blocked
-trusted SSH                   blocked unless explicitly approved
-PostgreSQL                    blocked
-unrelated LAN/WG services     blocked
+gateway port                   reachable
+10.8.0.6:5000                 blocked
+OpenHAB REST/admin             blocked
+trusted SSH                    blocked unless explicitly approved
+PostgreSQL                     blocked
+unrelated LAN/WG services      blocked
 ```
 
-## 3. Switch WireGuard hub/client peers
+## 3. Move WireGuard hub role to the new VPS
 
-If existing clients currently use the old VPS as their WireGuard server/hub, update their server peer entry from the old VPS to the new VPS.
+This step is operator-gated.
 
-Normally this means changing:
+1. Record the old hub's current state/configuration.
+2. Stop WireGuard on the old VPS.
+3. Verify the old VPS no longer answers as `10.8.0.1`.
+4. Remove/disable the new VPS temporary staging interface/address as required by the reviewed configuration.
+5. Activate the new VPS production hub configuration using:
+
+```text
+10.8.0.1/24
+```
+
+6. Update existing clients' hub peer configuration from:
 
 ```text
 PublicKey = <old-vps-public-key>
@@ -121,15 +158,27 @@ PublicKey = <new-vps-public-key>
 Endpoint  = <new-vps-public-ip>:<wireguard-port>
 ```
 
-Preserve client private keys and client WireGuard addresses unless the approved topology says otherwise.
+7. Preserve client private keys and client `10.8.0.x` addresses unless a separately reviewed change is required.
+8. Confirm required clients handshake with the new hub.
+9. On `10.8.0.6`, replace the temporary staging-source gateway firewall allowance with the final production rule permitting source `10.8.0.1` only to the integration-gateway port.
+10. Remove temporary staging firewall/address rules.
+11. Repeat positive/negative trusted-side reachability tests from the new production hub.
 
-Confirm each required client handshakes with the new VPS and can reach only intended peers/services.
+Never run both old and new hubs as `10.8.0.1` simultaneously.
 
-The dedicated/narrow feeder application tunnel remains independently constrained even if the VPS is also the general WireGuard hub.
+## 4. Verify integration gateway and weather after hub migration
 
-If the operator instead decides to reuse the old VPS WireGuard identity, first stop WireGuard on the old VPS and verify it cannot answer before activating that identity on the new host. Never run one peer private key on both hosts simultaneously.
+Before DNS change:
 
-## 4. Activate production nginx configuration
+- gateway health works from new `10.8.0.1`;
+- `/v1/feeder/override` works;
+- same-UUID feeder status/read path works without actuation;
+- `/v1/weather` returns sanitized current weather;
+- `10.8.0.6:5000` remains directly blocked from VPS;
+- legacy `/weather` mutating endpoint is not exposed;
+- OpenHAB REST/admin remains directly blocked.
+
+## 5. Activate production nginx configuration
 
 Install/reload the final production virtual hosts/routes on the new VPS.
 
@@ -145,7 +194,7 @@ Verify locally/directly before DNS change:
 - unknown user rejection;
 - nginx rate limits/body/method restrictions.
 
-## 5. Change DNS
+## 6. Change DNS
 
 Point required production names to the new VPS, including at least `lightning-goats.com` / `www` and any other still-required public hostname.
 
@@ -155,7 +204,7 @@ Monitor resolution from multiple resolvers if practical.
 
 Do not weaken registrar/DNS security controls to make the cutover easier.
 
-## 6. Verify public Lightning Address path
+## 7. Verify public Lightning Address path
 
 Once DNS resolves to the new VPS:
 
@@ -175,7 +224,17 @@ Once DNS resolves to the new VPS:
 
 If any financial-state or address-registry invariant fails, stop and investigate before enabling the feeder.
 
-## 7. Controlled feeder activation
+## 8. Verify weather presentation in production
+
+Confirm:
+
+- `lightning-goatsd` can obtain sanitized weather only through gateway `/v1/weather`;
+- the overlay receives a correctly formatted `weather_status` message;
+- the weather message never enters the Nostr outbox;
+- direct `10.8.0.6:5000` access remains blocked;
+- weather receiver failure does not affect payment/feeding.
+
+## 9. Controlled feeder activation
 
 After payment ingress/presentation is accepted:
 
@@ -196,7 +255,7 @@ For multiple due feeds, verify serialization, local minimum physical-feed interv
 
 Any ambiguous gateway/physical outcome remains `unknown`/unresolved and must not trigger a fresh automatic actuation.
 
-## 8. Confirm security/operational state after cutover
+## 10. Confirm security/operational state after cutover
 
 Before declaring success verify:
 
@@ -208,7 +267,9 @@ Before declaring success verify:
 - operational Strike balance remains below approved maximum;
 - Nostr outbox has no unexpected backlog;
 - no unresolved feeder attempt exists;
-- DNS/registrar security settings remain intact.
+- DNS/registrar security settings remain intact;
+- WireGuard topology matches documented `10.8.0.0/24` final state;
+- temporary staging address/UFW rules are removed.
 
 ## Rollback boundary
 
@@ -216,10 +277,14 @@ Before declaring success verify:
 
 Before the new stack has accepted meaningful new-epoch payments, rollback may consist of:
 
-- restore DNS to old VPS;
-- repoint WireGuard clients to old VPS peer;
-- keep local feeder remote-enable/override gates blocking;
-- restore only explicitly required legacy public services.
+1. keep local feeder remote-enable/override gates blocking;
+2. stop WireGuard on the new VPS so it releases `10.8.0.1`;
+3. restore old VPS WireGuard `10.8.0.1` hub;
+4. repoint clients to old hub public key/endpoint;
+5. restore DNS to old VPS;
+6. restore only explicitly required legacy public services.
+
+Never have both hubs active as `10.8.0.1`.
 
 Do not automatically reactivate CLN routing capital as part of rollback.
 
@@ -227,26 +292,13 @@ Do not automatically reactivate CLN routing capital as part of rollback.
 
 Once the new Strike-backed system has accepted payments, do not perform a blind rollback that discards its SQLite feed-credit/event state.
 
-Before routing payment traffic back elsewhere:
+Preserve the new SQLite database, account for all accepted payments/feed credit, preserve `address_user`, and reconcile unresolved feed attempts before routing payment traffic elsewhere.
 
-- preserve the new SQLite database;
-- account for all accepted payments and resulting feed credit;
-- preserve `address_user` metadata;
-- reconcile any unresolved feed attempt;
-- document how those credits remain authoritative.
+### Integration-gateway rollback
 
-The new Phase 1 ledger is authoritative for payments accepted after its production cutover.
+A problem in the integration gateway does not require redirecting payments immediately.
 
-### Feeder-gateway rollback
-
-A problem in the feeder gateway does not require redirecting payments immediately.
-
-Prefer:
-
-- keep `LightningGoatsRemoteEnabled=OFF` / `FeederOverride=ON`;
-- continue or pause payment ingress according to operator choice;
-- repair/reconcile the gateway safely;
-- never bypass the gateway by restoring generic OpenHAB access from the VPS.
+Prefer keeping `LightningGoatsRemoteEnabled=OFF` / `FeederOverride=ON`, pausing or continuing payment ingress according to operator choice, repairing the gateway safely, and never bypassing it with generic OpenHAB/weather access from the VPS.
 
 ## Old VPS retirement
 
@@ -269,11 +321,12 @@ Phase 1 is complete when:
 - arbitrary unconfigured users fail closed;
 - no LNbits/CLN/clnaddress runtime path serves production payments;
 - Strike settlements credit exactly once and preserve recipient metadata;
-- the VPS has no OpenHAB token/direct generic OpenHAB access;
+- the VPS has no OpenHAB token/direct generic OpenHAB or weather-service access;
+- weather messages work through the sanitized gateway and remain overlay-only;
 - feeder request/ack, duplicate suppression, threshold/remainder/ambiguity behavior is verified;
 - payment and feeder messages appear on Nostr + overlay;
-- informational messages are overlay-only;
-- WireGuard/UFW containment matches the approved topology;
+- WireGuard final state uses the approved `10.8.0.0/24` topology with new VPS as `10.8.0.1` hub;
+- UFW containment matches the approved topology;
 - host/domain/deployment hardening checks pass;
 - operational Strike balance policy is active;
 - old VPS is archival/rollback only;

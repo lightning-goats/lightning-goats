@@ -73,15 +73,19 @@ const GOATS: [Goat; 5] = [
 
 impl MessageRenderer {
     pub fn embedded() -> Result<Self> {
-        let catalog: TemplateCatalog =
-            toml::from_str(EMBEDDED_TEMPLATES).context("invalid embedded Phase 1 message templates")?;
+        let catalog: TemplateCatalog = toml::from_str(EMBEDDED_TEMPLATES)
+            .context("invalid embedded Phase 1 message templates")?;
         validate_catalog(&catalog)?;
         Ok(Self {
             catalog: Arc::new(catalog),
         })
     }
 
-    pub fn render(&self, event: &DurableEvent, threshold_sats: u64) -> Result<RenderedPresentation> {
+    pub fn render(
+        &self,
+        event: &DurableEvent,
+        threshold_sats: u64,
+    ) -> Result<RenderedPresentation> {
         if threshold_sats == 0 {
             bail!("feeder threshold must be greater than zero");
         }
@@ -417,11 +421,7 @@ mod tests {
 
         let weather = renderer
             .render(
-                &event(
-                    4,
-                    "weather_status",
-                    json!({"message": "Sunny and 72°F"}),
-                ),
+                &event(4, "weather_status", json!({"message": "Sunny and 72°F"})),
                 1_000,
             )
             .unwrap();

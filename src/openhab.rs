@@ -9,11 +9,18 @@ use zeroize::Zeroizing;
 
 use crate::secrets::read_systemd_credential;
 
+const REQUEST_ID_PLACEHOLDER: &str = "{request_id}";
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct TrustedOpenHabConfig {
     pub url: String,
     pub request_item: String,
     pub ack_item: String,
+    /// Exact command body template expected by the existing correlated feeder
+    /// owner. It must contain exactly one `{request_id}` placeholder and no
+    /// other brace expansion. This lets deployment bind to the live owner
+    /// contract without changing code.
+    pub request_payload_template: String,
     pub override_item: String,
     pub remote_enabled_item: String,
     #[serde(default)]
@@ -27,6 +34,7 @@ pub struct OpenHabClient {
     auth_token: Zeroizing<String>,
     request_item: String,
     ack_item: String,
+    request_payload_template: String,
     override_item: String,
     remote_enabled_item: String,
     temperature_item: Option<String>,
@@ -50,6 +58,7 @@ impl OpenHabClient {
         ] {
             validate_identifier(value, field)?;
         }
+        validate_request_payload_template(&config.request_payload_template)?;
         if let Some(item) = &config.temperature_item {
             validate_identifier(item, "OpenHAB temperature item")?;
         }
@@ -88,6 +97,7 @@ impl OpenHabClient {
             auth_token: Zeroizing::new(auth_token),
             request_item: config.request_item.clone(),
             ack_item: config.ack_item.clone(),
+            request_payload_template: config.request_payload_template.clone(),
             override_item: config.override_item.clone(),
             remote_enabled_item: config.remote_enabled_item.clone(),
             temperature_item: config.temperature_item.clone(),
@@ -118,8 +128,13 @@ impl OpenHabClient {
     }
 
     pub async fn command_feeder_request(&self, request_id: Uuid) -> Result<()> {
-        self.command_item(&self.request_item, &request_id.to_string())
-            .await
+        let command = self
+            .request_payload_template
+            .replace(REQUEST_ID_PLACEHOLDER, &request_id.to_string());
+        if command.len() > 2_048 {
+            bail!("rendered OpenHAB feeder request exceeds 2048 bytes");
+        }
+        self.command_item(&self.request_item, &command).await
     }
 
     pub async fn temperature_f(&self) -> Result<Option<f64>> {
@@ -174,6 +189,23 @@ impl OpenHabClient {
             .context("OpenHAB item command returned an error status")?;
         Ok(())
     }
+}
+
+fn validate_request_payload_template(template: &str) -> Result<()> {
+    if template.is_empty() || template.len() > 1_024 {
+        bail!("OpenHAB request_payload_template must contain 1 to 1024 characters");
+    }
+    if template.matches(REQUEST_ID_PLACEHOLDER).count() != 1 {
+        bail!("OpenHAB request_payload_template must contain exactly one {REQUEST_ID_PLACEHOLDER}");
+    }
+    let without_id = template.replace(REQUEST_ID_PLACEHOLDER, "");
+    if without_id.contains('{') || without_id.contains('}') {
+        bail!("OpenHAB request_payload_template contains unsupported brace expansion");
+    }
+    if template.contains('\n') || template.contains('\r') || template.contains('\0') {
+        bail!("OpenHAB request_payload_template must be a single bounded command value");
+    }
+    Ok(())
 }
 
 fn parse_acknowledgement(raw: &str) -> Result<Option<Uuid>> {
@@ -281,6 +313,15 @@ mod tests {
     }
 
     #[test]
+    fn request_template_is_narrow_and_deterministic() {
+        validate_request_payload_template("{request_id}").unwrap();
+        validate_request_payload_template(r#"request={request_id};source=lightning-goats"#).unwrap();
+        assert!(validate_request_payload_template("missing-id").is_err());
+        assert!(validate_request_payload_template("{request_id}{request_id}").is_err());
+        assert!(validate_request_payload_template("{request_id}{other}").is_err());
+    }
+
+    #[test]
     fn nullish_ack_is_none() {
         for state in ["", "NULL", "UNDEF", "-"] {
             assert_eq!(parse_acknowledgement(state).unwrap(), None);
@@ -293,6 +334,7 @@ mod tests {
             url: "http://10.8.0.6:8080/".to_owned(),
             request_item: "GoatFeeder_ManualRequest".to_owned(),
             ack_item: "GoatFeeder_Result".to_owned(),
+            request_payload_template: "{request_id}".to_owned(),
             override_item: "FeederOverride".to_owned(),
             remote_enabled_item: "LightningGoatsRemoteEnabled".to_owned(),
             temperature_item: None,

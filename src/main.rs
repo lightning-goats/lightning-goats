@@ -331,7 +331,11 @@ async fn strike_webhook(
         }
     };
 
-    match state.strike.reconcile_and_credit(&state.ledger, &event).await {
+    match state
+        .strike
+        .reconcile_and_credit(&state.ledger, &event)
+        .await
+    {
         Ok(SettlementOutcome::Credited {
             sats,
             address_user,

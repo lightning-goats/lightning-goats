@@ -14,6 +14,7 @@ url = "http://127.0.0.1:8080/"
 # feeder hardware.
 request_item = "LightningGoatsCanaryRequest"
 ack_item = "LightningGoatsCanaryAck"
+request_payload_template = "{request_id}"
 override_item = "FeederOverride"
 remote_enabled_item = "LightningGoatsCanaryRemoteEnabled"
 temperature_item = "AmbientWeatherWS2902A_WeatherDataWs2902a_Temperature"
@@ -25,3 +26,5 @@ max_stale_seconds = 300
 [feeder]
 ack_timeout_seconds = 5
 ack_poll_milliseconds = 100
+min_feed_interval_seconds = 5
+max_feeds_per_hour = 60

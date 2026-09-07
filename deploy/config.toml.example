@@ -10,13 +10,6 @@ mode = "shadow"
 [database]
 url = "sqlite:///var/lib/lightning-goats/lightning-goats.db"
 
-# Transitional CLN compatibility only; removed by Phase 1 issue #13 before
-# deployment handoff is complete.
-[lightning]
-clnrest_url = "https://127.0.0.1:3010"
-clnrest_ca_certificate = "/etc/lightning-goats/clnrest-ca.pem"
-herd_user = "herd"
-
 # Runtime API key must have only:
 #   partner.receive-request.create
 #   partner.receive-request.read

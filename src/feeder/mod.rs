@@ -165,7 +165,10 @@ mod tests {
     use tokio::net::TcpListener;
 
     use super::*;
-    use crate::ledger::{PaidInvoice, SettlementOutcome};
+    use crate::{
+        domain::payment::SettledPayment,
+        ledger::SettlementOutcome,
+    };
 
     #[derive(Clone)]
     struct MockOpenHabState {
@@ -208,16 +211,18 @@ mod tests {
         let store = LedgerStore::connect(&format!("sqlite://{}", path.display()))
             .await
             .unwrap();
-        store.initialize_cursor(100).await.unwrap();
-        let invoice = PaidInvoice {
-            pay_index: 101,
-            payment_hash: "worker-test-hash".to_owned(),
-            label: Some("clnaddress:v1:herd:550e8400-e29b-41d4-a716-446655440000".to_owned()),
+        let payment = SettledPayment {
+            source: "test".to_owned(),
+            source_id: format!("worker-{sats}"),
+            payment_hash: Some(format!("{sats:064x}")),
+            address_user: "herd".to_owned(),
+            credit_pool: "herd".to_owned(),
             amount_msat: sats * 1_000,
             settled_at: Some(1_700_000_000),
+            context_json: None,
         };
         assert!(matches!(
-            store.record_settlement(&invoice, "herd").await.unwrap(),
+            store.record_payment(&payment).await.unwrap(),
             SettlementOutcome::Credited { .. }
         ));
         (directory, store)

@@ -1,0 +1,57 @@
+name: Audit workbench (temporary)
+on:
+  push:
+    branches: [phase1/audit-remediation]
+    paths: [.github/workflows/audit-workbench.yml]
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.88'
+          components: rustfmt, clippy
+      - name: Export source and resolve audit dependencies (no repository writes)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/audit-source
+          git archive HEAD | tar -x -C /tmp/audit-source
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('Cargo.toml')
+          s = p.read_text().replace('anyhow = "1"', 'anyhow = "1"\nchrono = { version = "0.4", default-features = false, features = ["std"] }\nlightning-invoice = { version = "0.34.1", features = ["std"] }')
+          s = s.replace('"rt-multi-thread", "signal", "time"', '"rt-multi-thread", "signal", "time", "sync"')
+          s = s.replace('[dev-dependencies]', '[dev-dependencies]\nbitcoin = "0.32"\ntower = { version = "0.5", features = ["util"] }\ntokio = { version = "1", features = ["test-util"] }')
+          p.write_text(s)
+          PY
+          cargo generate-lockfile
+          cargo fetch --locked
+          cp Cargo.toml Cargo.lock /tmp/audit-source/
+          tar -C /tmp/audit-source -czf /tmp/audit-source.tar.gz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: audit-source
+          path: /tmp/audit-source.tar.gz
+          retention-days: 3
+      - name: Package offline compiler and registry (no credentials)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/audit-tools/rust /tmp/audit-tools/cargo
+          TOOLCHAIN="$(rustc --print sysroot)"
+          cp -a "$TOOLCHAIN/bin" "$TOOLCHAIN/lib" /tmp/audit-tools/rust/
+          cp -a "$HOME/.cargo/registry" /tmp/audit-tools/cargo/
+          tar -C /tmp/audit-tools -czf /tmp/audit-tools.tar.gz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: audit-tools
+          path: /tmp/audit-tools.tar.gz
+          retention-days: 3
+          compression-level: 0

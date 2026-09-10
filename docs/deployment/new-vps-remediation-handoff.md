@@ -169,3 +169,10 @@ See `../testing/vps-remediation-20260910.md` for evidence and limitations.
 F06 currency policy, F10 real BOLT11 checks, F04 owner fixtures, remaining F08/F11/
 F12 corrections and staging acceptance still require their separate work. Keep
 PRs reviewable and parent acceptance gates open; production remains HOLD.
+
+
+The next F06/F10 candidate starts from `cc23a4f2dfce7eaa8492f3ddf40a129e22bef309`.
+It verifies signed mainnet BOLT11 fields and issuance expiry, and uses
+BTC `amountCredited` for P2P with exact whole-satoshi/no-rounding policy.
+See the Strike architecture correction and VPS evidence. Actual P2P/account
+network acceptance and F04 owner fixtures remain separate live dependencies.

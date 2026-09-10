@@ -63,6 +63,9 @@ pub struct ReconciledStrikeReceive {
     pub amount_msat: u64,
     pub payment_hash: Option<String>,
     pub completed_provider: Option<String>,
+    received: ProviderAmount,
+    credited: Option<ProviderAmount>,
+    conversion_rate: Option<ProviderConversion>,
 }
 
 impl StrikeClient {
@@ -135,7 +138,8 @@ impl StrikeClient {
                 "create receive request",
             )
             .await?;
-        validate_receive_request_response(&response, amount_msat, description_hash)?;
+        let invoice = validate_receive_request_response(&response, amount_msat, description_hash)?;
+        crate::bolt11::verify_issuance_expiry(&invoice, expiry_seconds)?;
 
         let bolt11 = response
             .bolt11
@@ -226,23 +230,33 @@ impl StrikeClient {
         if receive.state != "COMPLETED" {
             bail!("Strike receive is not completed (state={})", receive.state);
         }
-        if receive.amount_received.currency != "BTC" {
-            bail!(
-                "Strike completed receive amount is not denominated in BTC ({})",
-                receive.amount_received.currency
-            );
+        validate_provider_amount(&receive.amount_received)?;
+        if let Some(rate) = &receive.conversion_rate {
+            validate_decimal_evidence(&rate.amount)?;
+            if rate.source_currency != receive.amount_received.currency
+                || rate.target_currency != "BTC"
+            {
+                bail!("Strike conversion currencies contradict the credited target");
+            }
         }
-        let amount_msat = btc_decimal_to_msat(&receive.amount_received.amount)
-            .context("invalid Strike completed BTC amount")?;
-        if amount_msat != stored.amount_msat {
-            bail!(
-                "Strike completed receive amount mismatch: expected {} msat, got {amount_msat}",
-                stored.amount_msat
-            );
-        }
+        let amount_msat;
 
         let payment_hash = match receive.receive_type.as_str() {
             "LIGHTNING" => {
+                if receive.amount_received.currency != "BTC" {
+                    bail!("Strike LIGHTNING receive must be denominated in BTC");
+                }
+                amount_msat = btc_decimal_to_msat(&receive.amount_received.amount)?;
+                if amount_msat != stored.amount_msat {
+                    bail!("Strike completed LIGHTNING amount differs from issued invoice");
+                }
+                if let Some(credited) = &receive.amount_credited {
+                    if credited.currency != "BTC"
+                        || btc_decimal_to_msat(&credited.amount)? != amount_msat
+                    {
+                        bail!("Strike LIGHTNING credited amount contradicts received amount");
+                    }
+                }
                 let lightning = receive
                     .lightning
                     .as_ref()
@@ -266,7 +280,31 @@ impl StrikeClient {
                 }
                 Some(lightning.payment_hash.to_ascii_lowercase())
             }
-            "P2P" => None,
+            "P2P" => {
+                if request.target_currency.as_deref() != Some("BTC") || receive.lightning.is_some()
+                {
+                    bail!("Strike P2P receive has an inconsistent target/type contract");
+                }
+                let credited = receive
+                    .amount_credited
+                    .as_ref()
+                    .context("Strike P2P omitted authoritative amountCredited")?;
+                if credited.currency != "BTC" {
+                    bail!("Strike P2P credited currency must be BTC");
+                }
+                amount_msat = btc_decimal_to_msat(&credited.amount)?;
+                // No rounding or guessed conversion. Fractional sats remain
+                // quarantined until an explicit accounting policy is approved.
+                if amount_msat == 0 || !amount_msat.is_multiple_of(1000) {
+                    bail!("Strike P2P credited amount must be positive whole satoshis");
+                }
+                if receive.amount_received.currency == "BTC"
+                    && btc_decimal_to_msat(&receive.amount_received.amount)? != amount_msat
+                {
+                    bail!("Strike BTC-to-BTC P2P received and credited amounts disagree");
+                }
+                None
+            }
             other => bail!("unexpected Strike receive type {other}; refusing feeder credit"),
         };
 
@@ -277,6 +315,9 @@ impl StrikeClient {
             amount_msat,
             payment_hash,
             completed_provider: receive.completed,
+            received: receive.amount_received,
+            credited: receive.amount_credited,
+            conversion_rate: receive.conversion_rate,
         })
     }
 
@@ -498,7 +539,11 @@ impl StrikeRuntime {
         let context_json = json!({
             "receive_request_id": receive.receive_request_id,
             "receive_type": receive.receive_type,
-            "completed_provider": receive.completed_provider
+            "completed_provider": receive.completed_provider,
+            "amount_received": receive.received,
+            "amount_credited": receive.credited,
+            "conversion_rate": receive.conversion_rate,
+            "rounding_policy": "none_exact_whole_satoshis"
         })
         .to_string();
         ledger
@@ -562,10 +607,18 @@ struct Bolt11ReceiveRequest {
     payment_hash: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 struct ProviderAmount {
     amount: String,
     currency: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct ProviderConversion {
+    amount: String,
+    source_currency: String,
+    target_currency: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -583,6 +636,10 @@ pub struct StrikeReceive {
     receive_type: String,
     state: String,
     amount_received: ProviderAmount,
+    #[serde(default)]
+    amount_credited: Option<ProviderAmount>,
+    #[serde(default)]
+    conversion_rate: Option<ProviderConversion>,
     #[serde(default)]
     completed: Option<String>,
     #[serde(default)]
@@ -640,7 +697,7 @@ fn validate_receive_request_response(
     response: &ReceiveRequestResponse,
     amount_msat: u64,
     expected_description_hash: &str,
-) -> Result<()> {
+) -> Result<lightning_invoice::Bolt11Invoice> {
     if response
         .target_currency
         .as_deref()
@@ -656,6 +713,12 @@ fn validate_receive_request_response(
         bail!("Strike returned an invalid BOLT11 invoice length");
     }
     validate_hex32(&bolt11.payment_hash, "Strike paymentHash")?;
+    let verified = crate::bolt11::verify(
+        &bolt11.invoice,
+        amount_msat,
+        &bolt11.payment_hash,
+        expected_description_hash,
+    )?;
     if let Some(hash) = bolt11.description_hash.as_deref() {
         validate_hex32(hash, "Strike descriptionHash")?;
         if !hash.eq_ignore_ascii_case(expected_description_hash) {
@@ -678,7 +741,7 @@ fn validate_receive_request_response(
             bail!("Strike btcAmount does not match requested millisatoshis");
         }
     }
-    Ok(())
+    Ok(verified)
 }
 
 fn validate_stored_request(
@@ -708,6 +771,32 @@ fn validate_stored_request(
 fn validate_hex32(value: &str, field: &str) -> Result<()> {
     if value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         bail!("{field} must be a 32-byte hex string");
+    }
+    Ok(())
+}
+
+fn validate_provider_amount(amount: &ProviderAmount) -> Result<()> {
+    if !matches!(
+        amount.currency.as_str(),
+        "BTC" | "USD" | "EUR" | "USDT" | "GBP" | "AUD"
+    ) {
+        bail!("unsupported Strike received currency");
+    }
+    validate_decimal_evidence(&amount.amount)
+}
+
+fn validate_decimal_evidence(value: &str) -> Result<()> {
+    let mut parts = value.split('.');
+    let whole = parts.next().unwrap_or("");
+    let fraction = parts.next();
+    if value.len() > 64
+        || whole.is_empty()
+        || !whole.bytes().all(|b| b.is_ascii_digit())
+        || fraction.is_some_and(|p| p.is_empty() || !p.bytes().all(|b| b.is_ascii_digit()))
+        || parts.next().is_some()
+        || !value.bytes().any(|b| matches!(b, b'1'..=b'9'))
+    {
+        bail!("invalid positive provider decimal");
     }
     Ok(())
 }
@@ -781,6 +870,9 @@ mod tests {
         description_hash: String,
         invoice: String,
         amount_btc: String,
+        received_amount: Option<Value>,
+        credited_amount: Option<Value>,
+        conversion: Option<Value>,
         receive_state: &'static str,
         receive_type: &'static str,
         api_calls: Arc<AtomicUsize>,
@@ -871,7 +963,9 @@ mod tests {
                 "receiveRequestId": state.receive_request_id,
                 "type": state.receive_type,
                 "state": state.receive_state,
-                "amountReceived": {"amount": state.amount_btc, "currency":"BTC"},
+                "amountReceived": state.received_amount.clone().unwrap_or_else(|| json!({"amount": state.amount_btc, "currency":"BTC"})),
+                "amountCredited": state.credited_amount,
+                "conversionRate": state.conversion,
                 "completed": "2026-09-07T17:01:00Z",
                 "lightning": lightning
             })]
@@ -910,8 +1004,11 @@ mod tests {
             receive_id: Uuid::parse_str("24180fae-a62d-4583-a960-759d605d252b").unwrap(),
             payment_hash: "22".repeat(32),
             description_hash: "11".repeat(32),
-            invoice: "lnbc2340n1strike-test".to_owned(),
+            invoice: crate::test_invoices::invoice(2_340_000, &"11".repeat(32)),
             amount_btc: "0.00002340000".to_owned(),
+            received_amount: None,
+            credited_amount: Some(json!({"amount":"0.00002340000","currency":"BTC"})),
+            conversion: None,
             receive_state: "COMPLETED",
             receive_type: "LIGHTNING",
             api_calls: Arc::new(AtomicUsize::new(0)),
@@ -956,6 +1053,181 @@ mod tests {
         assert_eq!(btc_decimal_to_msat("1").unwrap(), 100_000_000_000);
         assert!(btc_decimal_to_msat("1.000000000001").is_err());
         assert!(btc_decimal_to_msat("1e-8").is_err());
+    }
+
+    #[test]
+    fn signed_invoice_binds_optional_wrapper_fields_and_rejects_consistent_looking_fake() {
+        let state = state();
+        let mut value = json!({"receiveRequestId":state.receive_request_id,"targetCurrency":"BTC","bolt11":{"invoice":state.invoice,"paymentHash":state.payment_hash}});
+        let response: ReceiveRequestResponse = serde_json::from_value(value.clone()).unwrap();
+        validate_receive_request_response(&response, 2_340_000, &state.description_hash).unwrap();
+        value["bolt11"]["invoice"] = "lnbc2340n1strike-test".into();
+        value["bolt11"]["requestedAmount"] = json!({"amount":state.amount_btc,"currency":"BTC"});
+        value["bolt11"]["descriptionHash"] = state.description_hash.clone().into();
+        let fake = serde_json::from_value(value.clone()).unwrap();
+        assert!(
+            validate_receive_request_response(&fake, 2_340_000, &state.description_hash).is_err()
+        );
+        value["bolt11"]["invoice"] = state.invoice.into();
+        value["bolt11"]["paymentHash"] = "33".repeat(32).into();
+        assert!(
+            validate_receive_request_response(
+                &serde_json::from_value(value).unwrap(),
+                2_340_000,
+                &state.description_hash
+            )
+            .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn fiat_p2p_credits_only_authoritative_btc_target_and_preserves_original_evidence() {
+        let mut state = state();
+        state.receive_type = "P2P";
+        state.received_amount = Some(json!({"amount":"1.50","currency":"USD"}));
+        // Conversion is authoritative; invoice face value is not substituted.
+        state.credited_amount = Some(json!({"amount":"0.00002000","currency":"BTC"}));
+        state.conversion = Some(
+            json!({"amount":"0.0000133333333333","sourceCurrency":"USD","targetCurrency":"BTC"}),
+        );
+        let runtime = StrikeRuntime::new(
+            StrikeClient::new(&spawn_mock(state.clone()).await, state.api_key.into()).unwrap(),
+            StrikeWebhookVerifier::new("secret".into()).unwrap(),
+        );
+        let (directory, ledger) = ledger().await;
+        runtime
+            .create_and_record_receive_request(
+                &ledger,
+                "goat.name",
+                "herd",
+                2_340_000,
+                &state.description_hash,
+                300,
+            )
+            .await
+            .unwrap();
+        let event = runtime
+            .parse_completed_event(&webhook_body(&state))
+            .unwrap();
+        runtime.reconcile_and_credit(&ledger, &event).await.unwrap();
+        assert_eq!(
+            runtime.reconcile_and_credit(&ledger, &event).await.unwrap(),
+            SettlementOutcome::Duplicate
+        );
+        assert_eq!(ledger.feed_credit_sats().await.unwrap(), 2000);
+        assert_eq!(ledger.events_after(0, 100).await.unwrap().len(), 1);
+        let pool = sqlx::SqlitePool::connect(&format!(
+            "sqlite://{}",
+            directory.path().join("strike.db").display()
+        ))
+        .await
+        .unwrap();
+        let context: String = sqlx::query_scalar("SELECT context_json FROM settled_payments")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let evidence: Value = serde_json::from_str(&context).unwrap();
+        assert_eq!(evidence["amount_received"]["currency"], "USD");
+        assert_eq!(evidence["amount_received"]["amount"], "1.50");
+        assert_eq!(evidence["amount_credited"]["amount"], "0.00002000");
+        assert_eq!(evidence["rounding_policy"], "none_exact_whole_satoshis");
+        let hash: Option<String> = sqlx::query_scalar("SELECT payment_hash FROM settled_payments")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(hash, None);
+    }
+
+    #[tokio::test]
+    async fn completed_receive_recovers_after_its_signed_invoice_has_expired() {
+        let mut state = state();
+        let old = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            - Duration::from_secs(600);
+        state.invoice = crate::test_invoices::invoice_at(2_340_000, &state.description_hash, old);
+        let parsed = crate::bolt11::verify(
+            &state.invoice,
+            2_340_000,
+            &state.payment_hash,
+            &state.description_hash,
+        )
+        .unwrap();
+        assert!(crate::bolt11::verify_issuance_expiry(&parsed, 300).is_err());
+        let runtime = StrikeRuntime::new(
+            StrikeClient::new(&spawn_mock(state.clone()).await, state.api_key.into()).unwrap(),
+            StrikeWebhookVerifier::new("secret".into()).unwrap(),
+        );
+        let (_directory, ledger) = ledger().await;
+        // Restore an invoice issued while valid; no new expired invoice is issued.
+        ledger
+            .record_strike_receive_request(&StoredStrikeReceiveRequest {
+                receive_request_id: state.receive_request_id,
+                address_user: "herd".into(),
+                credit_pool: "herd".into(),
+                amount_msat: 2_340_000,
+                description_hash: state.description_hash.clone(),
+                payment_hash: state.payment_hash.clone(),
+                invoice: state.invoice.clone(),
+                created_provider: None,
+            })
+            .await
+            .unwrap();
+        runtime
+            .reconcile_and_credit(
+                &ledger,
+                &runtime
+                    .parse_completed_event(&webhook_body(&state))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(ledger.feed_credit_sats().await.unwrap(), 2340);
+        assert_eq!(ledger.events_after(0, 100).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn missing_wrong_currency_fractional_and_conflicting_p2p_amounts_never_credit() {
+        for credited in [
+            None,
+            Some(json!({"amount":"2","currency":"USD"})),
+            Some(json!({"amount":"0.000000015","currency":"BTC"})),
+            Some(json!({"amount":"0","currency":"BTC"})),
+            Some(json!({"amount":"0.00002000","currency":"BTC"})),
+        ] {
+            let mut state = state();
+            state.receive_type = "P2P";
+            state.credited_amount = credited;
+            let runtime = StrikeRuntime::new(
+                StrikeClient::new(&spawn_mock(state.clone()).await, state.api_key.into()).unwrap(),
+                StrikeWebhookVerifier::new("secret".into()).unwrap(),
+            );
+            let (_dir, ledger) = ledger().await;
+            runtime
+                .create_and_record_receive_request(
+                    &ledger,
+                    "herd",
+                    "herd",
+                    2_340_000,
+                    &state.description_hash,
+                    300,
+                )
+                .await
+                .unwrap();
+            assert!(
+                runtime
+                    .reconcile_and_credit(
+                        &ledger,
+                        &runtime
+                            .parse_completed_event(&webhook_body(&state))
+                            .unwrap()
+                    )
+                    .await
+                    .is_err()
+            );
+            assert_eq!(ledger.feed_credit_sats().await.unwrap(), 0);
+            assert!(ledger.events_after(0, 100).await.unwrap().is_empty());
+        }
     }
 
     #[test]

@@ -3,7 +3,9 @@ use std::{error::Error, fmt};
 const MAX_USER_LEN: usize = 64;
 
 pub fn validate_user(user: &str) -> Result<(), LightningAddressUserError> {
-    if user.is_empty() || user.len() > MAX_USER_LEN {
+    // URL path joining normalizes these whole segments instead of preserving
+    // the Lightning Address identity used for discovery and persistence.
+    if user.is_empty() || user.len() > MAX_USER_LEN || matches!(user, "." | "..") {
         return Err(LightningAddressUserError);
     }
 
@@ -49,7 +51,7 @@ mod tests {
 
     #[test]
     fn rejects_uppercase_colons_and_invalid_lengths() {
-        for user in ["Herd", "herd:other", "", "with space"] {
+        for user in ["Herd", "herd:other", "", "with space", ".", ".."] {
             assert!(validate_user(user).is_err());
         }
         assert!(validate_user(&"a".repeat(MAX_USER_LEN + 1)).is_err());

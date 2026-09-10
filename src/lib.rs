@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+mod bolt11;
+
 pub mod config;
 pub mod domain;
 pub mod feeder;
@@ -16,3 +18,7 @@ pub mod secrets;
 pub mod strike;
 
 pub mod http;
+
+#[cfg(test)]
+#[path = "../tests/support/invoices.rs"]
+mod test_invoices;

@@ -187,3 +187,50 @@ Final local candidate checks: `cargo fmt --all --check`,
 concrete liveness issues were corrected and their regressions pass. Exact-head
 GitHub Rust, Security and real-binary packaging results must be attached after
 publication; local Rust/HTTP tests are not a substitute for dependency audit.
+
+
+## F06/F10 signed-invoice and target-currency candidate
+
+Base: F05/F14 commit `cc23a4f2dfce7eaa8492f3ddf40a129e22bef309`,
+[draft PR #34](https://github.com/lightning-goats/lightning-goats/pull/34).
+That base passed [Rust CI](https://github.com/lightning-goats/lightning-goats/actions/runs/34529555784),
+[Security](https://github.com/lightning-goats/lightning-goats/actions/runs/34529556111), and
+[Deployment](https://github.com/lightning-goats/lightning-goats/actions/runs/34529555790).
+The next source branch is `remediation/phase1-verified-invoices-20260910`.
+
+Real BOLT11 fixtures are signed locally with an explicitly synthetic test key;
+no invoice is obtained from a real provider or paid. Tests distinguish valid
+checksum from invalid signature, reject wrong network, amountless/mismatched
+amounts, wrong hashes, bad checksum, expiry mismatch, expired issuance and
+future timestamps. Delayed settlement retains signed verification without an
+issuance-time expiry rejection. A provider wrapper with a plausible fake invoice
+fails; absent optional wrapper fields still require a verified signed contract.
+The LNURL callback regression asserts a fake invoice produces an error and zero
+issued rows, while a dotted configured user survives discovery/callback/storage.
+
+P2P fixtures include USD received with a different authoritative BTC credited
+amount. They assert that only credited BTC becomes feed credit, replay creates
+one event, the original amounts remain in context and no payment hash is invented.
+Missing/non-BTC/zero/fractional-satoshi/conflicting BTC-to-BTC credited amounts
+produce no credit or event. Policy is exact positive whole sats, with no rounding.
+The independent receipt/retry mechanisms retain unsupported cases for review.
+
+The actual provider documentation was read, but no live P2P account observation
+or account fixture was authorized/available. Mainnet is explicitly required;
+canary provider network compatibility is still a live acceptance dependency.
+
+
+The read-only candidate review found no concrete F06/F10 bypass. Its confirmed
+F14 edge case is corrected: whole usernames `.` and `..` are rejected centrally
+because URL joining would collapse their identity. Configuration tests reject
+both while retaining `goat.name`; the real LNURL service callback/persistence
+test covers the ordinary dotted case. Existing financial conflict checks and
+receive-only credentials remain unchanged.
+
+
+Local validation at publication: format, locked Clippy and all 11 deployment
+tests pass. The full locked suite passed before the added explicit expired-
+invoice recovery regression (94 library tests, one daemon HTTP test, 14
+integration tests). The final locked rerun including that additional case also passed: 95 library
+tests, one daemon HTTP test and 14 integration tests. Attach exact-head GitHub
+checks before accepting the candidate. Logs are under `/home/linuxuser/lg-evidence/f06-f10-*`.

@@ -129,6 +129,15 @@ Current VPS source disposition (supersedes the historical source-unchanged rows)
 | F03 | PR #33 correlated polling/refusals/cooldown; shipped timing | F04 contract and final staging matrix |
 | F05 | Settlement follow-up durable inbox, fair scans, retry/quarantine | Exact-head checks, production-equivalent restore/settlement acceptance |
 | F14 | Canonical validator at issuance, persistence and settlement | Final integrated review |
-| F04, F06, F10 | No acceptance claimed | Owner fixtures, credited-currency policy, cryptographic invoice verification |
+| F04 | No acceptance claimed | Exact physical-owner contract and sanitized fixtures |
+| F06, F10 | Signed invoice and authoritative credited-BTC correction with synthetic fixtures | Exact-head checks, live P2P/account network acceptance |
 | F08, F11, F12 | Provider/webhook body bounds partly implemented | Global resource controls, overlay protocol, actual weather freshness/units |
 | F01, F07, F09, F13 | Earlier integration/artifact work retained | Integration review, final package, clean install, home containment and website acceptance |
+
+
+F06/F10 follow-up: actual signed mainnet BOLT11 verification now binds network,
+amount, hashes and issuance expiry; recovery permits expired but valid issued
+invoices. P2P requires authoritative BTC credited amounts and preserves original
+currency evidence with a no-rounding policy. Mock evidence is recorded in the
+VPS report; actual account behavior and sandbox network compatibility remain
+unaccepted. No real payment or physical test is implied.

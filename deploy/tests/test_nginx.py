@@ -133,12 +133,15 @@ http {{
     access_log off;
     client_body_temp_path {cls.root}/body;
     proxy_temp_path {cls.root}/proxy;
+    fastcgi_temp_path {cls.root}/fastcgi;
+    uwsgi_temp_path {cls.root}/uwsgi;
+    scgi_temp_path {cls.root}/scgi;
     include {cls.root}/http.conf;
     include {cls.root}/production.conf;
     include {cls.root}/canary.conf;
 }}
 """)
-        command = [cls.nginx, "-p", str(cls.root), "-c", str(config)]
+        command = [cls.nginx, "-e", str(cls.root / "error.log"), "-p", str(cls.root), "-c", str(config)]
         subprocess.run(command + ["-t"], check=True, capture_output=True, timeout=10)
         cls.process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         cls.addClassCleanup(cls.stop_nginx)

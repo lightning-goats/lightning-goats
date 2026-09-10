@@ -130,3 +130,60 @@ same-ID admission race with conflicting safety snapshots.
 The independent candidate review found no concrete F03 bypass. F04 remains open:
 these results establish the internal protocol with a harmless echo fixture,
 not receipt-versus-completion behavior of the actual household owner.
+
+
+## F05 durable settlement recovery candidate
+
+Source base: `8580babd03733a9679d4d5f2183ab9c673806241`, draft
+[PR #33](https://github.com/lightning-goats/lightning-goats/pull/33). That head passed
+[Rust CI](https://github.com/lightning-goats/lightning-goats/actions/runs/34527761238),
+[Security](https://github.com/lightning-goats/lightning-goats/actions/runs/34527761248), and
+[Deployment](https://github.com/lightning-goats/lightning-goats/actions/runs/34527761348).
+The settlement follow-up uses branch
+`remediation/phase1-settlement-recovery-20260910` and the same Fedora/Rust environment.
+
+Authenticated webhook IDs are persisted before HTTP 204. Conflicting event IDs
+fail closed. Provider reads run outside the HTTP request, with persisted retry
+backoff and an independently scheduled, paginated scan of every locally issued
+request. Full scans repeat because provider offset pagination is not a stable
+snapshot. Scan progress and discovered work survive restart. Inbox admission is
+capped at 10,000 pending records; exhaustion or database failure returns 503 so
+notifications remain retryable. One worker iteration processes at most one inbox
+entry and one 100-row provider page. Provider bodies are bounded while streaming
+at 256 KiB; redirects are disabled. These are application bounds, not a complete
+F08 acceptance claim.
+
+Focused mock tests cover notification-free pagination, restart between discovery
+and processing, exact duplicates, conflicting identities, 429/503 outages, and
+recovery after the credit transaction commits but before inbox completion. They
+assert one credit/event. The HTTP test exercises the actual application router:
+slow provider causes zero calls during acknowledgement, duplicate delivery has
+one row, reopen retains work, injected insertion failure returns 503, malformed
+signature/content type/method fail, and a chunked oversized body receives 413.
+
+F14 persistence and settlement now use the configuration/LNURL username
+validator, including dotted usernames. Direct invalid issuance fails before
+provider contact. This candidate still uses synthetic provider wrappers: F06
+credited-currency policy and F10 cryptographic BOLT11 validation remain open.
+No real invoice, payment, owner operation or network change is part of this evidence.
+
+
+Candidate review identified and regression-tested two recovery liveness gaps:
+new work now uses its creation time as its first due time, so overdue page/retry
+work cannot be starved by a continuous stream of new rows. After eight failed
+attempts, work moves to durable quarantine, outside pending admission capacity,
+and remains eligible for hourly authoritative retry. It is never credited or
+discarded on error. A full 10,000-row admission test proves that quarantining a
+poison item releases a slot while retaining retry/completion capability; the
+outage test recovers quarantined work after provider restoration. Audit records
+are retained; database growth/retention and F08 global ingress budgets remain
+separate operational resource controls.
+
+
+Final local candidate checks: `cargo fmt --all --check`,
+`cargo clippy --locked --all-targets --all-features -- -D warnings`, and
+`cargo test --locked --all-features` pass (89 library tests, one daemon HTTP test,
+11 integration tests). All 11 deployment tests pass. The candidate review's two
+concrete liveness issues were corrected and their regressions pass. Exact-head
+GitHub Rust, Security and real-binary packaging results must be attached after
+publication; local Rust/HTTP tests are not a substitute for dependency audit.

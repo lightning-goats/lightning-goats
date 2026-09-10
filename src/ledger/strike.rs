@@ -23,12 +23,10 @@ impl LedgerStore {
     ) -> Result<()> {
         validate_hex32(&request.description_hash, "Strike description_hash")?;
         validate_hex32(&request.payment_hash, "Strike payment_hash")?;
-        if request.address_user.is_empty() || request.address_user.len() > 64 {
-            bail!("Strike address_user must contain 1 to 64 characters");
-        }
-        if request.credit_pool.is_empty() || request.credit_pool.len() > 64 {
-            bail!("Strike credit_pool must contain 1 to 64 characters");
-        }
+        crate::domain::invoice::validate_user(&request.address_user)
+            .context("invalid Strike address_user")?;
+        crate::domain::invoice::validate_user(&request.credit_pool)
+            .context("invalid Strike credit_pool")?;
         if request.amount_msat == 0 {
             bail!("Strike receive request amount_msat must be greater than zero");
         }

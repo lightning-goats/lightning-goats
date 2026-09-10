@@ -19,7 +19,7 @@ The `phase1/audit-remediation` tip `d2e8f1617cbd0711b1e883f6954a1267efef8e9a`
 adds a read-only workbench workflow, not source corrections. These observations
 are from retrieval time; check current refs before integration.
 
-## Finding disposition
+## Finding disposition at the integration handoff
 
 Verification for this work package (2026-09-10): all 11 new deployment tests
 passed in a disposable nginx 1.26.3 container with the repository mounted
@@ -95,8 +95,8 @@ gateway modules must use harmless OpenHAB and mocked/sandboxed Strike. Cover
 concurrent/deduplicated UUIDs, pending restart, no-dispatch 423/429 cooldown/hour
 rollover, network timeout, late acknowledgement and confirmation crash. Assert
 OpenHAB command counts and `2340 -> 2 confirmed feeds -> 340` with corrected
-shipped timing. Current 2s/5s defaults remain an F03 blocker; artifact tests do
-not establish that this combined flow works.
+shipped timing. The original 2s/5s timing defect is corrected by the F03 follow-up above;
+artifact checks alone do not establish the physical owner contract.
 
 Settlement tests must include missed/duplicate/late notifications, durable inbox
 restart, database unavailability, provider 429/5xx and extended outage, asserting
@@ -108,3 +108,27 @@ overlay, signer/relay, package provenance and backup/restore without financial o
 physical replay. Keep one physical owner and production actuation disabled. Only
 after all gates pass may an operator separately approve tiny payment, controlled
 feed and production cutover.
+
+
+### Settlement recovery follow-up
+
+F05 now has a durable authenticated webhook inbox and a supervised independent
+recovery worker over all locally issued requests, with bounded pagination,
+persisted progress/backoff and atomic idempotent settlement through the existing
+ledger transaction. F14 uses the canonical username validator at issuance and
+settlement. See the source-pinned VPS evidence for focused regression results.
+F06/F10 and end-to-end live settlement acceptance remain open; mocked provider
+wrappers do not verify invoices or authorize payment tests.
+
+
+Current VPS source disposition (supersedes the historical source-unchanged rows):
+
+| Finding | Reviewable correction | Remaining acceptance |
+| --- | --- | --- |
+| F02 | PR #32 atomic shared-store admission; command-count regressions | Final integrated checks and actual owner binding |
+| F03 | PR #33 correlated polling/refusals/cooldown; shipped timing | F04 contract and final staging matrix |
+| F05 | Settlement follow-up durable inbox, fair scans, retry/quarantine | Exact-head checks, production-equivalent restore/settlement acceptance |
+| F14 | Canonical validator at issuance, persistence and settlement | Final integrated review |
+| F04, F06, F10 | No acceptance claimed | Owner fixtures, credited-currency policy, cryptographic invoice verification |
+| F08, F11, F12 | Provider/webhook body bounds partly implemented | Global resource controls, overlay protocol, actual weather freshness/units |
+| F01, F07, F09, F13 | Earlier integration/artifact work retained | Integration review, final package, clean install, home containment and website acceptance |

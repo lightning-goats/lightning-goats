@@ -20,7 +20,6 @@ type HmacSha256 = Hmac<Sha256>;
 
 const STRIKE_SOURCE: &str = "strike";
 const COMPLETED_RECEIVE_EVENT: &str = "receive-request.receive-completed";
-const MAX_PROVIDER_ERROR_BODY: usize = 2_048;
 
 #[derive(Clone)]
 pub struct StrikeClient {
@@ -87,6 +86,7 @@ impl StrikeClient {
 
         let client = Client::builder()
             .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
             .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(10))
             .build()
@@ -192,6 +192,23 @@ impl StrikeClient {
         Ok(receive)
     }
 
+    async fn receive_page(&self, id: Uuid, offset: u32) -> Result<Vec<StrikeReceive>> {
+        let mut endpoint = self
+            .base_url
+            .join(&format!("v1/receive-requests/{id}/receives"))?;
+        endpoint
+            .query_pairs_mut()
+            .append_pair("$skip", &offset.to_string())
+            .append_pair("$top", "100");
+        let page: StrikeReceivePage = self
+            .send_json(self.client.get(endpoint), "scan receives")
+            .await?;
+        if page.items.len() > 100 || page.items.iter().any(|r| r.receive_request_id != id) {
+            bail!("invalid receive scan page");
+        }
+        Ok(page.items)
+    }
+
     pub async fn reconcile_completed_receive(
         &self,
         stored: &StoredStrikeReceiveRequest,
@@ -275,20 +292,12 @@ impl StrikeClient {
             .await
             .with_context(|| format!("Strike {operation} request failed"))?;
         let status = response.status();
-        let body = response
-            .bytes()
-            .await
-            .with_context(|| format!("failed reading Strike {operation} response"))?;
+        let body = crate::http::bounded_body(response, 256 * 1024).await?;
         if !status.is_success() {
-            let safe_body =
-                String::from_utf8_lossy(&body[..body.len().min(MAX_PROVIDER_ERROR_BODY)]);
             if status == StatusCode::TOO_MANY_REQUESTS {
-                bail!("Strike {operation} was rate limited (HTTP 429): {safe_body}");
+                bail!("Strike {operation} rate limited (HTTP 429)");
             }
-            if status.is_server_error() {
-                bail!("Strike {operation} provider failure (HTTP {status}): {safe_body}");
-            }
-            bail!("Strike {operation} failed with HTTP {status}: {safe_body}");
+            bail!("Strike {operation} failed with HTTP {status}");
         }
         serde_json::from_slice(&body)
             .with_context(|| format!("Strike {operation} returned malformed JSON"))
@@ -363,6 +372,81 @@ impl StrikeRuntime {
         self.verifier.parse_completed_event(body)
     }
 
+    /// One bounded inbox item plus one scan page. Every path converges on the
+    /// same authoritative reconciliation and atomic settlement transaction.
+    pub async fn recovery_step(&self, ledger: &LedgerStore) -> Result<()> {
+        if let Some(work) = ledger.due_strike_work().await? {
+            match self.reconcile_and_credit(ledger, &work.event).await {
+                Ok(_) => ledger.finish_strike_work(&work.key).await?,
+                Err(error) => {
+                    tracing::warn!(%error,"Strike durable work retained for retry");
+                    ledger.retry_strike_work(&work.key, work.attempts).await?;
+                }
+            }
+        }
+        if let Some((stored, offset, attempts)) = ledger.due_strike_scan().await? {
+            match self
+                .client
+                .receive_page(stored.receive_request_id, offset)
+                .await
+            {
+                Ok(page) => {
+                    let next = if page.len() == 100 && offset < 1_000_000 {
+                        offset + 100
+                    } else {
+                        0
+                    };
+                    for receive in page {
+                        if receive.state == "COMPLETED" {
+                            let event = StrikeCompletedReceiveEvent {
+                                event_id: receive.receive_id,
+                                receive_request_id: stored.receive_request_id,
+                                receive_id: receive.receive_id,
+                            };
+                            ledger
+                                .enqueue_strike_work(
+                                    &format!("recovery:{}", receive.receive_id),
+                                    &event,
+                                )
+                                .await?;
+                        }
+                    }
+                    // Full rescans are essential: offset pagination is not a
+                    // stable provider snapshot and notifications can be absent.
+                    ledger
+                        .record_strike_scan(
+                            stored.receive_request_id,
+                            next,
+                            0,
+                            if next == 0 { 300 } else { 1 },
+                        )
+                        .await?;
+                }
+                Err(error) => {
+                    tracing::warn!(%error,"Strike scan retained for retry");
+                    ledger
+                        .record_strike_scan(
+                            stored.receive_request_id,
+                            offset,
+                            attempts.saturating_add(1).min(30),
+                            (2_i64.pow(attempts.min(8))).min(300),
+                        )
+                        .await?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn run_recovery_worker(self, ledger: LedgerStore) -> Result<()> {
+        loop {
+            if let Err(error) = self.recovery_step(&ledger).await {
+                tracing::error!(%error,"Strike recovery will retry after storage failure");
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    }
+
     pub async fn create_and_record_receive_request(
         &self,
         ledger: &LedgerStore,
@@ -372,6 +456,8 @@ impl StrikeRuntime {
         description_hash: &str,
         expiry_seconds: u64,
     ) -> Result<CreatedStrikeReceiveRequest> {
+        crate::domain::invoice::validate_user(address_user)?;
+        crate::domain::invoice::validate_user(credit_pool)?;
         let created = self
             .client
             .create_bolt11_receive_request(amount_msat, description_hash, expiry_seconds)
@@ -698,6 +784,8 @@ mod tests {
         receive_state: &'static str,
         receive_type: &'static str,
         api_calls: Arc<AtomicUsize>,
+        unavailable: Arc<AtomicUsize>,
+        page_padding: bool,
     }
 
     async fn create_handler(
@@ -753,14 +841,23 @@ mod tests {
     struct ReceiveQuery {
         #[serde(rename = "$receiveId")]
         receive_id: Option<Uuid>,
+        #[serde(rename = "$skip", default)]
+        skip: u32,
     }
 
     async fn receive_handler(
         State(state): State<MockState>,
         Query(query): Query<ReceiveQuery>,
-    ) -> Json<Value> {
+    ) -> axum::response::Response {
         state.api_calls.fetch_add(1, Ordering::SeqCst);
-        let items = if query.receive_id == Some(state.receive_id) {
+        let failure = state.unavailable.load(Ordering::SeqCst);
+        if failure != 0 {
+            return StatusCode::from_u16(failure as u16)
+                .unwrap()
+                .into_response();
+        }
+        let mut items = if query.receive_id.is_none() || query.receive_id == Some(state.receive_id)
+        {
             let lightning = (state.receive_type == "LIGHTNING").then(|| {
                 json!({
                     "invoice": state.invoice,
@@ -781,7 +878,13 @@ mod tests {
         } else {
             Vec::new()
         };
-        Json(json!({"items":items,"count":items.len(),"isCountUnknown":false}))
+        if state.page_padding && query.receive_id.is_none() && query.skip == 0 {
+            let mut pending = items[0].clone();
+            pending["state"] = "PENDING".into();
+            items = vec![pending; 100];
+        }
+        Json(json!({"items":items,"count":items.len(),"isCountUnknown":state.page_padding}))
+            .into_response()
     }
 
     async fn spawn_mock(state: MockState) -> String {
@@ -812,6 +915,8 @@ mod tests {
             receive_state: "COMPLETED",
             receive_type: "LIGHTNING",
             api_calls: Arc::new(AtomicUsize::new(0)),
+            unavailable: Arc::new(AtomicUsize::new(0)),
+            page_padding: false,
         }
     }
 
@@ -977,5 +1082,166 @@ mod tests {
             .unwrap();
         assert_eq!(receive.receive_type, "P2P");
         assert_eq!(receive.payment_hash, None);
+    }
+    #[tokio::test]
+    async fn recovery_without_notifications_paginates_and_credits_dotted_user_once() {
+        let mut state = state();
+        state.page_padding = true;
+        let runtime = StrikeRuntime::new(
+            StrikeClient::new(&spawn_mock(state.clone()).await, state.api_key.into()).unwrap(),
+            StrikeWebhookVerifier::new("secret".into()).unwrap(),
+        );
+        let (directory, ledger) = ledger().await;
+        runtime
+            .create_and_record_receive_request(
+                &ledger,
+                "goat.name",
+                "herd",
+                2_340_000,
+                &state.description_hash,
+                300,
+            )
+            .await
+            .unwrap();
+        runtime.recovery_step(&ledger).await.unwrap();
+        assert_eq!(ledger.feed_credit_sats().await.unwrap(), 0);
+        let pool = sqlx::SqlitePool::connect(&format!(
+            "sqlite://{}",
+            directory.path().join("strike.db").display()
+        ))
+        .await
+        .unwrap();
+        let offset: i64 = sqlx::query_scalar("SELECT page_offset FROM strike_recovery_scan")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(offset, 100);
+        sqlx::query("UPDATE strike_recovery_scan SET next_attempt=0")
+            .execute(&pool)
+            .await
+            .unwrap();
+        runtime.recovery_step(&ledger).await.unwrap();
+        assert!(ledger.due_strike_work().await.unwrap().is_some());
+        // Reopen the same durable store after discovery, before processing.
+        let restored = LedgerStore::connect(&format!(
+            "sqlite://{}",
+            directory.path().join("strike.db").display()
+        ))
+        .await
+        .unwrap();
+        runtime.recovery_step(&restored).await.unwrap();
+        assert_eq!(restored.feed_credit_sats().await.unwrap(), 2340);
+        let event = runtime
+            .parse_completed_event(&webhook_body(&state))
+            .unwrap();
+        restored.enqueue_strike_event(&event).await.unwrap();
+        restored.enqueue_strike_event(&event).await.unwrap();
+        runtime.recovery_step(&restored).await.unwrap();
+        assert_eq!(restored.feed_credit_sats().await.unwrap(), 2340);
+        let events = restored.events_after(0, 100).await.unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(events[0].payload_json.contains("goat.name"));
+    }
+
+    #[tokio::test]
+    async fn persisted_inbox_survives_provider_outage_and_post_credit_crash() {
+        let state = state();
+        let runtime = StrikeRuntime::new(
+            StrikeClient::new(&spawn_mock(state.clone()).await, state.api_key.into()).unwrap(),
+            StrikeWebhookVerifier::new("secret".into()).unwrap(),
+        );
+        let (directory, ledger) = ledger().await;
+        runtime
+            .create_and_record_receive_request(
+                &ledger,
+                "herd",
+                "herd",
+                2_340_000,
+                &state.description_hash,
+                300,
+            )
+            .await
+            .unwrap();
+        let event = runtime
+            .parse_completed_event(&webhook_body(&state))
+            .unwrap();
+        ledger.enqueue_strike_event(&event).await.unwrap();
+        let mut conflict = event.clone();
+        conflict.receive_id = Uuid::new_v4();
+        assert!(ledger.enqueue_strike_event(&conflict).await.is_err());
+        let pool = sqlx::SqlitePool::connect(&format!(
+            "sqlite://{}",
+            directory.path().join("strike.db").display()
+        ))
+        .await
+        .unwrap();
+        // Simulate exhausted short retries during an extended outage.
+        sqlx::query("UPDATE strike_inbox SET attempts=7")
+            .execute(&pool)
+            .await
+            .unwrap();
+        for status in [429, 503] {
+            state.unavailable.store(status, Ordering::SeqCst);
+            runtime.recovery_step(&ledger).await.unwrap();
+            assert_eq!(ledger.feed_credit_sats().await.unwrap(), 0);
+            let status: String = sqlx::query_scalar(
+                "SELECT status FROM strike_inbox WHERE work_key LIKE 'webhook:%'",
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            assert_eq!(status, "quarantined");
+            sqlx::query("UPDATE strike_inbox SET next_attempt=0")
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        state.unavailable.store(0, Ordering::SeqCst);
+        // Commit settlement, then simulate a crash before marking the inbox done.
+        runtime.reconcile_and_credit(&ledger, &event).await.unwrap();
+        assert!(ledger.due_strike_work().await.unwrap().is_some());
+        let reopened = LedgerStore::connect(&format!(
+            "sqlite://{}",
+            directory.path().join("strike.db").display()
+        ))
+        .await
+        .unwrap();
+        runtime.recovery_step(&reopened).await.unwrap();
+        assert_eq!(reopened.feed_credit_sats().await.unwrap(), 2340);
+        assert_eq!(reopened.events_after(0, 100).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn invalid_direct_issuance_names_fail_before_provider_contact() {
+        let state = state();
+        let runtime = StrikeRuntime::new(
+            StrikeClient::new(&spawn_mock(state.clone()).await, state.api_key.into()).unwrap(),
+            StrikeWebhookVerifier::new("secret".into()).unwrap(),
+        );
+        let (_directory, ledger) = ledger().await;
+        for user in [
+            "Herd",
+            "../goat",
+            "goat%2ename",
+            "goat:one",
+            "goat name",
+            "🐐",
+            "",
+        ] {
+            assert!(
+                runtime
+                    .create_and_record_receive_request(
+                        &ledger,
+                        user,
+                        "herd",
+                        1000,
+                        &state.description_hash,
+                        300
+                    )
+                    .await
+                    .is_err()
+            );
+        }
+        assert_eq!(state.api_calls.load(Ordering::SeqCst), 0);
     }
 }

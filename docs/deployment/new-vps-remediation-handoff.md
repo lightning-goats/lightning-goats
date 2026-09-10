@@ -155,3 +155,17 @@ operator-authorized live tests in that record.
 After all source and staging gates pass, request separate explicit approval for
 a tiny real payment, controlled physical feeder test, and production DNS/WireGuard
 cutover. Never infer those approvals from this handoff or green CI.
+
+
+## Continuation: durable settlement recovery
+
+The F05 candidate is stacked on F03 source
+`8580babd03733a9679d4d5f2183ab9c673806241`. Webhook acknowledgement now requires
+inbox persistence; a supervised worker retries authoritative settlement and
+independently scans issued requests even when notifications are missing. Scan
+progress and retries are durable; all paths use the existing atomic credit/event
+transaction. Username persistence/settlement uses the canonical validator (F14).
+See `../testing/vps-remediation-20260910.md` for evidence and limitations.
+F06 currency policy, F10 real BOLT11 checks, F04 owner fixtures, remaining F08/F11/
+F12 corrections and staging acceptance still require their separate work. Keep
+PRs reviewable and parent acceptance gates open; production remains HOLD.

@@ -1,3 +1,5 @@
+mod inbox;
+pub use inbox::StrikeInboxWork;
 use std::{str::FromStr, time::Duration};
 
 use anyhow::{Context, Result, bail};
@@ -252,15 +254,7 @@ fn validate_external_id(value: &str, field: &str, max_len: usize) -> Result<()> 
 }
 
 fn validate_user(value: &str, field: &str) -> Result<()> {
-    if value.is_empty() || value.len() > 64 {
-        bail!("{field} must contain 1 to 64 characters");
-    }
-    if !value.bytes().all(|byte| {
-        byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'-' | b'_')
-    }) {
-        bail!("{field} must be a canonical lowercase identifier");
-    }
-    Ok(())
+    crate::domain::invoice::validate_user(value).with_context(|| format!("invalid {field}"))
 }
 
 fn validate_payment_hash(value: &str) -> Result<()> {

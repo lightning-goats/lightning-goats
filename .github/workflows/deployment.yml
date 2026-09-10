@@ -1,0 +1,38 @@
+name: Deployment artifacts
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  nginx:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install isolated-test dependencies
+        run: sudo apt-get update && sudo apt-get install -y nginx openssl
+      - name: Test assembled nginx sites and release verifier
+        run: python3 -m unittest discover -s deploy/tests -v
+
+  package:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.88"
+      - uses: Swatinem/rust-cache@v2
+      - name: Build all release binaries
+        run: cargo build --release --locked --bins
+      - name: Assemble and smoke-test the complete archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash deploy/scripts/package-release.sh target/release "$RUNNER_TEMP/package-smoke" smoke
+          (cd "$RUNNER_TEMP/package-smoke" && sha256sum --check SHA256SUMS)
+          python3 deploy/scripts/smoke-release.py "$RUNNER_TEMP/package-smoke/lightning-goats-smoke-x86_64-linux-gnu.tar.gz" "$GITHUB_SHA"

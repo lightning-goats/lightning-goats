@@ -1,4 +1,21 @@
 #!/bin/sh
+# Audit F09: this former allow-only example is now a non-applying worksheet.
+# Adding a narrow allow does not supersede broad rules or contain a hub which
+# can attribute packets to other sources in its peer AllowedIPs.
+cat <<'REVIEW'
+Production HOLD: this example applies no firewall changes.
+Read docs/deployment/audit-remediation.md (Home network acceptance).
+Inventory home-side AllowedIPs, UFW/raw rules, IPv4/IPv6, forwarding/NAT,
+established flows and alternate trusted paths; never export WireGuard keys.
+Prepare and rehearse a complete policy containing all traffic attributable to
+the untrusted hub, with independently authenticated administration and console
+recovery. Record positive harmless-gateway and negative REST/weather/SSH/DB/LAN
+tests, including forwarded/source-attribution cases. Operator review is required
+before changing household rules. The old example below is historical only.
+REVIEW
+exit 1
+
+# Historical allow-only example, retained as audit evidence; unreachable above.
 # REVIEW BEFORE RUNNING. Example UFW policy for the in-house host 10.8.0.6.
 #
 # This script intentionally uses placeholders. Codex must inventory the existing

@@ -1,5 +1,12 @@
 # Lightning Goats Documentation
 
+**Production HOLD (2026-09-08 audit, carried forward 2026-09-10).** Earlier
+completion claims do not establish deployment readiness. Read
+[`deployment/audit-remediation.md`](deployment/audit-remediation.md) and the
+[`deployment artifact guide`](deployment/deployment-artifacts.md) first.
+The new VPS agent should follow
+[`new-vps-remediation-handoff.md`](deployment/new-vps-remediation-handoff.md).
+
 ## Current Phase 1 source of truth
 
 Phase 1 is the migration from LNbits/Core Lightning to the standalone Strike-backed Lightning Goats architecture tracked in GitHub issue #6 and its child issues.

@@ -1,0 +1,29 @@
+# HTTP context: install as /etc/nginx/sites-available/lightning-goats-production.conf.
+# Replace the hostname, TLS paths and static root before enabling this site.
+# Requires conf.d/lightning-goats-http.conf and snippets/lightning-goats-production.conf.
+server {
+    listen 80;
+    listen [::]:80;
+    server_name lightning-goats.com;
+    return 308 https://lightning-goats.com$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name lightning-goats.com;
+    ssl_certificate /etc/letsencrypt/live/lightning-goats.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/lightning-goats.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    server_tokens off;
+
+    root /var/www/lightning-goats-production;
+    index index.html;
+    include /etc/nginx/snippets/lightning-goats-production.conf;
+
+    location / {
+        limit_except GET { deny all; }
+        try_files $uri $uri/ =404;
+    }
+    location ~ /\. { deny all; }
+}

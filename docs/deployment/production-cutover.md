@@ -331,3 +331,10 @@ Phase 1 is complete when:
 - operational Strike balance policy is active;
 - old VPS is archival/rollback only;
 - tracker #6 and its Phase 1 child issues are complete.
+# Audit override: do not execute this cutover yet
+
+Production is on HOLD under the 2026-09-08 audit. Complete the source corrections
+and acceptance evidence in `audit-remediation.md` before this runbook becomes
+eligible for separate operator approval. Read `deployment-artifacts.md` for the
+correct nginx include layout and archive provenance. Existing completion claims
+or artifact-only smoke tests do not satisfy the release gate.

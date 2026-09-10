@@ -1,5 +1,14 @@
 # Phase 1 Verification Matrix
 
+Audit addendum (2026-09-10): production is on HOLD. The 2026-09-08 findings and
+`../deployment/audit-remediation.md` add required negative, concurrent, delayed,
+missing-notification and restart cases. Existing always-successful gateway mocks
+do not satisfy the combined daemon -> real gateway -> mock OpenHAB gate.
+
+Artifact checks now run via `python3 -m unittest discover -s deploy/tests -v`
+and the `Deployment artifacts` workflow. They cover nginx TLS assembly/routing
+and complete release archives, not payment settlement or physical completion.
+
 Status: required before production cutover.
 
 Tracker: issue #15.

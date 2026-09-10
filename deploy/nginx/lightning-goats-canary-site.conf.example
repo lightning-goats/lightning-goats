@@ -1,0 +1,29 @@
+# HTTP context: install as /etc/nginx/sites-available/lightning-goats-canary.conf.
+# Replace the hostname, TLS paths and static root before enabling this site.
+# Requires conf.d/lightning-goats-http.conf and snippets/lightning-goats-canary.conf.
+server {
+    listen 80;
+    listen [::]:80;
+    server_name staging.lightning-goats.example;
+    return 308 https://staging.lightning-goats.example$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name staging.lightning-goats.example;
+    ssl_certificate /etc/letsencrypt/live/staging.lightning-goats.example/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/staging.lightning-goats.example/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    server_tokens off;
+
+    root /var/www/lightning-goats-canary;
+    index index.html;
+    include /etc/nginx/snippets/lightning-goats-canary.conf;
+
+    location / {
+        limit_except GET { deny all; }
+        try_files $uri $uri/ =404;
+    }
+    location ~ /\. { deny all; }
+}

@@ -1,6 +1,13 @@
 # Codex deployment handoff — Phase 1 standalone Lightning Goats
 
-Status: deployment handoff document for the Strike-backed Phase 1 architecture.
+Status: **HOLD production deployment**, per the 2026-09-08 audit.
+
+The current agent execution plan is `new-vps-remediation-handoff.md`.
+
+Read `audit-remediation.md` before following this handoff. The audit supersedes
+earlier claims that only environment binding remained. Rust corrections and
+combined daemon/gateway/provider regression tests are still required. Use
+`deployment-artifacts.md` for the corrected nginx layout and release packaging.
 
 Tracker: https://github.com/lightning-goats/lightning-goats/issues/6
 
@@ -104,7 +111,11 @@ Never request or place a raw production nsec in browser-visible code.
 - create/confirm the new `LightningGoatsRemoteEnabled` administrative kill-switch Item;
 - create separate harmless canary request/ack/remote-enable Items and a no-actuation echo/counter rule.
 
-The gateway supports either a simple UUID result or correlated JSON with an explicit request UUID and successful outcome. The production request payload is configurable through a single `{request_id}` template. Do not modify the physical owner merely to fit an assumed payload if its existing correlated contract can be reused safely.
+The current gateway accepts a simple UUID result and heuristic correlated JSON
+results, but audit F04 found that the request template rejects structural JSON
+braces and the result parser does not establish the owner's completion contract.
+Inspect sanitized live fixtures read-only and implement a typed adapter before
+binding physical control. A UUID echo is suitable only for harmless canary tests.
 
 ### Public site
 

@@ -204,3 +204,12 @@ The repository is ready to hand to Codex for deployment when the current CLN-fre
 ## Phase 2 boundary
 
 CyberHerd membership, headbutts, rewards/distributions, NIP-05, and outbound Lightning spending remain outside Phase 1. Future CyberHerd can be a separate `cyberherdd` service or an internal module, but it must consume the same durable payment/feeder/event boundaries and must not acquire a direct OpenHAB bypass. Any future spend-capable Strike credential should remain in a separately privileged payout component.
+# Audit correction: production HOLD
+
+As of 2026-09-10, the 2026-09-08 audit supersedes the completion/readiness claims
+retained below as historical evidence. Several blockers require Rust code and
+integration tests, not deployment configuration alone. See
+[`deployment/audit-remediation.md`](deployment/audit-remediation.md) for finding
+status and [`deployment/deployment-artifacts.md`](deployment/deployment-artifacts.md)
+for the corrected nginx/release workflow. Keep tracker #6 open until all required
+source, integration and live acceptance evidence is recorded.

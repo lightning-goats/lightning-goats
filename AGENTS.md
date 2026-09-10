@@ -1,5 +1,10 @@
 # Lightning Goats Agent Guide
 
+Production remains on HOLD under the 2026-09-08 audit. Begin deployment work with
+`docs/deployment/audit-remediation.md` and `docs/deployment/deployment-artifacts.md`.
+Passing artifact tests or earlier CI does not authorize production DNS/WireGuard
+changes, real payments, or physical feeding. Source-level blockers remain open.
+
 This repository is the standalone Lightning Goats payment-accounting, messaging, overlay, and feeder-automation service.
 
 ## Source of truth

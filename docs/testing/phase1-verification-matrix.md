@@ -439,3 +439,23 @@ labels to their real installation defaults; no host policy changes are made.
 The six added deployment regressions cover credential-store recovery guards and
 preservation of repeated/empty sandbox directives. Final local/CI execution
 results must be attached before treating this candidate as verified.
+
+Initial systemd candidate `fffee25537e6e5194c381a1f96afe6d5b300ae32` passed
+[Rust CI](https://github.com/lightning-goats/lightning-goats/actions/runs/34541274452),
+[Security](https://github.com/lightning-goats/lightning-goats/actions/runs/34541274566), and
+[Deployment including actual Ubuntu systemd](https://github.com/lightning-goats/lightning-goats/actions/runs/34541274456).
+Local format, locked Clippy, the full locked Rust suite, RSA-unreachable check and
+all 23 then-existing deployment tests passed. `cargo-audit` is not installed on
+this VPS; the exact-commit Security workflow provides the dependency audit result.
+
+The final follow-up strengthens credential separation: each role must have an
+in-sandbox startup probe while the other application is already running. A fifth
+service start restarts only the gateway while the daemon remains active, checks
+the same UUID again and still observes one total mock-owner command. A regression
+rejects evidence inferred only from an absent other service. Fedora execution
+passed; `evidence/systemd-rehearsal-fedora-20260910.json` records final harness,
+archive/binary/template hashes, all five starts and credential/protection probes.
+The earlier reload-probe experiment was rejected because systemd does not provide
+startup credentials to ExecReload; the final test uses actual startup delivery.
+Final GitHub checks for this follow-up must be read on draft #40. Production HOLD
+and all live gates remain open.

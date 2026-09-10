@@ -264,6 +264,12 @@ def rehearse(archive, source, daemon_user, gateway_user, launcher_factory=None):
             assert path.stat().st_mode & 0o777 == 0o600
         evidence.update(mock_owner_commands=1, restart_idempotency=True, root_owned_immutable_code_config=True, separated_credentials=True, all_six_discovery_routes=True, namespace_interfaces=["lo"])
         if launcher:
+            # Start gateway again while daemon stays running so the gateway's
+            # startup credential probe checks the live daemon's credential path.
+            stop(gateway)
+            gateway = start("gateway",gateway_user,"lightning-goats-gateway",gateway_url)
+            assert request(gateway_url + "/v1/feeder/request/" + request_id,post=True)["status"] == "confirmed"
+            assert commands == [request_id]
             evidence.update(launcher.evidence())
         return evidence
 

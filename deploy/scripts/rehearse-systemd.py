@@ -135,6 +135,7 @@ class SystemdLauncher:
         self.all_units = []
         cleanup.callback(self.verify_units_removed)
         self.starts = []
+        self.other_active_at_start = {}
         self.encrypted = {}
         self.template_hashes = {}
         self.sandbox_properties = {}
@@ -272,6 +273,7 @@ class SystemdLauncher:
             ("StandardOutput",f"append:{self.root}/{role}.log"),
             ("StandardError",f"append:{self.root}/{role}.log"),
         ])
+        self.other_active_at_start[role] = other in self.units and self.units[other].properties().get("ActiveState") == "active"
         process = self.launch_unit(unit, props, [binary,"--config",config])
         self.units[role] = process
         return process
@@ -284,13 +286,17 @@ class SystemdLauncher:
         assert state.stat().st_mode & 0o777 == 0o700
         assert runtime.stat().st_mode & 0o777 == 0o700
         assert self.config_path(role).stat().st_uid == 0
-        record = {"role":role, "automatic_restarts":0, "state_runtime_mode":"0700"}
+        record = {"role":role, "automatic_restarts":0, "state_runtime_mode":"0700",
+                  "other_service_active_during_credential_probe":self.other_active_at_start[role]}
         context = Path(f"/proc/{process.pid}/attr/current")
         if self.selinux_labels:
             record["selinux_process_context"] = context.read_text().strip().strip("\0")
         self.starts.append(record)
 
     def evidence(self):
+        for role in ["daemon", "gateway"]:
+            if not any(record["role"] == role and record["other_service_active_during_credential_probe"] for record in self.starts):
+                raise ValueError("credential isolation must be checked in both directions with the other service running")
         probes = {}
         for role, process in self.units.items():
             if process.properties().get("NRestarts") != "0":
@@ -300,7 +306,7 @@ class SystemdLauncher:
                 "systemd_version":command(["systemctl","--version"]).stdout.splitlines()[0],
                 "template_sha256":self.template_hashes, "temporary_binary_selinux_labels":self.selinux_labels, "preserved_service_properties":self.sandbox_properties,
                 "systemd_sandbox_probes":probes,"negative_encrypted_credentials":self.negative_results,
-                "service_starts":self.starts,"plaintext_source_credentials_removed":True,"automatic_service_restarts":0}
+                "credential_separation_checked_with_other_service_active":True,"service_starts":self.starts,"plaintext_source_credentials_removed":True,"automatic_service_restarts":0}
 
 
 def main():

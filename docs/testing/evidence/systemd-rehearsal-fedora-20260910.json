@@ -7,6 +7,7 @@
     "lightning-goatsctl": "10f93587e61c6b3db67aec311af6dabb11af64d6b488a85bfeccbd03f7b9c706",
     "lightning-goatsd": "47bd28622ed9119250c8c3db56c1d7a4f7becbd71f0ea3aadd916a5cee79c217"
   },
+  "credential_separation_checked_with_other_service_active": true,
   "daemon": {
     "effective_capabilities": 0,
     "gid": 2,
@@ -21,8 +22,8 @@
     "uid": 1
   },
   "harness_sha256": {
-    "rehearse-install.py": "d8ba29a8927defd15b68c235cb2fb98245e51cc2265c9727d5563e578b1e0a88",
-    "rehearse-systemd.py": "73d34393a53294ac45e417eb533e9e22f57e1d1acdf0719c8cae6be641b15b69",
+    "rehearse-install.py": "9ace9d355f891469bafef27ba8f7166d2c31f85abf7a6dc77e8cdf26da9e1499",
+    "rehearse-systemd.py": "7b59cf736b3d18dc9b9aa47b4ab92a75c951a4622d3e0b2d0af9e6fe3dd6dcd6",
     "smoke-release.py": "0958e8812706dbd1e783269d3d955eac9858598da9d6b626b4f5710c8e69dbd2"
   },
   "mock_owner_commands": 1,
@@ -33,7 +34,7 @@
     "tampered": "rejected_before_exec_status_243",
     "wrong_name": "rejected_before_exec_status_243"
   },
-  "observed_at_utc": "2026-09-10T23:10:58.100486+00:00",
+  "observed_at_utc": "2026-09-10T23:20:48.339323+00:00",
   "plaintext_source_credentials_removed": true,
   "preserved_service_properties": {
     "daemon": [
@@ -100,25 +101,36 @@
   "service_starts": [
     {
       "automatic_restarts": 0,
+      "other_service_active_during_credential_probe": false,
       "role": "gateway",
       "selinux_process_context": "system_u:system_r:unconfined_service_t:s0",
       "state_runtime_mode": "0700"
     },
     {
       "automatic_restarts": 0,
+      "other_service_active_during_credential_probe": true,
       "role": "daemon",
       "selinux_process_context": "system_u:system_r:unconfined_service_t:s0",
       "state_runtime_mode": "0700"
     },
     {
       "automatic_restarts": 0,
+      "other_service_active_during_credential_probe": false,
       "role": "gateway",
       "selinux_process_context": "system_u:system_r:unconfined_service_t:s0",
       "state_runtime_mode": "0700"
     },
     {
       "automatic_restarts": 0,
+      "other_service_active_during_credential_probe": true,
       "role": "daemon",
+      "selinux_process_context": "system_u:system_r:unconfined_service_t:s0",
+      "state_runtime_mode": "0700"
+    },
+    {
+      "automatic_restarts": 0,
+      "other_service_active_during_credential_probe": true,
+      "role": "gateway",
       "selinux_process_context": "system_u:system_r:unconfined_service_t:s0",
       "state_runtime_mode": "0700"
     }

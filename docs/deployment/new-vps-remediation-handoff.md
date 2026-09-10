@@ -249,3 +249,12 @@ Owner/site read-only access, staging address reservation/peer registration and a
 staging hostname remain pending operator input. The maintenance record's pending
 kernel reboot, final identities/privilege revocation and all live gates remain
 open. Nothing in this rehearsal authorizes real payments, feeding or cutover.
+
+Draft #40 initial commit `fffee25537e6e5194c381a1f96afe6d5b300ae32` passed all
+three GitHub workflows, including actual systemd on Ubuntu. The follow-up repeats
+the gateway startup probe while the daemon is live to establish both credential
+isolation directions and records five starts with zero automatic restarts. The
+Fedora record is `../testing/evidence/systemd-rehearsal-fedora-20260910.json`.
+Read final #40 check results before accepting the follow-up; retain the earlier
+CI/source evidence. Full local locked Rust and deployment tests passed, while
+the dependency audit runs in GitHub because cargo-audit is not installed locally.

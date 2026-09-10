@@ -30,3 +30,12 @@ class SystemdRehearsalTests(unittest.TestCase):
             path = Path(directory) / "test.service"
             path.write_text("[Unit]\nWants=production.service\n[Service]\nNoNewPrivileges=yes\n[Install]\nWantedBy=multi-user.target\n")
             self.assertEqual(REHEARSAL.service_properties(path), [("NoNewPrivileges","yes")])
+
+    def test_absent_other_service_does_not_prove_credential_isolation(self):
+        launcher = REHEARSAL.SystemdLauncher.__new__(REHEARSAL.SystemdLauncher)
+        launcher.starts = [
+            {"role":"gateway", "other_service_active_during_credential_probe":False},
+            {"role":"daemon", "other_service_active_during_credential_probe":True},
+        ]
+        with self.assertRaisesRegex(ValueError,"both directions"):
+            launcher.evidence()

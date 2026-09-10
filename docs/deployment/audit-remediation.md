@@ -178,3 +178,16 @@ and F09 inventory/test matrix. F09 remains blocked on actual authorized home
 inventory and a complete reviewed policy; local route/template preparation does
 not establish containment. Clean final installation, website/browser, actual
 owner binding and signer/relay acceptance remain open. Production HOLD persists.
+
+### Installed systemd acceptance evidence continuation
+
+Draft #40 follows the paired-store and installed-release candidates. Its actual
+systemd canary sandbox and encrypted synthetic credentials pass on Fedora and
+Ubuntu CI; see `systemd-rehearsal.md` and the source-pinned verification matrix.
+The additional restart probes both credential directions while the other service
+is running and retains one total mock-owner command. F13 installation evidence
+is stronger, but the final reviewed production installation, real credential
+scopes/identities, privilege revocation and pending host reboot remain open.
+F04 owner-contract binding, F09 actual home containment, authoritative website,
+public TLS/IPv6, signer and separately approved live tests are still unaccepted.
+Keep #6/#15/#16 open. No source/mock result lifts production HOLD.

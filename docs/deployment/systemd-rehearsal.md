@@ -34,13 +34,16 @@ plaintext input files, and delivers only `LoadCredentialEncrypted` through the
 actual system manager. An `ExecStartPre` probe verifies exact credential names and
 values without printing them, inaccessible other-service credentials, read-only
 code/config, writable state, namespace identity, PrivateTmp, ProtectHome and zero
-effective capabilities. Wrong-name and corrupt ciphertext must fail at systemd's
+effective capabilities. An additional gateway restart while the daemon stays
+running checks the opposite credential direction. Each role must have a startup
+probe while the other application is already running; an absent credential path
+at gateway-first startup alone cannot establish isolation. Wrong-name and corrupt ciphertext must fail at systemd's
 CREDENTIALS step (exit 243) before `/usr/bin/true` can execute successfully.
 
 The common installed-release checks run unchanged against the real processes:
 six discovery routes, zero daemon credit, sanitized temperature conversion and
 one total mock UUID-echo owner command across duplicate requests and stop/restart.
-All four service starts must have zero automatic restarts. State/runtime modes,
+All five service starts must have zero automatic restarts. State/runtime modes,
 actual UID/GID and source/archive/binary/template/harness hashes are recorded.
 Success is emitted only after the temporary units are collected and test files
 are removed. Unit journals may retain synthetic test diagnostics.

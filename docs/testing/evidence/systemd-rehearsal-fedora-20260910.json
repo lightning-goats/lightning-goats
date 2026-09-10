@@ -1,0 +1,172 @@
+{
+  "all_six_discovery_routes": true,
+  "archive_sha256": "92d1f556a9ff98362764e756858204f9fd7d090236838e1fe9c8c3aaeb7744a7",
+  "automatic_service_restarts": 0,
+  "binary_sha256": {
+    "lightning-goats-gateway": "0fbc3690d73bb329116ac3c63e2f4bf1f7394ff8f7ef57081e69ac58fae1ace9",
+    "lightning-goatsctl": "10f93587e61c6b3db67aec311af6dabb11af64d6b488a85bfeccbd03f7b9c706",
+    "lightning-goatsd": "47bd28622ed9119250c8c3db56c1d7a4f7becbd71f0ea3aadd916a5cee79c217"
+  },
+  "daemon": {
+    "effective_capabilities": 0,
+    "gid": 2,
+    "no_new_privileges": true,
+    "uid": 2
+  },
+  "environment": "Linux-7.2.4-200.fc44.x86_64-x86_64-with-glibc2.43",
+  "gateway": {
+    "effective_capabilities": 0,
+    "gid": 1,
+    "no_new_privileges": true,
+    "uid": 1
+  },
+  "harness_sha256": {
+    "rehearse-install.py": "d8ba29a8927defd15b68c235cb2fb98245e51cc2265c9727d5563e578b1e0a88",
+    "rehearse-systemd.py": "73d34393a53294ac45e417eb533e9e22f57e1d1acdf0719c8cae6be641b15b69",
+    "smoke-release.py": "0958e8812706dbd1e783269d3d955eac9858598da9d6b626b4f5710c8e69dbd2"
+  },
+  "mock_owner_commands": 1,
+  "namespace_interfaces": [
+    "lo"
+  ],
+  "negative_encrypted_credentials": {
+    "tampered": "rejected_before_exec_status_243",
+    "wrong_name": "rejected_before_exec_status_243"
+  },
+  "observed_at_utc": "2026-09-10T23:10:58.100486+00:00",
+  "plaintext_source_credentials_removed": true,
+  "preserved_service_properties": {
+    "daemon": [
+      "Type=simple",
+      "StateDirectoryMode=0700",
+      "RuntimeDirectoryMode=0700",
+      "UMask=0077",
+      "Restart=on-failure",
+      "RestartSec=5s",
+      "NoNewPrivileges=yes",
+      "PrivateTmp=yes",
+      "PrivateDevices=yes",
+      "ProtectSystem=strict",
+      "ProtectHome=yes",
+      "ProtectKernelTunables=yes",
+      "ProtectKernelModules=yes",
+      "ProtectControlGroups=yes",
+      "ProtectKernelLogs=yes",
+      "ProtectProc=invisible",
+      "ProcSubset=pid",
+      "RestrictSUIDSGID=yes",
+      "RestrictRealtime=yes",
+      "LockPersonality=yes",
+      "MemoryDenyWriteExecute=yes",
+      "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6",
+      "CapabilityBoundingSet=",
+      "AmbientCapabilities="
+    ],
+    "gateway": [
+      "Type=simple",
+      "StateDirectoryMode=0700",
+      "RuntimeDirectoryMode=0700",
+      "UMask=0077",
+      "Restart=on-failure",
+      "RestartSec=5s",
+      "NoNewPrivileges=yes",
+      "PrivateTmp=yes",
+      "PrivateDevices=yes",
+      "ProtectSystem=strict",
+      "ProtectHome=yes",
+      "ProtectKernelTunables=yes",
+      "ProtectKernelModules=yes",
+      "ProtectControlGroups=yes",
+      "ProtectKernelLogs=yes",
+      "ProtectProc=invisible",
+      "ProcSubset=pid",
+      "RestrictSUIDSGID=yes",
+      "RestrictRealtime=yes",
+      "LockPersonality=yes",
+      "MemoryDenyWriteExecute=yes",
+      "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6",
+      "CapabilityBoundingSet=",
+      "AmbientCapabilities=",
+      "IPAddressDeny=any",
+      "IPAddressAllow=localhost",
+      "IPAddressAllow=10.8.0.0/24"
+    ]
+  },
+  "restart_idempotency": true,
+  "root_owned_immutable_code_config": true,
+  "scope": "actual transient systemd canary sandboxes and encrypted synthetic credentials; no live acceptance",
+  "selinux_enforcing": true,
+  "separated_credentials": true,
+  "service_starts": [
+    {
+      "automatic_restarts": 0,
+      "role": "gateway",
+      "selinux_process_context": "system_u:system_r:unconfined_service_t:s0",
+      "state_runtime_mode": "0700"
+    },
+    {
+      "automatic_restarts": 0,
+      "role": "daemon",
+      "selinux_process_context": "system_u:system_r:unconfined_service_t:s0",
+      "state_runtime_mode": "0700"
+    },
+    {
+      "automatic_restarts": 0,
+      "role": "gateway",
+      "selinux_process_context": "system_u:system_r:unconfined_service_t:s0",
+      "state_runtime_mode": "0700"
+    },
+    {
+      "automatic_restarts": 0,
+      "role": "daemon",
+      "selinux_process_context": "system_u:system_r:unconfined_service_t:s0",
+      "state_runtime_mode": "0700"
+    }
+  ],
+  "source_commit": "76407c0ba8821ee53b4ffcb044e5a6d9b6733537",
+  "staging_credential_store_initialization": {
+    "created": true,
+    "gid": 0,
+    "mode": "0o400",
+    "path": "/var/lib/systemd/credential.secret",
+    "uid": 0
+  },
+  "systemd_sandbox_probes": {
+    "daemon": {
+      "credential_names": [
+        "strike-api-key",
+        "strike-webhook-secret"
+      ],
+      "credential_values_verified": true,
+      "network_namespace_verified": true,
+      "other_unit_credentials_inaccessible": true,
+      "private_tmp_verified": true,
+      "protect_home_verified": true,
+      "root_owned_code_config_nonwritable": true,
+      "state_writable": true
+    },
+    "gateway": {
+      "credential_names": [
+        "openhab-token"
+      ],
+      "credential_values_verified": true,
+      "network_namespace_verified": true,
+      "other_unit_credentials_inaccessible": true,
+      "private_tmp_verified": true,
+      "protect_home_verified": true,
+      "root_owned_code_config_nonwritable": true,
+      "state_writable": true
+    }
+  },
+  "systemd_version": "systemd 259 (259.8-1.fc44)",
+  "template_sha256": {
+    "lightning-goats-canary.service": "5c82f52647bc551b7da3a69f7f985138d354d34bef1f99814663ae16d6c4d1ae",
+    "lightning-goats-gateway-canary.service": "b93e3a3550940220210a364cec7b6272f2ee4408b58b7b0beb85c5bcb7576726"
+  },
+  "temporary_binary_selinux_labels": {
+    "lightning-goats-gateway": "system_u:object_r:bin_t:s0",
+    "lightning-goatsctl": "system_u:object_r:bin_t:s0",
+    "lightning-goatsd": "system_u:object_r:bin_t:s0"
+  },
+  "temporary_installation_removed": true
+}

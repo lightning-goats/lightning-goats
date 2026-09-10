@@ -116,12 +116,12 @@ def process_evidence(process, user):
     return {"uid": user.pw_uid, "gid": user.pw_gid, "effective_capabilities": 0, "no_new_privileges": True}
 
 
-def rehearse(archive, source, daemon_user, gateway_user):
+def rehearse(archive, source, daemon_user, gateway_user, launcher_factory=None):
     require_isolation()
     if daemon_user.pw_uid == gateway_user.pw_uid or daemon_user.pw_gid == gateway_user.pw_gid:
         raise ValueError("daemon and gateway must use distinct users and groups")
     os.umask(0o077)
-    with tempfile.TemporaryDirectory(prefix="lg-install-") as directory, ExitStack() as cleanup:
+    with tempfile.TemporaryDirectory(prefix="lg-install-", dir="/run" if launcher_factory else None) as directory, ExitStack() as cleanup:
         root = Path(directory)
         root.chmod(0o755)
         extracted = root / "package"
@@ -137,7 +137,8 @@ def rehearse(archive, source, daemon_user, gateway_user):
             target.chmod(0o755)
             assert target.stat().st_uid == 0
             binary_hashes[name] = hashlib.sha256(target.read_bytes()).hexdigest()
-        daemon_state, gateway_state = root / "daemon-state", root / "gateway-state"
+        launcher = launcher_factory(root, cleanup) if launcher_factory else None
+        daemon_state, gateway_state = (launcher.state_path(name) for name in ["daemon", "gateway"]) if launcher else (root / "daemon-state", root / "gateway-state")
         private_directory(daemon_state, daemon_user)
         private_directory(gateway_state, gateway_user)
         credentials = {}
@@ -207,7 +208,7 @@ def rehearse(archive, source, daemon_user, gateway_user):
             ('http://127.0.0.1:8080/', f'http://127.0.0.1:{owner.server_port}/'),
         ]:
             gateway_config = replace_once(gateway_config,old,new)
-        configs = {"daemon":root / "daemon.toml", "gateway":root / "gateway.toml"}
+        configs = {name: launcher.config_path(name) if launcher else root / f"{name}.toml" for name in ["daemon", "gateway"]}
         root_file(configs["daemon"], daemon_config, daemon_user.pw_gid, 0o640)
         root_file(configs["gateway"], gateway_config, gateway_user.pw_gid, 0o640)
         for name,user,other in [("daemon",daemon_user,"gateway"),("gateway",gateway_user,"daemon")]:
@@ -216,13 +217,17 @@ def rehearse(archive, source, daemon_user, gateway_user):
             own_secret = credentials[name] / ("strike-api-key" if name == "daemon" else "openhab-token")
             other_secret = credentials[other] / ("openhab-token" if name == "daemon" else "strike-api-key")
             subprocess.run(command_as(user,[sys.executable,"-c",program,*[installed/n for n in sorted(RELEASE.BINARIES)],configs[name],own_secret,other_secret]),check=True,cwd="/")
+        if launcher:
+            launcher.prepare(credentials, installed, configs)
         def start(name,user,binary,url):
             log = cleanup.enter_context((root / f"{name}.log").open("ab"))
             env = {"PATH":os.defpath, "CREDENTIALS_DIRECTORY":str(credentials[name]), "TOKIO_WORKER_THREADS":"2", "RUST_LOG":"warn"}
-            process = subprocess.Popen(command_as(user,[installed / binary,"--config",configs[name]]),cwd="/",env=env,stdout=log,stderr=log)
-            cleanup.callback(stop,process)
             try:
+                process = launcher.start(name, user, installed / binary, configs[name]) if launcher else subprocess.Popen(command_as(user,[installed / binary,"--config",configs[name]]),cwd="/",env=env,stdout=log,stderr=log)
+                cleanup.callback(stop,process)
                 await_health(process,url)
+                if launcher:
+                    launcher.started(name, process)
             except Exception:
                 log.flush()
                 # Synthetic-only bounded diagnostics; no production config/credentials involved.
@@ -235,7 +240,10 @@ def rehearse(archive, source, daemon_user, gateway_user):
         evidence["daemon"] = process_evidence(daemon,daemon_user)
         evidence["gateway"] = process_evidence(gateway,gateway_user)
         status = request(daemon_url + "/api/v1/status")
-        assert status["feed_credit_sats"] == 0 and status["gateway_reachable"]
+        if status["feed_credit_sats"] != 0 or not status["gateway_reachable"]:
+            for name in ["daemon", "gateway"]:
+                print((root / f"{name}.log").read_text()[-4096:],file=sys.stderr)
+            raise AssertionError(f"unexpected synthetic daemon status: {status}")
         assert status["temperature_f"] == 68.0
         for user in ["herd","dexter","rowan","cosmo","newton","nova"]:
             assert request(daemon_url + "/.well-known/lnurlp/" + user)["tag"] == "payRequest"
@@ -255,6 +263,8 @@ def rehearse(archive, source, daemon_user, gateway_user):
             assert path.stat().st_uid == user.pw_uid
             assert path.stat().st_mode & 0o777 == 0o600
         evidence.update(mock_owner_commands=1, restart_idempotency=True, root_owned_immutable_code_config=True, separated_credentials=True, all_six_discovery_routes=True, namespace_interfaces=["lo"])
+        if launcher:
+            evidence.update(launcher.evidence())
         return evidence
 
 

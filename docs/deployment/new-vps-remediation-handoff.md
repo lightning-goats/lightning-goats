@@ -222,3 +222,30 @@ across duplicate/restart checks. No host user/service or route was created. The
 harness disables bytecode writes and its temporary state/processes were removed.
 Final systemd/LoadCredentialEncrypted, actual identities, privilege revocation and
 all live acceptance gates remain outstanding; this is not cutover authorization.
+
+## Actual systemd rehearsal continuation
+
+The dedicated systemd branch starts from draft PR #39 head
+`5becfbd4b8b321ecb205a70233d1970a822645f9`. PRs #31–#39 were rechecked:
+all draft/open/unmerged, all current Rust/Security/Deployment checks successful,
+and no submitted GitHub reviews. Preserve stack order and require integrated
+review/checks before merging; merging does not lift production HOLD.
+
+Read `systemd-rehearsal.md`. The continuation exercises the shipped canary sandbox
+through actual transient system units, synthetic `LoadCredentialEncrypted`,
+wrong-name/corrupt credential rejection and real-binary restart idempotency in a
+new loopback-only namespace. No production credentials or host networking are used.
+The staging host credential key was initialized root-owned mode 0400 after the
+empty-store checks; it is retained securely and never included in evidence.
+
+Fedora initially rejected outbound service connections because disposable `/run`
+binaries retained a runtime-directory SELinux label. Matching their default
+`/usr/local/bin` destination labels fixed the rehearsal while preserving enforcing
+SELinux and all host policy. Record the default `unconfined_service_t` domain
+accurately; this does not claim a custom SELinux application policy. Final
+installation must restore/verify the actual destination labels.
+
+Owner/site read-only access, staging address reservation/peer registration and a
+staging hostname remain pending operator input. The maintenance record's pending
+kernel reboot, final identities/privilege revocation and all live gates remain
+open. Nothing in this rehearsal authorizes real payments, feeding or cutover.

@@ -49,3 +49,32 @@ jobs:
           path: ${{ runner.temp }}/package-smoke/
           if-no-files-found: error
           retention-days: 14
+
+  systemd:
+    # LoadCredentialEncrypted requires systemd >= 250; Ubuntu 22.04 has 249.
+    runs-on: ubuntu-24.04
+    needs: package
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: staging-package-${{ github.sha }}
+          path: ${{ runner.temp }}/package-systemd
+      - name: Verify package and rehearse actual systemd credential sandbox
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd "$RUNNER_TEMP/package-systemd" && sha256sum --check SHA256SUMS)
+          sudo python3 -B deploy/scripts/initialize-staging-credential-store.py > "$RUNNER_TEMP/CREDENTIAL-STORE.json"
+          sudo unshare --net -- python3 -B deploy/scripts/rehearse-systemd.py "$RUNNER_TEMP/package-systemd/lightning-goats-smoke-x86_64-linux-gnu.tar.gz" "$GITHUB_SHA" > "$RUNNER_TEMP/SYSTEMD-REHEARSAL.json"
+          (cd "$RUNNER_TEMP" && sha256sum CREDENTIAL-STORE.json SYSTEMD-REHEARSAL.json > SYSTEMD-SHA256SUMS)
+      - name: Retain systemd acceptance evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-systemd-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/SYSTEMD-REHEARSAL.json
+            ${{ runner.temp }}/CREDENTIAL-STORE.json
+            ${{ runner.temp }}/SYSTEMD-SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14

@@ -119,3 +119,13 @@ six discovery routes and restart idempotency are checked inside a fresh loopback
 network namespace. The fixture creates no host service/user or network policy.
 Its evidence narrows the installation gap; final systemd encrypted credentials,
 public TLS, actual identities/privilege revocation and live acceptance remain open.
+
+## Actual systemd sandbox and encrypted credentials
+
+`systemd-rehearsal.md` documents the additional transient-system-service test.
+It uses the real packaged binaries, shipped canary sandbox properties and
+synthetic encrypted credentials in a fresh loopback-only namespace. The local
+Fedora evidence is recorded separately from the earlier file-credential rehearsal.
+It checks same-UUID restart command counts and rejects mismatched/corrupt
+credentials before execution. Final production credentials, identities, hostname,
+network, physical owner and all external acceptance requirements above remain open.

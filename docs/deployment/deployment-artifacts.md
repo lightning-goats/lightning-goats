@@ -125,3 +125,9 @@ loopback-only network namespace with root-owned code/config and separate non-roo
 processes. Its `INSTALL-REHEARSAL.json` is included in the outer SHA256SUMS and
 retained with the package. Read `install-rehearsal.md` for exact scope and the
 remaining final systemd/credential/live acceptance requirements.
+
+The additional systemd job downloads the verified package and runs the actual
+canary service sandbox with encrypted synthetic credentials on Ubuntu 24.04.
+Its separate `staging-systemd-<source SHA>` artifact contains the rehearsal JSON,
+non-secret credential-store metadata and their checksums. See
+`systemd-rehearsal.md` for scope, Fedora labelling and outstanding live gates.

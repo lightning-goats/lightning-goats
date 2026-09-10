@@ -426,3 +426,16 @@ Celsius, optional field units, array ordering, and invalid data not advancing th
 watermark. Weather failure or skipped replay must not affect credit/settlement or
 enter the Nostr outbox. The earlier optional-timestamp wording is superseded by
 mandatory actual-age validation in `../architecture/weather-overlay.md`.
+
+## Actual systemd rehearsal candidate
+
+Base: draft PR #39 head `5becfbd4b8b321ecb205a70233d1970a822645f9`.
+The candidate adds actual transient-system-service execution of the canary sandbox
+and synthetic encrypted credential delivery. See `../deployment/systemd-rehearsal.md`.
+It preserves duplicate/restart command-count checks and adds runtime probes plus
+negative wrong-name/corrupt ciphertext failures at systemd CREDENTIALS (243).
+The Fedora rehearsal preserves SELinux enforcing and maps only disposable binary
+labels to their real installation defaults; no host policy changes are made.
+The six added deployment regressions cover credential-store recovery guards and
+preservation of repeated/empty sandbox directives. Final local/CI execution
+results must be attached before treating this candidate as verified.

@@ -54,3 +54,8 @@ final dedicated identities, real credential scopes, public TLS/IPv6, authoritati
 website/browser, signer/relay, remote network containment or physical completion.
 Those must still be proven on the final reviewed installation with authorized
 source/host access. Broad development sudo remains a separate pre-cutover gate.
+
+An additional actual-systemd test is documented in `systemd-rehearsal.md`. It reuses
+these process-level checks with transient units and encrypted synthetic credential
+mounts. Its separate evidence narrows the systemd gap; it retains all final live
+acceptance and production-privilege gates.

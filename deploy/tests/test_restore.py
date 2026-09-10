@@ -1,6 +1,5 @@
 """Offline restore failure boundaries; actual process recovery is a Rust test."""
 import hashlib
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -21,6 +20,11 @@ class RestoreTests(unittest.TestCase):
         self.source = self.root / "snapshot"
         self.source.mkdir()
         with sqlite3.connect(self.source / "daemon.db") as db:
+            # The daemon creates these snapshots with bundled SQLite >= 3.38.
+            # Ubuntu 22.04 Python uses SQLite 3.37; provide only the fixture
+            # clock while constructing its schema. Restore executes no clock SQL.
+            if sqlite3.sqlite_version_info < (3, 38, 0):
+                db.create_function("unixepoch", 0, lambda: 1_700_000_000)
             for migration in sorted((ROOT / "migrations").glob("*.sql")):
                 db.executescript(migration.read_text())
             db.execute("INSERT INTO overlay_identity VALUES(1, '11111111-1111-4111-8111-111111111111')")

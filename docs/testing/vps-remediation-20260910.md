@@ -378,3 +378,22 @@ staging artifact. Artifact retention follows the supported
 No actual home inventory, complete household policy review, final installed
 service/credential acceptance, authoritative website import/browser check or
 signer/relay acceptance is claimed. Those dependencies and parent gates stay open.
+
+
+The initial staging-evidence Deployment run
+[34536522612](https://github.com/lightning-goats/lightning-goats/actions/runs/34536522612)
+failed only while Python restore tests constructed fixtures: Ubuntu 22.04's
+SQLite 3.37 lacks `unixepoch()`, while the actual Rust daemon bundles a newer
+SQLite. The fixture now supplies a fixed test-only clock on SQLite < 3.38;
+production migration SQL and restore validation are unchanged. The package build,
+archive verification and retention job passed. A connector-provided download
+reference returned HTTP 403 from this VPS, so local installation of that archive
+was not observed. Require final corrected-head CI before accepting the candidate.
+The local full locked Rust suite completed successfully: 113 library tests, two
+daemon HTTP tests and 16 integration tests. The new paired-store restore test
+passed with exactly one total mock-owner command across backup/restore/restart,
+one late confirmation/debit and unchanged issued request and signed outbox bytes.
+The subsequent change is limited to Python fixture compatibility and acceptance
+documentation; its focused restore tests pass. Format and locked Clippy passed;
+all 14 local deployment tests passed before the fixture portability correction.
+Final GitHub results are recorded on draft PR #38; live acceptance remains open.

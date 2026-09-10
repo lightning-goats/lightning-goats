@@ -25,6 +25,11 @@ Use SQLite online backup or `VACUUM INTO` after quiescing; copying only a databa
 file while WAL writers remain active is not a consistent backup. Keep the two
 stores, their configuration/source revision and the evidence timestamp together.
 Never start two physical owners or old and restored writers simultaneously.
+A stale backup can omit physical activity after its capture. The mock rehearsal
+keeps all writers stopped during that interval; it does not resolve lost physical
+history. Before physical enablement after any real restore, reconcile the pair
+against the actual owner under the separately approved F04 contract. Keep physical
+action disabled while the history or owner outcome is uncertain.
 
 The packaged helper accepts only a new private destination and does not start
 services, copy credentials, change ownership/accounts, replace current databases

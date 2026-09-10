@@ -31,10 +31,8 @@ async fn main() -> Result<()> {
     let listener = tokio::net::TcpListener::bind(listen).await?;
     info!(%listen, "trusted Lightning Goats integration gateway listening");
 
-    axum::serve(listener, gateway.router())
-        .with_graceful_shutdown(shutdown_signal())
+    lightning_goats::server::serve_with_shutdown(listener, gateway.router(), shutdown_signal())
         .await
-        .map_err(anyhow::Error::from)
 }
 
 async fn shutdown_signal() {

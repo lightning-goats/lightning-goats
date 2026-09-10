@@ -141,3 +141,11 @@ invoices. P2P requires authoritative BTC credited amounts and preserves original
 currency evidence with a no-rounding policy. Mock evidence is recorded in the
 VPS report; actual account behavior and sandbox network compatibility remain
 unaccepted. No real payment or physical test is implied.
+
+
+F08 continuation adds shared durable global issuance admission, bounded HTTP and
+WebSocket admission, upload deadlines, bounded OpenHAB reads and explicit redirect
+rejection. It does not close F11 idle/replay behavior or F12 observation correctness.
+The rolling daily budget and historical storage policy require operator sizing
+review; recovery is available even when new issuance is refused. Final source-
+pinned results belong in the VPS evidence before accepting the gate.

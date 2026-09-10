@@ -6,8 +6,9 @@ use anyhow::{Result, anyhow};
 use axum::{
     Json, Router,
     body::Bytes,
-    extract::{DefaultBodyLimit, Path, Query, State, ws::WebSocketUpgrade},
+    extract::{DefaultBodyLimit, Path, Query, Request, State, ws::WebSocketUpgrade},
     http::{HeaderMap, StatusCode},
+    middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
@@ -47,6 +48,8 @@ struct AppState {
     strike: StrikeRuntime,
     lnurl: LnurlService,
     renderer: MessageRenderer,
+    status_slots: Arc<tokio::sync::Semaphore>,
+    overlay_slots: Arc<tokio::sync::Semaphore>,
 }
 
 #[derive(Debug, Serialize)]
@@ -117,6 +120,8 @@ async fn main() -> Result<()> {
         strike: strike.clone(),
         lnurl,
         renderer: renderer.clone(),
+        status_slots: Arc::new(tokio::sync::Semaphore::new(4)),
+        overlay_slots: Arc::new(tokio::sync::Semaphore::new(32)),
     };
     let app = app(state);
 
@@ -129,11 +134,8 @@ async fn main() -> Result<()> {
         "lightning-goatsd listening"
     );
 
-    let mut server = tokio::spawn(async move {
-        axum::serve(listener, app)
-            .await
-            .map_err(anyhow::Error::from)
-    });
+    let mut server =
+        tokio::spawn(async move { lightning_goats::server::serve(listener, app).await });
     let mut recovery = tokio::spawn(strike.run_recovery_worker(ledger.clone()));
     let mut feeder = tokio::spawn(run_feed_worker(
         ledger.clone(),
@@ -199,6 +201,33 @@ fn app(state: AppState) -> Router {
         .route("/lnurlp/{user}/callback", get(lnurl_callback))
         .route("/ws/overlay", get(overlay_ws))
         .with_state(state)
+        .layer(middleware::from_fn_with_state(
+            Arc::new(tokio::sync::Semaphore::new(64)),
+            bounded_http,
+        ))
+}
+
+async fn bounded_http(
+    State(slots): State<Arc<tokio::sync::Semaphore>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let is_lnurl = request.uri().path().starts_with("/.well-known/lnurlp/")
+        || request.uri().path().starts_with("/lnurlp/");
+    let rejection = |status| {
+        if is_lnurl {
+            lnurl_error(status, "Invoice service is busy; retry later")
+        } else {
+            status.into_response()
+        }
+    };
+    let Ok(_permit) = slots.try_acquire_owned() else {
+        return rejection(StatusCode::SERVICE_UNAVAILABLE);
+    };
+    match tokio::time::timeout(Duration::from_secs(30), next.run(request)).await {
+        Ok(response) => response,
+        Err(_) => rejection(StatusCode::REQUEST_TIMEOUT),
+    }
 }
 
 fn task_exit(name: &str, result: Result<Result<()>, tokio::task::JoinError>) -> Result<()> {
@@ -214,6 +243,11 @@ async fn healthz() -> Json<HealthResponse> {
 }
 
 async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse>, StatusCode> {
+    let _permit = state
+        .status_slots
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
     let feed_credit_sats = state.ledger.feed_credit_sats().await.map_err(|error| {
         tracing::error!(%error, "failed reading feed credit for status endpoint");
         StatusCode::INTERNAL_SERVER_ERROR
@@ -299,6 +333,10 @@ async fn lnurl_callback(
             lnurl_error(StatusCode::NOT_FOUND, "Unknown Lightning Address")
         }
         Err(LnurlServiceError::InvalidAmount(reason)) => lnurl_error(StatusCode::OK, reason),
+        Err(LnurlServiceError::Busy) => lnurl_error(
+            StatusCode::TOO_MANY_REQUESTS,
+            "Invoice service is busy; retry later",
+        ),
         Err(error @ LnurlServiceError::Provider(_)) => {
             if let Some(internal) = error.internal_error() {
                 tracing::error!(%internal, %user, amount_msat, "Strike-backed LNURL invoice creation failed");
@@ -364,14 +402,23 @@ async fn strike_webhook(
 }
 
 async fn overlay_ws(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
+    let Ok(permit) = state.overlay_slots.clone().try_acquire_owned() else {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    };
     let ledger = state.ledger.clone();
     let renderer = state.renderer.clone();
     let threshold_sats = state.config.feeder.threshold_sats;
-    ws.on_upgrade(move |socket| async move {
-        if let Err(error) = serve_overlay_socket(socket, ledger, renderer, threshold_sats).await {
-            tracing::warn!(%error, "overlay websocket disconnected after server-side error");
-        }
-    })
+    ws.max_message_size(1024)
+        .max_frame_size(1024)
+        .write_buffer_size(4096)
+        .max_write_buffer_size(65536)
+        .on_upgrade(move |socket| async move {
+            let _permit = permit;
+            if let Err(error) = serve_overlay_socket(socket, ledger, renderer, threshold_sats).await
+            {
+                tracing::warn!(%error, "overlay websocket disconnected after server-side error");
+            }
+        })
 }
 
 async fn shutdown_signal() {
@@ -430,10 +477,16 @@ mod tests {
             strike,
             lnurl,
             renderer: MessageRenderer::embedded().unwrap(),
+            status_slots: Arc::new(tokio::sync::Semaphore::new(4)),
+            overlay_slots: Arc::new(tokio::sync::Semaphore::new(32)),
         });
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
-        let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+        let server = tokio::spawn(async move {
+            lightning_goats::server::serve(listener, router)
+                .await
+                .unwrap()
+        });
         let url = format!("http://{address}/api/v1/strike/webhook");
         let client = reqwest::Client::builder()
             .no_proxy()
@@ -462,6 +515,23 @@ mod tests {
         }
         assert_eq!(calls.load(Ordering::SeqCst), 0);
         let pool = sqlx::SqlitePool::connect(&db).await.unwrap();
+        sqlx::query("WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<30) INSERT INTO invoice_admissions(id,finished) SELECT 'synthetic:'||x,1 FROM n").execute(&pool).await.unwrap();
+        let limited = client
+            .get(format!(
+                "http://{address}/lnurlp/herd/callback?amount=1000000"
+            ))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(limited.status(), StatusCode::TOO_MANY_REQUESTS);
+        let limited: serde_json::Value = limited.json().await.unwrap();
+        assert_eq!(limited["status"], "ERROR");
+        // Saturating public issuance must not disable webhook persistence.
+        assert_eq!(
+            post(body.clone()).await.unwrap().status(),
+            StatusCode::NO_CONTENT
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
         let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM strike_inbox")
             .fetch_one(&pool)
             .await
@@ -514,7 +584,88 @@ mod tests {
             .unwrap();
         assert!(response.starts_with("HTTP/1.1 413"), "{response}");
         assert_eq!(calls.load(Ordering::SeqCst), 0);
+        let mut slow = tokio::net::TcpStream::connect(address).await.unwrap();
+        slow.write_all(format!("POST /api/v1/strike/webhook HTTP/1.1\r\nHost: {address}\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n100\r\nx").as_bytes()).await.unwrap();
+        let mut timed_out = String::new();
+        tokio::time::timeout(Duration::from_secs(45), slow.read_to_string(&mut timed_out))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(timed_out.starts_with("HTTP/1.1 408"), "{timed_out}");
         server.abort();
         provider_task.abort();
+    }
+
+    #[tokio::test]
+    async fn http_concurrency_rejects_without_an_unbounded_wait_queue() {
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let router = Router::new()
+            .fallback({
+                let gate = gate.clone();
+                let calls = calls.clone();
+                move || {
+                    let gate = gate.clone();
+                    let calls = calls.clone();
+                    async move {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        gate.acquire_owned().await.unwrap().forget();
+                        StatusCode::OK
+                    }
+                }
+            })
+            .layer(middleware::from_fn_with_state(
+                Arc::new(tokio::sync::Semaphore::new(2)),
+                bounded_http,
+            ));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            lightning_goats::server::serve(listener, router)
+                .await
+                .unwrap()
+        });
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let mut active = Vec::new();
+        for _ in 0..2 {
+            let client = client.clone();
+            let url = url.clone();
+            active.push(tokio::spawn(async move {
+                client.get(url).send().await.unwrap()
+            }));
+        }
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while calls.load(Ordering::SeqCst) < 2 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            client.get(&url).send().await.unwrap().status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        let lnurl = client
+            .get(format!("{url}lnurlp/herd/callback?amount=1000"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(lnurl.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body: serde_json::Value = lnurl.json().await.unwrap();
+        assert_eq!(body["status"], "ERROR");
+        gate.add_permits(3);
+        for response in active {
+            assert_eq!(response.await.unwrap().status(), StatusCode::OK);
+        }
+        assert_eq!(
+            client.get(url).send().await.unwrap().status(),
+            StatusCode::OK
+        );
+        server.abort();
     }
 }

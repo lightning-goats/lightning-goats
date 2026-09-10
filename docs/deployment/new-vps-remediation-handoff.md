@@ -176,3 +176,12 @@ It verifies signed mainnet BOLT11 fields and issuance expiry, and uses
 BTC `amountCredited` for P2P with exact whole-satoshi/no-rounding policy.
 See the Strike architecture correction and VPS evidence. Actual P2P/account
 network acceptance and F04 owner fixtures remain separate live dependencies.
+
+
+F08 continuation from `7f54df087a0eaba1df6873e5318cb4b6143f5b8c` adds shared durable
+issuance admission, nonwaiting HTTP/status/WS slots, handler/upload deadlines,
+streaming OpenHAB bounds and redirect rejection. The daily issuance budget is
+10,000, and recovers as its 24-hour window advances without deleting issued evidence.
+Operator capacity/archival planning remains required for historical storage. Settlement
+recovery remains independent. See the VPS evidence; F11 replay/heartbeat, F12
+weather correctness, owner fixtures and final staging gates remain outstanding.

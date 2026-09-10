@@ -22,3 +22,5 @@ pub mod http;
 #[cfg(test)]
 #[path = "../tests/support/invoices.rs"]
 mod test_invoices;
+
+pub mod server;

@@ -234,3 +234,67 @@ invoice recovery regression (94 library tests, one daemon HTTP test, 14
 integration tests). The final locked rerun including that additional case also passed: 95 library
 tests, one daemon HTTP test and 14 integration tests. Attach exact-head GitHub
 checks before accepting the candidate. Logs are under `/home/linuxuser/lg-evidence/f06-f10-*`.
+
+
+## F08 application resource candidate
+
+Base: `7f54df087a0eaba1df6873e5318cb4b6143f5b8c`,
+[draft PR #35](https://github.com/lightning-goats/lightning-goats/pull/35), with passing
+[Rust CI](https://github.com/lightning-goats/lightning-goats/actions/runs/34531310426),
+[Security](https://github.com/lightning-goats/lightning-goats/actions/runs/34531310469), and
+[Deployment](https://github.com/lightning-goats/lightning-goats/actions/runs/34531310293).
+The next branch is `remediation/phase1-resource-controls-20260910`.
+
+Invoice creation validates input before nonwaiting admission. A process semaphore
+bounds tasks before SQLite; a shared-store transaction enforces four concurrent
+reservations and 30 provider attempts per rolling minute across all users and
+processes. Failed provider attempts still consume rate budget. Reservations
+expire after 30 seconds on crash/cancellation; an admitted provider/persistence
+operation has a 20-second deadline. Normal completion releases capacity. Recovery
+and webhook work do not acquire these issuance permits.
+
+The candidate also stops new issuance when issued requests from the last 24 hours plus active
+reservations reach 10,000. This rolling budget restores capacity as the window advances;
+no financial history is deleted. It is not a database retention policy. Historical
+storage/archival and operator sizing remain operational acceptance decisions.
+Recovery continues independently while new issuance is refused.
+
+HTTP handlers have 64 nonwaiting slots and a 30-second whole-handler/upload
+deadline; public status reads have four slots. WebSocket upgrades have 32 permits
+held through socket lifetime, 1-KiB inbound frame/message bounds and 64-KiB write
+buffer bounds. F11 still must establish heartbeat, idle expiry and replay semantics.
+
+OpenHAB item state is streaming-bounded at 4 KiB with strict UTF-8; weather uses
+the shared 64-KiB streaming bound and supports chunked responses. Both reject
+redirects and non-success statuses. Mock tests assert redirected reads and
+commands never reach a second server, while gateway health rejects 3xx rather
+than mistaking it for success. These transport checks do not bind the actual
+physical owner's receipt/completion contract (F04 remains open).
+
+Focused library tests pass for global/restart admission, concurrency and capacity,
+exact chunked bounds, oversized/invalid UTF-8 states and 307/308 redirect rejection.
+HTTP and LNURL tests cover excess requests across users, zero provider calls for
+invalid/budget-exhausted requests, overload without a waiter queue, upload timeout
+and webhook persistence while invoice budget is exhausted. Attach final full-suite
+and GitHub results after completion; F11/F12 and deployment acceptance remain open.
+
+
+Candidate review confirmed three gaps and drove corrections: LNURL overload/
+timeout errors retain their JSON envelope; the daily issuance window ages out
+without deleting issued history; and both binaries now use bounded HTTP/1.1
+transport upstream of handler middleware. Transport allows 128 active ordinary
+HTTP connections, 32-KiB header buffers, a real 10-second header timer and a
+180-second connection lifetime (including response transmission), longer than
+the gateway's 140-second handler/150-second client deadlines. WebSocket upgrades
+transfer to their separately bounded socket lifetime. nginx remains the public
+HTTP/TLS edge; its upstream uses HTTP/1.1. Gateway shutdown drains existing
+connections within the bounded lifetime. Incomplete-header tests assert excess
+connections are refused, stalled headers expire and capacity becomes reusable.
+
+
+At draft publication, 101 library tests and locked Clippy pass, including
+incomplete-header admission/expiry. All 11 deployment tests pass. The final locked
+full suite includes actual HTTP upload timeout and overload envelopes, daily
+budget age-out without history deletion, interrupted lease expiry and existing
+settlement recovery while public issuance is saturated. Its result and exact-head
+GitHub checks remain required before acceptance. No live system tests occurred.

@@ -89,6 +89,7 @@ impl OpenHabClient {
 
         let client = Client::builder()
             .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
             .connect_timeout(Duration::from_secs(2))
             .timeout(Duration::from_secs(5))
             .build()
@@ -162,17 +163,18 @@ impl OpenHabClient {
             .base_url
             .join(&format!("rest/items/{item}/state"))
             .context("failed constructing OpenHAB item state URL")?;
-        self.client
+        let response = self
+            .client
             .get(endpoint)
             .basic_auth(self.auth_token.as_str(), Some(""))
             .send()
             .await
-            .context("failed requesting OpenHAB item state")?
-            .error_for_status()
-            .context("OpenHAB item state request returned an error status")?
-            .text()
-            .await
-            .context("failed reading OpenHAB item state")
+            .context("failed requesting OpenHAB item state")?;
+        if !response.status().is_success() {
+            bail!("OpenHAB item state returned HTTP {}", response.status());
+        }
+        let bytes = crate::http::bounded_body(response, 4096).await?;
+        String::from_utf8(bytes).context("OpenHAB state must be UTF-8")
     }
 
     async fn command_item(&self, item: &str, command: &str) -> Result<()> {
@@ -180,16 +182,18 @@ impl OpenHabClient {
             .base_url
             .join(&format!("rest/items/{item}"))
             .context("failed constructing OpenHAB item command URL")?;
-        self.client
+        let response = self
+            .client
             .post(endpoint)
             .basic_auth(self.auth_token.as_str(), Some(""))
             .header("Content-Type", "text/plain")
             .body(command.to_owned())
             .send()
             .await
-            .context("OpenHAB item command failed")?
-            .error_for_status()
-            .context("OpenHAB item command returned an error status")?;
+            .context("OpenHAB item command failed")?;
+        if !response.status().is_success() {
+            bail!("OpenHAB command returned HTTP {}", response.status());
+        }
         Ok(())
     }
 }
@@ -278,6 +282,87 @@ fn validate_identifier(value: &str, field: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn mock_config(url: String) -> TrustedOpenHabConfig {
+        TrustedOpenHabConfig {
+            url,
+            request_item: "request".into(),
+            ack_item: "ack".into(),
+            request_payload_template: "{request_id}".into(),
+            override_item: "override".into(),
+            remote_enabled_item: "remote".into(),
+            temperature_item: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn state_reads_reject_oversized_chunked_and_non_utf8_data() {
+        use axum::{Router, body::Body, response::Response};
+        for bytes in [vec![b'x'; 4097], vec![0xff]] {
+            let app = Router::new().fallback(move || {
+                let bytes = bytes.clone();
+                async move {
+                    Response::new(Body::from_stream(futures_util::stream::iter([Ok::<
+                        _,
+                        std::convert::Infallible,
+                    >(
+                        bytes
+                    )])))
+                }
+            });
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("http://{}/", listener.local_addr().unwrap());
+            let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+            let client = OpenHabClient::new(&mock_config(url), "synthetic-token".into()).unwrap();
+            assert!(client.item_state("ack").await.is_err());
+            assert!(client.feeder_safety().await.is_err());
+            server.abort();
+        }
+    }
+
+    #[tokio::test]
+    async fn redirects_never_move_state_reads_or_repeat_commands() {
+        use axum::{Router, http::StatusCode};
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        let calls = Arc::new(AtomicUsize::new(0));
+        let target = Router::new().fallback({
+            let calls = calls.clone();
+            move || {
+                let calls = calls.clone();
+                async move {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    "OFF"
+                }
+            }
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let target_url = format!("http://{}/", listener.local_addr().unwrap());
+        let target_task = tokio::spawn(async move { axum::serve(listener, target).await.unwrap() });
+        for status in [
+            StatusCode::TEMPORARY_REDIRECT,
+            StatusCode::PERMANENT_REDIRECT,
+        ] {
+            let url = target_url.clone();
+            let source = Router::new().fallback(move || {
+                let url = url.clone();
+                async move { (status, [("location", url)]) }
+            });
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let source_url = format!("http://{}/", listener.local_addr().unwrap());
+            let source_task =
+                tokio::spawn(async move { axum::serve(listener, source).await.unwrap() });
+            let client =
+                OpenHabClient::new(&mock_config(source_url), "synthetic-token".into()).unwrap();
+            assert!(client.item_state("override").await.is_err());
+            assert!(client.command_feeder_request(Uuid::new_v4()).await.is_err());
+            assert_eq!(calls.load(Ordering::SeqCst), 0);
+            source_task.abort();
+        }
+        target_task.abort();
+    }
 
     #[test]
     fn parses_exact_uuid_and_correlated_json_success() {

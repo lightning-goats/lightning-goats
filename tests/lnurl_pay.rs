@@ -229,6 +229,41 @@ async fn dotted_user_discovery_callback_and_persistence_share_one_identity() {
     assert_eq!(user, "goat.name");
 }
 
+#[tokio::test]
+async fn issuance_budget_is_shared_across_users_and_invalid_inputs_do_not_spend_it() {
+    let state = StrikeMockState {
+        calls: Arc::new(AtomicUsize::new(0)),
+        last_body: Arc::new(Mutex::new(None)),
+        invalid_invoice: false,
+    };
+    let (_directory, service) = service(state.clone()).await;
+    for _ in 0..40 {
+        assert!(matches!(
+            service.callback("unknown", 1_000_000).await,
+            Err(LnurlServiceError::UnknownUser)
+        ));
+        assert!(matches!(
+            service.callback("herd", 1_001).await,
+            Err(LnurlServiceError::InvalidAmount(_))
+        ));
+    }
+    assert_eq!(state.calls.load(Ordering::SeqCst), 0);
+    for index in 0..30 {
+        // This provider deliberately reuses an ID; conflicting issuance may
+        // fail persistence but must still consume the provider-attempt budget.
+        let result = service
+            .clone()
+            .callback(if index % 2 == 0 { "herd" } else { "dexter" }, 1_000_000)
+            .await;
+        assert!(!matches!(result, Err(LnurlServiceError::Busy)));
+    }
+    assert!(matches!(
+        service.callback("goat.name", 1_000_000).await,
+        Err(LnurlServiceError::Busy)
+    ));
+    assert_eq!(state.calls.load(Ordering::SeqCst), 30);
+}
+
 #[test]
 fn configured_dot_segments_fail_while_dotted_names_remain_valid() {
     let mut config: lightning_goats::config::AppConfig =

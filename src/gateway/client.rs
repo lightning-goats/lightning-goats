@@ -117,13 +117,15 @@ impl GatewayClient {
 
     pub async fn health(&self) -> Result<()> {
         let endpoint = self.base_url.join("healthz")?;
-        self.client
+        let response = self
+            .client
             .get(endpoint)
             .send()
             .await
-            .context("integration gateway health request failed")?
-            .error_for_status()
-            .context("integration gateway health returned an error status")?;
+            .context("integration gateway health request failed")?;
+        if !response.status().is_success() {
+            bail!("gateway health returned HTTP {}", response.status());
+        }
         Ok(())
     }
 

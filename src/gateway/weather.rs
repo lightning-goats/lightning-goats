@@ -9,7 +9,7 @@ use serde_json::Value;
 
 use super::client::WeatherSnapshot;
 
-const MAX_WEATHER_BODY: u64 = 64 * 1024;
+const MAX_WEATHER_BODY: usize = 64 * 1024;
 
 #[derive(Clone)]
 pub struct WeatherAdapter {
@@ -38,6 +38,7 @@ impl WeatherAdapter {
         }
         let client = Client::builder()
             .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
             .connect_timeout(Duration::from_secs(2))
             .timeout(Duration::from_secs(3))
             .build()
@@ -57,22 +58,11 @@ impl WeatherAdapter {
             .header("Accept", "application/json")
             .send()
             .await
-            .context("trusted weather read failed")?
-            .error_for_status()
-            .context("trusted weather read returned an error status")?;
-        let length = response
-            .content_length()
-            .context("trusted weather response must include Content-Length")?;
-        if length > MAX_WEATHER_BODY {
-            bail!("trusted weather response is too large");
+            .context("trusted weather read failed")?;
+        if !response.status().is_success() {
+            bail!("trusted weather returned HTTP {}", response.status());
         }
-        let body = response
-            .bytes()
-            .await
-            .context("failed reading trusted weather response")?;
-        if body.len() as u64 > MAX_WEATHER_BODY {
-            bail!("trusted weather response exceeded size limit");
-        }
+        let body = crate::http::bounded_body(response, MAX_WEATHER_BODY).await?;
         let value: Value =
             serde_json::from_slice(&body).context("trusted weather JSON is malformed")?;
         let latest = match value {

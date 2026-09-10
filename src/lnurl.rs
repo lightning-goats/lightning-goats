@@ -39,6 +39,7 @@ struct RegisteredAddress {
 pub enum LnurlServiceError {
     UnknownUser,
     InvalidAmount(&'static str),
+    Busy,
     Provider(anyhow::Error),
 }
 
@@ -54,6 +55,7 @@ impl LnurlServiceError {
             Self::UnknownUser => "Unknown Lightning Address",
             Self::InvalidAmount(reason) => reason,
             Self::Provider(_) => "Unable to create Lightning invoice",
+            Self::Busy => "Invoice service is busy; retry later",
         }
     }
 
@@ -197,7 +199,13 @@ impl LnurlService {
                 self.invoice_expiry_seconds,
             )
             .await
-            .map_err(LnurlServiceError::Provider)?;
+            .map_err(|error| {
+                if error.is::<crate::strike::InvoiceCapacityError>() {
+                    LnurlServiceError::Busy
+                } else {
+                    LnurlServiceError::Provider(error)
+                }
+            })?;
         Ok(LnurlPayCallbackResponse {
             pr: created.invoice,
             routes: Vec::new(),

@@ -1097,6 +1097,8 @@ dependencies = [
  "futures-util",
  "hex",
  "hmac",
+ "hyper",
+ "hyper-util",
  "lightning-invoice",
  "proptest",
  "reqwest",

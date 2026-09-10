@@ -1,4 +1,4 @@
-use std::{net::IpAddr, str::FromStr, time::Duration};
+use std::{net::IpAddr, str::FromStr, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result, bail};
 use hmac::{Hmac, Mac};
@@ -37,7 +37,17 @@ pub struct StrikeWebhookVerifier {
 pub struct StrikeRuntime {
     client: StrikeClient,
     verifier: StrikeWebhookVerifier,
+    issuance_slots: Arc<tokio::sync::Semaphore>,
 }
+
+#[derive(Debug)]
+pub struct InvoiceCapacityError;
+impl std::fmt::Display for InvoiceCapacityError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Invoice service is busy; retry later")
+    }
+}
+impl std::error::Error for InvoiceCapacityError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreatedStrikeReceiveRequest {
@@ -398,11 +408,16 @@ impl StrikeRuntime {
         Ok(Self {
             client: StrikeClient::from_config(config).await?,
             verifier: StrikeWebhookVerifier::from_systemd_credential().await?,
+            issuance_slots: Arc::new(tokio::sync::Semaphore::new(4)),
         })
     }
 
     pub fn new(client: StrikeClient, verifier: StrikeWebhookVerifier) -> Self {
-        Self { client, verifier }
+        Self {
+            client,
+            verifier,
+            issuance_slots: Arc::new(tokio::sync::Semaphore::new(4)),
+        }
     }
 
     pub fn verify_webhook_signature(&self, body: &[u8], signature_hex: &str) -> Result<()> {
@@ -499,23 +514,54 @@ impl StrikeRuntime {
     ) -> Result<CreatedStrikeReceiveRequest> {
         crate::domain::invoice::validate_user(address_user)?;
         crate::domain::invoice::validate_user(credit_pool)?;
-        let created = self
-            .client
-            .create_bolt11_receive_request(amount_msat, description_hash, expiry_seconds)
-            .await?;
-        ledger
-            .record_strike_receive_request(&StoredStrikeReceiveRequest {
-                receive_request_id: created.receive_request_id,
-                address_user: address_user.to_owned(),
-                credit_pool: credit_pool.to_owned(),
-                amount_msat,
-                description_hash: created.description_hash.clone(),
-                payment_hash: created.payment_hash.clone(),
-                invoice: created.invoice.clone(),
-                created_provider: created.created_provider.clone(),
-            })
-            .await?;
-        Ok(created)
+        if amount_msat == 0
+            || !amount_msat.is_multiple_of(1000)
+            || amount_msat > i64::MAX as u64
+            || expiry_seconds == 0
+        {
+            bail!("invalid invoice amount or expiry");
+        }
+        validate_hex32(description_hash, "invoice description hash")?;
+        // Nonwaiting process admission prevents a public request queue from
+        // accumulating in front of SQLite. Durable admission also covers restarts
+        // and other instances sharing this database.
+        let _permit = self
+            .issuance_slots
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| InvoiceCapacityError)?;
+        let reservation = ledger
+            .reserve_invoice()
+            .await?
+            .ok_or(InvoiceCapacityError)?;
+        let result = tokio::time::timeout(Duration::from_secs(20), async {
+            let created = self
+                .client
+                .create_bolt11_receive_request(amount_msat, description_hash, expiry_seconds)
+                .await?;
+            ledger
+                .record_strike_receive_request(&StoredStrikeReceiveRequest {
+                    receive_request_id: created.receive_request_id,
+                    address_user: address_user.to_owned(),
+                    credit_pool: credit_pool.to_owned(),
+                    amount_msat,
+                    description_hash: created.description_hash.clone(),
+                    payment_hash: created.payment_hash.clone(),
+                    invoice: created.invoice.clone(),
+                    created_provider: created.created_provider.clone(),
+                })
+                .await?;
+            Ok(created)
+        })
+        .await
+        .context("invoice creation deadline exceeded")
+        .and_then(|value| value);
+        // A crash/cancellation leaves a 30-second reservation; it cannot create
+        // an unbounded waiter queue or permanently consume issuance capacity.
+        if let Err(error) = ledger.finish_invoice_admission(reservation).await {
+            tracing::warn!(%error,"invoice admission release will expire durably");
+        }
+        result
     }
 
     pub async fn reconcile_and_credit(
@@ -1447,6 +1493,22 @@ mod tests {
         ))
         .await
         .unwrap();
+        sqlx::query("WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<30) INSERT INTO invoice_admissions(id,finished) SELECT 'saturated:'||x,1 FROM n").execute(&pool).await.unwrap();
+        let calls_before = state.api_calls.load(Ordering::SeqCst);
+        let denied = runtime
+            .create_and_record_receive_request(
+                &ledger,
+                "herd",
+                "herd",
+                1000,
+                &state.description_hash,
+                300,
+            )
+            .await
+            .unwrap_err();
+        assert!(denied.is::<InvoiceCapacityError>());
+        assert_eq!(state.api_calls.load(Ordering::SeqCst), calls_before);
+        // Recovery below must still credit once while public admission is full.
         // Simulate exhausted short retries during an extended outage.
         sqlx::query("UPDATE strike_inbox SET attempts=7")
             .execute(&pool)

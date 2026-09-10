@@ -109,3 +109,13 @@ does not itself authorize replay.
 The website, signer/relay, owner contract, credentials and home network remain
 acceptance gates. Obtain explicit operator approval separately for tiny real
 payment, controlled physical feeding, and DNS/WireGuard cutover.
+
+## Retained staging candidates
+
+The Deployment workflow retains the smoke-tested three-binary package as
+`staging-package-<GITHUB_SHA>` for 14 days. Download it from that exact workflow,
+verify SHA256SUMS and BUILD-INFO, then run the archive smoke verifier before
+staging review. PR builds use GitHub's synthetic merge SHA; record both PR head
+and actual artifact source. A passed artifact does not establish service,
+credential, network, browser or physical-owner acceptance. The offline paired-store
+helper and its limits are documented in `staging-acceptance-evidence.md`.

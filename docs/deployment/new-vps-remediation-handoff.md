@@ -196,3 +196,13 @@ reusing old sequence numbers cannot be silently skipped by old clients. This
 only rotates presentation identity; never clear unresolved physical requests,
 issued requests, settlements or signed outbox evidence to recover availability.
 Keep all drafts pending integrated review and the remaining acceptance gates.
+
+The staging-evidence candidate starts at F11/F12 source
+`a3b17e809ba956407a98c35a07685f3d61402050` (draft #37, all checks passed).
+Follow `staging-acceptance-evidence.md` for paired-store restore and the F09
+inventory/dependency matrix. The restore helper creates a new private destination,
+checks both stores and rotates only overlay identity; it never starts services
+or overwrites current data. CI retains the exact tested package, labelled with
+its actual build SHA, for staging review. Final installation, actual owner/source,
+network, browser and signer acceptance remain open. Do not merge this stack just
+because individual PR checks are green; preserve exact integrated review evidence.

@@ -36,3 +36,10 @@ jobs:
           bash deploy/scripts/package-release.sh target/release "$RUNNER_TEMP/package-smoke" smoke
           (cd "$RUNNER_TEMP/package-smoke" && sha256sum --check SHA256SUMS)
           python3 deploy/scripts/smoke-release.py "$RUNNER_TEMP/package-smoke/lightning-goats-smoke-x86_64-linux-gnu.tar.gz" "$GITHUB_SHA"
+      - name: Retain the tested package for staging review
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-package-${{ github.sha }}
+          path: ${{ runner.temp }}/package-smoke/
+          if-no-files-found: error
+          retention-days: 14

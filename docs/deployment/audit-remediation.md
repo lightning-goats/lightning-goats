@@ -166,3 +166,15 @@ client obligations. The authoritative browser and live normalized source have
 not been observed; F11/F12 staging acceptance remains open. This does not close
 F04 physical binding, F09 home-enforced containment, source import or final clean
 install/restore/signer gates. Production remains HOLD.
+
+### Staging evidence continuation
+
+F11/F12 draft #37 source `a3b17e809ba956407a98c35a07685f3d61402050` passed
+Rust/Security/Deployment and all local required checks. A following candidate
+adds safe offline paired-store restore preparation and a real-process mock
+regression preserving unresolved UUIDs, issued invoices, settlements and exact
+signed outbox bytes. Consult `staging-acceptance-evidence.md` for the procedure
+and F09 inventory/test matrix. F09 remains blocked on actual authorized home
+inventory and a complete reviewed policy; local route/template preparation does
+not establish containment. Clean final installation, website/browser, actual
+owner binding and signer/relay acceptance remain open. Production HOLD persists.

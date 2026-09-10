@@ -59,20 +59,27 @@ impl Drop for Process {
     }
 }
 
-async fn gateway(directory: &TempDir, owner_url: &str, index: usize) -> (Process, String) {
+async fn gateway(
+    directory: &impl AsRef<std::path::Path>,
+    owner_url: &str,
+    index: usize,
+) -> (Process, String) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     drop(listener);
     let mut config: toml::Value =
         toml::from_str(include_str!("../deploy/gateway/config.canary.toml.example")).unwrap();
     config["service"]["listen"] = address.to_string().into();
-    config["database"]["url"] =
-        format!("sqlite://{}", directory.path().join("gateway.db").display()).into();
+    config["database"]["url"] = format!(
+        "sqlite://{}",
+        directory.as_ref().join("gateway.db").display()
+    )
+    .into();
     config["openhab"]["url"] = owner_url.into();
-    let path = directory.path().join(format!("gateway-{index}.toml"));
+    let path = directory.as_ref().join(format!("gateway-{index}.toml"));
     std::fs::write(&path, toml::to_string(&config).unwrap()).unwrap();
     std::fs::write(
-        directory.path().join("openhab-token"),
+        directory.as_ref().join("openhab-token"),
         "synthetic-mock-only",
     )
     .unwrap();
@@ -80,7 +87,7 @@ async fn gateway(directory: &TempDir, owner_url: &str, index: usize) -> (Process
         Command::new(env!("CARGO_BIN_EXE_lightning-goats-gateway"))
             .arg("--config")
             .arg(path)
-            .env("CREDENTIALS_DIRECTORY", directory.path())
+            .env("CREDENTIALS_DIRECTORY", directory.as_ref())
             .env("TOKIO_WORKER_THREADS", "2")
             .stdout(Stdio::null())
             .stderr(Stdio::inherit())
@@ -340,29 +347,32 @@ async fn credited(directory: &TempDir, sats: u64) -> lightning_goats::ledger::Le
     ledger
 }
 
-async fn daemon(directory: &TempDir, gateway_url: &str) -> Process {
+async fn daemon(directory: &impl AsRef<std::path::Path>, gateway_url: &str) -> Process {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     drop(listener);
     let mut config: toml::Value =
         toml::from_str(include_str!("../deploy/config.canary.toml.example")).unwrap();
     config["service"]["listen"] = address.to_string().into();
-    config["database"]["url"] =
-        format!("sqlite://{}", directory.path().join("daemon.db").display()).into();
+    config["database"]["url"] = format!(
+        "sqlite://{}",
+        directory.as_ref().join("daemon.db").display()
+    )
+    .into();
     config["strike"]["api_url"] = "https://127.0.0.1:9/".into();
     config["gateway"]["url"] = gateway_url.into();
     config["informational"]["interface_info_enabled"] = false.into();
     config["informational"]["weather_enabled"] = false.into();
-    let path = directory.path().join("daemon.toml");
+    let path = directory.as_ref().join("daemon.toml");
     std::fs::write(&path, toml::to_string(&config).unwrap()).unwrap();
     for name in ["strike-api-key", "strike-webhook-secret"] {
-        std::fs::write(directory.path().join(name), "synthetic-mock-only").unwrap();
+        std::fs::write(directory.as_ref().join(name), "synthetic-mock-only").unwrap();
     }
     let mut process = Process(
         Command::new(env!("CARGO_BIN_EXE_lightning-goatsd"))
             .arg("--config")
             .arg(path)
-            .env("CREDENTIALS_DIRECTORY", directory.path())
+            .env("CREDENTIALS_DIRECTORY", directory.as_ref())
             .env("TOKIO_WORKER_THREADS", "2")
             .stdout(Stdio::null())
             .stderr(Stdio::inherit())
@@ -558,5 +568,198 @@ async fn lost_rate_refusal_recovers_by_get_and_cooldown_survives_daemon_restart(
     wait_credit(&ledger, 0).await;
     assert_eq!(owner.commands.lock().unwrap().len(), 1);
     assert_ne!(owner.commands.lock().unwrap()[0], id.to_string());
+    mock.abort();
+}
+
+#[path = "support/invoices.rs"]
+mod invoices;
+
+#[tokio::test]
+async fn paired_store_restore_preserves_pending_identity_settlement_and_signed_bytes() {
+    use bitcoin::{
+        hashes::{Hash, sha256},
+        secp256k1::{Keypair, Message, Secp256k1, SecretKey},
+    };
+    use lightning_goats::ledger::{LedgerStore, StoredStrikeReceiveRequest};
+    use serde_json::json;
+    let owner = Owner::default();
+    let (mock, owner_url) = mock_owner(owner.clone()).await;
+    let source = TempDir::new().unwrap();
+    let ledger = credited(&source, 1000).await;
+    let description_hash = "11".repeat(32);
+    let issued = StoredStrikeReceiveRequest {
+        receive_request_id: Uuid::new_v4(),
+        address_user: "herd".into(),
+        credit_pool: "herd".into(),
+        amount_msat: 1_000_000,
+        description_hash: description_hash.clone(),
+        payment_hash: "22".repeat(32),
+        invoice: invoices::invoice(1_000_000, &description_hash),
+        created_provider: None,
+    };
+    ledger.record_strike_receive_request(&issued).await.unwrap();
+    let secp = Secp256k1::new();
+    let key = Keypair::from_secret_key(&secp, &SecretKey::from_slice(&[42; 32]).unwrap());
+    let pubkey = key.x_only_public_key().0.to_string();
+    let id = sha256::Hash::hash(
+        json!([0, pubkey, 1, 1, [], "synthetic restore fixture"])
+            .to_string()
+            .as_bytes(),
+    )
+    .to_byte_array();
+    let signature = secp
+        .sign_schnorr_no_aux_rand(&Message::from_digest(id), &key)
+        .to_string();
+    let event_id = hex::encode(id);
+    let signed = format!(
+        " {{\"id\":\"{event_id}\", \"pubkey\":\"{pubkey}\", \"created_at\":1, \"kind\":1, \"tags\":[], \"content\":\"synthetic restore fixture\", \"sig\":\"{signature}\"}}\n"
+    );
+    ledger
+        .enqueue_signed_message(1, &event_id, &signed)
+        .await
+        .unwrap();
+    ledger
+        .mark_outbox_failed(&event_id, "synthetic relay outage")
+        .await
+        .unwrap();
+    let outbox = ledger.next_outbox_entry().await.unwrap().unwrap();
+    let old_stream = ledger.overlay_stream_id().await.unwrap();
+    let (gateway_process, base) = gateway(&source, &owner_url, 1).await;
+    let daemon_process = daemon(&source, &base).await;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while owner.commands.lock().unwrap().is_empty() {
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let original = owner.commands.lock().unwrap()[0].clone();
+    drop(daemon_process);
+    drop(gateway_process);
+    assert_eq!(
+        ledger
+            .unresolved_feed_attempt()
+            .await
+            .unwrap()
+            .unwrap()
+            .id
+            .to_string(),
+        original
+    );
+
+    // Quiesced, SQLite-consistent snapshots, including WAL state; never cp a live DB.
+    let snapshots = TempDir::new().unwrap();
+    for name in ["daemon.db", "gateway.db"] {
+        let pool =
+            sqlx::SqlitePool::connect(&format!("sqlite://{}", source.path().join(name).display()))
+                .await
+                .unwrap();
+        sqlx::query("VACUUM INTO ?")
+            .bind(snapshots.path().join(name).to_str().unwrap())
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+    }
+    let parent = TempDir::new().unwrap();
+    let restored_path = parent.path().join("restored");
+    let output = Command::new("python3")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/deploy/scripts/restore-stores.py"
+        ))
+        .arg("--source-directory")
+        .arg(snapshots.path())
+        .arg("--destination-directory")
+        .arg(&restored_path)
+        .arg("--writers-stopped")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let manifest: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(restored_path.join("RESTORE.json").is_file());
+    assert!(!restored_path.join("INCOMPLETE").exists());
+    let restored = restored_path;
+    let restored_ledger = LedgerStore::connect(&format!(
+        "sqlite://{}",
+        restored.join("daemon.db").display()
+    ))
+    .await
+    .unwrap();
+    assert_ne!(
+        restored_ledger.overlay_stream_id().await.unwrap(),
+        old_stream
+    );
+    assert_eq!(
+        restored_ledger
+            .overlay_stream_id()
+            .await
+            .unwrap()
+            .to_string(),
+        manifest["overlay_stream_id"]
+    );
+    assert_eq!(
+        restored_ledger
+            .strike_receive_request(issued.receive_request_id)
+            .await
+            .unwrap()
+            .unwrap(),
+        issued
+    );
+    assert_eq!(
+        restored_ledger.next_outbox_entry().await.unwrap().unwrap(),
+        outbox
+    );
+    assert_eq!(restored_ledger.feed_credit_sats().await.unwrap(), 1000);
+    assert_eq!(
+        restored_ledger
+            .unresolved_feed_attempt()
+            .await
+            .unwrap()
+            .unwrap()
+            .id
+            .to_string(),
+        original
+    );
+    let (_gateway, restored_base) = gateway(&restored, &owner_url, 2).await;
+    let _daemon = daemon(&restored, &restored_base).await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(
+        owner.commands.lock().unwrap().as_slice(),
+        &[original.clone()]
+    );
+    assert_eq!(restored_ledger.feed_credit_sats().await.unwrap(), 1000);
+    *owner.ack.lock().unwrap() = original.clone();
+    wait_credit(&restored_ledger, 0).await;
+    assert_eq!(owner.commands.lock().unwrap().as_slice(), &[original]);
+    assert_eq!(
+        restored_ledger.next_outbox_entry().await.unwrap().unwrap(),
+        outbox,
+        "canary must not publish or rewrite pending signed bytes"
+    );
+    assert_eq!(
+        restored_ledger
+            .events_after(0, 100)
+            .await
+            .unwrap()
+            .iter()
+            .filter(|e| e.event_type == "payment_received")
+            .count(),
+        1
+    );
+    assert_eq!(
+        restored_ledger
+            .events_after(0, 100)
+            .await
+            .unwrap()
+            .iter()
+            .filter(|e| e.event_type == "feeder_confirmed")
+            .count(),
+        1
+    );
     mock.abort();
 }

@@ -344,3 +344,37 @@ containment, clean install, paired-store restore and signer acceptance remain
 separate gates. No tunnel was activated, no production settings changed, no real
 provider invoice/payment created and no physical owner contacted. Production HOLD
 and parent #6/#15/#16 remain open. Keep the stack draft until integrated review.
+
+## F11/F12 final evidence and paired-store restore candidate
+
+Source `a3b17e809ba956407a98c35a07685f3d61402050`,
+[draft #37](https://github.com/lightning-goats/lightning-goats/pull/37), passed
+format, locked Clippy and the full locked local suite: 113 library tests, two
+daemon HTTP tests and 15 integration tests. This includes default 76-second
+quiet heartbeat survival, slow-reader send expiry, 32 actual-route socket permits
+with reuse, receive-only frame limits, queued-weather expiry, restore sequence
+reuse, and all prior daemon/gateway command-count regressions.
+[Rust CI](https://github.com/lightning-goats/lightning-goats/actions/runs/34535661549),
+[Security](https://github.com/lightning-goats/lightning-goats/actions/runs/34535661691), and
+[Deployment artifacts](https://github.com/lightning-goats/lightning-goats/actions/runs/34535661601)
+passed for that candidate. All 11 local deployment tests passed.
+
+The next branch, `remediation/phase1-staging-evidence-20260910`, starts at that
+exact source and adds an offline paired-store restore helper and real-process
+recovery regression. Three Python restore failure/permission/hash tests pass,
+and locked Clippy passes. Full locked Rust and the expanded 14-test deployment
+suite remain required at publication; final results will be appended after they
+complete. Logs: `/home/linuxuser/lg-evidence/acceptance-*`.
+
+See `../deployment/staging-acceptance-evidence.md` for the reviewed procedure,
+mock scope, F09 inventory/test matrix and unresolved external acceptance gates.
+The Deployment workflow now retains its exact tested package for 14 days under
+`staging-package-<GITHUB_SHA>`. On pull requests that SHA is the tested synthetic
+merge commit: read BUILD-INFO and retain it alongside the PR head, never relabel
+it as the branch head. Earlier PR workflow runs tested but did not retain a
+staging artifact. Artifact retention follows the supported
+[GitHub upload-artifact action](https://github.com/actions/upload-artifact).
+
+No actual home inventory, complete household policy review, final installed
+service/credential acceptance, authoritative website import/browser check or
+signer/relay acceptance is claimed. Those dependencies and parent gates stay open.

@@ -2,7 +2,7 @@ use std::{
     fs,
     net::{IpAddr, SocketAddr},
     path::Path,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::Duration,
 };
 
 use anyhow::{Context, Result, bail};
@@ -232,12 +232,28 @@ async fn feed_request(
             "Lightning Goats remote feeding is disabled",
         );
     }
-    if let Err(reason) = enforce_local_rate_safety(&state).await {
-        return public_error(StatusCode::TOO_MANY_REQUESTS, &reason);
-    }
-
-    match state.store.begin_request(request_id).await {
+    match state
+        .store
+        .begin_request(
+            request_id,
+            state.min_feed_interval,
+            state.max_feeds_per_hour,
+        )
+        .await
+    {
         Ok(BeginRequestOutcome::New) => {}
+        Ok(BeginRequestOutcome::Blocked) => {
+            return public_error(
+                StatusCode::LOCKED,
+                "Another feeder request remains unresolved",
+            );
+        }
+        Ok(BeginRequestOutcome::RateLimited) => {
+            return public_error(
+                StatusCode::TOO_MANY_REQUESTS,
+                "Local feeder safety capacity unavailable",
+            );
+        }
         Ok(BeginRequestOutcome::Acknowledged) => return StatusCode::NO_CONTENT.into_response(),
         Ok(BeginRequestOutcome::Pending) => {
             return handle_existing_pending(&state, request_id).await;
@@ -339,41 +355,8 @@ async fn weather(State(state): State<GatewayState>) -> Response {
     }
 }
 
-async fn enforce_local_rate_safety(state: &GatewayState) -> std::result::Result<(), String> {
-    let now = unix_now().map_err(|error| format!("local clock unavailable: {error:#}"))?;
-    if let Some(last) = state
-        .store
-        .last_acknowledged_at()
-        .await
-        .map_err(|error| format!("feed history unavailable: {error:#}"))?
-    {
-        let min_interval = i64::try_from(state.min_feed_interval.as_secs())
-            .map_err(|_| "configured feed interval is out of range".to_owned())?;
-        if now.saturating_sub(last) < min_interval {
-            return Err("local minimum feed interval has not elapsed".to_owned());
-        }
-    }
-    let count = state
-        .store
-        .acknowledged_since(now.saturating_sub(3_600))
-        .await
-        .map_err(|error| format!("recent feed history unavailable: {error:#}"))?;
-    if count >= state.max_feeds_per_hour {
-        return Err("local maximum feeds-per-hour safety cap reached".to_owned());
-    }
-    Ok(())
-}
-
 async fn ack_matches(state: &GatewayState, request_id: Uuid) -> Result<bool> {
     Ok(state.openhab.acknowledged_request().await? == Some(request_id))
-}
-
-fn unix_now() -> Result<i64> {
-    let seconds = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .context("system clock is before Unix epoch")?
-        .as_secs();
-    i64::try_from(seconds).context("Unix time exceeds i64 range")
 }
 
 fn public_error(status: StatusCode, reason: &str) -> Response {

@@ -45,6 +45,15 @@ Keep #6 and verification/cutover gates #15/#16 open. Add targeted remediation
 follow-ups to affected implementation issues while preserving earlier evidence.
 This record does not change issue states or certify tests that have not run.
 
+### New VPS follow-up
+
+See `../testing/vps-remediation-20260910.md` for the source-pinned continuation.
+F02 now reserves shared-store capacity atomically and preserves unresolved UUIDs
+across processes/restarts. The new real-gateway process regressions reproduced
+two OpenHAB mock commands on the handoff code and pass after the correction.
+F03/F04 remain open; this does not accept the current physical owner binding.
+The deployment test harness also isolates Fedora nginx's default temporary paths.
+
 ## Home network acceptance (F09)
 
 Inventory the trusted home host before proposing changes: WireGuard interface,

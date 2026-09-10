@@ -5,6 +5,11 @@ them for review, and continue remediation on the new VPS. Production is on HOLD.
 This plan is for isolated development/staging and preparation of reviewable
 changes. It is not production deployment or physical-actuation authorization.
 
+Continuation evidence: `../testing/vps-remediation-20260910.md`. The new VPS
+branch starts at the exact handoff SHA and adds F02 shared-store admission
+regressions/correction. Keep remaining findings and production acceptance open;
+consult the continuation record for actual checks and unresolved access needs.
+
 ## 1. Start from the reviewed integration branch
 
 Read `AGENTS.md`, `audit-remediation.md`, `deployment-artifacts.md`, then the

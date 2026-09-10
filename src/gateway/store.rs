@@ -17,6 +17,8 @@ pub enum BeginRequestOutcome {
     New,
     Pending,
     Acknowledged,
+    Blocked,
+    RateLimited,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,37 +66,99 @@ impl GatewayStore {
         .execute(&pool)
         .await
         .context("failed creating gateway feeder request table")?;
+        // SQLite accepts memory URI aliases. Verify the actual opened database,
+        // not just the URL prefix, before admitting any physical request.
+        let databases = sqlx::query("PRAGMA database_list").fetch_all(&pool).await?;
+        let durable = databases.iter().any(|row| {
+            row.get::<String, _>("name") == "main" && !row.get::<String, _>("file").is_empty()
+        });
+        if !durable {
+            bail!("gateway database must be durable and file-backed");
+        }
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS feeder_request_events (seq INTEGER PRIMARY KEY AUTOINCREMENT, request_id TEXT NOT NULL REFERENCES feeder_requests(request_id), event TEXT NOT NULL, created_at INTEGER NOT NULL DEFAULT (unixepoch()))",
+        ).execute(&pool).await?;
         Ok(Self { pool })
     }
 
-    pub async fn begin_request(&self, request_id: Uuid) -> Result<BeginRequestOutcome> {
-        let request_id = request_id.to_string();
-        let inserted = sqlx::query(
-            "INSERT OR IGNORE INTO feeder_requests(request_id, status) VALUES (?, 'pending')",
-        )
-        .bind(&request_id)
-        .execute(&self.pool)
-        .await
-        .context("failed persisting feeder request intent")?;
-        if inserted.rows_affected() == 1 {
-            return Ok(BeginRequestOutcome::New);
+    /// Serialize admission across every connection/process sharing this file.
+    /// The write lock is released before any OpenHAB I/O. A pending reservation
+    /// never expires: only authoritative reconciliation can release it.
+    pub async fn begin_request(
+        &self,
+        request_id: Uuid,
+        min_interval: Duration,
+        max_per_hour: u64,
+    ) -> Result<BeginRequestOutcome> {
+        let interval = i64::try_from(min_interval.as_secs())?;
+        let cap = i64::try_from(max_per_hour)?;
+        if interval < 5 || cap < 1 {
+            bail!("invalid gateway safety limits");
         }
-        match self.status_str(&request_id).await? {
-            Some("pending") => Ok(BeginRequestOutcome::Pending),
-            Some("acknowledged") => Ok(BeginRequestOutcome::Acknowledged),
-            Some(other) => bail!("gateway feeder request has invalid persisted status {other}"),
-            None => bail!("gateway feeder request disappeared after insert conflict"),
-        }
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let id = request_id.to_string();
+        let existing: Option<String> =
+            sqlx::query_scalar("SELECT status FROM feeder_requests WHERE request_id=?")
+                .bind(&id)
+                .fetch_optional(&mut *tx)
+                .await?;
+        let outcome = match existing.as_deref() {
+            Some("pending") => BeginRequestOutcome::Pending,
+            Some("acknowledged") => BeginRequestOutcome::Acknowledged,
+            Some(_) => bail!("invalid persisted gateway status"),
+            None => {
+                let pending: i64 = sqlx::query_scalar(
+                    "SELECT EXISTS(SELECT 1 FROM feeder_requests WHERE status='pending')",
+                )
+                .fetch_one(&mut *tx)
+                .await?;
+                if pending != 0 {
+                    // Includes every legacy pending row; never discard ambiguity.
+                    BeginRequestOutcome::Blocked
+                } else {
+                    let limited: i64 = sqlx::query_scalar(
+                        "SELECT EXISTS(SELECT 1 FROM feeder_requests WHERE updated_at > unixepoch()-?) OR (SELECT COUNT(*) FROM feeder_requests WHERE updated_at >= unixepoch()-3600) >= ?",
+                    ).bind(interval).bind(cap).fetch_one(&mut *tx).await?;
+                    if limited != 0 {
+                        BeginRequestOutcome::RateLimited
+                    } else {
+                        sqlx::query(
+                            "INSERT INTO feeder_requests(request_id,status) VALUES (?, 'pending')",
+                        )
+                        .bind(&id)
+                        .execute(&mut *tx)
+                        .await?;
+                        sqlx::query("INSERT INTO feeder_request_events(request_id,event) VALUES (?, 'reserved')")
+                            .bind(&id).execute(&mut *tx).await?;
+                        BeginRequestOutcome::New
+                    }
+                }
+            }
+        };
+        tx.commit()
+            .await
+            .context("failed committing gateway admission")?;
+        Ok(outcome)
     }
 
     pub async fn mark_acknowledged(&self, request_id: Uuid) -> Result<()> {
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let result = sqlx::query(
             "UPDATE feeder_requests SET status='acknowledged', updated_at=unixepoch() WHERE request_id=? AND status='pending'",
         )
         .bind(request_id.to_string())
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await
         .context("failed marking gateway feeder request acknowledged")?;
+        if result.rows_affected() == 1 {
+            sqlx::query(
+                "INSERT INTO feeder_request_events(request_id,event) VALUES (?, 'acknowledged')",
+            )
+            .bind(request_id.to_string())
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
         if result.rows_affected() == 1 {
             return Ok(());
         }
@@ -111,29 +175,6 @@ impl GatewayStore {
             Some("acknowledged") => Ok(Some(StoredRequestStatus::Acknowledged)),
             Some(other) => bail!("gateway feeder request has invalid persisted status {other}"),
         }
-    }
-
-    pub async fn last_acknowledged_at(&self) -> Result<Option<i64>> {
-        let row = sqlx::query(
-            "SELECT MAX(updated_at) AS last_ack FROM feeder_requests WHERE status='acknowledged'",
-        )
-        .fetch_one(&self.pool)
-        .await
-        .context("failed reading last gateway feeder acknowledgement")?;
-        row.try_get("last_ack")
-            .context("failed decoding last gateway feeder acknowledgement")
-    }
-
-    pub async fn acknowledged_since(&self, since_unix: i64) -> Result<u64> {
-        let row = sqlx::query(
-            "SELECT COUNT(*) AS count FROM feeder_requests WHERE status='acknowledged' AND updated_at >= ?",
-        )
-        .bind(since_unix)
-        .fetch_one(&self.pool)
-        .await
-        .context("failed counting recent gateway feeder acknowledgements")?;
-        let count: i64 = row.try_get("count")?;
-        u64::try_from(count).context("gateway acknowledged count is negative/out of range")
     }
 
     async fn status_str<'a>(&self, request_id: &'a str) -> Result<Option<&'a str>> {
@@ -171,19 +212,71 @@ mod tests {
         let (_directory, store) = store().await;
         let id = Uuid::new_v4();
         assert_eq!(
-            store.begin_request(id).await.unwrap(),
+            store
+                .begin_request(id, Duration::from_secs(5), 60)
+                .await
+                .unwrap(),
             BeginRequestOutcome::New
         );
         assert_eq!(
-            store.begin_request(id).await.unwrap(),
+            store
+                .begin_request(id, Duration::from_secs(5), 60)
+                .await
+                .unwrap(),
             BeginRequestOutcome::Pending
         );
         store.mark_acknowledged(id).await.unwrap();
         assert_eq!(
-            store.begin_request(id).await.unwrap(),
+            store
+                .begin_request(id, Duration::from_secs(5), 60)
+                .await
+                .unwrap(),
             BeginRequestOutcome::Acknowledged
         );
-        assert!(store.last_acknowledged_at().await.unwrap().is_some());
-        assert_eq!(store.acknowledged_since(0).await.unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn rejects_sqlite_memory_aliases() {
+        for url in [
+            "sqlite://:memory:",
+            "sqlite://test?mode=memory",
+            "sqlite://%3Amemory%3A",
+        ] {
+            assert!(GatewayStore::connect(url).await.is_err(), "{url}");
+        }
+    }
+
+    #[tokio::test]
+    async fn legacy_multiple_pending_rows_are_preserved_and_block_admission() {
+        let (_directory, store) = store().await;
+        let ids = [Uuid::new_v4(), Uuid::new_v4()];
+        for id in ids {
+            sqlx::query("INSERT INTO feeder_requests(request_id,status) VALUES (?, 'pending')")
+                .bind(id.to_string())
+                .execute(&store.pool)
+                .await
+                .unwrap();
+        }
+        for id in ids {
+            assert_eq!(
+                store
+                    .begin_request(id, Duration::from_secs(5), 60)
+                    .await
+                    .unwrap(),
+                BeginRequestOutcome::Pending
+            );
+        }
+        store.mark_acknowledged(ids[0]).await.unwrap();
+        assert_eq!(
+            store
+                .begin_request(Uuid::new_v4(), Duration::from_secs(5), 60)
+                .await
+                .unwrap(),
+            BeginRequestOutcome::Blocked
+        );
+        assert_eq!(
+            store.status(ids[1]).await.unwrap(),
+            Some(StoredRequestStatus::Pending)
+        );
     }
 }

@@ -129,6 +129,25 @@ Failure/unknown JSON shapes fail closed.
 
 ## Exactly-once and ambiguity
 
+F02 remediation: every gateway process for the same owner must share the same
+file-backed SQLite database on local durable storage. Admission uses a single
+`BEGIN IMMEDIATE` transaction for exact-ID lookup, the global pending guard,
+interval/hour capacity checks and request reservation. Only its committed winner
+may issue an OpenHAB command. Stop all older gateway binaries before upgrading;
+separate databases or old binaries are not a supported multi-instance topology.
+
+Any pending UUID blocks every new UUID indefinitely, including after restart,
+command timeout or failed acknowledgement persistence. Existing databases with
+multiple pending UUIDs are preserved and remain blocked until each resolves.
+Completion timestamps conservatively anchor cooldown/hour capacity. Same-ID
+POST/GET reconciliation never sends a command; successful reconciliation and
+reservation each append a durable `feeder_request_events` row in the same
+transaction as the state change. Replays do not duplicate audit rows or move
+completion timestamps. No public endpoint clears pending state as "not fed".
+
+This addresses shared-store admission, not F04's still-unverified physical
+completion contract. Existing acknowledgement parsing is not live acceptance.
+
 `lightning-goatsd` and the trusted gateway use the **same feed-attempt UUID**.
 
 1. `lightning-goatsd` commits feed intent UUID `X` in its durable ledger.

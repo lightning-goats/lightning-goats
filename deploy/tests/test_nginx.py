@@ -141,7 +141,7 @@ http {{
     include {cls.root}/canary.conf;
 }}
 """)
-        command = [cls.nginx, "-e", str(cls.root / "error.log"), "-p", str(cls.root), "-c", str(config)]
+        command = [cls.nginx, "-p", str(cls.root), "-c", str(config)]
         subprocess.run(command + ["-t"], check=True, capture_output=True, timeout=10)
         cls.process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         cls.addClassCleanup(cls.stop_nginx)

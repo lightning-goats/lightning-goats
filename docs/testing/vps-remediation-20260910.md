@@ -65,6 +65,19 @@ then passed as the development user with temporary loopback services.
 Raw development logs are retained outside the repository under
 `/home/linuxuser/lg-evidence/`; only sanitized summaries belong in this record.
 
+F02 source commit: `405dd852b5f93bfa8b4a311681b1bd4acd4e4db8`,
+[draft PR #32](https://github.com/lightning-goats/lightning-goats/pull/32).
+Local format, locked Clippy and full locked tests passed: 82 unit tests plus
+eight integration tests, including three real-gateway process tests. GitHub
+[Rust CI passed](https://github.com/lightning-goats/lightning-goats/actions/runs/34526370025)
+and [Security passed](https://github.com/lightning-goats/lightning-goats/actions/runs/34526369958).
+The [deployment run](https://github.com/lightning-goats/lightning-goats/actions/runs/34526369903)
+passed the real three-binary release build/archive/checksum/help smoke job, but
+its nginx job failed on Ubuntu 22.04's nginx 1.18: the new `-e` startup option is
+unsupported there. The follow-up removes that option while retaining all
+temporary-path overrides; all 11 tests pass locally again. Require green checks
+on the follow-up head before accepting the artifact gate.
+
 ## External dependencies and acceptance
 
 No authorized outbound SSH identity, home-owner fixture, authoritative website

@@ -409,3 +409,20 @@ Issue #16 may begin only when:
 - old VPS remains recoverable and is still the only active `10.8.0.1` hub;
 - final new-VPS `10.8.0.1` hub config is prepared but inactive;
 - production DNS remains unchanged until operator starts the cutover runbook.
+
+## F11/F12 corrected presentation acceptance
+
+Use the versioned cursor contract in `../architecture/overlay-stream.md`.
+Verify ordered gap replay before its checkpoint, deduplication, explicit resets
+for foreign/future/missing/oversized history, and restart-persistent stream IDs.
+Exercise actual WebSocket capacity and reuse after disconnect, receive-only input
+and frame limits, heartbeat survival beyond the edge timeout, missing Pong and
+slow-consumer closure. Repeat against the imported authoritative browser before
+closing site compatibility; Rust socket mocks alone do not satisfy that gate.
+
+Weather must reject stale first responses, stale repeats/restarts, future/regressed
+observations and malformed timestamps. Check explicit Fahrenheit versus converted
+Celsius, optional field units, array ordering, and invalid data not advancing the
+watermark. Weather failure or skipped replay must not affect credit/settlement or
+enter the Nostr outbox. The earlier optional-timestamp wording is superseded by
+mandatory actual-age validation in `../architecture/weather-overlay.md`.

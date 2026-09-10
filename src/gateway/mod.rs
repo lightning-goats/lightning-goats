@@ -9,3 +9,4 @@ pub use client::{
 };
 pub use server::{GatewayServerConfig, TrustedGateway};
 pub use weather::format_weather_message;
+pub(crate) use weather::{now_epoch, validate_observation_time};

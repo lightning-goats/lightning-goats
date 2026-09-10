@@ -146,16 +146,7 @@ impl OpenHabClient {
             return Ok(None);
         };
         let state = self.item_state(item).await?;
-        let number = state
-            .split_whitespace()
-            .next()
-            .context("OpenHAB temperature state is empty")?
-            .parse::<f64>()
-            .with_context(|| format!("OpenHAB temperature state is not numeric: {state:?}"))?;
-        if !number.is_finite() || !(-100.0..=150.0).contains(&number) {
-            bail!("OpenHAB temperature state is non-finite or out of range");
-        }
-        Ok(Some(number))
+        Ok(Some(parse_temperature_f(&state)?))
     }
 
     async fn item_state(&self, item: &str) -> Result<String> {
@@ -196,6 +187,31 @@ impl OpenHabClient {
         }
         Ok(())
     }
+}
+
+fn parse_temperature_f(raw: &str) -> Result<f64> {
+    let raw = raw.trim();
+    let (number, celsius) =
+        if let Some(value) = raw.strip_suffix("°F").or_else(|| raw.strip_suffix('F')) {
+            (value, false)
+        } else if let Some(value) = raw.strip_suffix("°C").or_else(|| raw.strip_suffix('C')) {
+            (value, true)
+        } else {
+            bail!("OpenHAB temperature must include explicit Celsius or Fahrenheit units");
+        };
+    let value: f64 = number
+        .trim()
+        .parse()
+        .context("invalid OpenHAB temperature number")?;
+    let fahrenheit = if celsius {
+        value * 9.0 / 5.0 + 32.0
+    } else {
+        value
+    };
+    if !fahrenheit.is_finite() || !(-100.0..=150.0).contains(&fahrenheit) {
+        bail!("OpenHAB temperature is non-finite or out of range");
+    }
+    Ok(fahrenheit)
 }
 
 fn validate_request_payload_template(template: &str) -> Result<()> {
@@ -362,6 +378,24 @@ mod tests {
             source_task.abort();
         }
         target_task.abort();
+    }
+
+    #[test]
+    fn temperature_requires_units_and_converts_celsius() {
+        for raw in ["20 °C", "20 C", "68 °F", "68F"] {
+            assert_eq!(parse_temperature_f(raw).unwrap(), 68.0);
+        }
+        for raw in [
+            "20",
+            "20 K",
+            "NaN °F",
+            "inf C",
+            "200 °F",
+            "20 °F garbage",
+            "20 C F",
+        ] {
+            assert!(parse_temperature_f(raw).is_err(), "{raw}");
+        }
     }
 
     #[test]

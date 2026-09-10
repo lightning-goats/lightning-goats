@@ -27,6 +27,8 @@ enum Command {
         #[arg(long, value_enum)]
         outcome: ReconcileOutcome,
     },
+    /// Invalidate overlay cursors after offline database restore, before restarting the daemon.
+    ResetOverlayStream,
     /// Print the current durable feed-credit accounting state.
     Status,
 }
@@ -44,6 +46,10 @@ async fn main() -> Result<()> {
     let ledger = LedgerStore::connect(&config.database.url).await?;
 
     match args.command {
+        Command::ResetOverlayStream => {
+            let id = ledger.reset_overlay_stream().await?;
+            println!("overlay_stream_id={id}");
+        }
         Command::ReconcileFeed { id, outcome } => match outcome {
             ReconcileOutcome::Fed => {
                 ledger.reconcile_unknown_as_fed(id).await?;

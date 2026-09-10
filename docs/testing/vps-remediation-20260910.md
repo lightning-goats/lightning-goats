@@ -298,3 +298,49 @@ full suite includes actual HTTP upload timeout and overload envelopes, daily
 budget age-out without history deletion, interrupted lease expiry and existing
 settlement recovery while public issuance is saturated. Its result and exact-head
 GitHub checks remain required before acceptance. No live system tests occurred.
+
+## F08 final evidence and F11/F12 continuation
+
+F08 source `672763db6d36c696424e24fab92989a7c1b95f8a` in
+[draft #36](https://github.com/lightning-goats/lightning-goats/pull/36) passed the
+full local locked suite: 101 library tests, two daemon HTTP tests, 15 integration
+tests, format and locked Clippy. All 11 deployment regressions passed.
+Exact-source [Rust CI](https://github.com/lightning-goats/lightning-goats/actions/runs/34533305207),
+[Security](https://github.com/lightning-goats/lightning-goats/actions/runs/34533305205), and
+[Deployment artifacts](https://github.com/lightning-goats/lightning-goats/actions/runs/34533305210)
+passed. This completes the earlier pending local-run record, not production acceptance.
+
+F11/F12 continues from that exact source on
+`remediation/phase1-overlay-weather-20260910`, same Fedora VPS/Rust 1.88 and
+isolated loopback-only environment. The first library run passed 109 tests,
+including actual WebSocket replay/reset/control-frame behavior and 76-second
+quiet heartbeat survival. The final candidate additionally checks stream identity
+persistence, socket saturation/reuse through the daemon's real router, unread
+output deadlines, weather expiry while queued and restore sequence reuse.
+
+The overlay has versioned last-sequence resume, ordered bounded replay before a
+consistent checkpoint, explicit reset markers, per-send deadlines, receive-only
+input, Ping/Pong liveness and bounded socket lifetime. See
+`../architecture/overlay-stream.md` for client deduplication/reset rules.
+
+Weather uses parsed observation age, bounded future skew and a durable monotonic
+watermark, including on first read and restart. Invalid observations do not
+advance the watermark. Normalized keys declare units; explicit Celsius is
+converted to Fahrenheit and unitless OpenHAB display states are rejected.
+Stale weather replay preserves the cursor with a skip marker. These presentation
+changes do not create ledger credit, feed attempts or Nostr outbox entries.
+
+Independent candidate review found two concrete transitions: queued weather may
+expire before sending, and restoring older history may reuse acknowledged
+sequences. Freshness is now checked again when dequeued. Offline restore must run
+`lightning-goatsctl --config <restored-config> reset-overlay-stream` before any
+daemon starts, rotating only presentation identity. Ordinary process restarts
+retain identity for resume. Raw database rollback without that step is unsupported.
+Regression tests cover both transitions; final locked suite/exact-head CI results
+must be attached after completion. Logs: `/home/linuxuser/lg-evidence/f11-f12-*`.
+
+Actual weather/owner fixtures, authoritative website/browser behavior, network
+containment, clean install, paired-store restore and signer acceptance remain
+separate gates. No tunnel was activated, no production settings changed, no real
+provider invoice/payment created and no physical owner contacted. Production HOLD
+and parent #6/#15/#16 remain open. Keep the stack draft until integrated review.

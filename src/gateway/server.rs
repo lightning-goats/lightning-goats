@@ -140,6 +140,7 @@ impl TrustedGateway {
         let weather = WeatherAdapter::new(
             &config.weather.url,
             Duration::from_secs(config.weather.max_stale_seconds),
+            store.clone(),
         )?;
         Ok(Self {
             state: GatewayState {

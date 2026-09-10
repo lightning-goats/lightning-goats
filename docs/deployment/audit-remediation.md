@@ -149,3 +149,20 @@ rejection. It does not close F11 idle/replay behavior or F12 observation correct
 The rolling daily budget and historical storage policy require operator sizing
 review; recovery is available even when new issuance is refused. Final source-
 pinned results belong in the VPS evidence before accepting the gate.
+
+### F11/F12 source continuation (2026-09-10 VPS)
+
+The candidate stacked on F08 source `672763db6d36c696424e24fab92989a7c1b95f8a`
+adds versioned bounded overlay resume/replay, explicit resets, heartbeat and
+connection/write/input limits, plus timestamp-based weather age/future/regression
+checks with durable watermark and explicit units. A queued weather event is
+revalidated immediately before transmission; stale data becomes a cursor-preserving
+skip. Offline restore must rotate overlay identity before startup to prevent
+acknowledged sequence reuse; ordinary restart preserves resume identity.
+
+See `../testing/vps-remediation-20260910.md` and
+`../architecture/overlay-stream.md` for implementation/test evidence and exact
+client obligations. The authoritative browser and live normalized source have
+not been observed; F11/F12 staging acceptance remains open. This does not close
+F04 physical binding, F09 home-enforced containment, source import or final clean
+install/restore/signer gates. Production remains HOLD.

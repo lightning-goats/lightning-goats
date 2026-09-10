@@ -22,7 +22,7 @@ use lightning_goats::{
     lnurl::{LnurlErrorResponse, LnurlService, LnurlServiceError},
     messaging::{run_message_processor, run_outbox_publisher},
     nostr::NakClient,
-    overlay::serve_overlay_socket,
+    overlay::{OverlayResume, serve_overlay_socket},
     presentation::MessageRenderer,
     strike::StrikeRuntime,
 };
@@ -401,7 +401,14 @@ async fn strike_webhook(
     }
 }
 
-async fn overlay_ws(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
+async fn overlay_ws(
+    ws: WebSocketUpgrade,
+    State(state): State<AppState>,
+    Query(resume): Query<OverlayResume>,
+) -> Response {
+    if resume.validate().is_err() {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
     let Ok(permit) = state.overlay_slots.clone().try_acquire_owned() else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
@@ -414,7 +421,8 @@ async fn overlay_ws(ws: WebSocketUpgrade, State(state): State<AppState>) -> Resp
         .max_write_buffer_size(65536)
         .on_upgrade(move |socket| async move {
             let _permit = permit;
-            if let Err(error) = serve_overlay_socket(socket, ledger, renderer, threshold_sats).await
+            if let Err(error) =
+                serve_overlay_socket(socket, ledger, renderer, threshold_sats, resume).await
             {
                 tracing::warn!(%error, "overlay websocket disconnected after server-side error");
             }
@@ -584,6 +592,49 @@ mod tests {
             .unwrap();
         assert!(response.starts_with("HTTP/1.1 413"), "{response}");
         assert_eq!(calls.load(Ordering::SeqCst), 0);
+        // Actual application upgrade route: permits last for the whole socket.
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::{connect_async, tungstenite::Message};
+        let websocket_url = format!("ws://{address}/ws/overlay");
+        let mut sockets = Vec::new();
+        for _ in 0..32 {
+            let (mut socket, _) = connect_async(&websocket_url).await.unwrap();
+            assert!(matches!(
+                socket.next().await.unwrap().unwrap(),
+                Message::Text(_)
+            ));
+            sockets.push(socket);
+        }
+        let error = connect_async(&websocket_url).await.unwrap_err();
+        match error {
+            tokio_tungstenite::tungstenite::Error::Http(response) => {
+                assert_eq!(response.status(), 503)
+            }
+            _ => panic!("{error}"),
+        }
+        let mut oversized_socket = sockets.pop().unwrap();
+        oversized_socket
+            .send(Message::Binary(vec![0; 1025].into()))
+            .await
+            .unwrap();
+        assert!(matches!(
+            tokio::time::timeout(Duration::from_secs(2), oversized_socket.next())
+                .await
+                .unwrap(),
+            Some(Err(_)) | None | Some(Ok(Message::Close(_)))
+        ));
+        let (mut replacement, _) = connect_async(&websocket_url).await.unwrap();
+        assert!(matches!(
+            replacement.next().await.unwrap().unwrap(),
+            Message::Text(_)
+        ));
+        replacement.close(None).await.unwrap();
+        for mut socket in sockets {
+            socket.close(None).await.unwrap();
+        }
+        assert_eq!(ledger.feed_credit_sats().await.unwrap(), 0);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+
         let mut slow = tokio::net::TcpStream::connect(address).await.unwrap();
         slow.write_all(format!("POST /api/v1/strike/webhook HTTP/1.1\r\nHost: {address}\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n100\r\nx").as_bytes()).await.unwrap();
         let mut timed_out = String::new();

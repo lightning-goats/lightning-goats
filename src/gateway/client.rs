@@ -72,24 +72,32 @@ impl FeedRequestStatus {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WeatherSnapshot {
     pub observed_at: String,
+    #[serde(rename = "temperature_f")]
     pub temperature: f64,
     pub humidity: u64,
+    #[serde(rename = "wind_speed_mph")]
     pub wind_speed: f64,
     pub wind_direction: String,
     pub uv_index: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "apparent_temperature_f")]
     pub apparent_temperature: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "wind_gust_mph")]
     pub wind_gust: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "pressure_relative_inhg")]
     pub pressure_relative: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pressure_trend: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "rain_hourly_in")]
     pub rain_hourly: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "rain_daily_in")]
     pub rain_daily: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "solar_radiation_w_m2")]
     pub solar_radiation: Option<f64>,
 }
 
@@ -201,7 +209,9 @@ impl GatewayClient {
 
     pub async fn weather(&self) -> Result<WeatherSnapshot> {
         let endpoint = self.base_url.join("v1/weather")?;
-        self.get_json(endpoint, "weather").await
+        let snapshot = self.get_json(endpoint, "weather").await?;
+        super::weather::validate_snapshot(&snapshot)?;
+        Ok(snapshot)
     }
 
     async fn get_json<T: for<'de> Deserialize<'de>>(

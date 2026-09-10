@@ -185,3 +185,14 @@ streaming OpenHAB bounds and redirect rejection. The daily issuance budget is
 Operator capacity/archival planning remains required for historical storage. Settlement
 recovery remains independent. See the VPS evidence; F11 replay/heartbeat, F12
 weather correctness, owner fixtures and final staging gates remain outstanding.
+
+F11/F12 continuation starts at `672763db6d36c696424e24fab92989a7c1b95f8a`
+(draft #36, Rust/Security/Deployment all passed). It adds bounded versioned
+WebSocket replay/heartbeat and actual weather age/units. Follow the explicit
+protocol in `../architecture/overlay-stream.md`; browser acceptance awaits the
+authoritative website. After offline ledger restore, before any daemon restarts,
+run `lightning-goatsctl --config <restored-config> reset-overlay-stream` so events
+reusing old sequence numbers cannot be silently skipped by old clients. This
+only rotates presentation identity; never clear unresolved physical requests,
+issued requests, settlements or signed outbox evidence to recover availability.
+Keep all drafts pending integrated review and the remaining acceptance gates.

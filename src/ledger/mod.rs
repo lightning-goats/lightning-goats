@@ -15,6 +15,7 @@ use crate::domain::payment::SettledPayment;
 mod events;
 mod feed;
 mod outbox;
+mod overlay;
 mod strike;
 pub use events::DurableEvent;
 use events::append_event_in_transaction;

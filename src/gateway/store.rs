@@ -72,7 +72,22 @@ impl GatewayStore {
         ).execute(&pool).await?;
         sqlx::query("CREATE TABLE IF NOT EXISTS feeder_refusals (request_id TEXT PRIMARY KEY, refusal_json TEXT NOT NULL, created_at INTEGER NOT NULL DEFAULT (unixepoch()))")
             .execute(&pool).await?;
+        sqlx::query("CREATE TABLE IF NOT EXISTS weather_high_water (singleton INTEGER PRIMARY KEY CHECK(singleton=1), observed_at INTEGER NOT NULL)").execute(&pool).await?;
         Ok(Self { pool })
+    }
+
+    pub(super) async fn accept_weather_time(&self, epoch: i64) -> Result<()> {
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let previous: Option<i64> =
+            sqlx::query_scalar("SELECT observed_at FROM weather_high_water WHERE singleton=1")
+                .fetch_optional(&mut *tx)
+                .await?;
+        if previous.is_some_and(|value| epoch < value) {
+            bail!("weather observation timestamp regressed");
+        }
+        sqlx::query("INSERT INTO weather_high_water(singleton,observed_at) VALUES (1,?) ON CONFLICT(singleton) DO UPDATE SET observed_at=excluded.observed_at").bind(epoch).execute(&mut *tx).await?;
+        tx.commit().await?;
+        Ok(())
     }
 
     /// Serialize admission across every connection/process sharing this file.

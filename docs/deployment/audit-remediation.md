@@ -54,6 +54,13 @@ two OpenHAB mock commands on the handoff code and pass after the correction.
 F03/F04 remain open; this does not accept the current physical owner binding.
 The deployment test harness also isolates Fedora nginx's default temporary paths.
 
+F03 follow-up adds correlated outcomes, immutable no-dispatch tombstones,
+restart-safe cooldown and GET-only recovery of unresolved attempts. Shipped
+canary timing is now 5s/5s. Real daemon → real gateway → harmless mock OpenHAB
+tests establish two commands/two confirmations/340 sats from 2340 synthetic
+sats, plus response loss, restart and confirmation-write failure recovery.
+F04's live owner binding and complete staging/physical acceptance remain open.
+
 ## Home network acceptance (F09)
 
 Inventory the trusted home host before proposing changes: WireGuard interface,

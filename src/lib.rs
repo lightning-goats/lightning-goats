@@ -14,3 +14,5 @@ pub mod overlay;
 pub mod presentation;
 pub mod secrets;
 pub mod strike;
+
+pub mod http;

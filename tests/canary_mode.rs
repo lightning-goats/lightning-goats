@@ -5,8 +5,7 @@ use std::sync::{
 
 use axum::{
     Json, Router,
-    extract::State,
-    http::StatusCode,
+    extract::{Path, State},
     response::IntoResponse,
     routing::{get, post},
 };
@@ -14,7 +13,7 @@ use lightning_goats::{
     config::RuntimeMode,
     domain::payment::SettledPayment,
     feeder::{FeedWorkerStep, run_feed_step},
-    gateway::{FeederSafety, GatewayClient},
+    gateway::{FeedOutcome, FeedRequestStatus, FeederSafety, GatewayClient},
     ledger::{LedgerStore, SettlementOutcome},
 };
 use tempfile::TempDir;
@@ -32,9 +31,16 @@ async fn safety_handler() -> Json<FeederSafety> {
     })
 }
 
-async fn feed_handler(State(state): State<GatewayState>) -> impl IntoResponse {
+async fn feed_handler(
+    State(state): State<GatewayState>,
+    Path(id): Path<uuid::Uuid>,
+) -> impl IntoResponse {
     state.requests.fetch_add(1, Ordering::SeqCst);
-    StatusCode::NO_CONTENT
+    Json(FeedRequestStatus {
+        request_id: id,
+        status: FeedOutcome::Confirmed,
+        refusal: None,
+    })
 }
 
 #[tokio::test]

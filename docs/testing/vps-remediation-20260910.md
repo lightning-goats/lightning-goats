@@ -101,3 +101,32 @@ only loopback and the public interface, with no existing WireGuard listener.
 A new restricted local key/config was prepared and syntax-checked, outside Git.
 Peer-address reservation and hub registration remain pending; no tunnel, route,
 firewall rule, existing peer identity or production endpoint was changed.
+
+## F03 isolated recovery evidence
+
+The follow-up branch `remediation/phase1-correlated-recovery-20260910` starts at
+the F02 review head `6ac9363f8951ad232fc9a4e48380de90e2f06748`. All three GitHub
+workflows passed for that F02 head:
+[Rust](https://github.com/lightning-goats/lightning-goats/actions/runs/34526938256),
+[Security](https://github.com/lightning-goats/lightning-goats/actions/runs/34526938289),
+[Deployment](https://github.com/lightning-goats/lightning-goats/actions/runs/34526938376).
+
+Six process integration cases pass locally for the F03 candidate. In addition
+to the F02 cases, the actual daemon binary and actual gateway binary, configured
+from shipped canary examples with loopback paths and synthetic credentials,
+produced exactly two mock commands and two `feeder_confirmed` events from
+2340 synthetic sats, retaining 340 sats across daemon restart. The shipped
+five-second inter-feed/minimum timing is used. No real payment was initiated.
+
+Additional process cases lose the response after the mock command, restart the
+daemon, inject a failed confirmation transaction, then reconcile a late result
+with the original UUID and exactly one command/debit. A lost 429 refusal is
+recovered through GET, its cooldown survives daemon restart, and replay of the
+refused UUID remains terminal after capacity becomes available. Synthetic
+database timestamps are advanced for hour/cooldown tests; the host clock is not
+changed. Unit cases exercise contradictory/wrong-UUID/legacy responses and a
+same-ID admission race with conflicting safety snapshots.
+
+The independent candidate review found no concrete F03 bypass. F04 remains open:
+these results establish the internal protocol with a harmless echo fixture,
+not receipt-versus-completion behavior of the actual household owner.

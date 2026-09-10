@@ -64,6 +64,15 @@ impl LedgerStore {
             bail!("unresolved feed attempt {id} is still {status}");
         }
 
+        let cooling: i64 = sqlx::query_scalar(
+            "SELECT resume_after > unixepoch() FROM feeder_cooldown WHERE singleton=1",
+        )
+        .fetch_one(&mut *transaction)
+        .await?;
+        if cooling != 0 {
+            transaction.commit().await?;
+            return Ok(None);
+        }
         let credit = feed_credit_in_transaction(&mut transaction).await?;
         if credit < threshold_sats {
             transaction.commit().await?;
@@ -153,6 +162,34 @@ impl LedgerStore {
         )
         .await?;
         transaction.commit().await?;
+        Ok(())
+    }
+
+    /// Only call with a correlated terminal gateway no-dispatch result.
+    /// Preserve the attempt, credit and a restart-safe cooldown in one commit.
+    pub async fn resolve_feed_not_dispatched(
+        &self,
+        id: Uuid,
+        retry_after_seconds: u64,
+    ) -> Result<()> {
+        if !(1..=86_400).contains(&retry_after_seconds) {
+            bail!("invalid feeder cooldown");
+        }
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let changed = sqlx::query("UPDATE feed_attempts SET status='reconciled_not_fed', resolved_at=unixepoch(), error=NULL WHERE id=? AND status IN ('intent_committed','unknown')")
+            .bind(id.to_string()).execute(&mut *tx).await?;
+        if changed.rows_affected() != 1 {
+            bail!("feed attempt changed before no-dispatch resolution");
+        }
+        sqlx::query("UPDATE feeder_cooldown SET resume_after=MAX(resume_after,unixepoch()+?) WHERE singleton=1")
+            .bind(i64::try_from(retry_after_seconds)?).execute(&mut *tx).await?;
+        append_event_in_transaction(
+            &mut tx,
+            "feeder_not_dispatched",
+            &json!({"feed_attempt_id":id,"retry_after_seconds":retry_after_seconds}),
+        )
+        .await?;
+        tx.commit().await?;
         Ok(())
     }
 

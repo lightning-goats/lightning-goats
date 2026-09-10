@@ -1,5 +1,6 @@
 use std::{str::FromStr, time::Duration};
 
+use super::client::{FeedRefusal, RefusalReason};
 use anyhow::{Context, Result, bail};
 use sqlx::{
     Row, SqlitePool,
@@ -17,23 +18,14 @@ pub enum BeginRequestOutcome {
     New,
     Pending,
     Acknowledged,
-    Blocked,
-    RateLimited,
+    NotDispatched(FeedRefusal),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StoredRequestStatus {
     Pending,
     Acknowledged,
-}
-
-impl StoredRequestStatus {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Acknowledged => "acknowledged",
-        }
-    }
+    NotDispatched(FeedRefusal),
 }
 
 impl GatewayStore {
@@ -78,6 +70,8 @@ impl GatewayStore {
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS feeder_request_events (seq INTEGER PRIMARY KEY AUTOINCREMENT, request_id TEXT NOT NULL REFERENCES feeder_requests(request_id), event TEXT NOT NULL, created_at INTEGER NOT NULL DEFAULT (unixepoch()))",
         ).execute(&pool).await?;
+        sqlx::query("CREATE TABLE IF NOT EXISTS feeder_refusals (request_id TEXT PRIMARY KEY, refusal_json TEXT NOT NULL, created_at INTEGER NOT NULL DEFAULT (unixepoch()))")
+            .execute(&pool).await?;
         Ok(Self { pool })
     }
 
@@ -89,6 +83,7 @@ impl GatewayStore {
         request_id: Uuid,
         min_interval: Duration,
         max_per_hour: u64,
+        safety_refusal: bool,
     ) -> Result<BeginRequestOutcome> {
         let interval = i64::try_from(min_interval.as_secs())?;
         let cap = i64::try_from(max_per_hour)?;
@@ -102,36 +97,66 @@ impl GatewayStore {
                 .bind(&id)
                 .fetch_optional(&mut *tx)
                 .await?;
+        let refusal: Option<String> =
+            sqlx::query_scalar("SELECT refusal_json FROM feeder_refusals WHERE request_id=?")
+                .bind(&id)
+                .fetch_optional(&mut *tx)
+                .await?;
         let outcome = match existing.as_deref() {
             Some("pending") => BeginRequestOutcome::Pending,
             Some("acknowledged") => BeginRequestOutcome::Acknowledged,
             Some(_) => bail!("invalid persisted gateway status"),
+            None if refusal.is_some() => BeginRequestOutcome::NotDispatched(serde_json::from_str(
+                refusal.as_deref().unwrap(),
+            )?),
             None => {
                 let pending: i64 = sqlx::query_scalar(
                     "SELECT EXISTS(SELECT 1 FROM feeder_requests WHERE status='pending')",
                 )
                 .fetch_one(&mut *tx)
                 .await?;
-                if pending != 0 {
-                    // Includes every legacy pending row; never discard ambiguity.
-                    BeginRequestOutcome::Blocked
+                let delay: i64 = sqlx::query_scalar(
+                    "SELECT MAX(0, COALESCE((SELECT MAX(updated_at)+?-unixepoch() FROM feeder_requests),0), CASE WHEN (SELECT COUNT(*) FROM feeder_requests WHERE updated_at >= unixepoch()-3600) >= ? THEN COALESCE((SELECT MIN(updated_at)+3601-unixepoch() FROM feeder_requests WHERE updated_at >= unixepoch()-3600),0) ELSE 0 END)",
+                ).bind(interval).bind(cap).fetch_one(&mut *tx).await?;
+                let refusal = if safety_refusal {
+                    Some(FeedRefusal {
+                        reason: RefusalReason::Safety,
+                        retry_after_seconds: 5,
+                    })
+                } else if pending != 0 {
+                    Some(FeedRefusal {
+                        reason: RefusalReason::Unresolved,
+                        retry_after_seconds: 5,
+                    })
+                } else if delay > 0 {
+                    Some(FeedRefusal {
+                        reason: RefusalReason::Capacity,
+                        retry_after_seconds: u64::try_from(delay)?.min(86_400),
+                    })
                 } else {
-                    let limited: i64 = sqlx::query_scalar(
-                        "SELECT EXISTS(SELECT 1 FROM feeder_requests WHERE updated_at > unixepoch()-?) OR (SELECT COUNT(*) FROM feeder_requests WHERE updated_at >= unixepoch()-3600) >= ?",
-                    ).bind(interval).bind(cap).fetch_one(&mut *tx).await?;
-                    if limited != 0 {
-                        BeginRequestOutcome::RateLimited
-                    } else {
-                        sqlx::query(
-                            "INSERT INTO feeder_requests(request_id,status) VALUES (?, 'pending')",
-                        )
-                        .bind(&id)
-                        .execute(&mut *tx)
-                        .await?;
-                        sqlx::query("INSERT INTO feeder_request_events(request_id,event) VALUES (?, 'reserved')")
-                            .bind(&id).execute(&mut *tx).await?;
-                        BeginRequestOutcome::New
-                    }
+                    None
+                };
+                if let Some(refusal) = refusal {
+                    // Terminal tombstone: no later replay of this UUID can dispatch,
+                    // even if concurrent callers observed different safety states.
+                    sqlx::query(
+                        "INSERT INTO feeder_refusals(request_id,refusal_json) VALUES (?,?)",
+                    )
+                    .bind(&id)
+                    .bind(serde_json::to_string(&refusal)?)
+                    .execute(&mut *tx)
+                    .await?;
+                    BeginRequestOutcome::NotDispatched(refusal)
+                } else {
+                    sqlx::query(
+                        "INSERT INTO feeder_requests(request_id,status) VALUES (?, 'pending')",
+                    )
+                    .bind(&id)
+                    .execute(&mut *tx)
+                    .await?;
+                    sqlx::query("INSERT INTO feeder_request_events(request_id,event) VALUES (?, 'reserved')")
+                        .bind(&id).execute(&mut *tx).await?;
+                    BeginRequestOutcome::New
                 }
             }
         };
@@ -170,7 +195,21 @@ impl GatewayStore {
 
     pub async fn status(&self, request_id: Uuid) -> Result<Option<StoredRequestStatus>> {
         match self.status_str(&request_id.to_string()).await? {
-            None => Ok(None),
+            None => {
+                let refusal: Option<String> = sqlx::query_scalar(
+                    "SELECT refusal_json FROM feeder_refusals WHERE request_id=?",
+                )
+                .bind(request_id.to_string())
+                .fetch_optional(&self.pool)
+                .await?;
+                refusal
+                    .map(|v| {
+                        serde_json::from_str(&v)
+                            .map(StoredRequestStatus::NotDispatched)
+                            .map_err(Into::into)
+                    })
+                    .transpose()
+            }
             Some("pending") => Ok(Some(StoredRequestStatus::Pending)),
             Some("acknowledged") => Ok(Some(StoredRequestStatus::Acknowledged)),
             Some(other) => bail!("gateway feeder request has invalid persisted status {other}"),
@@ -213,14 +252,14 @@ mod tests {
         let id = Uuid::new_v4();
         assert_eq!(
             store
-                .begin_request(id, Duration::from_secs(5), 60)
+                .begin_request(id, Duration::from_secs(5), 60, false)
                 .await
                 .unwrap(),
             BeginRequestOutcome::New
         );
         assert_eq!(
             store
-                .begin_request(id, Duration::from_secs(5), 60)
+                .begin_request(id, Duration::from_secs(5), 60, false)
                 .await
                 .unwrap(),
             BeginRequestOutcome::Pending
@@ -228,7 +267,7 @@ mod tests {
         store.mark_acknowledged(id).await.unwrap();
         assert_eq!(
             store
-                .begin_request(id, Duration::from_secs(5), 60)
+                .begin_request(id, Duration::from_secs(5), 60, false)
                 .await
                 .unwrap(),
             BeginRequestOutcome::Acknowledged
@@ -260,7 +299,7 @@ mod tests {
         for id in ids {
             assert_eq!(
                 store
-                    .begin_request(id, Duration::from_secs(5), 60)
+                    .begin_request(id, Duration::from_secs(5), 60, false)
                     .await
                     .unwrap(),
                 BeginRequestOutcome::Pending
@@ -269,14 +308,54 @@ mod tests {
         store.mark_acknowledged(ids[0]).await.unwrap();
         assert_eq!(
             store
-                .begin_request(Uuid::new_v4(), Duration::from_secs(5), 60)
+                .begin_request(Uuid::new_v4(), Duration::from_secs(5), 60, false)
                 .await
                 .unwrap(),
-            BeginRequestOutcome::Blocked
+            BeginRequestOutcome::NotDispatched(FeedRefusal {
+                reason: RefusalReason::Unresolved,
+                retry_after_seconds: 5
+            })
         );
         assert_eq!(
             store.status(ids[1]).await.unwrap(),
             Some(StoredRequestStatus::Pending)
         );
+    }
+    #[tokio::test]
+    async fn same_uuid_safety_race_has_one_immutable_decision() {
+        let (directory, a) = store().await;
+        let b = GatewayStore::connect(&format!(
+            "sqlite://{}",
+            directory.path().join("gateway.db").display()
+        ))
+        .await
+        .unwrap();
+        let id = Uuid::new_v4();
+        let (one, two) = tokio::join!(
+            a.begin_request(id, Duration::from_secs(5), 60, true),
+            b.begin_request(id, Duration::from_secs(5), 60, false)
+        );
+        let results = [one.unwrap(), two.unwrap()];
+        if results
+            .iter()
+            .any(|r| matches!(r, BeginRequestOutcome::New))
+        {
+            assert!(
+                results
+                    .iter()
+                    .all(|r| !matches!(r, BeginRequestOutcome::NotDispatched(_)))
+            );
+        } else {
+            assert!(
+                results
+                    .iter()
+                    .all(|r| matches!(r, BeginRequestOutcome::NotDispatched(_)))
+            );
+        }
+        let replay = a
+            .begin_request(id, Duration::from_secs(5), 60, false)
+            .await
+            .unwrap();
+        assert_ne!(replay, BeginRequestOutcome::New);
     }
 }

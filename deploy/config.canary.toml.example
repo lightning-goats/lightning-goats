@@ -67,7 +67,7 @@ max_sendable_msat = 1000000000
 
 [feeder]
 threshold_sats = 1000
-inter_feed_delay_seconds = 2
+inter_feed_delay_seconds = 5
 
 # Separate in-house canary gateway, configured with harmless request/ack Items.
 # Do NOT point canary mode at the production physical-feeder gateway.

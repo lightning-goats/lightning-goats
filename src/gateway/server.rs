@@ -14,13 +14,13 @@ use axum::{
     routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
-use tokio::time::{Instant, sleep};
+use tokio::time::{Instant, sleep, timeout, timeout_at};
 use uuid::Uuid;
 
 use crate::openhab::{OpenHabClient, TrustedOpenHabConfig};
 
 use super::{
-    client::{FeedRequestStatus, FeederSafety},
+    client::{FeedOutcome, FeedRefusal, FeedRequestStatus, FeederSafety, RefusalReason},
     store::{BeginRequestOutcome, GatewayStore, StoredRequestStatus},
     weather::WeatherAdapter,
 };
@@ -205,70 +205,98 @@ async fn feed_request(
     AxumPath(request_id): AxumPath<Uuid>,
     State(state): State<GatewayState>,
 ) -> Response {
+    match timeout(
+        Duration::from_secs(140),
+        submit_feed_request(request_id, state),
+    )
+    .await
+    {
+        Ok(response) => response,
+        Err(_) => outcome_response(
+            StatusCode::GATEWAY_TIMEOUT,
+            request_id,
+            FeedOutcome::Ambiguous,
+        ),
+    }
+}
+
+async fn submit_feed_request(request_id: Uuid, state: GatewayState) -> Response {
     match state.store.status(request_id).await {
-        Ok(Some(StoredRequestStatus::Acknowledged)) => {
-            return StatusCode::NO_CONTENT.into_response();
-        }
-        Ok(Some(StoredRequestStatus::Pending)) => {
-            return handle_existing_pending(&state, request_id).await;
-        }
+        Ok(Some(status)) => return existing_response(&state, request_id, status).await,
         Ok(None) => {}
         Err(error) => return internal_failure("Unable to read feeder request status", error),
     }
-
-    let safety = match state.openhab.feeder_safety().await {
-        Ok((override_enabled, remote_enabled)) => FeederSafety {
-            override_enabled,
-            remote_enabled,
-        },
-        Err(error) => return internal_failure("OpenHAB feeder safety unavailable", error),
-    };
-    if safety.override_enabled {
-        return public_error(StatusCode::LOCKED, "FeederOverride is ON");
-    }
-    if !safety.remote_enabled {
-        return public_error(
-            StatusCode::LOCKED,
-            "Lightning Goats remote feeding is disabled",
-        );
-    }
+    let safety_refusal = !matches!(state.openhab.feeder_safety().await, Ok((false, true)));
     match state
         .store
         .begin_request(
             request_id,
             state.min_feed_interval,
             state.max_feeds_per_hour,
+            safety_refusal,
         )
         .await
     {
         Ok(BeginRequestOutcome::New) => {}
-        Ok(BeginRequestOutcome::Blocked) => {
-            return public_error(
-                StatusCode::LOCKED,
-                "Another feeder request remains unresolved",
-            );
+        Ok(BeginRequestOutcome::NotDispatched(refusal)) => {
+            return refusal_response(request_id, refusal);
         }
-        Ok(BeginRequestOutcome::RateLimited) => {
-            return public_error(
-                StatusCode::TOO_MANY_REQUESTS,
-                "Local feeder safety capacity unavailable",
-            );
+        Ok(BeginRequestOutcome::Acknowledged) => {
+            return outcome_response(StatusCode::OK, request_id, FeedOutcome::Confirmed);
         }
-        Ok(BeginRequestOutcome::Acknowledged) => return StatusCode::NO_CONTENT.into_response(),
         Ok(BeginRequestOutcome::Pending) => {
             return handle_existing_pending(&state, request_id).await;
         }
-        Err(error) => return internal_failure("Unable to persist feeder request", error),
+        Err(error) => return internal_failure("Unable to persist feeder admission", error),
     }
-
     if let Err(error) = state.openhab.command_feeder_request(request_id).await {
-        return internal_failure(
-            "OpenHAB feeder command failed after durable intent; outcome is ambiguous",
-            error,
-        );
+        tracing::warn!(%error, "command outcome ambiguous after durable admission");
+        return outcome_response(StatusCode::CONFLICT, request_id, FeedOutcome::Ambiguous);
     }
-
     wait_for_ack(&state, request_id).await
+}
+
+async fn existing_response(
+    state: &GatewayState,
+    id: Uuid,
+    status: StoredRequestStatus,
+) -> Response {
+    match status {
+        StoredRequestStatus::Acknowledged => {
+            outcome_response(StatusCode::OK, id, FeedOutcome::Confirmed)
+        }
+        StoredRequestStatus::Pending => handle_existing_pending(state, id).await,
+        StoredRequestStatus::NotDispatched(refusal) => refusal_response(id, refusal),
+    }
+}
+
+fn outcome_response(code: StatusCode, request_id: Uuid, status: FeedOutcome) -> Response {
+    (
+        code,
+        Json(FeedRequestStatus {
+            request_id,
+            status,
+            refusal: None,
+        }),
+    )
+        .into_response()
+}
+
+fn refusal_response(request_id: Uuid, refusal: FeedRefusal) -> Response {
+    let code = if refusal.reason == RefusalReason::Capacity {
+        StatusCode::TOO_MANY_REQUESTS
+    } else {
+        StatusCode::LOCKED
+    };
+    (
+        code,
+        Json(FeedRequestStatus {
+            request_id,
+            status: FeedOutcome::NotDispatched,
+            refusal: Some(refusal),
+        }),
+    )
+        .into_response()
 }
 
 async fn handle_existing_pending(state: &GatewayState, request_id: Uuid) -> Response {
@@ -277,12 +305,9 @@ async fn handle_existing_pending(state: &GatewayState, request_id: Uuid) -> Resp
             if let Err(error) = state.store.mark_acknowledged(request_id).await {
                 return internal_failure("Unable to persist feeder acknowledgement", error);
             }
-            StatusCode::NO_CONTENT.into_response()
+            outcome_response(StatusCode::OK, request_id, FeedOutcome::Confirmed)
         }
-        Ok(false) => public_error(
-            StatusCode::CONFLICT,
-            "Feeder request already exists in pending/ambiguous state; command was not resent",
-        ),
+        Ok(false) => outcome_response(StatusCode::ACCEPTED, request_id, FeedOutcome::Pending),
         Err(error) => internal_failure("OpenHAB feeder acknowledgement unavailable", error),
     }
 }
@@ -290,28 +315,31 @@ async fn handle_existing_pending(state: &GatewayState, request_id: Uuid) -> Resp
 async fn wait_for_ack(state: &GatewayState, request_id: Uuid) -> Response {
     let deadline = Instant::now() + state.ack_timeout;
     loop {
-        match ack_matches(state, request_id).await {
-            Ok(true) => {
+        match timeout_at(deadline, ack_matches(state, request_id)).await {
+            Ok(Ok(true)) => {
                 if let Err(error) = state.store.mark_acknowledged(request_id).await {
                     return internal_failure("Unable to persist feeder acknowledgement", error);
                 }
-                return StatusCode::NO_CONTENT.into_response();
+                return outcome_response(StatusCode::OK, request_id, FeedOutcome::Confirmed);
             }
-            Ok(false) => {}
-            Err(error) => {
-                return internal_failure(
-                    "OpenHAB acknowledgement read failed after feeder command; outcome is ambiguous",
-                    error,
-                );
+            Ok(Ok(false)) => {}
+            Ok(Err(_)) | Err(_) => {
+                return outcome_response(StatusCode::CONFLICT, request_id, FeedOutcome::Ambiguous);
             }
         }
         if Instant::now() >= deadline {
-            return public_error(
+            return outcome_response(
                 StatusCode::GATEWAY_TIMEOUT,
-                "Feeder acknowledgement timed out; request remains pending and will not be resent automatically",
+                request_id,
+                FeedOutcome::Ambiguous,
             );
         }
-        sleep(state.ack_poll).await;
+        sleep(
+            state
+                .ack_poll
+                .min(deadline.saturating_duration_since(Instant::now())),
+        )
+        .await;
     }
 }
 
@@ -319,33 +347,27 @@ async fn feed_request_status(
     AxumPath(request_id): AxumPath<Uuid>,
     State(state): State<GatewayState>,
 ) -> Response {
-    let mut status = match state.store.status(request_id).await {
-        Ok(Some(status)) => status,
-        Ok(None) => return public_error(StatusCode::NOT_FOUND, "Unknown feeder request UUID"),
-        Err(error) => return internal_failure("Unable to read feeder request status", error),
-    };
-    if status == StoredRequestStatus::Pending {
-        match ack_matches(&state, request_id).await {
-            Ok(true) => {
-                if let Err(error) = state.store.mark_acknowledged(request_id).await {
-                    return internal_failure("Unable to persist feeder acknowledgement", error);
-                }
-                status = StoredRequestStatus::Acknowledged;
-            }
-            Ok(false) => {}
-            Err(error) => {
-                return internal_failure("OpenHAB feeder acknowledgement unavailable", error);
-            }
-        }
-    }
-    (
-        StatusCode::OK,
-        Json(FeedRequestStatus {
-            request_id,
-            status: status.as_str().to_owned(),
-        }),
+    match timeout(
+        Duration::from_secs(10),
+        lookup_feed_request(request_id, state),
     )
-        .into_response()
+    .await
+    {
+        Ok(response) => response,
+        Err(_) => outcome_response(
+            StatusCode::GATEWAY_TIMEOUT,
+            request_id,
+            FeedOutcome::Ambiguous,
+        ),
+    }
+}
+
+async fn lookup_feed_request(request_id: Uuid, state: GatewayState) -> Response {
+    match state.store.status(request_id).await {
+        Ok(Some(status)) => existing_response(&state, request_id, status).await,
+        Ok(None) => public_error(StatusCode::NOT_FOUND, "Unknown feeder request UUID"),
+        Err(error) => internal_failure("Unable to read feeder request status", error),
+    }
 }
 
 async fn weather(State(state): State<GatewayState>) -> Response {

@@ -87,6 +87,32 @@ OpenHAB USER authorization is coarse, so the effective least-privilege boundary 
 
 ## Gateway API
 
+F03 wire contract: feeder POST and GET return bounded JSON containing the exact
+`request_id` and a typed `status`: `not_dispatched`, `pending`, `confirmed`, or
+`ambiguous`. Only correlated `confirmed` with HTTP 200 permits a debit. Bare
+204 responses, unknown statuses, wrong UUIDs and contradictory refusal fields
+are untrusted outcomes. Upgrade daemon and gateway together; an older gateway
+leaves the new daemon safely unresolved until a compatible status lookup works.
+
+`not_dispatched` includes a typed refusal reason (`safety`, `unresolved`, or
+`capacity`) and `retry_after_seconds`. It is an immutable gateway tombstone:
+that UUID can never subsequently dispatch, including when another process
+observed different safety state. Refusals do not consume physical cap history.
+The daemon preserves credit, records `feeder_not_dispatched`, and commits its
+cooldown in the same transaction. A fresh UUID is allowed only after that
+durable cooldown. Tombstones and cooldown must be included in backups.
+
+Pending/ambiguous attempts, interrupted intents, and failed debit commits are
+reconciled by GET of the original UUID. GET 404 never proves non-dispatch. No
+network error clears ambiguity. POST has a hard 140-second gateway envelope
+and 150-second client budget; status GET has 10/15-second gateway/client budgets.
+The acknowledgement timeout includes each poll read and sleep. Deadline expiry
+retains uncertainty; it never releases a reservation. Ordinary canary examples
+use a five-second inter-feed delay matching the gateway's five-second minimum.
+
+These internal protocol tests use the harmless UUID-echo owner only. F04's
+actual owner receipt/rejection/completion semantics remain unverified.
+
 The implemented gateway exposes only:
 
 ```text

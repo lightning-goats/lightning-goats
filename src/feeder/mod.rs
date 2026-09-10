@@ -6,13 +6,16 @@ use uuid::Uuid;
 
 use crate::{
     config::RuntimeMode,
-    gateway::GatewayClient,
+    gateway::{FeedOutcome, FeedRequestStatus, GatewayClient},
     ledger::{LedgerStore, StoredFeedAttemptStatus},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FeedWorkerStep {
     Idle,
+    NotDispatched {
+        attempt_id: Uuid,
+    },
     ShadowBlocked {
         feeds_due: u64,
     },
@@ -45,15 +48,17 @@ pub async fn run_feed_step(
     }
 
     if let Some(attempt) = ledger.unresolved_feed_attempt().await? {
-        return match attempt.status {
-            StoredFeedAttemptStatus::Unknown => Ok(FeedWorkerStep::UnknownFeedBlocked {
-                attempt_id: attempt.id,
-            }),
-            StoredFeedAttemptStatus::IntentCommitted => bail!(
-                "unreconciled intent_committed feed attempt {} reached the feed worker",
-                attempt.id
-            ),
+        // GET only. A 404, timeout, malformed result or receipt is never proof
+        // of non-dispatch, including when the original POST is still in flight.
+        let status = match gateway.feed_request_status(attempt.id).await {
+            Ok(status) => status,
+            Err(_) => {
+                return Ok(FeedWorkerStep::UnknownFeedBlocked {
+                    attempt_id: attempt.id,
+                });
+            }
         };
+        return apply_outcome(ledger, attempt.id, attempt.status, status).await;
     }
 
     let credit = ledger.feed_credit_sats().await?;
@@ -84,29 +89,70 @@ pub async fn run_feed_step(
         return Ok(FeedWorkerStep::Idle);
     };
 
-    // The same UUID is used by both ledgers. Any HTTP error after this point is
-    // treated as ambiguous: the trusted gateway may have actuated locally, and
-    // lightning-goatsd must never retry the physical command automatically.
-    if let Err(error) = gateway.request_feed(attempt_id).await {
-        ledger
-            .mark_feed_unknown(attempt_id, &error.to_string())
-            .await
-            .context("failed marking ambiguous gateway feed as unknown")?;
-        return Err(error).context(format!(
-            "trusted gateway feed attempt {attempt_id} is ambiguous and requires operator reconciliation"
-        ));
-    }
-
-    ledger
-        .confirm_feed_attempt(attempt_id)
-        .await
-        .context("trusted gateway acknowledged feed but durable feed confirmation failed")?;
-    let remaining_sats = ledger.feed_credit_sats().await?;
-
-    Ok(FeedWorkerStep::Fed {
+    let status = match gateway.request_feed(attempt_id).await {
+        Ok(status) => status,
+        Err(error) => {
+            ledger
+                .mark_feed_unknown(attempt_id, "gateway response unavailable or uncorrelated")
+                .await?;
+            return Err(error).context("gateway feed outcome remains unresolved");
+        }
+    };
+    apply_outcome(
+        ledger,
         attempt_id,
-        remaining_sats,
-    })
+        StoredFeedAttemptStatus::IntentCommitted,
+        status,
+    )
+    .await
+}
+
+async fn apply_outcome(
+    ledger: &LedgerStore,
+    attempt_id: Uuid,
+    stored: StoredFeedAttemptStatus,
+    status: FeedRequestStatus,
+) -> Result<FeedWorkerStep> {
+    status.validate(attempt_id)?;
+    match status.status {
+        FeedOutcome::Confirmed => {
+            match stored {
+                StoredFeedAttemptStatus::IntentCommitted => {
+                    ledger.confirm_feed_attempt(attempt_id).await?
+                }
+                StoredFeedAttemptStatus::Unknown => {
+                    ledger.reconcile_unknown_as_fed(attempt_id).await?
+                }
+            }
+            Ok(FeedWorkerStep::Fed {
+                attempt_id,
+                remaining_sats: ledger.feed_credit_sats().await?,
+            })
+        }
+        FeedOutcome::NotDispatched => {
+            ledger
+                .resolve_feed_not_dispatched(
+                    attempt_id,
+                    status
+                        .refusal
+                        .context("missing refusal")?
+                        .retry_after_seconds,
+                )
+                .await?;
+            Ok(FeedWorkerStep::NotDispatched { attempt_id })
+        }
+        FeedOutcome::Pending | FeedOutcome::Ambiguous => {
+            if stored == StoredFeedAttemptStatus::IntentCommitted {
+                ledger
+                    .mark_feed_unknown(
+                        attempt_id,
+                        "gateway physical outcome unresolved; status polling only",
+                    )
+                    .await?;
+            }
+            Ok(FeedWorkerStep::UnknownFeedBlocked { attempt_id })
+        }
+    }
 }
 
 pub async fn run_feed_worker(
@@ -154,6 +200,7 @@ pub async fn run_feed_worker(
                 );
                 sleep(Duration::from_secs(2)).await;
             }
+            Ok(FeedWorkerStep::NotDispatched { .. }) => sleep(Duration::from_secs(2)).await,
             Ok(FeedWorkerStep::Idle) => sleep(Duration::from_secs(2)).await,
             Err(error) => {
                 tracing::error!(%error, "feed worker step failed");
@@ -200,13 +247,18 @@ mod tests {
 
     async fn feed_handler(
         State(state): State<MockGatewayState>,
-        Path(_id): Path<Uuid>,
+        Path(id): Path<Uuid>,
     ) -> impl IntoResponse {
         state.posts.fetch_add(1, Ordering::SeqCst);
         if state.fail_post.load(Ordering::SeqCst) {
-            StatusCode::GATEWAY_TIMEOUT
+            StatusCode::GATEWAY_TIMEOUT.into_response()
         } else {
-            StatusCode::NO_CONTENT
+            Json(FeedRequestStatus {
+                request_id: id,
+                status: FeedOutcome::Confirmed,
+                refusal: None,
+            })
+            .into_response()
         }
     }
 

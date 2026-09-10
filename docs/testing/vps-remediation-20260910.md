@@ -425,3 +425,25 @@ rehearsal does not close final systemd encrypted-credential, public TLS/IPv6,
 actual owner, browser, signer, home containment or deploy-privilege gates. The
 operator was asked for authorized read-only owner/site access and confirmation
 of .12 reservation/peer registration; these are pending. Production remains HOLD.
+
+Installed-release execution completed on both Ubuntu CI and the Fedora VPS.
+Initial harness source `09cbe604aa451d48ae0d06fdf5b7a6b20ac7ef85` passed
+[Rust CI](https://github.com/lightning-goats/lightning-goats/actions/runs/34538395098),
+[Security](https://github.com/lightning-goats/lightning-goats/actions/runs/34538394993), and
+[Deployment including installed rehearsal](https://github.com/lightning-goats/lightning-goats/actions/runs/34538394981).
+Its retained package contains `INSTALL-REHEARSAL.json` and outer checksums.
+
+On Fedora, `cargo build --release --locked --bins` completed for exact runtime
+source `76407c0ba8821ee53b4ffcb044e5a6d9b6733537`. Full archive checksums/source
+verification and all three help paths passed, followed by actual installed
+process/credential/state/discovery/restart checks with one total mock-owner
+command. The temporary installation and processes were removed. A generated
+Python bytecode cache was identified and removed specifically; the harness now
+disables bytecode writes, and the repeated Fedora run passed with no cache left.
+See the sanitized record `evidence/installed-release-fedora-20260910.json` for
+runtime/harness/archive/binary hashes and actual UID/GID/capability evidence.
+Final PR #39 checks are still required for the subsequent cache/evidence commit.
+
+This closes the isolated installed-release rehearsal gap. Final systemd sandbox,
+encrypted credential delivery, production identity/privilege revocation, TLS/site/
+browser, trusted network, actual-owner and live operational gates remain open.

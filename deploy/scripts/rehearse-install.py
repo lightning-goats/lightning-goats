@@ -4,6 +4,9 @@
 Run only against an explicitly trusted archive. Never installs host services,
 creates users, reads production credentials or modifies host networking.
 """
+import sys
+sys.dont_write_bytecode = True
+
 import argparse
 import base64
 from contextlib import ExitStack
@@ -17,7 +20,6 @@ import pwd
 import shutil
 import socket
 import subprocess
-import sys
 import tempfile
 import threading
 import time

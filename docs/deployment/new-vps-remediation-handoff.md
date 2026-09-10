@@ -213,3 +213,12 @@ running the temporary root-owned/non-root-process package test. It refuses host
 network access and uses only synthetic file credentials and an internal mock
 owner. CI retains its JSON evidence and hashes. Do not convert those results into
 final systemd, live credential, browser, network or physical acceptance claims.
+
+The installed-release rehearsal passed on Ubuntu CI and this Fedora VPS. Its
+sanitized evidence is `../testing/evidence/installed-release-fedora-20260910.json`:
+exact runtime source/archive/binary hashes, separate UID/GID, zero capabilities,
+NoNewPrivileges, credential isolation, six discovery routes and one mock command
+across duplicate/restart checks. No host user/service or route was created. The
+harness disables bytecode writes and its temporary state/processes were removed.
+Final systemd/LoadCredentialEncrypted, actual identities, privilege revocation and
+all live acceptance gates remain outstanding; this is not cutover authorization.

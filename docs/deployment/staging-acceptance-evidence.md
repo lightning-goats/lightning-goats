@@ -109,3 +109,13 @@ peer, DNS or route changes are authorized by these mock results.
   and operator resource sizing/history retention review.
 - Separate explicit approvals for tiny real payment, controlled physical test,
   production DNS/WireGuard cutover and changes to old-VPS availability.
+
+## Installed-release rehearsal continuation
+
+A following candidate adds `install-rehearsal.md` and a reproducible isolated
+installation test against the actual release archive. Root-owned binaries/config,
+separate non-root processes, direct credential separation, migrations/startup,
+six discovery routes and restart idempotency are checked inside a fresh loopback-only
+network namespace. The fixture creates no host service/user or network policy.
+Its evidence narrows the installation gap; final systemd encrypted credentials,
+public TLS, actual identities/privilege revocation and live acceptance remain open.

@@ -36,6 +36,12 @@ jobs:
           bash deploy/scripts/package-release.sh target/release "$RUNNER_TEMP/package-smoke" smoke
           (cd "$RUNNER_TEMP/package-smoke" && sha256sum --check SHA256SUMS)
           python3 deploy/scripts/smoke-release.py "$RUNNER_TEMP/package-smoke/lightning-goats-smoke-x86_64-linux-gnu.tar.gz" "$GITHUB_SHA"
+      - name: Rehearse installed release with isolated runtime identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo unshare --net -- python3 deploy/scripts/rehearse-install.py "$RUNNER_TEMP/package-smoke/lightning-goats-smoke-x86_64-linux-gnu.tar.gz" "$GITHUB_SHA" > "$RUNNER_TEMP/package-smoke/INSTALL-REHEARSAL.json"
+          (cd "$RUNNER_TEMP/package-smoke" && sha256sum INSTALL-REHEARSAL.json >> SHA256SUMS)
       - name: Retain the tested package for staging review
         uses: actions/upload-artifact@v4
         with:

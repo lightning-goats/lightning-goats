@@ -206,3 +206,10 @@ or overwrites current data. CI retains the exact tested package, labelled with
 its actual build SHA, for staging review. Final installation, actual owner/source,
 network, browser and signer acceptance remain open. Do not merge this stack just
 because individual PR checks are green; preserve exact integrated review evidence.
+
+Installed-release rehearsal continues from PR #38 head
+`76407c0ba8821ee53b4ffcb044e5a6d9b6733537`. Read `install-rehearsal.md` before
+running the temporary root-owned/non-root-process package test. It refuses host
+network access and uses only synthetic file credentials and an internal mock
+owner. CI retains its JSON evidence and hashes. Do not convert those results into
+final systemd, live credential, browser, network or physical acceptance claims.

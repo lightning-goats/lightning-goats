@@ -26,53 +26,60 @@ REQUIRED = BINARIES | {
 }
 
 
+def verify_archive(archive, source_commit, root):
+    """Extract into an empty private directory and verify; execute nothing."""
+    if any(root.iterdir()):
+        raise ValueError("Archive destination must be empty")
+    files = {}
+    with tarfile.open(archive, "r:gz") as bundle:
+        for member in bundle:
+            path = PurePosixPath(member.name)
+            if path.is_absolute() or ".." in path.parts:
+                raise ValueError("Unsafe archive path")
+            if member.isdir():
+                continue
+            if not member.isfile() or member.size > 256 * 1024 * 1024:
+                raise ValueError("Unsupported archive member")
+            name = str(path)
+            if name in files:
+                raise ValueError("Duplicate archive member")
+            if len(files) >= 4096 or sum(files.values()) + member.size > 512 * 1024 * 1024:
+                raise ValueError("Archive exceeds size/count budget")
+            files[name] = member.size
+            destination = root / name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with bundle.extractfile(member) as incoming, destination.open("wb") as outgoing:
+                while chunk := incoming.read(1024 * 1024):
+                    outgoing.write(chunk)
+            destination.chmod(0o755 if name in BINARIES else 0o644)
+    if not (REQUIRED | {"SHA256SUMS"}) <= files.keys():
+        raise ValueError("Release is missing required files")
+    expected = {}
+    for line in (root / "SHA256SUMS").read_text().splitlines():
+        match = re.fullmatch(r"([0-9a-f]{64})  (?:\./)?(.+)", line)
+        if not match or match[2] in expected:
+            raise ValueError("Invalid checksum manifest")
+        expected[match[2]] = match[1]
+    if expected.keys() != files.keys() - {"SHA256SUMS"}:
+        raise ValueError("Checksum manifest must cover exactly the payload")
+    for name, digest in expected.items():
+        with (root / name).open("rb") as stream:
+            actual = hashlib.sha256()
+            while chunk := stream.read(1024 * 1024):
+                actual.update(chunk)
+            if actual.hexdigest() != digest:
+                raise ValueError(f"Checksum mismatch: {name}")
+    if not re.fullmatch(r"[0-9a-f]{40}", source_commit):
+        raise ValueError("Expected a full source commit")
+    info = (root / "BUILD-INFO.txt").read_text().splitlines()
+    if info.count(f"source_commit={source_commit}") != 1:
+        raise ValueError("Source commit mismatch")
+
+
 def verify_and_smoke(archive, source_commit):
     with tempfile.TemporaryDirectory(prefix="lg-release-smoke-") as directory:
         root = Path(directory)
-        files = {}
-        with tarfile.open(archive, "r:gz") as bundle:
-            for member in bundle:
-                path = PurePosixPath(member.name)
-                if path.is_absolute() or ".." in path.parts:
-                    raise ValueError("Unsafe archive path")
-                if member.isdir():
-                    continue
-                if not member.isfile() or member.size > 256 * 1024 * 1024:
-                    raise ValueError("Unsupported archive member")
-                name = str(path)
-                if name in files:
-                    raise ValueError("Duplicate archive member")
-                if len(files) >= 4096 or sum(files.values()) + member.size > 512 * 1024 * 1024:
-                    raise ValueError("Archive exceeds size/count budget")
-                files[name] = member.size
-                destination = root / name
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                with bundle.extractfile(member) as incoming, destination.open("wb") as outgoing:
-                    while chunk := incoming.read(1024 * 1024):
-                        outgoing.write(chunk)
-                destination.chmod(0o755 if name in BINARIES else 0o644)
-        if not (REQUIRED | {"SHA256SUMS"}) <= files.keys():
-            raise ValueError("Release is missing required files")
-        expected = {}
-        for line in (root / "SHA256SUMS").read_text().splitlines():
-            match = re.fullmatch(r"([0-9a-f]{64})  (?:\./)?(.+)", line)
-            if not match or match[2] in expected:
-                raise ValueError("Invalid checksum manifest")
-            expected[match[2]] = match[1]
-        if expected.keys() != files.keys() - {"SHA256SUMS"}:
-            raise ValueError("Checksum manifest must cover exactly the payload")
-        for name, digest in expected.items():
-            with (root / name).open("rb") as stream:
-                actual = hashlib.sha256()
-                while chunk := stream.read(1024 * 1024):
-                    actual.update(chunk)
-                if actual.hexdigest() != digest:
-                    raise ValueError(f"Checksum mismatch: {name}")
-        if not re.fullmatch(r"[0-9a-f]{40}", source_commit):
-            raise ValueError("Expected a full source commit")
-        info = (root / "BUILD-INFO.txt").read_text().splitlines()
-        if info.count(f"source_commit={source_commit}") != 1:
-            raise ValueError("Source commit mismatch")
+        verify_archive(archive, source_commit, root)
         for name in sorted(BINARIES):
             result = subprocess.run(
                 [str(root / name), "--help"], cwd=root,

@@ -119,3 +119,9 @@ staging review. PR builds use GitHub's synthetic merge SHA; record both PR head
 and actual artifact source. A passed artifact does not establish service,
 credential, network, browser or physical-owner acceptance. The offline paired-store
 helper and its limits are documented in `staging-acceptance-evidence.md`.
+
+The installed-release rehearsal additionally runs the verified archive in a new
+loopback-only network namespace with root-owned code/config and separate non-root
+processes. Its `INSTALL-REHEARSAL.json` is included in the outer SHA256SUMS and
+retained with the package. Read `install-rehearsal.md` for exact scope and the
+remaining final systemd/credential/live acceptance requirements.

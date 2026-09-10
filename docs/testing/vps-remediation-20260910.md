@@ -397,3 +397,31 @@ The subsequent change is limited to Python fixture compatibility and acceptance
 documentation; its focused restore tests pass. Format and locked Clippy passed;
 all 14 local deployment tests passed before the fixture portability correction.
 Final GitHub results are recorded on draft PR #38; live acceptance remains open.
+
+## Installed-release rehearsal candidate
+
+Base: PR #38 head `76407c0ba8821ee53b4ffcb044e5a6d9b6733537`, clean and still
+draft when rechecked. The continuation branch is
+`remediation/phase1-install-rehearsal-20260910`. Final base CI/Security/Deployment
+passed; no merge or production changes occurred.
+
+This candidate reuses archive verification without executing payloads as root,
+then rehearses an installation inside a new loopback-only network namespace.
+It checks root-owned binaries/config, two distinct unprivileged identities with
+no effective capabilities and NoNewPrivileges, credential separation, state
+ownership/migrations, six discovery routes, gateway/temperature reads and exact-ID
+restart idempotency using only its internal harmless owner. No accounts or host
+services are created, and the launcher refuses the host namespace.
+
+All 17 local deployment tests pass, including the three new namespace/fixture-drift
+safety regressions and the existing six archive regressions. Actual creation of
+an isolated namespace succeeded. A local locked release build of the exact base
+is running to exercise the new harness against real release binaries; final local
+and CI installation evidence must be attached after completion. CI runs the same
+harness and retains its JSON with the outer package checksum manifest.
+
+See `../deployment/install-rehearsal.md`. Synthetic file credential/process
+rehearsal does not close final systemd encrypted-credential, public TLS/IPv6,
+actual owner, browser, signer, home containment or deploy-privilege gates. The
+operator was asked for authorized read-only owner/site access and confirmation
+of .12 reservation/peer registration; these are pending. Production remains HOLD.

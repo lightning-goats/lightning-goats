@@ -358,7 +358,9 @@ are included in this decision record.
   authoritative source import and actual browser contact testing remain open.
 - Domain: the operator controls the registrar and ZoneEdit accounts and approved
   Let's Encrypt only. `domain-readiness.md` contains the unapplied CAA proposal.
-  Hardware-key MFA, tested account recovery and full-zone review remain pending.
+  The operator also confirms hardware-key MFA and tested recovery for both
+  accounts. Full-zone review remains pending; no authenticated account inspection
+  or DNS change has been performed.
 - SSH: the operator reports fresh key logins for `sat` and `linuxuser` and working
   provider-console recovery. Retain `sat` and provision its approved public key
   first. The host recheck still found no authorized-key file for that account;

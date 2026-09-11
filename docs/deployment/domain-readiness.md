@@ -55,8 +55,9 @@ distinguished from a timeout, refusal or non-authoritative response.
 ## Operator-dependent controls
 
 - The operator confirmed control of both registrar and ZoneEdit accounts on
-  2026-09-11. Authorized additional administrators, hardware-key MFA configuration
-  and tested account recovery remain unconfirmed. Never put
+  2026-09-11, with hardware-key MFA configured and account recovery tested for
+  both. This is operator attestation, not an authenticated account inspection.
+  Review any additional authorized administrators during the account inventory. Never put
   passwords, recovery codes, API tokens or private keys in this repository.
 - Obtain a complete authorized zone inventory and classify records by service.
   Preserve mail/TXT and any unrelated active services. Identify stale records

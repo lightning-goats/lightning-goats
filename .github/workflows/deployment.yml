@@ -72,6 +72,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Hosted runners make /usr/local writable for tool installation. This
+          # disposable VM must meet the same root-managed parent contract as a VPS.
+          # Change directories only, never recursively alter installed tools.
+          sudo install -d -o root -g root -m 0755 /usr/local /usr/local/bin
           CANARY_ARCHIVE="$RUNNER_TEMP/package-systemd/lightning-goats-smoke-x86_64-linux-gnu.tar.gz"
           CANARY_ARCHIVE_SHA256="$(sha256sum "$CANARY_ARCHIVE" | cut -d ' ' -f 1)"
           python3 -B deploy/scripts/prepare-vps-canary.py "$CANARY_ARCHIVE" "$GITHUB_SHA" "$CANARY_ARCHIVE_SHA256" > "$RUNNER_TEMP/INACTIVE-CANARY-PLAN.json"

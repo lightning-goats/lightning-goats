@@ -89,3 +89,10 @@ The Deployment workflow also runs this fresh installation on its disposable
 Ubuntu 24.04 runner after the isolated systemd rehearsal. It retains the plan
 and installation JSON with checksums. Confirm that workflow's exact-head result
 before accepting the Ubuntu execution; local Fedora evidence does not prove it.
+
+The initial Ubuntu run `34549009202` passed archive and isolated systemd checks
+but the fresh-install plan correctly refused runner-writable `/usr/local/bin`.
+The workflow now prepares only `/usr/local` and `/usr/local/bin` as root-owned
+0755 directories on that disposable runner before the positive installation
+test. It does not recursively change tool ownership or weaken the installer's
+parent checks. This fixture change performs no action on the Fedora VPS.

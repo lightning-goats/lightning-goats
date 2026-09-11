@@ -1,0 +1,34 @@
+name: Cutover offline workbench (read only)
+on:
+  push:
+    branches: [tools/cutover-offline-workbench-20260911]
+permissions:
+  contents: read
+jobs:
+  bundle:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 1c20d98307cee9259f0cba2157540bcb33e37062
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.88.0'
+      - name: Archive exact public source and locked crates
+        shell: bash
+        run: |
+          set -euo pipefail
+          git archive --format=tar.gz HEAD > /tmp/lg-source.tar.gz
+          cargo vendor --locked /tmp/lg-vendor > /tmp/vendor-config.toml
+          tar -C /tmp -czf /tmp/lg-vendor.tar.gz lg-vendor vendor-config.toml
+          sha256sum /tmp/lg-source.tar.gz /tmp/lg-vendor.tar.gz > /tmp/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lg-offline-source
+          path: |
+            /tmp/lg-source.tar.gz
+            /tmp/lg-vendor.tar.gz
+            /tmp/SHA256SUMS
+          retention-days: 7

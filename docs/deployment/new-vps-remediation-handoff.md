@@ -274,3 +274,21 @@ Review and recheck this correction before merging the stack. Keep the F02/F05
 durable-state acceptance conditions and parent gates open until verified on the
 final integration head. Actual owner/source access, effective network containment,
 website/browser and final privilege/credential decisions remain outstanding.
+
+### Corrected runtime installation evidence (2026-09-11)
+
+The exact #41 source `a54ead65b7d68a402b2e4a33ff387b6198a9cf84` passed all three
+GitHub workflows and the full local locked Rust suite (138 tests). A fresh local
+optimized archive now passes the actual Fedora systemd/encrypted-credential
+rehearsal as well; `systemd-rehearsal.md` links its source-pinned records. Five
+starts, both live-peer credential-isolation directions, zero automatic restarts
+and one total harmless owner command were observed. The packaged optimized CLI
+also rejects the volatile SQLite regression while preserving ordinary file state.
+
+Current read-only host evidence supersedes the earlier pending-reboot note:
+kernel `7.2.4-200.fc44.x86_64` is running and DNF reports no reboot required.
+No reboot was performed in this continuation. Recheck before final installation;
+final identities, privilege revocation, SSH and credential gates remain open.
+The existing owner/site access and staging identity/hostname dependencies remain;
+website contact additionally needs the operator-approved public Nostr key.
+Production remains HOLD and all parent acceptance gates stay open.

@@ -67,5 +67,43 @@ The PR head and GitHub synthetic merge/artifact source must both be recorded.
 This closes a mock installation gap. Final production identities, credential
 scopes, removal of broad deployment privileges, actual owner contract, trusted
 network containment, authoritative website/browser, public TLS/IPv6 and signer
-acceptance remain open. The host maintenance record also requires the pending
-kernel reboot before final acceptance; no reboot is performed by this harness.
+acceptance remain open. The earlier host maintenance record listed a pending
+kernel reboot. The dated observation below supersedes that status; recheck it
+before final installation/cutover. No reboot is performed by this harness.
+
+## Corrected SQLite runtime on Fedora (2026-09-11)
+
+The follow-up locally builds the exact PR #41 runtime source
+`a54ead65b7d68a402b2e4a33ff387b6198a9cf84` with
+`cargo build --locked --offline --release --bins`, packages the clean checkout,
+verifies the outer/inner checksums and source, and runs the unchanged systemd
+harness. This replaces the earlier Fedora runtime evidence's pre-correction
+coverage while preserving that earlier record. The archive SHA256 is
+`3fe81ed9f9c9b0500425ed903cd767e9fd5d286c8d47c23530732b59a6ff924e`.
+
+See `../testing/evidence/systemd-rehearsal-fedora-a54ead65-20260911.json` for exact
+binary/harness/template hashes, the running environment and five successful
+service starts. Both credential-isolation directions, invalid encrypted
+credentials, six discovery routes and duplicate/restart idempotency passed with
+one total harmless owner command and zero automatic restarts. All temporary
+units/files were removed. SELinux remained enforcing; its default service domain
+is recorded accurately. The protected staging credential key was preserved.
+
+`../testing/evidence/sqlite-durability-release-a54ead65-20260911.json` separately
+records the optimized packaged CLI inside bubblewrap with all namespaces
+unshared, no host credentials and host filesystem writes confined to a private
+synthetic work directory.
+Ten calls across five volatile URL forms were rejected before storage use. The
+ordinary filesystem control successfully read status and persisted an overlay
+identity visible to a subsequent read-only SQLite connection. This confirms the
+release build rejects the original defect; the full Rust suite separately covers
+credit, deduplication, events and the two-feed remainder scenario.
+
+The read-only host observation in
+`../testing/evidence/host-reboot-status-20260911.json` finds the newest installed
+kernel (`7.2.4-200.fc44.x86_64`) running and DNF reporting no reboot required.
+This updates only the kernel/reboot gate, not final host hardening or credentials.
+No reboot, service enablement, production network change, real payment or physical
+feeding was performed. This Fedora archive is a local build, distinct from the
+Ubuntu CI archive whose tested GitHub merge source is
+`69ff400b88b40b94f0a9fe6bbdcfbc64fd18dfae`.

@@ -1,0 +1,167 @@
+{
+  "observed_at": "2026-09-11T17:27:23.449706+00:00",
+  "checks": [
+    {
+      "server": "dns1.zoneedit.com",
+      "name": "feeder.lightning-goats.com",
+      "type": "A",
+      "exit": 0,
+      "output": ";; Got answer:\n;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 27289\n;; flags: qr aa rd; QUERY: 1, ANSWER: 1, AUTHORITY: 0, ADDITIONAL: 1\n;; WARNING: recursion requested but not available\n\n;; OPT PSEUDOSECTION:\n; EDNS: version: 0, flags:; udp: 1232\n; COOKIE: 91116809a5187920010000006aa439f8168e9c926cf1bb73 (good)\n;; ANSWER SECTION:\nfeeder.lightning-goats.com. 3600 IN\tA\t64.177.40.118\n\n",
+      "error": ""
+    },
+    {
+      "server": "dns1.zoneedit.com",
+      "name": "feeder.lightning-goats.com",
+      "type": "AAAA",
+      "exit": 0,
+      "output": ";; Got answer:\n;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 49122\n;; flags: qr aa rd; QUERY: 1, ANSWER: 0, AUTHORITY: 1, ADDITIONAL: 1\n;; WARNING: recursion requested but not available\n\n;; OPT PSEUDOSECTION:\n; EDNS: version: 0, flags:; udp: 1232\n; COOKIE: 848e78eabf8cc286010000006aa439f9998e47aa4c418329 (good)\n;; AUTHORITY SECTION:\nlightning-goats.com.\t300\tIN\tSOA\tdns0.zoneedit.com. zone.zoneedit.com. 1789146394 3600 600 604800 300\n\n",
+      "error": ""
+    },
+    {
+      "server": "dns1.zoneedit.com",
+      "name": "feeder.lightning-goats.com",
+      "type": "CAA",
+      "exit": 0,
+      "output": ";; Got answer:\n;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 32964\n;; flags: qr aa rd; QUERY: 1, ANSWER: 0, AUTHORITY: 1, ADDITIONAL: 1\n;; WARNING: recursion requested but not available\n\n;; OPT PSEUDOSECTION:\n; EDNS: version: 0, flags:; udp: 1232\n; COOKIE: de323692d3950ec0010000006aa439f9e6e40bd4ce75375e (good)\n;; AUTHORITY SECTION:\nlightning-goats.com.\t300\tIN\tSOA\tdns0.zoneedit.com. zone.zoneedit.com. 1789146394 3600 600 604800 300\n\n",
+      "error": ""
+    },
+    {
+      "server": "dns1.zoneedit.com",
+      "name": "lightning-goats.com",
+      "type": "CAA",
+      "exit": 0,
+      "output": ";; Got answer:\n;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 30731\n;; flags: qr aa rd; QUERY: 1, ANSWER: 0, AUTHORITY: 1, ADDITIONAL: 1\n;; WARNING: recursion requested but not available\n\n;; OPT PSEUDOSECTION:\n; EDNS: version: 0, flags:; udp: 1232\n; COOKIE: 45f186ee3de962b9010000006aa439f96c8af63deb8c92f5 (good)\n;; AUTHORITY SECTION:\nlightning-goats.com.\t300\tIN\tSOA\tdns0.zoneedit.com. zone.zoneedit.com. 1789146394 3600 600 604800 300\n\n",
+      "error": ""
+    },
+    {
+      "server": "dns2.zoneedit.com",
+      "name": "feeder.lightning-goats.com",
+      "type": "A",
+      "exit": 0,
+      "output": ";; Got answer:\n;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 29609\n;; flags: qr aa rd; QUERY: 1, ANSWER: 1, AUTHORITY: 0, ADDITIONAL: 1\n;; WARNING: recursion requested but not available\n\n;; OPT PSEUDOSECTION:\n; EDNS: version: 0, flags:; udp: 1232\n; COOKIE: 891386a8ce40d613010000006aa439f98b0f3b6724ec3ea3 (good)\n;; ANSWER SECTION:\nfeeder.lightning-goats.com. 3600 IN\tA\t64.177.40.118\n\n",
+      "error": ""
+    },
+    {
+      "server": "dns2.zoneedit.com",
+      "name": "feeder.lightning-goats.com",
+      "type": "AAAA",
+      "exit": 0,
+      "output": ";; Got answer:\n;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 2069\n;; flags: qr aa rd; QUERY: 1, ANSWER: 0, AUTHORITY: 1, ADDITIONAL: 1\n;; WARNING: recursion requested but not available\n\n;; OPT PSEUDOSECTION:\n; EDNS: version: 0, flags:; udp: 1232\n; COOKIE: a3e6fab4078c2d21010000006aa439f925d4db18010cc92b (good)\n;; AUTHORITY SECTION:\nlightning-goats.com.\t300\tIN\tSOA\tdns0.zoneedit.com. zone.zoneedit.com. 1789146394 3600 600 604800 300\n\n",
+      "error": ""
+    },
+    {
+      "server": "dns2.zoneedit.com",
+      "name": "feeder.lightning-goats.com",
+      "type": "CAA",
+      "exit": 0,
+      "output": ";; Got answer:\n;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 11629\n;; flags: qr aa rd; QUERY: 1, ANSWER: 0, AUTHORITY: 1, ADDITIONAL: 1\n;; WARNING: recursion requested but not available\n\n;; OPT PSEUDOSECTION:\n; EDNS: version: 0, flags:; udp: 1232\n; COOKIE: f980f94d6ef75de0010000006aa439f9340fc68deea8ccb0 (good)\n;; AUTHORITY SECTION:\nlightning-goats.com.\t300\tIN\tSOA\tdns0.zoneedit.com. zone.zoneedit.com. 1789146394 3600 600 604800 300\n\n",
+      "error": ""
+    },
+    {
+      "server": "dns2.zoneedit.com",
+      "name": "lightning-goats.com",
+      "type": "CAA",
+      "exit": 0,
+      "output": ";; Got answer:\n;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 29439\n;; flags: qr aa rd; QUERY: 1, ANSWER: 0, AUTHORITY: 1, ADDITIONAL: 1\n;; WARNING: recursion requested but not available\n\n;; OPT PSEUDOSECTION:\n; EDNS: version: 0, flags:; udp: 1232\n; COOKIE: b7213c3211d52608010000006aa439f92f08034c9468cb18 (good)\n;; AUTHORITY SECTION:\nlightning-goats.com.\t300\tIN\tSOA\tdns0.zoneedit.com. zone.zoneedit.com. 1789146394 3600 600 604800 300\n\n",
+      "error": ""
+    },
+    {
+      "server": "dns3.zoneedit.com",
+      "name": "feeder.lightning-goats.com",
+      "type": "A",
+      "exit": 0,
+      "output": ";; Got answer:\n;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 52566\n;; flags: qr aa rd; QUERY: 1, ANSWER: 1, AUTHORITY: 0, ADDITIONAL: 1\n;; WARNING: recursion requested but not available\n\n;; OPT PSEUDOSECTION:\n; EDNS: version: 0, flags:; udp: 1232\n; COOKIE: 71015cfaebc075e9010000006aa439f9c6d35612c363f32a (good)\n;; ANSWER SECTION:\nfeeder.lightning-goats.com. 3600 IN\tA\t64.177.40.118\n\n",
+      "error": ""
+    },
+    {
+      "server": "dns3.zoneedit.com",
+      "name": "feeder.lightning-goats.com",
+      "type": "AAAA",
+      "exit": 0,
+      "output": ";; Got answer:\n;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 540\n;; flags: qr aa rd; QUERY: 1, ANSWER: 0, AUTHORITY: 1, ADDITIONAL: 1\n;; WARNING: recursion requested but not available\n\n;; OPT PSEUDOSECTION:\n; EDNS: version: 0, flags:; udp: 1232\n; COOKIE: 98698fa3504c85b8010000006aa439fa374a7e80c41d960d (good)\n;; AUTHORITY SECTION:\nlightning-goats.com.\t300\tIN\tSOA\tdns0.zoneedit.com. zone.zoneedit.com. 1789146394 3600 600 604800 300\n\n",
+      "error": ""
+    },
+    {
+      "server": "dns3.zoneedit.com",
+      "name": "feeder.lightning-goats.com",
+      "type": "CAA",
+      "exit": 0,
+      "output": ";; Got answer:\n;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 40517\n;; flags: qr aa rd; QUERY: 1, ANSWER: 0, AUTHORITY: 1, ADDITIONAL: 1\n;; WARNING: recursion requested but not available\n\n;; OPT PSEUDOSECTION:\n; EDNS: version: 0, flags:; udp: 1232\n; COOKIE: 26c28ec721a92989010000006aa439fa19a7ac8948230a61 (good)\n;; AUTHORITY SECTION:\nlightning-goats.com.\t300\tIN\tSOA\tdns0.zoneedit.com. zone.zoneedit.com. 1789146394 3600 600 604800 300\n\n",
+      "error": ""
+    },
+    {
+      "server": "dns3.zoneedit.com",
+      "name": "lightning-goats.com",
+      "type": "CAA",
+      "exit": 0,
+      "output": ";; Got answer:\n;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 43294\n;; flags: qr aa rd; QUERY: 1, ANSWER: 0, AUTHORITY: 1, ADDITIONAL: 1\n;; WARNING: recursion requested but not available\n\n;; OPT PSEUDOSECTION:\n; EDNS: version: 0, flags:; udp: 1232\n; COOKIE: 2b3bf8d8c7dbfbb7010000006aa439fa01283148545912b9 (good)\n;; AUTHORITY SECTION:\nlightning-goats.com.\t300\tIN\tSOA\tdns0.zoneedit.com. zone.zoneedit.com. 1789146394 3600 600 604800 300\n\n",
+      "error": ""
+    },
+    {
+      "server": "1.1.1.1",
+      "name": "feeder.lightning-goats.com",
+      "type": "A",
+      "exit": 0,
+      "output": ";; Got answer:\n;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 43949\n;; flags: qr rd ra; QUERY: 1, ANSWER: 1, AUTHORITY: 0, ADDITIONAL: 1\n\n;; OPT PSEUDOSECTION:\n; EDNS: version: 0, flags:; udp: 1232\n;; ANSWER SECTION:\nfeeder.lightning-goats.com. 3600 IN\tA\t64.177.40.118\n\n",
+      "error": ""
+    },
+    {
+      "server": "1.1.1.1",
+      "name": "feeder.lightning-goats.com",
+      "type": "AAAA",
+      "exit": 0,
+      "output": ";; Got answer:\n;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 62936\n;; flags: qr rd ra; QUERY: 1, ANSWER: 0, AUTHORITY: 1, ADDITIONAL: 1\n\n;; OPT PSEUDOSECTION:\n; EDNS: version: 0, flags:; udp: 1232\n;; AUTHORITY SECTION:\nlightning-goats.com.\t300\tIN\tSOA\tdns0.zoneedit.com. zone.zoneedit.com. 1789146394 3600 600 604800 300\n\n",
+      "error": ""
+    },
+    {
+      "server": "1.1.1.1",
+      "name": "feeder.lightning-goats.com",
+      "type": "CAA",
+      "exit": 0,
+      "output": ";; Got answer:\n;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 3734\n;; flags: qr rd ra; QUERY: 1, ANSWER: 0, AUTHORITY: 1, ADDITIONAL: 1\n\n;; OPT PSEUDOSECTION:\n; EDNS: version: 0, flags:; udp: 1232\n;; AUTHORITY SECTION:\nlightning-goats.com.\t300\tIN\tSOA\tdns0.zoneedit.com. zone.zoneedit.com. 1789146394 3600 600 604800 300\n\n",
+      "error": ""
+    },
+    {
+      "server": "1.1.1.1",
+      "name": "lightning-goats.com",
+      "type": "CAA",
+      "exit": 0,
+      "output": ";; Got answer:\n;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 57777\n;; flags: qr rd ra; QUERY: 1, ANSWER: 0, AUTHORITY: 1, ADDITIONAL: 1\n\n;; OPT PSEUDOSECTION:\n; EDNS: version: 0, flags:; udp: 1232\n;; AUTHORITY SECTION:\nlightning-goats.com.\t300\tIN\tSOA\tdns0.zoneedit.com. zone.zoneedit.com. 1789146394 3600 600 604800 300\n\n",
+      "error": ""
+    },
+    {
+      "server": "8.8.8.8",
+      "name": "feeder.lightning-goats.com",
+      "type": "A",
+      "exit": 0,
+      "output": ";; Got answer:\n;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 54024\n;; flags: qr rd ra; QUERY: 1, ANSWER: 1, AUTHORITY: 0, ADDITIONAL: 1\n\n;; OPT PSEUDOSECTION:\n; EDNS: version: 0, flags:; udp: 512\n;; ANSWER SECTION:\nfeeder.lightning-goats.com. 3600 IN\tA\t64.177.40.118\n\n",
+      "error": ""
+    },
+    {
+      "server": "8.8.8.8",
+      "name": "feeder.lightning-goats.com",
+      "type": "AAAA",
+      "exit": 0,
+      "output": ";; Got answer:\n;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 56330\n;; flags: qr rd ra; QUERY: 1, ANSWER: 0, AUTHORITY: 1, ADDITIONAL: 1\n\n;; OPT PSEUDOSECTION:\n; EDNS: version: 0, flags:; udp: 512\n;; AUTHORITY SECTION:\nlightning-goats.com.\t300\tIN\tSOA\tdns0.zoneedit.com. zone.zoneedit.com. 1789146394 3600 600 604800 300\n\n",
+      "error": ""
+    },
+    {
+      "server": "8.8.8.8",
+      "name": "feeder.lightning-goats.com",
+      "type": "CAA",
+      "exit": 0,
+      "output": ";; Got answer:\n;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 4051\n;; flags: qr rd ra; QUERY: 1, ANSWER: 0, AUTHORITY: 1, ADDITIONAL: 1\n\n;; OPT PSEUDOSECTION:\n; EDNS: version: 0, flags:; udp: 512\n;; AUTHORITY SECTION:\nlightning-goats.com.\t300\tIN\tSOA\tdns0.zoneedit.com. zone.zoneedit.com. 1789146394 3600 600 604800 300\n\n",
+      "error": ""
+    },
+    {
+      "server": "8.8.8.8",
+      "name": "lightning-goats.com",
+      "type": "CAA",
+      "exit": 0,
+      "output": ";; Got answer:\n;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 65470\n;; flags: qr rd ra; QUERY: 1, ANSWER: 0, AUTHORITY: 1, ADDITIONAL: 1\n\n;; OPT PSEUDOSECTION:\n; EDNS: version: 0, flags:; udp: 512\n;; AUTHORITY SECTION:\nlightning-goats.com.\t300\tIN\tSOA\tdns0.zoneedit.com. zone.zoneedit.com. 1789146394 3600 600 604800 300\n\n",
+      "error": ""
+    }
+  ],
+  "production": "HOLD",
+  "dns_changes_performed": false
+}

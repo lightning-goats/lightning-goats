@@ -85,3 +85,7 @@ context reads succeeded; credential-related and unrelated memory records are
 excluded from subsequent scoped reads. Historical memories do not override the
 current source contract. This temporary development exception is not F09 runtime
 containment and must not become application authority or an application route.
+
+## Activation follow-up
+
+The operator-approved static stage is now active. See [activation evidence](static-staging-activation.md) for exact source, host changes, TLS checks and remaining gates. Earlier unactivated language above records the proposal state. Production remains HOLD.

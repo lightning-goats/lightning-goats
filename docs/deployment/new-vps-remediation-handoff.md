@@ -467,3 +467,7 @@ automatic completion. The operator confirmed JDBC with boundary/itemState false,
 epoch-zero start, omitted end time and omitted pagination. That start value selects
 OpenHAB's default one-day window; it does not prove all history. A reviewed terminal
 receipt authority contract remains necessary; do not change the live owner implicitly.
+
+## Static activation and owner proposal follow-up
+
+PR #51 at `d04fcffee9f3f6db4ba9ee21dbd59ecc8546833d` passed all required checks and its static website is activated with explicit operator approval. See [activation evidence](static-staging-activation.md). Payments remain disabled, canary daemon/gateway inactive, and production HOLD. PR #52 at `92a78612b0c22dd59e157cd250c14c196504edc6` contains the [repository-only owner-finality proposal](../security/hardening/owner-finality/hardening.md); no live owner change or finding closure.

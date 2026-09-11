@@ -1,75 +1,254 @@
-use std::time::Duration;
+use std::{collections::VecDeque, time::Duration};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use axum::extract::ws::{Message, WebSocket};
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{SinkExt, StreamExt, stream::SplitSink};
+use serde::Deserialize;
 use serde_json::{Value, json};
-use tokio::time::{MissedTickBehavior, interval};
+use tokio::time::{Instant, MissedTickBehavior, interval};
+use uuid::Uuid;
 
 use crate::{
     ledger::{DurableEvent, LedgerStore},
     presentation::MessageRenderer,
 };
 
-const EVENT_BATCH_SIZE: u32 = 100;
-const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(250);
+const MAX_MESSAGE: usize = 16 * 1024;
+const MAX_QUEUE: usize = 512 * 1024;
+
+#[derive(Clone, Copy, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OverlayResume {
+    pub version: Option<u8>,
+    pub stream: Option<Uuid>,
+    pub after: Option<u64>,
+}
+impl OverlayResume {
+    pub fn validate(&self) -> Result<()> {
+        if self.version.is_some_and(|v| v != 1)
+            || self.after.is_some_and(|seq| seq > i64::MAX as u64)
+            || (self.after.is_some() && (self.version != Some(1) || self.stream.is_none()))
+        {
+            bail!("unsupported overlay resume request");
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Timing {
+    heartbeat: Duration,
+    pong: Duration,
+    send: Duration,
+    poll: Duration,
+}
+impl Default for Timing {
+    fn default() -> Self {
+        Self {
+            heartbeat: Duration::from_secs(25),
+            pong: Duration::from_secs(10),
+            send: Duration::from_secs(5),
+            poll: Duration::from_millis(250),
+        }
+    }
+}
 
 pub async fn serve_overlay_socket(
     socket: WebSocket,
     ledger: LedgerStore,
     renderer: MessageRenderer,
     threshold_sats: u64,
+    resume: OverlayResume,
 ) -> Result<()> {
-    let (mut sender, mut receiver) = socket.split();
-    let (mut last_seq, snapshot) = ledger.overlay_snapshot_message(threshold_sats).await?;
-    sender
-        .send(Message::Text(snapshot.into()))
+    serve_with_timing(
+        socket,
+        ledger,
+        renderer,
+        threshold_sats,
+        resume,
+        Timing::default(),
+    )
+    .await
+}
+
+struct Queued {
+    seq: u64,
+    body: String,
+    weather_observed_at: Option<String>,
+}
+
+fn fresh_observation(raw: Option<&str>) -> bool {
+    raw.is_some_and(|time| {
+        crate::gateway::now_epoch().is_ok_and(|now| {
+            crate::gateway::validate_observation_time(time, now, Duration::from_secs(300)).is_ok()
+        })
+    })
+}
+
+fn skipped_weather(seq: u64) -> String {
+    json!({"type":"event_skipped","source_type":"weather_status","seq":seq,"reason":"stale_or_invalid_observation"}).to_string()
+}
+
+impl Queued {
+    fn current_body(self) -> String {
+        if self.weather_observed_at.is_some()
+            && !fresh_observation(self.weather_observed_at.as_deref())
+        {
+            skipped_weather(self.seq)
+        } else {
+            self.body
+        }
+    }
+}
+
+async fn snapshot(
+    ledger: &LedgerStore,
+    threshold: u64,
+    stream: Uuid,
+    reason: Option<&str>,
+) -> Result<Queued> {
+    let (seq, encoded) = ledger.overlay_snapshot_message(threshold).await?;
+    let mut value: Value = serde_json::from_str(&encoded)?;
+    value["version"] = 1.into();
+    value["stream_id"] = stream.to_string().into();
+    if let Some(reason) = reason {
+        value["reset_reason"] = reason.into();
+    }
+    Ok(Queued {
+        seq,
+        body: value.to_string(),
+        weather_observed_at: None,
+    })
+}
+
+fn render_window(
+    events: Vec<DurableEvent>,
+    renderer: &MessageRenderer,
+    threshold: u64,
+) -> Result<VecDeque<Queued>> {
+    let mut queue = VecDeque::new();
+    let mut size = 0;
+    for event in events {
+        let seq = event.seq;
+        let is_weather = event.event_type == "weather_status";
+        let body = durable_event_message(event, renderer, threshold)?;
+        size += body.len();
+        if body.len() > MAX_MESSAGE || size > MAX_QUEUE {
+            bail!("overlay replay exceeds output bounds");
+        }
+        let weather_observed_at = if is_weather {
+            let value: Value = serde_json::from_str(&body)?;
+            value["data"]["observed_at"].as_str().map(str::to_owned)
+        } else {
+            None
+        };
+        queue.push_back(Queued {
+            seq,
+            body,
+            weather_observed_at,
+        });
+    }
+    Ok(queue)
+}
+
+async fn send(
+    sender: &mut SplitSink<WebSocket, Message>,
+    message: Message,
+    deadline: Duration,
+) -> Result<()> {
+    tokio::time::timeout(deadline, sender.send(message))
         .await
-        .context("failed sending overlay snapshot")?;
+        .context("overlay send deadline exceeded")?
+        .context("overlay send failed")
+}
 
-    let mut ticker = interval(EVENT_POLL_INTERVAL);
+async fn serve_with_timing(
+    socket: WebSocket,
+    ledger: LedgerStore,
+    renderer: MessageRenderer,
+    threshold: u64,
+    resume: OverlayResume,
+    timing: Timing,
+) -> Result<()> {
+    resume.validate()?;
+    let stream = ledger.overlay_stream_id().await?;
+    let (mut sender, mut receiver) = socket.split();
+    let mut checkpoint = snapshot(&ledger, threshold, stream, None).await?;
+    let mut last_seq = checkpoint.seq;
+    let mut queue = VecDeque::new();
+    if let Some(after) = resume.after {
+        let replay = if resume.stream == Some(stream) {
+            ledger
+                .overlay_event_window(after, checkpoint.seq)
+                .await?
+                .and_then(|events| render_window(events, &renderer, threshold).ok())
+        } else {
+            None
+        };
+        let replay = replay.filter(|queue| {
+            queue.iter().map(|item| item.body.len()).sum::<usize>() + checkpoint.body.len()
+                <= MAX_QUEUE
+        });
+        if let Some(replay) = replay {
+            send(&mut sender, Message::Text(json!({"type":"resume","version":1,"stream_id":stream,"after":after,"through":checkpoint.seq}).to_string().into()), timing.send).await?;
+            last_seq = after;
+            queue = replay;
+        } else {
+            checkpoint = snapshot(&ledger, threshold, stream, Some("resume_unavailable")).await?;
+            last_seq = checkpoint.seq;
+        }
+    }
+    // A resumed connection sees its replay before the current-state checkpoint.
+    queue.push_back(checkpoint);
+    let mut ticker = interval(timing.poll);
     ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
-
+    let mut heartbeat = interval(timing.heartbeat);
+    heartbeat.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    heartbeat.tick().await; // first heartbeat is one full interval after connect
+    let mut pending_pong: Option<(Vec<u8>, Instant)> = None;
+    let mut nonce = 0_u64;
+    let mut input_window = Instant::now();
+    let mut inputs = 0_u32;
     loop {
         tokio::select! {
-            _ = ticker.tick() => {
-                loop {
-                    let events = ledger.events_after(last_seq, EVENT_BATCH_SIZE).await?;
-                    let event_count = events.len();
-                    if event_count == 0 {
-                        break;
-                    }
-
-                    for event in events {
-                        let seq = event.seq;
-                        let message = durable_event_message(event, &renderer, threshold_sats)?;
-                        sender
-                            .send(Message::Text(message.into()))
-                            .await
-                            .context("failed sending durable overlay event")?;
-                        last_seq = seq;
-                    }
-
-                    if event_count < EVENT_BATCH_SIZE as usize {
-                        break;
-                    }
+            biased;
+            _ = async { if let Some((_, deadline)) = &pending_pong { tokio::time::sleep_until(*deadline).await; } else { std::future::pending::<()>().await; } } => bail!("overlay pong deadline exceeded"),
+            _ = heartbeat.tick() => {
+                if pending_pong.is_none() {
+                    nonce = nonce.wrapping_add(1);
+                    let payload = nonce.to_be_bytes().to_vec();
+                    send(&mut sender, Message::Ping(payload.clone().into()), timing.send).await?;
+                    pending_pong = Some((payload, Instant::now() + timing.pong));
                 }
             }
             incoming = receiver.next() => {
+                if input_window.elapsed() >= Duration::from_secs(10) { input_window = Instant::now(); inputs = 0; }
+                inputs += 1;
+                if inputs > 20 { bail!("overlay input rate exceeded"); }
                 match incoming {
-                    Some(Ok(Message::Ping(payload))) => {
-                        sender
-                            .send(Message::Pong(payload))
-                            .await
-                            .context("failed replying to overlay websocket ping")?;
+                    Some(Ok(Message::Pong(payload))) => {
+                        if pending_pong.as_ref().is_some_and(|(expected,_)| payload.as_ref() == expected.as_slice()) { pending_pong = None; }
                     }
+                    Some(Ok(Message::Ping(payload))) => send(&mut sender, Message::Pong(payload), timing.send).await?,
                     Some(Ok(Message::Close(_))) | None => return Ok(()),
-                    Some(Ok(
-                        Message::Text(_) | Message::Binary(_) | Message::Pong(_),
-                    )) => {
-                        // The overlay websocket is intentionally server-to-client only.
-                    }
-                    Some(Err(error)) => return Err(error).context("overlay websocket receive failed"),
+                    Some(Ok(Message::Text(_) | Message::Binary(_))) => bail!("overlay accepts control frames only"),
+                    Some(Err(error)) => return Err(error).context("overlay receive failed"),
+                }
+            }
+            _ = async {}, if !queue.is_empty() => {
+                let next = queue.pop_front().expect("guarded queue");
+                last_seq = next.seq;
+                send(&mut sender, Message::Text(next.current_body().into()), timing.send).await?;
+            }
+            _ = ticker.tick(), if queue.is_empty() => {
+                let latest = ledger.latest_event_seq().await?;
+                if latest == last_seq { continue; }
+                let through = latest.min(last_seq.saturating_add(100));
+                let messages = ledger.overlay_event_window(last_seq, through).await?
+                    .and_then(|events| render_window(events, &renderer, threshold).ok());
+                match messages {
+                    Some(messages) => queue = messages,
+                    None => queue.push_back(snapshot(&ledger, threshold, stream, Some("event_window_unavailable")).await?),
                 }
             }
         }
@@ -81,9 +260,15 @@ fn durable_event_message(
     renderer: &MessageRenderer,
     threshold_sats: u64,
 ) -> Result<String> {
-    let presentation = renderer.render(&event, threshold_sats)?;
     let mut payload: Value = serde_json::from_str(&event.payload_json)
         .context("durable overlay event contains invalid JSON")?;
+    if event.event_type == "weather_status"
+        && !fresh_observation(payload["data"]["observed_at"].as_str())
+    {
+        return Ok(skipped_weather(event.seq));
+    }
+
+    let presentation = renderer.render(&event, threshold_sats)?;
     let object = payload
         .as_object_mut()
         .context("durable overlay event payload must be a JSON object")?;
@@ -173,7 +358,7 @@ mod tests {
                 event_type: "weather_status".to_owned(),
                 payload_json: json!({
                     "message": "Sunny and 72°F",
-                    "data": {"temperature_f": 72.0}
+                    "data": {"temperature_f": 72.0, "observed_at": chrono::DateTime::from_timestamp(crate::gateway::now_epoch().unwrap(), 0).unwrap().to_rfc3339()}
                 })
                 .to_string(),
             },
@@ -203,3 +388,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "overlay_socket_tests.rs"]
+mod socket_tests;

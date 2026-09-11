@@ -1,0 +1,207 @@
+{
+  "observed_at": "2026-09-11T17:46:11.551166+00:00",
+  "vantage": "new VPS using normal DNS and trusted TLS; independent client check separate",
+  "checks": [
+    {
+      "path": "/",
+      "method": "GET",
+      "status": 200,
+      "sha256": "1b5b7c7914e8c8e77ff633aa9be9ad6bcf92108a396cfea1b9d9a7bbbcfc8708"
+    },
+    {
+      "path": "/site-config.js",
+      "method": "GET",
+      "status": 200,
+      "sha256": "13103c2264aa3c2f5656d3f802fc42d459a4d908304a7c743dd539c91d096bb6"
+    },
+    {
+      "path": "/site.js",
+      "method": "GET",
+      "status": 200,
+      "sha256": "c5e3d8a6d8700f9f8e5cf0dadc7ba5d6e43fee7e0934780486eca8a558a36a43"
+    },
+    {
+      "path": "/chat.js",
+      "method": "GET",
+      "status": 200,
+      "sha256": "019b103f68469a4261cbbf905477aace26f45c49d0e2a3a961d377483d6f462b"
+    },
+    {
+      "path": "/images/preview-image.png",
+      "method": "HEAD",
+      "status": 200,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/.well-known/lnurlp/herd",
+      "method": "GET",
+      "status": 404,
+      "sha256": "55f7d9e99b8e2d4e0e193b2f0275501e6d9c1ebd29cadbea6a0da48a8587e3e0"
+    },
+    {
+      "path": "/lnurlp/herd/callback?amount=2340000",
+      "method": "GET",
+      "status": 404,
+      "sha256": "55f7d9e99b8e2d4e0e193b2f0275501e6d9c1ebd29cadbea6a0da48a8587e3e0"
+    },
+    {
+      "path": "/api/v1/strike/webhook",
+      "method": "POST",
+      "status": 405,
+      "sha256": "dace2a571c147da773724738bb0b80d39c430cce12f770210d8f270e958db773"
+    },
+    {
+      "path": "/api/v1/status",
+      "method": "GET",
+      "status": 404,
+      "sha256": "55f7d9e99b8e2d4e0e193b2f0275501e6d9c1ebd29cadbea6a0da48a8587e3e0"
+    },
+    {
+      "path": "/ws/overlay",
+      "method": "GET",
+      "status": 404,
+      "sha256": "55f7d9e99b8e2d4e0e193b2f0275501e6d9c1ebd29cadbea6a0da48a8587e3e0"
+    },
+    {
+      "path": "/rest/items",
+      "method": "GET",
+      "status": 404,
+      "sha256": "55f7d9e99b8e2d4e0e193b2f0275501e6d9c1ebd29cadbea6a0da48a8587e3e0"
+    }
+  ],
+  "tls": "TLSv1.3",
+  "certificate": {
+    "subject": [
+      [
+        [
+          "commonName",
+          "feeder.lightning-goats.com"
+        ]
+      ]
+    ],
+    "issuer": [
+      [
+        [
+          "countryName",
+          "US"
+        ]
+      ],
+      [
+        [
+          "organizationName",
+          "Let's Encrypt"
+        ]
+      ],
+      [
+        [
+          "commonName",
+          "YE2"
+        ]
+      ]
+    ],
+    "version": 3,
+    "serialNumber": "0608CEC765553C70853FA6F8771700DDC5FD",
+    "notBefore": "Sep 11 16:43:23 2026 GMT",
+    "notAfter": "Dec 10 16:43:22 2026 GMT",
+    "subjectAltName": [
+      [
+        "DNS",
+        "feeder.lightning-goats.com"
+      ]
+    ],
+    "caIssuers": [
+      "http://ye2.i.lencr.org/"
+    ],
+    "crlDistributionPoints": [
+      "http://ye2.c.lencr.org/126.crl"
+    ]
+  },
+  "production": "HOLD",
+  "source": "d04fcffee9f3f6db4ba9ee21dbd59ecc8546833d",
+  "independent_home_observation": {
+    "host": "10.8.0.6",
+    "transport": "previously approved pinned SSH; ordinary public HTTPS from home",
+    "trusted_tls": true,
+    "statuses": {
+      "/": 200,
+      "/site-config.js": 200,
+      "/.well-known/lnurlp/herd": 404,
+      "/api/v1/status": 404,
+      "/ws/overlay": 404
+    },
+    "root_sha256": "1b5b7c7914e8c8e77ff633aa9be9ad6bcf92108a396cfea1b9d9a7bbbcfc8708",
+    "config_sha256": "13103c2264aa3c2f5656d3f802fc42d459a4d908304a7c743dd539c91d096bb6"
+  },
+  "source_manifest": {
+    "source_commit": "d04fcffee9f3f6db4ba9ee21dbd59ecc8546833d",
+    "source_tree": "c73235758ab32b75d7435c38b794286d4ba1ab0e",
+    "ci_run": 34628402847,
+    "artifact_download": "connector returned URL but VPS fetch denied HTTP403; exact Git objects used for static files only",
+    "files": {
+      "deploy/nginx/lightning-goats-static-staging.conf.example": {
+        "sha256": "e541d1dc2e002c95957be1ec2b2bdb6c851633c91d4569ed71531c6b151338ea",
+        "bytes": 2388
+      },
+      "web/chat.js": {
+        "sha256": "019b103f68469a4261cbbf905477aace26f45c49d0e2a3a961d377483d6f462b",
+        "bytes": 20946
+      },
+      "web/images/lightninggoatslogo1.png": {
+        "sha256": "5379b917380a345cea6e877eb248a89fef4629ad8ca86eda326a82815d3f2ea1",
+        "bytes": 339614
+      },
+      "web/images/preview-image.png": {
+        "sha256": "b0b36357a3bae0fac478d132a608083c5c9a7d09dcb2fc1762227fa6bc4a813d",
+        "bytes": 1112792
+      },
+      "web/index.html": {
+        "sha256": "1b5b7c7914e8c8e77ff633aa9be9ad6bcf92108a396cfea1b9d9a7bbbcfc8708",
+        "bytes": 24235
+      },
+      "web/site-config.js": {
+        "sha256": "9820c34ecb728b1c2c0572a977cde748d12be642db37c7970aee949850be60cf",
+        "bytes": 155
+      },
+      "web/site.js": {
+        "sha256": "c5e3d8a6d8700f9f8e5cf0dadc7ba5d6e43fee7e0934780486eca8a558a36a43",
+        "bytes": 6066
+      }
+    }
+  },
+  "host": {
+    "os": "Fedora 44",
+    "nginx": "1.30.4",
+    "certbot": "5.7.0",
+    "selinux": "Enforcing",
+    "nginx_active_enabled": true,
+    "canary_daemon_active": false,
+    "canary_gateway_active": false,
+    "ipv4_listeners": [
+      "64.177.40.118:80",
+      "64.177.40.118:443"
+    ],
+    "ipv6_web_listener": false,
+    "firewall_zone": "FedoraServer",
+    "new_rules": [
+      "rule family=\"ipv4\" destination address=\"64.177.40.118\" port port=\"80\" protocol=\"tcp\" accept",
+      "rule family=\"ipv4\" destination address=\"64.177.40.118\" port port=\"443\" protocol=\"tcp\" accept"
+    ],
+    "rules_runtime_and_permanent": true,
+    "ssh_preserved": true,
+    "files_root_owned": true,
+    "website_modes": "directories 0755, files 0644",
+    "selinux_type": "httpd_sys_content_t",
+    "nginx_original_sha256": "2dd3b13a73286cc91f79722260b750e7d2eb137452ea643f3b01550efb32d8ea",
+    "nginx_current_sha256": "23912694907aaba681adebf3886fe172936c050420f5545fc3901bf68a0acb51",
+    "renewal_hook_sha256": "cf4a348167647fcfe7b12ff6dab66741128de8538801b77ec5e49f3b2299e2eb",
+    "renewal_timer_enabled": true
+  },
+  "renewal_dry_run": {
+    "success": true,
+    "exit": 0,
+    "deploy_hook_exercised": true,
+    "test_authority": "Let's Encrypt staging",
+    "random_delay_seconds": 378.9011542321696
+  },
+  "certificate_sha256": "1b5acb8b9274846522d2224fda1011ac09b414715a02b75e310142ad8728a18e"
+}

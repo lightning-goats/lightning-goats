@@ -1,0 +1,107 @@
+{
+  "installation": {
+    "scope": "fresh inactive VPS canary preparation only",
+    "source_commit": "a54ead65b7d68a402b2e4a33ff387b6198a9cf84",
+    "archive_sha256": "3fe81ed9f9c9b0500425ed903cd767e9fd5d286c8d47c23530732b59a6ff924e",
+    "applied": true,
+    "production": "HOLD",
+    "installer_sha256": "6ab6ec88a5c2e5407f77f73d481846afe8763598e8c0f3df6194b432ca265fa0",
+    "runtime_identity_policy": {
+      "user": "lightning-goats",
+      "group": "lightning-goats",
+      "system_account": true,
+      "home": "/var/lib/lightning-goats",
+      "shell": "/usr/sbin/nologin",
+      "password_locked": true,
+      "sudo_allowed": false,
+      "supplementary_groups": []
+    },
+    "directories": {
+      "/etc/lightning-goats": {
+        "uid": 0,
+        "gid": 0,
+        "mode": "0755"
+      },
+      "/var/lib/lightning-goats": {
+        "owner": "lightning-goats",
+        "group": "lightning-goats",
+        "mode": "0700"
+      }
+    },
+    "files": {
+      "/usr/local/bin/lightning-goatsd": {
+        "sha256": "6210f9feb0423c5ddfbd023cd3c56cb784fba34324e9ba7f5596762959b2ae61",
+        "uid": 0,
+        "gid": 0,
+        "mode": "0755"
+      },
+      "/usr/local/bin/lightning-goatsctl": {
+        "sha256": "576ab9f9836dac03e5b5ea63a6af8dca381fdab722990edc1b9796b349ade355",
+        "uid": 0,
+        "gid": 0,
+        "mode": "0755"
+      },
+      "/etc/lightning-goats/config.canary.toml.example": {
+        "sha256": "e261691dc20db5a5309bc9c8f4a54d200064e1a822f363620f3f64c6fc080b6c",
+        "uid": 0,
+        "gid": 0,
+        "mode": "0644"
+      },
+      "/etc/systemd/system/lightning-goats-canary.service": {
+        "sha256": "5c82f52647bc551b7da3a69f7f985138d354d34bef1f99814663ae16d6c4d1ae",
+        "uid": 0,
+        "gid": 0,
+        "mode": "0644"
+      }
+    },
+    "observed_at_utc": "2026-09-11T00:54:46.672218+00:00",
+    "runtime_identity": {
+      "user": "lightning-goats",
+      "uid": 985,
+      "gid": 985,
+      "password_locked": true,
+      "login_shell_disabled": true,
+      "sudo_allowed": false
+    },
+    "runtime_code_config_nonwritable": true,
+    "state_writable": true,
+    "services_started_or_enabled": false,
+    "active_configuration_installed": false,
+    "credentials_installed": false,
+    "systemd_reloaded": false
+  },
+  "independent_readback": {
+    "observed_at_utc": "2026-09-11T00:56:57.400069+00:00",
+    "source_commit": "a54ead65b7d68a402b2e4a33ff387b6198a9cf84",
+    "installed_hashes_ownership_modes_verified": true,
+    "runtime_uid": 985,
+    "runtime_gid": 985,
+    "runtime_supplementary_groups": [],
+    "state_directory_empty": true,
+    "active_configs_credentials_gateway_and_production_unit_absent": true,
+    "record_sha256": "8b70d2548309331533e3a3cca5b847f57da80f281c10a490f7b232d6c3f8ce0c",
+    "repeat_apply_refused_existing_account": true,
+    "repeat_apply_preserved_installed_files": true,
+    "services": {
+      "lightning-goats-canary.service": {
+        "active": "inactive",
+        "enabled": "disabled"
+      },
+      "lightning-goats.service": {
+        "active": "inactive",
+        "enabled": "not-found"
+      }
+    },
+    "production": "HOLD"
+  },
+  "environment": {
+    "os": "Fedora Linux 44",
+    "systemd": "259.8",
+    "selinux": "Enforcing"
+  },
+  "scope_limitations": [
+    "Inactive staging installation; no daemon service startup or live dependency acceptance.",
+    "Runtime source a54ead65 is the corrected candidate, not the final reviewed integration release.",
+    "Final configuration, credentials, privilege revocation, owner contract, containment, website and live approvals remain open."
+  ]
+}

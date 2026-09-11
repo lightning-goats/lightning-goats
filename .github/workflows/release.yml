@@ -9,11 +9,29 @@ permissions:
   contents: write
 
 jobs:
+  rust:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+  security:
+    uses: ./.github/workflows/security.yml
+    permissions:
+      contents: read
+  deployment:
+    uses: ./.github/workflows/deployment.yml
+    permissions:
+      contents: read
   release:
+    needs: [rust, security, deployment]
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Require an integrated source commit
+        run: git merge-base --is-ancestor HEAD origin/main
 
       - name: Install Rust 1.88
         uses: dtolnay/rust-toolchain@stable
@@ -27,24 +45,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          TAG="${GITHUB_REF_NAME}"
-          ARCHIVE="lightning-goats-${TAG}-x86_64-linux-gnu.tar.gz"
-          STAGE="release-${TAG}"
-
-          mkdir -p "$STAGE"
-          install -m 0755 target/release/lightning-goatsd ./lightning-goatsd
-          install -m 0755 target/release/lightning-goatsctl ./lightning-goatsctl
-          install -m 0755 ./lightning-goatsd "$STAGE/lightning-goatsd"
-          install -m 0755 ./lightning-goatsctl "$STAGE/lightning-goatsctl"
-
-          tar -C "$STAGE" -czf "$ARCHIVE" lightning-goatsd lightning-goatsctl
-          sha256sum lightning-goatsd lightning-goatsctl "$ARCHIVE" > SHA256SUMS
-          cat SHA256SUMS
+          bash deploy/scripts/package-release.sh target/release "$RUNNER_TEMP/release" "$GITHUB_REF_NAME"
+          (cd "$RUNNER_TEMP/release" && sha256sum --check SHA256SUMS)
+          python3 deploy/scripts/smoke-release.py "$RUNNER_TEMP/release/lightning-goats-${GITHUB_REF_NAME}-x86_64-linux-gnu.tar.gz" "$(git rev-parse HEAD)"
 
       - name: Publish GitHub release
         uses: ncipollo/release-action@v1
         with:
-          artifacts: "lightning-goatsd,lightning-goatsctl,lightning-goats-${{ github.ref_name }}-x86_64-linux-gnu.tar.gz,SHA256SUMS"
+          artifacts: "${{ runner.temp }}/release/*"
           artifactErrorsFailBuild: true
           allowUpdates: false
           immutableCreate: true

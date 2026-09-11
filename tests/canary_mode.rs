@@ -4,9 +4,8 @@ use std::sync::{
 };
 
 use axum::{
-    Router,
-    extract::State,
-    http::StatusCode,
+    Json, Router,
+    extract::{Path, State},
     response::IntoResponse,
     routing::{get, post},
 };
@@ -14,28 +13,38 @@ use lightning_goats::{
     config::RuntimeMode,
     domain::payment::SettledPayment,
     feeder::{FeedWorkerStep, run_feed_step},
+    gateway::{FeedOutcome, FeedRequestStatus, FeederSafety, GatewayClient},
     ledger::{LedgerStore, SettlementOutcome},
-    openhab::OpenHabClient,
 };
 use tempfile::TempDir;
 use tokio::net::TcpListener;
 
 #[derive(Clone)]
-struct OpenHabState {
-    triggers: Arc<AtomicUsize>,
+struct GatewayState {
+    requests: Arc<AtomicUsize>,
 }
 
-async fn override_handler() -> impl IntoResponse {
-    (StatusCode::OK, "OFF")
+async fn safety_handler() -> Json<FeederSafety> {
+    Json(FeederSafety {
+        override_enabled: false,
+        remote_enabled: true,
+    })
 }
 
-async fn trigger_handler(State(state): State<OpenHabState>) -> impl IntoResponse {
-    state.triggers.fetch_add(1, Ordering::SeqCst);
-    StatusCode::OK
+async fn feed_handler(
+    State(state): State<GatewayState>,
+    Path(id): Path<uuid::Uuid>,
+) -> impl IntoResponse {
+    state.requests.fetch_add(1, Ordering::SeqCst);
+    Json(FeedRequestStatus {
+        request_id: id,
+        status: FeedOutcome::Confirmed,
+        refusal: None,
+    })
 }
 
 #[tokio::test]
-async fn canary_mode_drains_test_rule_without_nostr_capability() {
+async fn canary_mode_drains_harmless_gateway_without_nostr_capability() {
     assert!(RuntimeMode::Canary.feeder_enabled());
     assert!(!RuntimeMode::Canary.nostr_enabled());
 
@@ -62,28 +71,22 @@ async fn canary_mode_drains_test_rule_without_nostr_capability() {
         SettlementOutcome::Credited { sats: 2_340, .. }
     ));
 
-    let triggers = Arc::new(AtomicUsize::new(0));
+    let requests = Arc::new(AtomicUsize::new(0));
     let app = Router::new()
-        .route("/rest/items/FeederOverride/state", get(override_handler))
-        .route("/rest/rules/canaryCounter/runnow", post(trigger_handler))
-        .with_state(OpenHabState {
-            triggers: Arc::clone(&triggers),
+        .route("/v1/feeder/override", get(safety_handler))
+        .route("/v1/feeder/request/{request_id}", post(feed_handler))
+        .with_state(GatewayState {
+            requests: Arc::clone(&requests),
         });
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
-    let openhab = OpenHabClient::new(
-        &format!("http://{address}/"),
-        "token".to_owned(),
-        "canaryCounter",
-        "FeederOverride",
-    )
-    .unwrap();
+    let gateway = GatewayClient::new(&format!("http://{address}/")).unwrap();
 
     assert!(matches!(
-        run_feed_step(&ledger, &openhab, 1_000, RuntimeMode::Canary)
+        run_feed_step(&ledger, &gateway, 1_000, RuntimeMode::Canary)
             .await
             .unwrap(),
         FeedWorkerStep::Fed {
@@ -92,7 +95,7 @@ async fn canary_mode_drains_test_rule_without_nostr_capability() {
         }
     ));
     assert!(matches!(
-        run_feed_step(&ledger, &openhab, 1_000, RuntimeMode::Canary)
+        run_feed_step(&ledger, &gateway, 1_000, RuntimeMode::Canary)
             .await
             .unwrap(),
         FeedWorkerStep::Fed {
@@ -101,6 +104,6 @@ async fn canary_mode_drains_test_rule_without_nostr_capability() {
         }
     ));
 
-    assert_eq!(triggers.load(Ordering::SeqCst), 2);
+    assert_eq!(requests.load(Ordering::SeqCst), 2);
     assert_eq!(ledger.feed_credit_sats().await.unwrap(), 340);
 }

@@ -1,0 +1,110 @@
+name: Deployment artifacts
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  website:
+    # Ubuntu 22.04 permits Chromium's user-namespace sandbox on hosted runners.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install isolated browser test dependencies
+        run: |
+          python -m pip install playwright==1.62.0
+          python -m playwright install --with-deps chromium
+      - name: Test website with all network traffic mocked
+        run: python -m unittest discover -s tests/website -v
+
+  nginx:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install isolated-test dependencies
+        run: sudo apt-get update && sudo apt-get install -y nginx openssl
+      - name: Test assembled nginx sites and release verifier
+        run: python3 -m unittest discover -s deploy/tests -v
+
+  package:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.88"
+      - uses: Swatinem/rust-cache@v2
+      - name: Build all release binaries
+        run: cargo build --release --locked --bins
+      - name: Assemble and smoke-test the complete archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash deploy/scripts/package-release.sh target/release "$RUNNER_TEMP/package-smoke" smoke
+          (cd "$RUNNER_TEMP/package-smoke" && sha256sum --check SHA256SUMS)
+          python3 deploy/scripts/smoke-release.py "$RUNNER_TEMP/package-smoke/lightning-goats-smoke-x86_64-linux-gnu.tar.gz" "$GITHUB_SHA"
+      - name: Rehearse installed release with isolated runtime identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo unshare --net -- python3 deploy/scripts/rehearse-install.py "$RUNNER_TEMP/package-smoke/lightning-goats-smoke-x86_64-linux-gnu.tar.gz" "$GITHUB_SHA" > "$RUNNER_TEMP/package-smoke/INSTALL-REHEARSAL.json"
+          (cd "$RUNNER_TEMP/package-smoke" && sha256sum INSTALL-REHEARSAL.json >> SHA256SUMS)
+      - name: Retain the tested package for staging review
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-package-${{ github.sha }}
+          path: ${{ runner.temp }}/package-smoke/
+          if-no-files-found: error
+          retention-days: 14
+
+  systemd:
+    # LoadCredentialEncrypted requires systemd >= 250; Ubuntu 22.04 has 249.
+    runs-on: ubuntu-24.04
+    needs: package
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: staging-package-${{ github.sha }}
+          path: ${{ runner.temp }}/package-systemd
+      - name: Verify package and rehearse actual systemd credential sandbox
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd "$RUNNER_TEMP/package-systemd" && sha256sum --check SHA256SUMS)
+          sudo python3 -B deploy/scripts/initialize-staging-credential-store.py > "$RUNNER_TEMP/CREDENTIAL-STORE.json"
+          sudo unshare --net -- python3 -B deploy/scripts/rehearse-systemd.py "$RUNNER_TEMP/package-systemd/lightning-goats-smoke-x86_64-linux-gnu.tar.gz" "$GITHUB_SHA" > "$RUNNER_TEMP/SYSTEMD-REHEARSAL.json"
+          (cd "$RUNNER_TEMP" && sha256sum CREDENTIAL-STORE.json SYSTEMD-REHEARSAL.json > SYSTEMD-SHA256SUMS)
+      - name: Prepare a fresh inactive canary on the disposable runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Hosted runners make /usr/local writable for tool installation. This
+          # disposable VM must meet the same root-managed parent contract as a VPS.
+          # Change directories only, never recursively alter installed tools.
+          sudo install -d -o root -g root -m 0755 /usr/local /usr/local/bin
+          CANARY_ARCHIVE="$RUNNER_TEMP/package-systemd/lightning-goats-smoke-x86_64-linux-gnu.tar.gz"
+          CANARY_ARCHIVE_SHA256="$(sha256sum "$CANARY_ARCHIVE" | cut -d ' ' -f 1)"
+          python3 -B deploy/scripts/prepare-vps-canary.py "$CANARY_ARCHIVE" "$GITHUB_SHA" "$CANARY_ARCHIVE_SHA256" > "$RUNNER_TEMP/INACTIVE-CANARY-PLAN.json"
+          sudo python3 -B deploy/scripts/prepare-vps-canary.py "$CANARY_ARCHIVE" "$GITHUB_SHA" "$CANARY_ARCHIVE_SHA256" --apply > "$RUNNER_TEMP/INACTIVE-CANARY-INSTALL.json"
+          (cd "$RUNNER_TEMP" && sha256sum INACTIVE-CANARY-PLAN.json INACTIVE-CANARY-INSTALL.json >> SYSTEMD-SHA256SUMS)
+      - name: Retain systemd acceptance evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-systemd-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/SYSTEMD-REHEARSAL.json
+            ${{ runner.temp }}/CREDENTIAL-STORE.json
+            ${{ runner.temp }}/INACTIVE-CANARY-PLAN.json
+            ${{ runner.temp }}/INACTIVE-CANARY-INSTALL.json
+            ${{ runner.temp }}/SYSTEMD-SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14

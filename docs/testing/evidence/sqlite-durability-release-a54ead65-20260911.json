@@ -1,0 +1,141 @@
+{
+  "source_commit": "a54ead65b7d68a402b2e4a33ff387b6198a9cf84",
+  "observed_at_utc": "2026-09-11T00:21:12.806628+00:00",
+  "binary_sha256": "576ab9f9836dac03e5b5ea63a6af8dca381fdab722990edc1b9796b349ade355",
+  "scope": "actual locally built optimized CLI; isolated namespaces, no host credentials/network or live payments/owner",
+  "isolation_command": [
+    "bwrap",
+    "--unshare-all",
+    "--die-with-parent",
+    "--new-session",
+    "--clearenv",
+    "--ro-bind",
+    "/usr",
+    "/usr",
+    "--symlink",
+    "usr/lib64",
+    "/lib64",
+    "--symlink",
+    "usr/lib",
+    "/lib",
+    "--symlink",
+    "usr/bin",
+    "/bin",
+    "--proc",
+    "/proc",
+    "--dev",
+    "/dev",
+    "--dir",
+    "/tmp",
+    "--bind",
+    "<private-fixture-directory>",
+    "/work",
+    "--chdir",
+    "/work",
+    "--setenv",
+    "PATH",
+    "/usr/bin",
+    "--setenv",
+    "TOKIO_WORKER_THREADS",
+    "2",
+    "--",
+    "/work/lightning-goatsctl"
+  ],
+  "results": {
+    "literal": {
+      "url": "sqlite://:memory:",
+      "commands": {
+        "status": {
+          "exit_code": 1,
+          "stdout": "",
+          "stderr": "Error: invalid database.url\n\nCaused by:\n    SQLite database must use a nonempty filesystem path, not memory or a native file: URI"
+        },
+        "reset-overlay-stream": {
+          "exit_code": 1,
+          "stdout": "",
+          "stderr": "Error: invalid database.url\n\nCaused by:\n    SQLite database must use a nonempty filesystem path, not memory or a native file: URI"
+        }
+      }
+    },
+    "named": {
+      "url": "sqlite:///work/volatile.db?mode=memory",
+      "commands": {
+        "status": {
+          "exit_code": 1,
+          "stdout": "",
+          "stderr": "Error: invalid database.url\n\nCaused by:\n    SQLite database URL has an unsupported storage option"
+        },
+        "reset-overlay-stream": {
+          "exit_code": 1,
+          "stdout": "",
+          "stderr": "Error: invalid database.url\n\nCaused by:\n    SQLite database URL has an unsupported storage option"
+        }
+      }
+    },
+    "encoded": {
+      "url": "sqlite://%3Amemory%3A",
+      "commands": {
+        "status": {
+          "exit_code": 1,
+          "stdout": "",
+          "stderr": "Error: invalid database.url\n\nCaused by:\n    SQLite database must use a nonempty filesystem path, not memory or a native file: URI"
+        },
+        "reset-overlay-stream": {
+          "exit_code": 1,
+          "stdout": "",
+          "stderr": "Error: invalid database.url\n\nCaused by:\n    SQLite database must use a nonempty filesystem path, not memory or a native file: URI"
+        }
+      }
+    },
+    "encoded_option": {
+      "url": "sqlite:///work/volatile.db?%6Dode=%6Demory",
+      "commands": {
+        "status": {
+          "exit_code": 1,
+          "stdout": "",
+          "stderr": "Error: invalid database.url\n\nCaused by:\n    SQLite database URL has an unsupported storage option"
+        },
+        "reset-overlay-stream": {
+          "exit_code": 1,
+          "stdout": "",
+          "stderr": "Error: invalid database.url\n\nCaused by:\n    SQLite database URL has an unsupported storage option"
+        }
+      }
+    },
+    "native_memdb": {
+      "url": "sqlite://file:/volatile%3Fvfs=memdb",
+      "commands": {
+        "status": {
+          "exit_code": 1,
+          "stdout": "",
+          "stderr": "Error: invalid database.url\n\nCaused by:\n    SQLite database must use a nonempty filesystem path, not memory or a native file: URI"
+        },
+        "reset-overlay-stream": {
+          "exit_code": 1,
+          "stdout": "",
+          "stderr": "Error: invalid database.url\n\nCaused by:\n    SQLite database must use a nonempty filesystem path, not memory or a native file: URI"
+        }
+      }
+    },
+    "durable": {
+      "url": "sqlite:///work/durable.db",
+      "commands": {
+        "status": {
+          "exit_code": 0,
+          "stdout": "mode=canary\npayment_backend=strike\nfeed_credit_sats=0\nthreshold_sats=1000\nfeeds_due=0\nremainder_sats=0\nunresolved_feed_attempt_id=none",
+          "stderr": ""
+        },
+        "reset-overlay-stream": {
+          "exit_code": 0,
+          "stdout": "overlay_stream_id=17347361-ed9d-4f7c-9952-a07eb1b247c8",
+          "stderr": ""
+        }
+      }
+    }
+  },
+  "volatile_file_created": false,
+  "durable_overlay_rows": 1,
+  "persisted_identity_matches_cli": true,
+  "production": "HOLD",
+  "fixture_directory_redacted": true
+}

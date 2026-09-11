@@ -1,0 +1,54 @@
+[Unit]
+Description=Lightning Goats Trusted Integration Gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lightning-goats-gateway
+Group=lightning-goats-gateway
+
+ExecStart=/usr/local/bin/lightning-goats-gateway --config /etc/lightning-goats-gateway/config.toml
+
+StateDirectory=lightning-goats-gateway
+StateDirectoryMode=0700
+RuntimeDirectory=lightning-goats-gateway
+RuntimeDirectoryMode=0700
+ConfigurationDirectory=lightning-goats-gateway
+UMask=0077
+
+Environment=RUST_LOG=info
+# Dedicated OpenHAB USER token for Lightning Goats. This credential exists only
+# on the trusted in-house host, never on Vultr.
+LoadCredentialEncrypted=openhab-token:/etc/credstore.encrypted/lightning-goats-gateway-openhab
+
+Restart=on-failure
+RestartSec=5s
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectKernelLogs=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+# The service needs only loopback access (OpenHAB/weather) and the existing
+# WireGuard subnet for its listener. UFW remains the primary peer-specific ACL.
+IPAddressDeny=any
+IPAddressAllow=localhost
+IPAddressAllow=10.8.0.0/24
+
+[Install]
+WantedBy=multi-user.target

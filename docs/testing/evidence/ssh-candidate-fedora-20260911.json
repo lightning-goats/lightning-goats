@@ -1,0 +1,81 @@
+{
+  "observed_at_utc": "2026-09-11T01:39:26.681877+00:00",
+  "scope": "unapplied Fedora SSH candidate; syntax/effective-policy checks only",
+  "reviewer_sha256": "d8274b6b9e886bfed0e0dc59854845d9f3eac2a43a2a4508bdba879ed9eb4615",
+  "candidate_sha256": "8e595d0fbd0221312775e600d08a427b5f5e37c6c2c3092d521fff2b8c68302d",
+  "installation_target": "/etc/ssh/sshd_config.d/00-local-hardening.conf",
+  "source_files_sha256": {
+    "/etc/ssh/sshd_config": "a25c358b50fcd7ec32c866a405277f9af949faa60e659e04d2cfa3c0579b5578",
+    "/etc/ssh/sshd_config.d/00-local-hardening.conf": "0144b1e57b930062e81cd37e0fdc8d0b90db1a269993614f336f8d80558ea00f",
+    "/etc/ssh/sshd_config.d/40-redhat-crypto-policies.conf": "ca62cf339a9884d687e6d8dedb5a7d8dcc28065acd255c85735170e8339e82b6",
+    "/etc/ssh/sshd_config.d/50-cloud-init.conf": "6bf43c7543d384fe7c3442bd97b1c91b9da62b51521184b6c1e421a7ef8bac1d",
+    "/etc/ssh/sshd_config.d/50-redhat.conf": "74c10e4e4396fb438536b844db348f00e08fd8dea20fb4505b8939b2af6669ac",
+    "/etc/crypto-policies/back-ends/opensshserver.config": "a19771cf98492a15b639001f746237b990f9cd65822255925f665147581d54db",
+    "/etc/sysconfig/sshd": "2c59ec4932f5f2ccacde06b7df9dd9004f486c7ff3d448daa2362da0f4be9433"
+  },
+  "service": {
+    "exec_start": "/usr/sbin/sshd -D $OPTIONS",
+    "options_empty": true,
+    "environment_file": "/etc/sysconfig/sshd",
+    "existing_match_blocks": false
+  },
+  "baseline_authentication": {
+    "permitrootlogin": [
+      "prohibit-password"
+    ],
+    "passwordauthentication": [
+      "yes"
+    ],
+    "kbdinteractiveauthentication": [
+      "no"
+    ],
+    "pubkeyauthentication": [
+      "yes"
+    ],
+    "authenticationmethods": [
+      "any"
+    ]
+  },
+  "candidate_authentication": {
+    "permitrootlogin": [
+      "no"
+    ],
+    "passwordauthentication": [
+      "no"
+    ],
+    "kbdinteractiveauthentication": [
+      "no"
+    ],
+    "pubkeyauthentication": [
+      "yes"
+    ],
+    "authenticationmethods": [
+      "publickey"
+    ]
+  },
+  "changed_effective_settings": [
+    "authenticationmethods",
+    "passwordauthentication",
+    "permitrootlogin"
+  ],
+  "connection_contexts_checked": [
+    "user=linuxuser,host=review.invalid,addr=192.0.2.10,laddr=127.0.0.1,lport=22",
+    "user=linuxuser,host=review.invalid,addr=2001:db8::10,laddr=127.0.0.1,lport=22",
+    "user=linuxuser,host=review.invalid,addr=10.8.0.10,laddr=127.0.0.1,lport=22",
+    "user=root,host=review.invalid,addr=192.0.2.10,laddr=127.0.0.1,lport=22",
+    "user=root,host=review.invalid,addr=2001:db8::10,laddr=127.0.0.1,lport=22",
+    "user=root,host=review.invalid,addr=10.8.0.10,laddr=127.0.0.1,lport=22",
+    "user=lightning-goats,host=review.invalid,addr=192.0.2.10,laddr=127.0.0.1,lport=22",
+    "user=lightning-goats,host=review.invalid,addr=2001:db8::10,laddr=127.0.0.1,lport=22",
+    "user=lightning-goats,host=review.invalid,addr=10.8.0.10,laddr=127.0.0.1,lport=22"
+  ],
+  "late_include_negative_detected": true,
+  "match_override_negative_detected": true,
+  "on_disk_policy_unchanged": true,
+  "effective_policy_source": "sshd -T on-disk configuration, not running-listener memory or authentication",
+  "applied": false,
+  "service_reloaded": false,
+  "operator_login_verified": false,
+  "console_recovery_verified": false,
+  "production": "HOLD"
+}

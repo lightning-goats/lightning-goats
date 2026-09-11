@@ -1,0 +1,29 @@
+# HTTP context only. Install once as /etc/nginx/conf.d/lightning-goats-http.conf.
+# nginx.conf must include conf.d/*.conf inside http{}, before the site files.
+upstream lightning_goats_backend {
+    server 127.0.0.1:8787;
+    keepalive 8;
+}
+upstream lightning_goats_canary_backend {
+    server 127.0.0.1:8788;
+    keepalive 8;
+}
+
+limit_req_zone $binary_remote_addr zone=lightning_goats_lnurl_discovery:10m rate=60r/m;
+limit_req_zone $binary_remote_addr zone=lightning_goats_lnurl_invoice:10m rate=12r/m;
+limit_req_zone $binary_remote_addr zone=lightning_goats_read:10m rate=30r/m;
+limit_req_zone $binary_remote_addr zone=lightning_goats_strike_webhook:10m rate=60r/m;
+limit_req_zone $binary_remote_addr zone=lg_canary_lnurl_discovery:10m rate=60r/m;
+limit_req_zone $binary_remote_addr zone=lg_canary_lnurl_invoice:10m rate=12r/m;
+limit_req_zone $binary_remote_addr zone=lg_canary_read:10m rate=30r/m;
+limit_req_zone $binary_remote_addr zone=lg_canary_webhook:10m rate=60r/m;
+limit_req_status 429;
+
+map $http_upgrade $lightning_goats_connection_upgrade {
+    default upgrade;
+    '' close;
+}
+map $http_content_type $lightning_goats_json_content_type {
+    default 0;
+    "~*^application/json([ ]*;.*)?$" 1;
+}

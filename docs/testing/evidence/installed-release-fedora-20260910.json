@@ -1,0 +1,35 @@
+{
+  "all_six_discovery_routes": true,
+  "archive_sha256": "92d1f556a9ff98362764e756858204f9fd7d090236838e1fe9c8c3aaeb7744a7",
+  "binary_sha256": {
+    "lightning-goats-gateway": "0fbc3690d73bb329116ac3c63e2f4bf1f7394ff8f7ef57081e69ac58fae1ace9",
+    "lightning-goatsctl": "10f93587e61c6b3db67aec311af6dabb11af64d6b488a85bfeccbd03f7b9c706",
+    "lightning-goatsd": "47bd28622ed9119250c8c3db56c1d7a4f7becbd71f0ea3aadd916a5cee79c217"
+  },
+  "checkout_cache_absent_after_run": true,
+  "daemon": {
+    "effective_capabilities": 0,
+    "gid": 2,
+    "no_new_privileges": true,
+    "uid": 2
+  },
+  "environment": "Fedora Server 44 x86_64; Rust 1.88.0; fresh loopback-only network namespace",
+  "gateway": {
+    "effective_capabilities": 0,
+    "gid": 1,
+    "no_new_privileges": true,
+    "uid": 1
+  },
+  "harness_sha256": "60b580475a20e63962a711fa5214afd426a65fba896abb0b98c625d8815b380c",
+  "mock_owner_commands": 1,
+  "namespace_interfaces": [
+    "lo"
+  ],
+  "observed_date_utc": "2026-09-10",
+  "restart_idempotency": true,
+  "root_owned_immutable_code_config": true,
+  "runtime_source_commit": "76407c0ba8821ee53b4ffcb044e5a6d9b6733537",
+  "scope": "isolated installed release with synthetic credentials; no systemd/TLS/live acceptance",
+  "separated_credentials": true,
+  "source_commit": "76407c0ba8821ee53b4ffcb044e5a6d9b6733537"
+}

@@ -1,5 +1,10 @@
 # Lightning Goats Agent Guide
 
+Production remains on HOLD under the 2026-09-08 audit. Begin deployment work with
+`docs/deployment/audit-remediation.md` and `docs/deployment/deployment-artifacts.md`.
+Passing artifact tests or earlier CI does not authorize production DNS/WireGuard
+changes, real payments, or physical feeding. Source-level blockers remain open.
+
 This repository is the standalone Lightning Goats payment-accounting, messaging, overlay, and feeder-automation service.
 
 ## Source of truth
@@ -8,7 +13,14 @@ Treat the GitHub Phase 1 tracker and the canonical documentation under `docs/` a
 
 Phase 1 tracker: https://github.com/lightning-goats/lightning-goats/issues/6
 
-Before beginning Phase 1 work, read in this order:
+For a deployment/provisioning session, read first:
+
+1. `docs/deployment/codex-handoff.md`
+2. this `AGENTS.md`
+3. `docs/implementation-status.md`
+4. the supporting documents linked from the handoff
+
+For implementation work, read in this order:
 
 1. `docs/README.md`
 2. `docs/planning/phase1-execution-plan.md`
@@ -22,13 +34,9 @@ Before beginning Phase 1 work, read in this order:
 10. `docs/testing/phase1-verification-matrix.md`
 11. the GitHub issue being implemented
 
-Before any production cutover work also read:
+Before any production cutover work also read `docs/deployment/production-cutover.md`.
 
-- `docs/deployment/production-cutover.md`
-
-For future CyberHerd work read:
-
-- `docs/architecture/cyberherd-phase2-boundary.md`
+For future CyberHerd work read `docs/architecture/cyberherd-phase2-boundary.md`.
 
 `docs/phase1-lnbits-rust-migration-plan.md` and CLN-specific portions of the old `docs/server-setup.md` are historical/superseded. Do not use them as the current execution plan.
 
@@ -36,7 +44,7 @@ For future CyberHerd work read:
 
 Replace the production LNbits/Core Lightning payment path with a standalone `lightning-goatsd` architecture using Strike for Lightning receives while preserving durable feeder accounting, Nostr publishing, and the video overlay.
 
-The physical feeder boundary is strengthened: `lightning-goatsd` talks only to a narrow in-house feeder gateway over WireGuard. It does **not** hold an OpenHAB API token or directly invoke generic OpenHAB REST/rules.
+The physical feeder boundary is strengthened: `lightning-goatsd` talks only to a narrow in-house feeder gateway over the established WireGuard network. It does **not** hold an OpenHAB API token or directly invoke generic OpenHAB REST/rules.
 
 Phase 1 does **not** implement CyberHerd membership/reward logic.
 
@@ -68,7 +76,8 @@ Nginx may route generic `/.well-known/lnurlp/<user>` paths to the service, but t
 - Public invoice creation must be rate-limited/backpressured; webhook method/body/content type must be constrained.
 - Feeder actuation must remain serialized and ambiguity-safe.
 - The feeder request UUID is the cross-boundary idempotency key. Duplicate/replayed UUIDs must never cause a second physical actuation.
-- Local OpenHAB safety gates (`LightningGoatsRemoteEnabled`, `FeederOverride`, minimum interval, safety/feed cap) remain authoritative even if the VPS is compromised.
+- The existing correlated OpenHAB feeder owner remains the physical authority unless the operator explicitly approves replacing it.
+- Gateway-local interval/hour caps and OpenHAB safety controls remain authoritative even if the VPS is compromised.
 - Never automatically submit a fresh feeder actuation after an ambiguous outcome.
 - Payment and feeder messages may publish to Nostr and the overlay. Informational/interface/weather messages are overlay-only and must never enter the Nostr outbox.
 - Keep Nostr signing isolated through the existing `nak`/NIP-46 architecture; do not place a Nostr private key in application configuration or source control.
@@ -111,7 +120,9 @@ Follow `docs/security/openhab-feeder-gateway.md` and issue #17.
 
 The VPS may access only the narrow feeder-gateway service over the approved WireGuard/UFW path. It must not directly reach generic OpenHAB REST/admin APIs or unrelated trusted-network services.
 
-The gateway uses a dedicated OpenHAB USER/token and dedicated request/ack Items/rule. It is not a generic proxy.
+Reuse the established `10.8.0.0/24` WireGuard network. The trusted host is `10.8.0.6`; the old production hub remains `10.8.0.1` during staging. The new VPS gets a new keypair and an inventoried unused temporary `10.8.0.x` address. Host/UFW policy, not a new subnet, provides the application containment.
+
+The gateway uses a dedicated OpenHAB USER/token and reuses the existing correlated feeder owner where its live request/result contract can be bound safely. It is not a generic proxy.
 
 Any future CyberHerd feeder action must use the same durable feeder authority/gateway; do not create a bypass path.
 
@@ -122,11 +133,11 @@ The replacement stack is built and tested on a new VPS in parallel with the curr
 - Do not change production DNS until the new stack passes the Phase 1 verification matrix.
 - Give the new VPS its own WireGuard identity during parallel testing.
 - Do not run the same WireGuard private key on both old and new VPSes simultaneously.
+- Reuse `10.8.0.0/24`; use an unused temporary staging address and never claim `10.8.0.1` while the old hub is active.
 - Existing production WireGuard clients stay on the old VPS during staging; repoint them to the new VPS only during the operator-approved cutover.
-- Prefer a dedicated Lightning Goats application WireGuard interface/key/subnet for VPS -> home feeder gateway traffic.
 - Keep the old VPS as a rollback/archive point until the new stack has been observed successfully in production.
 - The public edge should be minimal: nginx/TLS, WireGuard, static site, and explicitly required application ingress.
-- Restrict locally originated VPS traffic into the trusted network to explicitly required hosts/ports.
+- Restrict locally originated VPS traffic into the trusted network to `10.8.0.6` gateway ports explicitly required for the current stage.
 - SSH must be key-only with direct root login disabled before production.
 
 ## Agent/server operations

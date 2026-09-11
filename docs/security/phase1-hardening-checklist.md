@@ -129,6 +129,11 @@ Before production:
 - document registrar/DNS recovery method and account ownership;
 - remove stale public records from old services where safe.
 
+The read-only public baseline and remaining account/zone decisions are recorded
+in `../deployment/domain-readiness.md`. Public registry locks and an existing-site
+TLS handshake do not prove MFA, recovery, complete record inventory or new-VPS
+acceptance. Production DNS remains unchanged under the audit HOLD.
+
 ## 6. VPS SSH and host access
 
 - keys only;

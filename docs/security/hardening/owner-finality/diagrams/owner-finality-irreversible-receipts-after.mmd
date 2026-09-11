@@ -1,0 +1,8 @@
+flowchart LR
+  V[VPS gateway client] --> G[Durable gateway reservation]
+  G --> O[OpenHAB owner with exclusive admission]
+  O --> L[Versioned irreversible JDBC receipts]
+  O --> A[Physical actuator]
+  L --> R[Best effort Result Item]
+  L -. bounded verified recovery .-> G
+  R -. failure is diagnostic only .-> D[Delivery diagnostics]

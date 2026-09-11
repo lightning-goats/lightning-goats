@@ -1,0 +1,36 @@
+# Trusted in-house Lightning Goats gateway configuration for 10.8.0.6.
+# The OpenHAB token is NOT stored here; systemd supplies `openhab-token`.
+
+[service]
+listen = "10.8.0.6:8789"
+
+[database]
+url = "sqlite:///var/lib/lightning-goats-gateway/gateway.db"
+
+[openhab]
+# Gateway runs on the OpenHAB host and is deliberately restricted to loopback.
+url = "http://127.0.0.1:8080/"
+
+# Read-only source inspection confirmed rule 88bd9ec4de / feeder-request-v1.
+# JSON requestId + fresh requestedAt; only exact complete/complete confirms.
+# Denials and failures retain the gateway reservation. Production remains HOLD.
+request_item = "GoatFeeder_ManualRequest"
+ack_item = "GoatFeeder_ManualResult"
+protocol = "feeder_request_v1"
+
+override_item = "FeederOverride"
+# New local administrative kill switch for the Lightning Goats remote path.
+remote_enabled_item = "LightningGoatsRemoteEnabled"
+temperature_item = "AmbientWeatherWS2902A_WeatherDataWs2902a_Temperature"
+
+[weather]
+url = "http://127.0.0.1:5000/get_received_data"
+max_stale_seconds = 300
+
+[feeder]
+ack_timeout_seconds = 20
+ack_poll_milliseconds = 250
+# Defense in depth in the trusted gateway, in addition to the live OpenHAB
+# owner rule's own safety policy and lightning-goatsd's inter-feed delay.
+min_feed_interval_seconds = 30
+max_feeds_per_hour = 10

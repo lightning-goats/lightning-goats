@@ -1,0 +1,177 @@
+{
+  "all_six_discovery_routes": true,
+  "archive_sha256": "3fe81ed9f9c9b0500425ed903cd767e9fd5d286c8d47c23530732b59a6ff924e",
+  "automatic_service_restarts": 0,
+  "binary_sha256": {
+    "lightning-goats-gateway": "f76c73a84ec49caf0b95deed5a7e8146d1eb9af74458ce5caa43cd5c427444ca",
+    "lightning-goatsctl": "576ab9f9836dac03e5b5ea63a6af8dca381fdab722990edc1b9796b349ade355",
+    "lightning-goatsd": "6210f9feb0423c5ddfbd023cd3c56cb784fba34324e9ba7f5596762959b2ae61"
+  },
+  "credential_separation_checked_with_other_service_active": true,
+  "daemon": {
+    "effective_capabilities": 0,
+    "gid": 2,
+    "no_new_privileges": true,
+    "uid": 2
+  },
+  "environment": "Linux-7.2.4-200.fc44.x86_64-x86_64-with-glibc2.43",
+  "gateway": {
+    "effective_capabilities": 0,
+    "gid": 1,
+    "no_new_privileges": true,
+    "uid": 1
+  },
+  "harness_sha256": {
+    "rehearse-install.py": "9ace9d355f891469bafef27ba8f7166d2c31f85abf7a6dc77e8cdf26da9e1499",
+    "rehearse-systemd.py": "7b59cf736b3d18dc9b9aa47b4ab92a75c951a4622d3e0b2d0af9e6fe3dd6dcd6",
+    "smoke-release.py": "0958e8812706dbd1e783269d3d955eac9858598da9d6b626b4f5710c8e69dbd2"
+  },
+  "mock_owner_commands": 1,
+  "namespace_interfaces": [
+    "lo"
+  ],
+  "negative_encrypted_credentials": {
+    "tampered": "rejected_before_exec_status_243",
+    "wrong_name": "rejected_before_exec_status_243"
+  },
+  "observed_at_utc": "2026-09-11T00:19:42.739414+00:00",
+  "plaintext_source_credentials_removed": true,
+  "preserved_service_properties": {
+    "daemon": [
+      "Type=simple",
+      "StateDirectoryMode=0700",
+      "RuntimeDirectoryMode=0700",
+      "UMask=0077",
+      "Restart=on-failure",
+      "RestartSec=5s",
+      "NoNewPrivileges=yes",
+      "PrivateTmp=yes",
+      "PrivateDevices=yes",
+      "ProtectSystem=strict",
+      "ProtectHome=yes",
+      "ProtectKernelTunables=yes",
+      "ProtectKernelModules=yes",
+      "ProtectControlGroups=yes",
+      "ProtectKernelLogs=yes",
+      "ProtectProc=invisible",
+      "ProcSubset=pid",
+      "RestrictSUIDSGID=yes",
+      "RestrictRealtime=yes",
+      "LockPersonality=yes",
+      "MemoryDenyWriteExecute=yes",
+      "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6",
+      "CapabilityBoundingSet=",
+      "AmbientCapabilities="
+    ],
+    "gateway": [
+      "Type=simple",
+      "StateDirectoryMode=0700",
+      "RuntimeDirectoryMode=0700",
+      "UMask=0077",
+      "Restart=on-failure",
+      "RestartSec=5s",
+      "NoNewPrivileges=yes",
+      "PrivateTmp=yes",
+      "PrivateDevices=yes",
+      "ProtectSystem=strict",
+      "ProtectHome=yes",
+      "ProtectKernelTunables=yes",
+      "ProtectKernelModules=yes",
+      "ProtectControlGroups=yes",
+      "ProtectKernelLogs=yes",
+      "ProtectProc=invisible",
+      "ProcSubset=pid",
+      "RestrictSUIDSGID=yes",
+      "RestrictRealtime=yes",
+      "LockPersonality=yes",
+      "MemoryDenyWriteExecute=yes",
+      "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6",
+      "CapabilityBoundingSet=",
+      "AmbientCapabilities=",
+      "IPAddressDeny=any",
+      "IPAddressAllow=localhost",
+      "IPAddressAllow=10.8.0.0/24"
+    ]
+  },
+  "restart_idempotency": true,
+  "root_owned_immutable_code_config": true,
+  "scope": "actual transient systemd canary sandboxes and encrypted synthetic credentials; no live acceptance",
+  "selinux_enforcing": true,
+  "separated_credentials": true,
+  "service_starts": [
+    {
+      "automatic_restarts": 0,
+      "other_service_active_during_credential_probe": false,
+      "role": "gateway",
+      "selinux_process_context": "system_u:system_r:unconfined_service_t:s0",
+      "state_runtime_mode": "0700"
+    },
+    {
+      "automatic_restarts": 0,
+      "other_service_active_during_credential_probe": true,
+      "role": "daemon",
+      "selinux_process_context": "system_u:system_r:unconfined_service_t:s0",
+      "state_runtime_mode": "0700"
+    },
+    {
+      "automatic_restarts": 0,
+      "other_service_active_during_credential_probe": false,
+      "role": "gateway",
+      "selinux_process_context": "system_u:system_r:unconfined_service_t:s0",
+      "state_runtime_mode": "0700"
+    },
+    {
+      "automatic_restarts": 0,
+      "other_service_active_during_credential_probe": true,
+      "role": "daemon",
+      "selinux_process_context": "system_u:system_r:unconfined_service_t:s0",
+      "state_runtime_mode": "0700"
+    },
+    {
+      "automatic_restarts": 0,
+      "other_service_active_during_credential_probe": true,
+      "role": "gateway",
+      "selinux_process_context": "system_u:system_r:unconfined_service_t:s0",
+      "state_runtime_mode": "0700"
+    }
+  ],
+  "source_commit": "a54ead65b7d68a402b2e4a33ff387b6198a9cf84",
+  "systemd_sandbox_probes": {
+    "daemon": {
+      "credential_names": [
+        "strike-api-key",
+        "strike-webhook-secret"
+      ],
+      "credential_values_verified": true,
+      "network_namespace_verified": true,
+      "other_unit_credentials_inaccessible": true,
+      "private_tmp_verified": true,
+      "protect_home_verified": true,
+      "root_owned_code_config_nonwritable": true,
+      "state_writable": true
+    },
+    "gateway": {
+      "credential_names": [
+        "openhab-token"
+      ],
+      "credential_values_verified": true,
+      "network_namespace_verified": true,
+      "other_unit_credentials_inaccessible": true,
+      "private_tmp_verified": true,
+      "protect_home_verified": true,
+      "root_owned_code_config_nonwritable": true,
+      "state_writable": true
+    }
+  },
+  "systemd_version": "systemd 259 (259.8-1.fc44)",
+  "template_sha256": {
+    "lightning-goats-canary.service": "5c82f52647bc551b7da3a69f7f985138d354d34bef1f99814663ae16d6c4d1ae",
+    "lightning-goats-gateway-canary.service": "b93e3a3550940220210a364cec7b6272f2ee4408b58b7b0beb85c5bcb7576726"
+  },
+  "temporary_binary_selinux_labels": {
+    "lightning-goats-gateway": "system_u:object_r:bin_t:s0",
+    "lightning-goatsctl": "system_u:object_r:bin_t:s0",
+    "lightning-goatsd": "system_u:object_r:bin_t:s0"
+  },
+  "temporary_installation_removed": true
+}

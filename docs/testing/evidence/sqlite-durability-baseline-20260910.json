@@ -1,0 +1,58 @@
+{
+  "base_source": "dc5a88c3371d62d2795b067df42bc005fe0de334",
+  "environment": {
+    "host": "isolated new Fedora 44 VPS development checkout",
+    "rust": "1.88",
+    "build_jobs": 1,
+    "production": "HOLD",
+    "live_services_used": false
+  },
+  "integration_assessment": {
+    "range_base": "80ae37c7b20950b345a1510fa16a05708925f8b8",
+    "range_head": "dc5a88c3371d62d2795b067df42bc005fe0de334",
+    "patch_sha256": "3a912950f99b20769864fe7de1dc2621cd3dbadbc1656a4596217cdb98152318",
+    "recommendation": "revise"
+  },
+  "real_cli_reproduction": {
+    "volatile": {
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "Error: error returned from database: (code: 1) no such table: overlay_identity\n\nCaused by:\n    (code: 1) no such table: overlay_identity"
+    },
+    "literal": {
+      "exit_code": 0,
+      "stdout": "overlay_stream_id=f79aa4b9-f10e-486f-98e2-059f0a12f9ed",
+      "stderr": ""
+    },
+    "durable": {
+      "exit_code": 0,
+      "stdout": "overlay_stream_id=4a650446-2037-4c32-a088-162d3d082c4f",
+      "stderr": ""
+    },
+    "named_memory_file_exists": false,
+    "durable_file_exists": true,
+    "durable_overlay_rows": 1,
+    "runtime_source": "76407c0ba8821ee53b4ffcb044e5a6d9b6733537; Rust source unchanged through dc5a88c3371d62d2795b067df42bc005fe0de334",
+    "binary_sha256": "10f93587e61c6b3db67aec311af6dabb11af64d6b488a85bfeccbd03f7b9c706"
+  },
+  "regressions_before_fix": {
+    "command": "cargo test --locked --offline --all-features --test sqlite_durability",
+    "exit_code": 101,
+    "passed": 1,
+    "failed": 3,
+    "direct_ledger_accepted_volatile_forms": 15,
+    "ordinary_file_control": "passed",
+    "log_sha256": "93cd37ed265a98e8bfe807c96b7387ef08f3c3072d2bc3fa7320f3f8eefca465",
+    "test_output": "\ntest both_configs_reject_volatile_sqlite_representations ... FAILED\ntest direct_ledger_cannot_bypass_config_durability ... FAILED\ntest ordinary_file_preserves_credit_deduplication_events_and_identity_in_another_process ... ok\ntest real_operator_cli_rejects_volatile_storage ... FAILED\n\nfailures:\n\n---- both_configs_reject_volatile_sqlite_representations stdout ----\n\nthread 'both_configs_reject_volatile_sqlite_representations' panicked at tests/sqlite_durability.rs:51:5:\naccepted volatile config: [\"daemon: sqlite://:memory:\", \"gateway: sqlite://:memory:\", \"daemon: sqlite://%3Amemory%3A\", \"gateway: sqlite://%3Amemory%3A\", \"daemon: sqlite://\", \"gateway: sqlite://\", \"daemon: sqlite://?cache=private\", \"gateway: sqlite://?cache=private\", \"daemon: sqlite://volatile?mode=memory\", \"gateway: sqlite://volatile?mode=memory\", \"daemon: sqlite://volatile?%6Dode=%6Demory\", \"gateway: sqlite://volatile?%6Dode=%6Demory\", \"daemon: sqlite://volatile?mode=memory&mode=rw\", \"gateway: sqlite://volatile?mode=memory&mode=rw\", \"daemon: sqlite://sqlite::memory:\", \"gateway: sqlite://sqlite::memory:\", \"daemon: sqlite://file::memory:\", \"gateway: sqlite://file::memory:\", \"daemon: sqlite://file:volatile%3Fmode=memory\", \"gateway: sqlite://file:volatile%3Fmode=memory\", \"daemon: sqlite://file:%253Amemory%253A\", \"gateway: sqlite://file:%253Amemory%253A\", \"daemon: sqlite:///volatile?vfs=memdb\", \"gateway: sqlite:///volatile?vfs=memdb\", \"daemon: sqlite:///volatile?%76fs=mem%64b\", \"gateway: sqlite:///volatile?%76fs=mem%64b\", \"daemon: sqlite://file:/volatile%3Fvfs=memdb\", \"gateway: sqlite://file:/volatile%3Fvfs=memdb\"]\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n---- direct_ledger_cannot_bypass_config_durability stdout ----\n\nthread 'direct_ledger_cannot_bypass_config_durability' panicked at tests/sqlite_durability.rs:62:5:\naccepted volatile ledger: [\"sqlite::memory:\", \"sqlite://:memory:\", \"sqlite://%3Amemory%3A\", \"sqlite://\", \"sqlite://?cache=private\", \"sqlite://volatile?mode=memory\", \"sqlite://volatile?%6Dode=%6Demory\", \"sqlite://volatile?mode=memory&mode=rw\", \"sqlite://sqlite::memory:\", \"sqlite://file::memory:\", \"sqlite://file:volatile%3Fmode=memory\", \"sqlite://file:%253Amemory%253A\", \"sqlite:///volatile?vfs=memdb\", \"sqlite:///volatile?%76fs=mem%64b\", \"sqlite://file:/volatile%3Fvfs=memdb\"]\n\n---- real_operator_cli_rejects_volatile_storage stdout ----\n\nthread 'real_operator_cli_rejects_volatile_storage' panicked at tests/sqlite_durability.rs:78:13:\naccepted sqlite://:memory: status\n\n\nfailures:\n    both_configs_reject_volatile_sqlite_representations\n    direct_ledger_cannot_bypass_config_durability\n    real_operator_cli_rejects_volatile_storage\n\ntest result: FAILED. 1 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.27s\n\nerror: test failed, to rerun pass `--test sqlite_durability`\n"
+  },
+  "gateway_negative_control": {
+    "command": "cargo test --locked --offline --all-features --lib gateway::store::tests::rejects_sqlite_memory_aliases",
+    "exit_code": 0,
+    "memory_vfs_urls": [
+      "sqlite:///volatile?vfs=memdb",
+      "sqlite://file:/volatile%3Fvfs=memdb"
+    ],
+    "result": "existing runtime rejected both: no demonstrated gateway bypass",
+    "log_sha256": "be3694eb379e674ca9802f1d1cb3a29d3543de88583b24097b719de44f56e53a"
+  }
+}

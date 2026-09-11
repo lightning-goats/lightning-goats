@@ -1,6 +1,7 @@
 # Non-secret Lightning Goats canary configuration.
-# Use a separate database, Strike sandbox credentials, and a harmless feeder
-# counter/test path. Canary mode never enables Nostr signing/publication.
+# Canary mode uses a separate SQLite database, Strike sandbox credentials, and
+# a separate trusted gateway instance whose OpenHAB request/ack path MUST be
+# harmless. Canary mode never enables Nostr signing/publication.
 
 [service]
 listen = "127.0.0.1:8788"
@@ -9,20 +10,11 @@ mode = "canary"
 [database]
 url = "sqlite:///var/lib/lightning-goats/lightning-goats-canary.db"
 
-# Transitional CLN compatibility only; removed by Phase 1 issue #13.
-[lightning]
-clnrest_url = "https://127.0.0.1:3010"
-clnrest_ca_certificate = "/etc/lightning-goats/clnrest-ca.pem"
-herd_user = "herd-canary"
-
-# Strike documents https://api.dev.strike.me/ as its sandbox API. Use a sandbox
-# key with only partner.receive-request.create and partner.receive-request.read.
 [strike]
 api_url = "https://api.dev.strike.me/"
 
-# Replace this with the temporary HTTPS hostname used to exercise the new VPS.
 [lnurl]
-public_base_url = "https://staging.lightning-goats.com/"
+public_base_url = "https://feeder.lightning-goats.com/"
 invoice_expiry_seconds = 300
 
 [[lightning_address]]
@@ -75,14 +67,19 @@ max_sendable_msat = 1000000000
 
 [feeder]
 threshold_sats = 1000
-inter_feed_delay_seconds = 2
+inter_feed_delay_seconds = 5
 
-[openhab]
-url = "http://127.0.0.1:8080"
-# MUST be a harmless counter/test rule. Never point canary at the physical feeder.
-feeder_rule_id = "REPLACE_WITH_CANARY_COUNTER_RULE_ID"
-override_item = "FeederOverride"
-temperature_item = "AmbientWeatherWS2902A_WeatherDataWs2902a_Temperature"
+# Separate in-house canary gateway, configured with harmless request/ack Items.
+# Do NOT point canary mode at the production physical-feeder gateway.
+[gateway]
+url = "http://10.8.0.6:8790/"
+
+[informational]
+interval_seconds = 60
+interface_info_enabled = true
+weather_enabled = true
+interface_info_probability = 0.4
+weather_probability = 0.4
 
 [nostr]
 # Canary mode does not construct NakClient and does not read nostr-client-key.

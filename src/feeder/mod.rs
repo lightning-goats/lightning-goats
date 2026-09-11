@@ -6,20 +6,26 @@ use uuid::Uuid;
 
 use crate::{
     config::RuntimeMode,
+    gateway::{FeedOutcome, FeedRequestStatus, GatewayClient},
     ledger::{LedgerStore, StoredFeedAttemptStatus},
-    openhab::OpenHabClient,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FeedWorkerStep {
     Idle,
+    NotDispatched {
+        attempt_id: Uuid,
+    },
     ShadowBlocked {
         feeds_due: u64,
     },
     OverrideBlocked {
         feeds_due: u64,
     },
-    OverrideUnavailable {
+    RemoteDisabled {
+        feeds_due: u64,
+    },
+    SafetyUnavailable {
         feeds_due: u64,
     },
     UnknownFeedBlocked {
@@ -33,7 +39,7 @@ pub enum FeedWorkerStep {
 
 pub async fn run_feed_step(
     ledger: &LedgerStore,
-    openhab: &OpenHabClient,
+    gateway: &GatewayClient,
     threshold_sats: u64,
     mode: RuntimeMode,
 ) -> Result<FeedWorkerStep> {
@@ -42,15 +48,17 @@ pub async fn run_feed_step(
     }
 
     if let Some(attempt) = ledger.unresolved_feed_attempt().await? {
-        return match attempt.status {
-            StoredFeedAttemptStatus::Unknown => Ok(FeedWorkerStep::UnknownFeedBlocked {
-                attempt_id: attempt.id,
-            }),
-            StoredFeedAttemptStatus::IntentCommitted => bail!(
-                "unreconciled intent_committed feed attempt {} reached the feed worker",
-                attempt.id
-            ),
+        // GET only. A 404, timeout, malformed result or receipt is never proof
+        // of non-dispatch, including when the original POST is still in flight.
+        let status = match gateway.feed_request_status(attempt.id).await {
+            Ok(status) => status,
+            Err(_) => {
+                return Ok(FeedWorkerStep::UnknownFeedBlocked {
+                    attempt_id: attempt.id,
+                });
+            }
         };
+        return apply_outcome(ledger, attempt.id, attempt.status, status).await;
     }
 
     let credit = ledger.feed_credit_sats().await?;
@@ -63,72 +71,126 @@ pub async fn run_feed_step(
         return Ok(FeedWorkerStep::ShadowBlocked { feeds_due });
     }
 
-    let override_enabled = match openhab.feeder_override_enabled().await {
+    let safety = match gateway.feeder_safety().await {
         Ok(value) => value,
         Err(error) => {
-            tracing::warn!(%error, "unable to determine FeederOverride; automatic feeding remains blocked");
-            return Ok(FeedWorkerStep::OverrideUnavailable { feeds_due });
+            tracing::warn!(%error, "unable to determine trusted feeder safety state; automatic feeding remains blocked");
+            return Ok(FeedWorkerStep::SafetyUnavailable { feeds_due });
         }
     };
-    if override_enabled {
+    if safety.override_enabled {
         return Ok(FeedWorkerStep::OverrideBlocked { feeds_due });
+    }
+    if !safety.remote_enabled {
+        return Ok(FeedWorkerStep::RemoteDisabled { feeds_due });
     }
 
     let Some(attempt_id) = ledger.begin_feed_attempt(threshold_sats).await? else {
         return Ok(FeedWorkerStep::Idle);
     };
 
-    if let Err(error) = openhab.trigger_feeder().await {
-        ledger
-            .mark_feed_unknown(attempt_id, &error.to_string())
-            .await
-            .context("failed marking ambiguous OpenHAB feed as unknown")?;
-        return Err(error).context(format!(
-            "OpenHAB feed attempt {attempt_id} is ambiguous and requires operator reconciliation"
-        ));
-    }
-
-    ledger
-        .confirm_feed_attempt(attempt_id)
-        .await
-        .context("OpenHAB accepted feed but durable feed confirmation failed")?;
-    let remaining_sats = ledger.feed_credit_sats().await?;
-
-    Ok(FeedWorkerStep::Fed {
+    let status = match gateway.request_feed(attempt_id).await {
+        Ok(status) => status,
+        Err(error) => {
+            ledger
+                .mark_feed_unknown(attempt_id, "gateway response unavailable or uncorrelated")
+                .await?;
+            return Err(error).context("gateway feed outcome remains unresolved");
+        }
+    };
+    apply_outcome(
+        ledger,
         attempt_id,
-        remaining_sats,
-    })
+        StoredFeedAttemptStatus::IntentCommitted,
+        status,
+    )
+    .await
+}
+
+async fn apply_outcome(
+    ledger: &LedgerStore,
+    attempt_id: Uuid,
+    stored: StoredFeedAttemptStatus,
+    status: FeedRequestStatus,
+) -> Result<FeedWorkerStep> {
+    status.validate(attempt_id)?;
+    match status.status {
+        FeedOutcome::Confirmed => {
+            match stored {
+                StoredFeedAttemptStatus::IntentCommitted => {
+                    ledger.confirm_feed_attempt(attempt_id).await?
+                }
+                StoredFeedAttemptStatus::Unknown => {
+                    ledger.reconcile_unknown_as_fed(attempt_id).await?
+                }
+            }
+            Ok(FeedWorkerStep::Fed {
+                attempt_id,
+                remaining_sats: ledger.feed_credit_sats().await?,
+            })
+        }
+        FeedOutcome::NotDispatched => {
+            ledger
+                .resolve_feed_not_dispatched(
+                    attempt_id,
+                    status
+                        .refusal
+                        .context("missing refusal")?
+                        .retry_after_seconds,
+                )
+                .await?;
+            Ok(FeedWorkerStep::NotDispatched { attempt_id })
+        }
+        FeedOutcome::Pending | FeedOutcome::Ambiguous => {
+            if stored == StoredFeedAttemptStatus::IntentCommitted {
+                ledger
+                    .mark_feed_unknown(
+                        attempt_id,
+                        "gateway physical outcome unresolved; status polling only",
+                    )
+                    .await?;
+            }
+            Ok(FeedWorkerStep::UnknownFeedBlocked { attempt_id })
+        }
+    }
 }
 
 pub async fn run_feed_worker(
     ledger: LedgerStore,
-    openhab: OpenHabClient,
+    gateway: GatewayClient,
     threshold_sats: u64,
     inter_feed_delay: Duration,
     mode: RuntimeMode,
 ) -> Result<()> {
     loop {
-        match run_feed_step(&ledger, &openhab, threshold_sats, mode).await {
+        match run_feed_step(&ledger, &gateway, threshold_sats, mode).await {
             Ok(FeedWorkerStep::Fed {
                 attempt_id,
                 remaining_sats,
             }) => {
-                tracing::info!(%attempt_id, remaining_sats, "automatic feeder activation confirmed");
+                tracing::info!(%attempt_id, remaining_sats, "automatic feeder activation confirmed through trusted gateway");
                 sleep(inter_feed_delay).await;
             }
             Ok(FeedWorkerStep::UnknownFeedBlocked { attempt_id }) => {
                 tracing::error!(%attempt_id, "automatic feeding blocked by unresolved ambiguous feed");
                 sleep(Duration::from_secs(5)).await;
             }
-            Ok(FeedWorkerStep::OverrideUnavailable { feeds_due }) => {
+            Ok(FeedWorkerStep::SafetyUnavailable { feeds_due }) => {
                 tracing::warn!(
                     feeds_due,
-                    "automatic feeding blocked because FeederOverride state is unavailable"
+                    "automatic feeding blocked because trusted gateway safety state is unavailable"
                 );
                 sleep(Duration::from_secs(5)).await;
             }
             Ok(FeedWorkerStep::OverrideBlocked { feeds_due }) => {
                 tracing::info!(feeds_due, "automatic feeding blocked by FeederOverride");
+                sleep(Duration::from_secs(2)).await;
+            }
+            Ok(FeedWorkerStep::RemoteDisabled { feeds_due }) => {
+                tracing::info!(
+                    feeds_due,
+                    "automatic feeding blocked because LightningGoatsRemoteEnabled is OFF"
+                );
                 sleep(Duration::from_secs(2)).await;
             }
             Ok(FeedWorkerStep::ShadowBlocked { feeds_due }) => {
@@ -138,6 +200,7 @@ pub async fn run_feed_worker(
                 );
                 sleep(Duration::from_secs(2)).await;
             }
+            Ok(FeedWorkerStep::NotDispatched { .. }) => sleep(Duration::from_secs(2)).await,
             Ok(FeedWorkerStep::Idle) => sleep(Duration::from_secs(2)).await,
             Err(error) => {
                 tracing::error!(%error, "feed worker step failed");
@@ -151,12 +214,12 @@ pub async fn run_feed_worker(
 mod tests {
     use std::sync::{
         Arc,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     };
 
     use axum::{
-        Router,
-        extract::State,
+        Json, Router,
+        extract::{Path, State},
         http::StatusCode,
         response::IntoResponse,
         routing::{get, post},
@@ -165,41 +228,51 @@ mod tests {
     use tokio::net::TcpListener;
 
     use super::*;
-    use crate::{domain::payment::SettledPayment, ledger::SettlementOutcome};
+    use crate::{
+        domain::payment::SettledPayment,
+        gateway::FeederSafety,
+        ledger::{SettlementOutcome, StoredFeedAttemptStatus},
+    };
 
     #[derive(Clone)]
-    struct MockOpenHabState {
-        override_state: &'static str,
-        trigger_status: StatusCode,
-        triggers: Arc<AtomicUsize>,
+    struct MockGatewayState {
+        safety: FeederSafety,
+        posts: Arc<AtomicUsize>,
+        fail_post: Arc<AtomicBool>,
     }
 
-    async fn override_handler(State(state): State<MockOpenHabState>) -> impl IntoResponse {
-        (StatusCode::OK, state.override_state)
+    async fn safety_handler(State(state): State<MockGatewayState>) -> Json<FeederSafety> {
+        Json(state.safety)
     }
 
-    async fn trigger_handler(State(state): State<MockOpenHabState>) -> impl IntoResponse {
-        state.triggers.fetch_add(1, Ordering::SeqCst);
-        state.trigger_status
+    async fn feed_handler(
+        State(state): State<MockGatewayState>,
+        Path(id): Path<Uuid>,
+    ) -> impl IntoResponse {
+        state.posts.fetch_add(1, Ordering::SeqCst);
+        if state.fail_post.load(Ordering::SeqCst) {
+            StatusCode::GATEWAY_TIMEOUT.into_response()
+        } else {
+            Json(FeedRequestStatus {
+                request_id: id,
+                status: FeedOutcome::Confirmed,
+                refusal: None,
+            })
+            .into_response()
+        }
     }
 
-    async fn openhab(state: MockOpenHabState) -> OpenHabClient {
+    async fn gateway(state: MockGatewayState) -> GatewayClient {
         let app = Router::new()
-            .route("/rest/items/FeederOverride/state", get(override_handler))
-            .route("/rest/rules/rule123/runnow", post(trigger_handler))
+            .route("/v1/feeder/override", get(safety_handler))
+            .route("/v1/feeder/request/{id}", post(feed_handler))
             .with_state(state);
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });
-        OpenHabClient::new(
-            &format!("http://{address}/"),
-            "token".to_owned(),
-            "rule123",
-            "FeederOverride",
-        )
-        .unwrap()
+        GatewayClient::new(&format!("http://{address}/")).unwrap()
     }
 
     async fn credited_store(sats: u64) -> (TempDir, LedgerStore) {
@@ -225,19 +298,26 @@ mod tests {
         (directory, store)
     }
 
+    fn open_safety() -> FeederSafety {
+        FeederSafety {
+            override_enabled: false,
+            remote_enabled: true,
+        }
+    }
+
     #[tokio::test]
     async fn drains_two_thresholds_and_leaves_340() {
         let (_directory, ledger) = credited_store(2_340).await;
-        let triggers = Arc::new(AtomicUsize::new(0));
-        let openhab = openhab(MockOpenHabState {
-            override_state: "OFF",
-            trigger_status: StatusCode::OK,
-            triggers: Arc::clone(&triggers),
+        let posts = Arc::new(AtomicUsize::new(0));
+        let gateway = gateway(MockGatewayState {
+            safety: open_safety(),
+            posts: Arc::clone(&posts),
+            fail_post: Arc::new(AtomicBool::new(false)),
         })
         .await;
 
         assert!(matches!(
-            run_feed_step(&ledger, &openhab, 1_000, RuntimeMode::Active)
+            run_feed_step(&ledger, &gateway, 1_000, RuntimeMode::Active)
                 .await
                 .unwrap(),
             FeedWorkerStep::Fed {
@@ -246,7 +326,7 @@ mod tests {
             }
         ));
         assert!(matches!(
-            run_feed_step(&ledger, &openhab, 1_000, RuntimeMode::Active)
+            run_feed_step(&ledger, &gateway, 1_000, RuntimeMode::Active)
                 .await
                 .unwrap(),
             FeedWorkerStep::Fed {
@@ -255,84 +335,78 @@ mod tests {
             }
         ));
         assert_eq!(
-            run_feed_step(&ledger, &openhab, 1_000, RuntimeMode::Active)
+            run_feed_step(&ledger, &gateway, 1_000, RuntimeMode::Active)
                 .await
                 .unwrap(),
             FeedWorkerStep::Idle
         );
-        assert_eq!(triggers.load(Ordering::SeqCst), 2);
+        assert_eq!(posts.load(Ordering::SeqCst), 2);
         assert_eq!(ledger.feed_credit_sats().await.unwrap(), 340);
     }
 
     #[tokio::test]
-    async fn override_blocks_all_due_feeds_without_debit() {
-        let (_directory, ledger) = credited_store(2_340).await;
-        let triggers = Arc::new(AtomicUsize::new(0));
-        let openhab = openhab(MockOpenHabState {
-            override_state: "ON",
-            trigger_status: StatusCode::OK,
-            triggers: Arc::clone(&triggers),
-        })
-        .await;
-
-        assert_eq!(
-            run_feed_step(&ledger, &openhab, 1_000, RuntimeMode::Active)
-                .await
-                .unwrap(),
-            FeedWorkerStep::OverrideBlocked { feeds_due: 2 }
-        );
-        assert_eq!(triggers.load(Ordering::SeqCst), 0);
-        assert_eq!(ledger.feed_credit_sats().await.unwrap(), 2_340);
-    }
-
-    #[tokio::test]
-    async fn shadow_mode_never_touches_openhab_feeder() {
-        let (_directory, ledger) = credited_store(2_340).await;
-        let triggers = Arc::new(AtomicUsize::new(0));
-        let openhab = openhab(MockOpenHabState {
-            override_state: "OFF",
-            trigger_status: StatusCode::OK,
-            triggers: Arc::clone(&triggers),
-        })
-        .await;
-
-        assert_eq!(
-            run_feed_step(&ledger, &openhab, 1_000, RuntimeMode::Shadow)
-                .await
-                .unwrap(),
-            FeedWorkerStep::ShadowBlocked { feeds_due: 2 }
-        );
-        assert_eq!(triggers.load(Ordering::SeqCst), 0);
-        assert_eq!(ledger.feed_credit_sats().await.unwrap(), 2_340);
-    }
-
-    #[tokio::test]
-    async fn trigger_failure_becomes_unknown_and_stops_retry() {
-        let (_directory, ledger) = credited_store(1_340).await;
-        let triggers = Arc::new(AtomicUsize::new(0));
-        let openhab = openhab(MockOpenHabState {
-            override_state: "OFF",
-            trigger_status: StatusCode::INTERNAL_SERVER_ERROR,
-            triggers: Arc::clone(&triggers),
+    async fn ambiguous_gateway_failure_blocks_retry() {
+        let (_directory, ledger) = credited_store(1_000).await;
+        let posts = Arc::new(AtomicUsize::new(0));
+        let gateway = gateway(MockGatewayState {
+            safety: open_safety(),
+            posts: Arc::clone(&posts),
+            fail_post: Arc::new(AtomicBool::new(true)),
         })
         .await;
 
         assert!(
-            run_feed_step(&ledger, &openhab, 1_000, RuntimeMode::Active)
+            run_feed_step(&ledger, &gateway, 1_000, RuntimeMode::Active)
                 .await
                 .is_err()
         );
-        assert_eq!(triggers.load(Ordering::SeqCst), 1);
-        assert_eq!(ledger.feed_credit_sats().await.unwrap(), 1_340);
         let unresolved = ledger.unresolved_feed_attempt().await.unwrap().unwrap();
         assert_eq!(unresolved.status, StoredFeedAttemptStatus::Unknown);
+        assert_eq!(posts.load(Ordering::SeqCst), 1);
 
         assert!(matches!(
-            run_feed_step(&ledger, &openhab, 1_000, RuntimeMode::Active)
+            run_feed_step(&ledger, &gateway, 1_000, RuntimeMode::Active)
                 .await
                 .unwrap(),
             FeedWorkerStep::UnknownFeedBlocked { .. }
         ));
-        assert_eq!(triggers.load(Ordering::SeqCst), 1);
+        assert_eq!(posts.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn safety_controls_block_before_intent() {
+        for (safety, expected) in [
+            (
+                FeederSafety {
+                    override_enabled: true,
+                    remote_enabled: true,
+                },
+                "override",
+            ),
+            (
+                FeederSafety {
+                    override_enabled: false,
+                    remote_enabled: false,
+                },
+                "remote",
+            ),
+        ] {
+            let (_directory, ledger) = credited_store(1_000).await;
+            let gateway = gateway(MockGatewayState {
+                safety,
+                posts: Arc::new(AtomicUsize::new(0)),
+                fail_post: Arc::new(AtomicBool::new(false)),
+            })
+            .await;
+            let step = run_feed_step(&ledger, &gateway, 1_000, RuntimeMode::Active)
+                .await
+                .unwrap();
+            match expected {
+                "override" => assert!(matches!(step, FeedWorkerStep::OverrideBlocked { .. })),
+                "remote" => assert!(matches!(step, FeedWorkerStep::RemoteDisabled { .. })),
+                _ => unreachable!(),
+            }
+            assert!(ledger.unresolved_feed_attempt().await.unwrap().is_none());
+        }
     }
 }

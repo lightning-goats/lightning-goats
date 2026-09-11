@@ -1,5 +1,14 @@
 # Phase 1 Verification Matrix
 
+Audit addendum (2026-09-10): production is on HOLD. The 2026-09-08 findings and
+`../deployment/audit-remediation.md` add required negative, concurrent, delayed,
+missing-notification and restart cases. Existing always-successful gateway mocks
+do not satisfy the combined daemon -> real gateway -> mock OpenHAB gate.
+
+Artifact checks now run via `python3 -m unittest discover -s deploy/tests -v`
+and the `Deployment artifacts` workflow. They cover nginx TLS assembly/routing
+and complete release archives, not payment settlement or physical completion.
+
 Status: required before production cutover.
 
 Tracker: issue #15.
@@ -25,6 +34,14 @@ Record:
 - Rust toolchain version;
 - SHA-256 of deployed binaries;
 - config/template revision.
+
+Durable storage startup is also mandatory: both config and direct-store entry
+points must reject volatile SQLite aliases, nested native URIs, custom VFS and
+read-only/immutable modes before migrations or admission. All pool connections
+must report a real main file, WAL, FULL synchronization and enabled foreign keys.
+Preserve normal filesystem paths and prove payment deduplication, credit, events
+and overlay identity survive another process/reopen. See
+`sqlite-durability-review.md` for the inherited defect and regression criteria.
 
 ## 2. Lightning Address registry
 
@@ -400,3 +417,53 @@ Issue #16 may begin only when:
 - old VPS remains recoverable and is still the only active `10.8.0.1` hub;
 - final new-VPS `10.8.0.1` hub config is prepared but inactive;
 - production DNS remains unchanged until operator starts the cutover runbook.
+
+## F11/F12 corrected presentation acceptance
+
+Use the versioned cursor contract in `../architecture/overlay-stream.md`.
+Verify ordered gap replay before its checkpoint, deduplication, explicit resets
+for foreign/future/missing/oversized history, and restart-persistent stream IDs.
+Exercise actual WebSocket capacity and reuse after disconnect, receive-only input
+and frame limits, heartbeat survival beyond the edge timeout, missing Pong and
+slow-consumer closure. Repeat against the imported authoritative browser before
+closing site compatibility; Rust socket mocks alone do not satisfy that gate.
+
+Weather must reject stale first responses, stale repeats/restarts, future/regressed
+observations and malformed timestamps. Check explicit Fahrenheit versus converted
+Celsius, optional field units, array ordering, and invalid data not advancing the
+watermark. Weather failure or skipped replay must not affect credit/settlement or
+enter the Nostr outbox. The earlier optional-timestamp wording is superseded by
+mandatory actual-age validation in `../architecture/weather-overlay.md`.
+
+## Actual systemd rehearsal candidate
+
+Base: draft PR #39 head `5becfbd4b8b321ecb205a70233d1970a822645f9`.
+The candidate adds actual transient-system-service execution of the canary sandbox
+and synthetic encrypted credential delivery. See `../deployment/systemd-rehearsal.md`.
+It preserves duplicate/restart command-count checks and adds runtime probes plus
+negative wrong-name/corrupt ciphertext failures at systemd CREDENTIALS (243).
+The Fedora rehearsal preserves SELinux enforcing and maps only disposable binary
+labels to their real installation defaults; no host policy changes are made.
+The six added deployment regressions cover credential-store recovery guards and
+preservation of repeated/empty sandbox directives. Final local/CI execution
+results must be attached before treating this candidate as verified.
+
+Initial systemd candidate `fffee25537e6e5194c381a1f96afe6d5b300ae32` passed
+[Rust CI](https://github.com/lightning-goats/lightning-goats/actions/runs/34541274452),
+[Security](https://github.com/lightning-goats/lightning-goats/actions/runs/34541274566), and
+[Deployment including actual Ubuntu systemd](https://github.com/lightning-goats/lightning-goats/actions/runs/34541274456).
+Local format, locked Clippy, the full locked Rust suite, RSA-unreachable check and
+all 23 then-existing deployment tests passed. `cargo-audit` is not installed on
+this VPS; the exact-commit Security workflow provides the dependency audit result.
+
+The final follow-up strengthens credential separation: each role must have an
+in-sandbox startup probe while the other application is already running. A fifth
+service start restarts only the gateway while the daemon remains active, checks
+the same UUID again and still observes one total mock-owner command. A regression
+rejects evidence inferred only from an absent other service. Fedora execution
+passed; `evidence/systemd-rehearsal-fedora-20260910.json` records final harness,
+archive/binary/template hashes, all five starts and credential/protection probes.
+The earlier reload-probe experiment was rejected because systemd does not provide
+startup credentials to ExecReload; the final test uses actual startup delivery.
+Final GitHub checks for this follow-up must be read on draft #40. Production HOLD
+and all live gates remain open.

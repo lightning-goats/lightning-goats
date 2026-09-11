@@ -383,3 +383,48 @@ The payment, feeder, weather, event, messaging, overlay, address-registry, and i
 Future CyberHerd functionality may be implemented either as a separate service consuming/producing durable Lightning Goats events or as an internal module in the same codebase.
 
 Any future CyberHerd feeder action must use the same durable feeder authority/gateway; it must not gain direct OpenHAB credentials. Any future payout authority should remain separable from the receive-only Phase 1 daemon.
+
+
+## Audit correction: durable receives, invoice and currency contracts
+
+Webhook acknowledgement now records authenticated, bounded notification IDs in
+SQLite before replying. Provider reconciliation runs independently; issued
+requests are scanned periodically even when no notification arrives. Durable
+fair scheduling, pagination, retry and quarantine converge on the same atomic
+settlement/credit/event transaction. Repeated failures never imply settlement.
+
+At issuance, parse and verify the actual BOLT11 checksum, recoverable signature,
+Bitcoin mainnet network, exact requested millisatoshis, payment hash and exact
+LNURL metadata description hash. Optional wrapper fields may be absent; the
+signed invoice still must bind all required values. Any supplied wrapper amount
+or hash must agree. The signed expiry must equal the requested lifetime, the
+invoice must be unexpired, and its creation time may be at most 30 seconds ahead
+of the verifier. Recovery re-verifies the signed immutable fields and exact
+stored invoice but does not reject a completed receive merely because its
+invoice expired while notifications were delayed. Mainnet is the current
+explicit supported invoice network; a sandbox returning another network fails
+closed and requires a reviewed configuration/contract change before acceptance.
+
+A completed LIGHTNING receive must have the issued amount and payment hash; any
+supplied credited amount must agree in BTC. A completed P2P receive is bound to
+the locally issued request ID and an authoritative BTC target. It requires
+`amountCredited` in BTC, and credits that amount rather than the invoice face
+value or a locally calculated conversion. BTC-to-BTC received and credited
+amounts must agree. No payment hash is fabricated for P2P. Preserve the original
+received and credited currency amounts, any supplied conversion rate and the
+provider completion timestamp in settlement context. Supplied conversion
+currency labels must agree with received currency and BTC target.
+
+Rounding policy: **none**. The ledger accepts positive whole satoshis. Zero,
+negative, non-decimal, overflow, fractional-satoshi or contradictory credited
+amounts fail closed and remain durable retry/quarantine work. A future fractional
+credit policy requires a separately reviewed accounting change. Never round up,
+substitute the requested amount, or invent a conversion rate.
+
+Contract reference inspected 2026-09-10:
+[Strike receive schema](https://docs.strike.me/api/get-receives-for-receive-request/).
+The parser is the locked
+[lightning-invoice crate](https://docs.rs/lightning-invoice/latest/lightning_invoice/).
+These are source contracts and locally signed mock fixtures, not live account
+observations. Actual P2P account behavior remains an acceptance gate requiring
+separate approval for any real payment.

@@ -214,3 +214,32 @@ VPS -> integration gateway -> local 127.0.0.1:5000/get_received_data
 ## Future migration
 
 The legacy Flask receiver may be replaced later. Phase 1 should depend only on the gateway's normalized `/v1/weather` contract, so replacing `middlware/weather.py` does not require changing `lightning-goatsd` or the overlay event contract.
+
+## F12 audit correction: actual age and explicit units
+
+Timestamp validation is mandatory. `dateutc` must parse as RFC3339 with an offset
+or `YYYY-MM-DD HH:MM:SS` interpreted as UTC. The gateway checks actual age against
+`weather_max_stale_seconds`, rejects observations over 30 seconds in the future,
+and persists the last accepted timestamp in its durable SQLite store. Older
+observations remain rejected after restart. Equal timestamps remain usable only
+while their actual age is within the limit. Invalid values never advance that
+watermark. An array is selected by newest parsed timestamp, not array position;
+invalid entries fail closed. There is no first-seen freshness grace period.
+
+The implemented normalized contract uses `observed_at` (RFC3339 UTC),
+`temperature_f`, `humidity` (percent), `wind_speed_mph`, `wind_direction` (cardinal),
+`uv_index`, and optional `apparent_temperature_f`, `wind_gust_mph`,
+`pressure_relative_inhg`, `pressure_trend`, `rain_hourly_in`, `rain_daily_in`,
+`solar_radiation_w_m2`. Generic old temperature/wind keys are not accepted aliases.
+The ambiguous legacy `feelslike` field is omitted; only `feelslikef` declares the
+required Fahrenheit unit. OpenHAB's separate display temperature requires explicit
+Celsius or Fahrenheit units, converts Celsius, and rejects unitless states.
+This does not establish the actual owner's physical result contract.
+
+The daemon validates normalized ranges and actual freshness again, with a
+five-minute display ceiling even if the gateway's local tolerance is longer.
+Stale replay emits a cursor-preserving skip marker instead of old weather text;
+see [overlay stream version 1](overlay-stream.md). The authoritative site's
+handling of explicit keys, reset/skip events and visible-weather expiry requires
+browser acceptance. No reconstructed website or live source observation is
+claimed by the loopback fixture tests.

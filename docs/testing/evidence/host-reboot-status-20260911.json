@@ -1,0 +1,12 @@
+{
+  "observed_at_utc": "2026-09-11T00:19:39.430208+00:00",
+  "scope": "read-only staging host observation; no reboot or host policy changes performed",
+  "running_kernel": "7.2.4-200.fc44.x86_64",
+  "newest_installed_kernel": "7.2.4-200.fc44.x86_64",
+  "needs_restarting_command": "sudo -n dnf --cacheonly needs-restarting --json",
+  "needs_restarting_exit_code": 0,
+  "reboot_required": false,
+  "affected_packages": [],
+  "supersedes": "Earlier maintenance/handoff pending-reboot observation; preserve it as historical evidence. Recheck before final installation/cutover.",
+  "production": "HOLD"
+}

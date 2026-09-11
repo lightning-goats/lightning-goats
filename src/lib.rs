@@ -1,10 +1,13 @@
 #![forbid(unsafe_code)]
 
-pub mod cln;
+mod bolt11;
+mod sqlite;
+
 pub mod config;
 pub mod domain;
 pub mod feeder;
-pub mod invoice_watcher;
+pub mod gateway;
+pub mod informational;
 pub mod ledger;
 pub mod lnurl;
 pub mod messaging;
@@ -14,3 +17,11 @@ pub mod overlay;
 pub mod presentation;
 pub mod secrets;
 pub mod strike;
+
+pub mod http;
+
+#[cfg(test)]
+#[path = "../tests/support/invoices.rs"]
+mod test_invoices;
+
+pub mod server;

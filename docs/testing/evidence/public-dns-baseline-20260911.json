@@ -1,0 +1,651 @@
+{
+  "observed_at_utc": "2026-09-11T01:15:48.660498+00:00",
+  "scope": "read-only public authoritative DNS for apex/www and parent delegation; not a complete zone export",
+  "source_revision": "361e28e1b6c7bee724c7e462f611bf841591fc41",
+  "raw_dns_record_sha256": "a37714a629ac2c1143ef9e10a05a5261135c3f2f26534023f5d1a8a1be8125c6",
+  "all_three_authorities_agree": true,
+  "queries": [
+    {
+      "server": "dns1.zoneedit.com",
+      "name": "lightning-goats.com",
+      "type": "SOA",
+      "status": "NOERROR",
+      "authoritative": true,
+      "answer_count": 1,
+      "authority_count": 0,
+      "records": [
+        "lightning-goats.com. 3600 IN SOA dns0.zoneedit.com. zone.zoneedit.com. 1780000372 3600 600 604800 300"
+      ]
+    },
+    {
+      "server": "dns1.zoneedit.com",
+      "name": "lightning-goats.com",
+      "type": "NS",
+      "status": "NOERROR",
+      "authoritative": true,
+      "answer_count": 3,
+      "authority_count": 0,
+      "records": [
+        "lightning-goats.com. 3600 IN NS dns1.zoneedit.com.",
+        "lightning-goats.com. 3600 IN NS dns3.zoneedit.com.",
+        "lightning-goats.com. 3600 IN NS dns2.zoneedit.com."
+      ]
+    },
+    {
+      "server": "dns1.zoneedit.com",
+      "name": "lightning-goats.com",
+      "type": "A",
+      "status": "NOERROR",
+      "authoritative": true,
+      "answer_count": 1,
+      "authority_count": 0,
+      "records": [
+        "lightning-goats.com. 3600 IN A 45.76.234.192"
+      ]
+    },
+    {
+      "server": "dns1.zoneedit.com",
+      "name": "lightning-goats.com",
+      "type": "AAAA",
+      "status": "NOERROR",
+      "authoritative": true,
+      "answer_count": 0,
+      "authority_count": 1,
+      "records": [
+        "lightning-goats.com. 300 IN SOA dns0.zoneedit.com. zone.zoneedit.com. 1780000372 3600 600 604800 300"
+      ]
+    },
+    {
+      "server": "dns1.zoneedit.com",
+      "name": "lightning-goats.com",
+      "type": "MX",
+      "status": "NOERROR",
+      "authoritative": true,
+      "answer_count": 2,
+      "authority_count": 0,
+      "records": [
+        "lightning-goats.com. 3600 IN MX 20 mail2.anonaddy.me.",
+        "lightning-goats.com. 3600 IN MX 10 mail.anonaddy.me."
+      ]
+    },
+    {
+      "server": "dns1.zoneedit.com",
+      "name": "lightning-goats.com",
+      "type": "TXT",
+      "status": "NOERROR",
+      "authoritative": true,
+      "answer_count": 2,
+      "authority_count": 0,
+      "records_omitted": "Public TXT values retained in operator-controlled raw inventory.",
+      "record_set_sha256": "551ae16004e2f5db1e0f3a0bc5ba70de7a2809d8db28c24d103724659afa5d15"
+    },
+    {
+      "server": "dns1.zoneedit.com",
+      "name": "lightning-goats.com",
+      "type": "CAA",
+      "status": "NOERROR",
+      "authoritative": true,
+      "answer_count": 0,
+      "authority_count": 1,
+      "records": [
+        "lightning-goats.com. 300 IN SOA dns0.zoneedit.com. zone.zoneedit.com. 1780000372 3600 600 604800 300"
+      ]
+    },
+    {
+      "server": "dns1.zoneedit.com",
+      "name": "lightning-goats.com",
+      "type": "DNSKEY",
+      "status": "NOERROR",
+      "authoritative": true,
+      "answer_count": 0,
+      "authority_count": 1,
+      "records": [
+        "lightning-goats.com. 300 IN SOA dns0.zoneedit.com. zone.zoneedit.com. 1780000372 3600 600 604800 300"
+      ]
+    },
+    {
+      "server": "dns2.zoneedit.com",
+      "name": "lightning-goats.com",
+      "type": "SOA",
+      "status": "NOERROR",
+      "authoritative": true,
+      "answer_count": 1,
+      "authority_count": 0,
+      "records": [
+        "lightning-goats.com. 3600 IN SOA dns0.zoneedit.com. zone.zoneedit.com. 1780000372 3600 600 604800 300"
+      ]
+    },
+    {
+      "server": "dns2.zoneedit.com",
+      "name": "lightning-goats.com",
+      "type": "NS",
+      "status": "NOERROR",
+      "authoritative": true,
+      "answer_count": 3,
+      "authority_count": 0,
+      "records": [
+        "lightning-goats.com. 3600 IN NS dns2.zoneedit.com.",
+        "lightning-goats.com. 3600 IN NS dns1.zoneedit.com.",
+        "lightning-goats.com. 3600 IN NS dns3.zoneedit.com."
+      ]
+    },
+    {
+      "server": "dns2.zoneedit.com",
+      "name": "lightning-goats.com",
+      "type": "A",
+      "status": "NOERROR",
+      "authoritative": true,
+      "answer_count": 1,
+      "authority_count": 0,
+      "records": [
+        "lightning-goats.com. 3600 IN A 45.76.234.192"
+      ]
+    },
+    {
+      "server": "dns2.zoneedit.com",
+      "name": "lightning-goats.com",
+      "type": "AAAA",
+      "status": "NOERROR",
+      "authoritative": true,
+      "answer_count": 0,
+      "authority_count": 1,
+      "records": [
+        "lightning-goats.com. 300 IN SOA dns0.zoneedit.com. zone.zoneedit.com. 1780000372 3600 600 604800 300"
+      ]
+    },
+    {
+      "server": "dns2.zoneedit.com",
+      "name": "lightning-goats.com",
+      "type": "MX",
+      "status": "NOERROR",
+      "authoritative": true,
+      "answer_count": 2,
+      "authority_count": 0,
+      "records": [
+        "lightning-goats.com. 3600 IN MX 20 mail2.anonaddy.me.",
+        "lightning-goats.com. 3600 IN MX 10 mail.anonaddy.me."
+      ]
+    },
+    {
+      "server": "dns2.zoneedit.com",
+      "name": "lightning-goats.com",
+      "type": "TXT",
+      "status": "NOERROR",
+      "authoritative": true,
+      "answer_count": 2,
+      "authority_count": 0,
+      "records_omitted": "Public TXT values retained in operator-controlled raw inventory.",
+      "record_set_sha256": "551ae16004e2f5db1e0f3a0bc5ba70de7a2809d8db28c24d103724659afa5d15"
+    },
+    {
+      "server": "dns2.zoneedit.com",
+      "name": "lightning-goats.com",
+      "type": "CAA",
+      "status": "NOERROR",
+      "authoritative": true,
+      "answer_count": 0,
+      "authority_count": 1,
+      "records": [
+        "lightning-goats.com. 300 IN SOA dns0.zoneedit.com. zone.zoneedit.com. 1780000372 3600 600 604800 300"
+      ]
+    },
+    {
+      "server": "dns2.zoneedit.com",
+      "name": "lightning-goats.com",
+      "type": "DNSKEY",
+      "status": "NOERROR",
+      "authoritative": true,
+      "answer_count": 0,
+      "authority_count": 1,
+      "records": [
+        "lightning-goats.com. 300 IN SOA dns0.zoneedit.com. zone.zoneedit.com. 1780000372 3600 600 604800 300"
+      ]
+    },
+    {
+      "server": "dns3.zoneedit.com",
+      "name": "lightning-goats.com",
+      "type": "SOA",
+      "status": "NOERROR",
+      "authoritative": true,
+      "answer_count": 1,
+      "authority_count": 0,
+      "records": [
+        "lightning-goats.com. 3600 IN SOA dns0.zoneedit.com. zone.zoneedit.com. 1780000372 3600 600 604800 300"
+      ]
+    },
+    {
+      "server": "dns3.zoneedit.com",
+      "name": "lightning-goats.com",
+      "type": "NS",
+      "status": "NOERROR",
+      "authoritative": true,
+      "answer_count": 3,
+      "authority_count": 0,
+      "records": [
+        "lightning-goats.com. 3600 IN NS dns3.zoneedit.com.",
+        "lightning-goats.com. 3600 IN NS dns2.zoneedit.com.",
+        "lightning-goats.com. 3600 IN NS dns1.zoneedit.com."
+      ]
+    },
+    {
+      "server": "dns3.zoneedit.com",
+      "name": "lightning-goats.com",
+      "type": "A",
+      "status": "NOERROR",
+      "authoritative": true,
+      "answer_count": 1,
+      "authority_count": 0,
+      "records": [
+        "lightning-goats.com. 3600 IN A 45.76.234.192"
+      ]
+    },
+    {
+      "server": "dns3.zoneedit.com",
+      "name": "lightning-goats.com",
+      "type": "AAAA",
+      "status": "NOERROR",
+      "authoritative": true,
+      "answer_count": 0,
+      "authority_count": 1,
+      "records": [
+        "lightning-goats.com. 300 IN SOA dns0.zoneedit.com. zone.zoneedit.com. 1780000372 3600 600 604800 300"
+      ]
+    },
+    {
+      "server": "dns3.zoneedit.com",
+      "name": "lightning-goats.com",
+      "type": "MX",
+      "status": "NOERROR",
+      "authoritative": true,
+      "answer_count": 2,
+      "authority_count": 0,
+      "records": [
+        "lightning-goats.com. 3600 IN MX 20 mail2.anonaddy.me.",
+        "lightning-goats.com. 3600 IN MX 10 mail.anonaddy.me."
+      ]
+    },
+    {
+      "server": "dns3.zoneedit.com",
+      "name": "lightning-goats.com",
+      "type": "TXT",
+      "status": "NOERROR",
+      "authoritative": true,
+      "answer_count": 2,
+      "authority_count": 0,
+      "records_omitted": "Public TXT values retained in operator-controlled raw inventory.",
+      "record_set_sha256": "551ae16004e2f5db1e0f3a0bc5ba70de7a2809d8db28c24d103724659afa5d15"
+    },
+    {
+      "server": "dns3.zoneedit.com",
+      "name": "lightning-goats.com",
+      "type": "CAA",
+      "status": "NOERROR",
+      "authoritative": true,
+      "answer_count": 0,
+      "authority_count": 1,
+      "records": [
+        "lightning-goats.com. 300 IN SOA dns0.zoneedit.com. zone.zoneedit.com. 1780000372 3600 600 604800 300"
+      ]
+    },
+    {
+      "server": "dns3.zoneedit.com",
+      "name": "lightning-goats.com",
+      "type": "DNSKEY",
+      "status": "NOERROR",
+      "authoritative": true,
+      "answer_count": 0,
+      "authority_count": 1,
+      "records": [
+        "lightning-goats.com. 300 IN SOA dns0.zoneedit.com. zone.zoneedit.com. 1780000372 3600 600 604800 300"
+      ]
+    },
+    {
+      "server": "dns1.zoneedit.com",
+      "name": "www.lightning-goats.com",
+      "type": "A",
+      "status": "NOERROR",
+      "authoritative": true,
+      "answer_count": 2,
+      "authority_count": 0,
+      "records": [
+        "www.lightning-goats.com. 3600 IN CNAME lightning-goats.com.",
+        "lightning-goats.com. 3600 IN A 45.76.234.192"
+      ]
+    },
+    {
+      "server": "dns1.zoneedit.com",
+      "name": "www.lightning-goats.com",
+      "type": "AAAA",
+      "status": "NOERROR",
+      "authoritative": true,
+      "answer_count": 1,
+      "authority_count": 1,
+      "records": [
+        "www.lightning-goats.com. 3600 IN CNAME lightning-goats.com.",
+        "lightning-goats.com. 300 IN SOA dns0.zoneedit.com. zone.zoneedit.com. 1780000372 3600 600 604800 300"
+      ]
+    },
+    {
+      "server": "dns1.zoneedit.com",
+      "name": "www.lightning-goats.com",
+      "type": "CNAME",
+      "status": "NOERROR",
+      "authoritative": true,
+      "answer_count": 1,
+      "authority_count": 0,
+      "records": [
+        "www.lightning-goats.com. 3600 IN CNAME lightning-goats.com."
+      ]
+    },
+    {
+      "server": "dns1.zoneedit.com",
+      "name": "www.lightning-goats.com",
+      "type": "CAA",
+      "status": "NOERROR",
+      "authoritative": true,
+      "answer_count": 1,
+      "authority_count": 1,
+      "records": [
+        "www.lightning-goats.com. 3600 IN CNAME lightning-goats.com.",
+        "lightning-goats.com. 300 IN SOA dns0.zoneedit.com. zone.zoneedit.com. 1780000372 3600 600 604800 300"
+      ]
+    },
+    {
+      "server": "dns2.zoneedit.com",
+      "name": "www.lightning-goats.com",
+      "type": "A",
+      "status": "NOERROR",
+      "authoritative": true,
+      "answer_count": 2,
+      "authority_count": 0,
+      "records": [
+        "www.lightning-goats.com. 3600 IN CNAME lightning-goats.com.",
+        "lightning-goats.com. 3600 IN A 45.76.234.192"
+      ]
+    },
+    {
+      "server": "dns2.zoneedit.com",
+      "name": "www.lightning-goats.com",
+      "type": "AAAA",
+      "status": "NOERROR",
+      "authoritative": true,
+      "answer_count": 1,
+      "authority_count": 1,
+      "records": [
+        "www.lightning-goats.com. 3600 IN CNAME lightning-goats.com.",
+        "lightning-goats.com. 300 IN SOA dns0.zoneedit.com. zone.zoneedit.com. 1780000372 3600 600 604800 300"
+      ]
+    },
+    {
+      "server": "dns2.zoneedit.com",
+      "name": "www.lightning-goats.com",
+      "type": "CNAME",
+      "status": "NOERROR",
+      "authoritative": true,
+      "answer_count": 1,
+      "authority_count": 0,
+      "records": [
+        "www.lightning-goats.com. 3600 IN CNAME lightning-goats.com."
+      ]
+    },
+    {
+      "server": "dns2.zoneedit.com",
+      "name": "www.lightning-goats.com",
+      "type": "CAA",
+      "status": "NOERROR",
+      "authoritative": true,
+      "answer_count": 1,
+      "authority_count": 1,
+      "records": [
+        "www.lightning-goats.com. 3600 IN CNAME lightning-goats.com.",
+        "lightning-goats.com. 300 IN SOA dns0.zoneedit.com. zone.zoneedit.com. 1780000372 3600 600 604800 300"
+      ]
+    },
+    {
+      "server": "dns3.zoneedit.com",
+      "name": "www.lightning-goats.com",
+      "type": "A",
+      "status": "NOERROR",
+      "authoritative": true,
+      "answer_count": 2,
+      "authority_count": 0,
+      "records": [
+        "www.lightning-goats.com. 3600 IN CNAME lightning-goats.com.",
+        "lightning-goats.com. 3600 IN A 45.76.234.192"
+      ]
+    },
+    {
+      "server": "dns3.zoneedit.com",
+      "name": "www.lightning-goats.com",
+      "type": "AAAA",
+      "status": "NOERROR",
+      "authoritative": true,
+      "answer_count": 1,
+      "authority_count": 1,
+      "records": [
+        "www.lightning-goats.com. 3600 IN CNAME lightning-goats.com.",
+        "lightning-goats.com. 300 IN SOA dns0.zoneedit.com. zone.zoneedit.com. 1780000372 3600 600 604800 300"
+      ]
+    },
+    {
+      "server": "dns3.zoneedit.com",
+      "name": "www.lightning-goats.com",
+      "type": "CNAME",
+      "status": "NOERROR",
+      "authoritative": true,
+      "answer_count": 1,
+      "authority_count": 0,
+      "records": [
+        "www.lightning-goats.com. 3600 IN CNAME lightning-goats.com."
+      ]
+    },
+    {
+      "server": "dns3.zoneedit.com",
+      "name": "www.lightning-goats.com",
+      "type": "CAA",
+      "status": "NOERROR",
+      "authoritative": true,
+      "answer_count": 1,
+      "authority_count": 1,
+      "records": [
+        "www.lightning-goats.com. 3600 IN CNAME lightning-goats.com.",
+        "lightning-goats.com. 300 IN SOA dns0.zoneedit.com. zone.zoneedit.com. 1780000372 3600 600 604800 300"
+      ]
+    },
+    {
+      "server": "a.gtld-servers.net",
+      "name": "lightning-goats.com",
+      "type": "NS",
+      "status": "NOERROR",
+      "authoritative": false,
+      "answer_count": 0,
+      "authority_count": 7,
+      "records": [
+        "lightning-goats.com. 172800 IN NS dns1.zoneedit.com.",
+        "lightning-goats.com. 172800 IN NS dns2.zoneedit.com.",
+        "lightning-goats.com. 172800 IN NS dns3.zoneedit.com."
+      ]
+    },
+    {
+      "server": "a.gtld-servers.net",
+      "name": "lightning-goats.com",
+      "type": "DS",
+      "status": "NOERROR",
+      "authoritative": true,
+      "answer_count": 0,
+      "authority_count": 6,
+      "records": [
+        "com. 900 IN SOA a.gtld-servers.net. nstld.verisign-grs.com. 1789089333 1800 900 604800 900"
+      ]
+    },
+    {
+      "server": "b.gtld-servers.net",
+      "name": "lightning-goats.com",
+      "type": "NS",
+      "status": "NOERROR",
+      "authoritative": false,
+      "answer_count": 0,
+      "authority_count": 7,
+      "records": [
+        "lightning-goats.com. 172800 IN NS dns1.zoneedit.com.",
+        "lightning-goats.com. 172800 IN NS dns2.zoneedit.com.",
+        "lightning-goats.com. 172800 IN NS dns3.zoneedit.com."
+      ]
+    },
+    {
+      "server": "b.gtld-servers.net",
+      "name": "lightning-goats.com",
+      "type": "DS",
+      "status": "NOERROR",
+      "authoritative": true,
+      "answer_count": 0,
+      "authority_count": 6,
+      "records": [
+        "com. 900 IN SOA a.gtld-servers.net. nstld.verisign-grs.com. 1789089323 1800 900 604800 900"
+      ]
+    }
+  ],
+  "registry": {
+    "observed_at_utc": "2026-09-11T01:16:45.821576+00:00",
+    "source": "https://rdap.verisign.com/com/v1/domain/lightning-goats.com",
+    "ldhName": "LIGHTNING-GOATS.COM",
+    "status": [
+      "client transfer prohibited",
+      "client update prohibited"
+    ],
+    "nameservers": [
+      "DNS1.ZONEEDIT.COM",
+      "DNS2.ZONEEDIT.COM",
+      "DNS3.ZONEEDIT.COM"
+    ],
+    "secureDNS": {
+      "delegationSigned": false
+    },
+    "events": [
+      {
+        "eventAction": "registration",
+        "eventDate": "2023-06-26T20:18:30Z"
+      },
+      {
+        "eventAction": "expiration",
+        "eventDate": "2027-06-26T20:18:30Z"
+      },
+      {
+        "eventAction": "last changed",
+        "eventDate": "2025-06-25T15:40:41Z"
+      },
+      {
+        "eventAction": "last update of RDAP database",
+        "eventDate": "2026-09-11T01:16:36Z"
+      }
+    ],
+    "registrars": [
+      {
+        "handle": "469",
+        "roles": [
+          "registrar"
+        ],
+        "publicIds": [
+          {
+            "type": "IANA Registrar ID",
+            "identifier": "469"
+          }
+        ]
+      }
+    ],
+    "scope": "Public registry metadata only; no personal contact data retained, no account access or changes."
+  },
+  "existing_public_site_tls": {
+    "observed_at_utc": "2026-09-11T01:17:19.404657+00:00",
+    "scope": "TLS handshake only against the existing public site; not the new VPS staging acceptance",
+    "records": [
+      {
+        "hostname": "lightning-goats.com",
+        "connected_address": "45.76.234.192",
+        "tls_version": "TLSv1.3",
+        "issuer": [
+          [
+            [
+              "countryName",
+              "US"
+            ]
+          ],
+          [
+            [
+              "organizationName",
+              "Let's Encrypt"
+            ]
+          ],
+          [
+            [
+              "commonName",
+              "YE1"
+            ]
+          ]
+        ],
+        "subject_alt_names": [
+          [
+            "DNS",
+            "lightning-goats.com"
+          ],
+          [
+            "DNS",
+            "www.lightning-goats.com"
+          ]
+        ],
+        "not_before": "Jul  9 10:45:59 2026 GMT",
+        "not_after": "Oct  7 10:45:58 2026 GMT",
+        "hostname_and_system_trust_validation_passed": true,
+        "other_subject_alt_names_omitted": true
+      },
+      {
+        "hostname": "www.lightning-goats.com",
+        "connected_address": "45.76.234.192",
+        "tls_version": "TLSv1.3",
+        "issuer": [
+          [
+            [
+              "countryName",
+              "US"
+            ]
+          ],
+          [
+            [
+              "organizationName",
+              "Let's Encrypt"
+            ]
+          ],
+          [
+            [
+              "commonName",
+              "YE1"
+            ]
+          ]
+        ],
+        "subject_alt_names": [
+          [
+            "DNS",
+            "lightning-goats.com"
+          ],
+          [
+            "DNS",
+            "www.lightning-goats.com"
+          ]
+        ],
+        "not_before": "Jul  9 10:45:59 2026 GMT",
+        "not_after": "Oct  7 10:45:58 2026 GMT",
+        "hostname_and_system_trust_validation_passed": true,
+        "other_subject_alt_names_omitted": true
+      }
+    ]
+  },
+  "limitations": [
+    "This is not a complete zone export and does not identify unknown subdomains or delegated zones.",
+    "TXT values and unrelated certificate SANs are omitted from public evidence.",
+    "No registrar/DNS account authentication, MFA, recovery or provider capability was tested.",
+    "Parent negative answers were observed; no independent DNSSEC signature-chain validation was performed.",
+    "Existing-site TLS observation does not establish new-VPS staging TLS acceptance."
+  ],
+  "production": "HOLD",
+  "dns_changes_performed": false
+}

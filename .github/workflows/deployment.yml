@@ -11,7 +11,8 @@ permissions:
 
 jobs:
   website:
-    runs-on: ubuntu-24.04
+    # Ubuntu 22.04 permits Chromium's user-namespace sandbox on hosted runners.
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

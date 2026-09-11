@@ -104,7 +104,7 @@ class NginxAssemblyTests(unittest.TestCase):
                     continue
                 tls_port, http_port = free_port(), free_port()
                 cls.ports[mode] = (tls_port, http_port)
-                host = "lightning-goats.com" if mode == "production" else "staging.lightning-goats.example"
+                host = "lightning-goats.com" if mode == "production" else "feeder.lightning-goats.com"
                 cls.hosts[mode] = host
                 data = data.replace("listen 443 ssl;", f"listen 127.0.0.1:{tls_port} ssl;")
                 data = data.replace("listen 80;", f"listen 127.0.0.1:{http_port};")

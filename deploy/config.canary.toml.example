@@ -14,7 +14,7 @@ url = "sqlite:///var/lib/lightning-goats/lightning-goats-canary.db"
 api_url = "https://api.dev.strike.me/"
 
 [lnurl]
-public_base_url = "https://staging.lightning-goats.com/"
+public_base_url = "https://feeder.lightning-goats.com/"
 invoice_expiry_seconds = 300
 
 [[lightning_address]]

@@ -403,3 +403,22 @@ authentication test. Fresh external `sat` login after reload is operator-confirm
 and corroborated by a matching accepted-publickey journal entry from a non-loopback
 source. Preserve the root-only rollback copy and console recovery. Final privileges,
 owner/site/network integration and production HOLD remain unchanged.
+
+### Staging hostname and remote-access inputs (2026-09-11)
+
+Continuation base: final draft #46 head
+`8dbbb076086e12da36014e4fdf97c10697490258`, open/unmerged with all required
+checks passed. The operator selected `feeder.lightning-goats.com`; the canary
+nginx and daemon examples now use it consistently. Read `staging-hostname.md`
+for public DNS evidence, the unapplied A-record proposal and remaining TLS/site
+activation gates. No DNS, certificate or live nginx change was performed.
+
+The operator identified `sat` for both home `10.8.0.6` and the old VPS
+`45.76.234.192` / `10.8.0.1`, confirmed `10.8.0.12` reserved, and reports the
+temporary outbound SSH public key installed for both accounts. Server host-key
+fingerprints have been supplied but comparison and authentication remain pending.
+The operator subsequently confirmed hub peer registration for `10.8.0.12/32`.
+IPv6 reservation is not separately confirmed. No tunnel is active; do not send
+home-host traffic over the current public default route or infer containment
+from the address reservation. The hostname and account/address decisions
+supersede earlier unanswered entries only to this extent.

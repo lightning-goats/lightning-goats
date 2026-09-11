@@ -6,6 +6,10 @@ changes or cutover. The old VPS remains the public payment-routing destination.
 
 ## Public baseline, 2026-09-11
 
+Subsequent staging-name selection: the operator approved
+`feeder.lightning-goats.com`. See `staging-hostname.md` for its authoritative
+NXDOMAIN baseline, aligned application/nginx examples and unapplied DNS proposal.
+
 The continuation starts from draft #42 head
 `361e28e1b6c7bee724c7e462f611bf841591fc41`. Its Rust, Security and Deployment
 workflows passed; application/source checks do not establish domain readiness.

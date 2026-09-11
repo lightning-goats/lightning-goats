@@ -1,0 +1,119 @@
+{
+  "observed_at_utc": "2026-09-11T14:57:55.460457+00:00",
+  "hostname": "feeder.lightning-goats.com",
+  "queries": [
+    {
+      "server": "dns1.zoneedit.com",
+      "query_type": "A",
+      "exit_code": 0,
+      "status": "NXDOMAIN",
+      "authoritative": true,
+      "soa_serial": "1780000372",
+      "negative_ttl_seconds": 300
+    },
+    {
+      "server": "dns1.zoneedit.com",
+      "query_type": "AAAA",
+      "exit_code": 0,
+      "status": "NXDOMAIN",
+      "authoritative": true,
+      "soa_serial": "1780000372",
+      "negative_ttl_seconds": 300
+    },
+    {
+      "server": "dns1.zoneedit.com",
+      "query_type": "CNAME",
+      "exit_code": 0,
+      "status": "NXDOMAIN",
+      "authoritative": true,
+      "soa_serial": "1780000372",
+      "negative_ttl_seconds": 300
+    },
+    {
+      "server": "dns1.zoneedit.com",
+      "query_type": "CAA",
+      "exit_code": 0,
+      "status": "NXDOMAIN",
+      "authoritative": true,
+      "soa_serial": "1780000372",
+      "negative_ttl_seconds": 300
+    },
+    {
+      "server": "dns2.zoneedit.com",
+      "query_type": "A",
+      "exit_code": 0,
+      "status": "NXDOMAIN",
+      "authoritative": true,
+      "soa_serial": "1780000372",
+      "negative_ttl_seconds": 300
+    },
+    {
+      "server": "dns2.zoneedit.com",
+      "query_type": "AAAA",
+      "exit_code": 0,
+      "status": "NXDOMAIN",
+      "authoritative": true,
+      "soa_serial": "1780000372",
+      "negative_ttl_seconds": 300
+    },
+    {
+      "server": "dns2.zoneedit.com",
+      "query_type": "CNAME",
+      "exit_code": 0,
+      "status": "NXDOMAIN",
+      "authoritative": true,
+      "soa_serial": "1780000372",
+      "negative_ttl_seconds": 300
+    },
+    {
+      "server": "dns2.zoneedit.com",
+      "query_type": "CAA",
+      "exit_code": 0,
+      "status": "NXDOMAIN",
+      "authoritative": true,
+      "soa_serial": "1780000372",
+      "negative_ttl_seconds": 300
+    },
+    {
+      "server": "dns3.zoneedit.com",
+      "query_type": "A",
+      "exit_code": 0,
+      "status": "NXDOMAIN",
+      "authoritative": true,
+      "soa_serial": "1780000372",
+      "negative_ttl_seconds": 300
+    },
+    {
+      "server": "dns3.zoneedit.com",
+      "query_type": "AAAA",
+      "exit_code": 0,
+      "status": "NXDOMAIN",
+      "authoritative": true,
+      "soa_serial": "1780000372",
+      "negative_ttl_seconds": 300
+    },
+    {
+      "server": "dns3.zoneedit.com",
+      "query_type": "CNAME",
+      "exit_code": 0,
+      "status": "NXDOMAIN",
+      "authoritative": true,
+      "soa_serial": "1780000372",
+      "negative_ttl_seconds": 300
+    },
+    {
+      "server": "dns3.zoneedit.com",
+      "query_type": "CAA",
+      "exit_code": 0,
+      "status": "NXDOMAIN",
+      "authoritative": true,
+      "soa_serial": "1780000372",
+      "negative_ttl_seconds": 300
+    }
+  ],
+  "source_commit": "8dbbb076086e12da36014e4fdf97c10697490258",
+  "dns_changed": false,
+  "certificate_requested": false,
+  "production": "HOLD",
+  "raw_record_sha256": "4d3d712d20e10a2ad5fa24c8686ea18eae25dc400c7e18f482d3fbf91088aa17"
+}

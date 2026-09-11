@@ -150,7 +150,7 @@ Current VPS source disposition (supersedes the historical source-unchanged rows)
 | F03 | PR #33 correlated polling/refusals/cooldown; shipped timing | F04 contract and final staging matrix |
 | F05 | Settlement follow-up durable inbox, fair scans, retry/quarantine | Exact-head checks, production-equivalent restore/settlement acceptance |
 | F14 | Canonical validator at issuance, persistence and settlement | Final integrated review |
-| F04 | No acceptance claimed | Exact physical-owner contract and sanitized fixtures |
+| F04 | Inspected source and typed request/result adapter; see `../security/openhab-owner-contract.md` | Authoritative lost-result persistence recovery, harmless owner fixtures and final staging acceptance |
 | F06, F10 | Signed invoice and authoritative credited-BTC correction with synthetic fixtures | Exact-head checks, live P2P/account network acceptance |
 | F08, F11, F12 | Provider/webhook body bounds partly implemented | Global resource controls, overlay protocol, actual weather freshness/units |
 | F01, F07, F09, F13 | Earlier integration/artifact work retained | Integration review, final package, clean install, home containment and website acceptance |

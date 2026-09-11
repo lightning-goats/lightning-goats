@@ -442,3 +442,18 @@ at the last read-only check. F04 remains blocked on that export/contract evidenc
 no owner mutation, command or physical actuation was performed.
 
 Production remains HOLD. Keep #6/#15/#16/#19/#26 acceptance gates open.
+
+## F04 owner export and typed adapter follow-up — 2026-09-11
+
+The operator-provided rule export is now available and inspected. Its script hash
+exactly matches the historical audited owner. `docs/security/openhab-owner-contract.md`
+records source provenance, exact request/result schema, classifications and the
+remaining recovery dependency. The candidate replaces guessed payload templates
+and success aliases with an explicit typed owner protocol, while preserving the
+separate harmless canary echo protocol and all durable unresolved protections.
+
+Do not interpret an owner denial as a gateway pre-dispatch refusal. Do not treat
+the current request Item's ledger snapshot as proven durable completion: its
+postUpdate precedes persistence/readback. Authoritative persistence-history read
+fixtures are needed for lost/overwritten result recovery; until then the gateway
+retains the UUID reservation and never resends. F04 and parent gates stay open.

@@ -11,20 +11,12 @@ url = "sqlite:///var/lib/lightning-goats-gateway/gateway.db"
 # Gateway runs on the OpenHAB host and is deliberately restricted to loopback.
 url = "http://127.0.0.1:8080/"
 
-# The live feeder owner rule 88bd9ec4de is already triggered by
-# GoatFeeder_ManualRequest. Prefer reusing that correlated owner rather than
-# creating a second physical actuator owner. Before deployment, inspect the live
-# feeder-owner.js/result Item and set ack_item to the actual persisted correlated
-# result Item. The Rust adapter accepts either an exact UUID or a JSON object
-# containing requestId/request_id/id plus an explicit successful outcome.
+# Read-only source inspection confirmed rule 88bd9ec4de / feeder-request-v1.
+# JSON requestId + fresh requestedAt; only exact complete/complete confirms.
+# Denials and failures retain the gateway reservation. Production remains HOLD.
 request_item = "GoatFeeder_ManualRequest"
-ack_item = "REPLACE_WITH_LIVE_CORRELATED_FEEDER_RESULT_ITEM"
-
-# This template is the exact OpenHAB command body. It MUST contain exactly one
-# {request_id}. The bare UUID is a safe placeholder for code testing; Codex must
-# inspect the deployed feeder-owner.js and replace this value if the live owner
-# expects structured JSON or another correlated command shape.
-request_payload_template = "{request_id}"
+ack_item = "GoatFeeder_ManualResult"
+protocol = "feeder_request_v1"
 
 override_item = "FeederOverride"
 # New local administrative kill switch for the Lightning Goats remote path.

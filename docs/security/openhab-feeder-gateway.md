@@ -136,22 +136,22 @@ A separate canary listener on `10.8.0.6:8790` must use harmless canary request/a
 
 ## Correlated request compatibility
 
-The production gateway config contains:
+The inspected owner protocol is documented in [openhab-owner-contract.md](openhab-owner-contract.md).
+The production candidate uses:
 
 ```toml
 request_item = "GoatFeeder_ManualRequest"
-ack_item = "<live correlated result Item>"
-request_payload_template = "{request_id}"
+ack_item = "GoatFeeder_ManualResult"
+protocol = "feeder_request_v1"
 ```
 
-`request_payload_template` is deployment-configurable because the deployed owner may expect structured JSON rather than a bare UUID. It must contain exactly one `{request_id}` and no other brace expansion. Codex must inspect the live owner and set this to the exact accepted command shape before physical testing.
-
-The acknowledgement parser accepts either:
-
-- an Item state that is exactly the request UUID; or
-- a JSON object containing `request_id`, `requestId`, or `id` plus explicit successful status (`success=true`, or a recognized completed/success outcome).
-
-Failure/unknown JSON shapes fail closed.
+The gateway serializes JSON `requestId` and a fresh UTC `requestedAt`; only the
+exact correlated `complete/complete` result confirms the owner's sequence.
+Progress remains pending; owner rejection/failure never authorizes a fresh UUID.
+Generic success aliases and configurable command templates are removed. The
+explicit `uuid_canary` echo protocol is confined to the two harmless canary Items.
+Lost-result recovery from authoritative persistence history remains an open gate;
+a current Item-state snapshot alone is not proof of persistence completion.
 
 ## Exactly-once and ambiguity
 
@@ -172,7 +172,8 @@ transaction as the state change. Replays do not duplicate audit rows or move
 completion timestamps. No public endpoint clears pending state as "not fed".
 
 This addresses shared-store admission, not F04's still-unverified physical
-completion contract. Existing acknowledgement parsing is not live acceptance.
+completion contract. The typed adapter is not final live acceptance; see the
+remaining persistence-history gap in `openhab-owner-contract.md`.
 
 `lightning-goatsd` and the trusted gateway use the **same feed-attempt UUID**.
 

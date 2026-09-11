@@ -59,6 +59,11 @@ is rejected; migrate reviewed configurations to an explicit protocol.
 
 ## Durable recovery gap — acceptance remains open
 
+Follow-up: the operator supplied a four-record JDBC response. See
+[openhab-jdbc-recovery-evidence.md](openhab-jdbc-recovery-evidence.md) for the
+sanitized fixture and the source-backed complete-to-failed finality race. The
+export's existence does not close automatic recovery acceptance.
+
 The request Item also holds a `feeder-request-ledger/v1` ledger with at most 32
 entries and 8192 UTF-8 bytes. On restart, interrupted accepted/running entries
 become `failed/restart_uncertain`. Duplicate UUID commands are denied; the gateway

@@ -457,3 +457,13 @@ the current request Item's ledger snapshot as proven durable completion: its
 postUpdate precedes persistence/readback. Authoritative persistence-history read
 fixtures are needed for lost/overwritten result recovery; until then the gateway
 retains the UUID reservation and never resends. F04 and parent gates stay open.
+
+The operator subsequently supplied four existing JDBC records. The narrower
+approved inspection sanitized IDs/timestamps on the home host before fixture
+transfer. `docs/security/openhab-jdbc-recovery-evidence.md` records the observed
+shape and a further contract blocker: the current owner may persist complete and
+later overwrite it with failed. Offline inspection/regressions do not authorize
+automatic completion. The operator confirmed JDBC with boundary/itemState false,
+epoch-zero start, omitted end time and omitted pagination. That start value selects
+OpenHAB's default one-day window; it does not prove all history. A reviewed terminal
+receipt authority contract remains necessary; do not change the live owner implicitly.

@@ -292,3 +292,23 @@ final identities, privilege revocation, SSH and credential gates remain open.
 The existing owner/site access and staging identity/hostname dependencies remain;
 website contact additionally needs the operator-approved public Nostr key.
 Production remains HOLD and all parent acceptance gates stay open.
+
+### Persistent inactive staging installation (2026-09-11)
+
+The next continuation starts from final draft #41 head
+`d350b2af697b0add7056a353c2fcfe97c697b8ce`. PRs #31–#41 remain draft/open and
+unmerged; #41's Rust, Security and Deployment checks passed. Read
+`inactive-vps-canary.md` and its sanitized installation/readback evidence.
+
+The fresh VPS now has a separate locked, non-login, no-sudo runtime identity;
+root-owned daemon/CLI, canary example and inactive canary unit; and empty private
+state. The installed runtime is corrected source `a54ead65`, not a final merged
+release. No active configuration or canary credentials were installed, no service
+was started/enabled, and no systemd reload, SSH or network change was performed.
+The helper refuses existing installations; preserve this state on continuation.
+
+The initial account-only failure, its verified unused-account cleanup, corrected
+sudo-denial guard and successful repeat are documented without suppressing the
+earlier failure. Final production installation, integration review, privileges,
+actual owner/site access and live acceptance remain open. All production gates
+remain on HOLD; merges do not authorize activation or cutover.

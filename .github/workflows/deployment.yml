@@ -68,6 +68,15 @@ jobs:
           sudo python3 -B deploy/scripts/initialize-staging-credential-store.py > "$RUNNER_TEMP/CREDENTIAL-STORE.json"
           sudo unshare --net -- python3 -B deploy/scripts/rehearse-systemd.py "$RUNNER_TEMP/package-systemd/lightning-goats-smoke-x86_64-linux-gnu.tar.gz" "$GITHUB_SHA" > "$RUNNER_TEMP/SYSTEMD-REHEARSAL.json"
           (cd "$RUNNER_TEMP" && sha256sum CREDENTIAL-STORE.json SYSTEMD-REHEARSAL.json > SYSTEMD-SHA256SUMS)
+      - name: Prepare a fresh inactive canary on the disposable runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          CANARY_ARCHIVE="$RUNNER_TEMP/package-systemd/lightning-goats-smoke-x86_64-linux-gnu.tar.gz"
+          CANARY_ARCHIVE_SHA256="$(sha256sum "$CANARY_ARCHIVE" | cut -d ' ' -f 1)"
+          python3 -B deploy/scripts/prepare-vps-canary.py "$CANARY_ARCHIVE" "$GITHUB_SHA" "$CANARY_ARCHIVE_SHA256" > "$RUNNER_TEMP/INACTIVE-CANARY-PLAN.json"
+          sudo python3 -B deploy/scripts/prepare-vps-canary.py "$CANARY_ARCHIVE" "$GITHUB_SHA" "$CANARY_ARCHIVE_SHA256" --apply > "$RUNNER_TEMP/INACTIVE-CANARY-INSTALL.json"
+          (cd "$RUNNER_TEMP" && sha256sum INACTIVE-CANARY-PLAN.json INACTIVE-CANARY-INSTALL.json >> SYSTEMD-SHA256SUMS)
       - name: Retain systemd acceptance evidence
         uses: actions/upload-artifact@v4
         with:
@@ -75,6 +84,8 @@ jobs:
           path: |
             ${{ runner.temp }}/SYSTEMD-REHEARSAL.json
             ${{ runner.temp }}/CREDENTIAL-STORE.json
+            ${{ runner.temp }}/INACTIVE-CANARY-PLAN.json
+            ${{ runner.temp }}/INACTIVE-CANARY-INSTALL.json
             ${{ runner.temp }}/SYSTEMD-SHA256SUMS
           if-no-files-found: error
           retention-days: 14

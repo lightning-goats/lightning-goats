@@ -199,3 +199,18 @@ scopes/identities, privilege revocation and pending host reboot remain open.
 F04 owner-contract binding, F09 actual home containment, authoritative website,
 public TLS/IPv6, signer and separately approved live tests are still unaccepted.
 Keep #6/#15/#16 open. No source/mock result lifts production HOLD.
+
+### Persistent inactive installation follow-up (2026-09-11)
+
+F13/bootstrap evidence now includes the actual VPS runtime account and persistent
+root-owned daemon/CLI/example/unit installation, verified under the non-admin
+runtime UID with an empty private state directory. See `inactive-vps-canary.md`
+for exact source/archive/installer hashes and independent readback. The canary
+remains inactive/disabled with no active config or credentials; this does not
+establish final service or live dependency acceptance. The fresh-only helper and
+its sudo-denial portability correction have explicit refusal regressions.
+
+The current verified kernel/reboot observation in the handoff supersedes the
+historical pending-reboot note above. Final integrated release, SSH, credential
+scope and privilege revocation still need acceptance. F04/F09, actual website,
+signer and separately approved live tests remain open; preserve #6/#15/#16.

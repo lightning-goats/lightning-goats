@@ -133,6 +133,29 @@ class WebsiteBrowserTests(unittest.TestCase):
                          "npub1v60thnx0gz0wq3n6xdnq46y069l9x70xgmjp6lprdl6fv0eux6mqgjj4rp")
         self.assertEqual(self.page.locator("a[href^='mailto:']").count(), 0)
 
+    def test_feed_overlay_covers_qr_above_player_on_desktop_and_mobile(self):
+        self.open()
+        # A player layer must not cover the feed target. The iframe remains a
+        # harmless intercepted document; no video, payment or relay is contacted.
+        self.page.locator("iframe").evaluate("frame => frame.style.zIndex = '9999'")
+        for width in (1440, 390):
+            self.page.set_viewport_size({"width": width, "height": 900})
+            result = self.page.evaluate("""() => {
+              const button = document.getElementById('feedLink');
+              const video = document.querySelector('.iframe-container').getBoundingClientRect();
+              const rect = button.getBoundingClientRect();
+              const x = video.right - 50, y = video.top + 50;
+              return {above: button.contains(document.elementFromPoint(x, y)),
+                contained: rect.left >= video.left && rect.right <= video.right &&
+                  rect.top >= video.top && rect.bottom <= video.bottom,
+                opacity: getComputedStyle(button).opacity, disabled: button.disabled};
+            }""")
+            self.assertTrue(result["above"], (width, result))
+            self.assertTrue(result["contained"], (width, result))
+            self.assertEqual(result["opacity"], "1")
+            self.assertTrue(result["disabled"])
+        self.assertEqual(self.payments, [])
+
     def test_all_six_addresses_use_native_routes_without_automatic_payment(self):
         for user in ["herd", "dexter", "rowan", "cosmo", "newton", "nova"]:
             with self.subTest(user=user):

@@ -3,12 +3,20 @@ use std::{ffi::OsStr, path::PathBuf, process::Stdio, sync::Arc, time::Duration};
 use anyhow::{Context, Result, bail};
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
-use tokio::{io::AsyncWriteExt, process::Command, time::timeout};
-use zeroize::Zeroizing;
+use tokio::{
+    io::{AsyncRead, AsyncReadExt, AsyncWriteExt},
+    process::Command,
+    time::timeout,
+};
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::{config::NostrConfig, secrets::read_systemd_credential};
 
 const NAK_TIMEOUT: Duration = Duration::from_secs(45);
+const NAK_CLEANUP_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_NAK_INPUT: usize = 64 * 1024;
+const MAX_NAK_STDOUT: usize = 64 * 1024;
+const MAX_NAK_STDERR: usize = 8 * 1024;
 const PUBLISH_DUMMY_SECRET: &str = "01";
 
 #[derive(Clone)]
@@ -70,7 +78,7 @@ impl NakClient {
         let partial = serde_json::to_string(&serde_json::json!({
             "kind": 1,
             "content": content,
-            "tags": tags,
+            "tags": &tags,
         }))
         .context("failed serializing partial Nostr event")?;
 
@@ -82,9 +90,14 @@ impl NakClient {
             )
             .await
             .context("nak failed signing Nostr event through NIP-46")?;
+        // Do not attach a deserializer error: malformed field values can contain
+        // subprocess credentials. Keep all untrusted output out of error logs.
         let event: SignedNostrEvent = serde_json::from_str(output.trim())
-            .context("nak returned invalid signed Nostr event JSON")?;
+            .map_err(|_| anyhow::anyhow!("nak returned invalid signed Nostr event JSON"))?;
         validate_signed_event(&event, &self.project_pubkey)?;
+        if event.content != content || event.tags != tags {
+            bail!("signed Nostr event does not match requested content or tags");
+        }
         self.verify_event(&event).await?;
         Ok(event)
     }
@@ -101,9 +114,15 @@ impl NakClient {
             PUBLISH_DUMMY_SECRET.to_owned(),
         ];
         args.extend(self.relays.iter().cloned());
-        self.run_nak(args.iter().map(String::as_str), &event_json, None)
+        let output = self
+            .run_nak(args.iter().map(String::as_str), &event_json, None)
             .await
             .context("nak failed publishing persisted signed Nostr event")?;
+        let echoed: SignedNostrEvent = serde_json::from_str(output.trim())
+            .map_err(|_| anyhow::anyhow!("nak returned invalid publication event JSON"))?;
+        if &echoed != event {
+            bail!("nak publication returned a different persisted event");
+        }
         Ok(())
     }
 
@@ -127,6 +146,24 @@ impl NakClient {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
+        self.run_nak_with_timeout(args, stdin_text, signer, NAK_TIMEOUT)
+            .await
+    }
+
+    async fn run_nak_with_timeout<I, S>(
+        &self,
+        args: I,
+        stdin_text: &str,
+        signer: Option<(&str, &str)>,
+        deadline: Duration,
+    ) -> Result<String>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        if stdin_text.len() > MAX_NAK_INPUT {
+            bail!("nak input exceeds {MAX_NAK_INPUT} bytes");
+        }
         let mut command = Command::new(&self.nak_path);
         command
             .arg("--config-path")
@@ -149,29 +186,59 @@ impl NakClient {
             .spawn()
             .with_context(|| format!("failed spawning {}", self.nak_path.display()))?;
         let mut stdin = child.stdin.take().context("failed opening nak stdin")?;
-        stdin
-            .write_all(stdin_text.as_bytes())
-            .await
-            .context("failed writing event to nak stdin")?;
-        stdin
-            .write_all(b"\n")
-            .await
-            .context("failed terminating nak stdin event")?;
-        drop(stdin);
+        let stdout = child.stdout.take().context("failed opening nak stdout")?;
+        let stderr = child.stderr.take().context("failed opening nak stderr")?;
 
-        let output = timeout(NAK_TIMEOUT, child.wait_with_output())
-            .await
-            .context("nak operation timed out")?
-            .context("failed waiting for nak")?;
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!(
-                "nak exited with {}: {}",
-                output.status,
-                sanitize_stderr(&stderr)
-            );
+        // Drain both pipes concurrently with stdin, under the same deadline.
+        // Writing stdin first can deadlock if the child fills a pipe before
+        // reading. Waiting with output would allocate unbounded child output.
+        let execution = timeout(deadline, async {
+            tokio::try_join!(
+                async {
+                    stdin
+                        .write_all(stdin_text.as_bytes())
+                        .await
+                        .context("failed writing event to nak stdin")?;
+                    stdin
+                        .write_all(b"\n")
+                        .await
+                        .context("failed terminating nak stdin event")?;
+                    drop(stdin);
+                    Ok::<(), anyhow::Error>(())
+                },
+                read_bounded(stdout, MAX_NAK_STDOUT, "stdout"),
+                async {
+                    // stderr may contain credentials; bound and erase it, but
+                    // never incorporate it into logs or durable outbox errors.
+                    let _stderr =
+                        Zeroizing::new(read_bounded(stderr, MAX_NAK_STDERR, "stderr").await?);
+                    Ok::<(), anyhow::Error>(())
+                },
+                async { child.wait().await.context("failed waiting for nak") },
+            )
+        })
+        .await;
+
+        let ((), stdout, (), status) = match execution {
+            Ok(Ok(output)) => output,
+            failure => {
+                // Retain the Child handle until kill/reap, including failures
+                // while writing stdin. kill_on_drop remains a cancellation
+                // backstop; systemd owns cleanup of the whole service cgroup.
+                if !matches!(timeout(NAK_CLEANUP_TIMEOUT, child.kill()).await, Ok(Ok(()))) {
+                    tracing::warn!("nak child cleanup did not complete within its bound");
+                }
+                return match failure {
+                    Ok(Err(error)) => Err(error),
+                    Err(_) => Err(anyhow::anyhow!("nak operation timed out")),
+                    Ok(Ok(_)) => unreachable!(),
+                };
+            }
+        };
+        if !status.success() {
+            bail!("nak exited with {status}; subprocess stderr withheld");
         }
-        String::from_utf8(output.stdout).context("nak stdout was not UTF-8")
+        String::from_utf8(stdout).context("nak stdout was not UTF-8")
     }
 }
 
@@ -210,13 +277,22 @@ fn validate_hex(value: &str, expected_len: usize, field: &str) -> Result<()> {
     Ok(())
 }
 
-fn sanitize_stderr(stderr: &str) -> String {
-    stderr
-        .lines()
-        .take(8)
-        .map(|line| line.chars().take(240).collect::<String>())
-        .collect::<Vec<_>>()
-        .join(" | ")
+async fn read_bounded<R: AsyncRead + Unpin>(
+    reader: R,
+    limit: usize,
+    stream: &str,
+) -> Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    reader
+        .take((limit + 1) as u64)
+        .read_to_end(&mut bytes)
+        .await
+        .with_context(|| format!("failed reading nak {stream}"))?;
+    if bytes.len() > limit {
+        bytes.zeroize();
+        bail!("nak {stream} output exceeds {limit} bytes");
+    }
+    Ok(bytes)
 }
 
 #[cfg(test)]
@@ -263,5 +339,60 @@ mod tests {
         };
         validate_signed_event(&event, &"ab".repeat(32)).unwrap();
         assert!(validate_signed_event(&event, &"cd".repeat(32)).is_err());
+    }
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn timeout_includes_stdin_and_reaps_stalled_child() {
+        use std::{fs, os::unix::fs::PermissionsExt};
+
+        let directory = tempfile::TempDir::new().unwrap();
+        let script = directory.path().join("nak-stub");
+        fs::write(&script, include_str!("../tests/fixtures/nak_stub.py")).unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::write(directory.path().join("mode"), "stall_before_stdin").unwrap();
+        let mut config = config();
+        config.nak_path = script;
+        config.nak_config_path = directory.path().to_owned();
+        let client = NakClient::new(&config, "synthetic-key".to_owned()).unwrap();
+        let input = "x".repeat(MAX_NAK_INPUT);
+        let error = timeout(
+            Duration::from_secs(3),
+            client.run_nak_with_timeout(["event"], &input, None, Duration::from_millis(300)),
+        )
+        .await
+        .expect("stdin, output and exit must share one deadline")
+        .unwrap_err();
+        assert!(format!("{error:#}").contains("timed out"));
+        let pid = fs::read_to_string(directory.path().join("pid")).unwrap();
+        #[cfg(target_os = "linux")]
+        assert!(!std::path::Path::new(&format!("/proc/{pid}")).exists());
+    }
+
+    #[tokio::test]
+    async fn input_limit_rejects_before_spawn() {
+        let mut config = config();
+        config.nak_path = PathBuf::from("/definitely-missing-nak-binary");
+        let client = NakClient::new(&config, "synthetic-key".to_owned()).unwrap();
+        let error = client
+            .run_nak(["event"], &"x".repeat(MAX_NAK_INPUT + 1), None)
+            .await
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("input exceeds"));
+    }
+
+    #[tokio::test]
+    async fn output_limit_accepts_exact_boundary_and_rejects_one_more_byte() {
+        let accepted = vec![b'x'; 16];
+        assert_eq!(
+            read_bounded(accepted.as_slice(), 16, "stdout")
+                .await
+                .unwrap(),
+            accepted
+        );
+        assert!(
+            read_bounded([b'x'; 17].as_slice(), 16, "stderr")
+                .await
+                .is_err()
+        );
     }
 }

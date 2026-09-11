@@ -312,3 +312,19 @@ sudo-denial guard and successful repeat are documented without suppressing the
 earlier failure. Final production installation, integration review, privileges,
 actual owner/site access and live acceptance remain open. All production gates
 remain on HOLD; merges do not authorize activation or cutover.
+
+### Public domain readiness baseline (2026-09-11)
+
+The DNS continuation starts from final draft #42 head
+`361e28e1b6c7bee724c7e462f611bf841591fc41`; its three workflows passed,
+including the corrected fresh inactive Ubuntu installation. Read
+`domain-readiness.md` for public authoritative DNS/registry/TLS evidence and the
+remaining #19 account/zone/CA/DNSSEC decisions. The apex still points to the old
+VPS at `45.76.234.192`; `www` aliases it, both with TTL 3600. No DNS change was
+made. This is an apex/`www` baseline, not a complete zone or account audit.
+
+No child DNSKEY/parent DS or apex CAA answer was observed. Registry transfer/update
+locks are present, but account MFA/recovery and provider eligibility remain
+unverified. Preserve mail/TXT, the old certificate dependencies and all production
+gates. Owner/site access, staging registration/hostname and final SSH/credential/
+privilege decisions remain pending; keep #6/#15/#16/#19 open.

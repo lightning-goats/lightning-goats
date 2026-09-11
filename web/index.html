@@ -118,8 +118,11 @@
             width: 100%;
         }
 
+        #video-container { position: relative; isolation: isolate; }
+
         .iframe-container {
             position: relative;
+            z-index: 0;
             width: 100%;
             padding-bottom: 56.25%;
             height: 0;
@@ -150,7 +153,7 @@
             transition: transform 0.3s;
         }
 
-        .qr-code-overlay:hover { transform: scale(1.05); }
+        .qr-code-overlay:hover:not(:disabled) { transform: scale(1.05); }
 
         .chat-panel {
             min-width: 0;
@@ -554,9 +557,13 @@
             .lg-title { font-size: 0.95rem; }
             .nostr-auth-button { max-width: 112px; }
         }
-        .feed-action { position: absolute; bottom: 18px; right: 18px; border: 0; border-radius: 22px;
-            padding: 10px 18px; background: var(--lg-yellow); color: #111; font-weight: 700; }
-        .feed-action:disabled { opacity: .55; cursor: not-allowed; }
+        .feed-action { display: flex; align-items: flex-end; justify-content: center;
+            padding: 6px; border: 2px solid var(--lg-yellow); border-radius: 8px;
+            color: #111; font-weight: 700; }
+        .feed-action span { padding: 6px 10px; border-radius: 16px;
+            background: var(--lg-yellow); box-shadow: 0 2px 6px #000; }
+        .feed-action:disabled { opacity: 1; cursor: not-allowed; }
+        .feed-action:focus-visible { outline: 3px solid white; outline-offset: 3px; }
         #invoiceText { overflow-wrap: anywhere; }
     </style>
 </head>
@@ -583,8 +590,8 @@
                             ></iframe>
                         </div>
 
-                        <button id="feedLink" class="feed-action" type="button" disabled
-                            data-bs-toggle="modal" data-bs-target="#feedModal">Feed the herd</button>
+                        <button id="feedLink" class="qr-code-overlay feed-action" type="button" disabled
+                            data-bs-toggle="modal" data-bs-target="#feedModal"><span>Feed the herd</span></button>
                     </div>
                 </div>
             </section>

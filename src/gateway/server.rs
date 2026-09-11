@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use tokio::time::{Instant, sleep, timeout, timeout_at};
 use uuid::Uuid;
 
-use crate::openhab::{OpenHabClient, TrustedOpenHabConfig};
+use crate::openhab::{OpenHabClient, OwnerOutcome, TrustedOpenHabConfig};
 
 use super::{
     client::{FeedOutcome, FeedRefusal, FeedRequestStatus, FeederSafety, RefusalReason},
@@ -300,14 +300,19 @@ fn refusal_response(request_id: Uuid, refusal: FeedRefusal) -> Response {
 }
 
 async fn handle_existing_pending(state: &GatewayState, request_id: Uuid) -> Response {
-    match ack_matches(state, request_id).await {
-        Ok(true) => {
+    match state.openhab.feeder_result(request_id).await {
+        Ok(OwnerOutcome::Complete) => {
             if let Err(error) = state.store.mark_acknowledged(request_id).await {
                 return internal_failure("Unable to persist feeder acknowledgement", error);
             }
             outcome_response(StatusCode::OK, request_id, FeedOutcome::Confirmed)
         }
-        Ok(false) => outcome_response(StatusCode::ACCEPTED, request_id, FeedOutcome::Pending),
+        Ok(OwnerOutcome::Absent | OwnerOutcome::Pending) => {
+            outcome_response(StatusCode::ACCEPTED, request_id, FeedOutcome::Pending)
+        }
+        Ok(OwnerOutcome::Rejected | OwnerOutcome::Ambiguous) => {
+            outcome_response(StatusCode::CONFLICT, request_id, FeedOutcome::Ambiguous)
+        }
         Err(error) => internal_failure("OpenHAB feeder acknowledgement unavailable", error),
     }
 }
@@ -315,15 +320,15 @@ async fn handle_existing_pending(state: &GatewayState, request_id: Uuid) -> Resp
 async fn wait_for_ack(state: &GatewayState, request_id: Uuid) -> Response {
     let deadline = Instant::now() + state.ack_timeout;
     loop {
-        match timeout_at(deadline, ack_matches(state, request_id)).await {
-            Ok(Ok(true)) => {
+        match timeout_at(deadline, state.openhab.feeder_result(request_id)).await {
+            Ok(Ok(OwnerOutcome::Complete)) => {
                 if let Err(error) = state.store.mark_acknowledged(request_id).await {
                     return internal_failure("Unable to persist feeder acknowledgement", error);
                 }
                 return outcome_response(StatusCode::OK, request_id, FeedOutcome::Confirmed);
             }
-            Ok(Ok(false)) => {}
-            Ok(Err(_)) | Err(_) => {
+            Ok(Ok(OwnerOutcome::Absent | OwnerOutcome::Pending)) => {}
+            Ok(Ok(OwnerOutcome::Rejected | OwnerOutcome::Ambiguous)) | Ok(Err(_)) | Err(_) => {
                 return outcome_response(StatusCode::CONFLICT, request_id, FeedOutcome::Ambiguous);
             }
         }
@@ -377,10 +382,6 @@ async fn weather(State(state): State<GatewayState>) -> Response {
     }
 }
 
-async fn ack_matches(state: &GatewayState, request_id: Uuid) -> Result<bool> {
-    Ok(state.openhab.acknowledged_request().await? == Some(request_id))
-}
-
 fn public_error(status: StatusCode, reason: &str) -> Response {
     (
         status,
@@ -420,7 +421,7 @@ mod tests {
                 url: "http://127.0.0.1:8080/".to_owned(),
                 request_item: "GoatFeeder_ManualRequest".to_owned(),
                 ack_item: "GoatFeeder_Result".to_owned(),
-                request_payload_template: "{request_id}".to_owned(),
+                protocol: crate::openhab::OwnerProtocol::FeederRequestV1,
                 override_item: "FeederOverride".to_owned(),
                 remote_enabled_item: "LightningGoatsRemoteEnabled".to_owned(),
                 temperature_item: None,

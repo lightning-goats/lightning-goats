@@ -1,0 +1,69 @@
+{
+  "provenance": "Source-derived sanitized fixtures, not live actuation observations",
+  "owner_script_sha256": "730053e0f3245cb83461e3fe6e3b05d49c8b508631e8cdb4a889c8be8d915978",
+  "cases": [
+    {
+      "result": {
+        "requestId": "00000000-0000-4000-8000-000000000001",
+        "status": "accepted",
+        "reason": "accepted",
+        "at": "2026-09-11T00:00:00Z"
+      },
+      "expected": "pending"
+    },
+    {
+      "result": {
+        "requestId": "00000000-0000-4000-8000-000000000001",
+        "status": "running",
+        "reason": "pulse_started",
+        "at": "2026-09-11T00:00:00Z"
+      },
+      "expected": "pending"
+    },
+    {
+      "result": {
+        "requestId": "00000000-0000-4000-8000-000000000001",
+        "status": "complete",
+        "reason": "complete",
+        "at": "2026-09-11T00:00:00Z"
+      },
+      "expected": "complete"
+    },
+    {
+      "result": {
+        "requestId": "00000000-0000-4000-8000-000000000001",
+        "status": "denied",
+        "reason": "duplicate",
+        "at": "2026-09-11T00:00:00Z"
+      },
+      "expected": "rejected"
+    },
+    {
+      "result": {
+        "requestId": "00000000-0000-4000-8000-000000000001",
+        "status": "denied",
+        "reason": "cooldown",
+        "at": "2026-09-11T00:00:00Z"
+      },
+      "expected": "rejected"
+    },
+    {
+      "result": {
+        "requestId": "00000000-0000-4000-8000-000000000001",
+        "status": "failed",
+        "reason": "restart_uncertain",
+        "at": "2026-09-11T00:00:00Z"
+      },
+      "expected": "ambiguous"
+    },
+    {
+      "result": {
+        "requestId": "00000000-0000-4000-8000-000000000001",
+        "status": "failed",
+        "reason": "execution_error",
+        "at": "2026-09-11T00:00:00Z"
+      },
+      "expected": "ambiguous"
+    }
+  ]
+}

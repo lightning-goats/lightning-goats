@@ -20,6 +20,7 @@ struct Owner {
     commands: Arc<Mutex<Vec<String>>>,
     ack: Arc<Mutex<String>>,
     auto_ack: bool,
+    owner_v1: bool,
 }
 
 async fn item(State(owner): State<Owner>, Path(item): Path<String>) -> String {
@@ -32,10 +33,37 @@ async fn item(State(owner): State<Owner>, Path(item): Path<String>) -> String {
 }
 
 async fn command(State(owner): State<Owner>, body: String) {
+    let id = if owner.owner_v1 {
+        let value: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(value.as_object().unwrap().len(), 2);
+        let timestamp =
+            chrono::DateTime::parse_from_rfc3339(value["requestedAt"].as_str().unwrap()).unwrap();
+        assert!(
+            (chrono::DateTime::<chrono::Utc>::from(std::time::SystemTime::now())
+                - timestamp.with_timezone(&chrono::Utc))
+            .num_seconds()
+            .abs()
+                < 10
+        );
+        Uuid::parse_str(value["requestId"].as_str().unwrap())
+            .unwrap()
+            .to_string()
+    } else {
+        Uuid::parse_str(&body).unwrap().to_string()
+    };
     if owner.auto_ack {
-        *owner.ack.lock().unwrap() = body.clone();
+        *owner.ack.lock().unwrap() = if owner.owner_v1 {
+            owner_result(&id, "complete", "complete")
+        } else {
+            id.clone()
+        };
     }
-    owner.commands.lock().unwrap().push(body);
+    owner.commands.lock().unwrap().push(id);
+}
+
+fn owner_result(id: &str, status: &str, reason: &str) -> String {
+    serde_json::json!({"requestId":id,"status":status,"reason":reason,"at":chrono::DateTime::<chrono::Utc>::from(std::time::SystemTime::now()).to_rfc3339()})
+        .to_string()
 }
 
 async fn mock_owner(owner: Owner) -> (tokio::task::JoinHandle<()>, String) {
@@ -64,6 +92,15 @@ async fn gateway(
     owner_url: &str,
     index: usize,
 ) -> (Process, String) {
+    gateway_protocol(directory, owner_url, index, false).await
+}
+
+async fn gateway_protocol(
+    directory: &impl AsRef<std::path::Path>,
+    owner_url: &str,
+    index: usize,
+    owner_v1: bool,
+) -> (Process, String) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     drop(listener);
@@ -76,6 +113,9 @@ async fn gateway(
     )
     .into();
     config["openhab"]["url"] = owner_url.into();
+    if owner_v1 {
+        config["openhab"]["protocol"] = "feeder_request_v1".into();
+    }
     let path = directory.as_ref().join(format!("gateway-{index}.toml"));
     std::fs::write(&path, toml::to_string(&config).unwrap()).unwrap();
     std::fs::write(
@@ -412,12 +452,13 @@ async fn wait_credit(ledger: &lightning_goats::ledger::LedgerStore, sats: u64) {
 async fn shipped_examples_real_daemon_gateway_two_confirmed_commands_leave_340() {
     let owner = Owner {
         auto_ack: true,
+        owner_v1: true,
         ..Owner::default()
     };
     let (mock, owner_url) = mock_owner(owner.clone()).await;
     let directory = TempDir::new().unwrap();
     let ledger = credited(&directory, 2340).await;
-    let (_gateway, base) = gateway(&directory, &owner_url, 1).await;
+    let (_gateway, base) = gateway_protocol(&directory, &owner_url, 1, true).await;
     let process = daemon(&directory, &base).await;
     wait_credit(&ledger, 340).await;
     drop(process);
@@ -761,5 +802,94 @@ async fn paired_store_restore_preserves_pending_identity_settlement_and_signed_b
             .count(),
         1
     );
+    mock.abort();
+}
+
+#[tokio::test]
+async fn owner_progress_denials_and_failure_never_resend_or_release_reservation() {
+    let owner = Owner {
+        owner_v1: true,
+        ..Owner::default()
+    };
+    let (mock, owner_url) = mock_owner(owner.clone()).await;
+    let directory = TempDir::new().unwrap();
+    let (process, base) = gateway_protocol(&directory, &owner_url, 1, true).await;
+    let client = Client::new();
+    let id = Uuid::new_v4();
+    let path = format!("{base}/v1/feeder/request/{id}");
+    assert!(
+        !client
+            .post(&path)
+            .send()
+            .await
+            .unwrap()
+            .status()
+            .is_success()
+    );
+    assert_eq!(owner.commands.lock().unwrap().len(), 1);
+    drop(process);
+    let (_restarted, base) = gateway_protocol(&directory, &owner_url, 2, true).await;
+    let path = format!("{base}/v1/feeder/request/{id}");
+    for (status, reason, expected) in [
+        ("accepted", "accepted", "pending"),
+        ("running", "pulse_started", "pending"),
+        ("denied", "busy", "ambiguous"),
+        ("denied", "cooldown", "ambiguous"),
+        ("denied", "duplicate", "ambiguous"),
+        ("failed", "restart_uncertain", "ambiguous"),
+        ("failed", "execution_error", "ambiguous"),
+    ] {
+        *owner.ack.lock().unwrap() = owner_result(&id.to_string(), status, reason);
+        let result: serde_json::Value = client
+            .get(&path)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(result["status"], expected);
+        let replay: serde_json::Value = client
+            .post(&path)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(replay["status"], expected);
+        let other: serde_json::Value = client
+            .post(format!("{base}/v1/feeder/request/{}", Uuid::new_v4()))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(other["refusal"]["reason"], "unresolved");
+        assert_eq!(owner.commands.lock().unwrap().len(), 1);
+    }
+    // A completion for another UUID does not correlate; no notification is not proof.
+    *owner.ack.lock().unwrap() = owner_result(&Uuid::new_v4().to_string(), "complete", "complete");
+    let result: serde_json::Value = client
+        .get(&path)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(result["status"], "pending");
+    *owner.ack.lock().unwrap() = owner_result(&id.to_string(), "complete", "complete");
+    let result: serde_json::Value = client
+        .get(&path)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(result["status"], "confirmed");
+    assert_eq!(owner.commands.lock().unwrap().len(), 1);
     mock.abort();
 }

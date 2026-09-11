@@ -1,0 +1,241 @@
+{
+  "observed_at_utc": "2026-09-11T14:07:54.961879+00:00",
+  "source_commit": "52242e7aafe59d3e027cfa0944d6a24402cd9404",
+  "target": "/etc/ssh/sshd_config.d/00-local-hardening.conf",
+  "original_sha256": "0144b1e57b930062e81cd37e0fdc8d0b90db1a269993614f336f8d80558ea00f",
+  "installed_sha256": "8e595d0fbd0221312775e600d08a427b5f5e37c6c2c3092d521fff2b8c68302d",
+  "backup": "/etc/ssh/lg-remediation-backup-20260911/00-local-hardening.conf",
+  "backup_mode": "0600",
+  "backup_directory_mode": "0700",
+  "target_mode": "0600",
+  "target_owner": "root:root",
+  "target_selinux_context": "system_u:object_r:etc_t:s0",
+  "configuration_drift_before_apply": false,
+  "unrelated_keys_and_configuration_unchanged": true,
+  "syntax_and_12_context_checks": "passed before and after reload",
+  "effective_contexts": {
+    "user=sat,host=review.invalid,addr=192.0.2.10,laddr=127.0.0.1,lport=22": {
+      "permitrootlogin": [
+        "no"
+      ],
+      "passwordauthentication": [
+        "no"
+      ],
+      "kbdinteractiveauthentication": [
+        "no"
+      ],
+      "pubkeyauthentication": [
+        "yes"
+      ],
+      "authenticationmethods": [
+        "publickey"
+      ]
+    },
+    "user=sat,host=review.invalid,addr=2001:db8::10,laddr=127.0.0.1,lport=22": {
+      "permitrootlogin": [
+        "no"
+      ],
+      "passwordauthentication": [
+        "no"
+      ],
+      "kbdinteractiveauthentication": [
+        "no"
+      ],
+      "pubkeyauthentication": [
+        "yes"
+      ],
+      "authenticationmethods": [
+        "publickey"
+      ]
+    },
+    "user=sat,host=review.invalid,addr=10.8.0.10,laddr=127.0.0.1,lport=22": {
+      "permitrootlogin": [
+        "no"
+      ],
+      "passwordauthentication": [
+        "no"
+      ],
+      "kbdinteractiveauthentication": [
+        "no"
+      ],
+      "pubkeyauthentication": [
+        "yes"
+      ],
+      "authenticationmethods": [
+        "publickey"
+      ]
+    },
+    "user=linuxuser,host=review.invalid,addr=192.0.2.10,laddr=127.0.0.1,lport=22": {
+      "permitrootlogin": [
+        "no"
+      ],
+      "passwordauthentication": [
+        "no"
+      ],
+      "kbdinteractiveauthentication": [
+        "no"
+      ],
+      "pubkeyauthentication": [
+        "yes"
+      ],
+      "authenticationmethods": [
+        "publickey"
+      ]
+    },
+    "user=linuxuser,host=review.invalid,addr=2001:db8::10,laddr=127.0.0.1,lport=22": {
+      "permitrootlogin": [
+        "no"
+      ],
+      "passwordauthentication": [
+        "no"
+      ],
+      "kbdinteractiveauthentication": [
+        "no"
+      ],
+      "pubkeyauthentication": [
+        "yes"
+      ],
+      "authenticationmethods": [
+        "publickey"
+      ]
+    },
+    "user=linuxuser,host=review.invalid,addr=10.8.0.10,laddr=127.0.0.1,lport=22": {
+      "permitrootlogin": [
+        "no"
+      ],
+      "passwordauthentication": [
+        "no"
+      ],
+      "kbdinteractiveauthentication": [
+        "no"
+      ],
+      "pubkeyauthentication": [
+        "yes"
+      ],
+      "authenticationmethods": [
+        "publickey"
+      ]
+    },
+    "user=root,host=review.invalid,addr=192.0.2.10,laddr=127.0.0.1,lport=22": {
+      "permitrootlogin": [
+        "no"
+      ],
+      "passwordauthentication": [
+        "no"
+      ],
+      "kbdinteractiveauthentication": [
+        "no"
+      ],
+      "pubkeyauthentication": [
+        "yes"
+      ],
+      "authenticationmethods": [
+        "publickey"
+      ]
+    },
+    "user=root,host=review.invalid,addr=2001:db8::10,laddr=127.0.0.1,lport=22": {
+      "permitrootlogin": [
+        "no"
+      ],
+      "passwordauthentication": [
+        "no"
+      ],
+      "kbdinteractiveauthentication": [
+        "no"
+      ],
+      "pubkeyauthentication": [
+        "yes"
+      ],
+      "authenticationmethods": [
+        "publickey"
+      ]
+    },
+    "user=root,host=review.invalid,addr=10.8.0.10,laddr=127.0.0.1,lport=22": {
+      "permitrootlogin": [
+        "no"
+      ],
+      "passwordauthentication": [
+        "no"
+      ],
+      "kbdinteractiveauthentication": [
+        "no"
+      ],
+      "pubkeyauthentication": [
+        "yes"
+      ],
+      "authenticationmethods": [
+        "publickey"
+      ]
+    },
+    "user=lightning-goats,host=review.invalid,addr=192.0.2.10,laddr=127.0.0.1,lport=22": {
+      "permitrootlogin": [
+        "no"
+      ],
+      "passwordauthentication": [
+        "no"
+      ],
+      "kbdinteractiveauthentication": [
+        "no"
+      ],
+      "pubkeyauthentication": [
+        "yes"
+      ],
+      "authenticationmethods": [
+        "publickey"
+      ]
+    },
+    "user=lightning-goats,host=review.invalid,addr=2001:db8::10,laddr=127.0.0.1,lport=22": {
+      "permitrootlogin": [
+        "no"
+      ],
+      "passwordauthentication": [
+        "no"
+      ],
+      "kbdinteractiveauthentication": [
+        "no"
+      ],
+      "pubkeyauthentication": [
+        "yes"
+      ],
+      "authenticationmethods": [
+        "publickey"
+      ]
+    },
+    "user=lightning-goats,host=review.invalid,addr=10.8.0.10,laddr=127.0.0.1,lport=22": {
+      "permitrootlogin": [
+        "no"
+      ],
+      "passwordauthentication": [
+        "no"
+      ],
+      "kbdinteractiveauthentication": [
+        "no"
+      ],
+      "pubkeyauthentication": [
+        "yes"
+      ],
+      "authenticationmethods": [
+        "publickey"
+      ]
+    }
+  },
+  "service_reloaded": true,
+  "service_active": true,
+  "pre_change_sat_key_login": "operator confirmed after approved-key installation",
+  "console_recovery": "operator confirmed",
+  "post_change_fresh_login": "operator confirmed fresh public-key-only sat login after reload",
+  "live_authentication_negative_tests": "Separate loopback probes confirm only publickey offered; no valid-root-key test performed",
+  "production": "HOLD",
+  "application_helper_sha256": "940465d2a4ce4b503113b80c488d1c6cb1175e57afd7fe24190dc1fee05ab472",
+  "evidence_scope": "Actual Fedora SSH policy application; effective configuration and service state, with live method negotiation separately recorded",
+  "post_change_journal_corroboration": {
+    "observed_at_utc": "2026-09-11T14:11:24.919624+00:00",
+    "journal_timestamp_us": "1789135754820242",
+    "user": "sat",
+    "method": "publickey",
+    "fingerprint": "SHA256:XtmTHGF0GHiIOw1Ui9bBX4/DGCLkTfIAi5zIc0iLUGY",
+    "source_is_loopback": false,
+    "source_address_omitted": true,
+    "scope": "Bounded sshd service journal since reload; only matching success metadata retained"
+  }
+}

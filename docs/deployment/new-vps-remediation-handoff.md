@@ -386,3 +386,20 @@ using that installed key, keeping the session open. Existing password/root-key
 policy remains unchanged; no SSH reload was performed. The installation changes
 only `sat`'s new `.ssh` directory and authorized-key file. Production remains HOLD;
 this is host key-installation evidence, not live application or physical testing.
+
+### Reviewed staging SSH policy applied (2026-09-11)
+
+After the key-installation record at draft #46 commit
+`52242e7aafe59d3e027cfa0944d6a24402cd9404`, the operator confirmed a fresh
+public-key-only `sat` login using the installed key and retained session. With
+console recovery already confirmed, the exact reviewed early snippet was applied
+and SSH reloaded. See `ssh-hardening-review.md` for pinned application, backup and
+live method-negotiation evidence. This supersedes the unapplied-policy state above.
+
+Actual syntax and twelve account/address contexts pass; SSH remains active and
+the listener offers only public-key authentication on the tested loopback
+connections. Root prohibition is verified in policy, without a valid-root-key
+authentication test. Fresh external `sat` login after reload is operator-confirmed
+and corroborated by a matching accepted-publickey journal entry from a non-loopback
+source. Preserve the root-only rollback copy and console recovery. Final privileges,
+owner/site/network integration and production HOLD remain unchanged.

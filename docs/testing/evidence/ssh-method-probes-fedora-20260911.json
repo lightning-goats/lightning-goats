@@ -1,0 +1,35 @@
+{
+  "observed_at_utc": "2026-09-11T14:08:43.282314+00:00",
+  "scope": "Actual loopback SSH transport and unauthenticated method negotiation; no private key or password supplied",
+  "rows": [
+    {
+      "user": "sat",
+      "exit_code": 255,
+      "advertised_methods": [
+        "publickey"
+      ],
+      "host_key_verified": true
+    },
+    {
+      "user": "linuxuser",
+      "exit_code": 255,
+      "advertised_methods": [
+        "publickey"
+      ],
+      "host_key_verified": true
+    },
+    {
+      "user": "root",
+      "exit_code": 255,
+      "advertised_methods": [
+        "publickey"
+      ],
+      "host_key_verified": true
+    }
+  ],
+  "password_and_keyboard_interactive_not_offered": true,
+  "valid_root_key_denial_tested": false,
+  "remote_operator_reachability_tested": false,
+  "production": "HOLD",
+  "source_commit": "52242e7aafe59d3e027cfa0944d6a24402cd9404"
+}

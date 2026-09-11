@@ -1,17 +1,19 @@
-# Unapplied SSH hardening candidate
+# SSH hardening review and application
 
-Production remains **HOLD**. This prepares the #19/#15 SSH policy change for the
-observed Fedora VPS. It does not apply it or establish operator login/recovery,
-account/key cleanup, final privilege revocation or production acceptance.
+Production remains **HOLD**. The reviewed #19/#15 SSH policy was applied to the
+Fedora staging VPS on 2026-09-11 after operator-confirmed key login and console
+recovery. The application evidence below supersedes the earlier unapplied state.
+Account/key cleanup, final privilege revocation and production acceptance remain
+separate gates.
 
-## Concrete proposed change
+## Reviewed change
 
 Replace the reviewed `/etc/ssh/sshd_config.d/00-local-hardening.conf` with
 `deploy/ssh/00-local-hardening.conf.example`. Preserve the current empty-password,
 X11, authentication-attempt and login-grace restrictions. The effective changes
 observed in the private candidate configuration are:
 
-| Directive | Current | Candidate |
+| Directive | Reviewed baseline | Installed candidate |
 | --- | --- | --- |
 | `PermitRootLogin` | `prohibit-password` | `no` |
 | `PasswordAuthentication` | `yes` | `no` |
@@ -32,6 +34,11 @@ output alone is insufficient. See the primary
 [OpenSSH configuration manual](https://man.openbsd.org/sshd_config).
 
 ## Repeat the read-only candidate review
+
+This helper checks the original pre-application layout, including a negative
+control that expects the old permissive baseline. It is not a post-application
+health check: after application use actual `sshd -t`/`sshd -T` and the installed
+manifest below. Do not restore permissive settings merely to rerun this helper.
 
 From the reviewed repository source, using existing read/test privileges:
 
@@ -121,11 +128,11 @@ unchanged. No accounts, groups or SSH daemon policy were changed or reloaded.
 
 The effective `sat` configuration uses `.ssh/authorized_keys`, with public-key
 authentication and StrictModes enabled and no AuthorizedKeysCommand. These are
-configuration checks, not authentication evidence. Application of key-only policy
-still awaits a fresh operator login using this newly installed key, with password
-and keyboard-interactive fallback disabled and connection sharing bypassed. Keep
-that session and console recovery available for the policy change. The earlier
-login confirmation preceded installation and does not establish this test.
+configuration checks, not authentication evidence. After installation the operator
+confirmed a fresh login using this specific key, with password and
+keyboard-interactive fallback disabled and connection sharing bypassed. This
+post-installation confirmation satisfied the pre-change login dependency. The
+operator was instructed to keep that session and console recovery available.
 
 On the machine holding the matching private key, substitute its local path:
 
@@ -138,8 +145,7 @@ ssh -o ControlPath=none -o IdentitiesOnly=yes -o PreferredAuthentications=public
 The website Nostr identity is unrelated to SSH access. Final account/key cleanup
 and privilege reduction remain separate acceptance gates.
 
-Once the retained account's key and access checks are satisfied, perform the reviewed SSH-only
-change within the authorized staging scope:
+The reviewed SSH-only application/rollback procedure is:
 
 1. Rerun the candidate review and compare the complete source manifest. Inspect
    any drift, new include, `Match` condition or service option before proceeding.
@@ -160,3 +166,46 @@ Stale-key/account review and final Codex/deployment privilege reduction remain
 separate gates. The runtime account must stay locked/non-admin; final production
 secrets must wait for the required privilege review. This SSH candidate does not
 change DNS, WireGuard, household policy, payment or feeder authority.
+
+## Applied staging evidence, 2026-09-11
+
+The exact candidate was installed and `sshd.service` reloaded at 14:07 UTC.
+[Application evidence](../testing/evidence/ssh-policy-applied-fedora-20260911.json)
+pins the original, installed snippet and one-time application helper. Immediately
+before mutation, the original reviewer and all original configuration hashes
+matched the published review, and its syntax/context/negative checks passed again.
+The replacement was atomic, root-owned mode 0600, synchronized and restored to
+its default SELinux label. Unrelated SSH files and account keys were unchanged.
+
+Before and after reload, syntax and effective-policy checks passed for twelve
+contexts: `sat`, `linuxuser`, `root` and the non-login runtime account, each with
+synthetic IPv4/IPv6 and the known laptop address. The complete before/after
+configuration comparison permitted only the reviewed authentication changes.
+SSH remains active. The helper would restore the original snippet and validate/
+reload it on an application failure; rollback was not needed.
+
+The original is retained at
+`/etc/ssh/lg-remediation-backup-20260911/00-local-hardening.conf`, root-owned mode
+0600 in a root-only mode-0700 directory outside the active include glob. Its hash
+is the original snippet SHA256 above. The directory also holds an application
+record. Preserve these files; do not rerun the fresh-only application helper.
+
+[Live method-negotiation evidence](../testing/evidence/ssh-method-probes-fedora-20260911.json)
+records actual loopback connections to the reloaded listener for `sat`,
+`linuxuser` and `root`, with its Ed25519 host key pinned from the local public host
+key. Only `publickey` was offered and unauthenticated attempts were denied. No
+password or private key was supplied. This verifies that password and
+keyboard-interactive methods are not offered on those connections. It does not
+test a valid root key, prove remote reachability or establish successful login;
+root prohibition is verified by installed policy/context checks.
+
+The operator confirmed a fresh external public-key-only `sat` login after reload.
+A bounded SSH service journal read independently found an accepted public-key
+login for `sat` with the approved fingerprint from a non-loopback source after
+reload. Only matching success metadata is retained; source addresses are omitted.
+This corroborates the account/key login, while the operator supplies the client
+options and identity confirmation. Preserve console recovery and the backup.
+If fresh access later fails, use retained access to verify the current snippet still matches
+the installed hash, restore the exact original backup root-owned mode 0600,
+restore its default SELinux label, run `sshd -t`, and reload `sshd.service`.
+Inspect unexpected drift rather than overwriting it. No production gate is lifted.

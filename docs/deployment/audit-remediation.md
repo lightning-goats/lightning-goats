@@ -5,9 +5,12 @@ Operator decisions received on 2026-09-11 are recorded in
 validated; registrar/ZoneEdit ownership, hardware-key MFA, tested account recovery
 and Let's Encrypt-only intent are operator-confirmed; SSH login/recovery is
 operator-reported. The subsequently supplied approved `sat` SSH key is now
-installed and verified as recorded in `ssh-hardening-review.md`; a fresh login
-using that installed key remains pending before key-only policy. These resolve decision inputs,
-not F04/F09, website/browser, applied SSH or domain-control acceptance. No finding
+installed and verified as recorded in `ssh-hardening-review.md`. After the operator
+confirmed a fresh login with that key, the reviewed key-only/no-root policy was
+applied and SSH reloaded. Syntax, twelve contexts and live method negotiation
+passed; post-reload external login is operator-confirmed and corroborated by the
+matching public-key success in the service journal. These resolve decision inputs
+and part of SSH staging, not F04/F09, website/browser or domain-control acceptance. No finding
 or parent acceptance gate is closed by this documentation update.
 
 Decision: **HOLD production deployment.** Audit date: 2026-09-08. This correction

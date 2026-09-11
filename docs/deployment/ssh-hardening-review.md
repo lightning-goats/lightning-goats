@@ -100,13 +100,43 @@ checks, distinct from the earlier configuration-only evidence. The operator also
 required `sat` to retain SSH access and an approved public key to be provisioned
 first.
 
-A subsequent read-only host check still found no `/home/sat/.ssh/authorized_keys`
-or `.ssh` directory; `linuxuser` has a mode-0600 authorized-key file in a mode-0700
-`.ssh` directory. Do not infer a provisioned key for `sat` from the reported login.
-Application remains pending the approved SSH public key, its safe installation
-for `sat`, and a fresh key login using that installed key. The website Nostr key
-is unrelated and must never be installed as an SSH key. Keep a verified second
-administrative session and console recovery available for the change.
+The subsequent host check initially found no `/home/sat/.ssh/authorized_keys` or
+`.ssh` directory. The operator then supplied an Ed25519 public key explicitly for
+`sat`. It was installed on 2026-09-11 at 14:00 UTC, with fingerprint
+`SHA256:XtmTHGF0GHiIOw1Ui9bBX4/DGCLkTfIAi5zIc0iLUGY`.
+[Installation evidence](../testing/evidence/sat-key-installation-fedora-20260911.json)
+records the actual filesystem and syntax checks. Key comments and contents are
+omitted from the public record; no private key was requested or accessed.
+
+The installation validated the SSH Ed25519 wire format and SHA256 fingerprint,
+verified the existing account/home identity, and exclusively created the missing
+`.ssh` directory and key file. Directory-relative operations pinned the home and
+new directory; existing entries were refused rather than overwritten. The new
+directory is owned by `sat:sat` mode 0700 and `authorized_keys` mode 0600. File and
+directory writes were synchronized. Default SELinux labels were restored and
+verified as `ssh_home_t`; the account can read its key file. Installed bytes and
+the `ssh-keygen` fingerprint match the supplied key. `sshd -t` passed and hashes
+of the existing SSH configuration snippets and root/linuxuser key files were
+unchanged. No accounts, groups or SSH daemon policy were changed or reloaded.
+
+The effective `sat` configuration uses `.ssh/authorized_keys`, with public-key
+authentication and StrictModes enabled and no AuthorizedKeysCommand. These are
+configuration checks, not authentication evidence. Application of key-only policy
+still awaits a fresh operator login using this newly installed key, with password
+and keyboard-interactive fallback disabled and connection sharing bypassed. Keep
+that session and console recovery available for the policy change. The earlier
+login confirmation preceded installation and does not establish this test.
+
+On the machine holding the matching private key, substitute its local path:
+
+```sh
+ssh -o ControlPath=none -o IdentitiesOnly=yes -o PreferredAuthentications=publickey \
+  -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no \
+  -i /path/to/matching_private_key sat@64.177.40.118
+```
+
+The website Nostr identity is unrelated to SSH access. Final account/key cleanup
+and privilege reduction remain separate acceptance gates.
 
 Once the retained account's key and access checks are satisfied, perform the reviewed SSH-only
 change within the authorized staging scope:

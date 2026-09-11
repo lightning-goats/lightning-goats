@@ -371,3 +371,18 @@ These updates supersede the unanswered identity/access questions above only to
 the stated extent. They do not approve production DNS changes, establish actual
 owner/network/site integration or alter payment/feeder authority. Keep the stack
 draft, production HOLD and #6/#15/#16/#19 acceptance gates open.
+
+### Retained administrator key installation (2026-09-11)
+
+This continuation starts from final draft #45 head
+`c92e6c82d31dbedeea0f6e5be82bcf0a0138a9e6`, still open/unmerged with all
+three required workflows passed. The operator supplied the approved Ed25519 key
+for `sat`; safe installation and readback succeeded. See
+`ssh-hardening-review.md` and its source-pinned Fedora installation evidence.
+This supersedes the pending public-key selection/provisioning dependency above.
+
+The remaining SSH application dependency is a fresh public-key-only operator login
+using that installed key, keeping the session open. Existing password/root-key
+policy remains unchanged; no SSH reload was performed. The installation changes
+only `sat`'s new `.ssh` directory and authorized-key file. Production remains HOLD;
+this is host key-installation evidence, not live application or physical testing.

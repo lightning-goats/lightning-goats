@@ -1,0 +1,35 @@
+{
+  "observed_at_utc": "2026-09-11T14:00:25.300437+00:00",
+  "account": "sat",
+  "fingerprint": "SHA256:XtmTHGF0GHiIOw1Ui9bBX4/DGCLkTfIAi5zIc0iLUGY",
+  "installed": true,
+  "key_file_sha256": "2dea0ca2279a15442d0c0a0f7f08a5b11b5fa33bf3250fb73d4213c54cc4ec3e",
+  "metadata": {
+    "/home/sat/.ssh": {
+      "uid": 1001,
+      "gid": 1001,
+      "mode": "0o700",
+      "selinux_context": "unconfined_u:object_r:ssh_home_t:s0"
+    },
+    "/home/sat/.ssh/authorized_keys": {
+      "uid": 1001,
+      "gid": 1001,
+      "mode": "0o600",
+      "selinux_context": "unconfined_u:object_r:ssh_home_t:s0"
+    }
+  },
+  "unrelated_policy_and_keys_unchanged": true,
+  "sshd_syntax": "passed",
+  "sshd_reloaded": false,
+  "fresh_login_using_installed_key": "pending operator test",
+  "production": "HOLD",
+  "source_commit": "c92e6c82d31dbedeea0f6e5be82bcf0a0138a9e6",
+  "one_time_installer_sha256": "1c3c4b31a3dab998ab299ee193c0349ca7b61c00dca99bd5e1aacfa251a92ed4",
+  "sat_can_read_key_file": true,
+  "evidence_scope": "Actual Fedora public-key installation; no successful SSH authentication claimed",
+  "policy_source": "Existing sshd -T context for sat; not running-listener memory",
+  "effective_authorized_keys_file": ".ssh/authorized_keys",
+  "effective_authorized_keys_command": "none",
+  "effective_pubkeyauthentication": "yes",
+  "effective_strictmodes": "yes"
+}

@@ -4,8 +4,9 @@ Operator decisions received on 2026-09-11 are recorded in
 `new-vps-remediation-handoff.md`: website contact public identity is approved and
 validated; registrar/ZoneEdit ownership, hardware-key MFA, tested account recovery
 and Let's Encrypt-only intent are operator-confirmed; SSH login/recovery is
-operator-reported, with an approved key for the
-retained `sat` account still pending provisioning. These resolve decision inputs,
+operator-reported. The subsequently supplied approved `sat` SSH key is now
+installed and verified as recorded in `ssh-hardening-review.md`; a fresh login
+using that installed key remains pending before key-only policy. These resolve decision inputs,
 not F04/F09, website/browser, applied SSH or domain-control acceptance. No finding
 or parent acceptance gate is closed by this documentation update.
 

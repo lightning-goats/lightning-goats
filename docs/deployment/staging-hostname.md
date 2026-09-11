@@ -64,3 +64,7 @@ step after review. Preserve apex, www, mail, production services and the old VPS
 Do not overwrite the installed inactive runtime release's provenance. Final
 account/secret review, F09 home-enforced containment, provider acceptance and
 physical-owner finality remain open. Production remains HOLD.
+
+## Activation follow-up
+
+The operator-approved static stage is now active. See [activation evidence](static-staging-activation.md) for exact source, host changes, TLS checks and remaining gates. Earlier unactivated language above records the proposal state. Production remains HOLD.

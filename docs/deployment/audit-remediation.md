@@ -4,6 +4,14 @@ Decision: **HOLD production deployment.** Audit date: 2026-09-08. This correctio
 was prepared on 2026-09-10 for deployment/packaging/operations. Earlier completion
 evidence is retained; it is not production acceptance.
 
+Integrated-review follow-up: `../testing/sqlite-durability-review.md` records an
+inherited daemon startup defect affecting the durable-state assumptions behind
+F02/F03/F05. Volatile SQLite aliases were accepted despite the file-backed
+requirement. The follow-up shares strict filesystem URL validation and actual
+WAL/FULL checks across both stores, with failing-before regression evidence.
+Do not treat earlier green checks as coverage for that defect, or close parent
+acceptance gates before review/checks on the corrected integration head.
+
 ## Recovery and source identity
 
 The supplied `lightning-goats-remediation-recovery.zip` contained only

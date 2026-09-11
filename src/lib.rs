@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod bolt11;
+mod sqlite;
 
 pub mod config;
 pub mod domain;

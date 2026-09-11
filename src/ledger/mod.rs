@@ -1,14 +1,10 @@
 mod admission;
 mod inbox;
 pub use inbox::StrikeInboxWork;
-use std::{str::FromStr, time::Duration};
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
-use sqlx::{
-    Row, SqlitePool,
-    sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
-};
+use sqlx::{Row, SqlitePool};
 
 use crate::domain::payment::SettledPayment;
 
@@ -43,17 +39,7 @@ pub enum SettlementOutcome {
 
 impl LedgerStore {
     pub async fn connect(database_url: &str) -> Result<Self> {
-        let options = SqliteConnectOptions::from_str(database_url)
-            .with_context(|| format!("invalid SQLite URL: {database_url}"))?
-            .create_if_missing(true)
-            .journal_mode(SqliteJournalMode::Wal)
-            .synchronous(SqliteSynchronous::Full)
-            .foreign_keys(true)
-            .busy_timeout(Duration::from_secs(5));
-
-        let pool = SqlitePoolOptions::new()
-            .max_connections(5)
-            .connect_with(options)
+        let pool = crate::sqlite::connect_durable(database_url, 5)
             .await
             .context("failed opening Lightning Goats SQLite database")?;
 

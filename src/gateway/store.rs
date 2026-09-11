@@ -1,11 +1,8 @@
-use std::{str::FromStr, time::Duration};
+use std::time::Duration;
 
 use super::client::{FeedRefusal, RefusalReason};
 use anyhow::{Context, Result, bail};
-use sqlx::{
-    Row, SqlitePool,
-    sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
-};
+use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -30,19 +27,7 @@ pub enum StoredRequestStatus {
 
 impl GatewayStore {
     pub async fn connect(database_url: &str) -> Result<Self> {
-        if !database_url.starts_with("sqlite://") || database_url == "sqlite::memory:" {
-            bail!("gateway database must use a file-backed sqlite:// URL");
-        }
-        let options = SqliteConnectOptions::from_str(database_url)
-            .context("invalid integration gateway SQLite URL")?
-            .create_if_missing(true)
-            .journal_mode(SqliteJournalMode::Wal)
-            .synchronous(SqliteSynchronous::Full)
-            .foreign_keys(true)
-            .busy_timeout(Duration::from_secs(5));
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect_with(options)
+        let pool = crate::sqlite::connect_durable(database_url, 1)
             .await
             .context("failed opening integration gateway SQLite database")?;
         sqlx::query(
@@ -58,15 +43,6 @@ impl GatewayStore {
         .execute(&pool)
         .await
         .context("failed creating gateway feeder request table")?;
-        // SQLite accepts memory URI aliases. Verify the actual opened database,
-        // not just the URL prefix, before admitting any physical request.
-        let databases = sqlx::query("PRAGMA database_list").fetch_all(&pool).await?;
-        let durable = databases.iter().any(|row| {
-            row.get::<String, _>("name") == "main" && !row.get::<String, _>("file").is_empty()
-        });
-        if !durable {
-            bail!("gateway database must be durable and file-backed");
-        }
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS feeder_request_events (seq INTEGER PRIMARY KEY AUTOINCREMENT, request_id TEXT NOT NULL REFERENCES feeder_requests(request_id), event TEXT NOT NULL, created_at INTEGER NOT NULL DEFAULT (unixepoch()))",
         ).execute(&pool).await?;
@@ -295,6 +271,8 @@ mod tests {
             "sqlite://:memory:",
             "sqlite://test?mode=memory",
             "sqlite://%3Amemory%3A",
+            "sqlite:///volatile?vfs=memdb",
+            "sqlite://file:/volatile%3Fvfs=memdb",
         ] {
             assert!(GatewayStore::connect(url).await.is_err(), "{url}");
         }

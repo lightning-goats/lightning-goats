@@ -108,9 +108,8 @@ impl GatewayServerConfig {
                 "gateway service.listen must use a private/loopback address, never a public/unspecified address"
             );
         }
-        if !self.database.url.starts_with("sqlite://") || self.database.url == "sqlite::memory:" {
-            bail!("gateway database.url must be a file-backed sqlite:// URL");
-        }
+        crate::sqlite::durable_options(&self.database.url)
+            .context("invalid gateway database.url")?;
         if self.weather.max_stale_seconds == 0 || self.weather.max_stale_seconds > 86_400 {
             bail!("gateway weather.max_stale_seconds must be between 1 and 86400");
         }

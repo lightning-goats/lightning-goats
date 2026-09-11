@@ -35,6 +35,14 @@ Record:
 - SHA-256 of deployed binaries;
 - config/template revision.
 
+Durable storage startup is also mandatory: both config and direct-store entry
+points must reject volatile SQLite aliases, nested native URIs, custom VFS and
+read-only/immutable modes before migrations or admission. All pool connections
+must report a real main file, WAL, FULL synchronization and enabled foreign keys.
+Preserve normal filesystem paths and prove payment deduplication, credit, events
+and overlay identity survive another process/reopen. See
+`sqlite-durability-review.md` for the inherited defect and regression criteria.
+
 ## 2. Lightning Address registry
 
 Required configured users:

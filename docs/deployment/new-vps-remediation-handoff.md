@@ -258,3 +258,19 @@ Fedora record is `../testing/evidence/systemd-rehearsal-fedora-20260910.json`.
 Read final #40 check results before accepting the follow-up; retain the earlier
 CI/source evidence. Full local locked Rust and deployment tests passed, while
 the dependency audit runs in GitHub because cargo-audit is not installed locally.
+
+## Integrated review: durable SQLite startup
+
+The review of #31–#40 found an inherited daemon durability defect: a `sqlite://`
+prefix can still select a volatile database. The correction starts from final
+#40 head `dc5a88c3371d62d2795b067df42bc005fe0de334`, whose Rust, Security and
+Deployment workflows passed. Read `../testing/sqlite-durability-review.md` and
+its preserved failing regressions before accepting the follow-up. Both stores
+now share filesystem URL validation and effective WAL/FULL checks before schema
+changes and on every pool connection. The gateway already rejected the tested
+memory VFS cases at runtime; do not report those as a demonstrated bypass.
+
+Review and recheck this correction before merging the stack. Keep the F02/F05
+durable-state acceptance conditions and parent gates open until verified on the
+final integration head. Actual owner/source access, effective network containment,
+website/browser and final privilege/credential decisions remain outstanding.

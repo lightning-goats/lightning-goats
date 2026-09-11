@@ -43,9 +43,7 @@ impl AppConfig {
         if !self.service.listen.ip().is_loopback() {
             bail!("service.listen must use a loopback address; nginx is the public boundary");
         }
-        if !self.database.url.starts_with("sqlite://") || self.database.url == "sqlite::memory:" {
-            bail!("database.url must be a file-backed sqlite:// URL");
-        }
+        crate::sqlite::durable_options(&self.database.url).context("invalid database.url")?;
 
         let strike_url = Url::parse(&self.strike.api_url).context("invalid strike.api_url")?;
         if strike_url.scheme() != "https" || strike_url.host_str().is_none() {

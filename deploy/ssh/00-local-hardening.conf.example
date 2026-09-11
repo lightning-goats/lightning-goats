@@ -1,0 +1,11 @@
+# Review candidate only. Apply after verified operator key login and console recovery.
+# Replace the reviewed early local snippet; a late include may not override policy.
+PermitRootLogin no
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+AuthenticationMethods publickey
+PermitEmptyPasswords no
+X11Forwarding no
+MaxAuthTries 4
+LoginGraceTime 60

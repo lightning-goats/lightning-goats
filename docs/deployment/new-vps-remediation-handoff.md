@@ -328,3 +328,19 @@ locks are present, but account MFA/recovery and provider eligibility remain
 unverified. Preserve mail/TXT, the old certificate dependencies and all production
 gates. Owner/site access, staging registration/hostname and final SSH/credential/
 privilege decisions remain pending; keep #6/#15/#16/#19 open.
+
+### Unapplied SSH hardening review (2026-09-11)
+
+The SSH continuation starts from final #43 head
+`109ddbed760f703992a1d3eef9ec3cbc22a4601a`, whose Rust/Security/Deployment
+checks passed. Read `ssh-hardening-review.md` and its Fedora evidence before any
+SSH change. The candidate early snippet passed actual syntax/effective-policy
+checks, nine contexts and ordering/Match negative controls in private temporary
+copies. The on-disk policy still permits passwords and root keys; nothing was
+installed or reloaded. Public-key operator login and provider-console recovery
+remain unverified and must be confirmed before the application step.
+
+The read-only helper refuses unreviewed include graphs, Match blocks and service
+options. Preserve the pinned original files and review drift; do not use the
+candidate as an unconditional host bootstrap. Final account/key cleanup, privilege
+revocation, owner/site access, staging registration and all live gates remain open.

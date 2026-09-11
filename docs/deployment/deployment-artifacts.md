@@ -19,9 +19,10 @@ retain checks for the exact resulting `main` commit and tag that commit.
 Standalone downloads include all three binaries (`lightning-goatsd`,
 `lightning-goatsctl`, `lightning-goats-gateway`), `BUILD-INFO.txt` with full source
 commit/target/Rust/Cargo versions, and `SHA256SUMS` covering those files and the
-archive. The archive also includes `deploy/`, `docs/`, `AGENTS.md`, `Cargo.lock`
+archive. The archive also includes `deploy/`, `docs/`, `web/`, `AGENTS.md`, `Cargo.lock`
 and an internal checksum manifest covering every payload file. It contains
-examples, not production secrets or the still-unmigrated website. Install the
+examples and the imported static website with payments disabled; it contains no
+production secrets. Install the
 daemon/CLI on the VPS; install the gateway only on the trusted host.
 
 From a clean reviewed checkout, build and assemble without installing services:

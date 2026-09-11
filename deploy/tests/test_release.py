@@ -57,6 +57,12 @@ class ReleaseArchiveTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Checksum mismatch"):
             SMOKE.verify_and_smoke(self.archive, SOURCE)
 
+    def test_missing_website_fails_even_with_matching_manifest(self):
+        del self.files["web/site-config.js"]
+        self.write_archive()
+        with self.assertRaisesRegex(ValueError, "missing required"):
+            SMOKE.verify_and_smoke(self.archive, SOURCE)
+
     def test_unlisted_payload_fails(self):
         self.write_archive(lambda: self.files.update({"extra": b"unlisted"}))
         with self.assertRaisesRegex(ValueError, "exactly the payload"):

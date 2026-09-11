@@ -422,3 +422,23 @@ IPv6 reservation is not separately confirmed. No tunnel is active; do not send
 home-host traffic over the current public default route or infer containment
 from the address reservation. The hostname and account/address decisions
 supersede earlier unanswered entries only to this extent.
+
+## Website source import follow-up — 2026-09-11
+
+The authorized old-VPS inspection now supplies the actual website source and its
+two referenced public PNGs. The candidate `web/` tree preserves the video and
+independent chat, removes retired controls, supplies the approved Nostr contact,
+and gates native same-origin invoices off by default. Release packaging now
+requires the website. See `website-import-evidence.md` for exact provenance and
+verification limits. This supersedes the source-access blocker for #26 only.
+
+Pinned read-only SSH access succeeds to both hosts. Home RSA fingerprint
+`SHA256:sgPPLGHwCyEk5Zuebx2s2F/1IvvQmFd750+AVEM9NL8` and old-VPS Ed25519 fingerprint
+`SHA256:NS0Kp+nD0Os7jYIMgeLthXbX4x5LNun+4A8GGQrGeIw` were independently confirmed by
+the operator. The inspected home `sat` account cannot read the OpenHAB JSONDB;
+noninteractive sudo needs a password and anonymous rule GET returns 401. The
+requested owner-only export `/home/sat/lg-owner-review-88bd9ec4de.json` was absent
+at the last read-only check. F04 remains blocked on that export/contract evidence;
+no owner mutation, command or physical actuation was performed.
+
+Production remains HOLD. Keep #6/#15/#16/#19/#26 acceptance gates open.

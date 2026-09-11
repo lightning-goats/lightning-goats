@@ -23,7 +23,7 @@ for binary in lightning-goatsd lightning-goatsctl lightning-goats-gateway; do
     install -m 0755 "$BIN_DIR/$binary" "$STAGE/$binary"
     install -m 0755 "$BIN_DIR/$binary" "$OUTPUT/$binary"
 done
-cp -R "$REPO/deploy" "$REPO/docs" "$STAGE/"
+cp -R "$REPO/deploy" "$REPO/docs" "$REPO/web" "$STAGE/"
 cp "$REPO/AGENTS.md" "$REPO/Cargo.lock" "$STAGE/"
 {
     printf 'source_commit=%s\nversion=%s\ntarget=x86_64-unknown-linux-gnu\n' "$SOURCE" "$VERSION"

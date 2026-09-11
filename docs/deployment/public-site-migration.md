@@ -49,9 +49,10 @@ client opens a DM composer; verify the contact flow in the actual browser/client
 This key is approved for website contact only and does not select or authorize
 the daemon's NIP-46 signer.
 
-Authoritative website source and assets still require authorized access. The
-identity decision is complete, but the link has not been installed or browser
-tested. Preserve the source-import and staging acceptance gates below.
+The authoritative page and its two referenced public PNGs were imported on
+2026-09-11. The contact link is implemented in `web/index.html`; offline browser
+checks verify the approved key. See `website-import-evidence.md` for source hashes,
+mocked checks and the remaining live staging gates.
 
 ### CyberHerd leaderboard
 

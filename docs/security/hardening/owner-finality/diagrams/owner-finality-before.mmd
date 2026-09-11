@@ -1,0 +1,8 @@
+flowchart LR
+  V[VPS gateway client] --> G[Durable gateway reservation]
+  G --> O[OpenHAB owner]
+  O --> L[Mutable JDBC ledger snapshots]
+  O --> A[Physical actuator]
+  O --> R[Result Item]
+  L -. complete can become failed .-> O
+  R -. publication exception .-> O

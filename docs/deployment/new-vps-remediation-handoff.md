@@ -290,7 +290,8 @@ kernel `7.2.4-200.fc44.x86_64` is running and DNF reports no reboot required.
 No reboot was performed in this continuation. Recheck before final installation;
 final identities, privilege revocation, SSH and credential gates remain open.
 The existing owner/site access and staging identity/hostname dependencies remain;
-website contact additionally needs the operator-approved public Nostr key.
+website contact at that point additionally needed the operator-approved public
+Nostr key (supplied in the operator decisions update below).
 Production remains HOLD and all parent acceptance gates stay open.
 
 ### Persistent inactive staging installation (2026-09-11)
@@ -344,3 +345,27 @@ The read-only helper refuses unreviewed include graphs, Match blocks and service
 options. Preserve the pinned original files and review drift; do not use the
 candidate as an unconditional host bootstrap. Final account/key cleanup, privilege
 revocation, owner/site access, staging registration and all live gates remain open.
+
+### Operator decisions received (2026-09-11)
+
+This continuation starts from final draft #44 head
+`954fc3e1facfea2921e495bedaf6f46af40237d8`, still open and unmerged, with
+Rust/Security/Deployment checks passed. No application code or host policy changes
+are included in this decision record.
+
+- Website contact: the operator supplied the public Nostr key now recorded and
+  locally validated in `public-site-migration.md`. Identity selection is complete;
+  authoritative source import and actual browser contact testing remain open.
+- Domain: the operator controls the registrar and ZoneEdit accounts and approved
+  Let's Encrypt only. `domain-readiness.md` contains the unapplied CAA proposal.
+  Hardware-key MFA, tested account recovery and full-zone review remain pending.
+- SSH: the operator reports fresh key logins for `sat` and `linuxuser` and working
+  provider-console recovery. Retain `sat` and provision its approved public key
+  first. The host recheck still found no authorized-key file for that account;
+  key selection/provisioning and a fresh login with the installed key are pending.
+  See `ssh-hardening-review.md`; no SSH configuration was installed or reloaded.
+
+These updates supersede the unanswered identity/access questions above only to
+the stated extent. They do not approve production DNS changes, establish actual
+owner/network/site integration or alter payment/feeder authority. Keep the stack
+draft, production HOLD and #6/#15/#16/#19 acceptance gates open.

@@ -54,21 +54,45 @@ distinguished from a timeout, refusal or non-authoritative response.
 
 ## Operator-dependent controls
 
-- Identify the registrar and ZoneEdit account owners, authorized administrators,
-  hardware-key MFA support/configuration and tested recovery method. Never put
+- The operator confirmed control of both registrar and ZoneEdit accounts on
+  2026-09-11. Authorized additional administrators, hardware-key MFA configuration
+  and tested account recovery remain unconfirmed. Never put
   passwords, recovery codes, API tokens or private keys in this repository.
 - Obtain a complete authorized zone inventory and classify records by service.
   Preserve mail/TXT and any unrelated active services. Identify stale records
   before proposing removals; public apex queries cannot establish that they exist.
-- Confirm the intended CA set across the apex and all relevant subdomains.
-  The observed current certificate uses Let's Encrypt; that alone does not prove
-  it is the only CA required. A CAA proposal must follow the confirmed inventory.
+- The operator approved Let's Encrypt as the sole CA on 2026-09-11. Reconcile
+  that decision with the complete zone inventory before applying CAA policy.
 - Confirm DNSSEC eligibility and the exact provider/registrar procedure before
   preparing an activation plan. ZoneEdit's published procedure requires the
   domain to be registered through its service and changes authoritative servers
   during enable/disable. Do not treat this as a local record-only operation.
 - If a control is unsupported, record the provider evidence and operator rationale
   for `N/A`; missing access or an unanswered decision is not `N/A` or acceptance.
+
+### Unapplied CAA proposal
+
+Proposed apex record, using the observed 3600-second TTL:
+
+```dns
+lightning-goats.com. 3600 IN CAA 0 issue "letsencrypt.org"
+```
+
+This selects the operator-approved CA. Without a separate `issuewild` policy,
+`issue` also governs wildcard issuance. This proposal adds no account or ACME
+validation-method restriction. According to
+[Let's Encrypt's CAA documentation](https://letsencrypt.org/docs/caa/), records
+are additive, closer subdomain records override inherited policy, and lookup
+follows CNAMEs. A new apex record alone cannot prove a domain-wide restriction.
+
+Before an explicitly directed DNS change, export the complete zone and review
+existing CAA RRsets, subdomain overrides, aliases and delegated names. Do not
+append the proposal alongside another CA authorization and call it exclusive;
+prepare any required replacements separately. Keep `www` as its existing CNAME,
+without adding a conflicting CAA record at that name. Preserve unrelated records
+and save the original RRsets for rollback. After any authorized change, query
+every authoritative server and relevant name and check existing renewal paths.
+No CAA record has been applied and no certificate has been requested here.
 
 Provider references checked on 2026-09-11:
 [ZoneEdit CAA management](https://support.zoneedit.com/en/knowledgebase/article/managing-caa-records),

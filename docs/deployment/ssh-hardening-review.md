@@ -94,12 +94,21 @@ evidence; ordinary CI unit tests do not prove operator access.
 
 ## Application and rollback gate
 
-Application awaits operator confirmation of a **fresh key-authenticated login to
-the intended non-root administrative account** and working provider-console
-recovery. An existing session or Codex access does not establish either fact.
-Record the intended account and a second verified session before changing policy.
+On 2026-09-11 the operator confirmed fresh key-authenticated logins for `sat` and
+`linuxuser`, and working provider-console recovery. These are operator-reported
+checks, distinct from the earlier configuration-only evidence. The operator also
+required `sat` to retain SSH access and an approved public key to be provisioned
+first.
 
-Once those access/recovery checks are confirmed, perform the reviewed SSH-only
+A subsequent read-only host check still found no `/home/sat/.ssh/authorized_keys`
+or `.ssh` directory; `linuxuser` has a mode-0600 authorized-key file in a mode-0700
+`.ssh` directory. Do not infer a provisioned key for `sat` from the reported login.
+Application remains pending the approved SSH public key, its safe installation
+for `sat`, and a fresh key login using that installed key. The website Nostr key
+is unrelated and must never be installed as an SSH key. Keep a verified second
+administrative session and console recovery available for the change.
+
+Once the retained account's key and access checks are satisfied, perform the reviewed SSH-only
 change within the authorized staging scope:
 
 1. Rerun the candidate review and compare the complete source manifest. Inspect

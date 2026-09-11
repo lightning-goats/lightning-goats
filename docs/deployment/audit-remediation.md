@@ -1,5 +1,13 @@
 # Phase 1 audit remediation record
 
+Operator decisions received on 2026-09-11 are recorded in
+`new-vps-remediation-handoff.md`: website contact public identity is approved and
+validated; registrar/ZoneEdit ownership and Let's Encrypt-only intent are
+confirmed; SSH login/recovery is operator-reported, with an approved key for the
+retained `sat` account still pending provisioning. These resolve decision inputs,
+not F04/F09, website/browser, applied SSH or domain-control acceptance. No finding
+or parent acceptance gate is closed by this documentation update.
+
 Decision: **HOLD production deployment.** Audit date: 2026-09-08. This correction
 was prepared on 2026-09-10 for deployment/packaging/operations. Earlier completion
 evidence is retained; it is not production acceptance.

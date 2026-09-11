@@ -33,7 +33,25 @@ This does **not** affect Lightning Addresses. `herd`, `dexter`, `rowan`, `cosmo`
 
 Prefer a Nostr-native contact method rather than exposing an email address in the public page. The Phase 1 implementation should use one configured project/operator Nostr public key and provide a clear `Contact via Nostr DM` action/reference. Do not embed or request an nsec.
 
-The exact public key must be operator-confirmed before production publication. Do not guess it from unrelated configuration.
+The operator approved this contact identity on 2026-09-11:
+
+- Public key: `npub1v60thnx0gz0wq3n6xdnq46y069l9x70xgmjp6lprdl6fv0eux6mqgjj4rp`
+- Hexadecimal: `669ebbcccf409ee0467a33660ae88fd17e5379e646e41d7c236ff4963f3c36b6`
+- Contact URI: `nostr:npub1v60thnx0gz0wq3n6xdnq46y069l9x70xgmjp6lprdl6fv0eux6mqgjj4rp`
+
+Local validation passed the Bech32 checksum, `npub` prefix, canonical padding,
+32-byte decoded length and valid secp256k1 x-coordinate. This establishes encoding
+validity; operator approval supplies the intended contact identity.
+
+Use the [NIP-21 URI](https://github.com/nostr-protocol/nips/blob/master/21.md)
+with a copyable public-key fallback. A profile URI does not guarantee that every
+client opens a DM composer; verify the contact flow in the actual browser/client.
+This key is approved for website contact only and does not select or authorize
+the daemon's NIP-46 signer.
+
+Authoritative website source and assets still require authorized access. The
+identity decision is complete, but the link has not been installed or browser
+tested. Preserve the source-import and staging acceptance gates below.
 
 ### CyberHerd leaderboard
 

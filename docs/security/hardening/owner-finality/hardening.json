@@ -1,0 +1,337 @@
+{
+  "documentType": "codex-security.hardening-analysis",
+  "schemaVersion": "1.0",
+  "analysisId": "owner-finality-20260911",
+  "sourceEvidence": {
+    "kind": "document_collection",
+    "label": "Operator-exported owner and repository JDBC contract evidence",
+    "collectionSha256": "e0f3307f2e737c3d4774f713fb2cba26c81281603d64071c473c23188d42ae6e",
+    "artifactCount": 3,
+    "sourceDrift": "none",
+    "targetRevision": "d04fcffee9f3f6db4ba9ee21dbd59ecc8546833d",
+    "artifacts": [
+      {
+        "id": "owner-source",
+        "sha256": "730053e0f3245cb83461e3fe6e3b05d49c8b508631e8cdb4a889c8be8d915978"
+      },
+      {
+        "id": "jdbc-evidence",
+        "sha256": "62dba35341899521f8d22c76342fb1a824c42a68629d51ac259f8079c9b70b03"
+      },
+      {
+        "id": "gateway-contract",
+        "sha256": "932ef02e3cdcba1543d97f8d9d5e98c8d260a633d1de879686cb2cba09dad84d"
+      }
+    ]
+  },
+  "assessment": {
+    "outcome": "opportunities_identified",
+    "summary": "Separate durable owner outcome from result delivery and move admission reads under exclusive ownership; proposal only."
+  },
+  "constraints": {
+    "profile": "balanced",
+    "changeHorizons": [
+      "incremental"
+    ],
+    "nonNegotiables": [
+      "Production HOLD",
+      "Existing owner remains physical authority",
+      "No live owner mutation",
+      "Permanent gateway reservations and no resend"
+    ],
+    "assumptions": [
+      "No measured performance or memory budget supplied",
+      "Actual Java lock and JDBC semantics need validation"
+    ]
+  },
+  "opportunities": [
+    {
+      "opportunityId": "owner-finality",
+      "title": "Irreversible owner receipts",
+      "summary": "Make outcome finality independent of delivery",
+      "diagnosis": "One mutable ledger encodes both actuation outcome and notification/persistence health; admission reads precede ownership.",
+      "evidence": [
+        {
+          "claimType": "observed",
+          "sourceKind": "source",
+          "evidenceId": "owner-source",
+          "path": "OpenHAB rule 88bd9ec4de (export SHA in context)",
+          "claim": "Ledger read precedes busy acquisition and complete can be followed by failed correction."
+        },
+        {
+          "claimType": "inferred",
+          "sourceKind": "document",
+          "evidenceId": "jdbc-evidence",
+          "path": "docs/security/openhab-jdbc-recovery-evidence.md",
+          "claim": "Repeated snapshots do not establish terminal finality."
+        }
+      ],
+      "desiredInvariants": [
+        "Admission state read only under exclusive ownership",
+        "Durable acceptance precedes ON",
+        "Complete receipt is irreversible",
+        "Delivery failure never changes outcome",
+        "Missing/conflicting history retains unresolved hold"
+      ],
+      "proposalPath": "proposals/owner-finality.md",
+      "options": [
+        {
+          "optionId": "hold",
+          "title": "Retain unresolved hold with manual review",
+          "kind": "baseline",
+          "summary": "Retain unresolved hold with manual review",
+          "diagramPaths": {
+            "before": "diagrams/owner-finality-before.mmd",
+            "after": "diagrams/owner-finality-hold-after.mmd"
+          },
+          "evidenceCoverage": [
+            {
+              "evidenceId": "owner-source",
+              "effect": "mitigates",
+              "tacticalFixRequired": true,
+              "rationale": "Keep permanent unresolved gateway reservations and no resend throughout migration; old v1 ambiguity remains."
+            },
+            {
+              "evidenceId": "jdbc-evidence",
+              "effect": "mitigates",
+              "tacticalFixRequired": true,
+              "rationale": "Keep permanent unresolved gateway reservations and no resend throughout migration; old v1 ambiguity remains."
+            },
+            {
+              "evidenceId": "gateway-contract",
+              "effect": "mitigates",
+              "tacticalFixRequired": true,
+              "rationale": "Keep permanent unresolved gateway reservations and no resend throughout migration; old v1 ambiguity remains."
+            }
+          ],
+          "tradeoffs": [
+            {
+              "dimension": "security",
+              "direction": "neutral",
+              "confidence": "high",
+              "basis": "source-derived",
+              "assessment": "Source defect remains; history cannot release reservations.",
+              "validationPlan": "Confirm inspector never returns authority and gateway never resends."
+            },
+            {
+              "dimension": "performance",
+              "direction": "neutral",
+              "confidence": "medium",
+              "basis": "hypothetical",
+              "assessment": "No new fast-path work; unresolved capacity can remain blocked.",
+              "validationPlan": "Measure blocked duration under lost notification."
+            },
+            {
+              "dimension": "memory",
+              "direction": "neutral",
+              "confidence": "high",
+              "basis": "source-derived",
+              "assessment": "Existing bounded ledger and permanent gateway rows retained.",
+              "validationPlan": "Exercise max-sized ledger and retention tests."
+            },
+            {
+              "dimension": "reliability",
+              "direction": "neutral",
+              "confidence": "medium",
+              "basis": "source-derived",
+              "assessment": "Safe hold costs availability after result loss.",
+              "validationPlan": "Rehearse audited manual adjudication without speculative release."
+            },
+            {
+              "dimension": "operability",
+              "direction": "regresses",
+              "confidence": "medium",
+              "basis": "hypothetical",
+              "assessment": "Lost outcomes require operator evidence review.",
+              "validationPlan": "Measure operator review effort in harmless rehearsal."
+            },
+            {
+              "dimension": "migration",
+              "direction": "neutral",
+              "confidence": "high",
+              "basis": "source-derived",
+              "assessment": "No wire or live owner change.",
+              "validationPlan": "Run existing typed adapter fixtures."
+            },
+            {
+              "dimension": "developer_ergonomics",
+              "direction": "unknown",
+              "confidence": "medium",
+              "basis": "source-derived",
+              "assessment": "Manual policy risks future drift.",
+              "validationPlan": "Review reconciliation authority before implementing it."
+            },
+            {
+              "dimension": "reversibility",
+              "direction": "neutral",
+              "confidence": "high",
+              "basis": "source-derived",
+              "assessment": "Existing safety posture retained.",
+              "validationPlan": "Disable future readers without deleting reservation rows."
+            }
+          ],
+          "residualRisks": [
+            "No physical dispensing sensor evidence",
+            "Persistence/data loss and administrative compromise",
+            "V1 receipts remain ambiguous"
+          ],
+          "implementationReadiness": {
+            "affectedComponents": [
+              "OpenHAB rule 88bd9ec4de",
+              "src/openhab.rs",
+              "src/gateway/server.rs"
+            ],
+            "workPackages": [
+              "Review exact receipt schema and locking primitive",
+              "Prove persistence and concurrent admission",
+              "Implement compatible reader only after design selection"
+            ],
+            "acceptanceCriteria": [
+              "No terminal downgrade after completion persistence",
+              "No ON before durable admission",
+              "Same UUID never repeats ON",
+              "Synthetic 2340 sats yields two confirmations and 340 sats"
+            ],
+            "migrationNotes": [
+              "No live owner changes authorized by this proposal",
+              "Do not promote v1 entries to v2 authority"
+            ],
+            "rollback": "Disable recovery; preserve receipts and reservations; old-rule restore requires compatible state handling."
+          }
+        },
+        {
+          "optionId": "irreversible-receipts",
+          "title": "Irreversible versioned receipts in the existing owner",
+          "kind": "structural",
+          "summary": "Irreversible versioned receipts in the existing owner",
+          "diagramPaths": {
+            "before": "diagrams/owner-finality-before.mmd",
+            "after": "diagrams/owner-finality-irreversible-receipts-after.mmd"
+          },
+          "evidenceCoverage": [
+            {
+              "evidenceId": "owner-source",
+              "effect": "addresses",
+              "tacticalFixRequired": true,
+              "rationale": "Keep permanent unresolved gateway reservations and no resend throughout migration; old v1 ambiguity remains."
+            },
+            {
+              "evidenceId": "jdbc-evidence",
+              "effect": "mitigates",
+              "tacticalFixRequired": true,
+              "rationale": "Keep permanent unresolved gateway reservations and no resend throughout migration; old v1 ambiguity remains."
+            },
+            {
+              "evidenceId": "gateway-contract",
+              "effect": "mitigates",
+              "tacticalFixRequired": true,
+              "rationale": "Keep permanent unresolved gateway reservations and no resend throughout migration; old v1 ambiguity remains."
+            }
+          ],
+          "tradeoffs": [
+            {
+              "dimension": "security",
+              "direction": "improves",
+              "confidence": "medium",
+              "basis": "source-derived",
+              "assessment": "Exclusive admission and immutable terminal outcomes remove identified paths if primitives hold.",
+              "validationPlan": "Pause callbacks after persistence and attempt downgrade/concurrent admission."
+            },
+            {
+              "dimension": "performance",
+              "direction": "unknown",
+              "confidence": "low",
+              "basis": "hypothetical",
+              "assessment": "Serialized reads and bounded verification add critical-path work.",
+              "validationPlan": "Measure p50/p99 admission latency and timer jitter against baseline at saturation."
+            },
+            {
+              "dimension": "memory",
+              "direction": "unknown",
+              "confidence": "medium",
+              "basis": "source-derived",
+              "assessment": "Same ledger bounds; separate diagnostics must remain bounded.",
+              "validationPlan": "Measure peak heap at max ledger and concurrency; reject unbounded buffers."
+            },
+            {
+              "dimension": "reliability",
+              "direction": "improves",
+              "confidence": "medium",
+              "basis": "source-derived",
+              "assessment": "Lost publication can recover from durable receipt; persistence outage still holds.",
+              "validationPlan": "Inject restart, missing restore, failed writes and delivery loss."
+            },
+            {
+              "dimension": "operability",
+              "direction": "unknown",
+              "confidence": "medium",
+              "basis": "hypothetical",
+              "assessment": "Version-aware receipt diagnostics replace some manual reconciliation.",
+              "validationPlan": "Rehearse uncertainty triage and compatibility rollback."
+            },
+            {
+              "dimension": "migration",
+              "direction": "regresses",
+              "confidence": "high",
+              "basis": "source-derived",
+              "assessment": "V1/v2 coexistence and compatible parser rollout required.",
+              "validationPlan": "Reject promotion of v1 history; mixed-version and rollback tests."
+            },
+            {
+              "dimension": "developer_ergonomics",
+              "direction": "improves",
+              "confidence": "medium",
+              "basis": "source-derived",
+              "assessment": "Owned transition API prevents broad catch blocks rewriting finality.",
+              "validationPlan": "Review all terminal writers and enforce invalid-transition tests."
+            },
+            {
+              "dimension": "reversibility",
+              "direction": "regresses",
+              "confidence": "high",
+              "basis": "source-derived",
+              "assessment": "Old owner may reject new ledger; reader can be disabled without state deletion.",
+              "validationPlan": "Restore rehearsal preserving unresolved/v2 receipts and disabled actuation."
+            }
+          ],
+          "residualRisks": [
+            "No physical dispensing sensor evidence",
+            "Persistence/data loss and administrative compromise",
+            "V1 receipts remain ambiguous"
+          ],
+          "implementationReadiness": {
+            "affectedComponents": [
+              "OpenHAB rule 88bd9ec4de",
+              "src/openhab.rs",
+              "src/gateway/server.rs"
+            ],
+            "workPackages": [
+              "Review exact receipt schema and locking primitive",
+              "Prove persistence and concurrent admission",
+              "Implement compatible reader only after design selection"
+            ],
+            "acceptanceCriteria": [
+              "No terminal downgrade after completion persistence",
+              "No ON before durable admission",
+              "Same UUID never repeats ON",
+              "Synthetic 2340 sats yields two confirmations and 340 sats"
+            ],
+            "migrationNotes": [
+              "No live owner changes authorized by this proposal",
+              "Do not promote v1 entries to v2 authority"
+            ],
+            "rollback": "Disable recovery; preserve receipts and reservations; old-rule restore requires compatible state handling."
+          }
+        }
+      ],
+      "recommendedOptionId": "irreversible-receipts",
+      "recommendation": "Develop versioned irreversible receipts while retaining unresolved hold until actual runtime guarantees are demonstrated."
+    }
+  ],
+  "openQuestions": [
+    "Exact v2 discriminator and compatibility schema",
+    "Atomic owner locking primitive",
+    "JDBC persist/readback/restore semantics",
+    "History retention and bounded complete coverage"
+  ]
+}

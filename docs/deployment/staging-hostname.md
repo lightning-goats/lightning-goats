@@ -22,7 +22,7 @@ or key installed. The canary example remains sandbox/harmless-owner-only and doe
 not enable Nostr publication. The hostname is for the public website/application
 edge, not the trusted physical-feeder gateway or generic OpenHAB APIs.
 
-## Public DNS observation
+## Historical public DNS observation
 
 On 2026-09-11 all three authoritative ZoneEdit servers returned authoritative
 NXDOMAIN for A, AAAA, CNAME and CAA queries at this name. Their SOA serial was
@@ -33,30 +33,34 @@ not a complete zone export or an authenticated account inspection. Preserve the
 No existing service was found at this name in those answers. Recheck immediately
 before any approved DNS operation; absence now does not authorize a future write.
 
+## Current DNS and website evidence
+
+At 2026-09-11 17:27 UTC all three delegated ZoneEdit authorities and public
+resolvers 1.1.1.1/8.8.8.8 returned `64.177.40.118`, TTL 3600, for the staging A
+record. Authoritative SOA serial is now `1789146394`. The operator published the
+record; this session performed read-only queries. This supersedes the earlier
+NXDOMAIN observation without deleting it. See the
+[public query evidence](../testing/evidence/staging-dns-positive-20260911.json).
+
+AAAA is absent. CAA is absent at both the staging hostname and zone apex; the
+operator-approved Let's Encrypt-only CAA proposal remains unapplied by this
+session. See `domain-readiness.md`. No IPv6 listener or DNS record is proposed for
+the static acceptance stage.
+
+The authoritative website was imported in draft PR #48. Its offline browser
+checks passed with intercepted external traffic. Draft PR #49 adds the actual
+owner adapter; draft PR #50 records the unresolved JDBC finality gap. None of
+these establishes publicly trusted TLS or physical feeding acceptance.
+
 ## Remaining activation gates
 
-The concrete IPv4 DNS proposal is:
+Use [static staging acceptance](static-staging-acceptance.md) for the initial
+website-only stage. It intentionally has no application upstream and forces
+payments disabled. The broader canary example above remains a later integration
+stage, requiring harmless owner/provider boundaries and separate review.
 
-```dns
-feeder.lightning-goats.com. 300 IN A 64.177.40.118
-```
-
-This record is **unapplied**. Hostname selection does not approve DNS changes or
-certificate issuance. Full-zone review and an explicitly directed DNS/TLS step
-remain necessary. IPv6 is not proposed for DNS until the external path and its
-containment are accepted; the shipped generic dual-stack listener is not proof
-of IPv6 readiness. Preserve the existing apex, `www`, mail and unrelated records.
-The operator-approved CA is Let's Encrypt; see `domain-readiness.md` for the
-unapplied CAA proposal and account-control decisions.
-
-The persistent inactive installation still contains its original archived
-example, not this newly bound one. Do not silently overwrite its source/hash
-record or activate it: install a reviewed configuration when credentials, the
-harmless owner gateway, website source and network boundaries are ready.
-
-Authoritative website source import and browser acceptance remain open. An nginx
-mock regression proves routing/redirect behavior with temporary local TLS; it
-does not prove publicly trusted staging TLS, DNS resolution, production-equivalent
-browser behavior, provider access or physical feeding. Direct IP/SNI tests can be
-used before DNS changes, using a separately reviewed test certificate and client
-trust setup. Do not disable TLS verification for final acceptance.
+Public 80/443 activation and certificate issuance require an explicit operator
+step after review. Preserve apex, www, mail, production services and the old VPS.
+Do not overwrite the installed inactive runtime release's provenance. Final
+account/secret review, F09 home-enforced containment, provider acceptance and
+physical-owner finality remain open. Production remains HOLD.

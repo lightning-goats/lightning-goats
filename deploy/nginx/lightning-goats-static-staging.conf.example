@@ -1,0 +1,61 @@
+# HTTP context. Standalone static acceptance stage; do not combine with the
+# canary/production sites on this hostname. Activation requires operator approval.
+# No upstreams, daemon, payment endpoints, or generic static-directory exposure.
+server {
+    listen 64.177.40.118:80;
+    server_name feeder.lightning-goats.com;
+    if ($host != feeder.lightning-goats.com) { return 421; }
+    if ($request_method !~ ^(GET|HEAD)$) { return 405; }
+    server_tokens off;
+    client_max_body_size 1k;
+    location ~ ^/\.well-known/acme-challenge/[A-Za-z0-9_-]+$ {
+        root /var/lib/lightning-goats-acme;
+        default_type text/plain;
+        try_files $uri =404;
+    }
+    location / { return 308 https://feeder.lightning-goats.com$request_uri; }
+}
+
+server {
+    listen 64.177.40.118:443 ssl;
+    server_name feeder.lightning-goats.com;
+    if ($host != feeder.lightning-goats.com) { return 421; }
+    ssl_certificate /etc/letsencrypt/live/feeder.lightning-goats.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/feeder.lightning-goats.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    if ($request_method !~ ^(GET|HEAD)$) { return 405; }
+    server_tokens off;
+    client_max_body_size 1k;
+    client_body_timeout 10s;
+    client_header_timeout 10s;
+    keepalive_timeout 15s;
+    add_header X-Content-Type-Options nosniff always;
+    add_header Referrer-Policy strict-origin-when-cross-origin always;
+
+    root /var/www/lightning-goats-static-staging;
+    location = / {
+        default_type text/html;
+        try_files /index.html =404;
+    }
+    location = /index.html {
+        default_type text/html;
+        try_files $uri =404;
+    }
+    # Pin the acceptance stage to disabled payments even if an asset copy drifts.
+    location = /site-config.js {
+        default_type application/javascript;
+        add_header Cache-Control no-store;
+        add_header X-Content-Type-Options nosniff always;
+        return 200 'window.LightningGoatsSite = Object.freeze({ paymentsEnabled: false });\n';
+    }
+    location ~ ^/(site|chat)\.js$ {
+        default_type application/javascript;
+        try_files $uri =404;
+    }
+    location ~ ^/images/(lightninggoatslogo1|preview-image)\.png$ {
+        default_type image/png;
+        try_files $uri =404;
+    }
+    # Includes LNURL discovery/callbacks, webhook, health/status and WebSocket.
+    location / { return 404; }
+}

@@ -10,6 +10,9 @@ import base64
 import json
 import os
 from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import home_gateway_safety as safety
 import pwd
 import re
 import secrets
@@ -89,7 +92,7 @@ def apply(password_file, known_hosts, resume=False):
             statuses = []
             for path in ('items/LightningGoatsCanaryOverride/state', 'rules'):
                 request = urllib.request.Request('http://127.0.0.1:8080/rest/' + path, headers=headers)
-                opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+                opener = safety.local_opener()
                 try:
                     with opener.open(request, timeout=5) as response:
                         statuses.append(response.status)

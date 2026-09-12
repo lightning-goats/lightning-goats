@@ -10,6 +10,9 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import home_gateway_safety as safety
 import stat
 import urllib.error
 import urllib.request
@@ -25,7 +28,11 @@ ITEMS = {'LightningGoatsCanaryRequest': ('String', 'NULL'),
 
 def token_from_file(path):
     info = path.lstat()
-    if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077 or info.st_uid not in (0, os.geteuid()):
+    owners = {0, os.geteuid()}
+    invoking_uid = os.environ.get('SUDO_UID', '')
+    if os.geteuid() == 0 and invoking_uid.isdecimal():
+        owners.add(int(invoking_uid))
+    if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077 or info.st_uid not in owners:
         raise ValueError('provisioning env must be a private owned regular file')
     for line in path.read_text().splitlines():
         if line.startswith('OPENHAB_TOKEN='):
@@ -58,11 +65,7 @@ def main():
     p.add_argument('--apply', action='store_true')
     args = p.parse_args()
     auth = 'Basic ' + base64.b64encode((token_from_file(args.provisioning_env) + ':').encode()).decode()
-    class NoRedirect(urllib.request.HTTPRedirectHandler):
-        def redirect_request(self, req, fp, code, msg, headers, newurl):
-            return None
-
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+    opener = safety.local_opener()
 
     def request(path, method='GET', body=None, content_type='application/json', absent=False):
         data = json.dumps(body).encode() if content_type == 'application/json' and body is not None else body

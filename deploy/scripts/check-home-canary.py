@@ -12,10 +12,13 @@ from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import home_gateway_safety as safety
 import subprocess
 import time
-import tomllib
 import urllib.error
 import urllib.request
 import uuid
@@ -26,16 +29,32 @@ canary = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(canary)
 
 
+def verify_other_consumers(oh):
+    for rule in json.loads(oh('rules')):
+        if rule['uid'] == canary.RULE:
+            continue
+        full = json.dumps(json.loads(oh('rules/' + rule['uid'])))
+        if any(item in full for item in canary.ITEMS):
+            raise ValueError('another rule references canary Items')
+
+
+def wait_verified():
+    for attempt in range(30):
+        try:
+            safety.verify_running()
+            return
+        except (OSError, ValueError):
+            if attempt == 29:
+                raise
+            time.sleep(.2)
+
+
 def apply(env):
-    cfg = tomllib.loads(Path('/etc/lightning-goats-gateway-canary/config.toml').read_text())
-    if cfg['service']['listen'] != '127.0.0.1:8790' or cfg['openhab']['protocol'] != 'uuid_canary':
-        raise ValueError('unexpected canary binding')
-    expected = {'request_item': 'LightningGoatsCanaryRequest', 'ack_item': 'LightningGoatsCanaryAck',
-                'override_item': 'LightningGoatsCanaryOverride', 'remote_enabled_item': 'LightningGoatsCanaryRemoteEnabled'}
-    if any(cfg['openhab'].get(k) != v for k, v in expected.items()):
-        raise ValueError('unexpected Item binding')
+    if os.geteuid() != 0:
+        raise ValueError('--apply requires root for effective process/listener validation')
+    safety.installed_source()
     auth = 'Basic ' + base64.b64encode((canary.token_from_file(env) + ':').encode()).decode()
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    opener = safety.local_opener()
 
     def oh(path, method='GET', data=None):
         req = urllib.request.Request('http://127.0.0.1:8080/rest/' + path, method=method, data=data,
@@ -68,12 +87,17 @@ def apply(env):
         value = json.loads(oh('items/' + item))
         if value['type'] != kind or value.get('groupNames') or value.get('tags'):
             raise ValueError('canary Item has unexpected type/group/tag')
+    verify_other_consumers(oh)
     if any(item in oh('links') for item in canary.ITEMS):
         raise ValueError('canary Item is channel-linked')
     if oh('items/LightningGoatsCanaryRemoteEnabled/state') != 'OFF':
         raise ValueError('canary must begin remote-disabled')
     if oh('items/LightningGoatsCanaryOverride/state') != 'OFF':
         raise ValueError('unexpected canary override')
+    # Reload the verified config into the canary process before any gateway POST.
+    # No daemon-reload: stale or overridden loaded units are rejected above.
+    subprocess.run(['systemctl', 'restart', safety.UNIT.name], check=True)
+    wait_verified()
     before_real = oh('items/FeederOverride/state')
     start = count()
     evidence = {'initial_count': start, 'safety': gateway('v1/feeder/override')}
@@ -90,13 +114,9 @@ def apply(env):
         assert evidence['confirmed']['body']['status'] == 'confirmed'
         evidence['duplicate'] = feed(request_id)
         assert evidence['duplicate'] == evidence['confirmed'] and count() == start + 1
-        subprocess.run(['sudo', '-n', 'systemctl', 'restart', 'lightning-goats-gateway-canary.service'], check=True)
-        for attempt in range(30):
-            try:
-                gateway('healthz')
-                break
-            except OSError:
-                time.sleep(.2)
+        safety.installed_source()
+        subprocess.run(['systemctl', 'restart', safety.UNIT.name], check=True)
+        wait_verified()
         evidence['restart_replay'] = feed(request_id)
         assert evidence['restart_replay'] == evidence['confirmed'] and count() == start + 1
         time.sleep(5.1)

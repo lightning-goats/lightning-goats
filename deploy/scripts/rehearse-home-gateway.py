@@ -10,6 +10,9 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import home_gateway_safety as safety
 import sqlite3
 import subprocess
 import time
@@ -22,24 +25,46 @@ STATE = Path('/var/lib') / NAME
 UNIT = Path('/run/systemd/system') / (NAME + '.service')
 
 
+def render(source_config, source_unit):
+    safety.validate_source(source_config, source_unit)
+    # Render from reviewed templates, never inherit arbitrary installed text.
+    config, unit = safety.canonical_files()
+    config = config.replace('127.0.0.1:8790', '127.0.0.1:18790').replace(
+        'sqlite:///var/lib/lightning-goats-gateway-canary/gateway.db', 'sqlite://' + str(STATE / 'gateway.db'))
+    unit = unit.replace(str(safety.CONFIG), str(RUN / 'config.toml'))
+    unit = unit.replace('/etc/credstore.encrypted/lightning-goats-gateway-canary-openhab', str(RUN / 'synthetic.cred'))
+    unit = unit.replace('StateDirectory=lightning-goats-gateway-canary', 'StateDirectory=' + NAME)
+    unit = unit.replace('RuntimeDirectory=lightning-goats-gateway-canary', 'RuntimeDirectory=' + NAME + '-service')
+    import tomllib
+    expected = tomllib.loads(source_config)
+    expected['service']['listen'] = '127.0.0.1:18790'
+    expected['database']['url'] = 'sqlite://' + str(STATE / 'gateway.db')
+    if tomllib.loads(config) != expected:
+        raise ValueError('validation configuration rendering failed')
+    required = ['ExecStart=' + str(safety.BINARY) + ' --config ' + str(RUN / 'config.toml'),
+                'LoadCredentialEncrypted=openhab-token:' + str(RUN / 'synthetic.cred'),
+                'StateDirectory=' + NAME, 'RuntimeDirectory=' + NAME + '-service']
+    if any(unit.splitlines().count(line) != 1 for line in required):
+        raise ValueError('validation unit rendering failed')
+    return config, unit
+
+
 def run():
     if os.geteuid() != 0:
         raise ValueError('--apply requires root')
     for path in (RUN, STATE, UNIT):
         if path.exists() or path.is_symlink():
             raise ValueError(f'existing validation evidence/resource: {path}')
-    config = Path('/etc/lightning-goats-gateway-canary/config.toml').read_text()
-    import tomllib
-    parsed = tomllib.loads(config)
-    if parsed['service']['listen'] != '127.0.0.1:8790' or parsed['openhab']['protocol'] != 'uuid_canary':
-        raise ValueError('unexpected canary configuration')
-    config = config.replace('127.0.0.1:8790', '127.0.0.1:18790').replace(
-        '/var/lib/lightning-goats-gateway-canary/', str(STATE) + '/')
-    unit = Path('/etc/systemd/system/lightning-goats-gateway-canary.service').read_text()
-    unit = unit.replace('/etc/lightning-goats-gateway-canary/config.toml', str(RUN / 'config.toml'))
-    unit = unit.replace('/etc/credstore.encrypted/lightning-goats-gateway-canary-openhab', str(RUN / 'synthetic.cred'))
-    unit = unit.replace('StateDirectory=lightning-goats-gateway-canary', 'StateDirectory=' + NAME)
-    unit = unit.replace('RuntimeDirectory=lightning-goats-gateway-canary', 'RuntimeDirectory=' + NAME + '-service')
+    config, unit = render(*safety.installed_source())
+    loaded = subprocess.check_output(['systemctl', 'show', UNIT.name, '-p', 'LoadState', '--value'], text=True).strip()
+    if loaded != 'not-found':
+        raise ValueError('existing validation unit requires review')
+    # Reject all applicable unit drop-ins, including global and dashed prefixes.
+    prefixes = ['service.d', NAME + '.service.d']
+    prefixes += ['-'.join(NAME.split('-')[:i]) + '-.service.d' for i in range(1, len(NAME.split('-')))]
+    for directory in ('/etc/systemd/system', '/run/systemd/system', '/usr/lib/systemd/system', '/usr/local/lib/systemd/system'):
+        if any(((Path(directory) / prefix).exists() or (Path(directory) / prefix).is_symlink()) for prefix in prefixes):
+            raise ValueError('validation unit drop-ins require review')
     RUN.mkdir(mode=0o755)
     (RUN / 'config.toml').write_text(config)
     (RUN / 'config.toml').chmod(0o644)
@@ -51,7 +76,7 @@ def run():
         UNIT.write_text(unit)
         subprocess.run(['systemctl', 'daemon-reload'], check=True)
         subprocess.run(['systemctl', 'start', UNIT.name], check=True)
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        opener = safety.local_opener()
         for attempt in range(30):
             try:
                 opener.open('http://127.0.0.1:18790/healthz', timeout=1).close()

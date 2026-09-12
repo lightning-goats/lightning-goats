@@ -93,11 +93,29 @@ it does not change passwords or remove tokens. Remove temporary console inputs
 after provisioning. This needs local `pexpect`, not a new daemon dependency.
 
 After credential validation, start only `lightning-goats-gateway-canary.service`.
-`check-home-canary.py --provisioning-env <protected-local-env> --apply` verifies
+`sudo python3 deploy/scripts/check-home-canary.py --provisioning-env <protected-local-env> --apply` verifies
 exact rule/Item bindings, remote-OFF no-dispatch, immutable refusal replay, one
 confirmed UUID with duplicate and restart replay, and concurrent distinct UUIDs.
 Only the canary remote switch is temporarily enabled and returned OFF in finally.
 The helper never targets TCP8789 or changes the real FeederOverride.
+
+All home HTTP helpers disable proxies and reject redirects, including same-origin
+redirects. Direct permission responses remain 200/401/403. The checker requires
+the canonical loopback installation: parsed configuration must exactly match the
+home installer, including OpenHAB origin `http://127.0.0.1:8080/`, database and
+canary bindings. Installed config/unit and parents must be root-owned and not
+group/other writable. The unit must match the generated unit exactly, with no
+effective drop-ins, environment files or pending daemon reload. A changed
+installation needs separate review; the checker does not normalize it silently.
+
+Before any gateway POST, the checker restarts only the verified canary to load
+the checked configuration, then verifies its actual executable, command line,
+runtime identity and ownership of the sole loopback listener. It repeats those
+checks after the replay restart. It also fetches the full rule inventory and
+rejects any other rule referencing a canary Item, including JSON-escaped names.
+Operators must exclude concurrent administrative edits throughout the test and
+review generic/dynamic rule consumers that cannot be proven by literal-reference
+scanning. Root is required for the process and socket checks.
 
 ## Read-only synthetic credential rehearsal
 
@@ -108,6 +126,14 @@ POST exists in this helper. It stops/removes only its unit/config/ciphertext and
 preserves a separate SQLite database plus exact backup/restore evidence under
 `/var/lib/lightning-goats-gateway-validation-v2`. Existing evidence causes refusal.
 A second run needs a reviewed new name, not removal of evidence.
+
+The rehearsal rejects noncanonical installed configurations/units before creating
+resources. It renders from reviewed templates, explicitly sets the validation
+SQLite/config/ciphertext/state/runtime paths, and checks the derived config and
+unit targets. It never copies arbitrary installed directives. Existing loaded
+validation units and applicable systemd drop-ins are rejected. Alternate database
+paths cannot reach SQLite initialization. The preserved v2 evidence means this
+helper is not rerun against that name merely to validate a source correction.
 
 Expected bad-token safety response is HTTP **502**, not 503. `healthz` remains
 200 and does not certify credentials. Missing/empty credential startup and

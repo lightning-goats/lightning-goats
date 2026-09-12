@@ -471,3 +471,10 @@ receipt authority contract remains necessary; do not change the live owner impli
 ## Static activation and owner proposal follow-up
 
 PR #51 at `d04fcffee9f3f6db4ba9ee21dbd59ecc8546833d` passed all required checks and its static website is activated with explicit operator approval. See [activation evidence](static-staging-activation.md). Payments remain disabled, canary daemon/gateway inactive, and production HOLD. PR #52 at `92a78612b0c22dd59e157cd250c14c196504edc6` contains the [repository-only owner-finality proposal](../security/hardening/owner-finality/hardening.md); no live owner change or finding closure.
+
+## Current VPS/home coordination checkpoint
+
+See [VPS cutover status — 2026-09-12](vps-cutover-status.md) for current main and
+PR57 source pins, acceptance boundaries and pending
+operator input. The home agent owns home deployment and coordinates owner
+finality under its dedicated handoff. Preserve earlier evidence as historical.

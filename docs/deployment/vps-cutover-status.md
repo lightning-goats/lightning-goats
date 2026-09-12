@@ -35,31 +35,70 @@ cases, real TCP handshake/established-flow/rollback tests in disposable
 namespaces, release packaging and systemd rehearsal. These do not establish
 actual home OpenHAB/JDBC or physical behavior.
 
+Later source-pinned evidence, still awaiting integration and final acceptance:
+
+- [PR59](https://github.com/lightning-goats/lightning-goats/pull/59),
+  `b2f42dc39758d21d96068bcb0382db5314960908`: independent VPS review requests
+  revisions for credential redirects, inspected-target binding and rehearsal
+  state isolation. Green CI does not supersede this review disposition.
+- [PR60](https://github.com/lightning-goats/lightning-goats/pull/60),
+  `689f195a4376ddd9a845da80239c8cc3b8cfb0b0`: home-agent report of local harmless
+  canary observations, including command counts and restore. This is attributed
+  home evidence, not independently repeated VPS or cross-host acceptance.
+- [PR61](https://github.com/lightning-goats/lightning-goats/pull/61),
+  `1c09c8d6627960f1492ace31b0d3e94a99aae388`: a delayed unavailable safety read
+  reproduces the restore test's inadequate five-second observation window;
+  bounded observation and child-liveness checks preserve all accounting and
+  command-count assertions. Rust, Security and Deployment passed. The original
+  PR58 timeout cause remains unproven; its failed run remains historical evidence.
+- [PR62](https://github.com/lightning-goats/lightning-goats/pull/62),
+  `dbdd1a0136a4e2bf05a458e5adb439fb6ce5c50f`: six isolated WireGuard controls
+  prove the specific peer binding rejects a spoofed staging source before host
+  delivery, while legitimate traffic works. Removing that binding restores the
+  spoof path. Rust, Security, Deployment and dedicated peer-authentication CI
+  passed. No household rule, route or peer was changed.
+- [PR63](https://github.com/lightning-goats/lightning-goats/pull/63),
+  `3928378b89d55731f77166d45fe9bf3087843e58`: corrects a reproduced bunker
+  credential-output disclosure and verifies real NIP-46 signing, signature
+  rejection, durable outbox retry with the signer stopped, and overlay-only
+  informational/weather behavior using synthetic keys and a local relay.
+  Rust, Security, Deployment and dedicated real-NIP46 CI passed. This is not
+  production signer identity, service or public-relay acceptance.
+
+Check-run links are retained in the corresponding PRs and evidence documents.
+These are separate candidates, not an assembled
+release. Review their combined result and rerun the required gates before using
+a final package; do not equate individual green PRs with integration acceptance.
+
 | Required gate | Remaining work / responsible boundary |
 | --- | --- |
 | Owner finality | Home coordinator adopts/reviews PR57; verify actual atomic/timer/JDBC restore behavior, legacy callers and retention. Candidate stops at 32 entries and is not production-compatible yet. |
 | Shared gateway protocol | Coordinate explicit v2 request/result and bounded history recovery before enabling it; shipped gateway remains v1. |
-| Home canary contract | Home agent returns observed source, harmless Items, URL, credentials/role, caps, weather and service status per its handoff. No token reaches the VPS. |
-| Network authentication | Gateway currently has no application peer authentication. Coordinate end-to-end protection, staging versus final policy and old-hub impact. Source-IP filtering alone is insufficient. |
+| Home canary contract | Contract received and protocol/team acknowledgement exchanged. Resolve PR59 review findings and verify the revised source before cross-host use. No token reaches the VPS. |
+| Network authentication | Direct-peer design has isolated authentication evidence in PR62. Review the concrete home/VPS apply and rollback candidate, retire or separately contain inspection exceptions, then obtain approval and verify the live path. Source-IP filtering alone is insufficient. |
 | Combined staging | Real daemon -> real home gateway -> harmless owner; synthetic 2340 sats -> two confirmed commands -> 340 sats, concurrency/failures/restart and paired restore. |
-| Payment authority | Receive-only credential and webhook provisioning/scope evidence, independent recovery, approved balance ceiling/sweep procedure and final provider acceptance. No real invoices/payments authorized. |
-| Nostr | Production signer identity/relay/credential contract and actual isolated signer acceptance; retain signed retry bytes. |
+| Payment authority | Balance ceiling/manual-sweep responsibility supplied by the operator. Receive-only credential and webhook provisioning/scope evidence, actual balance check, independent recovery and final provider acceptance remain open. No real invoices/payments authorized. |
+| Nostr | Isolated real signer/client acceptance passed in PR63; integrate its output correction. Production public identity/relay/credential contract and actual service sandbox acceptance remain open. Retain signed retry bytes. |
 | Installed release | Agree final reviewed source/artifacts, verify binary provenance, prepare production units/config inactive, then authorized staging startup. Final production credentials and privilege revocation remain gated. |
 | DNS/TLS and website | Preserve existing static TLS evidence and operator domain controls; reconcile final zone/CAA/SNI/renewal proposal. Page changes deferred; payment frontend acceptance remains open. |
 | Cutover and rollback | Final matrix, quiesced paired backup, owner reconciliation, independent recovery, old-VPS archive, separately approved payments/physical tests and DNS/WireGuard change. |
 
-The next joint step is the home agent's **local harmless-canary status contract**,
-followed by an agreed authenticated cross-host connection. Until then, do not
-open broad VPS access or substitute the physical owner for a missing canary.
+The next joint step is the home agent's revised tooling and concrete authenticated
+staging path candidate. The local harmless-canary contract has been received.
+Do not open broad VPS access or substitute the physical owner for the canary.
 
-## Pending operator input
+## Operator decisions and remaining input
 
-Questions already presented, not answered in this checkpoint:
+The operator confirmed the home agent is active and will perform manual sweeps
+under the approved balance ceiling. Exact operational values remain in the
+private operator checkpoint. Do not ask those questions again or imply the
+daemon automatically enforces the balance policy. Project payment-credential
+provisioning remains outstanding; do not request credential values in chat.
 
-- Is the home agent actively working under the new assignment?
-- What operational Strike balance ceiling and sweep procedure are approved?
-- Are receive-only production/sandbox credentials provisioned (status or approved
-  secret-file locations only; no secret values in chat or repository)?
+The production announcement public identity and relay URLs have been requested.
+The website contact-link approval does not establish signer-migration authority.
+Final credential installation, privilege reduction, network application and
+live payment/physical acceptance need their concrete reviewed operator steps.
 
-None of these pending answers prevents independent repository/mock work. None
-may be assumed from elapsed time. Keep parent issues #6/#15/#16 open.
+Missing inputs do not prevent independent repository/mock work. Never infer
+approval from elapsed time or green CI. Keep parent issues #6/#15/#16 open.

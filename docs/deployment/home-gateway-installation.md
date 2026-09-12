@@ -62,8 +62,10 @@ read-only inspection; do not delete/recreate existing resources to make it pass.
 Use OpenHAB's supported `openhab:users add <user> <password> user` and
 `openhab:users addApiToken <user> <label> ''` console commands. Verify the installed
 version's accepted scope; never substitute admin or invented Item scopes.
-Production identity/label: `lightning_goats_gateway` / `lightning-goats-gateway`;
-canary: `lightning_goats_gateway_canary` / `lightning-goats-gateway-canary`.
+Production identity/label: `lightning_goats_gateway` / `lightninggoatsgateway`;
+canary: `lightning_goats_gateway_canary` / `lightninggoatsgatewaycanary`.
+OpenHAB 5.2.1 rejects hyphenated token labels; the documented example labels
+were corrected to supported alphanumeric names without changing ciphertext paths.
 Use a protected local console credential and a non-logged input channel. Capture
 new token output in process memory and pipe directly to `systemd-creds encrypt
 --name=openhab-token`; do not put passwords/tokens in argv, logs, Git or chat.
@@ -79,6 +81,23 @@ protect against offline access to both that key and ciphertext. Never regenerate
 the key for token rotation. Provision a replacement token under a new label,
 verify it, encrypt to a new exclusive file and review the canary-only restart;
 revoke the retired label only after readback. Production remains inactive.
+
+The repeatable `provision-home-openhab.py` helper defaults to plan and accepts
+a root-owned private console-password file plus pinned known-hosts. Its supported
+Karaf `shell:source` file is temporary, private, and removed in finally; passwords
+never enter SSH argv or interactive history. Token output goes directly into
+host-encrypted credentials after USER role and effective read checks. It refuses
+existing project accounts/ciphertexts. `--resume-empty-project-users` is only for
+an inspected partial run with exactly USER roles, zero tokens and zero sessions;
+it does not change passwords or remove tokens. Remove temporary console inputs
+after provisioning. This needs local `pexpect`, not a new daemon dependency.
+
+After credential validation, start only `lightning-goats-gateway-canary.service`.
+`check-home-canary.py --provisioning-env <protected-local-env> --apply` verifies
+exact rule/Item bindings, remote-OFF no-dispatch, immutable refusal replay, one
+confirmed UUID with duplicate and restart replay, and concurrent distinct UUIDs.
+Only the canary remote switch is temporarily enabled and returned OFF in finally.
+The helper never targets TCP8789 or changes the real FeederOverride.
 
 ## Read-only synthetic credential rehearsal
 

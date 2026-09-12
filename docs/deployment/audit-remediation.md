@@ -227,3 +227,12 @@ The current verified kernel/reboot observation in the handoff supersedes the
 historical pending-reboot note above. Final integrated release, SSH, credential
 scope and privilege revocation still need acceptance. F04/F09, actual website,
 signer and separately approved live tests remain open; preserve #6/#15/#16.
+
+## 2026-09-12 owner and containment candidates
+
+Option 2 repository implementation is selected. See the
+[owner implementation gates](../security/hardening/owner-finality/implementation/irreversible-receipts.md)
+and [home containment review](home-containment-review.md). Source-derived mock
+regressions and a home firewall baseline are available; no home rule or owner
+change has been applied. F02/F04/F09 and parent acceptance remain open. Website
+work is deferred at operator request.

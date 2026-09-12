@@ -1,0 +1,19 @@
+#!/usr/sbin/nft -f
+# REVIEW CANDIDATE ONLY. Applying this disconnects inspection SSH/Hexmem over wg0
+# and may interrupt old production hub flows. Use a trusted independent console.
+# This table must be absent before installation. Never flush the existing ruleset.
+table inet lg_home_wg_canary {
+    chain before_dnat {
+        type filter hook prerouting priority -310; policy accept;
+        # Restrict the entire hub-facing interface: a compromised hub can spoof
+        # any inner source, including an apparent administrative laptop address.
+        iifname "wg0" meta nfproto ipv4 ip saddr 10.8.0.12 ip daddr 10.8.0.6 tcp dport 8790 accept
+        iifname "wg0" meta l4proto tcp counter drop
+        iifname "wg0" drop
+    }
+    chain forwarded {
+        type filter hook forward priority -310; policy accept;
+        # Defense against future DNAT of the one admitted port into a container.
+        iifname "wg0" counter drop
+    }
+}

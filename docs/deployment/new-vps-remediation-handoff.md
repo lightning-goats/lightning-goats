@@ -471,3 +471,12 @@ receipt authority contract remains necessary; do not change the live owner impli
 ## Static activation and owner proposal follow-up
 
 PR #51 at `d04fcffee9f3f6db4ba9ee21dbd59ecc8546833d` passed all required checks and its static website is activated with explicit operator approval. See [activation evidence](static-staging-activation.md). Payments remain disabled, canary daemon/gateway inactive, and production HOLD. PR #52 at `92a78612b0c22dd59e157cd250c14c196504edc6` contains the [repository-only owner-finality proposal](../security/hardening/owner-finality/hardening.md); no live owner change or finding closure.
+
+## 2026-09-12 owner and containment candidates
+
+Option 2 repository implementation is selected. See the
+[owner implementation gates](../security/hardening/owner-finality/implementation/irreversible-receipts.md)
+and [home containment review](home-containment-review.md). Source-derived mock
+regressions and a home firewall baseline are available; no home rule or owner
+change has been applied. F02/F04/F09 and parent acceptance remain open. Website
+work is deferred at operator request.

@@ -30,7 +30,7 @@ container ports and apparent administrative-source exceptions. A compromised
 hub can impersonate an inner .10 or .12 source. Therefore source address is only
 a routing filter, never authentication. Canary activation must require an
 independently authenticated end-to-end channel (reviewed mTLS or pinned TLS with
-a scoped credential); existing plaintext bearer-token HTTP is insufficient
+a scoped credential); plaintext HTTP, with or without a bearer token, is insufficient
 against a hostile hub. No certificate or credential is supplied by this policy.
 
 ## Before any separately approved application
@@ -47,14 +47,30 @@ exceptions in the runtime policy.
 
 ## Isolated verification
 
-`sudo unshare --net -- python3 deploy/nftables/test-home-canary.py` passed eight
+`sudo unshare --net -- python3 deploy/nftables/test-home-canary.py` passed nine
 raw-packet cases on disposable veth links with broad INPUT/FORWARD ACCEPT and a
 Docker-like DNAT rule: gateway admission; SSH, OpenHAB, Docker port, spoofed .10,
-other peer, TCP ACK and IPv6 refusal. Kernel syntax validation also passed.
-The test rejects the host network namespace. These are synthetic packets,
-not a real WireGuard connection or an established TCP handshake. Forwarded
-admitted-port DNAT and reboot/restore behavior still need explicit tests.
+other peer, TCP ACK and IPv6 refusal, plus forwarding refusal after DNAT of
+the admitted gateway port. Kernel syntax validation also passed.
+Both tests reject the host network namespace. The separate
+`test-home-established.py` creates a second disposable namespace and real TCP
+sockets. It establishes a forbidden connection before policy, proves that data
+is blocked despite an existing established/related accept, then proves a fresh
+gateway handshake and echo succeed. Removing only the candidate table restores
+the forbidden connection while preserving the original table. These are local
+virtual-link tests, not a real WireGuard or home-host observation. Home
+reboot/restore, administrative recovery and old-hub impact still need acceptance.
 
-F09 remains OPEN: candidate not applied, full namespace packet matrix incomplete,
+F09 remains OPEN: candidate not applied, home runtime/reboot matrix incomplete,
 end-to-end gateway authentication not deployed, old-hub flow compatibility and
 home restore/reboot acceptance outstanding. No physical tests are authorized.
+
+## Parallel home integration
+
+Current main adds `home-gateway-agent-handoff.md` at
+7a051cb; it assigns home deployment and owner finality coordination to the home
+agent. PR57 supplies the existing source-derived candidate for adoption/review.
+This full-interface policy is not a legacy-compatible staging policy: old-hub
+flow inventory and the separate staging/final plans remain home-side work. The
+current gateway has no application peer authentication; end-to-end protection
+must be coordinated with its VPS client before network exposure.

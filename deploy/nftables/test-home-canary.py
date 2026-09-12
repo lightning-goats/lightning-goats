@@ -49,11 +49,11 @@ def checksum(data):
     return (~s) & 65535
 
 
-def packet(source, port, ipv6=False, ack=False):
+def packet(source, port, ipv6=False, ack=False, source_port=45000):
     destination = 'fd5e:6df:9c82::6' if ipv6 else '10.8.0.6'
     family = socket.AF_INET6 if ipv6 else socket.AF_INET
     src, dst = (socket.inet_pton(family, a) for a in (source, destination))
-    tcp = struct.pack('!HHIIBBHHH', 45000, port, 1, 1 if ack else 0, 80, 16 if ack else 2, 1024, 0, 0)
+    tcp = struct.pack('!HHIIBBHHH', source_port, port, 1, 1 if ack else 0, 80, 16 if ack else 2, 1024, 0, 0)
     pseudo = src + dst + (struct.pack('!I3xB', len(tcp), 6) if ipv6 else struct.pack('!BBH', 0, 6, len(tcp)))
     tcp = tcp[:16] + struct.pack('!H', checksum(pseudo + tcp)) + tcp[18:]
     if ipv6:
@@ -84,4 +84,19 @@ for name, source, port, ipv6, ack, denied in cases:
     observed = drops() - before
     assert observed == int(denied), (name, observed, denied)
     print('PASS', name, 'drop' if denied else 'passes early guard')
-print('PASS 8 packet cases; no real WireGuard, established handshake, or home activation tested')
+# A future Docker mapping of the admitted port must still hit the forward drop.
+run('ip', 'link', 'add', 'containerout', 'type', 'dummy')
+run('ip', 'link', 'set', 'containerout', 'up')
+run('ip', 'addr', 'add', '172.30.0.1/24', 'dev', 'containerout')
+Path('/proc/sys/net/ipv4/ip_forward').write_text('1')
+run('ip', 'route', 'add', '10.8.0.0/24', 'dev', 'wg0')
+run('nft', 'add', 'rule', 'ip', 'docker_like', 'prerouting', 'tcp', 'dport', '8790', 'dnat', 'to', '172.30.0.2:8790')
+before = drops()
+sock.send(packet('10.8.0.12', 8790, source_port=45001))
+time.sleep(.05)
+assert drops() - before == 1, 'admitted-port forwarding bypass'
+data = json.loads(run('nft', '-j', 'list', 'table', 'inet', 'lg_home_wg_canary'))
+forwarded = [e['rule'] for e in data['nftables'] if e.get('rule', {}).get('chain') == 'forwarded']
+assert sum(x['counter']['packets'] for r in forwarded for x in r['expr'] if 'counter' in x) == 1
+print('PASS admitted port DNAT is blocked in forward chain')
+print('PASS 9 packet cases; no real WireGuard or home activation tested')

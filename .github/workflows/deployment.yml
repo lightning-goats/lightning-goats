@@ -17,7 +17,9 @@ jobs:
       - name: Install isolated network test tools
         run: sudo apt-get update && sudo apt-get install -y nftables iproute2
       - name: Test policy in a disposable network namespace
-        run: sudo unshare --net -- python3 deploy/nftables/test-home-canary.py
+        run: |
+          sudo unshare --net -- python3 deploy/nftables/test-home-canary.py
+          sudo unshare --net -- python3 deploy/nftables/test-home-established.py
 
   owner-candidate:
     runs-on: ubuntu-22.04

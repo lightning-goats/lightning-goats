@@ -10,6 +10,13 @@ permissions:
   contents: read
 
 jobs:
+  home-canary:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test harmless home owner fixture
+        run: node --test deploy/openhab/tests/gateway-canary.test.cjs
+
   website:
     # Ubuntu 22.04 permits Chromium's user-namespace sandbox on hosted runners.
     runs-on: ubuntu-22.04
@@ -29,6 +36,9 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: Install isolated-test dependencies
         run: sudo apt-get update && sudo apt-get install -y nginx openssl
       - name: Test assembled nginx sites and release verifier

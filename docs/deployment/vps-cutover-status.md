@@ -88,7 +88,7 @@ combined or production acceptance.
 | Network authentication | Direct-peer design has isolated authentication evidence in PR62. Review the concrete home/VPS apply and rollback candidate, retire or separately contain inspection exceptions, then obtain approval and verify the live path. Source-IP filtering alone is insufficient. |
 | Combined staging | Real daemon -> real home gateway -> harmless owner; synthetic 2340 sats -> two confirmed commands -> 340 sats, concurrency/failures/restart and paired restore. |
 | Payment authority | Balance ceiling/manual-sweep responsibility supplied by the operator. Receive-only credential and webhook provisioning/scope evidence, actual balance check, independent recovery and final provider acceptance remain open. No real invoices/payments authorized. |
-| Nostr | Isolated real signer/client acceptance passed in PR63; integrate its output correction. Production public identity/relay/credential contract and actual service sandbox acceptance remain open. Retain signed retry bytes. |
+| Nostr | Isolated real signer/client acceptance passed in PR63 and its output correction is included. Production public identity/relay list is operator-approved; credentials, actual service sandbox and relay acceptance remain open. Retain signed retry bytes. |
 | Installed release | Agree final reviewed source/artifacts, verify binary provenance, prepare production units/config inactive, then authorized staging startup. Final production credentials and privilege revocation remain gated. |
 | DNS/TLS and website | Preserve existing static TLS evidence and operator domain controls; reconcile final zone/CAA/SNI/renewal proposal. Page changes deferred; payment frontend acceptance remains open. |
 | Cutover and rollback | Final matrix, quiesced paired backup, owner reconciliation, independent recovery, old-VPS archive, separately approved payments/physical tests and DNS/WireGuard change. |
@@ -105,8 +105,22 @@ private operator checkpoint. Do not ask those questions again or imply the
 daemon automatically enforces the balance policy. Project payment-credential
 provisioning remains outstanding; do not request credential values in chat.
 
-The production announcement public identity and relay URLs have been requested.
-The website contact-link approval does not establish signer-migration authority.
+The operator separately approved this production payment/feed announcement
+identity and relay list on 2026-09-12; the production public examples now match:
+
+- `npub1v60thnx0gz0wq3n6xdnq46y069l9x70xgmjp6lprdl6fv0eux6mqgjj4rp`
+- Hex public key: `669ebbcccf409ee0467a33660ae88fd17e5379e646e41d7c236ff4963f3c36b6`
+- `wss://relay-nwc-dev.rizful.com/v1`
+- `wss://relay.primal.net`
+- `wss://relay.damus.io`
+
+The public-key decoding was checked using the pinned test nak binary. The
+dedicated NIP-46 client public key is a separate credential identity and remains
+unprovisioned in the example. The approved relay URLs have not been contacted
+by these isolated tests; actual relay authentication/publication compatibility
+is still an acceptance gate. Public configuration approval does not authorize
+loading a production signer key, publishing announcements or activating feeds.
+
 Final credential installation, privilege reduction, network application and
 live payment/physical acceptance need their concrete reviewed operator steps.
 

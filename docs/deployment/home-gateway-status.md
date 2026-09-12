@@ -42,6 +42,9 @@ The real `FeederOverride` stayed unchanged. No production gateway was started.
 Installed ELF64 x86-64 gateway SHA-256:
 `1833948b9ffb5e24057b9107d6ee044f408565f36322644885297e0bd77b42a5`.
 Rust 1.88.0 build on Ubuntu 24.04.4, systemd255, OpenHAB5.2.1; libraries resolve.
+Installed JS automation/JDBC PostgreSQL addons are 5.2.1; Java is OpenJDK21.0.12.
+AppArmor is enabled on the host; the canary has no dedicated MAC profile
+(`unconfined`), while its effective capabilities are zero and NoNewPrivileges=1.
 NTP synchronized; SQLite is on local ext4. Binary/config/units are root-owned;
 locked `lightning-goats-gateway` and `lightning-goats-gateway-canary` users have
 no sudo, extra groups or capabilities. Canary systemd permits loopback only.
@@ -62,7 +65,7 @@ No global API-security setting changed. Rotation/rollback is in the
 | Check | Observed result |
 | --- | --- |
 | Rust baseline | Format, locked strict Clippy, 150 all-feature tests, release build and RSA reverse-tree passed; exact baseline CI/Security green |
-| Home artifacts | 50 deployment tests and 3 JS fixture tests passed; exact final tooling CI must be checked on PR59 |
+| Home artifacts | 50 deployment tests and 3 JS fixture tests passed; exact final tooling CI/Security/Deployment passed |
 | Real harmless rule | Two direct same-UUID fixture commands counted separately, both acknowledged |
 | Real gateway safety/replay | Remote-OFF POST423 `not_dispatched`; refusal replay remains423 after enabling; confirmed POST200; duplicate and restart replay200 with no extra command |
 | Concurrent UUIDs | One confirmed200 and one unresolved refusal423; exactly one additional command |
@@ -94,5 +97,10 @@ WireGuard change or household firewall change occurred. The separate
 [staging/final policy plans](https://github.com/lightning-goats/lightning-goats/blob/b2f42dc39758d21d96068bcb0382db5314960908/docs/deployment/home-network-change-plan.md)
 preserve legacy access during staging and do not mislabel PR57's full-interface
 restriction as legacy-compatible. Network acceptance remains untested.
+
+Final tooling head `b2f42dc` passed [Rust CI](https://github.com/lightning-goats/lightning-goats/actions/runs/34722967869),
+[Security](https://github.com/lightning-goats/lightning-goats/actions/runs/34722967870)
+and [Deployment](https://github.com/lightning-goats/lightning-goats/actions/runs/34722967931).
+These checks do not satisfy the independent VPS review or remaining live gates.
 
 Sanitized evidence: [home-gateway-20260912.json](../testing/evidence/home-gateway-20260912.json).

@@ -185,5 +185,21 @@
     "rust": "https://github.com/lightning-goats/lightning-goats/actions/runs/34721473748",
     "security": "https://github.com/lightning-goats/lightning-goats/actions/runs/34721473745",
     "deployment": "https://github.com/lightning-goats/lightning-goats/actions/runs/34721473741"
+  },
+  "runtime_inventory": {
+    "java": "21.0.12",
+    "js_automation": "5.2.1",
+    "jdbc_postgresql": "5.2.1",
+    "apparmor_enabled": true,
+    "canary_mac_profile": "unconfined",
+    "effective_capabilities": "0000000000000000",
+    "no_new_privileges": 1
+  },
+  "tooling_ci": {
+    "commit": "b2f42dc39758d21d96068bcb0382db5314960908",
+    "rust": "https://github.com/lightning-goats/lightning-goats/actions/runs/34722967869",
+    "security": "https://github.com/lightning-goats/lightning-goats/actions/runs/34722967870",
+    "deployment": "https://github.com/lightning-goats/lightning-goats/actions/runs/34722967931",
+    "conclusion": "success"
   }
 }

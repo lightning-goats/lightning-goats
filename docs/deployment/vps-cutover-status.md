@@ -35,7 +35,7 @@ cases, real TCP handshake/established-flow/rollback tests in disposable
 namespaces, release packaging and systemd rehearsal. These do not establish
 actual home OpenHAB/JDBC or physical behavior.
 
-Later source-pinned evidence, still awaiting integration and final acceptance:
+Later source-pinned evidence, with final acceptance still open:
 
 - [PR59](https://github.com/lightning-goats/lightning-goats/pull/59),
   `b2f42dc39758d21d96068bcb0382db5314960908`: independent VPS review requests
@@ -66,9 +66,12 @@ Later source-pinned evidence, still awaiting integration and final acceptance:
   production signer identity, service or public-relay acceptance.
 
 Check-run links are retained in the corresponding PRs and evidence documents.
-These are separate candidates, not an assembled
-release. Review their combined result and rerun the required gates before using
-a final package; do not equate individual green PRs with integration acceptance.
+This VPS integration candidate combines the updated PR58 handoff with PR61,
+PR62 and PR63 while preserving their original commits as merge parents. Review
+the combined diff and exact integration CI/package evidence before using it.
+Home PR57/59/60 remain separate reviewed or pending candidates; the unresolved
+home and live gates below still apply. Individual green PRs do not establish
+combined or production acceptance.
 
 | Required gate | Remaining work / responsible boundary |
 | --- | --- |

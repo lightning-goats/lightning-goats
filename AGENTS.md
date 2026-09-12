@@ -5,6 +5,23 @@ Production remains on HOLD under the 2026-09-08 audit. Begin deployment work wit
 Passing artifact tests or earlier CI does not authorize production DNS/WireGuard
 changes, real payments, or physical feeding. Source-level blockers remain open.
 
+## Choose the host-specific assignment first
+
+The agent on the **home OpenHAB/weather server (`10.8.0.6`)** starts with
+[`docs/deployment/home-gateway-agent-handoff.md`](docs/deployment/home-gateway-agent-handoff.md).
+That handoff owns the home gateway, dedicated OpenHAB credential, harmless canary,
+weather validation and home-side containment work. It also coordinates the existing
+physical-owner contract/finality work after checking for another agent's active
+changes. Complete independent canary work even when physical acceptance is blocked.
+
+The **VPS agent** follows `docs/deployment/new-vps-remediation-handoff.md` and
+retains ownership of the payment daemon, Strike, nginx/TLS, website and VPS
+networking. Neither agent should overwrite the other's checkout or silently
+change the shared gateway API. Exchange the short source-pinned status contract
+in the home handoff; never exchange the home OpenHAB token. These role-specific
+entry points precede the historical generic reading order below, without relaxing
+any production or physical-action gate.
+
 This repository is the standalone Lightning Goats payment-accounting, messaging, overlay, and feeder-automation service.
 
 ## Source of truth

@@ -32,8 +32,11 @@ export NOSTR_SECRET_KEY
 # shellcheck disable=SC2086
 set -- $LG_NOSTR_RELAYS
 
+# nak can print the signer key, pairing capabilities and request payloads during
+# startup and later requests. Keep both child streams out of the service journal.
+# Wrapper validation above remains visible; exec preserves exit/signal semantics.
 exec "$NAK_BIN" \
     --config-path "$RUNTIME_DIRECTORY" \
     bunker \
     --authorized-keys "$LG_NOSTR_CLIENT_PUBKEY" \
-    "$@"
+    "$@" >/dev/null 2>&1

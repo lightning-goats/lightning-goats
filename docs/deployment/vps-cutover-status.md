@@ -51,6 +51,13 @@ Later source-pinned evidence, with final acceptance still open:
   bounded observation and child-liveness checks preserve all accounting and
   command-count assertions. Rust, Security and Deployment passed. The original
   PR58 timeout cause remains unproven; its failed run remains historical evidence.
+  Follow-up `8f9bb28457fa47d9914023bd97be14a5fe10d6b9` also corrects the
+  restart/confirmation test's five-second loop followed by unchecked command
+  indexing, observed in run 34725450576. A controlled initial safety failure,
+  bounded observation and child-liveness checks preserve its database-failure
+  and no-resend assertions. This integration includes that follow-up; its exact
+  current check status belongs to the PR/integration evidence, not the earlier
+  green head.
 - [PR62](https://github.com/lightning-goats/lightning-goats/pull/62),
   `dbdd1a0136a4e2bf05a458e5adb439fb6ce5c50f`: six isolated WireGuard controls
   prove the specific peer binding rejects a spoofed staging source before host

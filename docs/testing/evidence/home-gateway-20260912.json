@@ -1,0 +1,189 @@
+{
+  "/healthz": {
+    "http": 200,
+    "body": {
+      "status": "ok"
+    }
+  },
+  "/v1/feeder/override": {
+    "http": 502,
+    "body": {
+      "status": "ERROR",
+      "reason": "OpenHAB feeder safety unavailable"
+    }
+  },
+  "/v1/temperature": {
+    "http": 200,
+    "body": {
+      "temperature_f": null
+    }
+  },
+  "/v1/weather": {
+    "http": 502,
+    "body": {
+      "status": "ERROR",
+      "reason": "Weather data unavailable"
+    }
+  },
+  "service_properties": [
+    "CapabilityBoundingSet=",
+    "User=lightning-goats-gateway-canary",
+    "Group=lightning-goats-gateway-canary",
+    "ProtectSystem=strict",
+    "NoNewPrivileges=yes"
+  ],
+  "sqlite_integrity": "ok",
+  "sqlite_journal": "wal",
+  "request_count": 0,
+  "restore_exact_sql_dump": true,
+  "synthetic_credential_only": true,
+  "no_command_requests": true,
+  "binary_sha256": "1833948b9ffb5e24057b9107d6ee044f408565f36322644885297e0bd77b42a5",
+  "state_preserved_at": "/var/lib/lightning-goats-gateway-validation-v2",
+  "observed_at_utc": "2026-09-12T22:22:44.925775+00:00",
+  "binary_source_commit": "a74890c47a57a13508b3d259929f1f1bec2a5cc3",
+  "tooling_commit": "b2f42dc39758d21d96068bcb0382db5314960908",
+  "tooling_pr": 59,
+  "classification": "local-live authenticated harmless gateway plus separate synthetic-credential rehearsal; no network or production acceptance",
+  "owner_script_sha256": "730053e0f3245cb83461e3fe6e3b05d49c8b508631e8cdb4a889c8be8d915978",
+  "openhab_version": "5.2.1",
+  "canary_rule_sha256": "a8ed99fb3140d785c13c3f628372a0146bddcb85970151a9d7a3af57afbb32ab",
+  "fixture_direct_commands": 2,
+  "fixture_direct_duplicate_uuid_acknowledged": true,
+  "fixture_direct_command_count": 2,
+  "canary_remote_enabled": false,
+  "production_service_active": false,
+  "production_remote_item": "absent; fail closed, not changed",
+  "weather_input_schema": "31 normalized Item-name fields; no dateutc or observation timestamp",
+  "temperature_optional": "omitted because live Number Item is unitless",
+  "checks": {
+    "rust_1_88_fmt": "pass",
+    "rust_1_88_clippy_locked_all_targets_all_features": "pass",
+    "rust_1_88_test_locked_all_features": 150,
+    "deployment_tests": 50,
+    "canary_js_tests": 3,
+    "rsa_reverse_tree": "not in active graph",
+    "baseline_security_ci": "https://github.com/lightning-goats/lightning-goats/actions/runs/34721473745"
+  },
+  "stage": "local-canary-ready",
+  "credentials": {
+    "accounts": [
+      {
+        "user": "lightning_goats_gateway",
+        "label": "lightninggoatsgateway",
+        "role": [
+          "user"
+        ],
+        "item_read_http": 200,
+        "admin_read_http": 401,
+        "ciphertext": "/etc/credstore.encrypted/lightning-goats-gateway-openhab",
+        "credential_name": "openhab-token"
+      },
+      {
+        "user": "lightning_goats_gateway_canary",
+        "label": "lightninggoatsgatewaycanary",
+        "role": [
+          "user"
+        ],
+        "item_read_http": 200,
+        "admin_read_http": 401,
+        "ciphertext": "/etc/credstore.encrypted/lightning-goats-gateway-canary-openhab",
+        "credential_name": "openhab-token"
+      }
+    ],
+    "tokens_shared": false
+  },
+  "live_canary": {
+    "initial_count": 2,
+    "safety": {
+      "http": 200,
+      "body": {
+        "override_enabled": false,
+        "remote_enabled": false
+      }
+    },
+    "remote_off": {
+      "http": 423,
+      "body": {
+        "request_id": "5e61a378-1967-4a03-92fa-9706ea8a25b1",
+        "status": "not_dispatched",
+        "refusal": {
+          "reason": "safety",
+          "retry_after_seconds": 5
+        }
+      }
+    },
+    "refusal_replay": {
+      "http": 423,
+      "body": {
+        "request_id": "5e61a378-1967-4a03-92fa-9706ea8a25b1",
+        "status": "not_dispatched",
+        "refusal": {
+          "reason": "safety",
+          "retry_after_seconds": 5
+        }
+      }
+    },
+    "confirmed": {
+      "http": 200,
+      "body": {
+        "request_id": "5417ac26-7521-4188-b1eb-4d0a3546eafe",
+        "status": "confirmed"
+      }
+    },
+    "duplicate": {
+      "http": 200,
+      "body": {
+        "request_id": "5417ac26-7521-4188-b1eb-4d0a3546eafe",
+        "status": "confirmed"
+      }
+    },
+    "restart_replay": {
+      "http": 200,
+      "body": {
+        "request_id": "5417ac26-7521-4188-b1eb-4d0a3546eafe",
+        "status": "confirmed"
+      }
+    },
+    "concurrent": [
+      {
+        "http": 200,
+        "body": {
+          "request_id": "6d519287-10d1-451f-a44f-371f6d6e9968",
+          "status": "confirmed"
+        }
+      },
+      {
+        "http": 423,
+        "body": {
+          "request_id": "16e1d5bc-df57-4f05-b3b5-5b6d0380b068",
+          "status": "not_dispatched",
+          "refusal": {
+            "reason": "unresolved",
+            "retry_after_seconds": 5
+          }
+        }
+      }
+    ],
+    "final_count": 4,
+    "remote_final": "OFF",
+    "physical_override_unchanged": true,
+    "rule_sha256": "a8ed99fb3140d785c13c3f628372a0146bddcb85970151a9d7a3af57afbb32ab"
+  },
+  "quiesced_canary_backup": {
+    "location": "/var/backups/lightning-goats/home-canary-20260912T223031Z",
+    "integrity": "ok",
+    "restore_exact": true,
+    "tables": {
+      "feeder_requests": 2,
+      "feeder_request_events": 4,
+      "feeder_refusals": 2,
+      "weather_high_water": 0
+    }
+  },
+  "source_ci": {
+    "rust": "https://github.com/lightning-goats/lightning-goats/actions/runs/34721473748",
+    "security": "https://github.com/lightning-goats/lightning-goats/actions/runs/34721473745",
+    "deployment": "https://github.com/lightning-goats/lightning-goats/actions/runs/34721473741"
+  }
+}

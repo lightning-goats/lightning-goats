@@ -10,6 +10,27 @@ permissions:
   contents: read
 
 jobs:
+  home-containment-candidate:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install isolated network test tools
+        run: sudo apt-get update && sudo apt-get install -y nftables iproute2
+      - name: Test policy in a disposable network namespace
+        run: |
+          sudo unshare --net -- python3 deploy/nftables/test-home-canary.py
+          sudo unshare --net -- python3 deploy/nftables/test-home-established.py
+
+  owner-candidate:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Test isolated owner candidate (no OpenHAB connection)
+        run: node deploy/openhab/tests/owner.test.cjs
+
   website:
     # Ubuntu 22.04 permits Chromium's user-namespace sandbox on hosted runners.
     runs-on: ubuntu-22.04

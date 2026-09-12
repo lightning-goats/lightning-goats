@@ -491,19 +491,30 @@ async fn shipped_examples_real_daemon_gateway_two_confirmed_commands_leave_340()
 
 #[tokio::test]
 async fn daemon_restart_and_confirmation_failure_poll_original_uuid_without_resend() {
-    let owner = Owner::default();
+    let owner = Owner {
+        initial_safety_delay: Arc::new(Mutex::new(Some(Duration::from_millis(500)))),
+        ..Owner::default()
+    };
     let (mock, owner_url) = mock_owner(owner.clone()).await;
     let directory = TempDir::new().unwrap();
     let ledger = credited(&directory, 1000).await;
-    let (_gateway, base) = gateway(&directory, &owner_url, 1).await;
-    let first = daemon(&directory, &base).await;
-    for _ in 0..100 {
-        if !owner.commands.lock().unwrap().is_empty() {
-            break;
+    let (mut gateway_process, base) = gateway(&directory, &owner_url, 1).await;
+    let mut first = daemon(&directory, &base).await;
+    let original = tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            assert!(first.0.try_wait().unwrap().is_none(), "daemon exited");
+            assert!(
+                gateway_process.0.try_wait().unwrap().is_none(),
+                "gateway exited"
+            );
+            if let Some(id) = owner.commands.lock().unwrap().first().cloned() {
+                break id;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
         }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    let original = owner.commands.lock().unwrap()[0].clone();
+    })
+    .await
+    .expect("initial command must arrive after bounded safety retry");
     drop(first); // response/confirmation lost after mock command
     let pool = sqlx::SqlitePool::connect(&format!(
         "sqlite://{}",

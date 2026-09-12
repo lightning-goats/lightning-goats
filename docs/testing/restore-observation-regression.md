@@ -38,3 +38,21 @@ Local candidate results: focused test passed in 12.06 seconds; all eight
 Clippy passed. Exact published-head Rust/Security/Deployment checks remain
 required. The negative control and these results do not identify the earlier
 CI timeout's original cause or close live restore/owner acceptance.
+
+## Restart/confirmation observation follow-up
+
+Updated documentation PR58 head `789351856bdeddce2303591a7f85ff2d018fabd3`
+failed the separate restart/confirmation test in
+[Rust run 34725450576](https://github.com/lightning-goats/lightning-goats/actions/runs/34725450576).
+Its loop waited five seconds and then unconditionally indexed command zero.
+The list was empty, producing an index-out-of-bounds panic. The reason no
+command arrived during that particular CI window remains unproven.
+
+That test now uses the same controlled initial unavailable-safety fixture and
+allows a bounded fifteen-second observation with both child-liveness checks.
+It obtains the UUID from the observed first command rather than indexing after
+an exhausted loop. The fixture requires the real worker's safety retry before
+the command can arrive. Restart, injected confirmation-database failure,
+unchanged credit, same-UUID status recovery and no-resend assertions remain.
+This corrects test observation; production timing and command admission are
+unchanged. The failed run is retained and is not explained away by a rerun.

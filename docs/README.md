@@ -7,6 +7,23 @@ completion claims do not establish deployment readiness. Read
 The new VPS agent should follow
 [`new-vps-remediation-handoff.md`](deployment/new-vps-remediation-handoff.md).
 
+## Parallel agent entry points
+
+**Home server (`10.8.0.6`):** start with
+[`home-gateway-agent-handoff.md`](deployment/home-gateway-agent-handoff.md).
+It covers the existing gateway installation, exact OpenHAB permission surface,
+project-specific token, isolated harmless canary, local weather, existing-owner
+contract/finality coordination, home-side UFW/WireGuard policy, tests, rollback,
+and the short status contract to return to the VPS agent. The home agent can
+finish independent canary work without enabling physical feeding.
+
+**New VPS:** continue with
+[`new-vps-remediation-handoff.md`](deployment/new-vps-remediation-handoff.md).
+Keep payment/nginx/site/VPS work separate from home-host changes. Coordinate
+shared source and API changes using pinned commits and focused PRs; do not
+exchange OpenHAB credentials or replay the already-integrated PR #56 stack.
+These host-specific entry points precede the generic reading order below.
+
 ## Current Phase 1 source of truth
 
 Phase 1 is the migration from LNbits/Core Lightning to the standalone Strike-backed Lightning Goats architecture tracked in GitHub issue #6 and its child issues.

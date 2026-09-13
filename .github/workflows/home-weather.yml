@@ -1,0 +1,20 @@
+name: Home weather compatibility
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  real-gateway-exporter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.88"
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --locked --bin lightning-goats-gateway
+      - name: Actual gateway with synthetic radio observations
+        env:
+          LG_WEATHER_GATEWAY_BIN: target/debug/lightning-goats-gateway
+        run: python3 -B -m unittest discover -s deploy/tests -p 'test_weather*.py' -v

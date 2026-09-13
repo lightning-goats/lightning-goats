@@ -1,0 +1,20 @@
+# REVIEW ONLY: atomically replace only the inventoried project namespace table.
+delete table inet __TABLE__
+table inet __TABLE__ {
+ chain input {
+  type filter hook input priority filter; policy drop;
+  iifname "lo" accept
+  iifname "__INTERFACE__" ip saddr __GATEWAY_IPV4__ tcp sport 8790 ct state established accept
+  counter drop
+ }
+ chain output {
+  type filter hook output priority filter; policy drop;
+  oifname "lo" accept
+  oifname "__INTERFACE__" ip daddr __GATEWAY_IPV4__ tcp dport 8790 ct state { new, established } accept
+  counter drop
+ }
+ chain forward {
+  type filter hook forward priority filter; policy drop;
+  counter drop
+ }
+}

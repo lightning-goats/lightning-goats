@@ -122,7 +122,8 @@ once after completion/remote-OFF cleanup. Both captures must have Hold ON,
 RemoteEnabled OFF, no unresolved delivery, and the pinned source digest. The HOME
 helper checks Fault OFF before emitting them. Preserve its exit status and logs;
 an unsigned capture is evidence to authenticate in the session handoff, not proof
-of its own origin. Preserve the existing Count1 baseline; never reset the fixture.
+of its own origin. Preserve the actual retained baseline; obtain a fresh read-only
+snapshot after HOME local tests and never reset the fixture.
 
 After quiescing the session, supply the daemon's consistent exported database
 (with matching WAL when applicable), the two HOME captures and the run UUID from

@@ -41,8 +41,8 @@ This does not establish a production signer identity, effective credential
 permissions, recipient client acceptance or approved DM relay reachability.
 
 The sections below describe the implemented balance, transport and durable
-state APIs. Remaining implementation includes the periodic worker, protected
-runtime configuration and installation/restore procedures. The NIP-17
+state APIs. Remaining implementation includes runtime assembly, dedicated credential
+configuration and installation/restore procedures. The NIP-17
 relay policy must be reconciled with the operator's approved recipient inbox
 relays before delivery; announcement relays are not implicitly DM relays.
 Missing encryption/signing must fail before any message publication. Public
@@ -77,8 +77,8 @@ responses, asserting one authenticated GET and no alternate-path/redirect reques
 No store or public event/outbox operation is part of this provider read. The
 alert worker must acquire its durable observation/episode serialization before
 calling it; accepting externally prefetched balances could reorder high/low
-observations between concurrent processes. Until that worker, encrypted outbox
-and runtime acceptance are implemented, the alert-delivery gate remains open.
+observations between concurrent processes. Until runtime assembly and operational acceptance are complete, the
+alert-delivery gate remains open.
 
 ## Application private transport
 
@@ -150,7 +150,38 @@ separate pinned-bunker test. These tests do not prove cross-process crash or
 full-host anti-rollback; operational restore must reconcile private alert state
 with its protected policy and keep the worker stopped until reviewed.
 
-No periodic worker, credential loader, unit or startup activation is added here.
-The policy/loop integration, scheduling/backoff, provider-account verification,
-reviewed initialization/install/restore commands, actual inbox-relay acceptance
-and independent review are still required before alert deployment.
+## Worker and protected policy API
+
+`run_private_alert_worker` is an explicitly invoked library worker. It attempts
+existing ciphertext delivery before an authoritative observation, so provider
+failure does not prevent pending delivery. Separate schedules normally poll every
+30 seconds and deliver one pending row every 15 seconds. Failures double each
+schedule's delay independently up to 300 seconds; successful operations reset it.
+Deadlines start at operation completion, avoiding catch-up bursts. Operations
+remain sequential under the private store's lock; provider/nak timeouts can delay
+both schedules. This is an alert, not an automatic balance cap or sweep service.
+
+A stop signal or closed shutdown channel prevents subsequent operations. An
+in-flight transaction/subprocess is allowed to complete using its existing
+bounded deadline, rather than cancelling midway through cleanup. Logs contain
+only generic observation/delivery availability, without errors, balance, policy,
+recipient or subprocess output. Tests cover retry after provider failure,
+completion during shutdown, no I/O when already stopped, capped/reset delays and
+scheduling from completion.
+
+`AlertPolicy::from_systemd_credential` reads only `private-alert-policy` from the
+absolute systemd credential directory. The file must be a non-symlink regular
+0400 file, at most 16 KiB, read within three seconds. Metadata is compared before
+and after opening, reads are bounded, raw bytes are zeroized and parsing errors
+are replaced with generic messages. JSON fields are exactly `threshold_sats`,
+`recipient` (lowercase hexadecimal), `inbox_relays`, and `account_binding`;
+unknown/duplicate/missing fields fail. No values default to public announcement
+configuration. Permission, symlink, size and parser-redaction regressions use
+synthetic local files. This does not establish the trusted source or effective
+owner of systemd's credential directory: the reviewed unit and installation
+acceptance must establish that boundary.
+
+No binary entry point, unit or startup activation is added here. Runtime assembly
+with dedicated provider/signer credentials, reviewed initialization/install/restore
+commands, actual provider account/scopes, inbox-relay acceptance and independent
+review are still required before alert deployment.

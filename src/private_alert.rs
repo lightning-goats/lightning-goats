@@ -1,4 +1,7 @@
 //! Durable private operational alerts. No public event/ledger integration.
+mod worker;
+pub use worker::run_private_alert_worker;
+mod policy;
 use crate::{
     nostr::{NakClient, PrivateGiftWrap},
     strike::StrikeClient,

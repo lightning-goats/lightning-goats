@@ -77,9 +77,16 @@ repeated POST of the already confirmed UUID. All upstreams are isolated loopback
 fixtures with synthetic credentials; no live owner is contacted by these tests.
 
 The existing real unlinked owner/JDBC fixture evidence remains in
-[home-owner-v2-candidate.md](home-owner-v2-candidate.md). That prior evidence does
-not itself test this new Rust reader against the actual persistence endpoint.
-Independent VPS review, actual unlinked reader acceptance, retained-state restart
+[home-owner-v2-candidate.md](home-owner-v2-candidate.md). The new fixed-target `inspect_owner_v2_fixture` example has now also read that
+existing receipt through actual OpenHAB/JDBC using the dedicated canary USER,
+returning `Complete`. It ran as a transient non-admin loopback-only system service
+with encrypted credential delivery, a root-owned executable and read-only system
+protection. No command method is called by the probe. The fixture counter and
+ON-delivery count stayed1 and actuator remained OFF. The first launch from
+noexec `/run` failed before execution; a standard executable directory resolved
+that without changing mount or security policy. See
+[reader evidence](../testing/evidence/home-owner-v2-reader-20260913.json).
+Independent VPS review, retained-state restart
 and serialization, sustained retention/full-host restore, migration of legacy
 callers, the approved authenticated network path and physical-owner replacement
 remain open. No result parser broadening or automatic command retry closes them.

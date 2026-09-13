@@ -93,6 +93,19 @@ non-writable ancestor chain. The exact bundle contains only:
 - `smoke-release.py`
 - `TOOL.json`
 
+Export the exact reviewed commit without running its files:
+
+```sh
+python3 -I -S -B deploy/scripts/export-upgrade-tools.py /path/to/repository FULL_REVIEWED_SHA /private/new-tool-bundle
+```
+
+The exporter refuses root execution and existing destinations. It reads regular
+Git blobs from the literal commit, disables replacement objects and caller Git
+environment overrides, and ignores dirty checkout files. It writes the six tools
+and deterministic `TOOL.json` with private modes and prints the manifest/launcher
+hashes. Failed output directories must be retained for inspection. This is an
+unprivileged preparation utility, not a trusted installer or source approval.
+
 Generate `TOOL.json` from the exact reviewed commit's file bytes, without running
 those files. Its schema is `{"version":1,"source_commit":"FULL_SHA","files":
 {"FILENAME":"SHA256",...}}`; `files` must cover exactly the six Python files,

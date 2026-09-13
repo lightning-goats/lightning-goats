@@ -106,3 +106,64 @@ checked; local preparation success cannot close them.
 
 Focused regression: `cargo test --locked --all-features --example prepare_cross_host`.
 CI explicitly runs this example's tests in addition to the required full checks.
+
+## Offline accounting comparison against the held fixture
+
+The generation2 held fixture/control contract is source-reviewed at HOME PR77
+`3b16b7a85e0a2ab88b42562c78a8b7dde728513f`. Its rule SHA256 is
+`1cacb11569ab90db03bc0ee2f94fd3fec9d0e2132bc816d4f5982d4fd7d6a88c`.
+HOME owns all OpenHAB reads/releases. The VPS does not receive its token or call
+OpenHAB. The source-reviewed contract does not approve network exposure or a run.
+
+`deploy/scripts/verify-cross-host-accounting.py` (Python 3.11+) compares captures
+without network access or application writes. It consumes the exact JSON from
+HOME's `control-held-canary.py` with no `--release`, once before the session and
+once after completion/remote-OFF cleanup. Both captures must have Hold ON,
+RemoteEnabled OFF, no unresolved delivery, and the pinned source digest. The HOME
+helper checks Fault OFF before emitting them. Preserve its exit status and logs;
+an unsigned capture is evidence to authenticate in the session handoff, not proof
+of its own origin. Preserve the existing Count1 baseline; never reset the fixture.
+
+After quiescing the session, supply the daemon's consistent exported database
+(with matching WAL when applicable), the two HOME captures and the run UUID from
+`PREPARED.json`:
+
+```sh
+python3 deploy/scripts/verify-cross-host-accounting.py \
+  --database /private/session/export/daemon.db \
+  --baseline /private/session/home-before.json \
+  --completed /private/session/home-completed.json \
+  --run-id ORIGINAL_PREPARED_RUN_UUID
+```
+
+Capture stdout, stderr and exit status to new evidence files. An empty output or
+failed exit is not a pass. The verifier opens SQLite read-only, takes a consistent
+read transaction and limits row/JSON sizes and SQLite work. It does not copy,
+repair, migrate or initialize a database. Use only the synthetic session export;
+this tool does not identify a live database or authenticate its provenance.
+
+The comparison requires an unchanged complete baseline journal, exactly two new
+owner deliveries with distinct nonhistorical UUIDs, and final Ack for the second
+UUID. Every extra delivery fails, including a duplicate UUID whose ledger debit
+was deduplicated. Those exact two UUIDs must match the daemon's confirmed attempts,
+ordered 1,000-sat debits and ordered confirmation events with balances 1,340 then
+340. The original run must have exactly one 2,340-sat synthetic payment/credit and
+payment event; no unresolved attempt, public Nostr outbox or issued provider
+request is permitted. Historical refusal attempts may remain as resolved
+`reconciled_not_fed` records and may not match a delivered UUID.
+
+A passing comparison establishes only consistency of the supplied captures. It
+cannot prove that duplicates/concurrency, refusal cooldown, lost responses, late
+release, process restarts or paired restore were actually exercised. Retain each
+scenario's timestamps, request/response bytes, process/source pins, original UUID,
+HOME before/after command journal, and backup/restore manifests separately. The
+final authenticated path, actual unit sandbox, provider scopes, physical-owner
+retention and operational approvals are still required. The launch/fault-control
+portion of the cross-host harness remains to be integrated after HOME's held
+binding and final staging path are reviewed.
+
+Regression tests use the actual repository SQLite migrations plus captured
+fixture-shaped data. They verify correct correlation and reject extra/duplicate
+commands, changed baseline, wrong UUID/source, pending completion, inconsistent
+financial events/debits, provider requests and public outbox work. These tests
+are offline verifier tests, not a cross-host run.

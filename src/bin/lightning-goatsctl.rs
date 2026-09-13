@@ -20,6 +20,11 @@ struct Args {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Private operational alert lifecycle, separate from the financial ledger.
+    PrivateAlert {
+        #[command(subcommand)]
+        action: PrivateAlertCommand,
+    },
     /// Resolve an ambiguous feed attempt without directly actuating the feeder.
     ReconcileFeed {
         #[arg(long)]
@@ -33,6 +38,16 @@ enum Command {
     Status,
 }
 
+#[derive(Debug, Subcommand)]
+enum PrivateAlertCommand {
+    /// Initialize new private state offline; refuses existing state.
+    Initialize,
+    /// Check existing private state and policy offline without provider credentials.
+    Check,
+    /// Run private balance alerts; requires separate operational approval.
+    Run,
+}
+
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum ReconcileOutcome {
     Fed,
@@ -42,10 +57,32 @@ enum ReconcileOutcome {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+    // Handle this before reading the application config or opening its ledger.
+    if let Command::PrivateAlert { action } = &args.command {
+        use lightning_goats::private_alert::{
+            check_private_alert, initialize_private_alert, run_private_alert,
+        };
+        tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::WARN)
+            .init();
+        let result = match action {
+            PrivateAlertCommand::Initialize => initialize_private_alert().await,
+            PrivateAlertCommand::Check => check_private_alert().await,
+            PrivateAlertCommand::Run => run_private_alert().await,
+        };
+        return result.map_err(|_| {
+            anyhow::anyhow!(
+                "private alert command failed; review protected configuration and state"
+            )
+        });
+    }
     let config = AppConfig::load(&args.config)?;
     let ledger = LedgerStore::connect(&config.database.url).await?;
 
     match args.command {
+        Command::PrivateAlert { .. } => {
+            unreachable!("private alert handled before financial state")
+        }
         Command::ResetOverlayStream => {
             let id = ledger.reset_overlay_stream().await?;
             println!("overlay_stream_id={id}");

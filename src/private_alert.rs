@@ -2,11 +2,13 @@
 mod worker;
 pub use worker::run_private_alert_worker;
 mod policy;
+mod runtime;
 use crate::{
     nostr::{NakClient, PrivateGiftWrap},
     strike::StrikeClient,
 };
 use anyhow::{Context, Result, bail};
+pub use runtime::{check_private_alert, initialize_private_alert, run_private_alert};
 use sha2::{Digest, Sha256};
 use sqlx::{Row, SqlitePool};
 use std::future::Future;

@@ -1,0 +1,49 @@
+[Unit]
+Description=Lightning Goats private operational balance alert
+After=network-online.target
+Wants=network-online.target
+# Candidate only: install separately; do not enable until operational acceptance.
+
+[Service]
+Type=simple
+User=lightning-goats-alert
+Group=lightning-goats-alert
+ExecStart=/usr/local/bin/lightning-goatsctl private-alert run
+StateDirectory=lightning-goats-alert
+StateDirectoryMode=0700
+RuntimeDirectory=lightning-goats-alert
+RuntimeDirectoryMode=0700
+UMask=0077
+LoadCredentialEncrypted=private-alert-policy:/etc/credstore.encrypted/lightning-goats-alert-policy
+LoadCredentialEncrypted=private-alert-runtime:/etc/credstore.encrypted/lightning-goats-alert-runtime
+LoadCredentialEncrypted=private-alert-strike-key:/etc/credstore.encrypted/lightning-goats-alert-strike-key
+LoadCredentialEncrypted=private-alert-nostr-key:/etc/credstore.encrypted/lightning-goats-alert-nostr-key
+Restart=on-failure
+RestartSec=30s
+# Allow the bounded nak verification/publication chain to finish on shutdown.
+TimeoutStopSec=240s
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectKernelLogs=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+AmbientCapabilities=
+# The alert identity has no reason to reach household, link-local or private LANs.
+# Public provider/relay destinations still require reviewed egress acceptance.
+IPAddressDeny=10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16
+IPAddressDeny=fc00::/7 fe80::/10
+
+[Install]
+WantedBy=multi-user.target

@@ -22,13 +22,7 @@ impl AlertPolicy {
     /// Trust in the directory and file ownership comes from the reviewed unit's
     /// LoadCredential assignment; this loader does not establish host provenance.
     pub async fn from_systemd_credential() -> Result<Self> {
-        let directory = std::env::var_os("CREDENTIALS_DIRECTORY")
-            .ok_or_else(|| anyhow::anyhow!("private alert policy credential unavailable"))?;
-        let directory = Path::new(&directory);
-        if !directory.is_absolute() {
-            bail!("private alert credential directory must be absolute");
-        }
-        Self::read_policy_file(&directory.join("private-alert-policy")).await
+        Self::read_policy_file(&credential_path("private-alert-policy")?).await
     }
 
     async fn read_policy_file(path: &Path) -> Result<Self> {
@@ -45,6 +39,27 @@ impl AlertPolicy {
             &input.account_binding,
         )
     }
+}
+
+fn credential_path(name: &str) -> Result<std::path::PathBuf> {
+    let directory = std::env::var_os("CREDENTIALS_DIRECTORY")
+        .ok_or_else(|| anyhow::anyhow!("private alert credential unavailable"))?;
+    let directory = Path::new(&directory);
+    if !directory.is_absolute() {
+        bail!("private alert credential directory must be absolute");
+    }
+    Ok(directory.join(name))
+}
+
+// Callers supply only fixed internal credential names, never user paths.
+pub(super) async fn credential(name: &'static str) -> Result<Zeroizing<Vec<u8>>> {
+    tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        read_policy(&credential_path(name)?),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("private alert credential read timed out"))?
+    .map_err(|_| anyhow::anyhow!("private alert credential rejected"))
 }
 
 #[cfg(unix)]

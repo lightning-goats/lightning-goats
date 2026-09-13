@@ -181,7 +181,28 @@ synthetic local files. This does not establish the trusted source or effective
 owner of systemd's credential directory: the reviewed unit and installation
 acceptance must establish that boundary.
 
-No binary entry point, unit or startup activation is added here. Runtime assembly
-with dedicated provider/signer credentials, reviewed initialization/install/restore
-commands, actual provider account/scopes, inbox-relay acceptance and independent
-review are still required before alert deployment.
+## CLI and inactive unit candidate
+
+`lightning-goatsctl private-alert initialize|check|run` now assembles the runtime
+without loading the financial application's config or opening its ledger.
+Initialize/check require only protected policy/runtime credentials and perform
+no provider/signer calls. Run requires separate balance-read and NIP-46 client
+credentials, opens existing state, and handles SIGTERM/SIGINT through the worker's
+bounded cleanup. The state binding additionally covers provider URL and signer
+identity/relay assignment; changes require reconciliation. CLI errors are generic.
+
+`tests/private_alert_cli.rs` executes the real CLI against temporary protected
+files. It covers offline initialization/check without keys or financial config,
+missing state/key rejection, provider/signer reassignment and redacted runtime
+validation. A loopback HTTP provider plus non-cryptographic nak process fixture
+checks actual balance polling, exactly one wrap/publication and high-episode
+persistence after process restart. This does not replace the real-bunker proof.
+
+The archive now requires the inactive `lightning-goats-private-alert.service`
+candidate. Syntax verification is not actual service isolation acceptance.
+Dedicated identity creation, encrypted-credential provisioning, actual unit
+sandbox checks, synthetic service rehearsal, operational account/scopes and
+inbox delivery acceptance remain open. See
+[private alert operations](../deployment/private-alert-operations.md) for the
+preparation, activation and restore boundaries. No unit is installed or activated
+by these repository changes.

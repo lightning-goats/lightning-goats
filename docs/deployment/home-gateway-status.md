@@ -1,4 +1,4 @@
-# Home gateway status — 2026-09-12
+# Home gateway status — updated 2026-09-13 UTC
 
 **Local canary ready; network and production acceptance blocked.** Production
 HOLD remains. Both original checkouts and the live physical owner are preserved.
@@ -9,7 +9,7 @@ review is requested, not self-certified by the home owner.
 
 ```yaml
 source_commit: a74890c47a57a13508b3d259929f1f1bec2a5cc3
-tooling_commit: b2f42dc39758d21d96068bcb0382db5314960908
+tooling_commit: f1cef47bf65660eb48bde81ca7bfcb0d48bb4252
 home_host: 10.8.0.6
 stage: local-canary-ready
 canary_url: http://127.0.0.1:8790/
@@ -30,7 +30,7 @@ credential_shared_with_vps: false
 verified_runtime_role: user
 weather: unavailable
 network_policy: proposed
-next_vps_action: Review PR59 and reply on issue17 with source/protocol and authenticated staging peer/path proposal; do not connect or seed a network canary yet.
+next_vps_action: Re-review PR59 at f1cef47 and review PR65; confirm peer endpoint, reciprocal mapping and recovery plan privately before any network canary.
 ```
 
 The production request/result names above are a future binding, never used for
@@ -60,16 +60,16 @@ root-only under `/etc/credstore.encrypted/lightning-goats-gateway-openhab` and
 These are coarse USER rights, not per-Item authorization. Existing implicit
 USER role permits unauthenticated Item reads; invalid-token reads return401.
 No global API-security setting changed. Rotation/rollback is in the
-[home installation guide](https://github.com/lightning-goats/lightning-goats/blob/b2f42dc39758d21d96068bcb0382db5314960908/docs/deployment/home-gateway-installation.md).
+[home installation guide](https://github.com/lightning-goats/lightning-goats/blob/f1cef47bf65660eb48bde81ca7bfcb0d48bb4252/docs/deployment/home-gateway-installation.md).
 
 | Check | Observed result |
 | --- | --- |
 | Rust baseline | Format, locked strict Clippy, 150 all-feature tests, release build and RSA reverse-tree passed; exact baseline CI/Security green |
-| Home artifacts | 50 deployment tests and 3 JS fixture tests passed; exact final tooling CI/Security/Deployment passed |
+| Home artifacts | 59 deployment tests (including 9 helper boundary tests) and 3 JS fixture tests passed; revised tooling CI/Security/Deployment passed |
 | Real harmless rule | Two direct same-UUID fixture commands counted separately, both acknowledged |
 | Real gateway safety/replay | Remote-OFF POST423 `not_dispatched`; refusal replay remains423 after enabling; confirmed POST200; duplicate and restart replay200 with no extra command |
 | Concurrent UUIDs | One confirmed200 and one unresolved refusal423; exactly one additional command |
-| Local count/state | Counter2→4 during gateway tests; two acknowledged requests, two durable refusals; remote returned OFF |
+| Local count/state | Original counter2→4; revised checker run4→6 with two further confirmations and two refusals; remote returned OFF |
 | HTTP reads | `/healthz`200; `/v1/feeder/override`200 with false/false; `/v1/temperature`200 with `temperature_f:null`; `/v1/weather`502 `Weather data unavailable` |
 | Synthetic invalid credential | Separate temporary system unit: health200, safety502; no command requests; unit removed and evidence state preserved |
 | Backup/restore | Quiesced nonempty canary store integrity OK; restored SQL dump matched, including acknowledged requests/refusals; active store never replaced |
@@ -88,19 +88,35 @@ Item is unitless, so it is omitted. No receiver mutation/rebind/restart occurred
 Stale/future/regression and explicit-unit cases pass isolated Rust fixtures;
 those do not repair the actual receiver contract.
 
-Remaining: independent PR59 review; approved authenticated staging peer/path and
+Remaining: independent re-review of corrected PR59; approved authenticated staging peer/path and
 home policy; coordinated real-daemon/gateway 2340-synthetic-sat cross-host test;
 weather observation contract; physical-owner finality and actual-runtime/JDBC
 acceptance under existing PR57; production sizing/remote Item/activation and
-separately approved physical acceptance. No physical test, payment, DNS change,
+physical acceptance after readiness and operator scope are verified. No physical test, payment, DNS change,
 WireGuard change or household firewall change occurred. The separate
-[staging/final policy plans](https://github.com/lightning-goats/lightning-goats/blob/b2f42dc39758d21d96068bcb0382db5314960908/docs/deployment/home-network-change-plan.md)
+[staging/final policy plans](https://github.com/lightning-goats/lightning-goats/blob/f1cef47bf65660eb48bde81ca7bfcb0d48bb4252/docs/deployment/home-network-change-plan.md)
 preserve legacy access during staging and do not mislabel PR57's full-interface
 restriction as legacy-compatible. Network acceptance remains untested.
 
-Final tooling head `b2f42dc` passed [Rust CI](https://github.com/lightning-goats/lightning-goats/actions/runs/34722967869),
-[Security](https://github.com/lightning-goats/lightning-goats/actions/runs/34722967870)
-and [Deployment](https://github.com/lightning-goats/lightning-goats/actions/runs/34722967931).
+Revised tooling head `f1cef47` passed [Rust CI](https://github.com/lightning-goats/lightning-goats/actions/runs/34726721411),
+[Security](https://github.com/lightning-goats/lightning-goats/actions/runs/34726721405)
+and [Deployment](https://github.com/lightning-goats/lightning-goats/actions/runs/34726721413).
 These checks do not satisfy the independent VPS review or remaining live gates.
 
 Sanitized evidence: [home-gateway-20260912.json](../testing/evidence/home-gateway-20260912.json).
+
+The PR59 review found credential redirects, mismatched inspected/configured
+OpenHAB origin and rehearsal database/unit drift. The revision rejects redirects,
+noncanonical installed config/unit, unsafe executable ownership, effective-service
+drift and other literal canary rule consumers. It constructs the rehearsal from
+reviewed templates with explicit isolated targets. The live harmless recheck
+passed; existing validation evidence and credentials were preserved.
+
+[PR65](https://github.com/lightning-goats/lightning-goats/pull/65) adds the concrete
+staging filter, read-only private drift guards, volatile-session application
+proposal and listener-first rollback. Eleven isolated packet cases plus table-only
+rollback and two drift tests passed locally; no live policy was applied. Peer
+metadata remains private. Owner source/readback still matches the digest above;
+its known completion-to-failure defect remains, and PR57 is not deployed.
+
+Recheck evidence: [home-gateway-helper-review-20260913.json](../testing/evidence/home-gateway-helper-review-20260913.json).

@@ -98,3 +98,27 @@ check is ok, with zero request/refusal rows. Preserve this store. Sanitized
 [read-only runtime evidence](../testing/evidence/home-held-gateway-readonly-20260913.json)
 is separate from the earlier inactive-installation snapshot. PR79 review and
 actual held request/restart/release acceptance remain open.
+
+## Local held request/restart/recovery (2026-09-13)
+
+After identified project-lead source acceptance of `863cfab` (runtime implementation
+still `daeb9ba`), HOME exercised the already-authorized local unlinked fixture.
+Remote OFF refused a UUID with423; replay after enabling the canary still refused
+without delivery. One different UUID was delivered and held beyond timeout.
+Restart preserved its pending database reservation and caused no second command.
+
+The first test assertion incorrectly expected `ambiguous` from the subsequent
+GET; the documented result is202 `pending`. That test stopped and cleaned up
+remote OFF/service stopped. Its immutable intent and failed-stage files were
+preserved. A separate continuation used that same UUID, verified202/pending,
+released it with HOME's fixed control, recovered200/confirmed by GET and replayed
+POST200/confirmed with no additional delivery. No new UUID replaced uncertainty.
+
+Count1 became2: exactly one additional unlinked owner delivery. Final Hold ON,
+remote OFF, all receipts released; gateway stopped/boot-disabled. Database
+integrity ok, one acknowledged row and one durable refusal retained. The test
+scripts and immutable stage records remain privately on HOME. Sanitized
+[local evidence](../testing/evidence/home-held-gateway-local-20260913.json) records
+both the interrupted assertion and successful same-UUID continuation. No physical
+command or household-access change occurred. This is local acceptance only;
+actual cross-host synthetic accounting, containment and paired restore remain open.

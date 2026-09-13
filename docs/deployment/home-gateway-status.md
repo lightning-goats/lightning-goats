@@ -6,6 +6,46 @@ nginx, website, Nostr and VPS networking. Issue #17 is the coordination thread;
 Hexmem holds private context. Existing checkouts, credentials and physical owner
 are preserved. Unrelated untracked `reports/` in the original checkout is untouched.
 
+## Current checkpoint — review and staging handoff
+
+Current integrated main is `ee0d2a8f4faec0324eff26e07d956b21386281f7`:
+weather PR78 is merged with tested tree `876154046e0468a43313fbfde8b105323e19d636`.
+This is source integration, not installation or real observation acceptance.
+The runtime observations below retain their original evidence scope; the fresh
+service check confirms held-canary and production gateway **inactive/disabled**.
+
+PR81 witness head `f644e6aaa5499c235ecd59c29e741a8ac99b9a86` has passing
+published checks, including Rust job103788271737 and audit job103788271670.
+VPS source acceptance is recorded in PR81 comment5656072623. The library-only
+witness remains uninstalled: initializer, enablement, owner-side sustained
+retention and full-host restore reconciliation are outstanding. Its160-identity
+fixture does not prove that the physical owner retains more than32 receipts.
+The operator stopped the resource-heavy local Rust build; that interrupted run
+is not a passing result and will not be restarted as part of this handoff.
+
+HOME independently reviewed PR82 `6cd52ba6ca169e86b4454e72ad1d40fb824f6d57`.
+Nine Python tests passed locally; exact-source Rust CI job103798255711 was
+inspected. [Changes requested](https://github.com/lightning-goats/lightning-goats/pull/82#pullrequestreview-5192556257):
+the offline checker accepts debits preceding their seed credit and payment events
+following confirmations. Both false passes were reproduced with disposable
+fixtures. VPS owns the correction; no shared gateway source was edited.
+
+**Next VPS action:** publish the PR82 chronology correction with regressions and
+an exact current-main candidate for HOME re-review. Retain the v1 transaction
+unchanged. HOME agrees with the proposed separate v2 transaction sequence in
+[#17 comment5656301976](https://github.com/lightning-goats/lightning-goats/issues/17#issuecomment-5656301976):
+authenticate reviewed tools, require fresh full baseline equality under an
+exclusive window, stop on drift, review the new snapshot and prepare a separate
+v2 transaction with its own rollback evidence. This acknowledges the preservation
+contract; it does not authorize application or establish baseline equality.
+
+Before cross-host execution, pin the corrected candidate, fresh HOME held-fixture
+baseline, exact authenticated peer/filter manifest, negative-access checks and
+paired-state restore procedure. VPS reports harmless-staging approval in its
+conversation; HOME household policy application still requires its specified
+operator approval. Keep credentials on HOME and release only the agreed UUID.
+Local canary success remains separate from cross-host containment acceptance.
+
 | Source / deliverable | Exact commit | State |
 | --- | --- | --- |
 | Installed gateway | `a74890c47a57a13508b3d259929f1f1bec2a5cc3` | Installed; production inactive |
@@ -15,7 +55,7 @@ are preserved. Unrelated untracked `reports/` in the original checkout is untouc
 | [PR72 owner correction](https://github.com/lightning-goats/lightning-goats/pull/72) | `bd59a055031f899787818592a633d6639a165871` | Accepted and merged; tested in unlinked fixture; physical owner unchanged |
 | [PR76 v2 adapter](https://github.com/lightning-goats/lightning-goats/pull/76) | `bdd5a534a91015cdfadfc7f2f4fdc6ca69a74865` | Implemented; synthetic restart and actual read-only USER/JDBC recovery passed; VPS source review accepted; not installed |
 | [PR77 held fixture](https://github.com/lightning-goats/lightning-goats/pull/77) | `3b16b7a85e0a2ab88b42562c78a8b7dde728513f` | Helper evidence-loss correction published; local Rust/helper tests and all 14 replacement CI jobs pass; VPS independently accepted replacement |
-| [PR78 weather reader](https://github.com/lightning-goats/lightning-goats/pull/78) | `a1aa8dca34d2a25b9f8a87ccca8adea024355495` | Read-only permission regression fixed; service template/installation layout prepared; not installed |
+| [PR78 weather reader](https://github.com/lightning-goats/lightning-goats/pull/78) | `a1aa8dca34d2a25b9f8a87ccca8adea024355495` | Read-only permission regression fixed; merged via tested current-main integration; not installed |
 | [PR79 held gateway](https://github.com/lightning-goats/lightning-goats/pull/79) | `daeb9ba0acfd4b506547aba8049a3f1a9aae3cc3` | All 13 CI jobs pass; installed; local held/restart/recovery passed; stopped/disabled |
 
 ```yaml
@@ -72,9 +112,8 @@ the current schema, missing/stale/future time and restored older producer state.
 The shared producer and existing receiver remain unchanged. Real-frame timestamp
 verification, source-interpretation ACK and installation approval remain open.
 
-**Next VPS action:** review PR78, bind the published held-canary control/evidence
-contract into the cross-host harness, and reply to the witness/retention scope request in #17
-comment5655433594. VPS accepted PR76 at `bdd5a534` and explicitly acknowledged
+**Earlier handoff (superseded by the current checkpoint above):** PR78 review,
+held-canary harness binding and the witness scope request were pending. VPS accepted PR76 at `bdd5a534` and explicitly acknowledged
 the final generation2 Request/Ack binding in comment5655694424. The shared
 `src/openhab.rs` scope is implemented; VPS-owned `tests/gateway_admission.rs`
 remains untouched. V2 recovery requires a committed

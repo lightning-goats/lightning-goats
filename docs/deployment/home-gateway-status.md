@@ -14,7 +14,7 @@ are preserved. Unrelated untracked `reports/` in the original checkout is untouc
 | [PR71 weather](https://github.com/lightning-goats/lightning-goats/pull/71) | `cb7bde28ceb7bb2aadcaa566192422170742976c` | Accepted and merged; all exact-head CI passed; not installed |
 | [PR72 owner correction](https://github.com/lightning-goats/lightning-goats/pull/72) | `bd59a055031f899787818592a633d6639a165871` | Accepted and merged; tested in unlinked fixture; physical owner unchanged |
 | [PR76 v2 adapter](https://github.com/lightning-goats/lightning-goats/pull/76) | `bdd5a534a91015cdfadfc7f2f4fdc6ca69a74865` | Implemented; synthetic restart and actual read-only USER/JDBC recovery passed; VPS source review accepted; not installed |
-| [PR77 held fixture](https://github.com/lightning-goats/lightning-goats/pull/77) | `3b16b7a85e0a2ab88b42562c78a8b7dde728513f` | Helper evidence-loss correction published; local Rust/helper tests pass; replacement CI and independent re-review pending |
+| [PR77 held fixture](https://github.com/lightning-goats/lightning-goats/pull/77) | `3b16b7a85e0a2ab88b42562c78a8b7dde728513f` | Helper evidence-loss correction published; local Rust/helper tests and all 14 replacement CI jobs pass; independent re-review pending |
 | [PR78 weather reader](https://github.com/lightning-goats/lightning-goats/pull/78) | `a1aa8dca34d2a25b9f8a87ccca8adea024355495` | Read-only permission regression fixed; service template/installation layout prepared; not installed |
 | [PR79 held gateway](https://github.com/lightning-goats/lightning-goats/pull/79) | `daeb9ba0acfd4b506547aba8049a3f1a9aae3cc3` | All 13 CI jobs pass; generation2 binding and guarded installer prepared; not installed |
 
@@ -98,9 +98,11 @@ on a failed stage write. Replacement `3b16b7a` keeps the pre-dispatch intent
 immutable and atomically publishes a separate `.progress` snapshot. Seven helper
 tests pass, including six before/during-write failures at held/released/passed,
 pre-dispatch directory-fsync failure and existing-evidence preservation; nine
-Node fixture tests pass. The new full local Rust gate passed. The local audit
-subcommand was unavailable; the exact replacement CI security job remains the
-pending audit evidence. These correction tests are isolated mocks and did not
+Node fixture tests pass. The new full local Rust gate passed; 89 deployment tests completed with two
+explicit weather-process skips covered by the passing real-gateway CI job. The local audit
+subcommand was unavailable; exact replacement CI Security job103782810092
+executed the audit successfully (310 locked dependencies; RSA unreachable). All
+14 replacement CI jobs passed. These correction tests are isolated mocks and did not
 submit another request to either deployed fixture.
 
 PR79 prepares `uuid_held_canary` restricted to the final fixed generation2 pair,

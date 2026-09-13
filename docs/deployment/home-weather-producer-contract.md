@@ -69,7 +69,7 @@ and accumulator semantics. No inferred Fahrenheit is attached to the optional
 unitless OpenHAB temperature Item.
 
 SQLite stores one latest export plus a durable observation high-water mark with
-WAL/FULL, in one transaction. A malformed selected frame clears availability
+rollback journaling and synchronous FULL, in one transaction. A malformed selected frame clears availability
 without lowering the mark. Only a valid nonregressing real frame restores it.
 A duplicate second-level timestamp is allowed, matching the gateway policy;
 submillisecond decoder time is normalized to milliseconds once at capture.
@@ -101,7 +101,7 @@ The generated observer is optional and catches storage errors; original station
 filtering, unit conversion, throttling and household HTTP dispatch remain.
 No historical snapshot is imported to make the project export look fresh.
 
-Ten tests pass locally, including **two real gateway process tests**. The current
+Eleven tests pass locally, including **two real gateway process tests**. The current
 normalized fixture fails 502; a synthetic coherent recorder snapshot succeeds 200
 with correct units. Missing/invalid/future/stale time, partial frames, inconsistent
 units and restored older producer state fail closed. Producer/gateway restart
@@ -133,3 +133,56 @@ snapshot/evidence files and the existing receiver/household services. Restarting
 the radio service to install or remove the hook needs the same reviewed window.
 A stale snapshot must remain stale across rollback. #21 stays open pending
 producer installation, real-frame/time verification and VPS interpretation ACK.
+
+## Read-only identity correction
+
+Before installation, a real filesystem-permission probe found that the original
+WAL database could require creation of `-wal`/`-shm` after the short-lived writer
+closed. An exporter with no database/directory write permission failed with
+`attempt to write a readonly database`. The recorder now uses SQLite rollback
+journaling with synchronous FULL and the same immediate transaction. No `immutable`
+flag ignores active writes, and no write permission is granted to the reader.
+A subprocess regression runs against mode0444 files in a mode0555 directory
+(dropping root when necessary), reads the real capture module successfully and
+asserts no sidecar creation. It fails before the mode correction and passes after.
+This corrects preparation source only; no deployed weather database or service
+has been changed. Existing real gateway stale/restore tests remain required.
+
+## Concrete installation layout for review
+
+The inspected radio and receiver services both run as `sat:sat` from
+`/home/sat/bin`. Keep that household service identity unchanged. The generated
+hook now loads the project module from an explicit root-managed absolute path,
+without adding a user-site module, changing Python search paths or editing the
+receiver. Before applying, require the pinned radio-source digest still matches
+and retain an exact private backup with ownership/mode/hash.
+
+Proposed project layout:
+
+| Path or identity | Required state |
+| --- | --- |
+| `lightning-goats-weather` | New locked system user/group; no sudo or supplementary groups |
+| `/usr/local/lib/lightning-goats-weather/` | New root:root 0755 directory; two reviewed Python modules root:root 0644 |
+| `/var/lib/lightning-goats-weather/` | New sat:lightning-goats-weather 2750 directory; reader cannot create/remove files |
+| `snapshot.db` | New empty sat:lightning-goats-weather 0640 file, initialized only by the radio observer |
+| `lightning-goats-weather.service` | Reviewed root-owned system unit; fixed loopback 5001, no credentials or write paths |
+
+`deploy/systemd/lightning-goats-weather.service` provides the concrete exporter
+unit. It uses a separate non-admin reader, read-only system protection, no
+capabilities and loopback-only networking. The writer retains only project-state
+write access through its existing identity; no existing user's groups change.
+Missing/invalid data returns 503, never an invented fresh observation.
+
+Apply remains a separate operator-approved window: verify absence of all new
+paths/identity and port 5001, stage modules/unit and empty restricted state, verify
+the unit, back up the exact radio source, apply the generated digest-pinned patch,
+restart only the radio service, then start only the project exporter. Validate a
+real complete decoder frame/time and readonly reader permissions before changing
+only the gateway's weather URL. Do not enable boot startup or claim weather
+acceptance before that validation. Preserve existing receiver port 5000/clients.
+
+Rollback stops the new exporter and restores only the exact approved radio patch
+if its digest still matches, then restarts that radio service in the same approved
+window. Restore the prior project gateway URL if changed. Preserve project data,
+backup and evidence. No household user/group, receiver or network-policy rollback
+is required because none is part of this plan. No installation was performed.

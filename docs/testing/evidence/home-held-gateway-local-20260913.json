@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "gateway_source": "daeb9ba0acfd4b506547aba8049a3f1a9aae3cc3",
+  "fixture_helper_source": "3b16b7a85e0a2ab88b42562c78a8b7dde728513f",
+  "scope": "actual HOME loopback unlinked fixture; not cross-host or physical",
+  "request_uuid_sha256": "766e1457226554520e9091167e543bf444fb0db6ff1512865b5d23a4949cb6ca",
+  "baseline_count": 1,
+  "final_count": 2,
+  "additional_owner_deliveries": 1,
+  "physical_commands": 0,
+  "phases": {
+    "refusal": {
+      "http": 423,
+      "status": "not_dispatched"
+    },
+    "refusal-replay": {
+      "http": 423,
+      "status": "not_dispatched"
+    },
+    "held": {
+      "http": 409,
+      "status": "ambiguous"
+    },
+    "restart-pending": {
+      "http": 202,
+      "status": "pending"
+    },
+    "recovered": {
+      "http": 200,
+      "status": "confirmed"
+    },
+    "replay": {
+      "http": 200,
+      "status": "confirmed"
+    }
+  },
+  "interruption": {
+    "cause": "test incorrectly expected ambiguous instead of documented pending after restart",
+    "state_preserved": true,
+    "original_uuid_continued": true,
+    "fresh_replacement_request": false,
+    "initial_failed_evidence_preserved": true
+  },
+  "final": {
+    "remote_enabled": "OFF",
+    "hold": "ON",
+    "all_receipts_released": true,
+    "service_active": false,
+    "enabled_at_boot": false,
+    "database_integrity": "ok",
+    "acknowledged_rows": 1,
+    "refusal_rows": 1
+  },
+  "remaining": [
+    "authenticated cross-host accounting/containment",
+    "paired nonempty-store acceptance with VPS",
+    "owner retention/full restore",
+    "real weather producer integration"
+  ]
+}

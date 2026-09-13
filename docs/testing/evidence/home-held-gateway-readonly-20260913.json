@@ -1,0 +1,34 @@
+{
+  "source_commit": "daeb9ba0acfd4b506547aba8049a3f1a9aae3cc3",
+  "requests": [
+    {
+      "route": "/healthz",
+      "status": 200,
+      "body": "{\"status\":\"ok\"}"
+    },
+    {
+      "route": "/v1/feeder/override",
+      "status": 200,
+      "body": "{\"override_enabled\":false,\"remote_enabled\":false}"
+    },
+    {
+      "route": "/v1/temperature",
+      "status": 200,
+      "body": "{\"temperature_f\":null}"
+    },
+    {
+      "route": "/v1/weather",
+      "status": 502,
+      "body": "{\"status\":\"ERROR\",\"reason\":\"Weather data unavailable\"}"
+    }
+  ],
+  "feeder_posts": 0,
+  "final_state": "MainPID=0\nActiveState=inactive\nUnitFileState=disabled",
+  "listener_scope": "127.0.0.1:8791 only",
+  "runtime_verify": "passed: exact executable/config/unit; expected uid; CapEff=0; NoNewPrivs=1",
+  "state_check": {
+    "integrity": "ok",
+    "requests": 0,
+    "refusals": 0
+  }
+}

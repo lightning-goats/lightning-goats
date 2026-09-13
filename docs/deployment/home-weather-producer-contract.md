@@ -77,7 +77,7 @@ The record survives process restarts unchanged. Missing storage is unavailable;
 the HTTP reader opens read-only and cannot initialize it or advance timestamps.
 
 `deploy/weather/serve_snapshot.py` provides only the project GET
-`/get_received_data` at a configurable **loopback-only** port, proposed 5001.
+`/get_received_data` at a configurable **loopback-only** port, proposed 5002.
 It returns 503 for missing/invalid/stale state. The existing port 5000 endpoint
 and all household field names remain unchanged. The gateway already accepts
 this loopback URL/path, so no alias expansion in `src/gateway/weather.rs` is needed.
@@ -165,7 +165,7 @@ Proposed project layout:
 | `/usr/local/lib/lightning-goats-weather/` | New root:root 0755 directory; two reviewed Python modules root:root 0644 |
 | `/var/lib/lightning-goats-weather/` | New sat:lightning-goats-weather 2750 directory; reader cannot create/remove files |
 | `snapshot.db` | New empty sat:lightning-goats-weather 0640 file, initialized only by the radio observer |
-| `lightning-goats-weather.service` | Reviewed root-owned system unit; fixed loopback 5001, no credentials or write paths |
+| `lightning-goats-weather.service` | Reviewed root-owned system unit; fixed loopback 5002, no credentials or write paths |
 
 `deploy/systemd/lightning-goats-weather.service` provides the concrete exporter
 unit. It uses a separate non-admin reader, read-only system protection, no
@@ -174,7 +174,7 @@ write access through its existing identity; no existing user's groups change.
 Missing/invalid data returns 503, never an invented fresh observation.
 
 Apply remains a separate operator-approved window: verify absence of all new
-paths/identity and port 5001, stage modules/unit and empty restricted state, verify
+paths/identity and port 5002, stage modules/unit and empty restricted state, verify
 the unit, back up the exact radio source, apply the generated digest-pinned patch,
 restart only the radio service, then start only the project exporter. Validate a
 real complete decoder frame/time and readonly reader permissions before changing
@@ -186,3 +186,21 @@ if its digest still matches, then restarts that radio service in the same approv
 window. Restore the prior project gateway URL if changed. Preserve project data,
 backup and evidence. No household user/group, receiver or network-policy rollback
 is required because none is part of this plan. No installation was performed.
+
+## Fresh port-conflict correction — 2026-09-13
+
+Read-only installation preflight found the originally proposed127.0.0.1:5001
+already held by an existing Docker listener. It remains untouched. The exporter
+default and reviewed unit now select127.0.0.1:5002, observed unbound during this
+preflight; verify it remains free immediately before approved startup. Existing
+receiver5000 is unchanged. This corrects preparation, not installed behavior.
+
+The source still matches9f034f9d0ed5912ad5495136bcb6414c20bccb3cb24d1c09622a16c29c9e2777.
+Protected original/proposed source and patch are prepared; proposed radio script
+SHA256deaf48dc9e35dabb06c93bbd484c8750479f25cc9b3e50f7ea0acebb2df7ade6,
+patch SHA25653dcb69e90c9dc0da4874dc7dc57510df100b2020cfbfe26c064e68fc9d2cf6c.
+Both existing services are active as sat:sat; new project paths/identity are
+absent. The patch imports the root-managed observer and records only coherent
+decoder events; no poll-time freshness or receiver change. Backup hashes and
+original ownership/mode are retained privately. Installation, radio restart and
+real-frame acceptance remain pending; recheck all drift before applying.

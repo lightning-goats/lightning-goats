@@ -1,3 +1,6 @@
+mod private;
+pub use private::PrivateGiftWrap;
+
 use std::{ffi::OsStr, path::PathBuf, process::Stdio, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result, bail};

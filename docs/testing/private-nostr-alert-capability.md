@@ -80,3 +80,34 @@ alert worker must acquire its durable observation/episode serialization before
 calling it; accepting externally prefetched balances could reorder high/low
 observations between concurrent processes. Until that worker, encrypted outbox
 and runtime acceptance are implemented, the alert-delivery gate remains open.
+
+## Application private transport
+
+`NakClient::wrap_private_message` now constructs kind 14 through the existing
+bounded subprocess runner, forces both identity-key options, and returns a
+separate `PrivateGiftWrap`. It validates exact outer fields, recipient tag,
+kind 1059, signature and NIP-44 v2 payload framing. Encryption remains in the
+pinned nak/bunker implementation; framing validation alone is not a MAC check.
+The application cannot decrypt a recipient's message without that private key.
+
+`restore_private_wrap` verifies saved ciphertext and preserves its exact bytes.
+`publish_private_wrap` takes an explicit inbox relay list, validates it before
+subprocess execution, verifies the saved event and checks the publication echo.
+Only wrapping receives NIP-46 credentials. Verification/retry use no signer;
+there is no fallback to the configured public announcement relays. The public
+kind-1 validators are unchanged and reject private wrappers. Unknown outer
+fields are rejected rather than accidentally persisting a plaintext side field.
+Private payload/error values have no automatic Debug/Serialize representation.
+
+The already locked base64 0.22.1 crate is now a direct dependency for bounded
+NIP-44 framing checks; no dependency version was changed. Protocol reference:
+https://github.com/nostr-protocol/nips/blob/master/44.md
+
+`tests/private_nostr_transport.rs` uses explicit non-cryptographic subprocess
+fixtures for encryption failure, unexpected fields, wrong kind/recipient,
+plaintext/invalid framing, invalid signature, publication failure/alteration,
+credential separation, explicit relays and exact retry input. The real-nak Rust
+acceptance additionally exercises the actual application wrapper, decrypts its
+layers using synthetic keys and retries the same wrapper after the real bunker
+has stopped. These tests do not establish durable alert episodes; the separate
+SQLite outbox/worker and operational provisioning are still required.

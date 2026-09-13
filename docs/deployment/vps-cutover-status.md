@@ -1,5 +1,49 @@
 # VPS cutover status — 2026-09-12
 
+## Combined candidate checkpoint — 2026-09-13
+
+This checkpoint supersedes the earlier current-head/review dispositions below;
+retain those entries as historical evidence. Production remains HOLD.
+
+The combined integration tree starts at `ccc1c17d9d0f7324e331549f0e1117c2d6faacd8`:
+
+- Main `df34bcdea5a178bb72193d1a431ea3a9f3e0c9f1` includes revised HOME PR59
+  `f1cef47bf65660eb48bde81ca7bfcb0d48bb4252`. Independent VPS review accepts
+  its redirect rejection, inspected-target binding and rehearsal isolation
+  corrections, with nine targeted tests. The old `b2f42dc` revise disposition
+  does not describe the replacement head.
+- VPS PR68 `fe5f8f6fee165f90e9b4670cfcd69e6bdf63692b` includes PR64, PR66 and
+  PR67: daemon regressions, real synthetic NIP46/systemd evidence, authenticated
+  peer tests, VPS TCP containment transition/rollback, inactive ledger preparation
+  and non-executing archive preflight. Its six workflows pass; this does not
+  substitute for checking the combined candidate.
+- HOME PR65 `e350ee7a9db3e37b51fa4345e90cd8815f8ed454` contributes the reviewed
+  containment proposal and drift/packet tests. Eleven isolated packet cases and
+  two drift tests independently pass. No home policy has been applied by this
+  integration and no runtime containment acceptance is claimed.
+
+Original commits/branches remain preserved as merge ancestry. The combined PR's
+exact head, workflow runs and retained artifacts are the release review unit;
+select and verify those bytes before installation. Do not promote a constituent
+PR's artifact as though it contained all combined changes.
+
+Current immediate canary source counts every delivery before UUID validation,
+and exact UUID Ack establishes immediate completion. The project lead's source
+review in issue17 confirms there is no controlled hold/release or separate
+held-delivery identity in this source. HOME owns the proposed harmless fixture
+extension and must acknowledge/publish its exact contract before VPS implements
+late-completion acceptance. HTTP response suppression proves lost observation,
+not delayed owner completion. Physical-owner finality/retention remains separate.
+
+Still open: reciprocal private network/recovery agreement; explicit approval of
+the concrete harmless two-host manifest; final installed provenance/permissions
+and sandbox; real VPS daemon -> real HOME gateway -> harmless canary proving
+2340 synthetic sats -> exactly two counted confirmed deliveries -> 340, including
+failure/restart/paired restore. Close canary exposure before removing the peer
+identity binding. Production credentials, provider acceptance, public signer/relay
+acceptance, weather, final website acceptance and cutover gates remain open.
+Website edits remain deferred. No repository merge grants live authority.
+
 **Not ready for cutover. Production HOLD.** This is the VPS-side counterpart to
 [the home assignment](home-gateway-agent-handoff.md), not authorization to enable
 payments, feeding, home access changes, DNS or hub cutover. Website work remains

@@ -13,11 +13,10 @@ are preserved. Unrelated untracked `reports/` in the original checkout is untouc
 | [PR65 containment](https://github.com/lightning-goats/lightning-goats/pull/65) | `e350ee7a9db3e37b51fa4345e90cd8815f8ed454` | VPS source review accepted and merged; not applied |
 | [PR71 weather](https://github.com/lightning-goats/lightning-goats/pull/71) | `cb7bde28ceb7bb2aadcaa566192422170742976c` | Accepted and merged; all exact-head CI passed; not installed |
 | [PR72 owner correction](https://github.com/lightning-goats/lightning-goats/pull/72) | `bd59a055031f899787818592a633d6639a165871` | Accepted and merged; tested in unlinked fixture; physical owner unchanged |
-
-| [PR76 v2 adapter](https://github.com/lightning-goats/lightning-goats/pull/76) | `bdd5a534a91015cdfadfc7f2f4fdc6ca69a74865` | Implemented; synthetic restart and actual read-only USER/JDBC recovery passed; VPS review pending |
-
-| [PR77 held fixture](https://github.com/lightning-goats/lightning-goats/pull/77) | `4c529ab8e6215d346bb3573feb09c4fd0e8b99d4` | All CI passed; actual local hold/release passed; separate gateway binding pending ACK |
+| [PR76 v2 adapter](https://github.com/lightning-goats/lightning-goats/pull/76) | `bdd5a534a91015cdfadfc7f2f4fdc6ca69a74865` | Implemented; synthetic restart and actual read-only USER/JDBC recovery passed; VPS source review accepted; not installed |
+| [PR77 held fixture](https://github.com/lightning-goats/lightning-goats/pull/77) | `3b16b7a85e0a2ab88b42562c78a8b7dde728513f` | Helper evidence-loss correction published; local Rust/helper tests pass; replacement CI and independent re-review pending |
 | [PR78 weather reader](https://github.com/lightning-goats/lightning-goats/pull/78) | `a1aa8dca34d2a25b9f8a87ccca8adea024355495` | Read-only permission regression fixed; service template/installation layout prepared; not installed |
+| [PR79 held gateway](https://github.com/lightning-goats/lightning-goats/pull/79) | `daeb9ba0acfd4b506547aba8049a3f1a9aae3cc3` | All 13 CI jobs pass; generation2 binding and guarded installer prepared; not installed |
 
 ```yaml
 home_host: 10.8.0.6
@@ -73,11 +72,12 @@ the current schema, missing/stale/future time and restored older producer state.
 The shared producer and existing receiver remain unchanged. Real-frame timestamp
 verification, source-interpretation ACK and installation approval remain open.
 
-**Next VPS action:** independently review exact PR76/77/78 heads and reply to
-the witness/retention scope request in #17 comment5655433594 and held-fixture
-allowlist claim (final generation2 Request/Ack pair). The prior shared
-`src/openhab.rs` claim was acknowledged and is implemented; VPS-owned
-`tests/gateway_admission.rs` remains untouched. V2 recovery requires a committed
+**Next VPS action:** independently re-review PR77 correction `3b16b7a`, then
+review PR78/79 and reply to the witness/retention scope request in #17
+comment5655433594. VPS accepted PR76 at `bdd5a534` and explicitly acknowledged
+the final generation2 Request/Ack binding in comment5655694424. The shared
+`src/openhab.rs` scope is implemented; VPS-owned `tests/gateway_admission.rs`
+remains untouched. V2 recovery requires a committed
 same-UUID JDBC receipt and sends no command. Six focused tests pass, including
 real gateway timeout/restart with one total command. Actual unlinked read-only
 probe returned Complete using the dedicated canary USER; fixture counts stayed1.
@@ -92,6 +92,24 @@ The prior failed held generation remains Fault ON with its evidence preserved;
 its JDBC DecimalType mismatch was fixed and regression-tested in generation2.
 No existing echo canary or physical owner was replaced. Full control/evidence is
 in PR77. No new gateway listener or remote control endpoint was enabled.
+
+VPS review reproduced the PR77 helper truncating its sole UUID evidence record
+on a failed stage write. Replacement `3b16b7a` keeps the pre-dispatch intent
+immutable and atomically publishes a separate `.progress` snapshot. Seven helper
+tests pass, including six before/during-write failures at held/released/passed,
+pre-dispatch directory-fsync failure and existing-evidence preservation; nine
+Node fixture tests pass. The new full local Rust gate passed. The local audit
+subcommand was unavailable; the exact replacement CI security job remains the
+pending audit evidence. These correction tests are isolated mocks and did not
+submit another request to either deployed fixture.
+
+PR79 prepares `uuid_held_canary` restricted to the final fixed generation2 pair,
+a separate Unix identity/database/unit and loopback port 8791. It deliberately
+uses the existing canary OpenHAB USER credential; it does not claim a distinct
+OpenHAB authorization scope. All 13 exact-head CI jobs passed. Installation and
+actual gateway hold/restart/release acceptance remain pending PR77 re-review.
+No new unit/account was installed or started. PR79 is based on PR76 and must be
+revalidated on current main when its parent is integrated.
 
 Weather preparation found the WAL reader needed sidecar write access after the
 writer closed. PR78 uses rollback journal/FULL, preserves the atomic timestamp

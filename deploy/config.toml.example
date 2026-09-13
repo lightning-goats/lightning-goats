@@ -91,7 +91,10 @@ weather_probability = 0.4
 [nostr]
 nak_path = "/usr/local/bin/nak"
 nak_config_path = "/run/lightning-goats/nak"
-bunker_pubkey = "REPLACE_WITH_64_CHAR_HEX_PUBKEY"
+# Operator-approved payment/feed announcement identity, 2026-09-12.
+bunker_pubkey = "669ebbcccf409ee0467a33660ae88fd17e5379e646e41d7c236ff4963f3c36b6"
 relays = [
-  "wss://relay.example",
+  "wss://relay-nwc-dev.rizful.com/v1",
+  "wss://relay.primal.net",
+  "wss://relay.damus.io",
 ]

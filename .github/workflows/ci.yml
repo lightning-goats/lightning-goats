@@ -33,3 +33,17 @@ jobs:
 
       - name: Test
         run: cargo test --locked --all-features
+
+      - name: Verify inactive cross-host preparation
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked --all-features --example prepare_cross_host
+          cargo run --locked --all-features --example prepare_cross_host -- "$RUNNER_TEMP/cross-host-seed" "$GITHUB_SHA" > "$RUNNER_TEMP/CROSS-HOST-PREPARED.json"
+          python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); assert v["seed_sats"] == 2340 and v["started"] is False and v["payment_received_events"] == 1' "$RUNNER_TEMP/CROSS-HOST-PREPARED.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cross-host-prepared-${{ github.sha }}
+          path: ${{ runner.temp }}/CROSS-HOST-PREPARED.json
+          if-no-files-found: error
+          retention-days: 14

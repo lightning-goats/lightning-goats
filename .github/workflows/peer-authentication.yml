@@ -1,0 +1,26 @@
+name: WireGuard peer authentication
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-peer-routing:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install isolated network test tools
+        run: sudo apt-get update && sudo apt-get install -y wireguard-tools nftables iproute2 iputils-ping
+      - name: Verify direct-peer source authentication and rollback
+        run: sudo python3 deploy/scripts/verify-wireguard-peer-isolation.py > "$RUNNER_TEMP/PEER-AUTHENTICATION.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: peer-authentication-${{ github.sha }}
+          path: ${{ runner.temp }}/PEER-AUTHENTICATION.json
+          if-no-files-found: error
+          retention-days: 14

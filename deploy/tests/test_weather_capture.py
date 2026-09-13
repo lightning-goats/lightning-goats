@@ -102,3 +102,32 @@ class WeatherCaptureTests(unittest.TestCase):
         self.assertTrue(self.record(packet, now=NOW+1))
         result = capture.read_snapshot(self.path, now=NOW+1)
         self.assertTrue(result['dateutc'].endswith('.123Z'))
+
+    def test_separate_read_only_identity_needs_no_sidecar_creation_after_writer_exit(self):
+        import os
+        import shutil
+        import subprocess
+        import sys
+        self.assertTrue(self.record())
+        root=Path(self.directory.name)
+        module=root/'capture.py'
+        shutil.copyfile(Path(capture.__file__),module)
+        module.chmod(0o444)
+        self.path.chmod(0o444)
+        root.chmod(0o555)
+        def drop_root():
+            os.setgroups([])
+            os.setgid(65534)
+            os.setuid(65534)
+        try:
+            run=subprocess.run([sys.executable,'-B','-c',
+                'import runpy,sys; m=runpy.run_path(sys.argv[1]); print(m["read_snapshot"](sys.argv[2],now=float(sys.argv[3]))["tempf"])',
+                str(module),str(self.path),str(NOW)],capture_output=True,text=True,timeout=5,
+                preexec_fn=drop_root if os.geteuid()==0 else None)
+            self.assertEqual(run.returncode,0,run.stderr)
+            self.assertEqual(run.stdout.strip(),'68.0')
+            self.assertFalse(Path(str(self.path)+'-shm').exists())
+            self.assertFalse(Path(str(self.path)+'-wal').exists())
+        finally:
+            root.chmod(0o755)
+            self.path.chmod(0o600)

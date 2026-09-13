@@ -6,6 +6,28 @@ nginx, website, Nostr and VPS networking. Issue #17 is the coordination thread;
 Hexmem holds private context. Existing checkouts, credentials and physical owner
 are preserved. Unrelated untracked `reports/` in the original checkout is untouched.
 
+## Latest preparation evidence
+
+[PR84](https://github.com/lightning-goats/lightning-goats/pull/84), exact
+`9cd654751b9f75ea4701faa632cc4d8102696e83`, adds a separate held8791 policy;
+echo8790 remains preserved. Both variants pass13 isolated packet cases and
+table-only rollback plus2 drift regressions. All published checks passed;
+filter job103806903153 was independently inspected. Independent VPS review and
+actual path/approval remain pending.
+
+[PR85](https://github.com/lightning-goats/lightning-goats/pull/85), exact
+`4369da182c69c9ec971f2767771253c9bff61a4f`, corrects the weather exporter to5002:
+existing Docker already owns5001 and is untouched. Nine lightweight tests,
+unit verification and an actual temporary exporter503/no-database smoke test
+passed. Two Rust gateway process tests were skipped locally; CI supplies that
+coverage. Protected radio backup and exact hook patch are prepared; installation
+and shared radio restart approval were requested and remain pending.
+
+Fresh held fixture capture confirms count2/bothreleased/HoldON/remoteOFF without
+commands. Source, capture digest and precise verification scope are recorded in
+[preflight evidence](../testing/evidence/home-staging-preflight-20260913.json).
+These are preparation results, not cross-host or real-weather acceptance.
+
 ## Current checkpoint — review and staging handoff
 
 Current integrated main is `ee0d2a8f4faec0324eff26e07d956b21386281f7`:

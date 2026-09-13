@@ -22,17 +22,19 @@ class AccountingTests(unittest.TestCase):
         self.ids = [str(uuid.uuid4()), str(uuid.uuid4())]
         self.connection = sqlite3.connect(self.database)
         self.addCleanup(self.connection.close)
+        # Explicit timestamps avoid reliance on the host Python SQLite's
+        # optional unixepoch() support; schema and application SQL stay unchanged.
         for name in ['0001_initial.sql','0003_backend_neutral_payments.sql','0004_strike_receive_requests.sql']:
             self.connection.executescript((ROOT/'migrations'/name).read_text())
-        self.connection.execute("INSERT INTO settled_payments(source,source_id,address_user,credit_pool,amount_msat) VALUES('synthetic-cross-host',?,'herd','herd',2340000)", (self.run_id,))
-        self.connection.execute("INSERT INTO ledger_entries(entry_type,source_key,delta_sats,payment_source,payment_source_id) VALUES('HERD_RECEIPT',?,2340,'synthetic-cross-host',?)", ('payment:synthetic-cross-host:'+self.run_id,self.run_id))
+        self.connection.execute("INSERT INTO settled_payments(source,source_id,address_user,credit_pool,amount_msat,received_at) VALUES('synthetic-cross-host',?,'herd','herd',2340000,0)", (self.run_id,))
+        self.connection.execute("INSERT INTO ledger_entries(entry_type,source_key,delta_sats,payment_source,payment_source_id,created_at) VALUES('HERD_RECEIPT',?,2340,'synthetic-cross-host',?,0)", ('payment:synthetic-cross-host:'+self.run_id,self.run_id))
         payment = dict(source='synthetic-cross-host',source_id=self.run_id,address_user='herd',credit_pool='herd',amount_sats=2340,feed_credit_sats=2340)
-        self.connection.execute("INSERT INTO event_log(event_type,payload_json) VALUES('payment_received',?)",(json.dumps(payment),))
+        self.connection.execute("INSERT INTO event_log(event_type,payload_json,created_at) VALUES('payment_received',?,0)",(json.dumps(payment),))
         for ident, remaining in zip(self.ids, [1340,340]):
-            self.connection.execute("INSERT INTO feed_attempts(id,status,threshold_sats) VALUES(?,'confirmed',1000)",(ident,))
-            self.connection.execute("INSERT INTO ledger_entries(entry_type,source_key,delta_sats,feed_attempt_id) VALUES('FEED_DEBIT',?,-1000,?)",('feed:'+ident,ident))
+            self.connection.execute("INSERT INTO feed_attempts(id,status,threshold_sats,created_at) VALUES(?,'confirmed',1000,0)",(ident,))
+            self.connection.execute("INSERT INTO ledger_entries(entry_type,source_key,delta_sats,feed_attempt_id,created_at) VALUES('FEED_DEBIT',?,-1000,?,0)",('feed:'+ident,ident))
             event = dict(feed_attempt_id=ident,threshold_sats=1000,feed_credit_sats=remaining)
-            self.connection.execute("INSERT INTO event_log(event_type,payload_json) VALUES('feeder_confirmed',?)",(json.dumps(event),))
+            self.connection.execute("INSERT INTO event_log(event_type,payload_json,created_at) VALUES('feeder_confirmed',?,0)",(json.dumps(event),))
         self.connection.commit()
         old_id = str(uuid.uuid4())
         def row(sequence, ident):
@@ -75,8 +77,8 @@ class AccountingTests(unittest.TestCase):
             "DELETE FROM event_log WHERE seq=3",
             "UPDATE ledger_entries SET delta_sats=-999 WHERE entry_type='FEED_DEBIT'",
             "UPDATE settled_payments SET source='strike'",
-            "INSERT INTO message_outbox(event_id,signed_event_json,status) VALUES('unexpected','{}','pending')",
-            "INSERT INTO strike_receive_requests(receive_request_id,address_user,credit_pool,amount_msat,description_hash,payment_hash,invoice) VALUES('unexpected','herd','herd',1000,'"+'a'*64+"','"+'b'*64+"','invoice')",
+            "INSERT INTO message_outbox(event_id,signed_event_json,status,created_at) VALUES('unexpected','{}','pending',0)",
+            "INSERT INTO strike_receive_requests(receive_request_id,address_user,credit_pool,amount_msat,description_hash,payment_hash,invoice,created_at) VALUES('unexpected','herd','herd',1000,'"+'a'*64+"','"+'b'*64+"','invoice',0)",
         ]
         for statement in mutations:
             with self.subTest(statement=statement):

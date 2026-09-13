@@ -10,9 +10,11 @@ are preserved. Unrelated untracked `reports/` in the original checkout is untouc
 | --- | --- | --- |
 | Installed gateway | `a74890c47a57a13508b3d259929f1f1bec2a5cc3` | Installed; production inactive |
 | PR59 helper corrections | `f1cef47bf65660eb48bde81ca7bfcb0d48bb4252` | VPS independently accepted; merged into main `df34bcdea5a178bb72193d1a431ea3a9f3e0c9f1` |
-| [PR65 containment](https://github.com/lightning-goats/lightning-goats/pull/65) | `e350ee7a9db3e37b51fa4345e90cd8815f8ed454` | VPS source review accepted; not applied |
-| [PR71 weather](https://github.com/lightning-goats/lightning-goats/pull/71) | `cb7bde28ceb7bb2aadcaa566192422170742976c` | Implemented/tested, all exact-head CI passed; not installed |
-| [PR72 owner correction](https://github.com/lightning-goats/lightning-goats/pull/72) | `bd59a055031f899787818592a633d6639a165871` | Implemented; tested in unlinked fixture; independent VPS review pending |
+| [PR65 containment](https://github.com/lightning-goats/lightning-goats/pull/65) | `e350ee7a9db3e37b51fa4345e90cd8815f8ed454` | VPS source review accepted and merged; not applied |
+| [PR71 weather](https://github.com/lightning-goats/lightning-goats/pull/71) | `cb7bde28ceb7bb2aadcaa566192422170742976c` | Accepted and merged; all exact-head CI passed; not installed |
+| [PR72 owner correction](https://github.com/lightning-goats/lightning-goats/pull/72) | `bd59a055031f899787818592a633d6639a165871` | Accepted and merged; tested in unlinked fixture; physical owner unchanged |
+
+| [PR76 v2 adapter](https://github.com/lightning-goats/lightning-goats/pull/76) | `bdd5a534a91015cdfadfc7f2f4fdc6ca69a74865` | Implemented; synthetic restart and actual read-only USER/JDBC recovery passed; VPS review pending |
 
 ```yaml
 home_host: 10.8.0.6
@@ -68,13 +70,22 @@ the current schema, missing/stale/future time and restored older producer state.
 The shared producer and existing receiver remain unchanged. Real-frame timestamp
 verification, source-interpretation ACK and installation approval remain open.
 
-**Next VPS action:** independently review exact PR71/72 heads and ACK or identify
-overlap with HOME's `src/openhab.rs` claim in #17 comment5654654270. Shared Rust
-and VPS-owned `tests/gateway_admission.rs` remain untouched. Coordinate durable
-lost-result recovery, sustained UUID retention and full-host rollback protection;
-current Item state alone is not committed JDBC evidence. Then finish the reviewed
-authenticated staging path/rollback and approved cross-host synthetic accounting
-acceptance. Local canary success does not authorize network or physical activation.
+**Next VPS action:** independently review exact PR76 head and reply to the
+witness/retention scope request in #17 comment5655433594. The prior shared
+`src/openhab.rs` claim was acknowledged and is implemented; VPS-owned
+`tests/gateway_admission.rs` remains untouched. V2 recovery requires a committed
+same-UUID JDBC receipt and sends no command. Six focused tests pass, including
+real gateway timeout/restart with one total command. Actual unlinked read-only
+probe returned Complete using the dedicated canary USER; fixture counts stayed1.
+Details and evidence are in PR76's `home-owner-v2-adapter.md` and
+`docs/testing/evidence/home-owner-v2-reader-20260913.json`. Local Rust1.88 full
+gates pass; replacement-head CI is running.
+
+Sustained UUID retention/full-host rollback protection still requires coordinated
+implementation and proof. A local witness cannot by itself certify freshness
+after full-host restore; compaction stays disabled. Continue the reviewed
+staging path/rollback and approved cross-host accounting acceptance separately.
+Local success does not authorize network or physical activation.
 
 Home policy application, shared weather-service changes, physical replacement
 and production remain separately gated. No real feeder command, payment, DNS,

@@ -1114,6 +1114,7 @@ dependencies = [
  "lightning-invoice",
  "proptest",
  "reqwest",
+ "rustix",
  "serde",
  "serde_json",
  "sha2",

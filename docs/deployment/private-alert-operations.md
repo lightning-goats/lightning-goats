@@ -26,7 +26,13 @@ or reconciliation command. Missing state never automatically bootstraps on run.
 ## Protected material
 
 All four inputs use the service manager's absolute `CREDENTIALS_DIRECTORY`.
-Each injected file must be a regular non-symlink 0400 file, no larger than 16 KiB.
+Each injected file must be regular, non-symlink and no larger than 16 KiB.
+The loader accepts owner-only 0400 files owned by root or the service user, or
+systemd's root-owned 0440 files whose exact POSIX ACL grants read access only to
+root and the named service user. The latter mode's group bits represent the ACL
+mask, not permission for the owning group. Writable, world-readable, ordinary
+group-readable and broader ACL variants are rejected. Trust in the credential
+directory still comes from the reviewed systemd assignment.
 Key contents must additionally be nonempty UTF-8 and at most 4096 bytes after
 trimming. Source plaintext belongs in a separately approved secure provisioning
 path; never put it in a checkout, command argument, GitHub or Hexmem.
@@ -130,7 +136,7 @@ successful SIGTERM exit before explicit stop/collection. The harness fails on
 any automatic restart. A distinct `nobody` unit remains active with its own
 synthetic encrypted credential while the alert unit proves cross-unit denial.
 
-The actual-unit probe verifies injected credential owner/mode/read-only access,
+The actual-unit probe verifies injected credential owner/mode/ACL/read-only access,
 non-root identity, no effective capabilities, NoNewPrivileges, code nonwritability,
 state writability, encrypted-source inaccessibility and network namespace identity.
 The loopback provider requires the synthetic balance token; a non-cryptographic
@@ -142,3 +148,13 @@ This is preparation evidence only. Mock encryption is not the real-bunker proof;
 temporary identities are not final account provisioning; a loopback namespace is
 not proof of final public-relay/private-network egress policy. Those acceptance
 gates remain separate even when the rehearsal passes.
+
+The first rehearsal at f96e3f918be96bcd3baa9ed5dfdbd200062f35e6 failed before
+worker startup because both the probe and loader assumed owner-only 0400 files.
+The retained failure is run34778483982/job103781131605, artifact10324198687
+(ZIP SHA256 `4f41806536189806ba24a50d4c884c325065fbd94292aa282091263199729908`).
+A separate disposable non-root systemd probe reproduced root-owned 0440 files
+with a named-user read ACL. The corrected loader validates that exact ACL on
+the opened file descriptor; the rehearsal verifies effective read-only access
+and denial of another active unit's credentials. A replacement passing run is
+required before claiming actual-unit acceptance.

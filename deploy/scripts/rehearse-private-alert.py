@@ -22,14 +22,20 @@ SPEC.loader.exec_module(SANDBOX)
 INSTALL = SANDBOX.INSTALL
 
 PROBE = r'''
-import json,os,stat,sys
+import json,os,stat,struct,sys
 from pathlib import Path
 state,code,source,namespace,names,other_unit = sys.argv[1:]
 credentials=Path(os.environ['CREDENTIALS_DIRECTORY'])
 assert sorted(p.name for p in credentials.iterdir()) == sorted(names.split(','))
 for p in credentials.iterdir():
- m=p.stat()
- assert stat.S_IMODE(m.st_mode)==0o400 and m.st_uid==os.geteuid()
+ m=p.lstat()
+ assert stat.S_ISREG(m.st_mode)
+ if stat.S_IMODE(m.st_mode)==0o440:
+  assert m.st_uid==0 and m.st_gid==0
+  expected=struct.pack('<I',2)+b''.join(struct.pack('<HHI',*e) for e in [(1,4,0xffffffff),(2,4,os.geteuid()),(4,0,0xffffffff),(16,4,0xffffffff),(32,0,0xffffffff)])
+  assert os.getxattr(p,'system.posix_acl_access')==expected
+ else:
+  assert stat.S_IMODE(m.st_mode)==0o400 and m.st_uid in (0,os.geteuid())
  assert p.is_file() and p.read_bytes() and not os.access(p,os.W_OK)
 assert os.geteuid()!=0 and os.getegid()!=0
 assert os.access(state,os.W_OK)
@@ -39,7 +45,7 @@ assert not os.access(Path('/run/credentials')/other_unit,os.R_OK)
 assert os.readlink('/proc/self/ns/net')==namespace
 fields=dict(l.split(':',1) for l in Path('/proc/self/status').read_text().splitlines() if ':' in l)
 assert fields['NoNewPrivs'].strip()=='1' and int(fields['CapEff'].strip(),16)==0
-Path(state,'probe.json').write_text(json.dumps({'credential_modes_owner_verified':True,'source_inaccessible':True,'other_active_unit_credentials_inaccessible':True,'code_nonwritable':True,'nonroot_no_caps':True,'isolated_network':True}))
+Path(state,'probe.json').write_text(json.dumps({'credential_modes_owner_acl_verified':True,'source_inaccessible':True,'other_active_unit_credentials_inaccessible':True,'code_nonwritable':True,'nonroot_no_caps':True,'isolated_network':True}))
 '''
 
 

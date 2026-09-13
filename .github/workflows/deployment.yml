@@ -99,7 +99,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo unshare --net -- python3 -B deploy/scripts/rehearse-private-alert.py "$RUNNER_TEMP/package-systemd/lightning-goats-smoke-x86_64-linux-gnu.tar.gz" "$GITHUB_SHA" > "$RUNNER_TEMP/PRIVATE-ALERT-REHEARSAL.json" 2> "$RUNNER_TEMP/PRIVATE-ALERT-REHEARSAL.log"
+          status=0
+          sudo unshare --net -- python3 -B deploy/scripts/rehearse-private-alert.py "$RUNNER_TEMP/package-systemd/lightning-goats-smoke-x86_64-linux-gnu.tar.gz" "$GITHUB_SHA" > "$RUNNER_TEMP/PRIVATE-ALERT-REHEARSAL.json" 2> "$RUNNER_TEMP/PRIVATE-ALERT-REHEARSAL.log" || status=$?
+          # Synthetic fixture diagnostics only; retain the full artifact as well.
+          tail -c 16384 "$RUNNER_TEMP/PRIVATE-ALERT-REHEARSAL.log"
+          exit "$status"
       - name: Retain private-alert rehearsal including failures
         if: always()
         uses: actions/upload-artifact@v4

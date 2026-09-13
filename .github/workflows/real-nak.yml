@@ -1,0 +1,57 @@
+name: Real NIP-46 acceptance
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-signer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.88"
+      - uses: Swatinem/rust-cache@v2
+      - name: Obtain the pinned test-only nak release
+        run: |
+          python3 - <<'PY'
+          import hashlib, os, pathlib, urllib.request
+          path = pathlib.Path(os.environ['RUNNER_TEMP']) / 'nak'
+          url = 'https://github.com/fiatjaf/nak/releases/download/v0.20.6/nak-v0.20.6-linux-amd64'
+          with urllib.request.urlopen(url, timeout=30) as response:
+              data = response.read(100_000_001)
+          assert len(data) <= 100_000_000
+          assert hashlib.sha256(data).hexdigest() == 'b44b36c792fbc3fb73b7ba3bbc94beda2219826271aa8d5f130f569c3817c3b9'
+          path.write_bytes(data)
+          path.chmod(0o700)
+          PY
+      - name: Build the actual Rust client and outbox regression
+        run: cargo test --locked --all-features --test real_nak --no-run --message-format=json > "$RUNNER_TEMP/real-nak-build.jsonl"
+      - name: Run synthetic signer and relay without external network access
+        shell: bash
+        run: |
+          set -euo pipefail
+          LG_REAL_TEST_BINARY="$(python3 -c 'import json,sys; rows=[json.loads(line) for line in open(sys.argv[1])]; paths=[r["executable"] for r in rows if r.get("reason")=="compiler-artifact" and r.get("target",{}).get("name")=="real_nak" and r.get("executable")]; assert len(paths)==1; print(paths[0])' "$RUNNER_TEMP/real-nak-build.jsonl")"
+          sudo unshare --net -- sh -c 'ip link set lo up; exec runuser -u "$1" -- env LG_TEST_NAK="$2" "$3" --ignored --nocapture' sh "$(id -un)" "$RUNNER_TEMP/nak" "$LG_REAL_TEST_BINARY" | tee "$RUNNER_TEMP/REAL-NAK.txt"
+      - name: Rehearse the shipped bunker sandbox with encrypted synthetic credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo systemd-creds setup
+          sudo unshare --net -- python3 -B deploy/scripts/rehearse-bunker-systemd.py "$RUNNER_TEMP/nak" > "$RUNNER_TEMP/BUNKER-SYSTEMD.json"
+          python3 -c 'import json,sys; value=json.load(open(sys.argv[1])); assert value["restart_signing"] == "pass" and value["corrupt_credential"] == "rejected before exec, status 243"' "$RUNNER_TEMP/BUNKER-SYSTEMD.json"
+          cat "$RUNNER_TEMP/BUNKER-SYSTEMD.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: real-nak-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/REAL-NAK.txt
+            ${{ runner.temp }}/BUNKER-SYSTEMD.json
+          if-no-files-found: error
+          retention-days: 14

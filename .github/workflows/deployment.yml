@@ -95,6 +95,21 @@ jobs:
           sudo python3 -B deploy/scripts/initialize-staging-credential-store.py > "$RUNNER_TEMP/CREDENTIAL-STORE.json"
           sudo unshare --net -- python3 -B deploy/scripts/rehearse-systemd.py "$RUNNER_TEMP/package-systemd/lightning-goats-smoke-x86_64-linux-gnu.tar.gz" "$GITHUB_SHA" > "$RUNNER_TEMP/SYSTEMD-REHEARSAL.json"
           (cd "$RUNNER_TEMP" && sha256sum CREDENTIAL-STORE.json SYSTEMD-REHEARSAL.json > SYSTEMD-SHA256SUMS)
+      - name: Rehearse private-alert unit with encrypted synthetic credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo unshare --net -- python3 -B deploy/scripts/rehearse-private-alert.py "$RUNNER_TEMP/package-systemd/lightning-goats-smoke-x86_64-linux-gnu.tar.gz" "$GITHUB_SHA" > "$RUNNER_TEMP/PRIVATE-ALERT-REHEARSAL.json" 2> "$RUNNER_TEMP/PRIVATE-ALERT-REHEARSAL.log"
+      - name: Retain private-alert rehearsal including failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: private-alert-systemd-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/PRIVATE-ALERT-REHEARSAL.json
+            ${{ runner.temp }}/PRIVATE-ALERT-REHEARSAL.log
+          if-no-files-found: warn
+          retention-days: 14
       - name: Prepare a fresh inactive canary on the disposable runner
         shell: bash
         run: |

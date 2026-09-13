@@ -110,3 +110,35 @@ until the operator/reviewer reconciles episode state and configuration; do not
 silently delete/reinitialize state or auto-rearm. Run offline `check` after a
 reviewed restoration, then obtain the required activation approval. A passing
 check proves binding/schema agreement, not absence of rollback.
+
+## Disposable systemd rehearsal
+
+`deploy/scripts/rehearse-private-alert.py ARCHIVE SOURCE` requires root solely for
+transient systemd/ownership setup, an already initialized staging host credential
+key, and a fresh network namespace containing only loopback. It verifies the
+archive first and runs the packaged CLI only as an existing non-root identity.
+It never creates users, enables services, reads production credentials or joins
+the household network. Deployment CI supplies the exact tested package through
+Actions artifact transfer and retains JSON plus failure logs.
+
+The harness preserves the shipped alert Service sandbox properties, substituting
+unique paths, synthetic encrypted credential sources and the existing `daemon`
+identity. It joins only its isolated mock-provider namespace. Preparation uses
+oneshot initialize/check with just policy/runtime credentials; runtime retains
+Type/Restart behavior. A temporary RemainAfterExit setting permits inspection of
+successful SIGTERM exit before explicit stop/collection. The harness fails on
+any automatic restart. A distinct `nobody` unit remains active with its own
+synthetic encrypted credential while the alert unit proves cross-unit denial.
+
+The actual-unit probe verifies injected credential owner/mode/read-only access,
+non-root identity, no effective capabilities, NoNewPrivileges, code nonwritability,
+state writability, encrypted-source inaccessibility and network namespace identity.
+The loopback provider requires the synthetic balance token; a non-cryptographic
+nak process fixture counts one wrap and one publication across worker restart.
+Plaintext source credential files are removed before services start. Cleanup
+stops and collects every unit before removing its state/code directories.
+
+This is preparation evidence only. Mock encryption is not the real-bunker proof;
+temporary identities are not final account provisioning; a loopback namespace is
+not proof of final public-relay/private-network egress policy. Those acceptance
+gates remain separate even when the rehearsal passes.

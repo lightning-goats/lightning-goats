@@ -20,8 +20,12 @@ def patched_source(source):
     hook = '''
 # Optional project observer: failure never interrupts household station ingestion.
 try:
-    from lightning_goats_weather import record_packet as _lg_record_packet
-except ImportError:
+    import importlib.util as _lg_import
+    _lg_spec = _lg_import.spec_from_file_location('lightning_goats_weather', '/usr/local/lib/lightning-goats-weather/lightning_goats_weather.py')
+    _lg_module = _lg_import.module_from_spec(_lg_spec)
+    _lg_spec.loader.exec_module(_lg_module)
+    _lg_record_packet = _lg_module.record_packet
+except Exception:
     _lg_record_packet = None
 '''
     event = '                    data = json.loads(line)\n'

@@ -76,6 +76,41 @@ For a manual Rust reproduction, build `cargo test --locked --all-features
 network namespace, setting `LG_TEST_NAK` to the checksum-pinned binary. The
 workflow contains the exact namespace setup and executable-discovery commands.
 
+## Shipped systemd sandbox rehearsal
+
+`deploy/scripts/rehearse-bunker-systemd.py` adds an actual transient systemd
+service derived from every Service directive in the shipped bunker unit. Only
+the executable and fixture paths are substituted; a loopback-only network
+namespace is added. No unit is installed or enabled. It uses the same pinned
+nak binary, public synthetic scalars and a temporary local relay. A host-key
+encrypted synthetic credential is created, its plaintext deleted, and the
+service must sign and verify an event both before and after restart. The test
+also checks the live process is non-root, has no effective capabilities, has
+NoNewPrivileges enabled, uses the isolated namespace, emits no process journal
+output and publishes no kind-1 note while signing. Corrupting the encrypted
+credential must fail before execution with systemd status 243. The separate
+persisted bunker configuration must be absent; ordinary LMDB caches and the
+local control socket are expected runtime data.
+
+The dedicated workflow runs this rehearsal after the Rust acceptance test and
+retains `BUNKER-SYSTEMD.json`. This exercises the sandbox using synthetic
+credentials; it does not establish production credential custody, public relay
+compatibility, or isolation from another live application service. The script
+requires an existing systemd host credential key and never initializes it on
+an operator host; only the disposable CI runner setup initializes that key.
+
+On the Fedora VPS, the synthetic rehearsal passed on 2026-09-13 after labeling
+only disposable executable copies for their intended installed paths. The
+first unlabeled-copy attempt could not connect to the relay (permission denied);
+no SELinux policy was changed. An initial overbroad assertion that the runtime
+directory contained no files also failed: upstream initializes LMDB caches and
+a control socket without enabling signer configuration persistence. The final
+assertion checks the source-defined `bunker` configuration path instead. The
+successful run reported signing/restart, zero kind-1 publications, zero process
+journal bytes, non-root/no effective capabilities/NoNewPrivileges, isolated
+network and corrupted-credential rejection. CI results must be checked for the
+exact candidate SHA; this local observation does not imply CI success.
+
 ## Remaining acceptance
 
 The final production nak version and binary provenance must be reviewed and

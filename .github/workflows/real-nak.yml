@@ -39,9 +39,15 @@ jobs:
           set -euo pipefail
           LG_REAL_TEST_BINARY="$(python3 -c 'import json,sys; rows=[json.loads(line) for line in open(sys.argv[1])]; paths=[r["executable"] for r in rows if r.get("reason")=="compiler-artifact" and r.get("target",{}).get("name")=="real_nak" and r.get("executable")]; assert len(paths)==1; print(paths[0])' "$RUNNER_TEMP/real-nak-build.jsonl")"
           sudo unshare --net -- sh -c 'ip link set lo up; exec runuser -u "$1" -- env LG_TEST_NAK="$2" "$3" --ignored --nocapture' sh "$(id -un)" "$RUNNER_TEMP/nak" "$LG_REAL_TEST_BINARY" | tee "$RUNNER_TEMP/REAL-NAK.txt"
+      - name: Rehearse the shipped bunker sandbox with encrypted synthetic credentials
+        run: |
+          sudo systemd-creds setup
+          sudo unshare --net -- python3 -B deploy/scripts/rehearse-bunker-systemd.py "$RUNNER_TEMP/nak" | tee "$RUNNER_TEMP/BUNKER-SYSTEMD.json"
       - uses: actions/upload-artifact@v4
         with:
           name: real-nak-${{ github.sha }}
-          path: ${{ runner.temp }}/REAL-NAK.txt
+          path: |
+            ${{ runner.temp }}/REAL-NAK.txt
+            ${{ runner.temp }}/BUNKER-SYSTEMD.json
           if-no-files-found: error
           retention-days: 14

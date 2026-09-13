@@ -9,10 +9,11 @@ use zeroize::Zeroizing;
 
 use crate::secrets::read_systemd_credential;
 
-#[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum OwnerProtocol {
     FeederRequestV1,
+    FeederRequestV2 { ledger_item: String },
     UuidCanary,
 }
 
@@ -104,6 +105,19 @@ impl OpenHabClient {
         {
             bail!("UUID echo protocol is restricted to harmless canary Items");
         }
+        if let OwnerProtocol::FeederRequestV2 { ledger_item } = &config.protocol {
+            validate_identifier(ledger_item, "OpenHAB owner ledger item")?;
+            if [
+                config.request_item.as_str(),
+                config.ack_item.as_str(),
+                config.override_item.as_str(),
+                config.remote_enabled_item.as_str(),
+            ]
+            .contains(&ledger_item.as_str())
+            {
+                bail!("v2 ledger must be separate from command/result/safety Items");
+            }
+        }
         if let Some(item) = &config.temperature_item {
             validate_identifier(item, "OpenHAB temperature item")?;
         }
@@ -143,7 +157,7 @@ impl OpenHabClient {
             auth_token: Zeroizing::new(auth_token),
             request_item: config.request_item.clone(),
             ack_item: config.ack_item.clone(),
-            protocol: config.protocol,
+            protocol: config.protocol.clone(),
             override_item: config.override_item.clone(),
             remote_enabled_item: config.remote_enabled_item.clone(),
             temperature_item: config.temperature_item.clone(),
@@ -165,9 +179,13 @@ impl OpenHabClient {
     /// An owner rejection describes this invocation only. It must never release
     /// a gateway reservation or authorize a fresh physical request.
     pub async fn feeder_result(&self, request_id: Uuid) -> Result<OwnerOutcome> {
+        if let OwnerProtocol::FeederRequestV2 { ledger_item } = &self.protocol {
+            return self.feeder_result_v2(request_id, ledger_item).await;
+        }
         let state = self.item_state(&self.ack_item).await?;
-        match self.protocol {
+        match &self.protocol {
             OwnerProtocol::FeederRequestV1 => parse_owner_result(&state, request_id),
+            OwnerProtocol::FeederRequestV2 { .. } => unreachable!("handled above"),
             OwnerProtocol::UuidCanary => {
                 let state = state.trim();
                 if state.is_empty() || matches!(state, "NULL" | "UNDEF" | "-") {
@@ -186,8 +204,14 @@ impl OpenHabClient {
     }
 
     pub async fn command_feeder_request(&self, request_id: Uuid) -> Result<()> {
-        let command = match self.protocol {
+        let command = match &self.protocol {
             OwnerProtocol::FeederRequestV1 => serde_json::to_string(&OwnerRequest {
+                request_id,
+                requested_at: DateTime::<Utc>::from(SystemTime::now())
+                    .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            })?,
+            OwnerProtocol::FeederRequestV2 { .. } => serde_json::to_string(&OwnerRequestV2 {
+                version: "feeder-request-v2",
                 request_id,
                 requested_at: DateTime::<Utc>::from(SystemTime::now())
                     .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
@@ -206,6 +230,10 @@ impl OpenHabClient {
     }
 
     async fn item_state(&self, item: &str) -> Result<String> {
+        self.item_state_bounded(item, 4096).await
+    }
+
+    async fn item_state_bounded(&self, item: &str, limit: usize) -> Result<String> {
         let endpoint = self
             .base_url
             .join(&format!("rest/items/{item}/state"))
@@ -220,8 +248,108 @@ impl OpenHabClient {
         if !response.status().is_success() {
             bail!("OpenHAB item state returned HTTP {}", response.status());
         }
-        let bytes = crate::http::bounded_body(response, 4096).await?;
+        let bytes = crate::http::bounded_body(response, limit).await?;
         String::from_utf8(bytes).context("OpenHAB state must be UTF-8")
+    }
+
+    // Recovery is read-only. The current Item locates a receipt, but only a
+    // matching committed JDBC snapshot can certify v2's immutable completion.
+    async fn feeder_result_v2(&self, request_id: Uuid, ledger_item: &str) -> Result<OwnerOutcome> {
+        let raw = self.item_state_bounded(ledger_item, 8192).await?;
+        let ledger = parse_ledger_v2(&raw)?;
+        let expected = request_id.to_string();
+        let Some(entry) = ledger
+            .entries
+            .iter()
+            .find(|entry| entry.request_id == expected)
+        else {
+            return parse_result_v2(&self.item_state(&self.ack_item).await?, request_id);
+        };
+        if entry.status == "accepted" {
+            return Ok(OwnerOutcome::Pending);
+        }
+        let completed_at = parse_v2_time(
+            entry
+                .updated_at
+                .as_deref()
+                .context("missing completion time")?,
+        )?;
+        // Owner v2 stamps completion immediately before bounded Item/JDBC writes.
+        // Failure to find that exact receipt in this bounded interval is ambiguous,
+        // never permission to scan older success or retry with a new UUID.
+        let start = completed_at - chrono::Duration::seconds(10);
+        let end = completed_at + chrono::Duration::seconds(10);
+        let mut seen_complete = false;
+        let mut previous_time = i64::MIN;
+        for page in 0..8 {
+            let mut endpoint = self
+                .base_url
+                .join(&format!("rest/persistence/items/{ledger_item}"))?;
+            endpoint
+                .query_pairs_mut()
+                .append_pair("serviceId", "jdbc")
+                .append_pair("starttime", &start.to_rfc3339())
+                .append_pair("endtime", &end.to_rfc3339())
+                .append_pair("boundary", "false")
+                .append_pair("itemState", "false")
+                .append_pair("displayState", "false")
+                .append_pair("pagelength", "8")
+                .append_pair("page", &page.to_string());
+            let response = self
+                .client
+                .get(endpoint)
+                .basic_auth(self.auth_token.as_str(), Some(""))
+                .send()
+                .await
+                .context("failed requesting owner persistence")?;
+            if !response.status().is_success() {
+                bail!("owner persistence returned HTTP {}", response.status());
+            }
+            let bytes = crate::http::bounded_body(response, 256 * 1024).await?;
+            let history: OwnerHistoryV2 =
+                serde_json::from_slice(&bytes).context("invalid owner persistence response")?;
+            if history.name != ledger_item
+                || history.data.len() > 8
+                || history.datapoints.parse::<usize>().ok() != Some(history.data.len())
+            {
+                bail!("owner persistence identity/count mismatch");
+            }
+            for row in &history.data {
+                if row.time < previous_time
+                    || row.time < start.timestamp_millis()
+                    || row.time > end.timestamp_millis()
+                    || row.time
+                        > DateTime::<Utc>::from(SystemTime::now()).timestamp_millis() + 30_000
+                {
+                    bail!("owner persistence ordering/time mismatch");
+                }
+                previous_time = row.time;
+                let snapshot = parse_ledger_v2(&row.state)?;
+                if let Some(receipt) = snapshot.entries.iter().find(|e| e.request_id == expected) {
+                    if receipt.at != entry.at {
+                        bail!("owner persistence admission conflict");
+                    }
+                    if receipt.status == "complete" {
+                        if receipt != entry || row.time < completed_at.timestamp_millis() {
+                            bail!("owner persistence completion conflict");
+                        }
+                        seen_complete = true;
+                    } else if seen_complete {
+                        bail!("owner persistence regressed after completion");
+                    }
+                } else if seen_complete {
+                    bail!("owner persistence evicted completed receipt");
+                }
+            }
+            if history.data.len() < 8 {
+                return Ok(if seen_complete {
+                    OwnerOutcome::Complete
+                } else {
+                    OwnerOutcome::Ambiguous
+                });
+            }
+        }
+        bail!("owner persistence pagination limit reached")
     }
 
     async fn command_item(&self, item: &str, command: &str) -> Result<()> {
@@ -242,6 +370,130 @@ impl OpenHabClient {
             bail!("OpenHAB command returned HTTP {}", response.status());
         }
         Ok(())
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OwnerRequestV2 {
+    version: &'static str,
+    request_id: Uuid,
+    requested_at: String,
+}
+
+#[derive(Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct OwnerEntryV2 {
+    version: String,
+    request_id: String,
+    status: String,
+    reason: String,
+    at: String,
+    updated_at: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OwnerLedgerV2 {
+    version: String,
+    entries: Vec<OwnerEntryV2>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OwnerHistoryV2 {
+    name: String,
+    datapoints: String,
+    data: Vec<OwnerHistoryRowV2>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OwnerHistoryRowV2 {
+    time: i64,
+    state: String,
+}
+
+fn parse_v2_time(raw: &str) -> Result<DateTime<chrono::FixedOffset>> {
+    let at = DateTime::parse_from_rfc3339(raw).context("invalid owner v2 timestamp")?;
+    if at.timestamp() < 946_684_800
+        || at > DateTime::<Utc>::from(SystemTime::now()) + chrono::Duration::seconds(30)
+    {
+        bail!("owner v2 timestamp is outside the supported range");
+    }
+    Ok(at)
+}
+
+fn parse_ledger_v2(raw: &str) -> Result<OwnerLedgerV2> {
+    if raw.len() > 8192 {
+        bail!("owner ledger exceeds byte limit");
+    }
+    let ledger: OwnerLedgerV2 = serde_json::from_str(raw).context("invalid owner v2 ledger")?;
+    if ledger.version != "feeder-request-ledger/v2" || ledger.entries.len() > 32 {
+        bail!("unsupported owner ledger version or capacity");
+    }
+    let mut ids = std::collections::HashSet::new();
+    for entry in &ledger.entries {
+        let id = entry.request_id.as_bytes();
+        if entry.version != "feeder-request-v2"
+            || !(8..=128).contains(&id.len())
+            || !id[0].is_ascii_alphanumeric()
+            || !id
+                .iter()
+                .all(|b| b.is_ascii_alphanumeric() || b"._:-".contains(b))
+            || !ids.insert(&entry.request_id)
+        {
+            bail!("invalid or duplicate owner ledger identity");
+        }
+        let admitted = parse_v2_time(&entry.at)?;
+        match (
+            entry.status.as_str(),
+            entry.reason.as_str(),
+            &entry.updated_at,
+        ) {
+            ("accepted", "accepted", None) => {}
+            ("complete", "complete", Some(updated)) if parse_v2_time(updated)? >= admitted => {}
+            _ => bail!("invalid owner ledger status/time"),
+        }
+    }
+    Ok(ledger)
+}
+
+fn parse_result_v2(raw: &str, expected: Uuid) -> Result<OwnerOutcome> {
+    if raw.trim().is_empty() || matches!(raw.trim(), "NULL" | "UNDEF" | "-") {
+        return Ok(OwnerOutcome::Absent);
+    }
+    let result: OwnerEntryV2 = serde_json::from_str(raw).context("invalid owner v2 result")?;
+    if result.version != "feeder-request-v2" || result.updated_at.is_some() {
+        bail!("invalid owner v2 result envelope");
+    }
+    parse_v2_time(&result.at)?;
+    if result.request_id != expected.to_string() {
+        return Ok(OwnerOutcome::Absent);
+    }
+    match (result.status.as_str(), result.reason.as_str()) {
+        // Notification alone never certifies durable completion.
+        ("complete", "complete") => Ok(OwnerOutcome::Ambiguous),
+        ("accepted", "accepted") | ("running", "pulse_started") => Ok(OwnerOutcome::Pending),
+        (
+            "denied",
+            "request_invalid"
+            | "request_version"
+            | "request_stale"
+            | "ledger_restore_missing"
+            | "ledger_restore_conflict"
+            | "ledger_invalid"
+            | "restart_uncertain"
+            | "ledger_full"
+            | "clock_invalid"
+            | "cooldown"
+            | "busy",
+        ) => Ok(OwnerOutcome::Rejected),
+        (
+            "failed",
+            "ledger_persist_uncertain" | "completion_persist_uncertain" | "execution_error",
+        ) => Ok(OwnerOutcome::Ambiguous),
+        _ => bail!("contradictory or unknown owner v2 status/reason"),
     }
 }
 

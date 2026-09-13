@@ -16,7 +16,7 @@ are preserved. Unrelated untracked `reports/` in the original checkout is untouc
 | [PR76 v2 adapter](https://github.com/lightning-goats/lightning-goats/pull/76) | `bdd5a534a91015cdfadfc7f2f4fdc6ca69a74865` | Implemented; synthetic restart and actual read-only USER/JDBC recovery passed; VPS source review accepted; not installed |
 | [PR77 held fixture](https://github.com/lightning-goats/lightning-goats/pull/77) | `3b16b7a85e0a2ab88b42562c78a8b7dde728513f` | Helper evidence-loss correction published; local Rust/helper tests and all 14 replacement CI jobs pass; independent re-review pending |
 | [PR78 weather reader](https://github.com/lightning-goats/lightning-goats/pull/78) | `a1aa8dca34d2a25b9f8a87ccca8adea024355495` | Read-only permission regression fixed; service template/installation layout prepared; not installed |
-| [PR79 held gateway](https://github.com/lightning-goats/lightning-goats/pull/79) | `daeb9ba0acfd4b506547aba8049a3f1a9aae3cc3` | All 13 CI jobs pass; generation2 binding and guarded installer prepared; not installed |
+| [PR79 held gateway](https://github.com/lightning-goats/lightning-goats/pull/79) | `daeb9ba0acfd4b506547aba8049a3f1a9aae3cc3` | All 13 CI jobs pass; installed and verified inactive/disabled; local acceptance pending |
 
 ```yaml
 home_host: 10.8.0.6
@@ -108,9 +108,13 @@ submit another request to either deployed fixture.
 PR79 prepares `uuid_held_canary` restricted to the final fixed generation2 pair,
 a separate Unix identity/database/unit and loopback port 8791. It deliberately
 uses the existing canary OpenHAB USER credential; it does not claim a distinct
-OpenHAB authorization scope. All 13 exact-head CI jobs passed. Installation and
-actual gateway hold/restart/release acceptance remain pending PR77 re-review.
-No new unit/account was installed or started. PR79 is based on PR76 and must be
+OpenHAB authorization scope. All 13 exact-head CI jobs passed. Fresh inactive installation and separate verifier passed at `daeb9ba`. The new
+locked nologin identity has no sudo authority and only its primary group; its
+0700 state directory is empty. The unit is inactive/disabled, MainPID0, with no
+listener on8791. Original echo remains active; production remains inactive.
+Actual gateway hold/restart/release acceptance remains pending review. No new
+service was started and no OpenHAB request was made. Sanitized installation
+evidence is published in PR79 docs-only follow-up `863cfab`. PR79 is based on PR76 and must be
 revalidated on current main when its parent is integrated.
 
 Weather preparation found the WAL reader needed sidecar write access after the

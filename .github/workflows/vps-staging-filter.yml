@@ -1,0 +1,26 @@
+name: VPS staging client filter
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  isolated-tcp:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y nftables iproute2
+      - name: Verify policy transition including established TCP and rollback
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo unshare --net -- env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin python3 -B deploy/nftables/test-vps-staging-client.py > "$RUNNER_TEMP/VPS-STAGING-TCP.json"
+          python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); assert v["scope"].startswith("isolated veth TCP")' "$RUNNER_TEMP/VPS-STAGING-TCP.json"
+          cat "$RUNNER_TEMP/VPS-STAGING-TCP.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vps-staging-filter-${{ github.sha }}
+          path: ${{ runner.temp }}/VPS-STAGING-TCP.json
+          if-no-files-found: error
+          retention-days: 14

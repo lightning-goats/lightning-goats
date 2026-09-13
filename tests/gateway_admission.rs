@@ -21,9 +21,20 @@ struct Owner {
     ack: Arc<Mutex<String>>,
     auto_ack: bool,
     owner_v1: bool,
+    initial_safety_delay: Arc<Mutex<Option<Duration>>>,
 }
 
 async fn item(State(owner): State<Owner>, Path(item): Path<String>) -> String {
+    let initial_delay = if item == "FeederOverride" {
+        owner.initial_safety_delay.lock().unwrap().take()
+    } else {
+        None
+    };
+    if let Some(delay) = initial_delay {
+        tokio::time::sleep(delay).await;
+        assert!(owner.commands.lock().unwrap().is_empty());
+        return "UNDEF".into();
+    }
     match item.as_str() {
         "FeederOverride" => "OFF".into(),
         "LightningGoatsCanaryRemoteEnabled" => "ON".into(),
@@ -480,19 +491,30 @@ async fn shipped_examples_real_daemon_gateway_two_confirmed_commands_leave_340()
 
 #[tokio::test]
 async fn daemon_restart_and_confirmation_failure_poll_original_uuid_without_resend() {
-    let owner = Owner::default();
+    let owner = Owner {
+        initial_safety_delay: Arc::new(Mutex::new(Some(Duration::from_millis(500)))),
+        ..Owner::default()
+    };
     let (mock, owner_url) = mock_owner(owner.clone()).await;
     let directory = TempDir::new().unwrap();
     let ledger = credited(&directory, 1000).await;
-    let (_gateway, base) = gateway(&directory, &owner_url, 1).await;
-    let first = daemon(&directory, &base).await;
-    for _ in 0..100 {
-        if !owner.commands.lock().unwrap().is_empty() {
-            break;
+    let (mut gateway_process, base) = gateway(&directory, &owner_url, 1).await;
+    let mut first = daemon(&directory, &base).await;
+    let original = tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            assert!(first.0.try_wait().unwrap().is_none(), "daemon exited");
+            assert!(
+                gateway_process.0.try_wait().unwrap().is_none(),
+                "gateway exited"
+            );
+            if let Some(id) = owner.commands.lock().unwrap().first().cloned() {
+                break id;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
         }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    let original = owner.commands.lock().unwrap()[0].clone();
+    })
+    .await
+    .expect("initial command must arrive after bounded safety retry");
     drop(first); // response/confirmation lost after mock command
     let pool = sqlx::SqlitePool::connect(&format!(
         "sqlite://{}",
@@ -623,7 +645,13 @@ async fn paired_store_restore_preserves_pending_identity_settlement_and_signed_b
     };
     use lightning_goats::ledger::{LedgerStore, StoredStrikeReceiveRequest};
     use serde_json::json;
-    let owner = Owner::default();
+    // Exercise startup safety recovery before the paired-store snapshot. The
+    // first failed safety read plus the real worker's five-second retry exceeds
+    // the old five-second command observation deadline.
+    let owner = Owner {
+        initial_safety_delay: Arc::new(Mutex::new(Some(Duration::from_millis(500)))),
+        ..Owner::default()
+    };
     let (mock, owner_url) = mock_owner(owner.clone()).await;
     let source = TempDir::new().unwrap();
     let ledger = credited(&source, 1000).await;
@@ -665,15 +693,25 @@ async fn paired_store_restore_preserves_pending_identity_settlement_and_signed_b
         .unwrap();
     let outbox = ledger.next_outbox_entry().await.unwrap().unwrap();
     let old_stream = ledger.overlay_stream_id().await.unwrap();
-    let (gateway_process, base) = gateway(&source, &owner_url, 1).await;
-    let daemon_process = daemon(&source, &base).await;
-    tokio::time::timeout(Duration::from_secs(5), async {
+    let (mut gateway_process, base) = gateway(&source, &owner_url, 1).await;
+    let mut daemon_process = daemon(&source, &base).await;
+    // This observes startup/retry, not the owner-completion deadline. Allow the
+    // real five-second safety backoff while keeping failures bounded and visible.
+    tokio::time::timeout(Duration::from_secs(15), async {
         while owner.commands.lock().unwrap().is_empty() {
+            assert!(
+                daemon_process.0.try_wait().unwrap().is_none(),
+                "daemon exited before the first harmless command"
+            );
+            assert!(
+                gateway_process.0.try_wait().unwrap().is_none(),
+                "gateway exited before the first harmless command"
+            );
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
     })
     .await
-    .unwrap();
+    .expect("no harmless command after startup and a safety-retry cycle");
     let original = owner.commands.lock().unwrap()[0].clone();
     drop(daemon_process);
     drop(gateway_process);

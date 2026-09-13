@@ -1,5 +1,10 @@
 # Staging acceptance evidence and outstanding gates
 
+> Current-state update (2026-09-12): see [VPS cutover status](vps-cutover-status.md).
+> The source/tunnel descriptions below record historical staging evidence.
+> Main now includes the remediation integration; operational inventory is private.
+> Historical evidence is retained; it is not a current readiness assertion.
+
 Production remains HOLD. This record separates repository/mock evidence from
 observations that need authorized host/source access. Keep #6/#15/#16 open and
 all integration/remediation PRs draft pending review. Green CI does not authorize

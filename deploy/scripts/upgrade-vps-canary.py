@@ -6,6 +6,15 @@ An operator must exclude competing administrators and service activation.
 """
 import sys
 sys.dont_write_bytecode = True
+# The authenticated launcher injects this callback only after checking every
+# local module. Direct CLI use must stop before importing any local code.
+if "verified_tool_identity" not in globals():
+    if __name__ == "__main__":
+        raise SystemExit("use the externally verified root-owned tool launcher")
+
+    def verified_tool_identity():
+        raise ValueError("verified tool launcher required")
+
 import argparse
 import hashlib
 import importlib.util
@@ -61,6 +70,7 @@ def root_only():
 
 def snapshot():
     root_only()
+    verified_tool_identity()
     user = pwd.getpwnam("lightning-goats")
     if user.pw_uid == 0 or user.pw_gid == 0 or user.pw_shell != "/usr/sbin/nologin" or user.pw_dir != str(STATE):
         raise ValueError("unexpected runtime identity")
@@ -150,6 +160,7 @@ def write_json(path, value):
 
 def prepare(archive, source, digest, baseline_path, baseline_digest):
     root_only()
+    tool = verified_tool_identity()
     baseline = read_json(baseline_path, baseline_digest)
     guard(baseline)
     if not BASE.exists():
@@ -181,13 +192,13 @@ def prepare(archive, source, digest, baseline_path, baseline_digest):
         raise ValueError("unit upgrade requires separate reviewed procedure")
     TX.prepare(bundle / "files", [(p, payload / member, baseline["files"][str(p)])
                                   for member, p in TARGETS.items()], lambda: guard(baseline))
-    write_json(bundle / "UPGRADE.json", {"version": 1, "baseline": baseline,
+    write_json(bundle / "UPGRADE.json", {"version": 2, "tool": tool, "baseline": baseline,
                                         "release": release})
     return {"prepared_directory": str(bundle), "applied": False, "activated": False}
 
 
 def validate_records(records, metadata):
-    if records.get("version") != 1 or metadata.get("version") != 1:
+    if records.get("version") != 1 or metadata.get("version") != 2:
         raise ValueError("unsupported upgrade manifest")
     rows = records.get("files", [])
     if len(rows) != len(TARGETS) or {r["destination"] for r in rows} != {str(p) for p in TARGETS.values()}:
@@ -210,6 +221,8 @@ def execute(bundle, rollback=False):
         trusted(path)
     metadata = read_json(bundle / "UPGRADE.json")
     records = read_json(bundle / "files/TRANSACTION.json")
+    if metadata.get("tool") != verified_tool_identity():
+        raise ValueError("prepared tool generation mismatch; retain legacy evidence")
     validate_records(records, metadata)
     for index in range(len(TARGETS)):
         for version in ["old", "new"]:
@@ -228,7 +241,7 @@ p.unlink()
         if not INSTALL.command([*run_as, str(TARGETS[name]), "--help"]).stdout.strip():
             raise ValueError("installed help verification failed")
     guard(metadata["baseline"], replacing=True)
-    result.update(prepared_release_source_commit=metadata["release"]["source_commit"], archive_sha256=metadata["release"]["archive_sha256"], runtime_permissions_verified=True,
+    result.update(tool=metadata["tool"], prepared_release_source_commit=metadata["release"]["source_commit"], archive_sha256=metadata["release"]["archive_sha256"], runtime_permissions_verified=True,
                   installed_files={str(path): TX.fingerprint(path) for path in TARGETS.values()})
     write_json(bundle / ("RESULT-" + str(uuid.uuid4()) + ".json"), result)
     return result

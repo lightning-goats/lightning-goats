@@ -78,58 +78,81 @@ state, enabled service, production unit, manager-reload requirement or changed
 unit/drop-in. Unexpected ACLs, capabilities, symlink parents and file modes are
 also refused. It never stops services to make these checks pass.
 
-First capture the read-only baseline and review the complete result against the
-authorized inventory, including the effective drop-in set:
+### Authenticate the tool before interpreting Python
+
+Do not run this coordinator or its helpers as root from a checkout. The reviewed
+bootstrap is `launch-vps-upgrade.py`; it and all five local/transitive modules
+must be copied into a fresh root-owned directory under an exclusively root-owned,
+non-writable ancestor chain. The exact bundle contains only:
+
+- `launch-vps-upgrade.py`
+- `upgrade-vps-canary.py`
+- `inactive_file_transaction.py`
+- `preflight-release.py`
+- `prepare-vps-canary.py`
+- `smoke-release.py`
+- `TOOL.json`
+
+Generate `TOOL.json` from the exact reviewed commit's file bytes, without running
+those files. Its schema is `{"version":1,"source_commit":"FULL_SHA","files":
+{"FILENAME":"SHA256",...}}`; `files` must cover exactly the six Python files,
+including the launcher. Independently review the source commit, every file hash,
+the manifest SHA256 and the launcher SHA256. A manifest supplied alongside files
+is not independently authenticated evidence. No checkout code may run with sudo
+to construct or establish this trust boundary.
+
+Using trusted system installation tools and the approved maintenance procedure,
+create a fresh root:root mode-0700 bundle directory under a root-controlled
+installation prefix; copy the seven files as root:root mode-0600. Check every
+ancestor for ownership, writability, symlinks and ACLs. Do not reuse or overwrite
+a prior generation. Reject links, extra files and bytecode caches. Exclude other
+administrative writers throughout installation and execution. Verify the copied
+launcher with `/usr/bin/sha256sum` against the independently reviewed launcher
+hash **before Python interprets it**. Verify the copied manifest hash as well.
+Do not substitute a helper's self-check for this external bootstrap check.
+
+Only after that boundary has been established, use the following command shape
+with the actual root-owned bundle path and externally reviewed manifest digest:
 
 ```sh
-sudo python3 -B deploy/scripts/upgrade-vps-canary.py snapshot > /private/baseline.json
-sha256sum /private/baseline.json
+sudo /usr/bin/python3 -I -S -B /ROOT_OWNED_BUNDLE/launch-vps-upgrade.py TOOL_MANIFEST_SHA256 snapshot > /private/baseline.json
 ```
 
-Successful exit and valid JSON are required. A digest only pins that reviewed
-snapshot; it does not by itself approve the baseline. After candidate review and
-an exclusive maintenance window, prepare the retained transaction:
+The root-installed launcher rejects writable/aliased paths and unexpected bundle
+contents, validates every module hash before loading any local code, and runs
+with caller import paths and site initialization disabled. It rechecks the tool
+identity during host operations. Root administrators remain outside this trust
+boundary; this does not provide protection against a concurrent root writer.
 
-```sh
-sudo python3 -B deploy/scripts/upgrade-vps-canary.py prepare \
-  /path/to/reviewed-release.tar.gz FULL_ARCHIVE_SOURCE_SHA ARCHIVE_SHA256 \
-  /private/baseline.json REVIEWED_BASELINE_SHA256
+Capture and independently review the baseline and its SHA256. Substitute the
+same authenticated launcher prefix for the commands below:
+
+```text
+LAUNCHER prepare /path/to/reviewed-release.tar.gz FULL_ARCHIVE_SOURCE_SHA ARCHIVE_SHA256 /private/baseline.json REVIEWED_BASELINE_SHA256
+LAUNCHER apply /var/lib/lightning-goats-upgrades/UUID
+LAUNCHER rollback /var/lib/lightning-goats-upgrades/UUID
 ```
 
-This creates one fresh root-private directory under
-`/var/lib/lightning-goats-upgrades/`, verifies the archive's private copy and
-source, requires its shipped unit to match the installed unit, and retains
-backups/staged replacements plus the baseline. It does not replace installed
-files. Preserve any failed/partial directory for inspection; do not reuse it.
+`LAUNCHER` is notation for the complete verified invocation above, not a shell
+executable. Preparation retains backups and staged replacements without changing
+installed files. Version-2 `UPGRADE.json` binds the source/tool manifest identity;
+apply and rollback refuse a missing or different generation before replacement.
+Results retain that identity alongside actual installed fingerprints.
 
-Use exactly the prepared UUID directory returned by that command:
+Existing version-1 prepared transactions are retained unchanged as evidence and
+are refused by this candidate. Do not fill in a tool identity retrospectively,
+delete their backups, or automatically reprepare them. Their future disposition
+needs a separately reviewed migration/reconciliation procedure.
 
-```sh
-sudo python3 -B deploy/scripts/upgrade-vps-canary.py apply /var/lib/lightning-goats-upgrades/UUID
-# If a reviewed rollback is required while the original empty/inactive
-# preconditions still hold:
-sudo python3 -B deploy/scripts/upgrade-vps-canary.py rollback /var/lib/lightning-goats-upgrades/UUID
-```
+All original inactivity, fixed-destination, archive, runtime permission and
+rollback checks remain required. No command activates a service or changes a
+unit, credential or database. The exclusive administrative maintenance window
+and concrete harmless network/test approvals remain separate prerequisites.
 
-Both commands validate fixed destinations and old/new metadata against the
-root-protected preparation record before executing the transaction. They recheck
-the full host baseline around each replacement, run permission/write probes and
-the installed binaries' `--help` as the non-admin runtime user, and retain a
-durable result with actual installed fingerprints. A rollback receipt identifies
-the prepared archive separately from the restored file fingerprints; it does
-not falsely label restored bytes as the new source. The historical installation
-record is preserved. A failed final probe leaves files/backups for reconciliation
-and creates no success receipt; nothing automatically activates or rolls forward.
-
-There is no service stop/start/enable/reload, unit replacement, credential load or
-database conversion. This helper cannot be used to roll back a later nonempty
-active session; use the separately reviewed paired-store reconciliation procedure.
-Do not start another administrative transaction or activate a service during
-these commands. Root administrators are outside the per-transaction lock.
-
-Deployment CI runs the coordinator fixture separately as root in a fresh network
-namespace: all target/state/transaction paths are redirected to a disposable
-`/run` tree, service/account inventory is mocked, and real non-root permission/
-help probes and file apply/rollback execute. The ordinary unprivileged test run
-skips that fixture; the separate root step must pass with no skipped fixture
-before claiming coordinator integration evidence.
+Deployment CI runs `test_upgrade*.py` separately as root in a fresh network
+namespace. The coordinator fixture redirects all installation paths into a
+fresh `/run` tree and explicitly mocks inventory/tool identity, while real file
+transactions and non-root probes execute. Separate actual launcher subprocesses
+exercise authenticated `--help`, poisoned caller imports, substituted/writable/
+symlinked helpers, unexpected bytecode directories and manifest drift. These
+fixtures do not establish persistent installation or cross-host acceptance.

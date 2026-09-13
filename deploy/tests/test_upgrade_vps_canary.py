@@ -20,6 +20,13 @@ SPEC.loader.exec_module(UP)
 
 
 class UpgradeTests(unittest.TestCase):
+    def setUp(self):
+        # Explicit unit-fixture trust provider; real launcher checked separately.
+        self.tool_patch = patch.object(UP, "verified_tool_identity", return_value={
+            "source_commit": "a" * 40, "manifest_sha256": "b" * 64})
+        self.tool_patch.start()
+        self.addCleanup(self.tool_patch.stop)
+
     @unittest.skipUnless(os.geteuid() == 0, "isolated root fixture runs separately in deployment CI")
     def test_disposable_root_prepare_apply_and_rollback(self):
         # All host boundaries are redirected into this disposable /run tree.
@@ -61,6 +68,20 @@ class UpgradeTests(unittest.TestCase):
             with patch.multiple(UP, BASE=root / "transactions", TARGETS=targets, UNIT=unit, RECORD=record, CONFIG=config, STATE=state), patch.object(UP, "snapshot", side_effect=observed), patch.object(UP.pwd, "getpwnam", return_value=user):
                 prepared = UP.prepare(archive, test_release.SOURCE, hashlib.sha256(archive.read_bytes()).hexdigest(), baseline_path, hashlib.sha256(baseline_path.read_bytes()).hexdigest())
                 self.assertFalse(prepared["applied"])
+                for rollback in [False, True]:
+                    with patch.object(UP, "verified_tool_identity", return_value={"manifest_sha256": "changed"}), patch.object(UP.TX, "execute", side_effect=AssertionError("replacement reached")):
+                        with self.assertRaisesRegex(ValueError, "tool generation mismatch"):
+                            UP.execute(prepared["prepared_directory"], rollback=rollback)
+                metadata_path = Path(prepared["prepared_directory"]) / "UPGRADE.json"
+                original_metadata = metadata_path.read_bytes()
+                legacy = json.loads(original_metadata)
+                legacy.pop("tool")
+                legacy["version"] = 1
+                metadata_path.write_text(json.dumps(legacy))
+                with patch.object(UP.TX, "execute", side_effect=AssertionError("replacement reached")):
+                    with self.assertRaisesRegex(ValueError, "tool generation mismatch"):
+                        UP.execute(prepared["prepared_directory"])
+                metadata_path.write_bytes(original_metadata)
                 result = UP.execute(prepared["prepared_directory"])
                 self.assertTrue(result["runtime_permissions_verified"])
                 self.assertEqual(targets["deploy/config.canary.toml.example"].read_bytes(), b"new example")
@@ -79,7 +100,7 @@ class UpgradeTests(unittest.TestCase):
             release["payload_sha256"][member] = "b" * 64
             rows.append({"destination": str(path), "old": old, "new": dict(old, sha256="b" * 64)})
         baseline["files"][str(UP.UNIT)] = {"sha256": "c" * 64}
-        return {"version": 1, "files": rows}, {"version": 1, "baseline": baseline, "release": release}
+        return {"version": 1, "files": rows}, {"version": 2, "baseline": baseline, "release": release}
 
     def test_only_exact_fixed_destination_payload_and_metadata_are_accepted(self):
         records, metadata = self.fixtures()

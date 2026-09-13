@@ -14,7 +14,7 @@ are preserved. Unrelated untracked `reports/` in the original checkout is untouc
 | [PR71 weather](https://github.com/lightning-goats/lightning-goats/pull/71) | `cb7bde28ceb7bb2aadcaa566192422170742976c` | Accepted and merged; all exact-head CI passed; not installed |
 | [PR72 owner correction](https://github.com/lightning-goats/lightning-goats/pull/72) | `bd59a055031f899787818592a633d6639a165871` | Accepted and merged; tested in unlinked fixture; physical owner unchanged |
 | [PR76 v2 adapter](https://github.com/lightning-goats/lightning-goats/pull/76) | `bdd5a534a91015cdfadfc7f2f4fdc6ca69a74865` | Implemented; synthetic restart and actual read-only USER/JDBC recovery passed; VPS source review accepted; not installed |
-| [PR77 held fixture](https://github.com/lightning-goats/lightning-goats/pull/77) | `3b16b7a85e0a2ab88b42562c78a8b7dde728513f` | Helper evidence-loss correction published; local Rust/helper tests and all 14 replacement CI jobs pass; independent re-review pending |
+| [PR77 held fixture](https://github.com/lightning-goats/lightning-goats/pull/77) | `3b16b7a85e0a2ab88b42562c78a8b7dde728513f` | Helper evidence-loss correction published; local Rust/helper tests and all 14 replacement CI jobs pass; VPS independently accepted replacement |
 | [PR78 weather reader](https://github.com/lightning-goats/lightning-goats/pull/78) | `a1aa8dca34d2a25b9f8a87ccca8adea024355495` | Read-only permission regression fixed; service template/installation layout prepared; not installed |
 | [PR79 held gateway](https://github.com/lightning-goats/lightning-goats/pull/79) | `daeb9ba0acfd4b506547aba8049a3f1a9aae3cc3` | All 13 CI jobs pass; installed and verified inactive/disabled; local acceptance pending |
 
@@ -72,8 +72,7 @@ the current schema, missing/stale/future time and restored older producer state.
 The shared producer and existing receiver remain unchanged. Real-frame timestamp
 verification, source-interpretation ACK and installation approval remain open.
 
-**Next VPS action:** independently re-review PR77 correction `3b16b7a`, then
-review PR78/79 and reply to the witness/retention scope request in #17
+**Next VPS action:** review PR78/79 and reply to the witness/retention scope request in #17
 comment5655433594. VPS accepted PR76 at `bdd5a534` and explicitly acknowledged
 the final generation2 Request/Ack binding in comment5655694424. The shared
 `src/openhab.rs` scope is implemented; VPS-owned `tests/gateway_admission.rs`
@@ -110,11 +109,15 @@ a separate Unix identity/database/unit and loopback port 8791. It deliberately
 uses the existing canary OpenHAB USER credential; it does not claim a distinct
 OpenHAB authorization scope. All 13 exact-head CI jobs passed. Fresh inactive installation and separate verifier passed at `daeb9ba`. The new
 locked nologin identity has no sudo authority and only its primary group; its
-0700 state directory is empty. The unit is inactive/disabled, MainPID0, with no
+0700 state directory now contains an initialized database with zero requests
+and refusals, integrity ok. The unit is inactive/disabled, MainPID0, with no
 listener on8791. Original echo remains active; production remains inactive.
-Actual gateway hold/restart/release acceptance remains pending review. No new
-service was started and no OpenHAB request was made. Sanitized installation
-evidence is published in PR79 docs-only follow-up `863cfab`. PR79 is based on PR76 and must be
+VPS independently accepted PR77 correction in comment5655799705. A bounded
+GET-only startup passed installed-process identity/capability verification and
+real credential/safety reads (both switches OFF); health200, temperature200/null,
+weather502/unavailable. No feeder POST or switch mutation occurred. The service
+was stopped after checks. Actual hold/restart/release acceptance remains pending
+PR79 review. Installation/runtime evidence is in PR79 docs-only `d17eb79`. PR79 is based on PR76 and must be
 revalidated on current main when its parent is integrated.
 
 Weather preparation found the WAL reader needed sidecar write access after the

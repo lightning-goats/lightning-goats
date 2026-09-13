@@ -5,11 +5,14 @@ Obtain the expected archive digest and source from independently reviewed build
 evidence. Self-consistent archive metadata alone is not source provenance.
 """
 import argparse
+from contextlib import contextmanager
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import re
+import stat
 import tempfile
 
 SPEC = importlib.util.spec_from_file_location(
@@ -17,6 +20,24 @@ SPEC = importlib.util.spec_from_file_location(
 RELEASE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(RELEASE)
 MAX_ARCHIVE_BYTES = 512 * 1024 * 1024
+
+
+@contextmanager
+def regular_archive(path):
+    # Linux O_PATH pins the inode without opening a device/FIFO for I/O.
+    # O_NOFOLLOW leaves a final symlink itself pinned, so fstat rejects it.
+    try:
+        descriptor = os.open(path, os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC)
+    except OSError as error:
+        raise ValueError("Archive must be an accessible regular file") from error
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise ValueError("Archive must be a regular file, not a symlink or special file")
+        # Reopen the pinned inode, never the replaceable caller pathname.
+        with open(f"/proc/self/fd/{descriptor}", "rb") as incoming:
+            yield incoming
+    finally:
+        os.close(descriptor)
 
 
 def preflight(archive, source, expected_digest):
@@ -31,7 +52,7 @@ def preflight(archive, source, expected_digest):
         size = 0
         # Verify the same private snapshot that is subsequently extracted, even
         # if the caller's original path is replaced during verification.
-        with Path(archive).open("rb") as incoming, snapshot.open("xb") as outgoing:
+        with regular_archive(archive) as incoming, snapshot.open("xb") as outgoing:
             while chunk := incoming.read(1024 * 1024):
                 size += len(chunk)
                 if size > MAX_ARCHIVE_BYTES:

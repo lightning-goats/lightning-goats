@@ -47,6 +47,9 @@ python3 deploy/scripts/preflight-release.py /path/to/release.tar.gz \
 
 Both pins must come from reviewed build/release evidence. The digest is for the
 inner release `.tar.gz`, not the GitHub artifact ZIP containing it. The command
+requires Linux with `/proc` and a regular archive file; pass the real file path,
+not a symlink. It rejects FIFOs, devices and directories before opening them for
+I/O, and pins the checked inode across pathname replacement. It
 checks a private snapshot against that digest before extraction, verifies every
 payload checksum and the declared source, and reports per-file hashes. It does
 not execute binaries or install files. Require a successful exit and valid JSON;

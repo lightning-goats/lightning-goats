@@ -63,13 +63,22 @@ python3 deploy/scripts/control-held-canary.py --provisioning-env /protected/env 
   --release UUID
 ```
 
-The check writes its UUID and stage to an exclusive mode 0600 evidence file before
-sending the single Request. Failure stops; no fresh retry is generated. Provision
+The check writes its UUID and prepared intent to an exclusive mode 0600 evidence
+file, fsyncs it and its parent directory before sending the single Request. That
+intent file is never rewritten. Later stages are published to a mode 0600
+`<evidence>.progress` sibling using a same-directory temporary file, file fsync,
+atomic replacement and directory fsync. Both names must be unused at preparation.
+A failed stage write preserves the intent and the previous complete snapshot;
+a failure after replacement can leave the new complete snapshot. An abrupt death
+may leave an ignored temporary file. Preserve all evidence on failure and recover
+only the original UUID; neither a prepared stage nor an incomplete progress file
+proves that dispatch did not happen. Failure stops; no fresh retry is generated. Provision
 and control inspect exact source/rule bindings, Item metadata, consumers and
 channel links. They do not alter remote-enable, clear faults, reset stores or
 send physical commands. Existing fixtures are refused, including failed ones.
 
-Nine Node model tests and three helper regressions pass. The real second-generation
+Nine Node model tests and seven helper tests pass, including six injected stage-write
+failures, pre-dispatch directory-sync failure and existing-evidence preservation. The real second-generation
 fixture also passed: counter 0→1, matching UUID held beyond the shipped five-second
 acknowledgement timeout, exact release then replay, counter still 1. Hold ON,
 RemoteEnabled OFF, Fault OFF. No OpenHAB restart or cross-host test is claimed.

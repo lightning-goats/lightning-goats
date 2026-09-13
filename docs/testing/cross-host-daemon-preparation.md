@@ -207,6 +207,15 @@ GET recovery, journal failure before forwarding, route/body limits, oversized
 responses and redirect rejection. Actual cross-host execution remains a separate
 approved and source-pinned step.
 
+The Rust regression
+`lost_post_responses_real_daemon_gateway_two_commands_leave_340` runs the actual
+daemon, Python proxy and gateway with a loopback mock owner. It requires exactly
+two recorded/discarded successful POST responses, subsequent GET recovery for
+each original UUID, exactly two distinct owner commands, two confirmation events,
+340 remaining after daemon restart, and no unresolved attempt or public outbox.
+The original direct-path shipped-example regression remains separate. Neither
+test is a HOME observation or a live held-rule/late-release acceptance result.
+
 Regression tests use the actual repository SQLite migrations plus captured
 fixture-shaped data. They verify correct correlation and reject extra/duplicate
 commands, changed baseline, wrong UUID/source, pending completion, inconsistent

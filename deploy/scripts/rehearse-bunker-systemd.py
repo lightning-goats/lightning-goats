@@ -119,12 +119,31 @@ def main(nak_path):
             checked([*args, "--", wrapper])
             wait_for(lambda: checked(["systemctl", "show", unit, "-p", "ActiveState", "--value"]).strip() == "active",
                      "bunker not active")
+            signing_attempts = []
             def sign():
-                return subprocess.run([str(nak), "--config-path", str(root / "client"), "event"],
+                # systemd Type=simple readiness precedes the relay subscription.
+                # Poll with synthetic signing-only requests, never publication.
+                deadline = time.monotonic() + 30
+                attempts = 0
+                while time.monotonic() < deadline:
+                    attempts += 1
+                    state = checked(["systemctl", "show", unit, "-p", "ActiveState", "--value"]).strip()
+                    restarts = checked(["systemctl", "show", unit, "-p", "NRestarts", "--value"]).strip()
+                    if state != "active" or restarts != "0":
+                        raise RuntimeError("bunker exited or automatically restarted during readiness")
+                    try:
+                        result = subprocess.run([str(nak), "--config-path", str(root / "client"), "event"],
                                       input=json.dumps({"kind": 1, "content": "synthetic sandbox acceptance", "tags": []}),
-                                      capture_output=True, text=True, timeout=15,
+                                      capture_output=True, text=True, timeout=min(5, max(.1, deadline-time.monotonic())),
                                       env={"PATH": os.defpath, "NOSTR_CLIENT_KEY": "02",
                                            "NOSTR_SECRET_KEY": f"bunker://{SIGNER}?relay={quote(relay_url, safe='')}"})
+                        if result.returncode == 0:
+                            signing_attempts.append(attempts)
+                            return result
+                    except subprocess.TimeoutExpired:
+                        pass
+                    time.sleep(.1)
+                raise RuntimeError("bounded NIP46 signing readiness failed")
             signed = sign()
             if signed.returncode:
                 raise RuntimeError("systemd bunker signing failed")
@@ -161,14 +180,15 @@ def main(nak_path):
             run([*args, "--", wrapper])
             wait_for(lambda: checked(["systemctl", "show", unit, "-p", "ExecMainStatus", "--value"]).strip() == "243",
                      "corrupt credential was not rejected before exec")
-            print(json.dumps({"scope": "synthetic systemd signer; no production acceptance",
+            evidence = {"scope": "synthetic systemd signer; no production acceptance",
                               "nak_sha256": DIGEST, "template_sha256": hashlib.sha256(template.read_bytes()).hexdigest(),
                               "signing": "pass", "restart_signing": "pass", "signing_publication_count": 0,
                               "process_journal_bytes": len(journal.encode()), "non_root": True,
                               "no_new_privileges": True, "effective_capabilities": 0,
                               "network": "loopback-only namespace", "encrypted_credential": "host-key decrypted",
                               "corrupt_credential": "rejected before exec, status 243",
-                              "persisted_bunker_configuration": False}))
+                              "persisted_bunker_configuration": False,
+                              "signing_readiness_attempts": signing_attempts}
         finally:
             try:
                 run(["systemctl", "stop", unit])
@@ -179,6 +199,7 @@ def main(nak_path):
             finally:
                 relay.terminate()
                 relay.wait(timeout=10)
+        print(json.dumps(evidence))
 
 
 if __name__ == "__main__":

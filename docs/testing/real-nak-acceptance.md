@@ -111,11 +111,23 @@ journal bytes, non-root/no effective capabilities/NoNewPrivileges, isolated
 network and corrupted-credential rejection. CI results must be checked for the
 exact candidate SHA; this local observation does not imply CI success.
 
+The first CI attempt at `13be0888a2b5d1ad1ceb4f4827156773d48524a1`
+([run 34727026940](https://github.com/lightning-goats/lightning-goats/actions/runs/34727026940),
+job 103642842497) reported green despite a timeout on signing after restart.
+Its new shell step lacked pipefail and `tee` masked the failing Python process,
+leaving an empty JSON artifact. That run is not systemd acceptance evidence.
+The correction uses strict Bash, direct file redirection and explicit JSON
+validation. Signing readiness now has a 30-second bound with five-second
+synthetic probes and recorded attempt counts; inactive/crashed/automatically
+restarted services fail immediately. `Type=simple` startup alone is not signing
+readiness. The precise cause of the original CI timeout remains unproven.
+Evidence is emitted only after disposable service/relay cleanup succeeds.
+
 ## Remaining acceptance
 
 The final production nak version and binary provenance must be reviewed and
-installed separately. Repeat actual systemd credential isolation and sandbox
-checks for the signer, agree the project public identity and relay contract,
+installed separately. Repeat actual production credential isolation and sandbox
+checks for the signer and validate the approved project identity and relay contract,
 and obtain authorization before production-key operations or public publication.
 Do not substitute this test's public keys or scalars into production settings.
 Payment/feeder accounting, home containment and the parent acceptance gates

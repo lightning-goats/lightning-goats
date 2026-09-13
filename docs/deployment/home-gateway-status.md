@@ -1,122 +1,86 @@
-# Home gateway status — updated 2026-09-13 UTC
+# HOME gateway status — 2026-09-13 UTC
 
-**Local canary ready; network and production acceptance blocked.** Production
-HOLD remains. Both original checkouts and the live physical owner are preserved.
-Home tooling/review: [PR #59](https://github.com/lightning-goats/lightning-goats/pull/59).
-Coordination: issue #17 comment thread, with durable context in Hexmem task97.
-The VPS agent owns daemon/Strike/nginx/website/Nostr/VPS networking; independent
-review is requested, not self-certified by the home owner.
+**Local canary verified; production HOLD.** HOME retains gateway/credential,
+canary, weather and containment preparation ownership. VPS owns daemon, Strike,
+nginx, website, Nostr and VPS networking. Issue #17 is the coordination thread;
+Hexmem holds private context. Existing checkouts, credentials and physical owner
+are preserved. Unrelated untracked `reports/` in the original checkout is untouched.
+
+| Source / deliverable | Exact commit | State |
+| --- | --- | --- |
+| Installed gateway | `a74890c47a57a13508b3d259929f1f1bec2a5cc3` | Installed; production inactive |
+| PR59 helper corrections | `f1cef47bf65660eb48bde81ca7bfcb0d48bb4252` | VPS independently accepted; merged into main `df34bcdea5a178bb72193d1a431ea3a9f3e0c9f1` |
+| [PR65 containment](https://github.com/lightning-goats/lightning-goats/pull/65) | `e350ee7a9db3e37b51fa4345e90cd8815f8ed454` | VPS source review accepted; not applied |
+| [PR71 weather](https://github.com/lightning-goats/lightning-goats/pull/71) | `cb7bde28ceb7bb2aadcaa566192422170742976c` | Implemented/tested, all exact-head CI passed; not installed |
+| [PR72 owner correction](https://github.com/lightning-goats/lightning-goats/pull/72) | `bd59a055031f899787818592a633d6639a165871` | Implemented; tested in unlinked fixture; independent VPS review pending |
 
 ```yaml
-source_commit: a74890c47a57a13508b3d259929f1f1bec2a5cc3
-tooling_commit: f1cef47bf65660eb48bde81ca7bfcb0d48bb4252
 home_host: 10.8.0.6
-stage: local-canary-ready
 canary_url: http://127.0.0.1:8790/
-canary_service_active: true
-canary_service_enabled_at_boot: false
-canary_remote_enabled: false
-production_url: http://10.8.0.6:8789/  # reserved future endpoint, not listening
-production_service_active: false
-production_remote_enabled: null     # Item absent; fails closed, not modified
-owner_protocol: feeder_request_v1
-owner_script_sha256: 730053e0f3245cb83461e3fe6e3b05d49c8b508631e8cdb4a889c8be8d915978
-owner_finality: blocked
 canary_protocol: uuid_canary
-request_item: GoatFeeder_ManualRequest
-result_item: GoatFeeder_ManualResult
-credential_name: openhab-token
+canary_active: true
+canary_enabled_at_boot: false
+canary_remote_enabled: false
+canary_count: 6
+production_url: http://10.8.0.6:8789/ # reserved future endpoint; not listening
+production_active: false
+production_enabled_at_boot: false
+production_remote_item: absent # fails closed
+configured_owner_protocol: feeder_request_v1
+candidate_owner_protocol: feeder-request-v2 # not supported by installed adapter
+credential_role: USER
 credential_shared_with_vps: false
-verified_runtime_role: user
 weather: unavailable
 network_policy: proposed
-next_vps_action: Re-review PR59 at f1cef47 and review PR65; confirm peer endpoint, reciprocal mapping and recovery plan privately before any network canary.
 ```
 
-The production request/result names above are a future binding, never used for
-a command test. Canary uses only `LightningGoatsCanaryRequest`, `Ack`, `Override`,
-`RemoteEnabled` and `Count`. Its exact rule digest is
-`a8ed99fb3140d785c13c3f628372a0146bddcb85970151a9d7a3af57afbb32ab`.
-The real `FeederOverride` stayed unchanged. No production gateway was started.
-
-Installed ELF64 x86-64 gateway SHA-256:
+Live owner digest rechecked unchanged:
+`730053e0f3245cb83461e3fe6e3b05d49c8b508631e8cdb4a889c8be8d915978`.
+Real `FeederOverride` remains OFF. Installed gateway binary SHA-256:
 `1833948b9ffb5e24057b9107d6ee044f408565f36322644885297e0bd77b42a5`.
-Rust 1.88.0 build on Ubuntu 24.04.4, systemd255, OpenHAB5.2.1; libraries resolve.
-Installed JS automation/JDBC PostgreSQL addons are 5.2.1; Java is OpenJDK21.0.12.
-AppArmor is enabled on the host; the canary has no dedicated MAC profile
-(`unconfined`), while its effective capabilities are zero and NoNewPrivileges=1.
-NTP synchronized; SQLite is on local ext4. Binary/config/units are root-owned;
-locked `lightning-goats-gateway` and `lightning-goats-gateway-canary` users have
-no sudo, extra groups or capabilities. Canary systemd permits loopback only.
-Production and canary configs/state have separate directories matching those
-user names, with `config.toml` and `gateway.db` respectively.
+Ubuntu 24.04.4, OpenHAB/JS/JDBC 5.2.1, Java21.0.12, systemd255, Rust1.88.0.
+Separate non-admin system users, root-owned units/config/binary and encrypted
+systemd credentials are installed. Dedicated gateway/canary OpenHAB USER tokens
+passed Item GET200/admin GET401; neither token is in this document or on VPS.
 
-Separate OpenHAB users: `lightning_goats_gateway` and
-`lightning_goats_gateway_canary`; labels `lightninggoatsgateway` and
-`lightninggoatsgatewaycanary`. OpenHAB rejected hyphenated labels; both resulting
-USER tokens passed Item GET200 and administrative rules GET401. Ciphertexts are
-root-only under `/etc/credstore.encrypted/lightning-goats-gateway-openhab` and
-`.../lightning-goats-gateway-canary-openhab`. Service-context decryption passed.
-These are coarse USER rights, not per-Item authorization. Existing implicit
-USER role permits unauthenticated Item reads; invalid-token reads return401.
-No global API-security setting changed. Rotation/rollback is in the
-[home installation guide](https://github.com/lightning-goats/lightning-goats/blob/f1cef47bf65660eb48bde81ca7bfcb0d48bb4252/docs/deployment/home-gateway-installation.md).
-
-| Check | Observed result |
+| Test actually run | Result / evidence |
 | --- | --- |
-| Rust baseline | Format, locked strict Clippy, 150 all-feature tests, release build and RSA reverse-tree passed; exact baseline CI/Security green |
-| Home artifacts | 59 deployment tests (including 9 helper boundary tests) and 3 JS fixture tests passed; revised tooling CI/Security/Deployment passed |
-| Real harmless rule | Two direct same-UUID fixture commands counted separately, both acknowledged |
-| Real gateway safety/replay | Remote-OFF POST423 `not_dispatched`; refusal replay remains423 after enabling; confirmed POST200; duplicate and restart replay200 with no extra command |
-| Concurrent UUIDs | One confirmed200 and one unresolved refusal423; exactly one additional command |
-| Local count/state | Original counter2→4; revised checker run4→6 with two further confirmations and two refusals; remote returned OFF |
-| HTTP reads | `/healthz`200; `/v1/feeder/override`200 with false/false; `/v1/temperature`200 with `temperature_f:null`; `/v1/weather`502 `Weather data unavailable` |
-| Synthetic invalid credential | Separate temporary system unit: health200, safety502; no command requests; unit removed and evidence state preserved |
-| Backup/restore | Quiesced nonempty canary store integrity OK; restored SQL dump matched, including acknowledged requests/refusals; active store never replaced |
+| PR59 helper boundaries | 59 Python +3 JS tests; redirects, inspected target and isolated rehearsal regressions; exact-head Rust/Security/Deployment passed |
+| Existing real loopback canary | Two revised-run confirmations, duplicate/restart no resend, refusal replay423, concurrency bounded; count4→6, remote returned OFF |
+| Canary backup/restore | Quiesced nonempty store integrity and restored SQL dump matched; active store preserved |
+| PR65 isolated containment | 11 packet cases, table-only rollback and2 drift tests passed; not cross-host acceptance |
+| PR71 weather | Rust1.88 format/strict Clippy/all-feature tests, 69 Python tests including2 real gateway process tests passed; exact-head Security passed |
+| PR72 owner | 18 JS +3 helper regressions passed; real unlinked OpenHAB/JDBC: one ON and durable complete, exact UUID duplicate gave zero additional ON |
 
-Every feeder response includes the matching `request_id` and typed `status`.
-GET `/v1/feeder/request/<uuid>` recovers the original UUID without resending;
-unknown UUID404, pending202 and ambiguous409 semantics are source/mock-tested.
-Canary caps: 5-second minimum, 5-second acknowledgement timeout, 100ms polling,
-60/hour. Production inactive config retains 30-second minimum, 20-second timeout,
-250ms polling, 10/hour; sizing and activation require approval.
+The owner correction adopts PR57's existing slice, separates command ingress and
+receipt ledger, waits for actual Item/JDBC readback, and fixes slow-persistence
+cooldown. The 33rd distinct request fails closed; oldest UUID survives restart.
+**No compaction or sustained-retention acceptance.** Runtime fixture bindings,
+source hash, zero-based JDBC paging correction and replay evidence are documented
+in [the exact candidate](https://github.com/lightning-goats/lightning-goats/blob/bd59a055031f899787818592a633d6639a165871/docs/deployment/home-owner-v2-candidate.md).
+No actual OpenHAB restart/crash or physical-owner replacement was performed.
 
-Weather is honestly unavailable: live `/get_received_data` returns 31 normalized
-Item-name fields with no observation timestamp and none of the required station
-keys. The installed adapter fails closed. The optional real temperature Number
-Item is unitless, so it is omitted. No receiver mutation/rebind/restart occurred.
-Stale/future/regression and explicit-unit cases pass isolated Rust fixtures;
-those do not repair the actual receiver contract.
+Weather inspection found32 normalized cached fields without observation time;
+field count varies and is not freshness. PR71 pins the deployed receiver/radio
+sources and prepares a coherent radio-decoder UTC recorder with explicit units,
+persistent timestamp and separate loopback exporter. Real gateway tests reject
+the current schema, missing/stale/future time and restored older producer state.
+The shared producer and existing receiver remain unchanged. Real-frame timestamp
+verification, source-interpretation ACK and installation approval remain open.
 
-Remaining: independent re-review of corrected PR59; approved authenticated staging peer/path and
-home policy; coordinated real-daemon/gateway 2340-synthetic-sat cross-host test;
-weather observation contract; physical-owner finality and actual-runtime/JDBC
-acceptance under existing PR57; production sizing/remote Item/activation and
-physical acceptance after readiness and operator scope are verified. No physical test, payment, DNS change,
-WireGuard change or household firewall change occurred. The separate
-[staging/final policy plans](https://github.com/lightning-goats/lightning-goats/blob/f1cef47bf65660eb48bde81ca7bfcb0d48bb4252/docs/deployment/home-network-change-plan.md)
-preserve legacy access during staging and do not mislabel PR57's full-interface
-restriction as legacy-compatible. Network acceptance remains untested.
+**Next VPS action:** independently review exact PR71/72 heads and ACK or identify
+overlap with HOME's `src/openhab.rs` claim in #17 comment5654654270. Shared Rust
+and VPS-owned `tests/gateway_admission.rs` remain untouched. Coordinate durable
+lost-result recovery, sustained UUID retention and full-host rollback protection;
+current Item state alone is not committed JDBC evidence. Then finish the reviewed
+authenticated staging path/rollback and approved cross-host synthetic accounting
+acceptance. Local canary success does not authorize network or physical activation.
 
-Revised tooling head `f1cef47` passed [Rust CI](https://github.com/lightning-goats/lightning-goats/actions/runs/34726721411),
-[Security](https://github.com/lightning-goats/lightning-goats/actions/runs/34726721405)
-and [Deployment](https://github.com/lightning-goats/lightning-goats/actions/runs/34726721413).
-These checks do not satisfy the independent VPS review or remaining live gates.
+Home policy application, shared weather-service changes, physical replacement
+and production remain separately gated. No real feeder command, payment, DNS,
+WireGuard or household firewall change occurred in this increment. Private peer
+inventory and all secrets remain outside GitHub.
 
-Sanitized evidence: [home-gateway-20260912.json](../testing/evidence/home-gateway-20260912.json).
-
-The PR59 review found credential redirects, mismatched inspected/configured
-OpenHAB origin and rehearsal database/unit drift. The revision rejects redirects,
-noncanonical installed config/unit, unsafe executable ownership, effective-service
-drift and other literal canary rule consumers. It constructs the rehearsal from
-reviewed templates with explicit isolated targets. The live harmless recheck
-passed; existing validation evidence and credentials were preserved.
-
-[PR65](https://github.com/lightning-goats/lightning-goats/pull/65) adds the concrete
-staging filter, read-only private drift guards, volatile-session application
-proposal and listener-first rollback. Eleven isolated packet cases plus table-only
-rollback and two drift tests passed locally; no live policy was applied. Peer
-metadata remains private. Owner source/readback still matches the digest above;
-its known completion-to-failure defect remains, and PR57 is not deployed.
-
-Recheck evidence: [home-gateway-helper-review-20260913.json](../testing/evidence/home-gateway-helper-review-20260913.json).
+Earlier detailed evidence is preserved in
+[initial HOME evidence](../testing/evidence/home-gateway-20260912.json) and
+[helper recheck evidence](../testing/evidence/home-gateway-helper-review-20260913.json).

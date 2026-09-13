@@ -26,7 +26,8 @@ if phase == 'publish':
     print(json.dumps(payload)); sys.exit(0)
 assert args[:4] == ['gift','wrap','--use-our-identity-key','--use-their-identity-key']
 assert payload['kind'] == 14 and payload['tags'] == [['p', args[-1]]]
-event = {'id':'01'*32,'pubkey':'cd'*32,'created_at':1700000000,'kind':1059,
+sequence = sum(1 for line in (root/'calls.jsonl').read_text().splitlines() if json.loads(line)['phase'] == 'wrap')
+event = {'id':format(sequence, '064x'),'pubkey':'cd'*32,'created_at':1700000000,'kind':1059,
          'tags':payload['tags'],'content':base64.b64encode(bytes([2])+bytes(98)).decode(),'sig':'02'*64}
 if mode == 'wrong_recipient': event['tags'] = [['p','ef'*32]]
 if mode == 'public_kind': event['kind'] = 1

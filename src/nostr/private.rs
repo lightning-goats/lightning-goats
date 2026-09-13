@@ -151,7 +151,7 @@ fn validate_private(event: &SignedNostrEvent, recipient: &str) -> Result<()> {
     Ok(())
 }
 
-fn validate_private_relays(relays: &[String]) -> Result<()> {
+pub(crate) fn validate_private_relays(relays: &[String]) -> Result<()> {
     if relays.is_empty() || relays.len() > 8 {
         bail!("private inbox relay list required");
     }

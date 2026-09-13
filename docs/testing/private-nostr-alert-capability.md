@@ -40,10 +40,9 @@ failed run is retained privately; the corrected run verified both layers.
 This does not establish a production signer identity, effective credential
 permissions, recipient client acceptance or approved DM relay reachability.
 
-Remaining implementation: distinct ciphertext-only durable outbox, authoritative
-read-only Strike balance observation, durable threshold episodes/rearm, bounded
-subprocess handling using the application boundary, failed-encryption rejection,
-exact-byte retry after restart and protected recipient/relay policy. The NIP-17
+The sections below describe the implemented balance, transport and durable
+state APIs. Remaining implementation includes the periodic worker, protected
+runtime configuration and installation/restore procedures. The NIP-17
 relay policy must be reconciled with the operator's approved recipient inbox
 relays before delivery; announcement relays are not implicitly DM relays.
 Missing encryption/signing must fail before any message publication. Public
@@ -109,5 +108,49 @@ plaintext/invalid framing, invalid signature, publication failure/alteration,
 credential separation, explicit relays and exact retry input. The real-nak Rust
 acceptance additionally exercises the actual application wrapper, decrypts its
 layers using synthetic keys and retries the same wrapper after the real bunker
-has stopped. These tests do not establish durable alert episodes; the separate
-SQLite outbox/worker and operational provisioning are still required.
+has stopped. These transport tests do not establish durable alert episodes; the separate
+state regressions below cover those. Runtime wiring and operational provisioning
+remain required.
+
+## Durable episode and outbox API
+
+`private_alert::AlertStore` uses a separate WAL/FULL SQLite file. Explicit
+`initialize` is preparation-only and refuses existing state; runtime `connect`
+refuses absent tables/singleton, unknown schema versions, unrelated tables or a
+changed policy binding. Missing state never silently rearms alerting. The
+binding covers the protected threshold, recipient, inbox relay list and reviewed
+account/config generation label. That label is not independent proof of the
+credential's effective provider account: provisioning must establish that.
+
+`poll` acquires BEGIN IMMEDIATE before invoking the authoritative Strike read.
+A high observation with an armed episode encrypts first, then atomically inserts
+the exact completed wrapper and disarms the episode. Repeated high observations
+produce no new wrapper. Only a successful later below-threshold read rearms it.
+Read, encryption and database failures leave the previous state intact. No
+balance, threshold or plaintext message is stored in an event row; the policy
+binding and ciphertext metadata remain private operational data. At most 128
+pending wrappers are admitted; capacity failure occurs before encryption.
+
+`deliver_next` serializes with observation and other publishers, verifies the
+saved event identity/signature/recipient and publishes the same saved bytes.
+Failure retains the row and increments a bounded attempt counter. Success deletes
+only that row; it does not rearm the threshold. A lost response or DB failure
+after relay acceptance causes replay of the same event ID, never re-wrapping.
+No public event/outbox table is created or used. Network operations under this
+separate DB lock use the existing bounded provider/nak deadlines; another
+process can time out acquiring SQLite and must retry later, without an early
+provider read. This lock never covers the financial or gateway ledger.
+
+Unit regressions use independent file-backed connections, mocked balances and
+explicit non-cryptographic nak fixtures. They cover episode/rearm, database
+reopen, exact retry bytes, overlapping reads, read/encryption/insert failures,
+publication followed by DB failure, bounded backlog, changed policy, lost state
+and rejection of the financial database. The real transport proof remains the
+separate pinned-bunker test. These tests do not prove cross-process crash or
+full-host anti-rollback; operational restore must reconcile private alert state
+with its protected policy and keep the worker stopped until reviewed.
+
+No periodic worker, credential loader, unit or startup activation is added here.
+The policy/loop integration, scheduling/backoff, provider-account verification,
+reviewed initialization/install/restore commands, actual inbox-relay acceptance
+and independent review are still required before alert deployment.

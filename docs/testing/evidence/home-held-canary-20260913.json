@@ -1,0 +1,24 @@
+{
+  "date": "2026-09-13",
+  "source_sha256": "1cacb11569ab90db03bc0ee2f94fd3fec9d0e2132bc816d4f5982d4fd7d6a88c",
+  "fixture_generation": 2,
+  "scope": "actual local unlinked OpenHAB/JDBC",
+  "stage": "passed",
+  "counts": {
+    "before": 0,
+    "held": 1,
+    "released": 1,
+    "release_replay": 1
+  },
+  "hold_seconds": 6,
+  "hold": "ON",
+  "remote_enabled": "OFF",
+  "fault": "OFF",
+  "physical_commands": 0,
+  "first_generation": "faulted on DecimalType representation; source/state/evidence preserved, not counted as pass",
+  "model_tests": 9,
+  "helper_tests": 3,
+  "gateway_binding": "not implemented; shared allowlist ACK pending",
+  "cross_host_acceptance": false,
+  "service_restart_tested": false
+}

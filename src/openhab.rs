@@ -15,6 +15,7 @@ pub enum OwnerProtocol {
     FeederRequestV1,
     FeederRequestV2 { ledger_item: String },
     UuidCanary,
+    UuidHeldCanary,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -99,11 +100,20 @@ impl OpenHabClient {
         ] {
             validate_identifier(value, field)?;
         }
-        if matches!(config.protocol, OwnerProtocol::UuidCanary)
-            && (config.request_item != "LightningGoatsCanaryRequest"
-                || config.ack_item != "LightningGoatsCanaryAck")
-        {
-            bail!("UUID echo protocol is restricted to harmless canary Items");
+        let canary_pair = match &config.protocol {
+            OwnerProtocol::UuidCanary => {
+                Some(("LightningGoatsCanaryRequest", "LightningGoatsCanaryAck"))
+            }
+            OwnerProtocol::UuidHeldCanary => Some((
+                "LightningGoatsHeldCanary2Request",
+                "LightningGoatsHeldCanary2Ack",
+            )),
+            _ => None,
+        };
+        if let Some((request, ack)) = canary_pair {
+            if config.request_item != request || config.ack_item != ack {
+                bail!("UUID echo protocol is restricted to its fixed harmless canary Items");
+            }
         }
         if let OwnerProtocol::FeederRequestV2 { ledger_item } = &config.protocol {
             validate_identifier(ledger_item, "OpenHAB owner ledger item")?;
@@ -186,7 +196,7 @@ impl OpenHabClient {
         match &self.protocol {
             OwnerProtocol::FeederRequestV1 => parse_owner_result(&state, request_id),
             OwnerProtocol::FeederRequestV2 { .. } => unreachable!("handled above"),
-            OwnerProtocol::UuidCanary => {
+            OwnerProtocol::UuidCanary | OwnerProtocol::UuidHeldCanary => {
                 let state = state.trim();
                 if state.is_empty() || matches!(state, "NULL" | "UNDEF" | "-") {
                     return Ok(OwnerOutcome::Absent);
@@ -216,7 +226,7 @@ impl OpenHabClient {
                 requested_at: DateTime::<Utc>::from(SystemTime::now())
                     .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             })?,
-            OwnerProtocol::UuidCanary => request_id.to_string(),
+            OwnerProtocol::UuidCanary | OwnerProtocol::UuidHeldCanary => request_id.to_string(),
         };
         self.command_item(&self.request_item, &command).await
     }

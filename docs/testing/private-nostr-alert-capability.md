@@ -49,3 +49,34 @@ relays before delivery; announcement relays are not implicitly DM relays.
 Missing encryption/signing must fail before any message publication. Public
 payment/feed tests must remain unchanged. No real message, payment or feeding
 is authorized by this capability proof. Production HOLD.
+
+## Authoritative balance input
+
+`StrikeClient::btc_balance` adds only `GET /v1/balances` using the existing
+bounded, redirect-disabled provider client. A project balance credential must
+include the read-only `partner.balances.read` scope; this change neither loads
+new credentials nor broadens effective scopes. The API method is not yet wired
+to a runtime worker.
+
+The typed result exposes BTC `current` converted exactly to whole satoshis.
+Strike defines this as including pending amounts; `available` may be lower.
+Deprecated `total`/`outgoing` are never used, and fiat balances are not converted
+or represented as a BTC-equivalent exposure. Deployment must explicitly confirm
+that the BTC current-balance policy matches the dedicated account configuration.
+An absent/duplicate BTC row, missing current field, non-string/negative/exponent/
+whitespace/overflow/fractional-satoshi value, auth failure, redirect or oversized
+response fails without a balance. Zero is accepted only as an explicit valid
+BTC current amount. Errors omit provider values, and the result intentionally
+implements neither Debug nor Serialize.
+
+Sources inspected 2026-09-13:
+- https://docs.strike.me/api/get-account-balance-details/
+- https://docs.strike.me/api/ (2024-07-19 balance-field deprecation)
+
+`tests/strike_balance.rs` exercises the real HTTP client against harmless mock
+responses, asserting one authenticated GET and no alternate-path/redirect request.
+No store or public event/outbox operation is part of this provider read. The
+alert worker must acquire its durable observation/episode serialization before
+calling it; accepting externally prefetched balances could reorder high/low
+observations between concurrent processes. Until that worker, encrypted outbox
+and runtime acceptance are implemented, the alert-delivery gate remains open.

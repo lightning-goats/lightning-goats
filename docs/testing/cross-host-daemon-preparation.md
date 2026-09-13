@@ -163,6 +163,50 @@ retention and operational approvals are still required. The launch/fault-control
 portion of the cross-host harness remains to be integrated after HOME's held
 binding and final staging path are reviewed.
 
+### Controlled lost-response evidence
+
+`deploy/scripts/cross-host-fault-proxy.py` prepares a plan by default. With an
+explicit `--serve`, it binds only IPv4 loopback and forwards the narrow gateway
+GET routes and empty-body canonical-UUID POST requests to one fixed private IPv4
+HTTP origin. It uses no environment proxy, DNS lookup, redirects, credentials or
+automatic upstream retries. This is a test transport, not authentication of the
+upstream: bind the target to HOME's reviewed harmless service and the approved
+contained path before use. Never point it at a physical-owner gateway.
+
+Example plan only (substitute the session's reviewed target and unused port):
+
+```sh
+python3 deploy/scripts/cross-host-fault-proxy.py \
+  --upstream http://REVIEWED_PRIVATE_IPV4:REVIEWED_PORT --listen-port 18791 \
+  --journal /private/session/lost-response.jsonl \
+  --run-id ORIGINAL_PREPARED_RUN_UUID --drop-post-responses
+```
+
+The journal is exclusively created mode0600 when serving starts. It fsyncs each
+record and the new directory entry before any upstream access. Each request has
+a unique exchange ID and durable intent before forwarding. A bounded upstream
+response is saved as status/base64 body before forwarding or deliberately closing
+the downstream connection without a POST response. GET status polling continues
+normally. It does not deduplicate incoming requests: proving duplicate owner
+suppression remains the actual gateway's job and requires HOME command counts.
+
+An intent without a response means dispatch is uncertain, not absent. A response
+marked `forward` does not prove downstream receipt. Failed journaling blocks later
+forwarding for that process; do not truncate or repair the journal to resume.
+Each restart uses a new journal file with the same session run ID, retaining all
+earlier journals and the daemon/gateway databases. Use the existing UUID after a
+lost response. No proxy startup sends a request of its own. Sixteen connection
+workers, socket deadlines and 16KiB response bounds limit this local test tool;
+it is not a public-facing service.
+
+The proxy does not control HOME Hold/Release, synthesize confirmations, prove
+late completion, or establish paired restore. Compare its evidence with HOME's
+independent journal and the daemon ledger. Tests use only disposable loopback
+mocks and cover concurrent duplicate forwarding without retry, lost POST with
+GET recovery, journal failure before forwarding, route/body limits, oversized
+responses and redirect rejection. Actual cross-host execution remains a separate
+approved and source-pinned step.
+
 Regression tests use the actual repository SQLite migrations plus captured
 fixture-shaped data. They verify correct correlation and reject extra/duplicate
 commands, changed baseline, wrong UUID/source, pending completion, inconsistent

@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "source_commit": "daeb9ba0acfd4b506547aba8049a3f1a9aae3cc3",
+  "stage": "installed-inactive",
+  "binary_sha256": "c1589247ff49c96703603e4e4744051cef825cdf0b72441f8845a511f165e1dc",
+  "config_sha256": "1b0ff0556a8eb3f8db4ca7216b135d80e68ef036e68dfdc6f9d3bdc85c8f6a99",
+  "unit_sha256": "42526937d6f351885b65db331ef52dfe09e756231af94c1833b8f3aec9e6e553",
+  "service": "lightning-goats-held-canary.service",
+  "configured_listener": "127.0.0.1:8791",
+  "listening": false,
+  "active": false,
+  "enabled_at_boot": false,
+  "main_pid": 0,
+  "runtime_identity": {
+    "locked_password": true,
+    "shell": "/usr/sbin/nologin",
+    "uid_nonzero": true,
+    "primary_group_only": true
+  },
+  "state": {
+    "empty": true,
+    "mode": "0700",
+    "owner_matches_runtime": true
+  },
+  "checks": {
+    "installer_verify": "passed",
+    "systemd_analyze_verify": "passed",
+    "root_owned_exact_artifacts": "passed"
+  },
+  "existing_echo_canary_active": true,
+  "production_gateway_active": false,
+  "credential_shared_with_vps": false,
+  "openhab_requests_during_install": 0,
+  "physical_commands": 0,
+  "acceptance_pending": [
+    "independent PR77 helper re-review",
+    "independent PR79 source review",
+    "local gateway hold/restart/release",
+    "approved authenticated cross-host containment/accounting"
+  ]
+}

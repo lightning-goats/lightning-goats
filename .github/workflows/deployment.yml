@@ -43,6 +43,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y nginx openssl
       - name: Test assembled nginx sites and release verifier
         run: python3 -m unittest discover -s deploy/tests -v
+      - name: Test inactive upgrade with disposable root-owned files
+        run: sudo unshare --net -- python3 -B -m unittest discover -s deploy/tests -p test_upgrade_vps_canary.py -v
 
   package:
     runs-on: ubuntu-22.04

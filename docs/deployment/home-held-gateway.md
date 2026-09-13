@@ -81,3 +81,20 @@ The original echo gateway remains active/boot-disabled; production remains
 inactive/disabled. No OpenHAB request, fixture mutation, network change or physical
 command was made for this installation. PR77 correction review and PR79 source
 review remain pending before the next actual local held-gateway acceptance.
+
+## Read-only runtime verification (2026-09-13)
+
+After VPS accepted PR77 correction `3b16b7a`, HOME started only the separate held
+unit for GET-only validation. `--verify --running` confirmed exact installed
+executable/arguments, expected UID, zero effective capabilities and
+NoNewPrivileges. The listener was only `127.0.0.1:8791`. Encrypted credential
+loading and real OpenHAB reads returned both canary safety switches false.
+`/healthz` returned 200; optional temperature returned 200/null; actual weather
+correctly returned 502/unavailable. No feeder POST or switch mutation occurred.
+
+The service was stopped in the check's cleanup and is inactive/disabled with
+MainPID0. Its database is now initialized (not an empty directory): integrity
+check is ok, with zero request/refusal rows. Preserve this store. Sanitized
+[read-only runtime evidence](../testing/evidence/home-held-gateway-readonly-20260913.json)
+is separate from the earlier inactive-installation snapshot. PR79 review and
+actual held request/restart/release acceptance remain open.

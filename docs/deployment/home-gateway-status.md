@@ -16,6 +16,9 @@ are preserved. Unrelated untracked `reports/` in the original checkout is untouc
 
 | [PR76 v2 adapter](https://github.com/lightning-goats/lightning-goats/pull/76) | `bdd5a534a91015cdfadfc7f2f4fdc6ca69a74865` | Implemented; synthetic restart and actual read-only USER/JDBC recovery passed; VPS review pending |
 
+| [PR77 held fixture](https://github.com/lightning-goats/lightning-goats/pull/77) | `4c529ab8e6215d346bb3573feb09c4fd0e8b99d4` | All CI passed; actual local hold/release passed; separate gateway binding pending ACK |
+| [PR78 weather reader](https://github.com/lightning-goats/lightning-goats/pull/78) | `a1aa8dca34d2a25b9f8a87ccca8adea024355495` | Read-only permission regression fixed; service template/installation layout prepared; not installed |
+
 ```yaml
 home_host: 10.8.0.6
 canary_url: http://127.0.0.1:8790/
@@ -70,8 +73,9 @@ the current schema, missing/stale/future time and restored older producer state.
 The shared producer and existing receiver remain unchanged. Real-frame timestamp
 verification, source-interpretation ACK and installation approval remain open.
 
-**Next VPS action:** independently review exact PR76 head and reply to the
-witness/retention scope request in #17 comment5655433594. The prior shared
+**Next VPS action:** independently review exact PR76/77/78 heads and reply to
+the witness/retention scope request in #17 comment5655433594 and held-fixture
+allowlist claim (final generation2 Request/Ack pair). The prior shared
 `src/openhab.rs` claim was acknowledged and is implemented; VPS-owned
 `tests/gateway_admission.rs` remains untouched. V2 recovery requires a committed
 same-UUID JDBC receipt and sends no command. Six focused tests pass, including
@@ -79,7 +83,21 @@ real gateway timeout/restart with one total command. Actual unlinked read-only
 probe returned Complete using the dedicated canary USER; fixture counts stayed1.
 Details and evidence are in PR76's `home-owner-v2-adapter.md` and
 `docs/testing/evidence/home-owner-v2-reader-20260913.json`. Local Rust1.88 full
-gates pass; replacement-head CI is running.
+gates pass; PR76 exact-head CI passed.
+
+The separate `LightningGoatsHeldCanary2*` fixture is now installed locally with
+Hold ON, remote OFF, count1, and one released receipt. Real testing held the UUID
+beyond6 seconds, released it and replayed release without a second delivery.
+The prior failed held generation remains Fault ON with its evidence preserved;
+its JDBC DecimalType mismatch was fixed and regression-tested in generation2.
+No existing echo canary or physical owner was replaced. Full control/evidence is
+in PR77. No new gateway listener or remote control endpoint was enabled.
+
+Weather preparation found the WAL reader needed sidecar write access after the
+writer closed. PR78 uses rollback journal/FULL, preserves the atomic timestamp
+transaction and passes a real read-only identity/filesystem regression plus both
+gateway process tests (11 weather tests total). The unit and source-pinned
+absolute-module hook are prepared; both existing weather services are unchanged.
 
 Sustained UUID retention/full-host rollback protection still requires coordinated
 implementation and proof. A local witness cannot by itself certify freshness

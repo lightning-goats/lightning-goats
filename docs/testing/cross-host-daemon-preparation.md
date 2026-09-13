@@ -38,6 +38,25 @@ backup procedure when transferring this state to an installed runtime identity.
 
 ## Required activation handoff
 
+Before installation, use the reviewed checkout's non-executing archive preflight:
+
+```sh
+python3 deploy/scripts/preflight-release.py /path/to/release.tar.gz \
+  REVIEWED_FULL_SOURCE_SHA INDEPENDENTLY_REVIEWED_ARCHIVE_SHA256 > release-preflight.json
+```
+
+Both pins must come from reviewed build/release evidence. The digest is for the
+inner release `.tar.gz`, not the GitHub artifact ZIP containing it. The command
+checks a private snapshot against that digest before extraction, verifies every
+payload checksum and the declared source, and reports per-file hashes. It does
+not execute binaries or install files. Require a successful exit and valid JSON;
+preserve failures, and do not treat an empty redirected output as a pass.
+Checksums and a source declaration do not authenticate how binaries were built.
+Keep the build's source/run provenance alongside this report. After installation,
+compare actual binary/config hashes with this report and the separately reviewed
+session configuration; verify ownership, effective permissions and sandbox
+behavior independently. Installation must remain inactive until approval.
+
 Preparation under a development identity is not installation acceptance. Before
 launching a daemon against the home gateway, the reviewed session manifest must
 bind the following to the same session/source:

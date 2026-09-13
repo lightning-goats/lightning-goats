@@ -169,3 +169,28 @@ transactions and non-root probes execute. Separate actual launcher subprocesses
 exercise authenticated `--help`, poisoned caller imports, substituted/writable/
 symlinked helpers, unexpected bytecode directories and manifest drift. These
 fixtures do not establish persistent installation or cross-host acceptance.
+
+## Runtime probe and interruption recovery
+
+Before each apply/resume/rollback transaction, the coordinator checks the host
+baseline, proves runtime write authority using Linux `O_TMPFILE` under the real
+runtime UID/GID with `NoNewPrivileges`, and checks the baseline again. It writes
+and fsyncs an unnamed inode, with no named-file fallback. Unsupported filesystem
+semantics or denied writes fail before any replacement. The guard allows only
+recorded target fingerprints to differ during recovery; the transaction still
+checks that every target is exactly its retained old/new state.
+
+After replacement, the coordinator only checks runtime read/no-write permissions,
+binary `--help`, and host drift. It creates no named entry in runtime STATE.
+Result receipts are written in the separate root-owned transaction directory.
+The actual empty-state/owner/mode check is shared by `snapshot()` and the root
+fixture, which includes a stranded-entry negative control. A mocked inventory
+must not bypass that invariant.
+
+Root regressions interrupt after completed apply and rollback transactions,
+then invoke ordinary rollback without deleting anything from STATE. They require
+old fingerprints restored, no extra receipt from the interrupted operation, and
+all retained transaction files unchanged. A separate runtime probe test terminates
+the subprocess after its unnamed-inode write/fsync and verifies no residue. These
+are isolated process/interruption tests, not physical power-loss or host upgrade
+acceptance. Retain all older source and failed-probe evidence.

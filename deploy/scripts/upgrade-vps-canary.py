@@ -68,6 +68,15 @@ def root_only():
         raise ValueError("root required for authoritative inactive-host checks")
 
 
+def require_empty_state(user):
+    info = STATE.lstat()
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != user.pw_uid
+            or info.st_gid != user.pw_gid or stat.S_IMODE(info.st_mode) != 0o700
+            or list(STATE.iterdir())):
+        raise ValueError("requires original empty private runtime state")
+    trusted(STATE.parent, directory=True)
+
+
 def snapshot():
     root_only()
     verified_tool_identity()
@@ -90,12 +99,7 @@ def snapshot():
                 if line.startswith("Uid:") and user.pw_uid in map(int, line.split()[1:]):
                     raise ValueError("runtime process exists")
     trusted(CONFIG, directory=True)
-    info = STATE.lstat()
-    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != user.pw_uid
-            or info.st_gid != user.pw_gid or stat.S_IMODE(info.st_mode) != 0o700
-            or list(STATE.iterdir())):
-        raise ValueError("requires original empty private runtime state")
-    trusted(STATE.parent, directory=True)
+    require_empty_state(user)
     if set(p.name for p in CONFIG.iterdir()) != {RECORD.name, "config.canary.toml.example"}:
         raise ValueError("active configuration, credentials or unknown config entries present")
     services, files = {}, {}
@@ -211,6 +215,34 @@ def validate_records(records, metadata):
             raise ValueError("transaction payload/metadata differs from reviewed preparation")
 
 
+WRITE_PROBE = """import os,sys
+fd=os.open(sys.argv[1], os.O_WRONLY | os.O_TMPFILE | os.O_CLOEXEC, 0o600)
+try:
+    assert os.fstat(fd).st_nlink == 0
+    payload=b'synthetic permission probe'
+    assert os.write(fd,payload) == len(payload)
+    os.fsync(fd)
+finally:
+    os.close(fd)
+"""
+READ_PROBE = """import os,sys
+assert all(os.access(p,os.R_OK) and not os.access(p,os.W_OK) for p in sys.argv[1:])
+"""
+
+
+def runtime_command():
+    user = pwd.getpwnam("lightning-goats")
+    return ["setpriv", f"--reuid={user.pw_uid}", f"--regid={user.pw_gid}", "--clear-groups", "--no-new-privs", "--"]
+
+
+def runtime_probe(write_state=False):
+    # No named-file fallback: unsupported/denied O_TMPFILE fails before TX.
+    prefix = [*runtime_command(), "/usr/bin/python3", "-I", "-S", "-B", "-c"]
+    if write_state:
+        INSTALL.command([*prefix, WRITE_PROBE, str(STATE)])
+    INSTALL.command([*prefix, READ_PROBE, str(CONFIG), *map(str, TARGETS.values()), str(UNIT), str(RECORD)])
+
+
 def execute(bundle, rollback=False):
     root_only()
     bundle = Path(bundle)
@@ -227,16 +259,14 @@ def execute(bundle, rollback=False):
     for index in range(len(TARGETS)):
         for version in ["old", "new"]:
             trusted(bundle / "files" / f"{index}.{version}")
+    # Resumed apply/rollback may already have old/new replacement fingerprints.
+    # TX validates those exact states; every other baseline property stays fixed.
+    guard(metadata["baseline"], replacing=True)
+    runtime_probe(write_state=True)
+    guard(metadata["baseline"], replacing=True)
     result = TX.execute(bundle / "files", lambda: guard(metadata["baseline"], replacing=True), rollback=rollback)
-    user = pwd.getpwnam("lightning-goats")
-    run_as = ["setpriv", f"--reuid={user.pw_uid}", f"--regid={user.pw_gid}", "--clear-groups", "--no-new-privs", "--"]
-    probe = """import os,sys,pathlib,uuid
-assert all(os.access(p,os.R_OK) and not os.access(p,os.W_OK) for p in sys.argv[2:])
-p=pathlib.Path(sys.argv[1])/('.upgrade-probe-'+str(uuid.uuid4()))
-with p.open('x') as output: output.write('synthetic permission probe')
-p.unlink()
-"""
-    INSTALL.command([*run_as, "python3", "-c", probe, str(STATE), str(CONFIG), *map(str, TARGETS.values()), str(UNIT), str(RECORD)])
+    runtime_probe()
+    run_as = runtime_command()
     for name in ["lightning-goatsd", "lightning-goatsctl"]:
         if not INSTALL.command([*run_as, str(TARGETS[name]), "--help"]).stdout.strip():
             raise ValueError("installed help verification failed")

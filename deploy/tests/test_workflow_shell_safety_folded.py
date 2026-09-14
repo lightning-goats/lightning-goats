@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-CHECKER = REPO_ROOT / "deploy" / "scripts" / "check-workflow-shell-safety.py"
+CHECKER = REPO_ROOT / "deploy" / "scripts" / "check-workflow-folded-shell-safety.py"
 
 
 class WorkflowShellSafetyFoldedTests(unittest.TestCase):
@@ -36,7 +36,7 @@ jobs:
 """
         )
         self.assertEqual(result.returncode, 1, result.stderr)
-        self.assertIn("pipeline executes before", result.stderr)
+        self.assertIn("folded shell pipeline", result.stderr)
 
     def test_accepts_folded_same_line_pipefail_before_pipeline(self) -> None:
         result = self.run_checker(
@@ -60,6 +60,21 @@ jobs:
     steps:
       - run: >
           printf '%s\\n' 'left|right'
+"""
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_ignores_folded_explicit_non_shell_override(self) -> None:
+        result = self.run_checker(
+            """name: folded-python
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - shell: python
+        run: >
+          value = 1 | 2
+          print(value)
 """
         )
         self.assertEqual(result.returncode, 0, result.stderr)

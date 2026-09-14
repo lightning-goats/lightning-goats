@@ -22,7 +22,7 @@ jobs:
         run: python3 -B deploy/scripts/check-workflow-folded-shell-safety.py .github/workflows
       - name: Reject unsafe nested child-shell pipelines
         run: python3 -B deploy/scripts/check-workflow-nested-shell-safety.py .github/workflows
-      - name: Reject executable workflow YAML aliases
+      - name: Reject executable workflow YAML anchors/aliases
         run: python3 -B deploy/scripts/check-workflow-yaml-alias-safety.py .github/workflows
       - name: Test workflow shell safety checker
         run: python3 -B -m unittest discover -s deploy/tests -p 'test_workflow_shell_safety*.py' -v

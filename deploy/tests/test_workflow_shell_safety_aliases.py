@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-CHECKER = REPO_ROOT / "deploy" / "scripts" / "check-workflow-shell-safety.py"
+CHECKER = REPO_ROOT / "deploy" / "scripts" / "check-workflow-yaml-alias-safety.py"
 
 
 class WorkflowShellSafetyAliasTests(unittest.TestCase):

@@ -28,6 +28,7 @@ _SPEC = importlib.util.spec_from_file_location("workflow_shell_safety", BASE_CHE
 if _SPEC is None or _SPEC.loader is None:
     raise RuntimeError(f"cannot load workflow shell checker: {BASE_CHECKER}")
 _BASE = importlib.util.module_from_spec(_SPEC)
+sys.modules[_SPEC.name] = _BASE
 _SPEC.loader.exec_module(_BASE)
 
 

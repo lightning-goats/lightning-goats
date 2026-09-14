@@ -131,6 +131,21 @@ jobs:
         )
         self.assertEqual(result.returncode, 1)
 
+    def test_run_first_key_does_not_consume_following_step_metadata(self) -> None:
+        result = self.run_checker(
+            """name: run-first
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo safe
+        env:
+          EXAMPLE: left|right
+"""
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_current_repository_workflows_are_safe(self) -> None:
         result = subprocess.run(
             [

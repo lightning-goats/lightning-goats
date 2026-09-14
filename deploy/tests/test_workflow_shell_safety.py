@@ -52,6 +52,43 @@ jobs:
         self.assertEqual(result.returncode, 1)
         self.assertIn("pipeline executes before", result.stderr)
 
+    def test_accepts_single_line_pipefail_before_pipeline(self) -> None:
+        result = self.run_checker(
+            """name: single-line-good
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: set -o pipefail; false | tee result.txt
+"""
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_single_line_quoted_pipe_is_not_a_pipeline(self) -> None:
+        result = self.run_checker(
+            """name: single-line-quoted-pipe
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: printf '%s\\n' 'left|right'
+"""
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_single_line_run_honors_following_non_shell_override(self) -> None:
+        result = self.run_checker(
+            """name: scalar-run-first-python
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: value = 1 | 2
+        shell: python
+"""
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_accepts_pipefail_before_pipeline(self) -> None:
         result = self.run_checker(
             """name: good

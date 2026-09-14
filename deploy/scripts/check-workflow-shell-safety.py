@@ -212,7 +212,9 @@ def scan_workflow(path: Path) -> list[Finding]:
             ):
                 pipefail_enabled = False
 
-            heredoc_match = HEREDOC_RE.search(cleaned)
+            # Match the heredoc marker on the original command: the quote scrubber
+            # intentionally removes quoted delimiters such as <<'PY'.
+            heredoc_match = HEREDOC_RE.search(command)
             if heredoc_match:
                 heredoc_end = heredoc_match.group("word")
 

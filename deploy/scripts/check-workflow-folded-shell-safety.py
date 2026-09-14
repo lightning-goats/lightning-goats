@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Conservatively reject unsafe pipelines in YAML folded workflow run blocks.
 
-YAML ``run: >`` folds adjacent physical lines into spaces before GitHub Actions
-passes the resulting command to the shell. Therefore a source layout like::
+YAML ``run: >`` folds adjacent base-indented physical lines into spaces before
+GitHub Actions passes the resulting command to the shell. Therefore a source
+layout like::
 
     run: >
       set -o pipefail
@@ -10,9 +11,11 @@ passes the resulting command to the shell. Therefore a source layout like::
 
 executes as ``set -o pipefail false | tee result.txt``; the first source line
 does not establish parent-shell pipefail. This guard complements
-``check-workflow-shell-safety.py`` by requiring any real pipeline in a folded
-shell block to establish pipefail on that same physical source line. For more
-complex command structure, use a literal ``run: |`` block instead.
+``check-workflow-shell-safety.py`` by reconstructing folded paragraphs before
+checking pipeline safety. Blank or more-indented boundaries are treated
+conservatively: each resulting paragraph containing a pipeline must establish
+its own pipefail state. Use a literal ``run: |`` block for more complex shell
+control flow.
 """
 
 from __future__ import annotations
@@ -30,6 +33,47 @@ if _SPEC is None or _SPEC.loader is None:
 _BASE = importlib.util.module_from_spec(_SPEC)
 sys.modules[_SPEC.name] = _BASE
 _SPEC.loader.exec_module(_BASE)
+
+
+def _folded_paragraphs(
+    block_lines: list[str], content_indent: int
+) -> list[tuple[int, str]]:
+    """Approximate YAML folded paragraphs without adding a YAML dependency.
+
+    Consecutive nonblank lines at the block's base content indentation fold to
+    spaces. Blank lines and more-indented content preserve a line boundary, so
+    they terminate the current paragraph. Treating each preserved boundary as a
+    fresh safety proof is intentionally conservative and cannot turn an unsafe
+    folded pipeline into an accepted one.
+    """
+    paragraphs: list[tuple[int, str]] = []
+    parts: list[str] = []
+    start_offset = 0
+
+    def flush() -> None:
+        nonlocal parts
+        if parts:
+            paragraphs.append((start_offset, " ".join(parts)))
+            parts = []
+
+    for offset, raw in enumerate(block_lines):
+        if not raw.strip():
+            flush()
+            continue
+
+        command = raw[content_indent:] if len(raw) >= content_indent else raw
+        relative_indent = len(command) - len(command.lstrip(" \t"))
+        if relative_indent:
+            flush()
+            paragraphs.append((offset, command.strip()))
+            continue
+
+        if not parts:
+            start_offset = offset
+        parts.append(command.strip())
+
+    flush()
+    return paragraphs
 
 
 def scan_workflow(path: Path) -> list[object]:
@@ -73,17 +117,14 @@ def scan_workflow(path: Path) -> list[object]:
             len(line) - len(line.lstrip(" \t")) for line in nonblank
         )
 
-        for offset, raw in enumerate(block_lines):
-            if not raw.strip():
-                continue
-            command = raw[content_indent:] if len(raw) >= content_indent else raw
+        for offset, command in _folded_paragraphs(block_lines, content_indent):
             if _BASE._single_line_pipeline_is_unsafe(command):
                 findings.append(
                     _BASE.Finding(
                         path=path,
                         line=block_start + offset + 1,
                         message=(
-                            "folded shell pipeline lacks same-line "
+                            "folded shell pipeline lacks local "
                             "`set -o pipefail` before execution"
                         ),
                     )

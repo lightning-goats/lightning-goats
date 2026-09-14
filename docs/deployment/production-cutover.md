@@ -1,56 +1,48 @@
-# Production Cutover and Rollback Runbook
+# Production Cutover and Rollback — After the Parallel Pilot
 
-Status: operator-gated production procedure.
+Effective 2026-09-14; tracker #16. Begin with
+[parallel-live-pilot.md](parallel-live-pilot.md).
 
-Tracker: issue #16.
+The operator will decide when live results at **herd@feeder.lightning-goats.com**
+are good enough to point established DNS, Nostr profile metadata and other references
+at the new stack. Completion of every historic issue/audit exercise is no longer a
+blanket precondition. This does not erase a known payment/physical correctness defect
+or waive repository protections. It does not execute a cutover.
 
-## Preconditions
+## The useful readiness check
 
-Do not begin unless:
+Before the operator switches public references, establish that the intended new path
+accepts real payments exactly once, feeds/debits as intended with local safeguards,
+retains state across restart, and has an accessible stop/rollback path. Review any
+actual limitations together. Verify the installed source/config, existing credential
+boundaries and outstanding payments/feeding state; reuse valid prior test evidence.
 
-- issue #15 verification matrix and `../testing/phase1-verification-matrix.md` have passed on the new VPS;
-- issues #17–#21 are complete or explicitly operator-waived with rationale where applicable;
-- the old VPS remains intact and recoverable;
-- the new VPS has a distinct tested WireGuard identity and temporary staging `10.8.0.x` address;
-- the reviewed production hub configuration for `10.8.0.1/24` is prepared but inactive;
-- the in-house integration-gateway WireGuard/UFW boundary on `10.8.0.6` is tested;
-- `lightning-goatsd` has no OpenHAB token and cannot directly reach generic OpenHAB REST/admin or `10.8.0.6:5000`;
-- the in-house gateway has its dedicated OpenHAB USER/token and local safety rules;
-- sanitized weather `/v1/weather` and overlay message behavior are verified;
-- final production systemd units run under non-admin runtime identities;
-- broad temporary Codex/deploy sudo has been revoked or narrowed;
-- final production credentials are installed and audited in the correct trust domains;
-- Strike runtime credential is receive/read-only and cannot spend;
-- any temporary/admin Strike webhook-management credential has been revoked/removed unless explicitly retained for operations;
-- domain/DNS security controls and recovery ownership have been reviewed;
-- deployed binary hash/provenance has been recorded;
-- operator-approved operational Strike balance ceiling/sweep policy exists and current balance is within it;
-- feeder operator is available to control `LightningGoatsRemoteEnabled` and `FeederOverride`;
-- a current archive exists of old LNbits/config/nginx/WireGuard/CLN recovery material.
+Weather polish, optional CI work and a complete infrastructure redesign do not block
+the decision. Validate additional goat addresses as they become publicly routed; do
+not require six paid transactions. Keep no-spend Strike authority, the home-only
+OpenHAB token, protected runtime and gateway-only access. Keep the existing account
+balance/sweep policy; no sweep or spend-capable daemon is introduced here.
 
-## Existing WireGuard topology
+## 1. Preserve the financial epoch and arbitrate dispatch
 
-Production network:
+The pilot database already contains **real** invoices, payments, credit, feed UUIDs
+and possibly signed Nostr events. Back it up consistently and keep it as the new
+system's database. Do not start from zero again or import its receipts a second time.
+If moving storage, quiesce the affected services and preserve outstanding identities;
+a stale restored database is not proof that no later feed happened.
 
-```text
-10.8.0.0/24
-```
+Pause old invoice creation/feeder dispatch as needed for the operator's switch.
+Keep reconciliation for old issued invoices that may still settle. Record any earned
+legacy credit and resolve it explicitly; do not silently delete it or blindly copy
+it into the new ledger. Observe DNS caches and old outstanding invoices, not just
+recent traffic volume. Keep one physical owner and no competing bypass dispatcher.
+Do not disable household-wide safety or erase an ambiguous attempt to unblock cutover.
 
-Before cutover:
+## 2. Prepare the final public origin and routes
 
-```text
-10.8.0.1   old/current production VPS hub
-10.8.0.6   in-house OpenHAB/weather/integration host
-10.8.0.X   temporary staging address for new VPS
-```
-
-Preferred final state preserves `10.8.0.1` as the hub address, but with the **new VPS keypair/public endpoint**.
-
-See `wireguard-topology.md`.
-
-## Required production Lightning Addresses
-
-The final service configuration must include:
+Keep the pilot hostname working while outstanding invoices/callbacks may still be
+used. Prepare the final TLS/nginx origin and `lnurl.public_base_url` for the public
+address the operator chooses. The eventual registry remains:
 
 ```text
 herd@lightning-goats.com
@@ -61,280 +53,72 @@ newton@lightning-goats.com
 nova@lightning-goats.com
 ```
 
-All six map to the same `herd` feed-credit pool while preserving the paid `address_user`.
-
-No arbitrary wildcard user is authorized.
-
-## Cutover principle
-
-The old VPS stays production-authoritative until the final switch.
-
-The new VPS becomes authoritative only after:
-
-1. legacy side effects are stopped;
-2. old WireGuard hub is stopped and `10.8.0.1` is free;
-3. new VPS assumes the reviewed `10.8.0.1` hub configuration;
-4. required clients update to the new hub public key/public endpoint;
-5. the integration-gateway path is healthy and tightly contained;
-6. DNS points to the new VPS;
-7. the new payment path is verified with tiny real payments before physical feeder enablement.
-
-## 1. Freeze old feeder/payment side effects
-
-Set local feeder safety gates so automatic physical feeding is blocked:
-
-```text
-LightningGoatsRemoteEnabled = OFF
-FeederOverride = ON
-```
-
-Stop the old Lightning-Goats/LNbits feeder-side processes that could mutate goat-feeder accounting.
-
-Archive/log the exact cutover timestamp.
-
-Do not delete old databases or configuration.
-
-## 2. Confirm new VPS and trusted gateway readiness
-
-On the new host confirm:
-
-- nginx config valid;
-- `lightning-goatsd` healthy;
-- Strike receive/read API access valid;
-- webhook route reachable;
-- Nostr signer/publisher healthy;
-- overlay status/WebSocket healthy;
-- staging WireGuard peer healthy;
-- configured address registry contains all six expected users;
-- public abuse/rate-limit configuration is loaded;
-- SQLite state is the intended fresh Phase 1 accounting epoch.
-
-On `10.8.0.6` confirm:
-
-- integration gateway healthy;
-- dedicated OpenHAB token is present only there;
-- request UUID/ack path works;
-- local duplicate suppression and physical safety gates are enabled;
-- sanitized `/v1/weather` works;
-- local weather receiver remains available to the gateway at `127.0.0.1:5000/get_received_data`;
-- UFW/firewall rules are ready to transition from temporary staging source to production source `10.8.0.1`.
-
-From the staging VPS repeat negative reachability checks:
-
-```text
-gateway port                   reachable
-10.8.0.6:5000                 blocked
-OpenHAB REST/admin             blocked
-trusted SSH                    blocked unless explicitly approved
-PostgreSQL                     blocked
-unrelated LAN/WG services      blocked
-```
-
-## 3. Move WireGuard hub role to the new VPS
-
-This step is operator-gated.
-
-1. Record the old hub's current state/configuration.
-2. Stop WireGuard on the old VPS.
-3. Verify the old VPS no longer answers as `10.8.0.1`.
-4. Remove/disable the new VPS temporary staging interface/address as required by the reviewed configuration.
-5. Activate the new VPS production hub configuration using:
-
-```text
-10.8.0.1/24
-```
-
-6. Update existing clients' hub peer configuration from:
-
-```text
-PublicKey = <old-vps-public-key>
-Endpoint  = <old-vps-public-ip>:<wireguard-port>
-```
-
-to:
-
-```text
-PublicKey = <new-vps-public-key>
-Endpoint  = <new-vps-public-ip>:<wireguard-port>
-```
-
-7. Preserve client private keys and client `10.8.0.x` addresses unless a separately reviewed change is required.
-8. Confirm required clients handshake with the new hub.
-9. On `10.8.0.6`, replace the temporary staging-source gateway firewall allowance with the final production rule permitting source `10.8.0.1` only to the integration-gateway port.
-10. Remove temporary staging firewall/address rules.
-11. Repeat positive/negative trusted-side reachability tests from the new production hub.
-
-Never run both old and new hubs as `10.8.0.1` simultaneously.
-
-## 4. Verify integration gateway and weather after hub migration
-
-Before DNS change:
-
-- gateway health works from new `10.8.0.1`;
-- `/v1/feeder/override` works;
-- same-UUID feeder status/read path works without actuation;
-- `/v1/weather` returns sanitized current weather;
-- `10.8.0.6:5000` remains directly blocked from VPS;
-- legacy `/weather` mutating endpoint is not exposed;
-- OpenHAB REST/admin remains directly blocked.
-
-## 5. Activate production nginx configuration
-
-Install/reload the final production virtual hosts/routes on the new VPS.
-
-Verify locally/directly before DNS change:
-
-- static site;
-- generic Lightning Address discovery route;
-- LNURL callback;
-- webhook endpoint;
-- overlay WebSocket;
-- health/status;
-- configured user allowlist behavior;
-- unknown user rejection;
-- nginx rate limits/body/method restrictions.
-
-## 6. Change DNS
-
-Point required production names to the new VPS, including at least `lightning-goats.com` / `www` and any other still-required public hostname.
-
-Record old and new DNS values and change time.
-
-Monitor resolution from multiple resolvers if practical.
-
-Do not weaken registrar/DNS security controls to make the cutover easier.
-
-## 7. Verify public Lightning Address path
-
-Once DNS resolves to the new VPS:
-
-1. load `https://lightning-goats.com`;
-2. resolve `herd@lightning-goats.com` through a real wallet/client;
-3. resolve each goat address (`dexter`, `rowan`, `cosmo`, `newton`, `nova`);
-4. confirm an intentionally unknown address is rejected and does not create a Strike receive request;
-5. request a tiny invoice for one configured address;
-6. pay a very small amount;
-7. confirm Strike marks it completed;
-8. confirm `lightning-goatsd` credits it exactly once;
-9. confirm durable settlement/event records preserve the correct `address_user` and `credit_pool=herd`;
-10. confirm one durable `payment_received` event;
-11. confirm templated Nostr publication;
-12. confirm overlay message/animation;
-13. verify no feeder actuation occurs while local safety gates remain blocking.
-
-If any financial-state or address-registry invariant fails, stop and investigate before enabling the feeder.
-
-## 8. Verify weather presentation in production
-
-Confirm:
-
-- `lightning-goatsd` can obtain sanitized weather only through gateway `/v1/weather`;
-- the overlay receives a correctly formatted `weather_status` message;
-- the weather message never enters the Nostr outbox;
-- direct `10.8.0.6:5000` access remains blocked;
-- weather receiver failure does not affect payment/feeding.
-
-## 9. Controlled feeder activation
-
-After payment ingress/presentation is accepted:
-
-1. arrange a controlled threshold condition;
-2. verify the exact pending feed-attempt UUID/state;
-3. keep `FeederOverride=ON` / remote enable OFF while checking state;
-4. with explicit operator approval, enable the remote feeder path and release the override as required;
-5. confirm exactly one gateway request UUID;
-6. confirm exactly one physical feeding for one due threshold;
-7. confirm authoritative acknowledgement of the same UUID;
-8. confirm exactly one feed debit;
-9. confirm exactly one durable `feeder_confirmed` event;
-10. confirm templated feeder message on Nostr + overlay;
-11. replay/query the same UUID and confirm no second physical actuation;
-12. restore the desired normal local safety state.
-
-For multiple due feeds, verify serialization, local minimum physical-feed interval, and safety/feed caps.
-
-Any ambiguous gateway/physical outcome remains `unknown`/unresolved and must not trigger a fresh automatic actuation.
-
-## 10. Confirm security/operational state after cutover
-
-Before declaring success verify:
-
-- runtime Strike key remains receive/read only;
-- OpenHAB token exists only on the in-house gateway;
-- deploy/Codex user cannot read production secrets or modify production binary/config;
-- SSH remains key-only with root login disabled;
-- deployed binary hash still matches recorded artifact;
-- operational Strike balance remains below approved maximum;
-- Nostr outbox has no unexpected backlog;
-- no unresolved feeder attempt exists;
-- DNS/registrar security settings remain intact;
-- WireGuard topology matches documented `10.8.0.0/24` final state;
-- temporary staging address/UFW rules are removed.
-
-## Rollback boundary
-
-### Easy rollback
-
-Before the new stack has accepted meaningful new-epoch payments, rollback may consist of:
-
-1. keep local feeder remote-enable/override gates blocking;
-2. stop WireGuard on the new VPS so it releases `10.8.0.1`;
-3. restore old VPS WireGuard `10.8.0.1` hub;
-4. repoint clients to old hub public key/endpoint;
-5. restore DNS to old VPS;
-6. restore only explicitly required legacy public services.
-
-Never have both hubs active as `10.8.0.1`.
-
-Do not automatically reactivate CLN routing capital as part of rollback.
-
-### After new-epoch payments
-
-Once the new Strike-backed system has accepted payments, do not perform a blind rollback that discards its SQLite feed-credit/event state.
-
-Preserve the new SQLite database, account for all accepted payments/feed credit, preserve `address_user`, and reconcile unresolved feed attempts before routing payment traffic elsewhere.
-
-### Integration-gateway rollback
-
-A problem in the integration gateway does not require redirecting payments immediately.
-
-Prefer keeping `LightningGoatsRemoteEnabled=OFF` / `FeederOverride=ON`, pausing or continuing payment ingress according to operator choice, repairing the gateway safely, and never bypassing it with generic OpenHAB/weather access from the VPS.
-
-## Old VPS retirement
-
-After successful cutover:
-
-- power down/disable unnecessary old services;
-- retain the old VPS intact for an observation period;
-- retain LNbits data read-only for historical audit as desired;
-- retain CLN recovery material offline;
-- retain old nginx/WireGuard configs in an encrypted/archive location;
-- do not destroy the old Vultr instance until backups and new production behavior have been verified.
-
-After the observation period, destroy/downgrade the old VPS to stop billing.
-
-## Final acceptance
-
-Phase 1 is complete when:
-
-- all six configured Lightning Addresses use native LNURL-pay + Strike;
-- arbitrary unconfigured users fail closed;
-- no LNbits/CLN/clnaddress runtime path serves production payments;
-- Strike settlements credit exactly once and preserve recipient metadata;
-- the VPS has no OpenHAB token/direct generic OpenHAB or weather-service access;
-- weather messages work through the sanitized gateway and remain overlay-only;
-- feeder request/ack, duplicate suppression, threshold/remainder/ambiguity behavior is verified;
-- payment and feeder messages appear on Nostr + overlay;
-- WireGuard final state uses the approved `10.8.0.0/24` topology with new VPS as `10.8.0.1` hub;
-- UFW containment matches the approved topology;
-- host/domain/deployment hardening checks pass;
-- operational Strike balance policy is active;
-- old VPS is archival/rollback only;
-- tracker #6 and its Phase 1 child issues are complete.
-# Audit override: do not execute this cutover yet
-
-Production is on HOLD under the 2026-09-08 audit. Complete the source corrections
-and acceptance evidence in `audit-remediation.md` before this runbook becomes
-eligible for separate operator approval. Read `deployment-artifacts.md` for the
-correct nginx include layout and archive provenance. Existing completion claims
-or artifact-only smoke tests do not satisfy the release gate.
+All credit the herd pool and preserve the paid user. Unknown users remain rejected.
+Verify metadata/callback origin for new invoices and retain original stored metadata
+for already-issued pilot invoices. Keep the appropriate webhook subscriptions/recovery
+paths during overlap. Changing a DNS record alone does not migrate invoice identity.
+
+Do not couple the payment cutover to an unrelated website rewrite or stream migration.
+Route only names/services that the operator intends to move. Inventory their current
+DNS values and nginx/stream dependencies before repointing the apex or `www`.
+
+## 3. Operator changes public references
+
+The operator changes the chosen DNS records and Nostr profile Lightning Address or
+other metadata, along with overlay/QR links when appropriate. Record old/new values
+and the switch time. Existing production references are not changed by pilot startup
+or by this planning revision. Update public IPv6 records only if the path works.
+
+Confirm a wallet resolves the intended address on the new origin, generates the right
+invoice, and that a manual payment produces one credit and the expected downstream
+behavior. Observe pending invoices on both old/new paths during the overlap. Do not
+let two independent dispatchers double-fulfil payments or exceed the local feed cap.
+
+Nostr payment/feed publishing and Nostr **profile metadata** are separate operations.
+Use `active` mode only when normal public event publishing is intended. Do not replay
+old pilot history en masse or re-sign persisted outbox events just because DNS changed.
+
+## 4. WireGuard hub migration is optional and separate
+
+If the pilot's existing gateway route is working, leave the old hub running through
+the payment cutover. The payment switch need not wait for household hub migration.
+Keeping the old VPS as hub means it cannot yet be retired.
+
+If the operator later chooses to move the hub, use [wireguard-topology.md](wireguard-topology.md):
+back up the configuration, stop/release old `10.8.0.1` before the new host claims it,
+use the new host's own keypair, update clients, adjust the narrow home-gateway allowance
+and verify required connectivity and recovery access. Never run two `10.8.0.1` hubs.
+Do not treat a payment-DNS instruction as permission to repoint all WireGuard clients.
+
+## Rollback or pause
+
+**Pilot-only failure:** close new pilot invoice issuance and stop its dispatcher;
+keep the old public system available. Preserve new issued requests and reconcile
+late settlements in a non-actuating mode. The owner must resolve any possible delivery
+before another dispatcher is re-enabled. Keep local override/stop controls authoritative.
+
+**After public cutover:** the operator can restore old public references, but DNS
+rollback does not undo received money or physical feeding. Preserve the new database,
+reconcile outstanding invoices/credits/UUIDs and prevent concurrent fulfilment. Do not
+restore an old snapshot over current state, zero balances, or repay/re-credit everything.
+Keep necessary webhook/read recovery paths for invoices issued by either stack.
+
+**Gateway-only problem:** stop new dispatch, mark feeding unavailable and choose whether
+to pause invoice issuance too. Never replace the gateway with generic OpenHAB access or
+pretend that a receipt ACK proves completed feeding. Repair the affected feature without
+rebuilding all unrelated services.
+
+Retain the old VPS/configuration and recovery material until the operator is comfortable
+retiring it and it no longer supplies required hub/stream/other services. No mandatory
+observation duration is imposed. Preserve private backups; remove unneeded access and
+subscriptions deliberately, not as an automatic side effect of a DNS change.
+
+## Completion is observation, not paperwork
+
+Record which public addresses and services moved, actual payment/feed/restart results,
+remaining known limitations, and rollback state. #15 records observed behavior; #16
+records the actual operator cutover. Do not close unverified work as passed, but an
+open historical issue is not itself a veto on the operator's hobby-project launch.
+The former blanket audit HOLD is superseded for this pilot/cutover sequence by the
+operator's 2026-09-14 decision; specific unsafe outcomes still require stopping their
+physical/financial path rather than inventing success.

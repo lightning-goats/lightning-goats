@@ -41,6 +41,9 @@ PIPEFAIL_ON_ARGS_RE = re.compile(
 PIPEFAIL_OFF_ARGS_RE = re.compile(
     r"(?:^|[ \t])\+o[ \t]+pipefail(?:[ \t]|$)"
 )
+PIPEFAIL_OFF_COMMAND_RE = re.compile(
+    r"\bset\b[^;|&\n]*?\+o[ \t]+pipefail\b"
+)
 HEREDOC_RE = re.compile(
     r"<<-?[ \t]*(?P<quote>['\"]?)(?P<word>[A-Za-z_][A-Za-z0-9_]*)\1"
 )
@@ -238,13 +241,17 @@ def scan_workflow(path: Path) -> list[Finding]:
                 and set_completes_before_pipeline
             )
 
-            if off and set_state is not None:
-                # Conservatively honor a direct-looking disable even after the
-                # prologue. A nested false positive is safer than masking a
-                # pipeline failure.
-                pipefail_enabled = False
+            prefix = cleaned if pipeline is None else cleaned[:pipeline]
+            disabled_before_pipeline = (
+                PIPEFAIL_OFF_COMMAND_RE.search(prefix) is not None
+            )
+            disabled_anywhere = (
+                PIPEFAIL_OFF_COMMAND_RE.search(cleaned) is not None
+            )
 
-            enabled_before_pipeline = pipefail_enabled or can_enable_here
+            enabled_before_pipeline = (
+                pipefail_enabled or can_enable_here
+            ) and not disabled_before_pipeline
             if pipeline is not None and not enabled_before_pipeline:
                 findings.append(
                     Finding(
@@ -255,7 +262,12 @@ def scan_workflow(path: Path) -> list[Finding]:
                 )
                 break
 
-            if can_enable_here:
+            if disabled_anywhere:
+                # Conservatively honor a direct-looking disable anywhere on the
+                # line. If it is nested/conditional this may reject safe code,
+                # but it cannot mask a pipeline failure.
+                pipefail_enabled = False
+            elif can_enable_here:
                 pipefail_enabled = True
 
             if set_prologue:

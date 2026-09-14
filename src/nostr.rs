@@ -1,3 +1,7 @@
+mod private;
+pub use private::PrivateGiftWrap;
+pub(crate) use private::validate_private_relays;
+
 use std::{ffi::OsStr, path::PathBuf, process::Stdio, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result, bail};

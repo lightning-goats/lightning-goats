@@ -98,6 +98,56 @@ async fn read_notes(nak: &Path, runtime: &Path, url: &str) -> Vec<Value> {
         .collect()
 }
 
+fn verify_private_layer_signature(event: &Value) {
+    use bitcoin::secp256k1::{Message, Secp256k1, XOnlyPublicKey, schnorr::Signature};
+    let canonical = json!([
+        0,
+        event["pubkey"],
+        event["created_at"],
+        event["kind"],
+        event["tags"],
+        event["content"]
+    ]);
+    let digest: [u8; 32] = Sha256::digest(serde_json::to_vec(&canonical).unwrap()).into();
+    assert_eq!(event["id"], hex::encode(digest));
+    Secp256k1::verification_only()
+        .verify_schnorr(
+            &Signature::from_slice(&hex::decode(event["sig"].as_str().unwrap()).unwrap()).unwrap(),
+            &Message::from_digest(digest),
+            &XOnlyPublicKey::from_slice(&hex::decode(event["pubkey"].as_str().unwrap()).unwrap())
+                .unwrap(),
+        )
+        .unwrap();
+}
+
+async fn decrypt_private_layer(
+    nak: &Path,
+    runtime: &Path,
+    sender: &str,
+    ciphertext: &str,
+) -> Value {
+    let output = timeout(
+        Duration::from_secs(10),
+        tokio::process::Command::new(nak)
+            .arg("--config-path")
+            .arg(runtime)
+            .args(["decrypt", "-p", sender, ciphertext])
+            .env_clear()
+            .env("NOSTR_SECRET_KEY", "02")
+            .env("NO_COLOR", "1")
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(
+        output.status.success(),
+        "synthetic private layer decryption failed"
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
 #[tokio::test]
 #[ignore = "requires pinned real nak and a fresh loopback-only network namespace"]
 async fn real_nip46_sign_verify_and_durable_retry_without_signer() {
@@ -181,6 +231,36 @@ async fn real_nip46_sign_verify_and_durable_retry_without_signer() {
         "signing must not publish kind 1"
     );
 
+    // The actual application boundary must encrypt through this real bunker,
+    // not merely prove that the nak CLI supports gift wrapping independently.
+    let private_message = "Synthetic private application alert only";
+    let private = client
+        .wrap_private_message(CLIENT, private_message)
+        .await
+        .unwrap();
+    assert!(!private.ciphertext_json().contains(private_message));
+    let wrap: Value = serde_json::from_str(private.ciphertext_json()).unwrap();
+    assert_eq!(wrap["kind"], 1059);
+    let seal = decrypt_private_layer(
+        &nak,
+        &runtime,
+        wrap["pubkey"].as_str().unwrap(),
+        wrap["content"].as_str().unwrap(),
+    )
+    .await;
+    assert_eq!(seal["kind"], 13);
+    assert_eq!(seal["pubkey"], SIGNER);
+    verify_private_layer_signature(&seal);
+    let decoded =
+        decrypt_private_layer(&nak, &runtime, SIGNER, seal["content"].as_str().unwrap()).await;
+    assert_eq!(decoded["kind"], 14);
+    assert_eq!(decoded["pubkey"], SIGNER);
+    assert_eq!(decoded["content"], private_message);
+    assert_eq!(decoded["tags"], json!([["p", CLIENT]]));
+    let public_shape: SignedNostrEvent = serde_json::from_value(wrap).unwrap();
+    assert!(client.publish_signed(&public_shape).await.is_err());
+    assert!(read_notes(&nak, &runtime, &url).await.is_empty());
+
     let database = format!("sqlite://{}", root.path().join("ledger.db").display());
     let ledger = LedgerStore::connect(&database).await.unwrap();
     let renderer = MessageRenderer::embedded().unwrap();
@@ -260,5 +340,45 @@ async fn real_nip46_sign_verify_and_durable_retry_without_signer() {
             .unwrap();
     }
     assert!(ledger.next_outbox_entry().await.unwrap().is_none());
+    assert_eq!(read_notes(&nak, &runtime, &url).await, notes);
+    // The bunker is stopped. Restored ciphertext can still be verified and
+    // retried without signing/encrypting again; the public lane stays unchanged.
+    let recovered = client
+        .restore_private_wrap(CLIENT, private.ciphertext_json())
+        .await
+        .unwrap();
+    assert_eq!(recovered.ciphertext_json(), private.ciphertext_json());
+    client
+        .publish_private_wrap(CLIENT, &[url.clone()], &recovered)
+        .await
+        .unwrap();
+    client
+        .publish_private_wrap(CLIENT, &[url.clone()], &recovered)
+        .await
+        .unwrap();
+    let output = timeout(
+        Duration::from_secs(10),
+        tokio::process::Command::new(&nak)
+            .arg("--config-path")
+            .arg(&runtime)
+            .args(["req", "--kind", "1059", &url])
+            .env_clear()
+            .env("NO_COLOR", "1")
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(output.status.success());
+    let delivered: Vec<Value> = String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(
+        delivered,
+        vec![serde_json::from_str::<Value>(private.ciphertext_json()).unwrap()]
+    );
     assert_eq!(read_notes(&nak, &runtime, &url).await, notes);
 }

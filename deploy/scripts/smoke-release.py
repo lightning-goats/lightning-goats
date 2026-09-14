@@ -22,6 +22,7 @@ REQUIRED = BINARIES | {
     "deploy/nginx/lightning-goats-production-site.conf.example",
     "deploy/nginx/lightning-goats-canary-site.conf.example",
     "deploy/systemd/lightning-goats-gateway.service",
+    "deploy/systemd/lightning-goats-private-alert.service",
     "docs/deployment/deployment-artifacts.md",
     "web/index.html", "web/chat.js", "web/site.js", "web/site-config.js",
     "web/images/preview-image.png", "web/images/lightninggoatslogo1.png",

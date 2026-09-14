@@ -1,3 +1,6 @@
+mod balance;
+pub use balance::StrikeBtcBalance;
+
 use std::{net::IpAddr, str::FromStr, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result, bail};

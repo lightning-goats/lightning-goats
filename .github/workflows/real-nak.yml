@@ -39,6 +39,11 @@ jobs:
           set -euo pipefail
           LG_REAL_TEST_BINARY="$(python3 -c 'import json,sys; rows=[json.loads(line) for line in open(sys.argv[1])]; paths=[r["executable"] for r in rows if r.get("reason")=="compiler-artifact" and r.get("target",{}).get("name")=="real_nak" and r.get("executable")]; assert len(paths)==1; print(paths[0])' "$RUNNER_TEMP/real-nak-build.jsonl")"
           sudo unshare --net -- sh -c 'ip link set lo up; exec runuser -u "$1" -- env LG_TEST_NAK="$2" "$3" --ignored --nocapture' sh "$(id -un)" "$RUNNER_TEMP/nak" "$LG_REAL_TEST_BINARY" | tee "$RUNNER_TEMP/REAL-NAK.txt"
+      - name: Prove private encryption and seal signing through the real bunker
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo unshare --net -- sh -c 'ip link set lo up; exec runuser -u "$1" -- env -i PATH=/usr/bin:/bin LG_TEST_NAK="$2" python3 -B -m unittest discover -s deploy/tests -p test_private_nostr_capability.py -v' sh "$(id -un)" "$RUNNER_TEMP/nak" 2>&1 | tee "$RUNNER_TEMP/PRIVATE-NAK.txt"
       - name: Rehearse the shipped bunker sandbox with encrypted synthetic credentials
         shell: bash
         run: |
@@ -52,6 +57,7 @@ jobs:
           name: real-nak-${{ github.sha }}
           path: |
             ${{ runner.temp }}/REAL-NAK.txt
+            ${{ runner.temp }}/PRIVATE-NAK.txt
             ${{ runner.temp }}/BUNKER-SYSTEMD.json
           if-no-files-found: error
           retention-days: 14

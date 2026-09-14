@@ -1,10 +1,45 @@
-# HOME gateway status — 2026-09-13 UTC
+# HOME gateway status — updated 2026-09-14 UTC
 
 **Local canary verified; production HOLD.** HOME retains gateway/credential,
 canary, weather and containment preparation ownership. VPS owns daemon, Strike,
 nginx, website, Nostr and VPS networking. Issue #17 is the coordination thread;
 Hexmem holds private context. Existing checkouts, credentials and physical owner
 are preserved. Unrelated untracked `reports/` in the original checkout is untouched.
+
+## Weather installed — 2026-09-14
+
+After direct operator approval and independent source acceptance of PR85
+`4369da182c69c9ec971f2767771253c9bff61a4f`, HOME installed the observer/exporter
+and restarted only `rtl_weather.service`. The receiver remained active under
+its original PID; Docker5001 remained untouched. The exporter is active/enabled
+at **http://127.0.0.1:5002/get_received_data**, under locked non-admin identity
+`lightning-goats-weather`, with no capabilities, read-only system protection and
+no write access to the project database. Modules/unit are root-owned; the radio
+writer retains its existing sat identity and the project-only state directory.
+
+Real complete observations passed: decoder UTC advanced from13:58:22Z to13:58:38Z
+while repeated polls retained the existing observation time. Explicit units and
+`radio_decode_utc` are verified. A disposable actual gateway returned weather200
+using invalid synthetic credentials and unreachable OpenHAB, with no commands.
+The actual reader rejected an expired-time read without changing data or clock.
+The initial10-second window did not span two frames; a longer passive window
+passed. No local Rust build was started.
+
+[Installed evidence](../testing/evidence/home-weather-installed-20260914.json)
+pins source, module/unit/binary hashes, results and scope. Exact original radio
+backup, installation manifest and guarded rollback are retained root-only under
+`/var/backups/lightning-goats-weather-20260914/`; `rollback.py` defaults to a
+read-only guard check and requires `--apply` for restoration. Its guard dry-run
+passed; rollback was not executed. It stops only the project exporter, restores
+only the exact unchanged approved radio patch and preserves snapshot evidence.
+
+**Integration boundary:** installed gateway weather URLs remain unchanged, so
+this proves the local producer/exporter plus disposable gateway compatibility,
+not installed gateway or cross-host overlay acceptance. VPS should use the
+reviewed gateway weather endpoint after HOME's separate configuration integration;
+never connect directly to the weather exporter. Existing network and physical
+acceptance gates remain open. Earlier preparation-only paragraphs below are
+historical and superseded by this installed checkpoint where applicable.
 
 ## Latest preparation evidence
 

@@ -132,9 +132,26 @@ def _shell_for_run(
     return None
 
 
+def _unquote_simple_yaml_scalar(value: str) -> str:
+    """Remove one matching YAML scalar quote pair for shell classification.
+
+    GitHub accepts ``shell: 'bash'`` and ``shell: "bash -e {0}"``. Treating the
+    quote marks as part of the executable would silently classify those valid
+    bash steps as non-shell and skip the pipeline check. Full YAML decoding is
+    deliberately out of scope; this helper only unwraps one simple outer pair.
+    """
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1].strip()
+    return value
+
+
 def _is_shell_like(shell: str | None) -> bool:
     if shell is None:
         return True
+    shell = _unquote_simple_yaml_scalar(shell)
+    if not shell:
+        return False
     executable = shell.split()[0].lower()
     return Path(executable).name in {"bash", "sh"}
 

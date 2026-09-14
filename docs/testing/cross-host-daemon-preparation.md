@@ -153,6 +153,13 @@ payment event; no unresolved attempt, public Nostr outbox or issued provider
 request is permitted. Historical refusal attempts may remain as resolved
 `reconciled_not_fed` records and may not match a delivered UUID.
 
+The verifier checks receipt/debit insertion order (`ledger_entries.id`) and
+running balances 2,340 -> 1,340 -> 340, plus payment/confirmation event order
+(`event_log.seq`) and matching balances. The receipt must precede both debits and
+the payment event must precede both confirmations. Gaps in insertion keys and
+interleaved informational events are allowed; wall-clock timestamps do not
+establish order.
+
 A passing comparison establishes only consistency of the supplied captures. It
 cannot prove that duplicates/concurrency, refusal cooldown, lost responses, late
 release, process restarts or paired restore were actually exercised. Retain each

@@ -91,7 +91,16 @@ def verify(database, baseline, completed, run_id):
         connection.execute('BEGIN')
         payments = rows(connection, 'SELECT source,source_id,address_user,credit_pool,amount_msat FROM settled_payments')
         require(payments == [{'source':'synthetic-cross-host','source_id':run_id,'address_user':'herd','credit_pool':'herd','amount_msat':2340000}], 'unexpected synthetic settlement')
-        entries = rows(connection, 'SELECT entry_type,source_key,delta_sats,payment_source,payment_source_id,feed_attempt_id FROM ledger_entries ORDER BY id')
+        entries = rows(connection, 'SELECT id,entry_type,source_key,delta_sats,payment_source,payment_source_id,feed_attempt_id FROM ledger_entries ORDER BY id')
+        # Validate insertion order before grouping; the final sum alone can
+        # hide debits that precede their funding receipt. IDs may have gaps.
+        require([row['entry_type'] for row in entries] == ['HERD_RECEIPT','FEED_DEBIT','FEED_DEBIT'], 'ledger chronology mismatch')
+        running_balances = []
+        balance = 0
+        for entry in entries:
+            balance += entry['delta_sats']
+            running_balances.append(balance)
+        require(running_balances == [2340,1340,340], 'ledger running balance mismatch')
         receipts = [row for row in entries if row['entry_type'] == 'HERD_RECEIPT']
         require(len(receipts) == 1 and receipts[0]['delta_sats'] == 2340 and receipts[0]['payment_source'] == 'synthetic-cross-host' and receipts[0]['payment_source_id'] == run_id, 'synthetic credit mismatch')
         debits = [row for row in entries if row['entry_type'] == 'FEED_DEBIT']
@@ -103,14 +112,18 @@ def verify(database, baseline, completed, run_id):
         require({row['id'] for row in confirmed} == set(ids) and len(confirmed) == 2, 'confirmation identity mismatch')
         require(all(row['threshold_sats'] == 1000 and row['status'] in ('confirmed','reconciled_not_fed') for row in attempts), 'unresolved or unexpected feed attempt')
         require(not set(row['id'] for row in attempts if row['status'] == 'reconciled_not_fed').intersection(ids), 'refused UUID was delivered')
-        events = rows(connection, 'SELECT event_type,substr(payload_json,1,65537) AS payload_json FROM event_log ORDER BY seq')
+        events = rows(connection, 'SELECT seq,event_type,substr(payload_json,1,65537) AS payload_json FROM event_log ORDER BY seq')
+        # Informational events may interleave, but financial events must retain
+        # the same payment-first order as the ledger's atomic writer.
+        financial_types = [row['event_type'] for row in events if row['event_type'] in ('payment_received','feeder_confirmed')]
+        require(financial_types == ['payment_received','feeder_confirmed','feeder_confirmed'], 'financial event chronology mismatch')
         feed_events = [json.loads(row['payload_json'], object_pairs_hook=unique_object) for row in events if row['event_type'] == 'feeder_confirmed']
         require([row['feed_attempt_id'] for row in feed_events] == ids, 'confirmation events do not match deliveries')
-        require([row['feed_credit_sats'] for row in feed_events] == [1340,340] and all(row['threshold_sats'] == 1000 for row in feed_events), 'confirmation event accounting mismatch')
+        require([row['feed_credit_sats'] for row in feed_events] == running_balances[1:] and all(row['threshold_sats'] == 1000 for row in feed_events), 'confirmation event accounting mismatch')
         payment_events = [json.loads(row['payload_json'], object_pairs_hook=unique_object) for row in events if row['event_type'] == 'payment_received']
         require(len(payment_events) == 1, 'duplicate or missing payment event')
         payment_event = payment_events[0]
-        require(all(payment_event.get(key) == value for key, value in {'source':'synthetic-cross-host','source_id':run_id,'address_user':'herd','credit_pool':'herd','amount_sats':2340,'feed_credit_sats':2340}.items()), 'payment event does not match seed')
+        require(all(payment_event.get(key) == value for key, value in {'source':'synthetic-cross-host','source_id':run_id,'address_user':'herd','credit_pool':'herd','amount_sats':2340,'feed_credit_sats':running_balances[0]}.items()), 'payment event does not match seed')
         require(connection.execute('SELECT count(*) FROM message_outbox').fetchone()[0] == 0, 'synthetic run contains public Nostr outbox work')
         require(connection.execute('SELECT count(*) FROM strike_receive_requests').fetchone()[0] == 0, 'synthetic run issued provider requests')
     finally:

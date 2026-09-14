@@ -3,6 +3,8 @@ import importlib.util
 import json
 from pathlib import Path
 import sqlite3
+import subprocess
+import sys
 import tempfile
 import unittest
 import uuid
@@ -98,3 +100,65 @@ class AccountingTests(unittest.TestCase):
         for raw in [b'{"count":1,"count":2}', b' '*(check.MAX_INPUT+1)]:
             capture.write_bytes(raw)
             with self.assertRaises(ValueError):check.read_json(capture)
+
+    def assert_rejected_read_only(self, message):
+        before = self.database.read_bytes()
+        with self.assertRaisesRegex(ValueError, message):
+            self.verify()
+        self.assertEqual(self.database.read_bytes(), before)
+
+    def test_receipt_must_precede_both_debits(self):
+        self.connection.execute("UPDATE ledger_entries SET id=10 WHERE entry_type='HERD_RECEIPT'")
+        self.connection.commit()
+        self.assert_rejected_read_only('ledger chronology')
+
+    def test_payment_event_must_precede_both_confirmations(self):
+        self.connection.execute("UPDATE event_log SET seq=10 WHERE event_type='payment_received'")
+        self.connection.commit()
+        self.assert_rejected_read_only('financial event chronology')
+
+    def test_debit_order_must_match_home_deliveries(self):
+        self.connection.execute('UPDATE ledger_entries SET id=10 WHERE feed_attempt_id=?', (self.ids[0],))
+        self.connection.commit()
+        self.assert_rejected_read_only('debits do not match delivered UUIDs')
+
+    def test_confirmation_order_must_match_home_deliveries(self):
+        self.connection.execute("UPDATE event_log SET seq=10 WHERE seq=2")
+        self.connection.commit()
+        self.assert_rejected_read_only('confirmation events do not match deliveries')
+
+    def test_informational_events_and_gapped_ids_preserve_financial_order(self):
+        # IDs are ordered keys, not contiguous indexes or wall-clock timestamps.
+        # All created_at values deliberately remain identical.
+        self.connection.execute('UPDATE ledger_entries SET id=id+100')
+        for old, new in [(101,10),(102,30),(103,50)]:
+            self.connection.execute('UPDATE ledger_entries SET id=? WHERE id=?', (new,old))
+        self.connection.execute('UPDATE event_log SET seq=seq+100')
+        for old, new in [(101,10),(102,30),(103,50)]:
+            self.connection.execute('UPDATE event_log SET seq=? WHERE seq=?', (new,old))
+        for sequence in [5,20,40,60]:
+            self.connection.execute("INSERT INTO event_log(seq,event_type,payload_json,created_at) VALUES(?,'info','{}',0)", (sequence,))
+        self.connection.commit()
+        before = self.database.read_bytes()
+        report = self.verify()
+        self.assertEqual(report['remaining_sats'], 340)
+        self.assertEqual(report['confirmed_request_ids'], self.ids)
+        self.assertEqual(self.database.read_bytes(), before)
+
+    def test_cli_rejects_reordered_capture_with_nonzero_exit_and_no_pass_report(self):
+        self.connection.execute("UPDATE ledger_entries SET id=10 WHERE entry_type='HERD_RECEIPT'")
+        self.connection.commit()
+        before = self.database.read_bytes()
+        baseline = Path(self.temp.name)/'baseline.json'
+        completed = Path(self.temp.name)/'completed.json'
+        baseline.write_text(json.dumps(self.before))
+        completed.write_text(json.dumps(self.after))
+        result = subprocess.run([
+            sys.executable, '-B', str(ROOT/'deploy/scripts/verify-cross-host-accounting.py'),
+            '--database', str(self.database), '--baseline', str(baseline),
+            '--completed', str(completed), '--run-id', self.run_id,
+        ], capture_output=True, text=True, timeout=10)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, '')
+        self.assertIn('ledger chronology', result.stderr)
+        self.assertEqual(self.database.read_bytes(), before)

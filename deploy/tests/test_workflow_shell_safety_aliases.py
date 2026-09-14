@@ -58,6 +58,34 @@ jobs:
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertIn("YAML alias", result.stderr)
 
+    def test_rejects_anchored_shell_value_before_pipeline(self) -> None:
+        result = self.run_checker(
+            """name: anchored-shell
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - shell: &bash_shell bash
+        run: false | tee result.txt
+"""
+        )
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("YAML anchor", result.stderr)
+
+    def test_rejects_anchored_run_block(self) -> None:
+        result = self.run_checker(
+            """name: anchored-run-block
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: &unsafe_run |
+          false | tee result.txt
+"""
+        )
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("YAML anchor", result.stderr)
+
     def test_quoted_asterisk_is_not_a_yaml_alias(self) -> None:
         result = self.run_checker(
             """name: quoted-asterisk

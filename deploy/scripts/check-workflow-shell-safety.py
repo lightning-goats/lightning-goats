@@ -141,8 +141,10 @@ def scan_workflow(path: Path) -> list[Finding]:
             continue
 
         run_indent = len(match.group("indent"))
+        run_has_dash = match.group("dash") is not None
+        run_key_indent = run_indent + 2 if run_has_dash else run_indent
         shell = _shell_for_run(
-            lines, idx, run_indent, run_has_dash=match.group("dash") is not None
+            lines, idx, run_indent, run_has_dash=run_has_dash
         )
         idx += 1
         block_start = idx
@@ -153,7 +155,7 @@ def scan_workflow(path: Path) -> list[Finding]:
                 idx += 1
                 continue
             indent = len(raw) - len(raw.lstrip(" \t"))
-            if indent <= run_indent:
+            if indent <= run_key_indent:
                 break
             idx += 1
 

@@ -82,6 +82,20 @@ jobs:
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_rejects_pipefail_disabled_later_on_same_line(self) -> None:
+        result = self.run_checker(
+            """name: same-line-disable
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          set -o pipefail; set +o pipefail
+          false | tee result.txt
+"""
+        )
+        self.assertEqual(result.returncode, 1)
+
     def test_rejects_subshell_pipefail_that_does_not_enable_parent(self) -> None:
         result = self.run_checker(
             """name: subshell-bypass

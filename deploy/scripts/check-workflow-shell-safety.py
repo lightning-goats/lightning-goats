@@ -3,15 +3,16 @@
 
 GitHub's default bash invocation enables ``-e`` but not ``pipefail``. A workflow
 step such as ``real-test | tee evidence.log`` can therefore report success when
-the command on the left fails. This checker scans multiline workflow ``run``
-blocks and requires pipefail before the first real shell pipeline.
+the command on the left fails. This checker scans shell-like workflow ``run``
+commands and requires pipefail before the first real shell pipeline.
 
 The parser is intentionally narrow: it is not a YAML or shell interpreter. It
 understands block indentation, step-local shell overrides, comments, simple
-quotes, logical ``||``, simple heredocs, and an initial prologue of direct ``set``
-builtins. A ``set -o pipefail`` hidden in a subshell, conditional, function, or
-other control-flow construct does not establish parent-shell state. Ambiguous
-constructs should be rewritten explicitly rather than weakening this guard.
+quotes, logical ``||``, simple heredocs, single-line run scalars, and an initial
+prologue of direct ``set`` builtins. A ``set -o pipefail`` hidden in a subshell,
+conditional, function, or other control-flow construct does not establish
+parent-shell state. Ambiguous constructs should be rewritten explicitly rather
+than weakening this guard.
 """
 
 from __future__ import annotations
@@ -25,10 +26,13 @@ from pathlib import Path
 
 RUN_BLOCK_RE = re.compile(
     r"^(?P<indent>[ \t]*)(?P<dash>-[ \t]+)?run:[ \t]*(?P<style>[|>])"
-    r"(?:[-+]|[1-9])?[ \t]*(?:#.*)?$"
+    r"(?:(?:[-+][1-9]?|[1-9][-+]?))?[ \t]*(?:#.*)?$"
+)
+RUN_SCALAR_RE = re.compile(
+    r"^(?P<indent>[ \t]*)(?P<dash>-[ \t]+)?run:[ \t]+(?P<value>.+?)[ \t]*$"
 )
 SHELL_RE = re.compile(
-    r"^(?P<indent>[ \t]*)(?:-[ \t]+)?shell:[ \t]*(?P<value>[^#]+?)?"
+    r"^(?P<indent>[ \t]*)(?P<dash>-[ \t]+)?shell:[ \t]*(?P<value>[^#]+?)?"
     r"[ \t]*(?:#.*)?$"
 )
 DIRECT_SET_RE = re.compile(
@@ -108,10 +112,9 @@ def _shell_for_run(
     lines: list[str], run_index: int, run_indent: int, run_has_dash: bool
 ) -> str | None:
     """Return a step-local shell override, or None for the workflow default."""
-    if run_has_dash:
-        return None
+    step_indent = run_indent if run_has_dash else max(run_indent - 2, 0)
+    key_indent = run_indent + 2 if run_has_dash else run_indent
 
-    step_indent = max(run_indent - 2, 0)
     for idx in range(run_index - 1, -1, -1):
         raw = lines[idx]
         if not raw.strip():
@@ -121,24 +124,49 @@ def _shell_for_run(
             break
 
         match = SHELL_RE.match(raw)
-        if match and len(match.group("indent")) in {run_indent, step_indent}:
-            return (match.group("value") or "").strip()
+        if match:
+            shell_indent = len(match.group("indent"))
+            shell_has_dash = match.group("dash") is not None
+            if (shell_has_dash and shell_indent == step_indent) or (
+                not shell_has_dash and shell_indent == key_indent
+            ):
+                return (match.group("value") or "").strip()
 
         # The first list-item marker is the start of this step. Do not cross it
         # into a preceding step looking for a shell override.
         if indent == step_indent and raw.lstrip().startswith("- "):
             break
 
+    # YAML mappings are unordered. A step may legally put `shell:` after `run:`.
+    # Ignore block-scalar content by accepting only the step's key indentation,
+    # and stop at the next list item so another step's shell cannot leak backward.
+    for idx in range(run_index + 1, len(lines)):
+        raw = lines[idx]
+        if not raw.strip():
+            continue
+        indent = len(raw) - len(raw.lstrip(" \t"))
+        if indent < step_indent:
+            break
+        if indent == step_indent and raw.lstrip().startswith("- "):
+            break
+
+        match = SHELL_RE.match(raw)
+        if (
+            match
+            and match.group("dash") is None
+            and len(match.group("indent")) == key_indent
+        ):
+            return (match.group("value") or "").strip()
+
     return None
 
 
 def _unquote_simple_yaml_scalar(value: str) -> str:
-    """Remove one matching YAML scalar quote pair for shell classification.
+    """Remove one matching YAML scalar quote pair for narrow classification.
 
-    GitHub accepts ``shell: 'bash'`` and ``shell: "bash -e {0}"``. Treating the
-    quote marks as part of the executable would silently classify those valid
-    bash steps as non-shell and skip the pipeline check. Full YAML decoding is
-    deliberately out of scope; this helper only unwraps one simple outer pair.
+    GitHub accepts quoted ``shell:`` values and quoted single-line ``run:``
+    commands. Full YAML decoding is deliberately out of scope; this helper only
+    unwraps one simple outer pair so the shell syntax inside can be inspected.
     """
     value = value.strip()
     if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
@@ -175,6 +203,33 @@ def _set_state(cleaned: str) -> tuple[bool, bool, str] | None:
     )
 
 
+def _single_line_pipeline_is_unsafe(command: str) -> bool:
+    """Return True when a scalar run command has an unprotected real pipeline."""
+    command = _unquote_simple_yaml_scalar(command)
+    cleaned = _strip_quotes_and_comment(command)
+    pipeline = _pipeline_index(cleaned)
+    if pipeline is None:
+        return False
+
+    set_state = _set_state(cleaned)
+    on = off = False
+    if set_state is not None:
+        on, off, _ = set_state
+
+    semicolon = cleaned.find(";")
+    set_completes_before_pipeline = semicolon != -1 and semicolon < pipeline
+    can_enable_here = (
+        set_state is not None
+        and on
+        and not off
+        and set_completes_before_pipeline
+    )
+    disabled_before_pipeline = (
+        PIPEFAIL_OFF_COMMAND_RE.search(cleaned[:pipeline]) is not None
+    )
+    return not (can_enable_here and not disabled_before_pipeline)
+
+
 def scan_workflow(path: Path) -> list[Finding]:
     text = path.read_text(encoding="utf-8")
     lines = text.splitlines()
@@ -184,6 +239,23 @@ def scan_workflow(path: Path) -> list[Finding]:
     while idx < len(lines):
         match = RUN_BLOCK_RE.match(lines[idx])
         if not match:
+            scalar_match = RUN_SCALAR_RE.match(lines[idx])
+            if scalar_match:
+                run_indent = len(scalar_match.group("indent"))
+                run_has_dash = scalar_match.group("dash") is not None
+                shell = _shell_for_run(
+                    lines, idx, run_indent, run_has_dash=run_has_dash
+                )
+                if _is_shell_like(shell) and _single_line_pipeline_is_unsafe(
+                    scalar_match.group("value")
+                ):
+                    findings.append(
+                        Finding(
+                            path=path,
+                            line=idx + 1,
+                            message="shell pipeline executes before `set -o pipefail`",
+                        )
+                    )
             idx += 1
             continue
 

@@ -39,6 +39,19 @@ jobs:
         self.assertEqual(result.returncode, 1)
         self.assertIn("pipeline executes before", result.stderr)
 
+    def test_rejects_single_line_pipeline_without_pipefail(self) -> None:
+        result = self.run_checker(
+            """name: single-line-bad
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: false | tee result.txt
+"""
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("pipeline executes before", result.stderr)
+
     def test_accepts_pipefail_before_pipeline(self) -> None:
         result = self.run_checker(
             """name: good

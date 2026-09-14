@@ -120,14 +120,14 @@ def _child_shell_script(segment: list[str]) -> tuple[str, bool, str] | None:
         token = segment[index]
         if token == "--":
             return None
-        if token == "-o":
+        if token in {"-o", "+o"}:
             if index + 1 >= len(segment):
                 return None
             if segment[index + 1] == "pipefail":
-                child_pipefail = True
+                child_pipefail = token == "-o"
             index += 2
             continue
-        if token == "-O":
+        if token in {"-O", "+O"}:
             if index + 1 >= len(segment):
                 return None
             index += 2

@@ -92,6 +92,32 @@ jobs:
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_rejects_bash_plus_o_pipefail_before_c(self) -> None:
+        result = self.run_checker(
+            NESTED_CHECKER,
+            """name: child-plus-o-bad
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: bash +o pipefail -c 'false | tee result.txt'
+""",
+        )
+        self.assertEqual(result.returncode, 1, result.stderr)
+
+    def test_rejects_bash_plus_upper_o_option_before_c(self) -> None:
+        result = self.run_checker(
+            NESTED_CHECKER,
+            """name: child-plus-upper-o-bad
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: bash +O extglob -c 'false | tee result.txt'
+""",
+        )
+        self.assertEqual(result.returncode, 1, result.stderr)
+
     def test_rejects_combined_bash_c_option_without_pipefail(self) -> None:
         result = self.run_checker(
             NESTED_CHECKER,

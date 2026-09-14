@@ -118,6 +118,32 @@ jobs:
         )
         self.assertEqual(result.returncode, 1, result.stderr)
 
+    def test_last_plus_o_pipefail_disables_invocation_protection(self) -> None:
+        result = self.run_checker(
+            NESTED_CHECKER,
+            """name: child-last-disable-bad
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: bash -o pipefail +o pipefail -c 'false | tee result.txt'
+""",
+        )
+        self.assertEqual(result.returncode, 1, result.stderr)
+
+    def test_last_minus_o_pipefail_reenables_invocation_protection(self) -> None:
+        result = self.run_checker(
+            NESTED_CHECKER,
+            """name: child-last-enable-good
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: bash +o pipefail -o pipefail -c 'false | tee result.txt'
+""",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_rejects_combined_bash_c_option_without_pipefail(self) -> None:
         result = self.run_checker(
             NESTED_CHECKER,

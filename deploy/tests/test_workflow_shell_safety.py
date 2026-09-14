@@ -101,19 +101,21 @@ jobs:
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_ignores_explicit_non_shell_run_block(self) -> None:
-        result = self.run_checker(
-            """name: python-shell
+        for shell in ("python", "pwsh"):
+            with self.subTest(shell=shell):
+                result = self.run_checker(
+                    f"""name: non-shell
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - shell: python
+      - shell: {shell}
         run: |
           value = 1 | 2
           print(value)
 """
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_does_not_inherit_shell_from_previous_step(self) -> None:
         result = self.run_checker(

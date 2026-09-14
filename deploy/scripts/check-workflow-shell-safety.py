@@ -8,8 +8,10 @@ blocks and requires pipefail before the first real shell pipeline.
 
 The parser is intentionally narrow: it is not a YAML or shell interpreter. It
 understands block indentation, step-local shell overrides, comments, simple
-quotes, logical ``||``, and simple heredocs. Ambiguous constructs should be
-rewritten explicitly rather than weakening this guard.
+quotes, logical ``||``, simple heredocs, and an initial prologue of direct ``set``
+builtins. A ``set -o pipefail`` hidden in a subshell, conditional, function, or
+other control-flow construct does not establish parent-shell state. Ambiguous
+constructs should be rewritten explicitly rather than weakening this guard.
 """
 
 from __future__ import annotations
@@ -29,10 +31,16 @@ SHELL_RE = re.compile(
     r"^(?P<indent>[ \t]*)(?:-[ \t]+)?shell:[ \t]*(?P<value>[^#]+?)?"
     r"[ \t]*(?:#.*)?$"
 )
-PIPEFAIL_ON_RE = re.compile(
-    r"\bset\b[^;\n]*?(?:-o[ \t]+pipefail|-[A-Za-z]*o[A-Za-z]*[ \t]+pipefail)\b"
+DIRECT_SET_RE = re.compile(
+    r"^[ \t]*set\b(?P<args>[^;|&\n]*)(?P<rest>.*)$"
 )
-PIPEFAIL_OFF_RE = re.compile(r"\bset\b[^;\n]*?\+o[ \t]+pipefail\b")
+PIPEFAIL_ON_ARGS_RE = re.compile(
+    r"(?:^|[ \t])(?:-o[ \t]+pipefail|-[A-Za-z]*o[A-Za-z]*[ \t]+pipefail)"
+    r"(?:[ \t]|$)"
+)
+PIPEFAIL_OFF_ARGS_RE = re.compile(
+    r"(?:^|[ \t])\+o[ \t]+pipefail(?:[ \t]|$)"
+)
 HEREDOC_RE = re.compile(
     r"<<-?[ \t]*(?P<quote>['\"]?)(?P<word>[A-Za-z_][A-Za-z0-9_]*)\1"
 )
@@ -128,6 +136,25 @@ def _is_shell_like(shell: str | None) -> bool:
     return Path(executable).name in {"bash", "sh"}
 
 
+def _set_state(cleaned: str) -> tuple[bool, bool, str] | None:
+    """Return direct-set pipefail on/off flags and the suffix after the set command.
+
+    Only a direct ``set`` builtin at the start of a cleaned command qualifies.
+    The argument slice stops before shell control operators so constructs such as
+    ``(set -o pipefail)`` and ``false && set -o pipefail`` never masquerade as
+    parent-shell state changes.
+    """
+    match = DIRECT_SET_RE.match(cleaned)
+    if not match:
+        return None
+    args = match.group("args")
+    return (
+        PIPEFAIL_ON_ARGS_RE.search(args) is not None,
+        PIPEFAIL_OFF_ARGS_RE.search(args) is not None,
+        match.group("rest"),
+    )
+
+
 def scan_workflow(path: Path) -> list[Finding]:
     text = path.read_text(encoding="utf-8")
     lines = text.splitlines()
@@ -171,6 +198,7 @@ def scan_workflow(path: Path) -> list[Finding]:
         )
 
         pipefail_enabled = False
+        set_prologue = True
         heredoc_end: str | None = None
 
         for offset, raw in enumerate(block_lines):
@@ -186,17 +214,37 @@ def scan_workflow(path: Path) -> list[Finding]:
 
             cleaned = _strip_quotes_and_comment(command)
             pipeline = _pipeline_index(cleaned)
+            set_state = _set_state(cleaned)
 
-            on_match = PIPEFAIL_ON_RE.search(cleaned)
-            off_match = PIPEFAIL_OFF_RE.search(cleaned)
-            if off_match and (on_match is None or off_match.start() < on_match.start()):
-                pipefail_enabled = False
+            # Only an initial sequence of direct `set` builtins can establish
+            # pipefail. Once ordinary/control-flow shell code begins, a later
+            # textual `set -o pipefail` could be conditional, nested or
+            # unexecuted, so it cannot prove parent-shell state to this parser.
+            on = off = False
+            rest = ""
+            if set_state is not None:
+                on, off, rest = set_state
 
-            enabled_before_pipeline = pipefail_enabled or (
-                on_match is not None
-                and (pipeline is None or on_match.end() <= pipeline)
+            semicolon = cleaned.find(";")
+            set_completes_before_pipeline = (
+                pipeline is None
+                or (semicolon != -1 and semicolon < pipeline)
+            )
+            can_enable_here = (
+                set_prologue
+                and set_state is not None
+                and on
+                and not off
+                and set_completes_before_pipeline
             )
 
+            if off and set_state is not None:
+                # Conservatively honor a direct-looking disable even after the
+                # prologue. A nested false positive is safer than masking a
+                # pipeline failure.
+                pipefail_enabled = False
+
+            enabled_before_pipeline = pipefail_enabled or can_enable_here
             if pipeline is not None and not enabled_before_pipeline:
                 findings.append(
                     Finding(
@@ -207,12 +255,19 @@ def scan_workflow(path: Path) -> list[Finding]:
                 )
                 break
 
-            if on_match is not None:
+            if can_enable_here:
                 pipefail_enabled = True
-            if off_match and (
-                on_match is None or off_match.start() > on_match.start()
-            ):
-                pipefail_enabled = False
+
+            if set_prologue:
+                if set_state is None:
+                    set_prologue = False
+                else:
+                    # A control/operator suffix containing another command ends
+                    # the simple-set prologue after this line. A trailing ';' by
+                    # itself remains harmless.
+                    suffix = rest.strip()
+                    if suffix not in {"", ";"}:
+                        set_prologue = False
 
             # Match the heredoc marker on the original command: the quote scrubber
             # intentionally removes quoted delimiters such as <<'PY'.

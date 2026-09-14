@@ -71,8 +71,22 @@ def _command_segments(tokens: list[str]) -> list[list[str]]:
     return segments
 
 
+def _split_env_argument(value: str) -> list[str] | None:
+    """Split GNU ``env -S`` data conservatively for child-shell inspection."""
+    try:
+        return shlex.split(value, posix=True)
+    except ValueError:
+        return None
+
+
 def _skip_env_wrapper(segment: list[str], index: int) -> int:
-    """Return the first command token after a simple ``env`` wrapper."""
+    """Return the first command token after a simple ``env`` wrapper.
+
+    ``env`` may consume more than one option before the command. GNU ``-S`` /
+    ``--split-string`` inserts its parsed arguments back into the argument list,
+    so expand that value in place and continue option processing instead of
+    silently skipping an executable child shell hidden inside it.
+    """
     if index >= len(segment) or Path(segment[index]).name != "env":
         return index
     index += 1
@@ -84,10 +98,29 @@ def _skip_env_wrapper(segment: list[str], index: int) -> int:
         if token in {"-i", "--ignore-environment", "-0", "--null"}:
             index += 1
             continue
-        if token in {"-u", "--unset", "-C", "--chdir", "-S", "--split-string"}:
-            # These options consume one argument. If it is absent, there is no
-            # child command for this conservative parser to analyze.
-            return min(index + 2, len(segment))
+        if token in {"-u", "--unset", "-C", "--chdir"}:
+            if index + 1 >= len(segment):
+                return len(segment)
+            index += 2
+            continue
+        if token in {"-S", "--split-string"}:
+            if index + 1 >= len(segment):
+                return len(segment)
+            expanded = _split_env_argument(segment[index + 1])
+            if expanded is None:
+                return len(segment)
+            segment[index : index + 2] = expanded
+            if not expanded:
+                return len(segment)
+            continue
+        if token.startswith("--split-string="):
+            expanded = _split_env_argument(token.split("=", 1)[1])
+            if expanded is None:
+                return len(segment)
+            segment[index : index + 1] = expanded
+            if not expanded:
+                return len(segment)
+            continue
         if token.startswith("--unset=") or token.startswith("--chdir="):
             index += 1
             continue

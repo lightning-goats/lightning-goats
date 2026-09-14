@@ -125,7 +125,7 @@ def _is_shell_like(shell: str | None) -> bool:
     if shell is None:
         return True
     executable = shell.split()[0].lower()
-    return executable.endswith("bash") or executable.endswith("sh")
+    return Path(executable).name in {"bash", "sh"}
 
 
 def scan_workflow(path: Path) -> list[Finding]:

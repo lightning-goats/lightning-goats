@@ -67,6 +67,65 @@ jobs:
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_accepts_initial_set_prologue_before_pipeline(self) -> None:
+        result = self.run_checker(
+            """name: set-prologue
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          set -eu
+          set -o pipefail
+          false | tee result.txt
+"""
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_rejects_subshell_pipefail_that_does_not_enable_parent(self) -> None:
+        result = self.run_checker(
+            """name: subshell-bypass
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          (set -o pipefail)
+          false | tee result.txt
+"""
+        )
+        self.assertEqual(result.returncode, 1)
+
+    def test_rejects_short_circuited_pipefail_that_never_executes(self) -> None:
+        result = self.run_checker(
+            """name: short-circuit-bypass
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          false && set -o pipefail
+          false | tee result.txt
+"""
+        )
+        self.assertEqual(result.returncode, 1)
+
+    def test_rejects_uninvoked_function_pipefail(self) -> None:
+        result = self.run_checker(
+            """name: function-bypass
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          enable_pipefail() {
+            set -o pipefail
+          }
+          false | tee result.txt
+"""
+        )
+        self.assertEqual(result.returncode, 1)
+
     def test_rejects_pipefail_enabled_after_pipeline(self) -> None:
         result = self.run_checker(
             """name: too-late

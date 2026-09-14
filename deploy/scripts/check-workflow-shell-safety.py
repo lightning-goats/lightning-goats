@@ -115,27 +115,31 @@ def _shell_for_run(
     step_indent = run_indent if run_has_dash else max(run_indent - 2, 0)
     key_indent = run_indent + 2 if run_has_dash else run_indent
 
-    for idx in range(run_index - 1, -1, -1):
-        raw = lines[idx]
-        if not raw.strip():
-            continue
-        indent = len(raw) - len(raw.lstrip(" \t"))
-        if indent < step_indent:
-            break
+    # When `run:` itself carries the list marker (`- run:`), it is necessarily
+    # the first key in that step. Looking backward would cross into the previous
+    # step and could inherit that step's shell override.
+    if not run_has_dash:
+        for idx in range(run_index - 1, -1, -1):
+            raw = lines[idx]
+            if not raw.strip():
+                continue
+            indent = len(raw) - len(raw.lstrip(" \t"))
+            if indent < step_indent:
+                break
 
-        match = SHELL_RE.match(raw)
-        if match:
-            shell_indent = len(match.group("indent"))
-            shell_has_dash = match.group("dash") is not None
-            if (shell_has_dash and shell_indent == step_indent) or (
-                not shell_has_dash and shell_indent == key_indent
-            ):
-                return (match.group("value") or "").strip()
+            match = SHELL_RE.match(raw)
+            if match:
+                shell_indent = len(match.group("indent"))
+                shell_has_dash = match.group("dash") is not None
+                if (shell_has_dash and shell_indent == step_indent) or (
+                    not shell_has_dash and shell_indent == key_indent
+                ):
+                    return (match.group("value") or "").strip()
 
-        # The first list-item marker is the start of this step. Do not cross it
-        # into a preceding step looking for a shell override.
-        if indent == step_indent and raw.lstrip().startswith("- "):
-            break
+            # The first list-item marker is the start of this step. Do not cross it
+            # into a preceding step looking for a shell override.
+            if indent == step_indent and raw.lstrip().startswith("- "):
+                break
 
     # YAML mappings are unordered. A step may legally put `shell:` after `run:`.
     # Ignore block-scalar content by accepting only the step's key indentation,

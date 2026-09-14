@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
-"""Reject YAML aliases in executable GitHub Actions step fields.
+"""Reject YAML anchors/aliases in executable GitHub Actions step fields.
 
-GitHub Actions supports YAML anchors and aliases. A raw-text workflow checker
-cannot safely infer the resolved value of ``run: *alias`` or ``shell: *alias``
-without parsing the complete YAML graph. Reject those directly executable alias
-forms so the existing shell-safety guards always inspect literal command and
-shell values.
+GitHub Actions supports YAML anchors and aliases. The repository's shell-safety
+checks intentionally use a small raw-text parser rather than a YAML dependency,
+so executable fields that begin with ``&anchor`` or ``*alias`` are ambiguous to
+those checks. Reject that indirection in ``run:`` and ``shell:`` while allowing
+anchors/aliases in non-executable workflow fields.
 
-This deliberately does not reject aliases in non-executable workflow fields.
-Block-scalar contents are skipped so shell text that merely contains a line such
-as ``run: *example`` is not mistaken for workflow YAML.
+Literal block-scalar contents are skipped so shell text that merely contains a
+line such as ``run: *example`` is not mistaken for workflow YAML.
 """
 
 from __future__ import annotations
@@ -29,14 +28,28 @@ _BASE = importlib.util.module_from_spec(_SPEC)
 sys.modules[_SPEC.name] = _BASE
 _SPEC.loader.exec_module(_BASE)
 
-RUN_ALIAS_RE = re.compile(
-    r"^(?P<indent>[ \t]*)(?P<dash>-[ \t]+)?run:[ \t]+(?P<alias>\*[^ \t#]+)"
-    r"[ \t]*(?:#.*)?$"
+RUN_REFERENCE_RE = re.compile(
+    r"^(?P<indent>[ \t]*)(?P<dash>-[ \t]+)?run:[ \t]+"
+    r"(?P<kind>[*&])(?P<name>[^ \t#|>]+)(?:[ \t]+.*)?$"
 )
-SHELL_ALIAS_RE = re.compile(
-    r"^(?P<indent>[ \t]*)(?P<dash>-[ \t]+)?shell:[ \t]+(?P<alias>\*[^ \t#]+)"
-    r"[ \t]*(?:#.*)?$"
+SHELL_REFERENCE_RE = re.compile(
+    r"^(?P<indent>[ \t]*)(?P<dash>-[ \t]+)?shell:[ \t]+"
+    r"(?P<kind>[*&])(?P<name>[^ \t#]+)(?:[ \t]+.*)?$"
 )
+
+
+def _reference_finding(path: Path, line: int, field: str, kind: str) -> object:
+    label = "alias" if kind == "*" else "anchor"
+    action = "inspected" if field == "run" else "classified"
+    literal = "command" if field == "run" else "shell"
+    return _BASE.Finding(
+        path=path,
+        line=line,
+        message=(
+            f"YAML {label} in `{field}:` cannot be statically {action}; "
+            f"use a literal {literal}"
+        ),
+    )
 
 
 def scan_workflow(path: Path) -> list[object]:
@@ -63,29 +76,19 @@ def scan_workflow(path: Path) -> list[object]:
                 idx += 1
             continue
 
-        run_alias = RUN_ALIAS_RE.match(raw)
-        if run_alias is not None:
+        run_reference = RUN_REFERENCE_RE.match(raw)
+        if run_reference is not None:
             findings.append(
-                _BASE.Finding(
-                    path=path,
-                    line=idx + 1,
-                    message=(
-                        "YAML alias in `run:` cannot be statically inspected; "
-                        "use a literal command"
-                    ),
+                _reference_finding(
+                    path, idx + 1, "run", run_reference.group("kind")
                 )
             )
 
-        shell_alias = SHELL_ALIAS_RE.match(raw)
-        if shell_alias is not None:
+        shell_reference = SHELL_REFERENCE_RE.match(raw)
+        if shell_reference is not None:
             findings.append(
-                _BASE.Finding(
-                    path=path,
-                    line=idx + 1,
-                    message=(
-                        "YAML alias in `shell:` cannot be statically classified; "
-                        "use a literal shell"
-                    ),
+                _reference_finding(
+                    path, idx + 1, "shell", shell_reference.group("kind")
                 )
             )
 

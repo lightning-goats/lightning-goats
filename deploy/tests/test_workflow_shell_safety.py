@@ -190,6 +190,39 @@ jobs:
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_rejects_unsafe_pipeline_with_quoted_bash_shell(self) -> None:
+        for shell in ("'bash'", '"bash"', "'/bin/bash'", '"bash -e {0}"'):
+            with self.subTest(shell=shell):
+                result = self.run_checker(
+                    f"""name: quoted-shell
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - shell: {shell}
+        run: |
+          false | tee result.txt
+"""
+                )
+                self.assertEqual(result.returncode, 1, result.stderr)
+
+    def test_quoted_non_shell_remains_ignored(self) -> None:
+        for shell in ("'python'", '"pwsh"'):
+            with self.subTest(shell=shell):
+                result = self.run_checker(
+                    f"""name: quoted-non-shell
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - shell: {shell}
+        run: |
+          value = 1 | 2
+          print(value)
+"""
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_does_not_inherit_shell_from_previous_step(self) -> None:
         result = self.run_checker(
             """name: separate-steps

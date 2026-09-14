@@ -21,6 +21,7 @@ use crate::openhab::{OpenHabClient, OwnerOutcome, TrustedOpenHabConfig};
 
 use super::{
     client::{FeedOutcome, FeedRefusal, FeedRequestStatus, FeederSafety, RefusalReason},
+    owner_witness::OwnerWitness,
     store::{BeginRequestOutcome, GatewayStore, StoredRequestStatus},
     weather::WeatherAdapter,
 };
@@ -68,6 +69,7 @@ pub struct TrustedGateway {
 struct GatewayState {
     openhab: OpenHabClient,
     store: GatewayStore,
+    witness: Option<OwnerWitness>,
     weather: WeatherAdapter,
     ack_timeout: Duration,
     ack_poll: Duration,
@@ -145,6 +147,7 @@ impl TrustedGateway {
             state: GatewayState {
                 openhab,
                 store,
+                witness: None,
                 weather,
                 ack_timeout: Duration::from_secs(config.feeder.ack_timeout_seconds),
                 ack_poll: Duration::from_millis(config.feeder.ack_poll_milliseconds),
@@ -153,6 +156,20 @@ impl TrustedGateway {
             },
             listen: config.service.listen,
         })
+    }
+
+    /// Source-preparation entrypoint only: the shipped CLI does not select this.
+    /// Provisioning/migration and generation-bound physical enable are separate.
+    pub async fn from_config_with_owner_witness(
+        config: &GatewayServerConfig,
+        witness: OwnerWitness,
+    ) -> Result<Self> {
+        let mut gateway = Self::from_config(config).await?;
+        witness
+            .validate_coverage(&gateway.state.store.request_identities().await?)
+            .await?;
+        gateway.state.witness = Some(witness);
+        Ok(gateway)
     }
 
     #[must_use]
@@ -220,7 +237,22 @@ async fn feed_request(
     }
 }
 
+async fn check_owner_coverage(state: &GatewayState, id: Uuid) -> Result<()> {
+    if let Some(witness) = &state.witness {
+        witness
+            .validate_coverage(&state.store.request_identities().await?)
+            .await?;
+        if state.store.status(id).await?.is_none() && witness.contains(id).await? {
+            bail!("witness identity exists without gateway state");
+        }
+    }
+    Ok(())
+}
+
 async fn submit_feed_request(request_id: Uuid, state: GatewayState) -> Response {
+    if let Err(error) = check_owner_coverage(&state, request_id).await {
+        return internal_failure("Owner replay coverage unavailable", error);
+    }
     match state.store.status(request_id).await {
         Ok(Some(status)) => return existing_response(&state, request_id, status).await,
         Ok(None) => {}
@@ -239,6 +271,11 @@ async fn submit_feed_request(request_id: Uuid, state: GatewayState) -> Response 
     {
         Ok(BeginRequestOutcome::New) => {}
         Ok(BeginRequestOutcome::NotDispatched(refusal)) => {
+            if let Some(witness) = &state.witness {
+                if let Err(error) = witness.reserve(request_id).await {
+                    return internal_failure("Unable to preserve refusal replay coverage", error);
+                }
+            }
             return refusal_response(request_id, refusal);
         }
         Ok(BeginRequestOutcome::Acknowledged) => {
@@ -248,6 +285,17 @@ async fn submit_feed_request(request_id: Uuid, state: GatewayState) -> Response 
             return handle_existing_pending(&state, request_id).await;
         }
         Err(error) => return internal_failure("Unable to persist feeder admission", error),
+    }
+    if let Some(witness) = &state.witness {
+        match witness.reserve(request_id).await {
+            Ok(true) => {}
+            Ok(false) => {
+                return outcome_response(StatusCode::CONFLICT, request_id, FeedOutcome::Ambiguous);
+            }
+            Err(error) => {
+                return internal_failure("Unable to preserve owner replay identity", error);
+            }
+        }
     }
     if let Err(error) = state.openhab.command_feeder_request(request_id).await {
         tracing::warn!(%error, "command outcome ambiguous after durable admission");
@@ -368,6 +416,9 @@ async fn feed_request_status(
 }
 
 async fn lookup_feed_request(request_id: Uuid, state: GatewayState) -> Response {
+    if let Err(error) = check_owner_coverage(&state, request_id).await {
+        return internal_failure("Owner replay coverage unavailable", error);
+    }
     match state.store.status(request_id).await {
         Ok(Some(status)) => existing_response(&state, request_id, status).await,
         Ok(None) => public_error(StatusCode::NOT_FOUND, "Unknown feeder request UUID"),
@@ -459,3 +510,7 @@ mod tests {
         assert!(rate_config.validate().is_err());
     }
 }
+
+#[cfg(test)]
+#[path = "witness_tests.rs"]
+mod witness_tests;

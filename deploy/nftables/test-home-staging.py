@@ -2,6 +2,7 @@
 """Isolated staging-filter test derived from PR57 packet fixtures. Run only through sudo unshare --net -- python3.
 Creates virtual links in its disposable namespace; never connects to WireGuard.
 """
+import argparse
 import json
 import os
 from pathlib import Path
@@ -14,6 +15,12 @@ import time
 def run(*args, **kwargs):
     return subprocess.run(args, check=True, text=True, capture_output=True, **kwargs).stdout
 
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--held', action='store_true')
+args = parser.parse_args()
+gateway_port = 8791 if args.held else 8790
+policy = 'home-held-staging-peer.nft.example' if args.held else 'home-staging-peer.nft.example'
 
 if os.readlink('/proc/self/ns/net') == os.readlink('/proc/1/ns/net'):
     raise SystemExit('Refusing the host network namespace')
@@ -32,7 +39,7 @@ table ip docker_like {
  }
 }
 ''')
-run('nft', '-f', str(Path(__file__).with_name('home-staging-peer.nft.example')))
+run('nft', '-f', str(Path(__file__).with_name(policy)))
 run('ip', 'route', 'add', '10.8.0.0/24', 'dev', 'wg0')
 run('ip', '-6', 'route', 'add', 'fd5e:6df:9c82::/64', 'dev', 'wg0')
 # Add no permissions; count packets that survive the guard into input.
@@ -76,7 +83,9 @@ def input_count():
     return sum(expr['counter']['packets'] for entry in data['nftables'] for expr in entry.get('rule', {}).get('expr', []) if 'counter' in expr)
 
 
-cases = [('gateway', '10.8.0.12', 8790, False, False, False),
+cases = [('gateway', '10.8.0.12', gateway_port, False, False, False),
+         ('other canary denied', '10.8.0.12', 8790 if args.held else 8791, False, False, True),
+         ('production denied', '10.8.0.12', 8789, False, False, True),
          ('SSH', '10.8.0.12', 22, False, False, True),
          ('OpenHAB', '10.8.0.12', 8080, False, False, True),
          ('Docker DNAT', '10.8.0.12', 80, False, False, True),
@@ -98,27 +107,27 @@ run('ip', 'link', 'add', 'containerout', 'type', 'dummy')
 run('ip', 'link', 'set', 'containerout', 'up')
 run('ip', 'addr', 'add', '172.30.0.1/24', 'dev', 'containerout')
 Path('/proc/sys/net/ipv4/ip_forward').write_text('1')
-run('nft', 'add', 'rule', 'ip', 'docker_like', 'prerouting', 'tcp', 'dport', '8790', 'dnat', 'to', '172.30.0.2:8790')
+run('nft', 'add', 'rule', 'ip', 'docker_like', 'prerouting', 'tcp', 'dport', str(gateway_port), 'dnat', 'to', f'172.30.0.2:{gateway_port}')
 before = drops()
-sock.send(packet('10.8.0.12', 8790, source_port=45001))
+sock.send(packet('10.8.0.12', gateway_port, source_port=45001))
 time.sleep(.05)
 assert drops() - before == 1, 'admitted-port forwarding bypass'
 data = json.loads(run('nft', '-j', 'list', 'table', 'inet', 'lg_home_staging_peer'))
 forwarded = [e['rule'] for e in data['nftables'] if e.get('rule', {}).get('chain') == 'forwarded']
 assert sum(x['counter']['packets'] for r in forwarded for x in r['expr'] if 'counter' in x) == 1
 print('PASS admitted port DNAT is blocked in forward chain')
-print('PASS 9 staging packet cases; peer authentication is separately tested in PR62, no home activation')
+print('PASS initial packet cases; peer authentication is separately tested in PR62, no home activation')
 
 # Route/LAN alternative drops before routing and DNAT.
 before = drops()
-sock.send(packet('10.8.0.12', 8790, source_port=45002, destination='172.30.0.2'))
+sock.send(packet('10.8.0.12', gateway_port, source_port=45002, destination='172.30.0.2'))
 time.sleep(.05)
 assert drops() - before == 1, 'alternate destination bypass'
 print('PASS alternate destination blocked before routing')
 # A future redirect of the admitted port to a different local service is denied.
-run('nft', 'insert', 'rule', 'ip', 'docker_like', 'prerouting', 'tcp', 'dport', '8790', 'dnat', 'to', '10.8.0.6:8080')
+run('nft', 'insert', 'rule', 'ip', 'docker_like', 'prerouting', 'tcp', 'dport', str(gateway_port), 'dnat', 'to', '10.8.0.6:8080')
 before, input_before = drops(), input_count()
-sock.send(packet('10.8.0.12', 8790, source_port=45003))
+sock.send(packet('10.8.0.12', gateway_port, source_port=45003))
 time.sleep(.05)
 assert drops() - before == 1 and input_count() == input_before, 'local DNAT bypass'
 print('PASS admitted port DNAT to other local service blocked')

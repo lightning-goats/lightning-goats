@@ -51,6 +51,35 @@ jobs:
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_accepts_folded_semicolon_before_physical_line_break(self) -> None:
+        result = self.run_checker(
+            """name: folded-semicolon-good
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: >
+          set -o pipefail;
+          false | tee result.txt
+"""
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_rejects_folded_prior_command_swallowing_set_builtin(self) -> None:
+        result = self.run_checker(
+            """name: folded-prefix-bad
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: >
+          echo prefix
+          set -o pipefail; false | tee result.txt
+"""
+        )
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("folded shell pipeline", result.stderr)
+
     def test_folded_quoted_pipe_is_not_a_pipeline(self) -> None:
         result = self.run_checker(
             """name: folded-quoted-pipe

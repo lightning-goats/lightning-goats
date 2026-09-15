@@ -160,15 +160,29 @@ per-stream goal is a different metric and must not be inferred from unspent cred
 Project receipt models are **private**. Build explicit public projections before
 feeding `/ws/overlay` or Nostr: no XMR tx hash, subaddress, wallet/provider receipt
 ID, view/spend key, callback capability, status capability or quote internals.
-Default public message is credited sats plus goat. Publishing asset/exact XMR amount
-requires an explicit presentation decision; even an exact sats value/timing can
-correlate with public events. Do not promise anonymity from Monero alone. Private
-payer status may show its own native amounts. Preserve deterministic templates,
-exact signed-event retries, and overlay-only information/weather.
+**Amount display approved by the operator, 2026-09-15:** BTC/Lightning payment
+messages show credited sats only. Monero messages show actual XMR received plus
+credited sats. Other future non-BTC payment assets show their native amount/unit
+plus credited sats. Apply this to BOTH Nostr and the video overlay. This supersedes
+the earlier default hiding native asset/amount, not the private-field exclusions.
+
+Native amounts come from verified receipts/allocations, not reverse conversion of
+rounded sats or a new market price. Keep exact atomic precision and deterministic
+decimal formatting; describe sats as credited value, not an executed trade. For
+partials/dust distinguish the latest receipt from cumulative credit/rounding carry.
+Do not make a duplicate replay look like another payment or rewrite old signed
+messages. Amount/timing disclosure can correlate donations; do not promise anonymity.
+Renderer/public-event wiring remains [#99](https://github.com/lightning-goats/lightning-goats/issues/99).
+The #103 storage projection is still sats-only until that wiring is delivered.
+Preserve deterministic templates, exact signed-event retries, and overlay-only
+information/weather.
 
 The OBS browser-source integration remains distinct from the public site. Introduce
 the two-rail payment choice/progress/status contract without a general website rewrite.
 XMR controls/routes are disabled until implemented and reviewed; no dead payment UI.
+
+See [the quote-service implementation and activation boundary](xmr-quote-service.md)
+for #96. Creating quote terms alone does not create an address or grant credit.
 
 ## Work order and ownership
 

@@ -1,5 +1,6 @@
 mod admission;
 mod credit;
+mod quotes;
 pub use credit::{
     CreditAllocation, CreditReceiptOutcome, XmrCreditIntent, XmrNetwork, XmrReceiptObservation,
 };

@@ -1,4 +1,8 @@
 mod admission;
+mod credit;
+pub use credit::{
+    CreditAllocation, CreditReceiptOutcome, XmrCreditIntent, XmrNetwork, XmrReceiptObservation,
+};
 mod inbox;
 pub use inbox::StrikeInboxWork;
 
@@ -51,7 +55,8 @@ impl LedgerStore {
         Ok(Self { pool })
     }
 
-    /// Record one provider-authoritative settled payment exactly once.
+    /// Record one provider-authoritative native BTC settlement exactly once.
+    /// Non-BTC receipts must use their asset-specific valuation path, not fake msat.
     ///
     /// Provider delivery ordering is intentionally irrelevant. Identity is the
     /// `(source, source_id)` tuple, with `payment_hash` acting as an additional
@@ -87,11 +92,11 @@ impl LedgerStore {
         let amount_msat = to_i64(payment.amount_msat, "amount_msat")?;
         let credited_sats = payment.amount_msat / 1_000;
         let credited_sats_i64 = to_i64(credited_sats, "credited_sats")?;
-        let mut transaction = self.pool.begin().await?;
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
 
         let existing = sqlx::query(
             r#"
-            SELECT payment_hash, address_user, credit_pool, amount_msat, settled_at
+            SELECT id, payment_hash, address_user, credit_pool, amount_msat, settled_at
             FROM settled_payments
             WHERE source = ? AND source_id = ?
             "#,
@@ -115,6 +120,7 @@ impl LedgerStore {
                 && existing_settled_at == payment.settled_at;
 
             if matches {
+                credit::verify_native_btc(&mut transaction, row.try_get("id")?).await?;
                 transaction.commit().await?;
                 return Ok(SettlementOutcome::Duplicate);
             }
@@ -144,7 +150,7 @@ impl LedgerStore {
             }
         }
 
-        sqlx::query(
+        let settlement_id = sqlx::query(
             r#"
             INSERT INTO settled_payments
                 (source, source_id, payment_hash, address_user, credit_pool,
@@ -161,10 +167,11 @@ impl LedgerStore {
         .bind(payment.settled_at)
         .bind(payment.context_json.as_deref())
         .execute(&mut *transaction)
-        .await?;
+        .await?
+        .last_insert_rowid();
 
         let source_key = format!("payment:{}:{}", payment.source, payment.source_id);
-        sqlx::query(
+        let ledger_id = sqlx::query(
             r#"
             INSERT INTO ledger_entries
                 (entry_type, source_key, delta_sats, payment_hash,
@@ -180,10 +187,11 @@ impl LedgerStore {
         .bind(&payment.address_user)
         .bind(&payment.credit_pool)
         .execute(&mut *transaction)
-        .await?;
+        .await?
+        .last_insert_rowid();
 
         let feed_credit_sats = feed_credit_in_transaction(&mut transaction).await?;
-        append_event_in_transaction(
+        let event_seq = append_event_in_transaction(
             &mut transaction,
             "payment_received",
             &json!({
@@ -198,6 +206,7 @@ impl LedgerStore {
         )
         .await?;
 
+        credit::record_native_btc(&mut transaction, settlement_id, ledger_id, event_seq).await?;
         transaction.commit().await?;
 
         Ok(SettlementOutcome::Credited {

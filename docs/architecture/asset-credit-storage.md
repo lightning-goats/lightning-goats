@@ -99,6 +99,12 @@ this migration to live state is deployment work, not performed by publishing cod
 
 ## Public projection
 
+The following describes the #103 implementation. The operator subsequently approved
+native XMR amount plus credited sats on Nostr and the overlay (BTC remains sats-only).
+See [the current messaging policy](multi-asset-payments.md#overlay-messaging-and-privacy).
+The additional public fields/renderer are tracked in #99; do not mistake the existing
+four-field projection for the completed dual-amount message feature.
+
 New XMR credit events contain only `amount_sats` (new grant), `feed_credit_sats`
 (absolute balance), `address_user` and `credit_pool`; the existing event streamer
 adds type/sequence and the message renderer supplies goat presentation. No receipt,

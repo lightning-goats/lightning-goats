@@ -153,56 +153,8 @@ struct PublicCreditEvent<'a> {
 
 impl LedgerStore {
     pub async fn register_xmr_credit_intent(&self, intent: &XmrCreditIntent) -> Result<()> {
-        if intent.id.is_nil() {
-            bail!("nil credit intent ID");
-        }
-        super::validate_source(&intent.provider)?;
-        super::validate_external_id(&intent.account_scope, "account scope", 256)?;
-        super::validate_external_id(&intent.receive_scope, "receive scope", 256)?;
-        super::validate_user(&intent.address_user, "address_user")?;
-        if intent.credit_pool != "herd" {
-            bail!("only the shared herd credit pool is supported");
-        }
-        let terms = intent.quote.terms();
-        if intent.max_credit_sats < terms.target_sats()
-            || intent.max_credit_sats > MAX_ACCOUNTING_UNITS
-        {
-            bail!("invalid immutable intent credit limit");
-        }
-        let (num, den) = intent.quote.rate().ratio();
-        let valuation = Valuation {
-            id: xmr_id(intent.id),
-            asset: "XMR".into(),
-            network: intent.network.as_str().into(),
-            provider: intent.provider.clone(),
-            account_scope: intent.account_scope.clone(),
-            receive_scope: intent.receive_scope.clone(),
-            address_user: intent.address_user.clone(),
-            credit_pool: intent.credit_pool.clone(),
-            expected_atomic: to_i64(terms.expected_atomic(), "quoted amount")?,
-            target_sats: to_i64(terms.target_sats(), "quoted credit")?,
-            max_credit_sats: to_i64(intent.max_credit_sats, "credit limit")?,
-            rate_numerator: Some(num.to_string()),
-            rate_denominator: Some(den.to_string()),
-            rate_source: Some(intent.quote.rate().source().into()),
-            rate_observed_at: Some(intent.quote.rate().observed_at()),
-            issued_at: Some(intent.quote.issued_at()),
-            expires_at: Some(intent.quote.expires_at()),
-            policy_version: "xmr-unlocked-quote-v1".into(),
-        };
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        let existing: Option<Valuation> =
-            sqlx::query_as("SELECT * FROM credit_valuations WHERE id=?")
-                .bind(&valuation.id)
-                .fetch_optional(&mut *tx)
-                .await?;
-        if let Some(existing) = existing {
-            if existing != valuation {
-                bail!("credit intent already has different immutable terms");
-            }
-        } else {
-            valuation.insert(&mut tx).await?;
-        }
+        register_xmr_intent_in_transaction(&mut tx, intent).await?;
         tx.commit().await?;
         Ok(())
     }
@@ -547,6 +499,61 @@ pub(super) async fn verify_native_btc(
         .bind(settlement_id).fetch_one(&mut **tx).await?;
     if !valid {
         bail!("native BTC receipt provenance is inconsistent");
+    }
+    Ok(())
+}
+
+/// Shared with quote binding so provenance and payable binding are atomic.
+pub(super) async fn register_xmr_intent_in_transaction(
+    tx: &mut Transaction<'_, Sqlite>,
+    intent: &XmrCreditIntent,
+) -> Result<()> {
+    if intent.id.is_nil() {
+        bail!("nil credit intent ID");
+    }
+    super::validate_source(&intent.provider)?;
+    super::validate_external_id(&intent.account_scope, "account scope", 256)?;
+    super::validate_external_id(&intent.receive_scope, "receive scope", 256)?;
+    super::validate_user(&intent.address_user, "address_user")?;
+    if intent.credit_pool != "herd" {
+        bail!("only the shared herd credit pool is supported");
+    }
+    let terms = intent.quote.terms();
+    if intent.max_credit_sats < terms.target_sats() || intent.max_credit_sats > MAX_ACCOUNTING_UNITS
+    {
+        bail!("invalid immutable intent credit limit");
+    }
+    let (num, den) = intent.quote.rate().ratio();
+    let valuation = Valuation {
+        id: xmr_id(intent.id),
+        asset: "XMR".into(),
+        network: intent.network.as_str().into(),
+        provider: intent.provider.clone(),
+        account_scope: intent.account_scope.clone(),
+        receive_scope: intent.receive_scope.clone(),
+        address_user: intent.address_user.clone(),
+        credit_pool: intent.credit_pool.clone(),
+        expected_atomic: to_i64(terms.expected_atomic(), "quoted amount")?,
+        target_sats: to_i64(terms.target_sats(), "quoted credit")?,
+        max_credit_sats: to_i64(intent.max_credit_sats, "credit limit")?,
+        rate_numerator: Some(num.to_string()),
+        rate_denominator: Some(den.to_string()),
+        rate_source: Some(intent.quote.rate().source().into()),
+        rate_observed_at: Some(intent.quote.rate().observed_at()),
+        issued_at: Some(intent.quote.issued_at()),
+        expires_at: Some(intent.quote.expires_at()),
+        policy_version: "xmr-unlocked-quote-v1".into(),
+    };
+    let existing: Option<Valuation> = sqlx::query_as("SELECT * FROM credit_valuations WHERE id=?")
+        .bind(&valuation.id)
+        .fetch_optional(&mut **tx)
+        .await?;
+    if let Some(existing) = existing {
+        if existing != valuation {
+            bail!("credit intent already has different immutable terms");
+        }
+    } else {
+        valuation.insert(tx).await?;
     }
     Ok(())
 }

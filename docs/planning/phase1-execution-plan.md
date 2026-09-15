@@ -1,10 +1,32 @@
-# Phase 1 Execution Plan — Parallel Live Pilot
+# Phase 1 Execution Plan — Parallel Live Pilot and Multi-Asset Credit
+
+## Addition approved 2026-09-15
+
+Read [the multi-asset architecture and implementation plan](../architecture/multi-asset-payments.md).
+[#94](https://github.com/lightning-goats/lightning-goats/issues/94) adds in-house
+MoneroPay alongside Strike, with native receipts -> immutable sats valuation ->
+project feed-credit ledger. The child order is #95 ledger/domain, #96 quotes,
+#97 separate home receive bridge, #98 intents/reconciliation, #99 overlay/payment
+presentation and #100 mixed-rail acceptance/deployment scripts. This supersedes
+older Strike-only/no-new-backend scope restrictions for that specific addition.
+
+Implement the credit foundation before the final two-rail overlay client. Keep
+BTC native identity valuation and the existing public LNURL path working. Do not
+encode XMR as BTC millisatoshis, use either wallet balance for progress, revalue
+old credit at current FX, or expose pending XMR as available feeding credit.
+The lead may start disjoint domain/tests/docs work now; do not manufacture Codex
+capacity or take over active shared files without coordination.
+
+Monero stays disabled until its own path is implemented/accepted. The complete
+multi-asset backlog is not a new prerequisite for the separately authorized Strike
+pilot below. Preserve real paid state and existing source-review/live boundaries.
+CyberHerd, automatic swapping/refunding and general frontend rewrites stay out of scope.
+
+## Existing pilot objective
 
 Status: operator-selected direction, 2026-09-14; not a claim of live deployment.
 Tracker: #6. Canonical operating plan:
 [parallel-live-pilot.md](../deployment/parallel-live-pilot.md).
-
-## Objective
 
 Run the existing Strike-backed Lightning Goats stack on the new VPS at
 **herd@feeder.lightning-goats.com** alongside the old production system. The operator
@@ -13,12 +35,12 @@ new system is good enough to take over established public addresses and metadata
 This is a low-traffic hobby pilot, not an enterprise launch certification exercise.
 
 Preserve durable payment/feeding accounting, local feeder safety and the existing
-Nostr/overlay architecture. Do not switch backend because sandbox access is delayed.
-No CyberHerd, website rewrite or general platform expansion is in this launch scope.
+Nostr/overlay architecture. Do not switch Lightning backend because sandbox access
+is delayed. The approved Monero addition is a separate workstream, not a substitute.
 
 ## Superseded launch policy
 
-The operator's new decision replaces the blanket HOLD and full-verification-before-
+The operator's pilot decision replaces the blanket HOLD and full-verification-before-
 any-live-payment sequencing in older plans, handoffs and issue comments. Strike
 sandbox, every open audit item, six paid goat-address tests, repeated full host
 laboratories, optional pipeline guards and long-retention/restore redesign are
@@ -34,7 +56,7 @@ correctness. A specific unresolved defect blocks its affected feature, not the
 entire project. Do not self-approve a safety-critical runtime fix or force-merge an
 existing changes-requested PR. The operator's planning decision needs no Codex ACK.
 
-## Work order
+## Pilot work order
 
 | Step | Deliverable | Completion evidence |
 | --- | --- | --- |
@@ -90,7 +112,8 @@ This planning edit itself performs none of those operations.
 Use [the risk-tiered matrix](../testing/phase1-verification-matrix.md), preserving
 existing tests and reusing exact-candidate CI results. A 2340-sat run at a 1000-sat
 threshold should give two confirmed feeds and 340 remaining; it is a useful test,
-not a mandatory purchase or arbitrary pilot budget.
+not a mandatory purchase or arbitrary pilot budget. Apply #100's corresponding
+mixed-rail checks before enabling XMR; arithmetic-only tests are not live acceptance.
 
 Stop only the new pilot ingress/dispatcher on failure; keep its real ledger,
 issued requests, pending UUIDs and signed outbox. Resolve possible physical delivery

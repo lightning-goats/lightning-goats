@@ -1,121 +1,91 @@
-# Phase 1 Execution Plan — Parallel Live Pilot and Multi-Asset Credit
+# Phase 1 execution — minimal Lightning payments
 
-## Addition approved 2026-09-15
+**Current operator decision: 2026-09-17.**
+[Delivery roadmap](delivery-roadmap.md): Lightning first, Square #104 second,
+Monero on hold until explicitly resumed. This replaces the previous immediate
+multi-asset work order; no XMR integration or dual-asset UI is a Lightning blocker.
+Preserve the merged foundations, tests and paid state rather than reverting them.
 
-Read [the multi-asset architecture and implementation plan](../architecture/multi-asset-payments.md).
-[#94](https://github.com/lightning-goats/lightning-goats/issues/94) adds in-house
-MoneroPay alongside Strike, with native receipts -> immutable sats valuation ->
-project feed-credit ledger. The child order is #95 ledger/domain, #96 quotes,
-#97 separate home receive bridge, #98 intents/reconciliation, #99 overlay/payment
-presentation and #100 mixed-rail acceptance/deployment scripts. This supersedes
-older Strike-only/no-new-backend scope restrictions for that specific addition.
+## Goal and operating policy
 
-Implement the credit foundation before the final two-rail overlay client. Keep
-BTC native identity valuation and the existing public LNURL path working. Do not
-encode XMR as BTC millisatoshis, use either wallet balance for progress, revalue
-old credit at current FX, or expose pending XMR as available feeding credit.
-The lead may start disjoint domain/tests/docs work now; do not manufacture Codex
-capacity or take over active shared files without coordination.
+Deliver the existing Strike-backed daemon on the new VPS, the narrow home gateway,
+real feeding through the existing owner, payment/feed messages and OBS progress,
+and the usable public Lightning interface with required VPS WAF #106.
+Use [the parallel live pilot](../deployment/parallel-live-pilot.md) at
+`herd@feeder.lightning-goats.com`, keeping old production recoverable. The operator
+selects manual payment amounts/duration and later public DNS/profile cutover.
 
-Monero stays disabled until its own path is implemented/accepted. The complete
-multi-asset backlog is not a new prerequisite for the separately authorized Strike
-pilot below. Preserve real paid state and existing source-review/live boundaries.
-CyberHerd, automatic swapping/refunding and general frontend rewrites stay out of scope.
+The earlier practical pilot decision remains: no blanket HOLD, compulsory Strike
+sandbox, every historical issue closed, or unrelated exhaustive laboratory work
+before a first manual pilot payment. A real defect still blocks its unsafe feature.
+There is no adopted two-payment/220-sat/30-minute budget. Read current evidence;
+do not turn a historical mock result or unrun check into production acceptance.
 
-## Existing pilot objective
+## Ordered work
 
-Status: operator-selected direction, 2026-09-14; not a claim of live deployment.
-Tracker: #6. Canonical operating plan:
-[parallel-live-pilot.md](../deployment/parallel-live-pilot.md).
-
-Run the existing Strike-backed Lightning Goats stack on the new VPS at
-**herd@feeder.lightning-goats.com** alongside the old production system. The operator
-sends real payments, watches accounting/feeding/presentation, and decides when the
-new system is good enough to take over established public addresses and metadata.
-This is a low-traffic hobby pilot, not an enterprise launch certification exercise.
-
-Preserve durable payment/feeding accounting, local feeder safety and the existing
-Nostr/overlay architecture. Do not switch Lightning backend because sandbox access
-is delayed. The approved Monero addition is a separate workstream, not a substitute.
-
-## Superseded launch policy
-
-The operator's pilot decision replaces the blanket HOLD and full-verification-before-
-any-live-payment sequencing in older plans, handoffs and issue comments. Strike
-sandbox, every open audit item, six paid goat-address tests, repeated full host
-laboratories, optional pipeline guards and long-retention/restore redesign are
-not prerequisites for beginning the pilot. Historical evidence stays historical.
-
-The earlier proposed two payments of 100 sats, 220-sat total and 30-minute window
-were not adopted. The operator selects manual payment amounts and duration. Keep
-configured invoice limits, local feeder interval/caps and the existing account
-balance policy; do not invent a new arbitrary quota or automatic payment loop.
-
-This docs revision does not perform host changes or waive branch protections/code
-correctness. A specific unresolved defect blocks its affected feature, not the
-entire project. Do not self-approve a safety-critical runtime fix or force-merge an
-existing changes-requested PR. The operator's planning decision needs no Codex ACK.
-
-## Pilot work order
-
-| Step | Deliverable | Completion evidence |
+| Step | Deliverable | Evidence |
 | --- | --- | --- |
-| 1. Prepare the pilot | Dedicated hostname/TLS, existing daemon under a non-admin identity, receive-only Strike access, fresh pilot ledger, old production untouched | Source/binary/config pin and short preflight in the pilot runbook |
-| 2. Take manual payments | Wallet resolves herd at the pilot domain; mainnet invoice reaches the new daemon | Actual settled payment and exactly one matching credit/event |
-| 3. Observe real feeding | Existing local owner accepts the new gateway path; old/new dispatch cannot race outside that owner | Operator sees intended feed, correlated completion and one debit; ambiguity blocks retry |
-| 4. Iterate in place | Fix observed failures, verify restart/replay, preview overlay and optionally enable normal Nostr messages | Brief source-pinned observations; no reset of paid state |
-| 5. Cut over when satisfied | Operator changes established DNS/address/profile references | Existing payments/credit retained, no doubled dispatch, old VPS still recoverable |
+| 1 | Select reviewed Lightning source and finish concrete defects in that path | Exact source, relevant tests/review, no duplicate integration branch |
+| 2 | Prepare scriptable VPS/HOME config, TLS, isolated durable state, receive-only credentials and gateway binding | Pinned artifacts, private host values, inactive install/preflight and rollback |
+| 3 | Configure the required nginx/ModSecurity/CRS boundary (#106) for existing Lightning routes | Legitimate LNURL/webhook/status/WebSocket/static traffic passes; attack fixtures blocked; private logs checked |
+| 4 | Observe manual Strike payments and local feeding with operator | One verified receipt/credit, correlated completed feed/debit, no competing legacy dispatcher |
+| 5 | Finish/verify Nostr and actual OBS browser-source behavior | Sats-only goat-fact/payment and feed messages, durable absolute progress, reconnect/restart; info/weather overlay-only |
+| 6 | Hand off the minimal complete release and cut over when operator chooses | Short tested commands/config inputs, actual observations, preserved paid state and recoverable old system |
 
-A quick shadow payment check can precede feeding in the same session. It is not a
-separate approval ceremony or a replacement for the requested live-feeder pilot.
-Use `canary` for feeds without public Nostr; `active` includes public Nostr. Runtime
-mode alone does not tell whether the gateway targets a harmless fixture or real owner.
+Steps 2/3 and browser-source work may run in parallel where file/host ownership
+is clear. WAF tuning is not a reason to expose speculative Square/XMR routes, turn
+off all payment inspection, or interrupt an existing pilot without a scoped decision.
+Its blocking-mode acceptance is required for calling the new public deliverable
+complete; detection-only mode is preparation, not equivalent protection.
 
-## Minimal blockers versus follow-up
+## Practical acceptance boundaries
 
-Before taking money: working pilot TLS/routing and authoritative Strike settlement,
-protected receive-only credentials, separate durable state, a tested selected
-build with no known defect corrupting this path, and a practical way to stop it.
-Do not publish invoices as feeding-enabled while the physical path is still off.
+Before taking money, verify TLS/routing, signed invoice/authoritative settlement,
+protected receive-only credentials, correct durable state, relevant tested source,
+and a practical stop path. Do not advertise feeding enabled when it is unavailable.
+Before feeding, verify correlated completion, durable duplicate handling, local
+safety controls and arbitration with the old dispatcher. Only one existing owner
+may actuate. An unknown outcome blocks a fresh retry, not the rest of safe work.
 
-Before feeding: the selected owner contract must actually support correlated
-completion, persistent UUID deduplication and local override/interval/cap controls.
-Confirm the narrow gateway target and arbitrate the old dispatcher. If that path
-is unavailable, keep testing payments honestly as payment-only instead of inventing
-completion or bypassing the owner.
+Keep the six configured goat users and common herd pool. Pilot edge can initially
+expose herd only; roll out the other existing addresses without a registry rewrite.
+The bar follows unconsumed project sats credit, never Strike balance or message
+counts. A 2,340-sat synthetic example with two 1,000-sat confirmed debits leaves
+340; it is a regression target, not a required real purchase or pilot budget.
 
-Weather polish, broader browser compatibility, additional goat addresses, optional
-CI tools, advanced retention/co-restore designs and unrelated hardening exercises
-are follow-up unless a concrete issue affects the pilot. A deployed capacity limit
-remains real: stop at exhaustion, never delete replay identities to continue.
+The public site is not the OBS rendering page. Core payment/feed display and the
+actual browser source belong to this deliverable; larger redesign, XMR fields,
+fiat account UI and CyberHerd do not. Preserve existing weather/info behavior;
+weather polish does not justify fabricating freshness or blocking unrelated tests.
 
-Use existing candidate PRs rather than recreate integrations: at planning baseline
-`df6be90f1b0505d183643ec55a298b382cd43b6c`, #91 contains the #82 chronology correction;
-#89 contains HOME #84/#85 integration. Recheck them when selecting runtime source.
-They are not declared merged/accepted by this plan. #87 and #92 are not prerequisites.
+## Next deliverable and deferred work
 
-## Execution responsibilities
+After minimal Lightning, implement Square #104's anonymous stored integer Feedings
+and safe later redemption, separate from the sats ledger. Do not route fiat through
+XMR quoting, require Lightning accounts, or create a second feeder owner.
 
-The lead handles repository implementation/integration work with available tools.
-HOME/VPS retain their host-specific technical responsibilities when available;
-Codex is not required to bring up the pilot. Do not manufacture worker capacity,
-private-record access, handoffs or independent reviews.
+Monero parent #94 and XMR-specific work in #95–#100 remain on hold. The exception
+requested now is preserving the prepared #97 work in draft PR #107 and merging
+only when appropriate under existing review requirements. No continued #98 coding,
+MoneroPay installation, new Monero tests/feature expansion or wallet/rate activation
+is authorized by the old plan. Ordinary shared CI may keep testing existing code.
+Core Lightning overlay work is not paused with #99's XMR-specific extension.
 
-A later instruction to bring this pilot online should be handled as one scoped
-setup/test session, not serial approvals for each ordinary check. Explain any
-specific necessary host/credential action and its effect. The operator pays from
-their own wallet and retains the final public DNS/Nostr-metadata cutover decision.
-This planning edit itself performs none of those operations.
+## Responsibilities, verification and rollback
 
-## Verification and rollback
+HOME retains physical owner/gateway/OpenHAB/weather/home containment; VPS retains
+Strike/nginx/TLS/WAF/Nostr/site/overlay/VPS configuration. Lead handles bounded repo
+work/review/integration. Use #17 for short exact-source handoffs, preserve branches,
+and do not assume available Codex tokens or invent private-record authority.
 
-Use [the risk-tiered matrix](../testing/phase1-verification-matrix.md), preserving
-existing tests and reusing exact-candidate CI results. A 2340-sat run at a 1000-sat
-threshold should give two confirmed feeds and 340 remaining; it is a useful test,
-not a mandatory purchase or arbitrary pilot budget. Apply #100's corresponding
-mixed-rail checks before enabling XMR; arithmetic-only tests are not live acceptance.
+Use [the verification matrix](../testing/phase1-verification-matrix.md), applicable
+checks and existing exact-candidate evidence. Preserve independent review of
+safety-critical source and protections; this operator-directed planning edit does
+not approve unreviewed runtime changes or perform host operations.
 
-Stop only the new pilot ingress/dispatcher on failure; keep its real ledger,
-issued requests, pending UUIDs and signed outbox. Resolve possible physical delivery
-before resuming another dispatcher. Do not reset the database or restore stale state
-as an easy rollback. See [cutover/rollback](../deployment/production-cutover.md).
+Stop only the affected new ingress/dispatcher on failure. Keep real receipts,
+issued requests, credit, pending UUIDs and signed events. Resolve ambiguous physical
+outcomes before changing dispatchers. Never reset paid state or restore an older
+ledger as an easy rollback. See
+[cutover and rollback](../deployment/production-cutover.md). Scripts must leave
+installation, activation and public cutover explicit, not hidden side effects.

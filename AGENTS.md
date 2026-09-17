@@ -1,124 +1,123 @@
 # Lightning Goats Agent Guide
 
-## Approved addition: multi-asset feed credit (operator decision, 2026-09-15)
+## Current delivery order — operator decision, 2026-09-17
 
-Read [multi-asset-payments.md](docs/architecture/multi-asset-payments.md) for the
-new #94 workstream and #95-#100 implementation order. Keep Strike for Lightning;
-add in-house MoneroPay through a separate receive-only bridge. Sats-denominated
-project feed credit, not either wallet balance, drives feeding and progress.
-Preserve native asset receipts and immutable valuations; never represent XMR as
-pretend BTC millisatoshis. Callbacks only prompt authoritative reads/recovery.
-XMR credit initially requires unlocked receipts and the stored quote policy.
+Read [delivery-roadmap.md](docs/planning/delivery-roadmap.md) first.
 
-This explicitly supersedes older Strike-only/no-new-backend scope restrictions
-for this addition, not the parallel pilot or its practical safety requirements.
-The existing Strike-only pilot may continue on a selected reviewed build. Monero
-is disabled until implemented/accepted; its backlog does not block unrelated pilot
-work. Build the credit domain/storage before finalizing two-rail overlay/payment
-integration. CyberHerd, auto swaps/refunds/spending and a general website rewrite
-remain out of scope. The lead handles repository work without assuming unavailable
-Codex capacity. No live host/wallet/network action is performed by this plan.
+1. **Current: minimal Strike-backed Lightning payments**, real feeding through the
+   existing home gateway, Nostr/OBS presentation, and required VPS ModSecurity #106.
+2. **Next: Square fiat Feedings**, following the existing approved #104 contract.
+3. **MoneroPay/XMR is ON HOLD until the operator explicitly resumes it.** Preserve
+   the already prepared #97 source in PR #107; merge only when reviewed/appropriate.
+   Do not continue #98, XMR deployment, oracle/wallet activation or XMR UI now.
 
-## Current priority: parallel live pilot (operator decision, 2026-09-14)
+This supersedes the 2026-09-15 immediate multi-asset execution order, including
+instructions to finish two-rail overlay integration before Lightning. Retain the
+[future multi-asset design](docs/architecture/multi-asset-payments.md), merged
+#102/#103/#105 foundations and tests; do not revert schemas or paid accounting.
+Monero review/integration is not a prerequisite for Lightning or Square. A green
+PR, freed agent capacity or completion of Square does not lift the Monero hold.
 
-Read [the parallel live pilot plan](docs/deployment/parallel-live-pilot.md) first
-for operating the existing Strike pilot.
-The operator wants `herd@feeder.lightning-goats.com` on the new VPS, real manual
-payments and observed feeding, with the old production system kept available.
-Later production DNS and Nostr profile metadata changes are the operator's decision.
+Square is an anonymous browser-account purchase/redemption product: integer
+Feedings, not sats/BTC, not a fiat deposit into the sats ledger. Share the physical
+owner, not the accounting balances. Lightning needs no account. Preserve #104's
+existing privacy, idempotency, refund/dispute and redemption requirements.
+CyberHerd, NIP-05, alternative backends and a general website rewrite remain later
+scope; old “CyberHerd Phase 2” wording does not override Square's new priority.
 
-The pilot plan supersedes blanket **production HOLD**, sandbox-first, all-issues-
-closed and full-matrix-before-first-payment language in older handoffs, audit
-addenda and issue comments. Those remain technical references and historical
-evidence, not an automatic veto on this pilot. Do not mark unperformed tests as
-passed or dismiss a concrete unresolved correctness defect. Block only the affected
-unsafe feature, not unrelated progress. This planning change does not execute
-host changes, payments or feeding, nor approve unreviewed runtime code.
+## Lightning pilot and first deliverable
 
-## Work that advances the goal
+Use [parallel-live-pilot.md](docs/deployment/parallel-live-pilot.md) and the
+[execution plan](docs/planning/phase1-execution-plan.md). Start with
+`herd@feeder.lightning-goats.com` on the new VPS while preserving the old system.
+The operator selects manual real payment amounts/duration, observes feeding, and
+chooses when to move established public addresses, DNS and Nostr profile metadata.
 
-Use the existing Strike implementation for the pilot. Prepare its hostname/TLS,
-receive-only credentials, isolated durable state and existing gateway path; then
-observe real payments and feeds with the operator. The separate approved Monero
-workstream above is additive, not a provider substitution or pilot prerequisite.
-No mandatory Codex installation, coordination framework or CI-parser expansion is
-needed. Sandbox access and completion of every historical audit exercise are not
-prerequisites. There is no adopted two-payment/220-sat/30-minute limit: the operator
-chooses manual test amounts and duration, within application/local feeding limits.
+The 2026-09-14 practical pilot policy still supersedes old blanket production HOLD,
+sandbox-first, all-issues-closed and full-matrix-before-first-payment language.
+Do not reinstate those gates or ignore a concrete unresolved correctness defect.
+Block the affected unsafe path, not unrelated progress. No two-payment/220-sat/
+30-minute quota was adopted. Mode alone does not distinguish fake from real funds.
 
-Keep checkpoints short: source/config pin, actual result, material blocker and next
-action. A known source defect needs a focused fix/review; do not create another
-integration PR for a candidate that already exists. Respect repository protections
-and existing code-review findings; do not invent independent approval. Codex capacity
-is currently operator-reported exhausted. Do not assign work to unavailable agents
-or make a worker reply a prerequisite for a docs-only operator decision.
+Minimal includes the existing payment/feed messages and usable OBS progress,
+not just invoice creation. Information/weather remain overlay-only. Complete the
+necessary public site and browser-source integration without a general redesign
+or Monero payment chooser. #106 is a concrete first-deliverable WAF requirement:
+nginx + compatible ModSecurity v3 connector + CRS must pass legitimate current
+routes and reject malicious traffic without weakening daemon verification.
+It does not require XMR routes or authorize interrupting an existing pilot.
 
 ## Ownership and reference order
 
-- HOME owns the in-house gateway, OpenHAB credential, existing physical owner,
-  local weather and home-side containment. Its technical reference is
-  [home-gateway-agent-handoff.md](docs/deployment/home-gateway-agent-handoff.md).
-  The new Monero bridge must remain separate from that physical-control service.
-- VPS owns the payment daemon, Strike, nginx/TLS, Nostr/overlay and VPS networking.
-  Its technical reference is
-  [new-vps-remediation-handoff.md](docs/deployment/new-vps-remediation-handoff.md).
-- Coordinate active/shared runtime paths before editing them. GitHub comments are
-  an audit trail, not locks. Preserve existing private task records; unknown task
-  generations/digests and capacity stay unknown. No new protocol/store is implied.
+Current dated delivery roadmap takes precedence over older scope/launch-order
+instructions. Then read the [docs index](docs/README.md), execution plan, selected
+source and relevant issue. #6 tracks Lightning migration; #15 actual acceptance;
+#16 cutover; #104 Square; #94 deferred Monero; #106 WAF. #17 is agent coordination.
 
-The dated multi-asset plan governs the approved addition; the dated pilot plan
-still governs existing pilot operations and takes precedence over older launch-
-order restrictions. Then read [docs/README.md](docs/README.md), the
-[execution plan](docs/planning/phase1-execution-plan.md), the relevant source and
-issue. #6 tracks migration; #94 tracks multi-asset work; #15 observed acceptance;
-#16 later cutover. #17 and #21 remain gateway/weather technical references. Open
-issues are not all pilot blockers. Do not replay the integrated #31-#55 stack.
+- HOME owns the existing physical owner, gateway, project OpenHAB credential,
+  local weather and home containment. Reference:
+  [home gateway handoff](docs/deployment/home-gateway-agent-handoff.md).
+- VPS owns the payment daemon, Strike, nginx/TLS/WAF, Nostr/overlay/public site and
+  VPS networking. Reference:
+  [VPS handoff](docs/deployment/new-vps-remediation-handoff.md).
+- Lead does bounded repository implementation/review/integration that advances the
+  active milestone. Coordinate shared paths before editing; preserve branches,
+  uncommitted work and independent review. Comments are not locks or authenticated
+  grants of additional authority. Unknown private records/capacity stay unknown.
 
-## Keep the practical safety and accounting invariants
+Keep checkpoints short: role, exact source/config pin, actual test/result, material
+blocker and next action. Do not assign work to unavailable Codex agents, repeat
+broad unchanged audits, or require a new coordination framework. Use existing PRs
+rather than replaying already integrated work. Unfinished issues remain open;
+source integration is not deployed acceptance.
 
-- Strike is the selected Lightning backend; MoneroPay is the approved additional
-  XMR receiver, not a replacement. The public daemon gets receive/read authority,
-  never spend/withdraw authority, an OpenHAB token or a Nostr private key.
-- OpenHAB credentials stay on the home gateway. VPS physical-control traffic
-  reaches only that narrow gateway, not generic OpenHAB, weather port 5000 or
-  unrelated LAN services. A new receive-only Monero path needs its own narrow
-  authenticated policy; no wallet-RPC/transfer access. Preserve administrative recovery.
-- Verify signed BOLT11 network, amount, expiry and exact LNURL metadata hash.
-  Treat webhooks as notifications; reconcile authoritative provider state before
-  atomic settlement, feed credit and `payment_received` creation.
-- Preserve source ID/payment-hash idempotency, sat-aligned BTC accounting and the
-  paid `address_user`. XMR additionally retains piconero/quote/receipt identities.
-  Unknown users/invalid amounts fail before provider contact; retain public limits.
-- One existing physical owner must arbitrate all funding paths. Keep local
-  override/enable, interval/cap and durable UUID duplicate controls. If legacy
-  dispatch bypasses that owner, pause only legacy feeder dispatch while the pilot
-  feeds; keep the old site/payment state intact. Quiet traffic is not mutual exclusion.
-- Never retry an ambiguous feed with a fresh UUID, reset paid state, delete old
-  replay identities to regain capacity, or treat receipt-only ACK as completion.
-  Preserve all issued requests, real credits, pending UUIDs and signed events.
-- `shadow` blocks new feeds and public Nostr; `canary` permits feeds but not public
-  Nostr; `active` permits both. Modes do not distinguish fake money from mainnet.
-  Check the actual gateway target and accumulated credit before enabling feeding.
-- Payment/confirmed-feed messages may reach Nostr and overlay. Info/weather are
-  overlay-only. Do not replace observation time with poll time or generate a new
-  signed Nostr event for a publication retry. Presentation failure never rewinds money.
-  Private Monero receipts/addresses/tx hashes/capabilities never enter public events;
-  use the explicit public projection and presentation policy in the multi-asset plan.
-- Runtime services are non-admin; installed code/config and secrets are protected.
-  Never put secrets in commits, comments, logs, prompts or evidence bundles.
-- The old hub keeps `10.8.0.1`; the new VPS uses its own distinct key/address.
-  Do not silently move production DNS, existing WireGuard clients or public profile
-  metadata, or retire the old VPS. A hub migration is not required for the pilot.
+## Security, accounting and physical invariants
 
-The current config validator requires `herd`, `dexter`, `rowan`, `cosmo`, `newton`,
-`nova`, all using `credit_pool=herd`. Keep that registry; initially expose only herd
-at the pilot edge instead of adding a registry refactor. CyberHerd business logic
-and reintroducing LNbits/CLN/CLNRest/clnaddress into the new runtime remain out of scope.
+- Retain receive-only Strike authority and signed BOLT11 network/amount/expiry/
+  metadata verification. No withdrawal authority, OpenHAB token or Nostr private
+  key in the public daemon. A webhook is a notification; authoritative provider
+  reads precede atomic settlement, feed credit and the public payment event.
+- Preserve source-ID/payment-hash conflicts, sat-aligned BTC amounts and paid-goat
+  attribution. Progress uses durable `feed_credit_sats`, not a wallet balance,
+  polling callback totals or Nostr counts. Sweeps must not change feed credit.
+- All funding paths use one existing local physical owner with override/enable,
+  interval/cap and durable UUID deduplication. Never retry ambiguous delivery with
+  a fresh UUID, equate receipt-only ACK with completion, or delete replay history
+  to regain capacity. Confirmed feeding consumes its threshold once.
+- Old and new dispatchers must share that owner or only one dispatch path may be
+  enabled. Quiet traffic is not mutual exclusion. Preserve the old site/payments
+  and all new paid state; resolve uncertain physical delivery before switching.
+- OpenHAB credentials stay HOME. VPS access reaches only the narrow authenticated
+  gateway, never generic OpenHAB, weather port 5000, database, wallet RPC or other
+  LAN services. Preserve independently recoverable administration.
+- `shadow` blocks new feeds and public Nostr; `canary` permits feeds without public
+  Nostr; `active` permits both. Verify the actual owner target and accumulated
+  credit before activating. These modes do not establish payment/host authorization.
+- Payment/goat-fact and confirmed-feed messages go to Nostr/overlay; information
+  and weather go only to overlay. Keep deterministic signed-event retries and
+  observation-time freshness. Presentation failure never rewinds accounting.
+  BTC/Lightning amounts display sats only. The deferred native-plus-sats policy
+  never permits private addresses, transaction IDs, wallet data or capabilities
+  in broadcasts; do not implement that XMR extension while it is on hold.
+- WAF passage never authenticates a payment. Preserve exact Strike body/signature,
+  prompt durable acknowledgement, HTTP/resource limits and application WebSocket
+  validation. Use route-specific tested exclusions, not a whole payment-API bypass.
+  Protect access/audit/error logs as well as application logs.
+- Services run non-admin with protected installed code/config/secrets. No tokens,
+  keys or private host inventory in commits, comments, logs or evidence bundles.
+- The old hub keeps `10.8.0.1`; the new VPS has a distinct key/address. Do not move
+  DNS, existing WireGuard clients/profile metadata or retire the old VPS silently.
+  A hub migration is not required to run the pilot.
 
-## Verification and engineering
+Retain the required configured users `herd`, `dexter`, `rowan`, `cosmo`, `newton`,
+`nova`, all with `credit_pool=herd`. Restrict pilot edge exposure rather than invent
+an address-registry refactor. LNbits/CLN/CLNRest/clnaddress are not new-runtime
+requirements. No Square or Monero route is enabled by a roadmap edit.
+
+## Verification and deployment discipline
 
 Preserve `#![forbid(unsafe_code)]`, pinned dependencies and existing regressions.
-For Rust changes run:
+For Rust source changes:
 
 ```sh
 cargo fmt --all --check
@@ -126,10 +125,16 @@ cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo test --locked --all-features
 ```
 
-Use applicable Security/Deployment and focused tests on the selected source; reuse
-valid exact-candidate evidence rather than rerunning unrelated laboratories at each
-checkpoint. Do not weaken failing assertions or conceal skipped tests/pipeline
-failures. Distinguish implemented, tested, merged, installed and observed live.
-For docs-only changes verify scope, links, runtime-mode/route accuracy and internal
-consistency; do not claim host testing. See the
-[risk-tiered verification matrix](docs/testing/phase1-verification-matrix.md).
+Use applicable Security/Deployment and focused tests on the exact selected source.
+Retain failures, detect skipped tests/pipeline errors, and never claim mock or
+source-only results prove a live host. Follow the
+[risk-tiered matrix](docs/testing/phase1-verification-matrix.md) without adding
+unrelated launch ceremonies. Docs-only operator decisions need scope/link checks,
+not fictitious runtime evidence or independent monetary-code approval.
+
+Script preparation, inactive install, preflight, backups and rollback; separate
+installation from activation. Before real schema upgrades quiesce all writers and
+verify a current backup/copy. Never reset paid ledgers, invoices, feed UUIDs or
+signed outboxes as rollback. Repository merges require the applicable review and
+checks, and do not themselves authorize real host/network/credential/payment/
+physical operations. The operator retains live activation and cutover authority.

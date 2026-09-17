@@ -1,0 +1,11 @@
+# REVIEWED RENDER REQUIRED. This restricts only the bridge UID's outbound IP.
+# It is NOT a replacement for the home's existing inbound WireGuard/UFW policy.
+# No flush ruleset, accept-all WireGuard, forwarding or NAT change is intended.
+table inet lg_monero_egress {
+  chain output {
+    type filter hook output priority -20; policy accept;
+    meta skuid __BRIDGE_UID__ ip daddr 127.0.0.1 tcp dport __PROVIDER_PORT__ accept
+    meta skuid __BRIDGE_UID__ ip daddr 127.0.0.1 tcp sport { __BRIDGE_PORT__, __CALLBACK_PORT__ } ct state established ct direction reply accept
+    meta skuid __BRIDGE_UID__ reject
+  }
+}

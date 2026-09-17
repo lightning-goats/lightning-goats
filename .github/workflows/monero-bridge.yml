@@ -1,0 +1,29 @@
+name: Monero bridge preparation
+on:
+  pull_request:
+    paths:
+      - 'deploy/monero/**'
+      - 'src/monero_bridge/**'
+      - '.github/workflows/monero-bridge.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/monero/**'
+      - 'src/monero_bridge/**'
+      - '.github/workflows/monero-bridge.yml'
+permissions:
+  contents: read
+jobs:
+  preparation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test offline renderer, backup, sync validation and inactive installer guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s deploy/monero -p 'test_*.py' -v
+          bash -n deploy/monero/install-inactive.sh
+# The ordinary Rust CI also compiles the bridge binary and runs monero_bridge.rs.
+# No live credentials, Monero process, host changes or payment operations here.

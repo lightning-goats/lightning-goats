@@ -1,5 +1,15 @@
 # Multi-asset payments and sats-denominated feed credit
 
+> **ON HOLD — operator decision 2026-09-17.** Deliver the minimal Lightning/Strike
+> version first, then Square fiat Feedings under #104. MoneroPay/XMR integration
+> and deployment resume only on explicit operator instruction. This document's
+> implementation sequence is a preserved future roadmap, not an active assignment.
+> The already prepared #97 source is preserved in draft PR #107; its publication
+> or a later reviewed merge does not authorize continuing #98 or activating XMR.
+> Existing merged accounting, migration history and paid state stay intact.
+> See [the current delivery roadmap](../planning/delivery-roadmap.md).
+> Square Feedings are separate entitlements, not additions to the sats credit pool.
+
 Operator-approved direction: **2026-09-15**. Tracker: [#94](https://github.com/lightning-goats/lightning-goats/issues/94), under [#6](https://github.com/lightning-goats/lightning-goats/issues/6).
 
 This adds MoneroPay to Strike, not a replacement Lightning provider. It supersedes

@@ -1,35 +1,43 @@
-# Lightning Goats Documentation
+# Lightning Goats documentation
 
-## Current plan: parallel live pilot
+## Current delivery order — 2026-09-17
 
-**Operator decision, 2026-09-14:** get `herd@feeder.lightning-goats.com` running on
-the new VPS alongside the old system, send real payments, observe the results and
-fix actual problems. The operator decides when to redirect established addresses,
-DNS, Nostr profile metadata and other public references.
+Start with [the delivery roadmap](planning/delivery-roadmap.md):
+**minimal Strike/Lightning first, Square fiat Feedings second, Monero on hold until
+the operator explicitly resumes it**. The prepared #97 work is preserved in draft
+PR #107, not a dependency of either active deliverable. Do not undo already merged
+accounting/migrations or reset paid state to pause an unused rail.
 
-Start with [Parallel live pilot](deployment/parallel-live-pilot.md). It supersedes
-blanket HOLD/full-audit/sandbox-first launch restrictions in older documentation,
-including host handoffs and audit addenda. They remain implementation references;
-old unperformed checks do not become passing evidence. This is not a statement
-that services are already installed or live.
+[The parallel live pilot](deployment/parallel-live-pilot.md) remains the practical
+path for `herd@feeder.lightning-goats.com` alongside the old system. The operator
+sends manual payments, observes feeding and chooses the eventual established-address,
+DNS and Nostr-profile cutover. Older blanket HOLD/full-audit/sandbox-first language
+is historical, not a veto on unrelated safe pilot work. No plan is a claim that
+services are already installed or that live acceptance has happened.
 
 ## Short execution path
 
-1. [Agent guide](../AGENTS.md) and
-   [execution plan](planning/phase1-execution-plan.md): priorities and boundaries.
-2. [New VPS pilot runbook](deployment/new-vps-staging.md): dedicated hostname,
-   existing daemon/gateway and real manual payments.
-3. [Verification matrix](testing/phase1-verification-matrix.md): small initial
-   preflight, checks during the pilot, follow-up work rather than one giant gate.
-4. [Cutover and rollback](deployment/production-cutover.md): operator-directed
-   public address switch after the pilot looks right; WireGuard can move separately.
+1. [Agent guide](../AGENTS.md), [delivery roadmap](planning/delivery-roadmap.md) and
+   [Lightning execution plan](planning/phase1-execution-plan.md).
+2. [VPS pilot runbook](deployment/new-vps-staging.md), with the required current
+   Lightning WAF work tracked in [#106](https://github.com/lightning-goats/lightning-goats/issues/106).
+3. [Verification matrix](testing/phase1-verification-matrix.md): selected-source
+   and actual pilot evidence, not a requirement to finish every future feature.
+4. [Cutover and rollback](deployment/production-cutover.md): explicit operator
+   public-address switch with all real paid state preserved.
 
-## Technical references, not prerequisite reading projects
+Minimal Lightning includes real Nostr payment/feed messages and the actual OBS
+browser-source integration/progress, not just the public video page or backend
+WebSocket. Information/weather remain overlay-only; Lightning amounts show sats.
+No Monero payment chooser or fiat account screen is needed to deliver that path.
+
+## Technical references
 
 - [Strike architecture](architecture/phase1-strike-architecture.md) and
   [address registry](architecture/lightning-address-registry.md).
 - [Gateway boundary](security/openhab-feeder-gateway.md),
-  [weather/overlay](architecture/weather-overlay.md) and
+  [weather/overlay](architecture/weather-overlay.md),
+  [overlay stream](architecture/overlay-stream.md) and
   [WireGuard topology](deployment/wireguard-topology.md).
 - HOME: [gateway handoff](deployment/home-gateway-agent-handoff.md).
 - VPS: [remediation handoff](deployment/new-vps-remediation-handoff.md).
@@ -39,35 +47,35 @@ that services are already installed or live.
   [hardening checklist](security/phase1-hardening-checklist.md) and
   [implementation history](implementation-status.md).
 
-Apply the pilot plan's priority/scope classification before treating language in
-these references as a launch blocker. There is no requirement to close every issue,
-complete every host rehearsal, or obtain Strike sandbox access before manual pilot
-payments. Do not ignore an actual defect in the feature being used.
+Apply the current roadmap before following older launch or immediate-XMR instructions
+in these references. Reuse existing reviewed work. Do not ignore an actual defect,
+waive a required code review, or report a mock as live evidence.
 
-## Addresses and physical ownership
+## Subsequent deliverables
 
-Initially publish **herd@feeder.lightning-goats.com** only. The daemon still keeps
-its six required configured users; the pilot edge restricts discovery/callbacks to
-herd. The eventual addresses remain `herd`, `dexter`, `rowan`, `cosmo`, `newton` and
-`nova` at `lightning-goats.com`, sharing the herd credit pool and retaining recipient
-attribution. No registry rewrite is needed to begin.
+[Square #104](https://github.com/lightning-goats/lightning-goats/issues/104) is next:
+anonymous browser accounts buy integer Feedings and redeem them through the same
+physical-owner safeguards. These are separate entitlements, not sats or a wallet
+balance. Lightning stays account-free. The existing Square product/acceptance plan
+is retained; no pricing or new fiat API is selected by this documentation.
 
-Old and new sites/payment services can coexist. Both must respect one local feeder
-owner and its interval/cap/duplicate controls, or only one feeder-dispatch path may
-be enabled at a time. Keep separate ledgers and retain real pilot credits at cutover.
-Never copy the OpenHAB token to the VPS or bypass the gateway. Weather stays overlay-only.
-The old WireGuard hub remains `10.8.0.1` during the pilot.
+[Multi-asset/Monero design](architecture/multi-asset-payments.md),
+[XMR quote service](architecture/xmr-quote-service.md) and
+[asset-credit storage](architecture/asset-credit-storage.md) remain preserved future
+references. XMR integration/deployment is on explicit hold. Core shared BTC credit
+and Lightning display work continue; #99's XMR portion must not block them.
+[CyberHerd](architecture/cyberherd-phase2-boundary.md), new providers, broader site
+redesign and optional tools are not first-deliverable dependencies.
 
-## Tracking and history
+## Addresses, ownership and tracking
 
-#6 is the migration tracker; #15 records what the pilot actually demonstrates;
-#16 is the eventual cutover; #17 and #21 track gateway and weather details. Leave
-unverified items open, but do not treat an open parent issue as a ban on pilot work.
+Keep herd/dexter/rowan/cosmo/newton/nova configured with the common herd pool; the
+pilot edge may initially expose herd only. Both old and new payment services must
+respect one physical owner or only one dispatcher may be enabled. Keep separate
+pilot/old ledgers and preserve real pilot credit at cutover. Never put the OpenHAB
+token on the VPS. The old WireGuard hub stays `10.8.0.1` during the pilot.
 
-The former exhaustive execution/staging/matrix texts remain in Git history at
-`df6be90f1b0505d183643ec55a298b382cd43b6c`. Audit evidence and regression tests are
-retained. Historical CLN/clnaddress plans (`phase1-lnbits-rust-migration-plan.md` and
-CLN-specific `server-setup.md`) are not the current runtime architecture.
-
-[CyberHerd Phase 2](architecture/cyberherd-phase2-boundary.md), alternative backends,
-website expansion and optional tooling are not dependencies of this pilot.
+#6 tracks migration; #15 observed acceptance; #16 cutover; #17 coordination;
+#21 weather; #106 WAF; #104 next Square deliverable; #94 deferred Monero. Leave
+unfinished acceptance and deferred roadmap issues open with truthful dispositions.
+Earlier CLN/clnaddress setup documents are historical, not new-runtime instructions.

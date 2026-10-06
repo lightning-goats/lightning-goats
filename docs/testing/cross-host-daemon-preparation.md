@@ -106,3 +106,118 @@ checked; local preparation success cannot close them.
 
 Focused regression: `cargo test --locked --all-features --example prepare_cross_host`.
 CI explicitly runs this example's tests in addition to the required full checks.
+
+## Offline accounting comparison against the held fixture
+
+The generation2 held fixture/control contract is source-reviewed at HOME PR77
+`3b16b7a85e0a2ab88b42562c78a8b7dde728513f`. Its rule SHA256 is
+`1cacb11569ab90db03bc0ee2f94fd3fec9d0e2132bc816d4f5982d4fd7d6a88c`.
+HOME owns all OpenHAB reads/releases. The VPS does not receive its token or call
+OpenHAB. The source-reviewed contract does not approve network exposure or a run.
+
+`deploy/scripts/verify-cross-host-accounting.py` (Python 3.11+) compares captures
+without network access or application writes. It consumes the exact JSON from
+HOME's `control-held-canary.py` with no `--release`, once before the session and
+once after completion/remote-OFF cleanup. Both captures must have Hold ON,
+RemoteEnabled OFF, no unresolved delivery, and the pinned source digest. The HOME
+helper checks Fault OFF before emitting them. Preserve its exit status and logs;
+an unsigned capture is evidence to authenticate in the session handoff, not proof
+of its own origin. Preserve the actual retained baseline; obtain a fresh read-only
+snapshot after HOME local tests and never reset the fixture.
+
+After quiescing the session, supply the daemon's consistent exported database
+(with matching WAL when applicable), the two HOME captures and the run UUID from
+`PREPARED.json`:
+
+```sh
+python3 deploy/scripts/verify-cross-host-accounting.py \
+  --database /private/session/export/daemon.db \
+  --baseline /private/session/home-before.json \
+  --completed /private/session/home-completed.json \
+  --run-id ORIGINAL_PREPARED_RUN_UUID
+```
+
+Capture stdout, stderr and exit status to new evidence files. An empty output or
+failed exit is not a pass. The verifier opens SQLite read-only, takes a consistent
+read transaction and limits row/JSON sizes and SQLite work. It does not copy,
+repair, migrate or initialize a database. Use only the synthetic session export;
+this tool does not identify a live database or authenticate its provenance.
+
+The comparison requires an unchanged complete baseline journal, exactly two new
+owner deliveries with distinct nonhistorical UUIDs, and final Ack for the second
+UUID. Every extra delivery fails, including a duplicate UUID whose ledger debit
+was deduplicated. Those exact two UUIDs must match the daemon's confirmed attempts,
+ordered 1,000-sat debits and ordered confirmation events with balances 1,340 then
+340. The original run must have exactly one 2,340-sat synthetic payment/credit and
+payment event; no unresolved attempt, public Nostr outbox or issued provider
+request is permitted. Historical refusal attempts may remain as resolved
+`reconciled_not_fed` records and may not match a delivered UUID.
+
+A passing comparison establishes only consistency of the supplied captures. It
+cannot prove that duplicates/concurrency, refusal cooldown, lost responses, late
+release, process restarts or paired restore were actually exercised. Retain each
+scenario's timestamps, request/response bytes, process/source pins, original UUID,
+HOME before/after command journal, and backup/restore manifests separately. The
+final authenticated path, actual unit sandbox, provider scopes, physical-owner
+retention and operational approvals are still required. The launch/fault-control
+portion of the cross-host harness remains to be integrated after HOME's held
+binding and final staging path are reviewed.
+
+### Controlled lost-response evidence
+
+`deploy/scripts/cross-host-fault-proxy.py` prepares a plan by default. With an
+explicit `--serve`, it binds only IPv4 loopback and forwards the narrow gateway
+GET routes and empty-body canonical-UUID POST requests to one fixed private IPv4
+HTTP origin. It uses no environment proxy, DNS lookup, redirects, credentials or
+automatic upstream retries. This is a test transport, not authentication of the
+upstream: bind the target to HOME's reviewed harmless service and the approved
+contained path before use. Never point it at a physical-owner gateway.
+
+Example plan only (substitute the session's reviewed target and unused port):
+
+```sh
+python3 deploy/scripts/cross-host-fault-proxy.py \
+  --upstream http://REVIEWED_PRIVATE_IPV4:REVIEWED_PORT --listen-port 18791 \
+  --journal /private/session/lost-response.jsonl \
+  --run-id ORIGINAL_PREPARED_RUN_UUID --drop-post-responses
+```
+
+The journal is exclusively created mode0600 when serving starts. It fsyncs each
+record and the new directory entry before any upstream access. Each request has
+a unique exchange ID and durable intent before forwarding. A bounded upstream
+response is saved as status/base64 body before forwarding or deliberately closing
+the downstream connection without a POST response. GET status polling continues
+normally. It does not deduplicate incoming requests: proving duplicate owner
+suppression remains the actual gateway's job and requires HOME command counts.
+
+An intent without a response means dispatch is uncertain, not absent. A response
+marked `forward` does not prove downstream receipt. Failed journaling blocks later
+forwarding for that process; do not truncate or repair the journal to resume.
+Each restart uses a new journal file with the same session run ID, retaining all
+earlier journals and the daemon/gateway databases. Use the existing UUID after a
+lost response. No proxy startup sends a request of its own. Sixteen connection
+workers, socket deadlines and 16KiB response bounds limit this local test tool;
+it is not a public-facing service.
+
+The proxy does not control HOME Hold/Release, synthesize confirmations, prove
+late completion, or establish paired restore. Compare its evidence with HOME's
+independent journal and the daemon ledger. Tests use only disposable loopback
+mocks and cover concurrent duplicate forwarding without retry, lost POST with
+GET recovery, journal failure before forwarding, route/body limits, oversized
+responses and redirect rejection. Actual cross-host execution remains a separate
+approved and source-pinned step.
+
+The Rust regression
+`lost_post_responses_real_daemon_gateway_two_commands_leave_340` runs the actual
+daemon, Python proxy and gateway with a loopback mock owner. It requires exactly
+two recorded/discarded successful POST responses, subsequent GET recovery for
+each original UUID, exactly two distinct owner commands, two confirmation events,
+340 remaining after daemon restart, and no unresolved attempt or public outbox.
+The original direct-path shipped-example regression remains separate. Neither
+test is a HOME observation or a live held-rule/late-release acceptance result.
+
+Regression tests use the actual repository SQLite migrations plus captured
+fixture-shaped data. They verify correct correlation and reject extra/duplicate
+commands, changed baseline, wrong UUID/source, pending completion, inconsistent
+financial events/debits, provider requests and public outbox work. These tests
+are offline verifier tests, not a cross-host run.

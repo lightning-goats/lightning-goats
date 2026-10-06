@@ -52,6 +52,23 @@ impl GatewayStore {
         Ok(Self { pool })
     }
 
+    pub(super) async fn request_identities(&self) -> Result<Vec<Uuid>> {
+        let rows: Vec<String> = sqlx::query_scalar(
+            "SELECT request_id FROM feeder_requests UNION SELECT request_id FROM feeder_refusals",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter()
+            .map(|id| {
+                let parsed = Uuid::parse_str(&id)?;
+                if parsed.to_string() != id {
+                    bail!("noncanonical gateway identity");
+                }
+                Ok(parsed)
+            })
+            .collect()
+    }
+
     pub(super) async fn accept_weather_time(&self, epoch: i64) -> Result<()> {
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let previous: Option<i64> =

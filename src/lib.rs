@@ -11,6 +11,7 @@ pub mod informational;
 pub mod ledger;
 pub mod lnurl;
 pub mod messaging;
+pub mod monero_bridge;
 pub mod nostr;
 pub mod openhab;
 pub mod overlay;

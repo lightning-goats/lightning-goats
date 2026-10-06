@@ -18,6 +18,10 @@ path = "src/bin/lightning-goatsctl.rs"
 name = "lightning-goats-gateway"
 path = "src/bin/lightning-goats-gateway.rs"
 
+[[bin]]
+name = "lightning-goats-monero-bridge"
+path = "src/bin/lightning-goats-monero-bridge.rs"
+
 [dependencies]
 anyhow = "1"
 axum = { version = "0.8", features = ["ws"] }

@@ -1,0 +1,10 @@
+{
+  "provider_url": "http://127.0.0.1:18993/",
+  "wallet_rpc_url": "http://127.0.0.1:18994/json_rpc",
+  "daemon_rpc_url": "http://127.0.0.1:18081/json_rpc",
+  "wallet_credentials_file": "/etc/lightning-goats-monero/credentials/wallet-rpc.json",
+  "network": "mainnet",
+  "account_scope": "REPLACE_WITH_64_LOWERCASE_HEX",
+  "max_wallet_lag": 0,
+  "report_file": "/run/lightning-goats-monero-sync/status.json"
+}

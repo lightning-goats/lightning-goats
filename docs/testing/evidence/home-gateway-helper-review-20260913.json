@@ -1,0 +1,98 @@
+{
+  "observed_date_utc": "2026-09-13",
+  "binary_source_commit": "a74890c47a57a13508b3d259929f1f1bec2a5cc3",
+  "tooling_commit": "f1cef47bf65660eb48bde81ca7bfcb0d48bb4252",
+  "tooling_pr": 59,
+  "tests": {
+    "deployment_python": 59,
+    "canary_js": 3,
+    "rust_fmt": "pass",
+    "rust_clippy_locked_all_targets_all_features": "pass",
+    "rust_tests_locked_all_features": "pass",
+    "rsa_reverse_tree": "empty",
+    "security": "exact CI pass; cargo-audit unavailable locally"
+  },
+  "live_canary": {
+    "initial_count": 4,
+    "safety": {
+      "http": 200,
+      "body": {
+        "override_enabled": false,
+        "remote_enabled": false
+      }
+    },
+    "remote_off": {
+      "http": 423,
+      "body": {
+        "request_id": "005044c2-4517-41c0-bd31-7772438c40ff",
+        "status": "not_dispatched",
+        "refusal": {
+          "reason": "safety",
+          "retry_after_seconds": 5
+        }
+      }
+    },
+    "refusal_replay": {
+      "http": 423,
+      "body": {
+        "request_id": "005044c2-4517-41c0-bd31-7772438c40ff",
+        "status": "not_dispatched",
+        "refusal": {
+          "reason": "safety",
+          "retry_after_seconds": 5
+        }
+      }
+    },
+    "confirmed": {
+      "http": 200,
+      "body": {
+        "request_id": "b63dc9af-bf9c-4f44-b45e-d1f71585debf",
+        "status": "confirmed"
+      }
+    },
+    "duplicate": {
+      "http": 200,
+      "body": {
+        "request_id": "b63dc9af-bf9c-4f44-b45e-d1f71585debf",
+        "status": "confirmed"
+      }
+    },
+    "restart_replay": {
+      "http": 200,
+      "body": {
+        "request_id": "b63dc9af-bf9c-4f44-b45e-d1f71585debf",
+        "status": "confirmed"
+      }
+    },
+    "concurrent": [
+      {
+        "http": 423,
+        "body": {
+          "request_id": "108d91bc-f174-429e-9383-9077bf0e1f40",
+          "status": "not_dispatched",
+          "refusal": {
+            "reason": "unresolved",
+            "retry_after_seconds": 5
+          }
+        }
+      },
+      {
+        "http": 200,
+        "body": {
+          "request_id": "da0ec49f-e8f4-4fab-b711-3dbbc2718552",
+          "status": "confirmed"
+        }
+      }
+    ],
+    "final_count": 6,
+    "remote_final": "OFF",
+    "physical_override_unchanged": true,
+    "rule_sha256": "a8ed99fb3140d785c13c3f628372a0146bddcb85970151a9d7a3af57afbb32ab"
+  },
+  "owner_sha256": "730053e0f3245cb83461e3fe6e3b05d49c8b508631e8cdb4a889c8be8d915978",
+  "owner_unchanged_live_readback": true,
+  "network_changes_applied": false,
+  "production_feeder_tests_executed": false,
+  "network_candidate_pr": 65,
+  "scope": "helper correction and local-live harmless recheck; not physical or network acceptance"
+}

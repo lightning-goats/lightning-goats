@@ -1,0 +1,36 @@
+{
+  "scope": "HOME preparation and isolated verification; not cross-host or production acceptance",
+  "held_policy_source": "9cd654751b9f75ea4701faa632cc4d8102696e83",
+  "held_policy_pr": 84,
+  "ci_base": "ee0d2a8f4faec0324eff26e07d956b21386281f7",
+  "filter_ci_job": 103806903153,
+  "filter_ci_log_inspected": true,
+  "isolated_packet_cases_per_variant": 13,
+  "variants": [
+    "echo8790",
+    "held8791"
+  ],
+  "table_only_rollback": "passed both variants",
+  "drift_tests_passed": 2,
+  "held_snapshot": {
+    "captured_at": "2026-09-13T22:47:58.906936Z",
+    "source_sha256": "1cacb11569ab90db03bc0ee2f94fd3fec9d0e2132bc816d4f5982d4fd7d6a88c",
+    "sha256": "b27f4164e2ce931acc13ae59e2bf7ae400835290a7865ef69d75eca571d2bcae",
+    "count": 2,
+    "released": 2,
+    "hold": "ON",
+    "remote_enabled": "OFF",
+    "commands_sent": 0
+  },
+  "weather_source": "4369da182c69c9ec971f2767771253c9bff61a4f",
+  "weather_pr": 85,
+  "weather_port": 5002,
+  "weather_local_python_tests_passed": 9,
+  "weather_local_rust_process_tests_skipped": 2,
+  "weather_actual_exporter_missing_data_status": 503,
+  "weather_unit_verified": true,
+  "weather_activation": "awaiting operator approval and independent review",
+  "network_applied": false,
+  "physical_commands": 0,
+  "heavy_local_build_restarted": false
+}

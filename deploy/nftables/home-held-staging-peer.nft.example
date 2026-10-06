@@ -1,0 +1,21 @@
+# HELD CANARY REVIEW CANDIDATE ONLY. Mutually exclusive with the echo policy. Requires direct WireGuard key binding .12/32 on home
+# and reciprocal .6/32 on VPS; a relayed source address is not authentication.
+# No IPv6 AllowedIPs may be assigned to the staging peer.
+# Apply only after explicit approval and exact drift checks in the runbook.
+# Does not replace the final all-wg0 containment candidate in PR57.
+table inet lg_home_staging_peer {
+    chain before_dnat {
+        type filter hook prerouting priority -310; policy accept;
+        iifname "wg0" ip saddr 10.8.0.12 ip daddr 10.8.0.6 tcp dport 8791 accept
+        iifname "wg0" ip saddr 10.8.0.12 counter drop
+    }
+    chain local_input {
+        type filter hook input priority -310; policy accept;
+        iifname "wg0" ip saddr 10.8.0.12 ip daddr 10.8.0.6 tcp dport 8791 accept
+        iifname "wg0" ip saddr 10.8.0.12 counter drop
+    }
+    chain forwarded {
+        type filter hook forward priority -310; policy accept;
+        iifname "wg0" ip saddr 10.8.0.12 counter drop
+    }
+}

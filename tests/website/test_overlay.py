@@ -33,6 +33,7 @@ class OverlayBrowserTests(unittest.TestCase):
         self.page = context.new_page()
         self.errors = []
         self.display_payload = {"weather": None, "market": None}
+        self.status_payload = {"mode":"shadow", "gateway_reachable":True, "remote_feeding_enabled":True, "feeder_override_active":False, "feed_credit_sats":999999}
         self.page.on("pageerror", lambda error: self.errors.append(str(error)))
         context.route("**/*", self.route)
         context.add_init_script("""
@@ -52,8 +53,7 @@ class OverlayBrowserTests(unittest.TestCase):
             route.fulfill(content_type="application/json", body=json.dumps(self.display_payload))
             return
         if url.path == "/api/v1/status":
-            route.fulfill(content_type="application/json", body=json.dumps({"mode":"shadow", "gateway_reachable":True,
-                "remote_feeding_enabled":True, "feeder_override_active":False, "feed_credit_sats":999999}))
+            route.fulfill(content_type="application/json", body=json.dumps(self.status_payload))
             return
         file = ROOT / url.path.lstrip("/")
         if url.netloc == "lightning-goats.com" and file.is_file() and file.resolve().is_relative_to(ROOT):
@@ -194,7 +194,7 @@ class OverlayBrowserTests(unittest.TestCase):
         self.assertIn("btc-change-negative",self.page.locator("#btc-change").get_attribute("class"))
         self.assertEqual(self.page.locator("#credit").inner_text(),"2 sats credit")
         self.page.clock.run_for(30000)
-        self.assertIn("paused", self.page.locator("#feeding-state").inner_text())
+        self.assertIn("Paused", self.page.locator("#feeding-state").inner_text())
         self.page.clock.fast_forward(301000)
         self.assertEqual(self.page.locator("#current-temperature").inner_text(),"-- °F")
         self.assertEqual(self.page.locator("#btc-price").inner_text(),"BTC: --")
@@ -239,4 +239,20 @@ class OverlayBrowserTests(unittest.TestCase):
         self.assertFalse(self.page.locator("#feeder-triggered").is_visible())
         self.assertEqual(self.page.locator("#credit").inner_text(),"340 sats credit")
         self.assertEqual(self.page.locator("#progress").get_attribute("aria-valuenow"),"34")
+        self.assertEqual(self.errors,[])
+
+
+    def test_live_connection_label_hidden_and_override_banner_follows_operator(self):
+        self.snapshot(credit=3)
+        self.assertEqual(self.page.locator("#connection").get_attribute("data-state"),"live")
+        self.assertEqual(self.page.locator("#connection").inner_text(),"")
+        self.status_payload.update(mode="canary", feeder_override_active=True)
+        self.page.clock.run_for(11000)
+        self.assertEqual(self.page.locator("#feeding-state").inner_text(),"⏸ Feeder Paused")
+        self.assertEqual(self.page.locator("#feeding-state").get_attribute("data-state"),"paused")
+        self.assertGreaterEqual(self.page.locator("#feeding-state").evaluate("node=>parseInt(getComputedStyle(node).fontSize)"),28)
+        self.status_payload["feeder_override_active"] = False
+        self.page.clock.run_for(11000)
+        self.assertEqual(self.page.locator("#feeding-state").inner_text(),"")
+        self.assertEqual(self.page.locator("#credit").inner_text(),"3 sats credit")
         self.assertEqual(self.errors,[])

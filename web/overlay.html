@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Lightning Goats OBS overlay</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/overlay.css?v=2">
+  <link rel="stylesheet" href="/overlay.css?v=3">
   <script src="/vendor/qrcode.js" defer></script>
-  <script src="/overlay.js?v=2" defer></script>
+  <script src="/overlay.js?v=3" defer></script>
 </head>
 <body>
   <main id="container" aria-label="Lightning Goats stream overlay">
@@ -24,7 +24,7 @@
       <span id="lightning-img" aria-hidden="true">ϟ</span>
     </a>
     <div id="connection" role="status">Connecting…</div>
-    <div id="feeding-state"></div>
+    <div id="feeding-state" role="status" aria-live="polite"></div>
     <div id="sats-received-overlay" aria-live="polite"></div>
     <div id="feeder-triggered" aria-live="polite">⚡ Feeder Triggered ⚡</div>
     <div id="accordion-container" aria-label="Featured goats and CyberHerd"></div>

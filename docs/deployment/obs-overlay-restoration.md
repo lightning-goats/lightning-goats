@@ -109,3 +109,51 @@ runtime requirements. Record live trusted TLS, socket state, actual weather and
 market timestamps, QR decoding, ownership, negative network paths and preserved
 credit separately from synthetic animations. Do not submit a real feed merely to
 exercise a visual effect.
+
+## Observed initial deployment and operator-directed activation
+
+The initial overlay source was `05cfb425be9f5b394f36892dab85c96dd61a1b2f`;
+its archive SHA256 was
+`b6d54750bd5741543c70b88b56d0096619d326f8f6baea7e66530b9f11442f2c`.
+The root install record points to backup
+`/var/backups/lightning-goats/obs-20261108T222550Z`.
+Sixteen browser tests passed, including the independent QR decoder; the deployment
+suite ran 126 cases with five existing skips. The isolated display-firewall
+exercise passed gateway/public access, five private-path denials and atomic reload.
+
+Live Chromium acceptance established trusted TLS, the public ordered ledger,
+current gateway temperature, fresh indicative BTC/24-hour data, no JavaScript
+errors and independent decoding of the actual 180-pixel center-logo QR. The
+1024×576 `?fit=1` preview included both the QR and bottom bar. The separate display
+UID could read gateway health but was denied OpenHAB :8080, legacy weather :5000,
+home SSH :22, the loopback payment listener, payment-state files and the encrypted
+credential store. Payment binaries remained unchanged. Real credit was retained;
+subsequent operator payments produced additional settlement/event records. Live
+interface-information and weather events appeared while the Nostr outbox stayed
+empty. The operator independently tested the new overlay with another real
+payment and approved placing it on the actual OBS stream.
+
+The operator then explicitly authorized feeding and confirmed the OBS switch is
+the existing gateway-bound OpenHAB `FeederOverride`. The operator switched it ON;
+a read-only gateway check observed `override_enabled=true, remote_enabled=true`,
+with 3 sats credit, zero feeds due and no unresolved UUID. This is the explicit
+physical enablement step; no home Item is changed by VPS tooling.
+
+`enable-feeding.py` defaults to a read-only plan. Its explicit `--apply` transition
+requires the local override to remain ON, the existing remote-enable gate ON,
+no unresolved UUID, the exact existing ledger/gateway and a private quiesced-state
+backup. It arms `canary` feeding while retaining the existing threshold, local
+caps, all paid state and Nostr-disabled status. The worker and gateway check the
+local override before dispatch; switch changes never fabricate a confirmation or
+discard credit. Any existing ambiguity blocks new physical UUIDs. The helper
+sends no feeder POST and never restores an older financial database on failure.
+
+The connected overlay no longer displays “Live ledger”; connection failures still
+remain visible. The availability display polls the gateway-backed public status
+every ten seconds. Override/local-disable/paused mode shows a prominent centered
+**“⏸ Feeder Paused”** banner; unknown state also shows a paused warning. When the
+operator's override is OFF and the gateway/remote gate permit feeding, the pause
+banner disappears. No home switch is mirrored by writing back from the browser.
+Seventeen mocked browser tests passed after this update, including the visible
+ON/OFF behavior and unchanged credit. A real feed/completion observation remains
+separate from arming the paused service.

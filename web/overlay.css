@@ -14,7 +14,16 @@ html, body { margin: 0; padding: 0; width: 1920px; height: 1080px; overflow: hid
 #lightning-img { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; background: white; color: var(--orange); font-size: 170px; line-height: 1; font-weight: bold; text-shadow: 0 0 12px #ffdb5880; }
 #connection, #feeding-state { position: absolute; right: 8px; top: 188px; color: var(--cream); font-size: 12px; background: #000b; border-radius: 6px; padding: 3px 7px; text-shadow: 0 1px 2px black; }
 #feeding-state { top: 211px; color: #ffdb58; }
-#feeding-state:empty { display: none; }
+#connection:empty, #feeding-state:empty { display: none; }
+#feeding-state[data-state=paused], #feeding-state[data-state=unknown] {
+  top: 56px; left: 50%; right: auto; transform: translateX(-50%); z-index: 5;
+  padding: 12px 26px; border-radius: 14px; border: 2px solid #ffdb58;
+  color: #fff7df; background: linear-gradient(#361800f2, #080400f2);
+  font-size: 28px; font-weight: 800; letter-spacing: .5px; white-space: nowrap;
+  box-shadow: inset 0 1px #ffe6aa47, 0 4px 18px #0009, 0 0 16px #f7931a66;
+  text-shadow: 0 2px 4px black;
+}
+#feeding-state[data-state=unknown] { font-size: 22px; }
 #sats-received-overlay, #feeder-triggered { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); display: none; color: var(--cream); font-size: 32px; font-weight: 800; text-align: center; white-space: nowrap; pointer-events: none; transform-origin: center; border-radius: 20px; backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); text-shadow: 0 1px #ffd27838, 0 0 10px #f7931a6b, 0 2px 5px #000d; }
 #sats-received-overlay { z-index: 6; padding: 22px 46px; line-height: 1.12; letter-spacing: .4px; border: 1px solid #f7931a94; background: linear-gradient(#1c0c02c2, #000a); box-shadow: inset 0 1px #ffd29642, inset 0 -1px #0006, 0 10px 32px #0006, 0 0 18px #f7931a3d; overflow: hidden; }
 #sats-received-overlay::before { content: ''; position: absolute; inset: 0; border-radius: inherit; background: linear-gradient(90deg, transparent, #f7931a38 18%, #ffdb582e 50%, #f7931a38 82%, transparent); opacity: .56; }

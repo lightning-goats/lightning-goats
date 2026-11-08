@@ -1,5 +1,5 @@
 [Unit]
-Description=Lightning Goats Strike receives (physical dispatch disabled)
+Description=Lightning Goats Strike payments and feeder automation
 After=network-online.target lightning-goats-firewall.service
 Requires=lightning-goats-firewall.service
 Wants=network-online.target
@@ -22,7 +22,8 @@ Environment=RUST_LOG=info
 # Receive/read-only Strike runtime credentials.
 LoadCredentialEncrypted=strike-api-key:/etc/credstore.encrypted/lightning-goats-strike-api-key
 LoadCredentialEncrypted=strike-webhook-secret:/etc/credstore.encrypted/lightning-goats-strike-webhook-secret
-# Receive-only deployment uses shadow mode: no new physical feeds or Nostr signing.
+# Initial install uses shadow mode; operator-approved canary enables gated feeding.
+# Both modes keep public Nostr signing disabled until separately configured.
 # No OpenHAB, CLN, or LNbits credential belongs on this host/service.
 
 Restart=on-failure

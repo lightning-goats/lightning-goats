@@ -252,7 +252,7 @@
             if (data.stream_id === stream && data.seq < seq && !data.reset_reason) return;
             if (stream !== data.stream_id || data.reset_reason) clearPresentation();
             stream = data.stream_id; seq = data.seq; credit = data.feed_credit_sats; threshold = data.threshold_sats;
-            replaying = false; el("connection").textContent = "Live ledger"; render(); return;
+            replaying = false; el("connection").dataset.state = "live"; el("connection").textContent = ""; el("connection").ariaLabel = "Connected"; render(); return;
         }
         if (!integer(data.seq) || seq === null || stream === null) return resetConnection();
         if (data.seq <= seq) return;
@@ -284,11 +284,12 @@
         url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
         if (stream !== null && seq !== null) { url.searchParams.set("version", "1"); url.searchParams.set("stream", stream); url.searchParams.set("after", String(seq)); }
         const current = socket = new WebSocket(url.href);
-        current.onopen = () => { if (socket === current) { retry = 500; el("connection").textContent = "Synchronizing…"; } };
+        current.onopen = () => { if (socket === current) { retry = 500; el("connection").dataset.state = "connecting"; el("connection").textContent = "Synchronizing…"; } };
         current.onmessage = (event) => { if (socket === current) receive(event); };
         current.onclose = () => {
             current.onmessage = null;
             if (socket !== current) return;
+            el("connection").dataset.state = "disconnected";
             el("connection").textContent = "Disconnected · reconnecting";
             clearPresentation(); replaying = false;
             reconnectTimer = setTimeout(connect, retry); retry = Math.min(retry * 2, 30000);
@@ -323,16 +324,26 @@
             }
         } catch { /* Cached observations expire independently; money is unaffected. */ }
     }
+    function setFeedingState(state) {
+        const banner = el("feeding-state");
+        banner.dataset.state = state;
+        banner.textContent = state === "paused" ? "⏸ Feeder Paused"
+            : state === "unknown" ? "⏸ Feeder Paused · status unavailable"
+            : state === "pending" ? "Feeding pending confirmation" : "";
+    }
     async function status() {
         try {
             const data = await readJson("/api/v1/status");
             if (!["shadow", "canary", "active"].includes(data.mode)) return;
             statusTime = Date.now();
             const paused = data.mode === "shadow" || !data.gateway_reachable || data.remote_feeding_enabled !== true || data.feeder_override_active !== false;
-            el("feeding-state").textContent = paused ? "Feeding paused · credits saved" : data.unresolved_feed_attempt ? "Feeding pending confirmation" : "";
+            setFeedingState(paused ? "paused" : data.unresolved_feed_attempt ? "pending" : "ready");
+            el("feeding-state").title = data.feeder_override_active === true
+                ? "FeederOverride is on. Feed credit is saved."
+                : paused ? "Local feeding controls are paused. Feed credit is saved." : "";
             // HTTP status is for availability only. Credit/progress come from the
             // ordered socket; a slower HTTP response must never regress the ledger.
-        } catch { el("feeding-state").textContent = "Feeding status unavailable"; }
+        } catch { setFeedingState("unknown"); }
     }
     function makeQr() {
         // LUD-16 discovery encoded as LNURL with the Bech32 checksum. Uppercase
@@ -364,7 +375,7 @@
         el("current-time").dateTime = now.toISOString();
         if (weatherTime !== null && !fresh(weatherTime)) { weatherTime = null; el("current-temperature").textContent = "-- °F"; el("weather").textContent = ""; }
         if (marketTime !== null && !fresh(marketTime)) { marketTime = null; el("btc-price").textContent = "BTC: --"; el("btc-change").textContent = "(24h: --)"; el("btc-change").classList.remove("btc-change-positive", "btc-change-negative"); }
-        if (statusTime !== null && Date.now() - statusTime > 60000) el("feeding-state").textContent = "Feeding status unavailable";
+        if (statusTime !== null && Date.now() - statusTime > 30000) setFeedingState("unknown");
     }
     if (new URLSearchParams(location.search).get("fit") === "1") {
         const fit = () => {
@@ -378,5 +389,5 @@
     makeQr(); tick(); connect(); displayData(); status();
     setInterval(tick, 1000);
     setInterval(displayData, 15000);
-    setInterval(status, 30000);
+    setInterval(status, 10000);
 })();

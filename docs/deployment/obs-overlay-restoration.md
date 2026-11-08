@@ -157,3 +157,29 @@ banner disappears. No home switch is mirrored by writing back from the browser.
 Seventeen mocked browser tests passed after this update, including the visible
 ON/OFF behavior and unchanged credit. A real feed/completion observation remains
 separate from arming the paused service.
+
+The update was deployed from `103df1977148660f73d2d1eff643f65b2c83c419`,
+archive SHA256
+`bc7d18e762cace44e42888e5f17db0257a51241900dbc743170fb9e21c73582c`.
+The static-install backup is
+`/var/backups/lightning-goats/obs-20261108T223724Z`.
+At `2026-11-08T22:37:50Z` the explicit guarded activation succeeded;
+`FEEDING-ENABLE.json` records the quiesced-state backup
+`/var/backups/lightning-goats/feeding-arm-20261108T223747Z`.
+The daemon verified `mode=canary`, override ON, remote-enable ON, retained
+3 sats/1000-sat threshold, no feeds due and no unresolved UUID. No helper submitted
+a feeder command, and subsequent readback showed zero feed attempts. The public
+payment controls now reflect enabled feeding; the homepage no longer claims a
+permanent payment-only pause. The payment binary hash remains unchanged.
+
+The operator then exercised the actual OBS switch and independently confirmed
+the prominent paused text responds to Item updates. A browser probe that assumed
+the switch would remain ON timed out during those live toggles; no failure was
+inferred for the feeder/overlay from that observation. The final live check
+instead accepts the selected ready/paused state and verifies the corresponding
+visible banner plus hidden connection label. The gateway and public status both
+exposed the changing local control without VPS writes to it. A completed physical
+feed through this service still needs operator observation on a later threshold
+crossing; activation, synthetic animation tests and prior gateway-only physical
+tests are not substituted for that observation. Public Nostr remains disabled
+pending its separate isolated signer/client setup.

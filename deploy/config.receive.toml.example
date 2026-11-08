@@ -83,8 +83,8 @@ url = "http://10.8.0.6:8789/"
 # at most one message per cycle, 40% unconditional chance for each category.
 [informational]
 interval_seconds = 60
-interface_info_enabled = false
-weather_enabled = false
+interface_info_enabled = true
+weather_enabled = true
 interface_info_probability = 0.4
 weather_probability = 0.4
 

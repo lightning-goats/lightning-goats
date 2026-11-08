@@ -73,3 +73,13 @@ location ~ "^/(api|invoice|lnbits|cln|clnrest|clnaddress|lightning_goats|cyberhe
     return 404;
 }
 location ~ "^/\.well-known/lnurlp(/|$)" { return 404; }
+
+# SERVER context: one normalized public presentation cache; no generic proxy.
+location = /overlay-data.json {
+    limit_except GET { deny all; }
+    limit_req zone=lightning_goats_read burst=10 nodelay;
+    alias /var/cache/lightning-goats-display/overlay-data.json;
+    default_type application/json;
+    add_header Cache-Control "no-store" always;
+    add_header X-Content-Type-Options "nosniff" always;
+}

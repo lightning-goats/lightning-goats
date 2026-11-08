@@ -4,6 +4,7 @@
 Run: sudo unshare --net -- python3 -B deploy/nftables/test-runtime.py
 No host firewall, service, WireGuard peer or provider is contacted.
 """
+import argparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -16,6 +17,10 @@ import threading
 import time
 import urllib.request
 
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--display", action="store_true", help="test the separate display-writer policy")
+args = parser.parse_args()
+
 if os.geteuid() != 0 or os.readlink("/proc/self/ns/net") == os.readlink("/proc/1/ns/net"):
     raise SystemExit("requires root in a fresh network namespace")
 links = json.loads(subprocess.check_output(["ip", "-j", "link", "show"]))
@@ -27,13 +32,15 @@ for address in ("10.8.0.6/32", "10.8.0.7/32", "203.0.113.1/32"):
 subprocess.run(["ip", "-6", "addr", "add", "fd00::6/128", "dev", "lo"], check=True)
 runtime = pwd.getpwnam("lightning-goats")
 assert runtime.pw_uid != 0
-policy = Path(__file__).with_name("lightning-goats-runtime.nft.example").read_text().replace("@UID@", str(runtime.pw_uid))
+table = "lightning_goats_display" if args.display else "lightning_goats_runtime"
+filename = "lightning-goats-display.nft.example" if args.display else "lightning-goats-runtime.nft.example"
+policy = Path(__file__).with_name(filename).read_text().replace("@UID@", str(runtime.pw_uid))
 with tempfile.NamedTemporaryFile(mode="w") as file:
     file.write(policy); file.flush()
     for _ in range(2):
         subprocess.run(["nft", "-f", file.name], check=True)
-    rules = json.loads(subprocess.check_output(["nft", "-j", "list", "table", "inet", "lightning_goats_runtime"]))
-    assert sum("rule" in item for item in rules["nftables"]) == 9
+    rules = json.loads(subprocess.check_output(["nft", "-j", "list", "table", "inet", table]))
+    assert sum("rule" in item for item in rules["nftables"]) == (7 if args.display else 9)
 
 
 class Backend(BaseHTTPRequestHandler):
@@ -78,31 +85,32 @@ assert [s.calls for s in servers] == [1, 0, 0, 0, 0, 1, 0]
 opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 with opener.open("http://10.8.0.6:8080/", timeout=2) as response:
     assert response.status == 200
-# nginx's root-side loopback request must receive a reply from runtime port 8787.
-server_code = '''
-from http.server import HTTPServer,BaseHTTPRequestHandler
-class Handler(BaseHTTPRequestHandler):
- def do_GET(self):
-  self.send_response(200);self.end_headers();self.wfile.write(b'ok')
-HTTPServer(('127.0.0.1',8787),Handler).handle_request()
-'''
-child = subprocess.Popen([*as_runtime, "python3", "-c", server_code], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-try:
-    for _ in range(40):
-        try:
-            with opener.open("http://127.0.0.1:8787/", timeout=1) as response:
-                assert response.status in (200, 404)
-            break
-        except ConnectionError:
-            time.sleep(.05)
-        except urllib.error.URLError:
-            time.sleep(.05)
-    else:
-        raise AssertionError("service loopback replies failed")
-    child.wait(timeout=3)
-finally:
-    if child.poll() is None:
-        child.kill(); child.wait()
+if not args.display:
+    # nginx's root-side loopback request must receive a reply from runtime port 8787.
+    server_code = '''
+    from http.server import HTTPServer,BaseHTTPRequestHandler
+    class Handler(BaseHTTPRequestHandler):
+     def do_GET(self):
+      self.send_response(200);self.end_headers();self.wfile.write(b'ok')
+    HTTPServer(('127.0.0.1',8787),Handler).handle_request()
+    '''
+    child = subprocess.Popen([*as_runtime, "python3", "-c", server_code], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        for _ in range(40):
+            try:
+                with opener.open("http://127.0.0.1:8787/", timeout=1) as response:
+                    assert response.status in (200, 404)
+                break
+            except ConnectionError:
+                time.sleep(.05)
+            except urllib.error.URLError:
+                time.sleep(.05)
+        else:
+            raise AssertionError("service loopback replies failed")
+        child.wait(timeout=3)
+    finally:
+        if child.poll() is None:
+            child.kill(); child.wait()
 for server in servers:
     server.shutdown(); server.server_close()
-print("PASS: gateway/public egress, five private-path denials, loopback replies, unrelated traffic and atomic reload.")
+print("PASS: gateway/public egress, five private-path denials, unrelated traffic and atomic reload; " + ("display writer has no loopback backend allowance." if args.display else "runtime loopback replies accepted."))

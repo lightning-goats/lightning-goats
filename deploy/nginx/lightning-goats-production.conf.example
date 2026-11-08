@@ -65,6 +65,16 @@ location = /healthz {
     proxy_set_header X-Forwarded-Proto $scheme;
 }
 
+# SERVER context: one normalized public presentation cache; no generic proxy.
+location = /overlay-data.json {
+    limit_except GET { deny all; }
+    limit_req zone=lightning_goats_read burst=10 nodelay;
+    alias /var/cache/lightning-goats-display/overlay-data.json;
+    default_type application/json;
+    add_header Cache-Control "no-store" always;
+    add_header X-Content-Type-Options "nosniff" always;
+}
+
 # Single server-to-client overlay websocket.
 location = /ws/overlay {
     limit_except GET { deny all; }

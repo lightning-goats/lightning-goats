@@ -1,6 +1,7 @@
 """Browser-source tests with synthetic WebSocket messages and no external traffic."""
 import json
 import mimetypes
+from datetime import datetime, timezone
 import os
 from pathlib import Path
 import unittest
@@ -31,6 +32,7 @@ class OverlayBrowserTests(unittest.TestCase):
         self.addCleanup(context.close)
         self.page = context.new_page()
         self.errors = []
+        self.display_payload = {"weather": None, "market": None}
         self.page.on("pageerror", lambda error: self.errors.append(str(error)))
         context.route("**/*", self.route)
         context.add_init_script("""
@@ -46,6 +48,13 @@ class OverlayBrowserTests(unittest.TestCase):
 
     def route(self, route):
         url = urlsplit(route.request.url)
+        if url.path == "/overlay-data.json":
+            route.fulfill(content_type="application/json", body=json.dumps(self.display_payload))
+            return
+        if url.path == "/api/v1/status":
+            route.fulfill(content_type="application/json", body=json.dumps({"mode":"shadow", "gateway_reachable":True,
+                "remote_feeding_enabled":True, "feeder_override_active":False, "feed_credit_sats":999999}))
+            return
         file = ROOT / url.path.lstrip("/")
         if url.netloc == "lightning-goats.com" and file.is_file() and file.resolve().is_relative_to(ROOT):
             route.fulfill(content_type=mimetypes.guess_type(file)[0] or "text/plain", body=file.read_bytes())
@@ -108,3 +117,126 @@ class OverlayBrowserTests(unittest.TestCase):
         self.page.clock.fast_forward(301000)
         self.assertEqual(self.page.locator("#weather").inner_text(), "")
         self.assertEqual(self.errors, [])
+
+
+    def test_full_hd_transparent_layout_and_branded_canonical_qr(self):
+        self.snapshot(credit=2)
+        self.assertEqual(self.page.locator("main").evaluate("node => [node.offsetWidth,node.offsetHeight]"), [1920, 1080])
+        self.assertEqual(self.page.locator("body").evaluate("node => getComputedStyle(node).backgroundColor"), "rgba(0, 0, 0, 0)")
+        self.assertEqual(self.page.locator("#qr-code").evaluate("node => [node.offsetLeft,node.offsetTop,node.offsetWidth,node.offsetHeight]"), [1732, 3, 180, 180])
+        self.assertEqual(self.page.locator("#bottom-container").evaluate("node => node.offsetTop+node.offsetHeight"), 1080)
+        self.assertIn("998", self.page.locator("#sats_left").inner_text())
+        self.assertEqual(self.page.locator("#qr-image svg").count(), 1)
+        payload = self.page.locator("#qr-code").get_attribute("data-lnurl")
+        self.assertTrue(payload.startswith("LNURL1"))
+        self.assertEqual(self.page.locator("#qr-code").get_attribute("href"), "lightning:"+payload)
+        chars = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
+        words = [chars.index(char) for char in payload.lower().split("1", 1)[1]]
+        checksum = 1
+        for word in [3,3,3,3,3,0,12,14,21,18,12]+words:
+            top = checksum >> 25
+            checksum = ((checksum & 0x1ffffff) << 5) ^ word
+            for bit, generator in enumerate([0x3b6a57b2,0x26508e6d,0x1ea119fa,0x3d4233dd,0x2a1462b3]):
+                if top >> bit & 1:
+                    checksum ^= generator
+        self.assertEqual(checksum, 1)
+        bits = "".join(f"{word:05b}" for word in words[:-6])
+        decoded = bytes(int(bits[pos:pos+8],2) for pos in range(0,len(bits)-7,8)).decode()
+        self.assertEqual(decoded, "https://lightning-goats.com/.well-known/lnurlp/herd")
+        self.assertEqual(self.errors, [])
+
+    def test_payment_reaching_threshold_never_fakes_a_feed(self):
+        self.snapshot(credit=990)
+        payment = {"type":"sats_received", "source_type":"payment_received", "seq":1,
+                   "feed_credit_sats":1010, "amount_sats":20, "message":"Thanks, Dexter!",
+                   "goats":[{"name":"Dexter", "imageUrl":"javascript:alert(1)"}]}
+        self.send(payment)
+        self.assertTrue(self.page.locator("#sats-received-overlay").is_visible())
+        self.assertIn("20 sats",self.page.locator("#sats-received-overlay").inner_text())
+        self.assertEqual(self.page.locator("#sats-received-overlay").get_attribute("data-tier"),"spark")
+        self.assertFalse(self.page.locator("#feeder-triggered").is_visible())
+        self.assertFalse(self.page.locator("main").evaluate("node=>node.classList.contains('fed')"))
+        self.assertEqual(self.page.locator("#progress").get_attribute("aria-valuenow"),"100")
+        self.assertTrue(self.page.locator("#lightning-img").is_visible())
+        self.assertEqual(self.page.locator(".user-profile-name").inner_text(),"Dexter")
+        self.send(payment)
+        self.send({"type":"feeder_trigger","source_type":"feeder_confirmed","seq":2,"feed_credit_sats":10,"message":"Confirmed"})
+        self.assertTrue(self.page.locator("#feeder-triggered").is_visible())
+        self.assertFalse(self.page.locator("#sats-received-overlay").is_visible())
+        self.page.clock.fast_forward(4000)
+        self.assertEqual(self.page.locator("#credit").inner_text(),"10 sats credit")
+        self.assertEqual(self.page.locator("#progress").get_attribute("aria-valuenow"),"1")
+        self.assertFalse(self.page.locator("#feeder-triggered").is_visible())
+        self.assertEqual(self.errors,[])
+
+    def test_resume_suppresses_old_payment_notice_and_qr_swap(self):
+        self.snapshot(seq=2,credit=2)
+        self.page.evaluate("window.mockSocket.close()")
+        self.page.wait_for_function("window.socketUrls.length === 2")
+        self.send({"type":"resume","version":1,"stream_id":STREAM,"after":2,"through":3})
+        self.send({"type":"sats_received","source_type":"payment_received","seq":3,"feed_credit_sats":502,"amount_sats":500,"message":"Historical payment"})
+        self.snapshot(seq=3,credit=502)
+        self.assertFalse(self.page.locator("#lightning-img").is_visible())
+        self.assertFalse(self.page.locator("#sats-received-overlay").is_visible())
+        self.assertEqual(self.page.locator("#message").inner_text(),"")
+        self.assertEqual(self.page.locator("#credit").inner_text(),"502 sats credit")
+        self.assertEqual(self.errors,[])
+
+    def test_public_display_data_expires_and_status_cannot_overwrite_credit(self):
+        self.snapshot(credit=2)
+        observed = self.page.evaluate("new Date().toISOString()")
+        self.display_payload = {"weather":{"observed_at":observed,"temperature_f":65.66},
+            "market":{"observed_at":observed,"price_usd":75000,"change_24h_percent":-2}}
+        self.page.clock.run_for(16000)
+        self.assertEqual(self.page.locator("#current-temperature").inner_text(),"66 °F")
+        self.assertEqual(self.page.locator("#btc-price").inner_text(),"BTC: $75,000")
+        self.assertEqual(self.page.locator("#btc-change").inner_text(),"(24h: -2.00%)")
+        self.assertIn("btc-change-negative",self.page.locator("#btc-change").get_attribute("class"))
+        self.assertEqual(self.page.locator("#credit").inner_text(),"2 sats credit")
+        self.page.clock.run_for(30000)
+        self.assertIn("paused", self.page.locator("#feeding-state").inner_text())
+        self.page.clock.fast_forward(301000)
+        self.assertEqual(self.page.locator("#current-temperature").inner_text(),"-- °F")
+        self.assertEqual(self.page.locator("#btc-price").inner_text(),"BTC: --")
+        self.assertEqual(self.errors,[])
+
+    def test_future_roster_cards_are_bounded_sorted_safe_and_resettable(self):
+        self.snapshot()
+        members = [{"name":f"Member {i}","pubkey":str(i),"amount":i,"picture":"javascript:alert(1)"} for i in range(12)]
+        members[-1]["name"] = "<img src=x onerror=alert(1)>"
+        self.send({"type":"cyberherd_roster_updated","source_type":"cyberherd_roster_updated","seq":1,
+            "members":members,"newest_pubkey":"11"})
+        self.assertEqual(self.page.locator(".accordion-item").count(),10)
+        self.assertEqual(self.page.locator(".user-profile-name").first.inner_text(),"<img src=x onerror=alert(1)>")
+        self.assertEqual(self.page.locator(".accordion-item[data-newest=true]").count(),1)
+        self.assertEqual(self.page.locator(".user-profile-name img").count(),0)
+        self.assertTrue(self.page.locator(".accordion-content img").first.get_attribute("src").endswith("lightninggoatslogo1.png"))
+        self.send({"type":"cyberherd_daily_reset","source_type":"cyberherd_daily_reset","seq":2})
+        self.assertEqual(self.page.locator(".accordion-item").count(),0)
+        self.assertEqual(self.errors,[])
+
+
+    def test_actual_logo_branded_qr_decodes_at_obs_size(self):
+        import io
+        from PIL import Image
+        import zxingcpp
+        self.snapshot()
+        self.page.wait_for_function("document.querySelector('#qr-brand img').naturalWidth > 0")
+        image = Image.open(io.BytesIO(self.page.locator("#qr-code").screenshot()))
+        decoded = zxingcpp.read_barcode(image)
+        self.assertIsNotNone(decoded, "180px QR with the center logo must remain scannable")
+        self.assertEqual(decoded.text, self.page.locator("#qr-code").get_attribute("data-lnurl"))
+
+    def test_two_confirmations_preserve_absolute_remainder_during_visual_drain(self):
+        self.snapshot(credit=2340)
+        for sequence, credit in [(1,1340),(2,340)]:
+            self.send({"type":"feeder_trigger","source_type":"feeder_confirmed","seq":sequence,
+                       "feed_credit_sats":credit,"message":"Confirmed."})
+        self.page.clock.run_for(3000)
+        self.assertTrue(self.page.locator("#feeder-triggered").is_visible())
+        self.assertEqual(self.page.locator("#credit").inner_text(),"340 sats credit")
+        self.page.clock.run_for(3000)
+        self.assertFalse(self.page.locator("#feeder-triggered").is_visible())
+        self.assertEqual(self.page.locator("#credit").inner_text(),"340 sats credit")
+        self.assertEqual(self.page.locator("#progress").get_attribute("aria-valuenow"),"34")
+        self.assertEqual(self.errors,[])

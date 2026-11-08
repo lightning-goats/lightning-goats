@@ -25,6 +25,8 @@ REQUIRED = BINARIES | {
     "docs/deployment/deployment-artifacts.md",
     "web/index.html", "web/chat.js", "web/site.js", "web/site-config.js",
     "web/feed.html", "web/overlay.html", "web/overlay.js", "web/overlay.css",
+    "web/nip05.json", "deploy/nginx/lightning-goats-nip05.conf.example",
+    "deploy/nginx/lightning-goats-address-alias.conf.example",
     "web/vendor/nostr.bundle.js", "web/vendor/bootstrap.min.css",
     "web/images/preview-image.png", "web/images/lightninggoatslogo1.png",
 }

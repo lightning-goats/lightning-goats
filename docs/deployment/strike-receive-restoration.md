@@ -121,3 +121,37 @@ The actual source SHA, archive/binary hashes, backup location and installed
 configuration are recorded by the root-owned `RECEIVE-INSTALL.json`. Final live
 acceptance must additionally record route/overlay/HMAC/WAF checks, subscription
 readback, restart behavior, and any operator-observed payment or feed results.
+
+## Live corrections and operator scope additions
+
+The initial public proxy check exposed Fedora's default SELinux label for TCP
+8787 (`jboss_debug_port_t`). The host already persistently enables the restricted
+`httpd_can_network_relay` policy. Mapping 8787 to `http_port_t` restored nginx
+access without enabling broad `httpd_can_network_connect`. The obsolete local
+HTTP label override for LNbits TCP 3002 was removed. The installer now records
+the required 8787 mapping for repeatable installation.
+
+The first actual LNURL invoice request exposed Strike's one-second expiration
+rounding: requested 300 seconds, signed BOLT11 tag 299 seconds, with the correct
+description hash. Verification now accepts only exact expiry or one second less,
+never zero, any longer duration, more than one second of shortening, an expired
+invoice, or excessive future skew. Signature/network/amount/hash checks remain
+unchanged. Signed synthetic regressions cover the boundary and late settlement.
+
+The operator requested `herd@lnb.bolverker.com` and the corresponding configured
+goat names as aliases. The alias snippet forwards only the native LNURL routes
+to the same daemon; discovery retains canonical `lightning-goats.com` callbacks,
+recipient username attribution and shared herd credit. Retired generic LNbits,
+NIP-05 signup and relay/admin paths stay closed. No DNS change is needed.
+
+The operator separately approved static NIP-05 for all six canonical usernames,
+with each goat's existing repository profile rather than mapping all names to
+herd. `web/nip05.json` contains public keys only. nginx serves it directly as JSON
+with CORS and no redirect at `/.well-known/nostr.json?name=<user>`. This narrow
+scope supersedes the older NIP-05 deferral without restoring signup/backend code
+or authorizing Nostr profile changes. All six mappings passed live TLS/JSON/CORS
+readback and the operator independently confirmed NIP-05 works.
+
+The webhook was enabled only after the actual unsigned-401/signed-incomplete-400
+preflight succeeded. Registration and delivery authorization are distinct from a
+genuine completed-payment notification, which remains an operator test.

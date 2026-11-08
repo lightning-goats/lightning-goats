@@ -155,6 +155,7 @@ def main():
             write("/etc/nginx/lightning-goats-waf.conf", waf)
             snippets = directory("/etc/nginx/snippets")
             install(payload / "deploy/nginx/lightning-goats-production.conf.example", snippets / "lightning-goats-production.conf")
+            install(payload / "deploy/nginx/lightning-goats-nip05.conf.example", snippets / "lightning-goats-nip05.conf")
             stage = directory("/etc/lightning-goats/nginx-staged", 0o700)
             common = (payload / "deploy/nginx/lightning-goats-http.conf.example").read_text()
             common += '\nlog_format lightning_goats_private "$time_iso8601 $request_method $status $bytes_sent $request_time";\n'
@@ -191,13 +192,16 @@ server {{
     index index.html;
     include /etc/nginx/snippets/lightning-goats-production.conf;
     location ^~ /.well-known/acme-challenge/ {{ root /var/www/letsencrypt; try_files $uri =404; }}
-    location = /.well-known/nostr.json {{ return 404; }}
+    include /etc/nginx/snippets/lightning-goats-nip05.conf;
     location ~ ^/(leaderboard|extensions)(/|$) {{ return 404; }}
     location ~ /\\. {{ deny all; }}
     location / {{ limit_except GET {{ deny all; }} try_files $uri $uri/ =404; }}
 }}
 '''
             write(stage / "lightning-goats.com.conf", site)
+            # Fedora labels 8787 as JBoss debug by default. nginx's restricted
+            # relay boolean permits connections only to appropriate port types.
+            run("semanage", "port", "-m", "-t", "http_port_t", "-p", "tcp", "8787")
             # Validate the proposed complete host config without touching active conf.d.
             proposed = temp / "conf.d"
             shutil.copytree("/etc/nginx/conf.d", proposed)

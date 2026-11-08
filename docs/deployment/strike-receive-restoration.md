@@ -154,4 +154,52 @@ readback and the operator independently confirmed NIP-05 works.
 
 The webhook was enabled only after the actual unsigned-401/signed-incomplete-400
 preflight succeeded. Registration and delivery authorization are distinct from a
-genuine completed-payment notification, which remains an operator test.
+genuine completed-payment notification; subsequent live evidence is recorded below.
+
+## Invoice correction and live payment acceptance
+
+The bounded-expiry correction was built and packaged from
+`6f47c8c4cf69e75198c0de50a970cc2624d5e386`. Release
+`v0.1.0-strike-20261108-r2` has archive SHA256
+`31c9fbb14ee8f5aa6ec5fccd7126f99727ca0172945c7e0804da21e88b774ba1`;
+the installed daemon SHA256 is
+`6347340f8a6dd7510bfeb26166506a7104f8c21e9a91d8c187f4d9ec6c4b177e`.
+Archive completeness, all payload checksums, source identity and all three binary
+help commands passed. `upgrade-strike-receive.py --apply` quiesced the daemon,
+retained a private state/config/binary backup at
+`/var/backups/lightning-goats/receive-upgrade-20261108T215018Z`, checked SQLite
+integrity and replaced only the daemon/CLI. Existing configuration, database and
+shadow mode were preserved. The root-owned install record retains both releases.
+
+Both canonical and alias public callbacks returned fresh unpaid 1-sat mainnet
+invoices with signed 299-second expiry and the correct discovery metadata hash.
+All twelve address discovery routes retained canonical callbacks. Unknown users,
+invalid amounts, callback HEAD, WAF enforcement, static NIP-05/CORS and the live
+HMAC rejection/recognition checks passed. Independent Strike subscription
+readback confirmed delivery enabled. Runtime and firewall units are active;
+installed binaries/config are root-owned, the daemon runs as the dedicated
+non-admin identity, and full installed nginx syntax validation passed.
+
+The operator then sent 1 sat to `herd@lightning-goats.com` and confirmed receipt
+in Strike. Read-only ledger verification established exactly one Strike
+settlement for `address_user=herd`, `credit_pool=herd`, amount 1000 msat, one
+`HERD_RECEIPT` credit of 1 sat and one atomic `payment_received` event. The
+authenticated webhook inbox item completed. Two explicit signed redeliveries of
+that same completed notification both returned 204 and left the settlement,
+ledger, event and inbox counts at one. Credit remains 1 sat; feed attempts remain
+zero. This establishes live receive/notification/credit/replay acceptance for the
+tested address, not physical, signer, paid-state restore or all-account P2P
+acceptance. No new physical UUID was submitted and public Nostr remains disabled.
+The actual public OBS page was also checked in Chromium over trusted TLS: its
+WebSocket connected, displayed the live 1-sat ledger credit and queued no feed.
+
+Final correction checks: formatting and strict locked Clippy passed; the complete
+locked all-features Rust suite passed 241 tests, with the dedicated real-nak
+namespace case still explicitly ignored. Test/debug symbol generation was disabled
+through `CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0` to reuse the VPS's
+low-memory build profile; assertions and test coverage were unchanged. One earlier
+run under concurrent compilation failed the existing subprocess PID-readiness
+test; both its independent rerun and this complete rerun passed. Seven archive
+regressions passed. The advisory gate passed with the documented RSA exception,
+and the locked all-features reverse dependency check confirmed RSA remains
+unreachable. No live signer or physical acceptance is implied by these results.

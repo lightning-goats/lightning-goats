@@ -183,3 +183,12 @@ feed through this service still needs operator observation on a later threshold
 crossing; activation, synthetic animation tests and prior gateway-only physical
 tests are not substituted for that observation. Public Nostr remains disabled
 pending its separate isolated signer/client setup.
+
+## Progress-track appearance — operator follow-up
+
+The operator requested removal of the progress-bar background flashing. The
+continuous `container-glow`, fill brightness pulse and striped-flow animations
+inherited from the supplied overlay were removed. The idle track and fill are
+steady; progress updates, scrolling messages and confirmed-feed effects retain
+their existing behavior. The stylesheet cache version is bumped so refreshing
+the OBS source loads the correction.

@@ -9,6 +9,7 @@ Never changes physical Items, sends production requests or resets any database.
 import argparse
 import base64
 from concurrent.futures import ThreadPoolExecutor
+from decimal import Decimal, InvalidOperation
 import hashlib
 import importlib.util
 import json
@@ -27,6 +28,17 @@ ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location('canary', ROOT / 'deploy/scripts/prepare-home-openhab-canary.py')
 canary = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(canary)
+
+
+def command_count(raw):
+    # OpenHAB Number Items may render an integral count as e.g. "6.0".
+    try:
+        value = Decimal(raw)
+    except InvalidOperation:
+        raise ValueError('invalid canary command count') from None
+    if not value.is_finite() or value < 0 or value > 2**53 - 1 or value != value.to_integral_value():
+        raise ValueError('invalid canary command count')
+    return int(value)
 
 
 def verify_other_consumers(oh):
@@ -73,7 +85,7 @@ def apply(env):
             return {'http': response.code, 'body': json.loads(response.read())}
 
     def count():
-        return int(oh('items/LightningGoatsCanaryCount/state'))
+        return command_count(oh('items/LightningGoatsCanaryCount/state'))
 
     def feed(request_id):
         response = gateway('v1/feeder/request/' + request_id, 'POST')

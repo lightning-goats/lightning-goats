@@ -89,6 +89,15 @@ class ProvisioningFileTests(unittest.TestCase):
 
 
 class CanaryTargetTests(unittest.TestCase):
+    def test_openhab_decimal_count_preserves_duplicate_detection(self):
+        checker = load('check-home-canary')
+        for raw, expected in [('0', 0), ('6.0', 6), ('7.00', 7), ('9007199254740991', 2**53 - 1)]:
+            with self.subTest(raw=raw):
+                self.assertEqual(checker.command_count(raw), expected)
+        for raw in ('6.1', '-1', 'NaN', 'Infinity', 'NULL', 'UNDEF', '', '9007199254740992'):
+            with self.subTest(raw=raw), self.assertRaises(ValueError):
+                checker.command_count(raw)
+
     def test_alternate_origin_and_database_fail_before_service_or_http(self):
         checker = load('check-home-canary')
         config, unit = safety.canonical_files()

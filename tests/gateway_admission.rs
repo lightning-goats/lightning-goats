@@ -112,6 +112,17 @@ async fn gateway_protocol(
     index: usize,
     owner_v1: bool,
 ) -> (Process, String) {
+    gateway_limits(directory, owner_url, index, owner_v1, 5, 60).await
+}
+
+async fn gateway_limits(
+    directory: &impl AsRef<std::path::Path>,
+    owner_url: &str,
+    index: usize,
+    owner_v1: bool,
+    interval: i64,
+    hourly_cap: i64,
+) -> (Process, String) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     drop(listener);
@@ -124,6 +135,8 @@ async fn gateway_protocol(
     )
     .into();
     config["openhab"]["url"] = owner_url.into();
+    config["feeder"]["min_feed_interval_seconds"] = interval.into();
+    config["feeder"]["max_feeds_per_hour"] = hourly_cap.into();
     if owner_v1 {
         config["openhab"]["protocol"] = "feeder_request_v1".into();
     }
@@ -158,6 +171,80 @@ async fn gateway_protocol(
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     panic!("gateway did not start");
+}
+
+#[tokio::test]
+async fn two_second_unlimited_gateway_preserves_interval_and_replay_after_restart() {
+    let owner = Owner {
+        auto_ack: true,
+        ..Owner::default()
+    };
+    let (mock, owner_url) = mock_owner(owner.clone()).await;
+    let directory = TempDir::new().unwrap();
+    let (first, base) = gateway_limits(&directory, &owner_url, 1, false, 2, 0).await;
+    let pool = sqlx::SqlitePool::connect(&format!(
+        "sqlite://{}",
+        directory.path().join("gateway.db").display()
+    ))
+    .await
+    .unwrap();
+    for _ in 0..61 {
+        sqlx::query("INSERT INTO feeder_requests(request_id,status,created_at,updated_at) VALUES (?, 'acknowledged', unixepoch()-3, unixepoch()-3)")
+            .bind(Uuid::new_v4().to_string()).execute(&pool).await.unwrap();
+    }
+    let client = Client::new();
+    let id = Uuid::new_v4();
+    for _ in 0..2 {
+        let response = client
+            .post(format!("{base}/v1/feeder/request/{id}"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        assert_eq!(
+            response.json::<serde_json::Value>().await.unwrap()["status"],
+            "confirmed"
+        );
+    }
+    assert_eq!(owner.commands.lock().unwrap().len(), 1);
+    assert_eq!(
+        client
+            .post(format!("{base}/v1/feeder/request/{}", Uuid::new_v4()))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        429
+    );
+    assert_eq!(owner.commands.lock().unwrap().len(), 1);
+    drop(first);
+    let (_second, base) = gateway_limits(&directory, &owner_url, 2, false, 2, 0).await;
+    assert_eq!(
+        client
+            .post(format!("{base}/v1/feeder/request/{id}"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        200
+    );
+    assert_eq!(owner.commands.lock().unwrap().len(), 1);
+    // Advance only disposable fixture history to the two-second boundary.
+    sqlx::query("UPDATE feeder_requests SET updated_at=unixepoch()-2")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        client
+            .post(format!("{base}/v1/feeder/request/{}", Uuid::new_v4()))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        200
+    );
+    assert_eq!(owner.commands.lock().unwrap().len(), 2);
+    mock.abort();
 }
 
 #[tokio::test]

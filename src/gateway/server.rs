@@ -119,13 +119,13 @@ impl GatewayServerConfig {
         if self.feeder.ack_poll_milliseconds < 50 || self.feeder.ack_poll_milliseconds > 5_000 {
             bail!("gateway feeder.ack_poll_milliseconds must be between 50 and 5000");
         }
-        if self.feeder.min_feed_interval_seconds < 5
+        if self.feeder.min_feed_interval_seconds < 2
             || self.feeder.min_feed_interval_seconds > 86_400
         {
-            bail!("gateway feeder.min_feed_interval_seconds must be between 5 and 86400");
+            bail!("gateway feeder.min_feed_interval_seconds must be between 2 and 86400");
         }
-        if self.feeder.max_feeds_per_hour == 0 || self.feeder.max_feeds_per_hour > 60 {
-            bail!("gateway feeder.max_feeds_per_hour must be between 1 and 60");
+        if self.feeder.max_feeds_per_hour > 60 {
+            bail!("gateway feeder.max_feeds_per_hour must be 0 (unlimited) or between 1 and 60");
         }
         Ok(())
     }
@@ -452,10 +452,18 @@ mod tests {
     #[test]
     fn rejects_unsafe_local_rate_configuration() {
         let mut interval_config = config();
-        interval_config.feeder.min_feed_interval_seconds = 0;
+        interval_config.feeder.min_feed_interval_seconds = 1;
         assert!(interval_config.validate().is_err());
         let mut rate_config = config();
-        rate_config.feeder.max_feeds_per_hour = 0;
+        rate_config.feeder.max_feeds_per_hour = 61;
         assert!(rate_config.validate().is_err());
+    }
+
+    #[test]
+    fn accepts_two_second_interval_without_hourly_cap() {
+        let mut config = config();
+        config.feeder.min_feed_interval_seconds = 2;
+        config.feeder.max_feeds_per_hour = 0;
+        config.validate().unwrap();
     }
 }

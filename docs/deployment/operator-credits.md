@@ -113,3 +113,28 @@ Clippy, 250 Rust tests with the dedicated real-nak namespace case explicitly
 ignored, all 18 mocked browser tests and 126 deployment cases with five existing
 skips. The security gate passed and RSA remains unreachable under the documented
 exception. No production grant or real feeding was used to produce this evidence.
+
+## Installed acceptance — 2026-11-08
+
+Source `be2598306cb7c6aae7ea99759aafc05172c512e3` was packaged with SHA256
+`f4adb1c7569543877b044765dbc85dd259c47426a86808d541df42b12cf8cede`.
+Before installation, a consistent root-private copy of the live schema-11 ledger
+was upgraded in a network-isolated namespace. Preview preserved all prior row
+fingerprints; a private-copy grant/retry produced one addition and preserved
+provider receipts/feed state. The copy was removed after the rehearsal. No
+production credit was granted during that test.
+
+The paired production binary/wrapper upgrade retained a private backup at
+`/var/backups/lightning-goats/receive-upgrade-20261108T230435Z`; the matching static
+update retained `/var/backups/lightning-goats/obs-20261108T230521Z`. The root-owned
+receive/overlay install records retain the source, archive and binary hashes.
+The daemon migrated to schema 12 and remained in canary mode with the existing
+1000-sat threshold, 3 sats real credit, three provider settlements and no unresolved
+feed/physical attempt. Both production wrapper dry runs (1000 sats and 9 sats)
+returned preview, with announcement eligibility true and false respectively.
+The operator-grant audit table remained empty and credit stayed 3 sats. The
+wrapper and CLI are root-owned 0755; the database remained runtime-owned 0600.
+No grant or feeder command was submitted by the deployment agent. The public
+page serves the v4 client; existing OBS browser sources need one refresh to load
+new JavaScript. Real operator-command feeding and later public Nostr observations
+remain distinct from this deployment verification.

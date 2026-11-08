@@ -262,10 +262,14 @@
         if (!replaying && data.type !== "event_skipped") {
             const kind = data.source_type || data.type;
             if (typeof kind !== "string" || kind.length > 80) return resetConnection();
+            const isPayment = kind === "payment_received" || kind === "operator_credit_added";
+            // Match the server's per-credit announcement threshold. Progress
+            // still advances for sub-threshold payments and replay skip markers.
+            if (isPayment && (!integer(data.amount_sats) || data.amount_sats < 10)) { seq = data.seq; return; }
             if (kind === "weather_status") acceptWeather(data.data, data.message);
             else addMessage(data.message);
             if (Array.isArray(data.goats)) showCards(data.goats);
-            if (kind === "payment_received" && integer(data.amount_sats) && data.amount_sats > 0) {
+            if (isPayment) {
                 if (payments.length >= 12) payments.shift();
                 payments.push(data.amount_sats); toggleQr(); showPayment();
             }

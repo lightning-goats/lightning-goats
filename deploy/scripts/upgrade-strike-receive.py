@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Upgrade only the receive daemon/CLI, retaining configuration and all paid state.
+"""Upgrade receive binaries and the local operator wrapper, retaining all paid state.
 
 Default verifies and prints a plan. --apply stops the daemon, backs up state,
 replaces root-owned binaries, records provenance, then restarts the same mode.
@@ -88,6 +88,15 @@ def main():
             run("restorecon", str(pending))
             os.replace(pending, target)
             run("restorecon", str(target))
+        wrapper = Path("/usr/local/bin/lg-credit")
+        if wrapper.is_symlink():
+            raise ValueError("unexpected operator wrapper symlink")
+        if wrapper.exists():
+            shutil.copy2(wrapper, backup / "lg-credit")
+        shutil.copyfile(payload / "deploy/scripts/lg-credit", wrapper)
+        wrapper.chmod(0o755)
+        os.chown(wrapper, 0, 0)
+        run("restorecon", str(wrapper))
         if config_path.read_bytes() != config_bytes:
             raise ValueError("configuration changed during upgrade; service remains stopped")
         record = {"source": args.source, "archive_sha256": args.sha256,

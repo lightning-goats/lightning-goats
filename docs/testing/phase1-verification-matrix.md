@@ -116,3 +116,12 @@ result, concrete failures, enabled modes and still-untested features is enough. 
 sensitive payment/account details private. Leave unverified items open without making
 each one a launch gate. Previous exhaustive matrix/history is retained in Git at
 `df6be90f1b0505d183643ec55a298b382cd43b6c` and in existing audit/testing records.
+
+## Local operator credits — 2026-11-08
+
+The operator-approved local grant path and per-event 10-sat announcement threshold
+are specified in [operator-credits.md](../deployment/operator-credits.md). Validate
+atomic/idempotent grants independently from provider settlement, plus concurrent
+retry, exact feed debit through the existing override, 9/10-sat overlay and Nostr
+boundaries, and preserved real paid state during deployment. Isolated grant/feeder
+fixtures are not evidence of a live Lightning payment or physical feeding.

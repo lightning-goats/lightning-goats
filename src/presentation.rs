@@ -7,6 +7,8 @@ use sha2::{Digest, Sha256};
 
 use crate::ledger::DurableEvent;
 
+pub const PAYMENT_MESSAGE_MIN_SATS: u64 = 10;
+
 const EMBEDDED_TEMPLATES: &str = include_str!("../templates/phase1.toml");
 
 #[derive(Clone)]
@@ -96,7 +98,9 @@ impl MessageRenderer {
             .context("durable event payload must be a JSON object")?;
 
         match event.event_type.as_str() {
-            "payment_received" => self.render_payment(event, object, threshold_sats),
+            "payment_received" | "operator_credit_added" => {
+                self.render_payment(event, object, threshold_sats)
+            }
             "feeder_confirmed" => self.render_feeder(event, object, threshold_sats),
             "interface_info" => self.render_interface_info(event),
             "weather_status" => self.render_weather(object),
@@ -111,6 +115,9 @@ impl MessageRenderer {
         threshold_sats: u64,
     ) -> Result<RenderedPresentation> {
         let amount = required_u64(payload, "amount_sats")?;
+        if amount < PAYMENT_MESSAGE_MIN_SATS {
+            return Ok(RenderedPresentation::empty());
+        }
         let credit = required_u64(payload, "feed_credit_sats")?;
         let address_user = payload
             .get("address_user")
@@ -407,6 +414,34 @@ mod tests {
         assert_eq!(rendered.overlay_goats[0].name, "Dexter");
         assert!(rendered.overlay_message.unwrap().contains("Dexter"));
         assert!(rendered.nostr_content.unwrap().contains("nostr:nprofile1"));
+    }
+
+    #[test]
+    fn payment_minimum_applies_to_provider_and_operator_messages_without_test_labels() {
+        let renderer = MessageRenderer::embedded().unwrap();
+        for kind in ["payment_received", "operator_credit_added"] {
+            for amount in [1, 9, 10, 11] {
+                let rendered = renderer
+                    .render(
+                        &event(
+                            42,
+                            kind,
+                            json!({
+                                "amount_sats":amount,"feed_credit_sats":1000,"address_user":"dexter"
+                            }),
+                        ),
+                        1000,
+                    )
+                    .unwrap();
+                assert_eq!(rendered.overlay_message.is_some(), amount >= 10);
+                assert_eq!(rendered.nostr_content.is_some(), amount >= 10);
+                if let Some(message) = rendered.overlay_message {
+                    assert!(!message.contains("TEST"));
+                    assert!(!message.contains("operator"));
+                    assert!(message.contains("Dexter"));
+                }
+            }
+        }
     }
 
     #[test]

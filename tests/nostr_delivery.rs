@@ -271,3 +271,63 @@ async fn failed_publication_reopens_and_retries_exact_persisted_event_without_re
     assert_eq!(publications[0]["payload"], publications[1]["payload"]);
     assert_eq!(publications[0]["payload"]["id"], saved.event_id);
 }
+
+#[tokio::test]
+async fn below_minimum_never_signs_and_operator_credit_uses_normal_outbox() {
+    let fixture = Fixture::new("success");
+    let ledger = LedgerStore::connect(&fixture.database()).await.unwrap();
+    let renderer = MessageRenderer::embedded().unwrap();
+    for kind in ["payment_received", "operator_credit_added"] {
+        ledger
+            .append_event(
+                kind,
+                &json!({"amount_sats":9,"feed_credit_sats":9,"address_user":"herd"}),
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            process_next_message(
+                &ledger,
+                Some(&fixture.client()),
+                &renderer,
+                1000,
+                RuntimeMode::Active
+            )
+            .await
+            .unwrap(),
+            lightning_goats::messaging::MessageProcessorStep::NonPublicSkipped { .. }
+        ));
+    }
+    assert!(fixture.trace().is_empty());
+    assert!(ledger.next_outbox_entry().await.unwrap().is_none());
+    ledger
+        .append_event(
+            "operator_credit_added",
+            &json!({"amount_sats":10,"feed_credit_sats":19,"address_user":"dexter"}),
+        )
+        .await
+        .unwrap();
+    process_next_message(
+        &ledger,
+        Some(&fixture.client()),
+        &renderer,
+        1000,
+        RuntimeMode::Active,
+    )
+    .await
+    .unwrap();
+    let outbox = ledger.next_outbox_entry().await.unwrap().unwrap();
+    let signed: Value = serde_json::from_str(&outbox.signed_event_json).unwrap();
+    let message = signed["content"].as_str().unwrap();
+    assert!(message.contains("10"));
+    assert!(!message.contains("TEST"));
+    assert!(!message.contains("operator"));
+    assert_eq!(
+        fixture
+            .trace()
+            .iter()
+            .filter(|call| call["phase"] == "sign")
+            .count(),
+        1
+    );
+}

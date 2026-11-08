@@ -5,6 +5,8 @@ The operator-directed 2026-11-08 Strike restoration is recorded in
 including exact API scopes, webhook staging, WAF and payment-only deployment.
 The operator-supplied OBS layout and its current data/QR contracts are documented
 in [`deployment/obs-overlay-restoration.md`](deployment/obs-overlay-restoration.md).
+Local CLI grants and the 10-sat message threshold are documented in
+[`deployment/operator-credits.md`](deployment/operator-credits.md).
 
 ## Current delivery order — 2026-09-17
 

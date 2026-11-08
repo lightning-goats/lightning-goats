@@ -15,7 +15,9 @@ use crate::domain::payment::SettledPayment;
 
 mod events;
 mod feed;
+mod operator_credit;
 mod outbox;
+pub use operator_credit::{OperatorCreditGrant, OperatorCreditResult, OperatorCreditStatus};
 mod overlay;
 mod strike;
 pub use events::DurableEvent;

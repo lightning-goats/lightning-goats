@@ -256,3 +256,23 @@ class OverlayBrowserTests(unittest.TestCase):
         self.assertEqual(self.page.locator("#feeding-state").inner_text(),"")
         self.assertEqual(self.page.locator("#credit").inner_text(),"3 sats credit")
         self.assertEqual(self.errors,[])
+
+
+    def test_small_credits_update_progress_but_suppress_all_payment_effects(self):
+        self.snapshot(credit=3)
+        self.send({"type":"sats_received","source_type":"payment_received","seq":1,
+            "amount_sats":9,"feed_credit_sats":12,"message":"Too small to announce", "goats":[{"name":"Dexter"}]})
+        self.assertEqual(self.page.locator("#credit").inner_text(),"12 sats credit")
+        self.assertFalse(self.page.locator("#sats-received-overlay").is_visible())
+        self.assertFalse(self.page.locator("#lightning-img").is_visible())
+        self.assertEqual(self.page.locator("#message").inner_text(),"")
+        self.assertEqual(self.page.locator(".accordion-item").count(),0)
+        self.send({"type":"event_skipped","source_type":"operator_credit_added","seq":2,"feed_credit_sats":21})
+        self.assertEqual(self.page.locator("#credit").inner_text(),"21 sats credit")
+        self.send({"type":"sats_received","source_type":"operator_credit_added","seq":3,
+            "amount_sats":10,"feed_credit_sats":31,"message":"10 sats received!","goats":[{"name":"Dexter"}]})
+        self.assertTrue(self.page.locator("#sats-received-overlay").is_visible())
+        self.assertEqual(self.page.locator("#sats-received-overlay").inner_text(),"⚡ 10 sats ⚡")
+        self.assertTrue(self.page.locator("#lightning-img").is_visible())
+        self.assertEqual(self.page.locator(".user-profile-name").inner_text(),"Dexter")
+        self.assertEqual(self.errors,[])

@@ -1,0 +1,100 @@
+# Non-secret Lightning Goats production configuration.
+# Secrets are loaded through systemd credentials, not this file.
+
+[service]
+listen = "127.0.0.1:8787"
+# Use shadow during production ingress verification. Change to active only after
+# the operator-gated cutover acceptance checks pass.
+mode = "shadow"
+
+[database]
+url = "sqlite:///var/lib/lightning-goats/lightning-goats.db"
+
+# Runtime API key must have only:
+#   partner.receive-request.create
+#   partner.receive-request.read
+[strike]
+api_url = "https://api.strike.me/"
+
+[lnurl]
+public_base_url = "https://lightning-goats.com/"
+invoice_expiry_seconds = 300
+
+[[lightning_address]]
+user = "herd"
+display_name = "Lightning Goats"
+description = "Feed the Lightning Goats"
+credit_pool = "herd"
+min_sendable_msat = 1000
+max_sendable_msat = 1000000000
+
+[[lightning_address]]
+user = "dexter"
+display_name = "Dexter"
+description = "Feed Dexter and the Lightning Goats"
+credit_pool = "herd"
+min_sendable_msat = 1000
+max_sendable_msat = 1000000000
+
+[[lightning_address]]
+user = "rowan"
+display_name = "Rowan"
+description = "Feed Rowan and the Lightning Goats"
+credit_pool = "herd"
+min_sendable_msat = 1000
+max_sendable_msat = 1000000000
+
+[[lightning_address]]
+user = "cosmo"
+display_name = "Cosmo"
+description = "Feed Cosmo and the Lightning Goats"
+credit_pool = "herd"
+min_sendable_msat = 1000
+max_sendable_msat = 1000000000
+
+[[lightning_address]]
+user = "newton"
+display_name = "Newton"
+description = "Feed Newton and the Lightning Goats"
+credit_pool = "herd"
+min_sendable_msat = 1000
+max_sendable_msat = 1000000000
+
+[[lightning_address]]
+user = "nova"
+display_name = "Nova"
+description = "Feed Nova and the Lightning Goats"
+credit_pool = "herd"
+min_sendable_msat = 1000
+max_sendable_msat = 1000000000
+
+[feeder]
+threshold_sats = 1000
+inter_feed_delay_seconds = 30
+
+# This is the ONLY trusted-side origin available to lightning-goatsd. The VPS
+# holds no OpenHAB credential and must be firewalled from direct 10.8.0.6
+# OpenHAB/weather/SSH access.
+[gateway]
+url = "http://10.8.0.6:8789/"
+
+# Preserve current Lightning Goats extension presentation cadence: one
+# informational evaluation every 60 seconds, interface info considered first,
+# at most one message per cycle, 40% unconditional chance for each category.
+[informational]
+interval_seconds = 60
+interface_info_enabled = false
+weather_enabled = false
+interface_info_probability = 0.4
+weather_probability = 0.4
+
+[nostr]
+nak_path = "/usr/local/bin/nak"
+nak_config_path = "/run/lightning-goats/nak"
+# Operator-approved payment/feed announcement identity, 2026-09-12.
+bunker_pubkey = "669ebbcccf409ee0467a33660ae88fd17e5379e646e41d7c236ff4963f3c36b6"
+relays = [
+  "wss://relay-nwc-dev.rizful.com/v1",
+  "wss://relay.primal.net",
+  "wss://relay.damus.io",
+]

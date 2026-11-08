@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lightning Goats OBS overlay</title>
+  <link rel="stylesheet" href="/overlay.css">
+  <script src="/overlay.js" defer></script>
+</head>
+<body>
+  <main aria-label="Lightning Goats feed progress">
+    <header><strong>⚡ Lightning Goats</strong><span id="connection">Connecting…</span></header>
+    <div class="amount"><span id="credit">—</span><span id="due"></span></div>
+    <div id="progress" role="progressbar" aria-label="Credit toward next feeding" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="fill"></div></div>
+    <p id="target">Waiting for ledger state</p>
+    <p id="message" aria-live="polite"></p>
+    <p id="weather"></p>
+  </main>
+</body>
+</html>

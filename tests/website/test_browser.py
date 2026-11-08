@@ -110,7 +110,7 @@ class WebsiteBrowserTests(unittest.TestCase):
         self.page.close()
         self.page = self.context.new_page()
         self.page.on("pageerror", lambda error: self.errors.append(str(error)))
-        self.page.goto(ORIGIN, wait_until="domcontentloaded", timeout=120000)
+        self.page.goto(ORIGIN + "/feed.html", wait_until="domcontentloaded", timeout=120000)
 
     def submit(self):
         self.page.evaluate("document.getElementById('feedForm').dispatchEvent(new Event('submit', {cancelable: true}))")
@@ -172,7 +172,7 @@ class WebsiteBrowserTests(unittest.TestCase):
                                                 f"{ORIGIN}/lnurlp/{user}/callback?amount=1000000"])
                 self.assertEqual(self.page.locator("#invoiceText").input_value(), INVOICE)
                 self.assertEqual(self.page.locator("#invoiceWallet").get_attribute("href"), "lightning:" + INVOICE)
-                self.assertEqual(self.page.url, ORIGIN + "/")
+                self.assertEqual(self.page.url, ORIGIN + "/feed.html")
                 self.page.eval_on_selector("#feedAmount", "e => { e.value = '2000'; e.dispatchEvent(new Event('input')); }")
                 self.assertEqual(self.page.locator("#invoiceText").input_value(), "")
                 self.assertIsNone(self.page.locator("#invoiceWallet").get_attribute("href"))

@@ -198,7 +198,10 @@ fn app(state: AppState) -> Router {
             post(strike_webhook).layer(DefaultBodyLimit::max(MAX_STRIKE_WEBHOOK_BODY)),
         )
         .route("/.well-known/lnurlp/{user}", get(lnurl_discovery))
-        .route("/lnurlp/{user}/callback", get(lnurl_callback))
+        .route(
+            "/lnurlp/{user}/callback",
+            get(lnurl_callback).head(|| async { StatusCode::METHOD_NOT_ALLOWED }),
+        )
         .route("/ws/overlay", get(overlay_ws))
         .with_state(state)
         .layer(middleware::from_fn_with_state(
@@ -501,6 +504,24 @@ mod tests {
             .timeout(Duration::from_secs(2))
             .build()
             .unwrap();
+        // Axum normally runs GET handlers for HEAD. A probe must never issue
+        // a provider invoice or consume the durable invoice admission budget.
+        assert_eq!(
+            client
+                .head(format!("http://{address}/lnurlp/herd/callback?amount=1000"))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::METHOD_NOT_ALLOWED
+        );
+        let pool = sqlx::SqlitePool::connect(&db).await.unwrap();
+        let admissions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM invoice_admissions")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(admissions, 0);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
         let body = serde_json::json!({"id":uuid::Uuid::new_v4(),"eventType":"receive-request.receive-completed","webhookVersion":"v1","data":{"entityId":uuid::Uuid::new_v4(),"receiveId":uuid::Uuid::new_v4()}}).to_string();
         let signature = |body: &str| {
             let mut mac = Hmac::<Sha256>::new_from_slice(b"synthetic-webhook-secret").unwrap();

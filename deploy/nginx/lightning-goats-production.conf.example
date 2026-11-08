@@ -13,11 +13,13 @@ location ~ "^/\.well-known/lnurlp/[a-z0-9._-]{1,64}$" {
     proxy_set_header X-Forwarded-Proto $scheme;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     add_header Access-Control-Allow-Origin "*" always;
+    add_header Cache-Control "no-store" always;
 }
 
 # LUD-06 invoice callback. This is the endpoint which can create a Strike
 # receive request, so it uses a substantially tighter edge rate limit.
 location ~ "^/lnurlp/[a-z0-9._-]{1,64}/callback$" {
+    if ($request_method = HEAD) { return 405; }
     limit_except GET { deny all; }
     limit_req zone=lightning_goats_lnurl_invoice burst=6 nodelay;
     proxy_pass http://lightning_goats_backend;
@@ -25,6 +27,7 @@ location ~ "^/lnurlp/[a-z0-9._-]{1,64}/callback$" {
     proxy_set_header X-Forwarded-Proto $scheme;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     add_header Access-Control-Allow-Origin "*" always;
+    add_header Cache-Control "no-store" always;
 }
 
 # Strike completed-receive notification endpoint. Signature verification occurs

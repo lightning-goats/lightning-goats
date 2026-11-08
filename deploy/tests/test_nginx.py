@@ -52,7 +52,8 @@ class MockBackend(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_POST(self):
-        self.rfile.read(int(self.headers.get("Content-Length", "0")))
+        body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+        self.server.bodies.append(body)
         self.do_GET()
 
 
@@ -77,6 +78,7 @@ class NginxAssemblyTests(unittest.TestCase):
         for mode in ("production", "canary"):
             backend = ThreadingHTTPServer(("127.0.0.1", 0), MockBackend)
             backend.calls = []
+            backend.bodies = []
             backend.label = mode
             cls.addClassCleanup(backend.server_close)
             cls.addClassCleanup(backend.shutdown)
@@ -122,14 +124,28 @@ class NginxAssemblyTests(unittest.TestCase):
                     (web / retired / "forbidden").write_text("must not be served")
                 data = data.replace(f"/var/www/lightning-goats-{mode}", str(web))
                 (cls.root / f"{mode}.conf").write_text(data)
+        waf_module = ""
+        waf_http = ""
+        if os.environ.get("LG_WAF_CRS"):
+            crs = Path(os.environ["LG_WAF_CRS"]).resolve(strict=True)
+            module = Path(os.environ["LG_WAF_MODULE"]).resolve(strict=True)
+            rules = EXAMPLES.parent / "waf" / "lightning-goats.conf.example"
+            (cls.root / "waf-tmp").mkdir()
+            rendered = rules.read_text().replace("@CRS@", str(crs)).replace("@TMP@", str(cls.root / "waf-tmp"))
+            rendered = rendered.replace("SecRuleEngine On", "SecRuleEngine " + os.environ.get("LG_WAF_MODE", "On"))
+            (cls.root / "waf.conf").write_text(rendered)
+            waf_module = f"load_module {module};"
+            waf_http = f"modsecurity on; modsecurity_rules_file {cls.root}/waf.conf; error_log {cls.root}/private-error.log crit;"
         config = cls.root / "nginx.conf"
         config.write_text(f"""
+{waf_module}
 daemon off;
 worker_processes 1;
 pid {cls.root}/nginx.pid;
 error_log {cls.root}/error.log;
 events {{ worker_connections 128; }}
 http {{
+    {waf_http}
     access_log off;
     client_body_temp_path {cls.root}/body;
     proxy_temp_path {cls.root}/proxy;
@@ -142,7 +158,9 @@ http {{
 }}
 """)
         command = [cls.nginx, "-p", str(cls.root), "-c", str(config)]
-        subprocess.run(command + ["-t"], check=True, capture_output=True, timeout=10)
+        check = subprocess.run(command + ["-t"], capture_output=True, timeout=10)
+        if check.returncode:
+            raise RuntimeError(check.stderr.decode(errors="replace"))
         cls.process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         cls.addClassCleanup(cls.stop_nginx)
         deadline = time.monotonic() + 5
@@ -204,6 +222,8 @@ http {{
     def test_methods_unknown_retired_and_health_acl(self):
         for mode in self.backends:
             before = len(self.backends[mode].calls)
+            self.assertEqual(self.request(mode, "/lnurlp/herd/callback?amount=1000", "HEAD")[0], 405)
+            self.assertEqual(len(self.backends[mode].calls), before)
             for path in ("/.well-known/lnurlp/herd", "/lnurlp/herd/callback", "/api/v1/status", "/ws/overlay", "/healthz"):
                 self.assertEqual(self.request(mode, path, "POST", b"")[0], 403)
             for path in ("/unknown", "/api/v1/admin", "/invoice/forbidden", "/api/forbidden", "/lnbits/forbidden", "/v1/forbidden", "/rest/items", "/clnrest", "/cyberherd", "/ws/admin", "/.well-known/lnurlp/" + "a" * 65):

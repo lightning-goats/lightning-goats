@@ -127,6 +127,11 @@ def main():
             config = config_root / "config.receive.toml"
             install(payload / "deploy/config.receive.toml.example", config)
             install(payload / "deploy/systemd/lightning-goats-receive.service", "/etc/systemd/system/lightning-goats-receive.service")
+            install(payload / "deploy/systemd/lightning-goats-firewall.service", "/etc/systemd/system/lightning-goats-firewall.service")
+            directory("/etc/nftables")
+            policy = (payload / "deploy/nftables/lightning-goats-runtime.nft.example").read_text().replace("@UID@", str(runtime.pw_uid))
+            write("/etc/nftables/lightning-goats-runtime.nft", policy)
+            run("nft", "-c", "-f", "/etc/nftables/lightning-goats-runtime.nft")
             crs_root = directory("/usr/local/share/lightning-goats")
             with tarfile.open(crs_archive) as bundle:
                 for member in bundle:
@@ -207,6 +212,7 @@ server {{
             (temp / "nginx.conf").write_text(main_config)
             run("nginx", "-t", "-c", str(temp / "nginx.conf"))
             run("systemd-analyze", "verify", "/etc/systemd/system/lightning-goats-receive.service")
+            run("systemd-analyze", "verify", "/etc/systemd/system/lightning-goats-firewall.service")
             run("restorecon", "-R", "/etc/lightning-goats", "/etc/nginx", str(web), "/usr/local/bin/lightning-goatsd", "/usr/local/bin/lightning-goatsctl", str(tmp))
             write(config_root / "RECEIVE-INSTALL.json", json.dumps({"source": args.source, "archive_sha256": args.sha256,
                   "daemon_sha256": digest("/usr/local/bin/lightning-goatsd"), "backup": str(backup)}, indent=2) + "\n")
@@ -241,6 +247,7 @@ server {{
             run("nginx", "-t")
             run("systemctl", "reload", "nginx")
             run("systemctl", "enable", "lightning-goats-receive.service")
+            run("systemctl", "enable", "lightning-goats-firewall.service")
         except Exception:
             # Keep paid state; stop new workers. Do not restore an old database.
             run("systemctl", "stop", "lightning-goats-receive.service")

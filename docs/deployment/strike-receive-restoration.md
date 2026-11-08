@@ -80,6 +80,27 @@ Other virtual hosts, DNS, WireGuard and home configuration remain outside that
 transaction. Activation failure closes the affected API routes; it never resets
 paid state or automatically restores exploited LNbits proxy routes.
 
+The operator subsequently confirmed LNbits is stopped, the sole new gateway has
+been tested physically from this VPS, and requested removal of all obsolete
+LNbits nginx/firewall configuration. `retire-lnbits-ingress.py` replaces only
+inspected legacy proxy locations with 410 across the Lightning Goats, bolverker
+and retired LNbits virtual hosts, preserving unrelated static/TLS/ACME routes.
+It also updates the inactive prepared copies and removes the unused ACL snippet.
+The complete proposed nginx tree is checked before applying; prior files are
+retained only in a root-private backup.
+
+Inventory found no separate active/permanent LNbits port-3002 rule to remove.
+Existing public HTTP/HTTPS, SSH and WireGuard rules remain needed. The shared VPN
+forwarding/NAT policies belong to existing peers and are not LNbits exceptions.
+A separate atomic nftables OUTPUT policy restricts only the daemon UID: gateway
+`10.8.0.6:8789`, local DNS, backend loopback replies and public provider/relay
+egress; generic private-network and unrelated loopback services are denied.
+The service requires its root-managed firewall unit before startup. Isolated
+namespace tests cover IPv4/IPv6 private targets, the gateway, public egress,
+loopback backend replies, unrelated identities and repeated atomic reload.
+This is service containment, not proof of home-enforced protection from a
+root-compromised VPS or a forwarded/spoofed hub path.
+
 ## Acceptance boundaries
 
 The initial receiving configuration is explicitly **payment-only**: shadow mode

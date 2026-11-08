@@ -1,6 +1,7 @@
 [Unit]
 Description=Lightning Goats Strike receives (physical dispatch disabled)
-After=network-online.target
+After=network-online.target lightning-goats-firewall.service
+Requires=lightning-goats-firewall.service
 Wants=network-online.target
 
 [Service]

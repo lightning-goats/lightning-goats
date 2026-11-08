@@ -138,3 +138,23 @@ No grant or feeder command was submitted by the deployment agent. The public
 page serves the v4 client; existing OBS browser sources need one refresh to load
 new JavaScript. Real operator-command feeding and later public Nostr observations
 remain distinct from this deployment verification.
+
+## Operator-authorized live small-grant checks
+
+The operator subsequently authorized a few live CLI grants while explicitly
+reserving threshold-crossing/feeding tests for themselves. Starting at 3 sats,
+the deployed wrapper added exactly these grants:
+
+| Grant ID | Amount | Address | Resulting credit | Live presentation |
+| --- | ---: | --- | ---: | --- |
+| `overlay-check-20261108-nine` | 9 | herd | 12 | Cursor/progress updated; no payment announcement/effects |
+| `overlay-check-20261108-ten` | 10 | dexter | 22 | Normal ticker, centered amount, QR swap and Dexter card |
+| `overlay-check-20261108-twentyfive` | 25 | nova | 47 | Normal ticker, centered amount, QR swap and Nova card |
+
+A real Chromium client observed the actual public WebSocket frames and DOM during
+these commands. The 9-sat grant emitted a skip marker with absolute credit; the
+10/25-sat grants emitted normal presentation without test labels. Repeating the
+last command returned `duplicate`, preserved 47 sats and created no extra message.
+No JavaScript errors occurred. A final read-only ledger check confirmed three
+grant rows totalling 44 sats, unchanged real settlement count, zero feed attempts
+and no Nostr outbox rows. No threshold crossing or physical-feed test was performed.

@@ -192,3 +192,14 @@ inherited from the supplied overlay were removed. The idle track and fill are
 steady; progress updates, scrolling messages and confirmed-feed effects retain
 their existing behavior. The stylesheet cache version is bumped so refreshing
 the OBS source loads the correction.
+
+The steady-track correction was deployed from
+`e16c3484a5a67997e31b40ea6849ce65b0387ee1`, archive SHA256
+`a2856fca779a3830a57dd728e25443bce7f2d286e4787752dfae6c051d557a4a`,
+with backup `/var/backups/lightning-goats/obs-20261108T231310Z`.
+All 12 existing overlay regressions passed. On the actual public page with
+positive live credit, computed animation names for both the track and fill were
+`none`, including after the operator-authorized 9/10/25-sat grant sequence recorded
+in [operator-credits.md](operator-credits.md). Credit finished at 47 sats, with no
+feeding due or physical attempt. Existing OBS sources need a refresh to load the
+stylesheet cache version 4. Payment binaries and physical mode were unchanged.

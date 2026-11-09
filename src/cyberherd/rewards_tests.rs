@@ -339,9 +339,12 @@ async fn mixed_funding_freezes_whole_sat_shares_and_exact_reservation_across_res
             plan.plan.reserved_sats,
             plan.plan.operations_sats
         ),
-        (700, 70, 69, 931)
+        (700, 70, 68, 932)
     );
-    for (n, gross) in [(2, 49), (3, 15), (4, 5)] {
+    // Six-decimal percentages are frozen before sat rounding: 70 * 2.142857
+    // / 10 is 14.999999, so the repost share is 14 sats, not the full-rational
+    // 15. Both that fraction and the zap fraction remain with operations.
+    for (n, gross) in [(2, 49), (3, 14), (4, 5)] {
         let row = plan.plan.rows.iter().find(|r| r.pubkey == key(n)).unwrap();
         assert_eq!(
             (row.gross_sats, row.net_sats, row.fee_limit_sats),

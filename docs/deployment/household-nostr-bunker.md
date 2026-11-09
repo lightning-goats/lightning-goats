@@ -181,5 +181,23 @@ for new eligible payment/operator-credit events (10-sat minimum) and confirmed
 feedings, using the household signer and all four configured announcement relays.
 Information/weather remain WebSocket-only; CyberHerd producers are future work.
 No test credit, payment, physical feeding or public test note was created to
-activate it. Actual public note acceptance/readback awaits the next qualifying
-payment/credit or confirmed feeding; service activation alone is not that evidence.
+activate it. Service activation alone was not public delivery evidence; the
+first qualifying event and readback were subsequently observed below.
+
+### First live public post and audience observation
+
+During verification the existing feeder path confirmed one queued feeding,
+creating durable event **659** and exactly one 1000-sat debit, leaving **142 sats**
+with no unresolved attempt. The active publisher created and published kind-1
+event `89b0944f0d833da3d755f0657dd56002935358544a8b5b49158c7cf9c22f873c`
+under the approved project identity. It is a new confirmation after cutoff 658,
+not a replay of earlier payment/grant history. Informational event 660 advanced
+the message cursor without another Nostr outbox entry.
+
+Read-only queries as daemon UID 985 retrieved the exact persisted signed note
+from Primal, Chaima and ArtX; local signature checks passed for each. Damus's
+nak lookup returned HTTP 503, and an independent TLS/WebSocket read-only probe
+also returned 503. Its delivery is therefore unverified; it remains configured,
+and no note was manually republished to manufacture a fourth-relay result.
+No public test note, credit grant or direct feeder command was issued by the
+activation/verification helpers. The normal daemon/owner completed the feeding.

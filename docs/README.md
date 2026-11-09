@@ -10,6 +10,10 @@ The native incoming zap/receipt contract is described in
 [`architecture/native-nip57.md`](architecture/native-nip57.md). It preserves
 ordinary LNURL payments and requires explicit feature activation.
 
+The [separate CyberHerd intake worker](architecture/cyberherd-worker.md) now
+connects core events, authenticated discovery and ordered membership in source.
+It is uninstalled and has no payout or publication capability.
+
 The operator-directed 2026-11-08 Strike restoration is recorded in
 [`deployment/strike-receive-restoration.md`](deployment/strike-receive-restoration.md),
 including exact API scopes, webhook staging, WAF and payment-only deployment.

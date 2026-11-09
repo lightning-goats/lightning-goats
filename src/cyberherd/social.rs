@@ -276,13 +276,17 @@ pub async fn process(
             frozen
         }
         None => {
+            let expired_cycle =
+                social.event.event().created_at < store.snapshot(owner).await?.cycle_start as u64;
             let profile = match profile {
                 Some(profile) if profile.event().event().pubkey == social.event.event().pubkey => {
                     profile.event().require_not_future(now)?;
                     profile.profile().clone()
                 }
                 Some(_) => bail!("social profile belongs to another signer"),
-                None if target == Target::Other && feeder == FeederAvailability::Ready => {
+                None if expired_cycle
+                    || (target == Target::Other && feeder == FeederAvailability::Ready) =>
+                {
                     Profile::default()
                 }
                 None => {

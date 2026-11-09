@@ -1,0 +1,47 @@
+[Unit]
+Description=CyberHerd intake and membership (no payouts or publishing)
+After=network-online.target lightning-goats-receive.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cyberherd
+Group=cyberherd
+SupplementaryGroups=cyberherd-bridge
+ExecStart=/usr/local/bin/cyberherdd --config /etc/cyberherd/config.toml
+Restart=on-failure
+RestartSec=5s
+StateDirectory=cyberherd
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectProc=invisible
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/cyberherd
+# Defense in depth. Actual cross-UID/socket/DNS/IPv4/IPv6 qualification remains
+# required; these examples do not claim a live host's containment is verified.
+IPAddressDeny=10.0.0.0/8
+IPAddressDeny=172.16.0.0/12
+IPAddressDeny=192.168.0.0/16
+IPAddressDeny=169.254.0.0/16
+IPAddressDeny=fc00::/7
+IPAddressDeny=fe80::/10
+TimeoutStopSec=90
+
+[Install]
+WantedBy=multi-user.target

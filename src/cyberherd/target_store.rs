@@ -35,6 +35,34 @@ async fn insert_event(
 }
 
 impl Store {
+    /// Retain a referenced signed object without granting project/host authority.
+    /// In particular a raw 30311 can never enter stream_heads or aliases here.
+    pub async fn remember_reference(
+        &self,
+        owner: &str,
+        event: &VerifiedEvent,
+        now: i64,
+    ) -> Result<()> {
+        validate_public_key(owner)?;
+        event.require_not_future(now)?;
+        if !matches!(event.event().kind, 1 | 9041 | 30311) {
+            bail!("unsupported referenced target");
+        }
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        insert_event(&mut tx, owner, event).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn stream_alias_ids(&self, owner: &str, coordinate: &str) -> Result<Vec<String>> {
+        validate_public_key(owner)?;
+        let _: crate::nostr_event::Coordinate = coordinate.parse()?;
+        // A bounded overlap for relay queries. Direct references from settled
+        // zaps/inbox work still resolve any individually requested old version.
+        Ok(sqlx::query_scalar("SELECT v.event_id FROM stream_versions v JOIN observed_events e ON v.owner=e.owner AND v.event_id=e.event_id WHERE v.owner=? AND v.coordinate=? ORDER BY e.created_at DESC,e.event_id LIMIT 125")
+            .bind(owner).bind(coordinate).fetch_all(&self.pool).await?)
+    }
+
     pub async fn remember_project_event(
         &self,
         policy: &TargetPolicy,
@@ -270,10 +298,20 @@ impl Store {
         .fetch_one(&mut *tx)
         .await?;
         if pending >= 4096 {
-            bail!("social pending inbox capacity reached; retry after backpressure");
+            return Err(crate::cyberherd::ingress::IngressFull.into());
         }
         insert_event(&mut tx, owner, event).await?;
         let inserted=sqlx::query("INSERT INTO social_inbox(owner,event_id) VALUES(?,?) ON CONFLICT(owner,event_id) DO NOTHING").bind(owner).bind(&event.event().id).execute(&mut *tx).await?.rows_affected()==1;
+        // The same transaction establishes order before any profile/target
+        // lookup. A later, backdated social event cannot precede a feeding.
+        super::ingress_state::enqueue(
+            &mut tx,
+            owner,
+            &format!("nostr:{}", event.event().id),
+            "social",
+            &serde_json::to_string(&event.event().id)?,
+        )
+        .await?;
         tx.commit().await?;
         Ok(inserted)
     }

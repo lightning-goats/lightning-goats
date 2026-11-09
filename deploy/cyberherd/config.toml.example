@@ -1,0 +1,31 @@
+# Intake/membership only. Inactive until identities, core epoch/cutoff and socket
+# access are provisioned and reviewed. This file contains no production values.
+enabled = false
+state_dir = "/var/lib/cyberherd"
+core_socket = "/run/lightning-goats-bridge/core.sock"
+project_pubkey = "0000000000000000000000000000000000000000000000000000000000000000"
+tracked_tags = ["CyberHerd"]
+timezone = "America/Denver"
+midnight_reset = true
+relays = ["wss://relay.damus.io/", "wss://nostr.chaima.info/", "wss://relay.artx.market/"]
+# Explicit availability policy, after validating actual relay reachability.
+# Saturated queries always hold their cursor regardless of this quorum.
+required_relays = 1
+poll_seconds = 5
+
+[settings]
+minimum_sats = 10
+max_members = 10
+member_percent = 10
+
+[core]
+# Placeholders deliberately fail validation; never run under the core UID.
+core_uid = 0
+epoch = "00000000-0000-0000-0000-000000000000"
+# Operator-selected retained-event activation boundary, not a guessed balance.
+start_after = 0
+credit_pool = "herd"
+
+[core.payees]
+# Configure all actual receive user -> native payee mappings for this one roster.
+herd = "0000000000000000000000000000000000000000000000000000000000000000"

@@ -14,6 +14,9 @@ use super::templates::Catalog;
 #[path = "target_store.rs"]
 mod target_state;
 
+#[path = "ingress_store.rs"]
+mod ingress_state;
+
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./cyberherd-migrations");
 
 #[derive(Debug, Clone)]
@@ -178,6 +181,7 @@ impl Store {
         interaction.validate()?;
         let input_json = serde_json::to_string(interaction)?;
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let mut was_deferred = false;
         if let Some(row) = sqlx::query("SELECT source_hash,input_json,status,result_json FROM interactions WHERE owner=? AND source_id=?").bind(owner).bind(&interaction.source_id).fetch_optional(&mut *tx).await? {
             if row.try_get::<String,_>("source_hash")? != interaction.source_hash || row.try_get::<String,_>("input_json")? != input_json {
                 bail!("CyberHerd source identity conflicts with its immutable interaction");
@@ -187,6 +191,7 @@ impl Store {
                 tx.commit().await?;
                 return Ok(receipt);
             }
+            was_deferred = true;
         }
         let row = sqlx::query("SELECT * FROM owners WHERE owner=?")
             .bind(owner)
@@ -196,12 +201,13 @@ impl Store {
         let stale_target = feeder == FeederAvailability::Ready
             && (target == Target::Other
                 || (target == Target::ProjectContent
-                    && !(matches!(interaction.action, Action::Zap { .. })
-                        && snapshot
-                            .roster
-                            .members
-                            .get(&interaction.pubkey)
-                            .is_some_and(|member| member.active))));
+                    && (was_deferred
+                        || !(matches!(interaction.action, Action::Zap { .. })
+                            && snapshot
+                                .roster
+                                .members
+                                .get(&interaction.pubkey)
+                                .is_some_and(|member| member.active)))));
         let receipt = if interaction.occurred_at < snapshot.cycle_start || stale_target {
             Receipt {
                 status: Status::Discarded,

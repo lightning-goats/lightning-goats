@@ -217,12 +217,17 @@ components; they do not themselves start discovery or recovery services.
 The optional [private core bridge](../architecture/cyberherd-core-bridge.md)
 adds actual peer-authenticated event/safety reads and checks correlated settlement,
 credit and confirmed-feed sources. Its additive feed-event binding never guesses
-historical JSON into new reward authority. The consumer ordering/checkpointing
-and capabilities for later signing, reward reservation and presentation remain
-separate work; enabling this read endpoint does not implement those operations.
+historical JSON into new reward authority.
 
-These are source components, not a running CyberHerd service. The discovery/
-refresh/recovery orchestration, ordered core-event consumer, real-fund reward planning,
+The [separate intake worker](../architecture/cyberherd-worker.md) consumes
+authenticated pages with an atomic checkpoint, one durable observation order,
+replay-safe settled-zap membership and confirmed-feeding membership barriers.
+It refreshes targets/profiles before recovery and backfills social queries with
+bounded durable windows. It has no publishing, funding or payout capabilities;
+a membership barrier is not a funded payout plan.
+
+These are source components and an uninstalled intake binary, not a live CyberHerd
+service. Real-fund reward planning,
 isolated payout worker, durable note/chat destinations, scheduled lifecycle/reset,
 operator/client interfaces, installation and end-to-end verification remain work.
 No CyberHerd payout or membership worker is activated by this checkpoint.

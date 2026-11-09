@@ -6,10 +6,18 @@
 //! docs/planning/cyberherd-implementation-plan.md.
 
 pub mod calendar;
+pub mod discovery;
+pub mod ingress;
 pub mod membership;
 pub mod relay;
+#[cfg(unix)]
+pub mod runtime;
 pub mod shares;
 pub mod social;
 pub mod store;
 pub mod targets;
 pub mod templates;
+pub mod worker;
+
+#[cfg(all(test, unix))]
+mod ingress_tests;

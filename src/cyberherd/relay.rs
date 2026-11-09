@@ -31,6 +31,8 @@ pub struct Filter {
     pub events: Vec<String>,
     #[serde(rename = "#a", skip_serializing_if = "Vec::is_empty")]
     pub coordinates: Vec<String>,
+    #[serde(rename = "#p", skip_serializing_if = "Vec::is_empty")]
+    pub people: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub since: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -44,6 +46,7 @@ impl Filter {
             || self.authors.len() > 8
             || self.events.len() > 128
             || self.coordinates.len() > 128
+            || self.people.len() > 8
             || self.kinds.is_empty()
             || self.kinds.len() > 8
             || !(1..=512).contains(&self.limit)
@@ -56,14 +59,15 @@ impl Filter {
             || (self.ids.is_empty()
                 && self.authors.is_empty()
                 && self.events.is_empty()
-                && self.coordinates.is_empty())
+                && self.coordinates.is_empty()
+                && self.people.is_empty())
         {
             bail!("unbounded or invalid Nostr query filter");
         }
         for id in self.ids.iter().chain(&self.events) {
             validate_hex(id, 32)?;
         }
-        for author in &self.authors {
+        for author in self.authors.iter().chain(&self.people) {
             validate_public_key(author)?;
         }
         for coordinate in &self.coordinates {
@@ -89,6 +93,10 @@ impl Filter {
                 || event
                     .tag_values("a")
                     .any(|id| self.coordinates.iter().any(|value| value == id)))
+            && (self.people.is_empty()
+                || event
+                    .tag_values("p")
+                    .any(|key| self.people.iter().any(|value| value == key)))
     }
 }
 
@@ -121,6 +129,7 @@ pub fn engagement_filters(
         kinds: vec![6, 7, 16],
         events: vec![],
         coordinates: vec![],
+        people: vec![],
         since: Some(since),
         until: Some(until),
         limit: 256,
@@ -155,6 +164,19 @@ pub struct Reader {
     relays: Vec<String>,
 }
 
+pub trait Query {
+    fn query<'a>(
+        &'a self,
+        filters: &'a [Filter],
+    ) -> impl std::future::Future<Output = Result<ReadBatch>> + Send + 'a;
+}
+
+impl Query for Reader {
+    async fn query(&self, filters: &[Filter]) -> Result<ReadBatch> {
+        Reader::query(self, filters).await
+    }
+}
+
 impl Reader {
     pub fn new(relays: Vec<String>) -> Result<Self> {
         if relays.is_empty() || relays.len() > 8 {
@@ -167,6 +189,9 @@ impl Reader {
         Ok(Self {
             relays: normalized.into_iter().collect(),
         })
+    }
+    pub fn relay_count(&self) -> usize {
+        self.relays.len()
     }
     pub async fn query(&self, filters: &[Filter]) -> Result<ReadBatch> {
         if filters.is_empty() || filters.len() > 8 {
@@ -382,6 +407,7 @@ mod tests {
             kinds: vec![7],
             events: vec!["12".repeat(32)],
             coordinates: vec![],
+            people: vec![],
             since: Some(900),
             until: Some(1100),
             limit: 10,

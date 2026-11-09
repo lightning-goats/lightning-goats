@@ -125,3 +125,12 @@ atomic/idempotent grants independently from provider settlement, plus concurrent
 retry, exact feed debit through the existing override, 9/10-sat overlay and Nostr
 boundaries, and preserved real paid state during deployment. Isolated grant/feeder
 fixtures are not evidence of a live Lightning payment or physical feeding.
+
+## Paused queue messages — 2026-11-09
+
+Verify paused credit retention and confirmation-only debits, including an already
+in-flight feeding completing after pause. Advisory message state must never
+authorize dispatch or block financial credit. Cover queued versus pending counts,
+restart/retry stability, normal information/weather while paused and their
+nonpublic audience. The implementation/acceptance contract is in
+[paused-feeding-queue.md](../deployment/paused-feeding-queue.md).

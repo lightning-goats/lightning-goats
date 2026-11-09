@@ -6,6 +6,7 @@ mod sqlite;
 pub mod config;
 pub mod domain;
 pub mod feeder;
+pub mod feeding_presentation;
 pub mod gateway;
 pub mod informational;
 pub mod ledger;

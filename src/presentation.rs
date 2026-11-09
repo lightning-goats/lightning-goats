@@ -97,7 +97,7 @@ impl MessageRenderer {
             .as_object()
             .context("durable event payload must be a JSON object")?;
 
-        match event.event_type.as_str() {
+        let mut rendered = match event.event_type.as_str() {
             "payment_received" | "operator_credit_added" => {
                 self.render_payment(event, object, threshold_sats)
             }
@@ -105,7 +105,16 @@ impl MessageRenderer {
             "interface_info" => self.render_interface_info(event),
             "weather_status" => self.render_weather(object),
             _ => Ok(RenderedPresentation::empty()),
+        }?;
+        if let Some(note) = feeding_pause_note(object.get("feeding"))? {
+            if let Some(message) = rendered.overlay_message.as_mut() {
+                *message = format!("{note} {message}");
+            }
+            if let Some(message) = rendered.nostr_content.as_mut() {
+                *message = format!("{note} {message}");
+            }
         }
+        Ok(rendered)
     }
 
     fn render_payment(
@@ -339,6 +348,45 @@ fn required_u64(payload: &serde_json::Map<String, Value>, field: &str) -> Result
         .with_context(|| format!("durable event is missing unsigned integer field {field}"))
 }
 
+fn feeding_pause_note(value: Option<&Value>) -> Result<Option<String>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let paused = value["paused"]
+        .as_bool()
+        .context("invalid feeding pause context")?;
+    if !paused {
+        return Ok(None);
+    }
+    let queued = value["queued_feedings"]
+        .as_u64()
+        .context("invalid queued feeding count")?;
+    let pending = value["awaiting_confirmation"]
+        .as_bool()
+        .context("invalid pending feeding context")?;
+    let prefix = if value["reason"] == "unavailable" {
+        "Feeding is paused while feeder status is unavailable."
+    } else {
+        "Feeding is paused."
+    };
+    let queue = if queued == 0 && pending {
+        "No additional feedings are queued.".to_owned()
+    } else if queued == 0 {
+        "0 feedings are queued; credit is saved toward the next feeding.".to_owned()
+    } else {
+        format!(
+            "{queued} feeding{} queued to run after unpausing, subject to local safety limits.",
+            if queued == 1 { " is" } else { "s are" }
+        )
+    };
+    let pending_note = if pending {
+        " An earlier feeding is awaiting confirmation; the queue also waits for that result."
+    } else {
+        ""
+    };
+    Ok(Some(format!("{prefix} {queue}{pending_note}")))
+}
+
 fn remaining_sats(credit: u64, threshold: u64) -> u64 {
     if credit < threshold {
         threshold - credit
@@ -349,15 +397,18 @@ fn remaining_sats(credit: u64, threshold: u64) -> u64 {
 
 fn difference_message(credit: u64, threshold: u64) -> String {
     if credit < threshold {
-        return format!("{} sats until feeder activation.", threshold - credit);
+        return format!(
+            "{} sats until the next feeding is funded.",
+            threshold - credit
+        );
     }
     let feeds_due = credit / threshold;
     let remainder = credit % threshold;
     if remainder == 0 {
-        format!("Feeder ready! {feeds_due} feeding(s) are funded.")
+        format!("{feeds_due} feeding(s) are funded and queued.")
     } else {
         format!(
-            "Feeder ready! {feeds_due} feeding(s) are funded, with {remainder} sats already toward the following feeding."
+            "{feeds_due} feeding(s) are funded and queued, with {remainder} sats already toward the following feeding."
         )
     }
 }

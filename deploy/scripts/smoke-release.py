@@ -25,7 +25,7 @@ REQUIRED = BINARIES | {
     "docs/deployment/deployment-artifacts.md",
     "web/index.html", "web/chat.js", "web/site.js", "web/site-config.js",
     "web/feed.html", "web/overlay.html", "web/overlay.js", "web/overlay.css",
-    "deploy/scripts/lg-credit", "migrations/0012_operator_credits.sql",
+    "deploy/scripts/lg-credit", "migrations/0012_operator_credits.sql", "migrations/0013_feeding_presentation.sql",
     "deploy/scripts/enable-feeding.py",
     "deploy/scripts/deploy-obs-overlay.py", "deploy/scripts/update-overlay-data.py",
     "deploy/systemd/lightning-goats-display-firewall.service",

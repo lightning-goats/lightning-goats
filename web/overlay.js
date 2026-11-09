@@ -12,6 +12,7 @@
     let replaying = false, socket, retry = 500, reconnectTimer;
     let weatherTime = null, marketTime = null, statusTime = null;
     let feeding = false, qrBusy = false, paymentBusy = false;
+    let availability = "unknown", awaitingConfirmation = false;
     let marqueeFrame = null, lastFrame = null, cardTimer = null;
     const messages = [], activeMessages = [], payments = [], feeds = [];
 
@@ -26,18 +27,21 @@
         animations.add(animation);
         animation.onfinish = animation.oncancel = () => animations.delete(animation);
     }
+    function queuedFeedings() { return Math.max(0, Math.floor(credit / threshold) - (awaitingConfirmation ? 1 : 0)); }
     function render() {
         el("credit").textContent = `${credit.toLocaleString()} ${credit === 1 ? "sat" : "sats"} credit`;
-        const due = Math.floor(credit / threshold);
+        const due = queuedFeedings();
         el("due").textContent = due ? `${due} feed${due === 1 ? "" : "s"} queued` : "";
         el("sats_left").textContent = due
-            ? `⚡ ${due} feeding${due === 1 ? "" : "s"} ready · ${credit.toLocaleString()} sats credit ⚡`
-            : `⚡${(threshold - credit).toLocaleString()} sats to go until the herd is fed again.⚡`;
+            ? `⚡ ${due} feeding${due === 1 ? "" : "s"} queued · ${credit.toLocaleString()} sats credit ⚡`
+            : awaitingConfirmation ? "⚡ Feeding awaiting confirmation · credit held ⚡"
+            : `⚡${Math.max(0, threshold - credit).toLocaleString()} sats to go until the herd is fed again.⚡`;
         const percent = Math.min(100, credit / threshold * 100);
         el("progress").setAttribute("aria-valuenow", String(Math.round(percent)));
         el("progress-percentage").textContent = `${Math.round(percent)}%`;
         if (!feeding && !activeMessages.length) el("progress-fill").style.width = `${percent}%`;
         el("progress-fill").classList.toggle("is-filling", percent > 0 && percent < 100 && !feeding);
+        renderFeedingBanner();
     }
     function clearPresentation() {
         for (const timer of timers) clearTimeout(timer);
@@ -252,11 +256,15 @@
             if (data.stream_id === stream && data.seq < seq && !data.reset_reason) return;
             if (stream !== data.stream_id || data.reset_reason) clearPresentation();
             stream = data.stream_id; seq = data.seq; credit = data.feed_credit_sats; threshold = data.threshold_sats;
+            awaitingConfirmation = typeof data.unresolved_feed_attempt === "string";
             replaying = false; el("connection").dataset.state = "live"; el("connection").textContent = ""; el("connection").ariaLabel = "Connected"; render(); return;
         }
         if (!integer(data.seq) || seq === null || stream === null) return resetConnection();
         if (data.seq <= seq) return;
         if (data.seq !== seq + 1) return resetConnection();
+        if (typeof data.feeding?.awaiting_confirmation === "boolean") awaitingConfirmation = data.feeding.awaiting_confirmation;
+        if (data.source_type === "feeder_confirmed") awaitingConfirmation = false;
+        if (data.source_type === "processing_error" && typeof data.feed_attempt_id === "string") awaitingConfirmation = true;
         if (integer(data.feed_credit_sats)) { credit = data.feed_credit_sats; render(); }
         // Replays advance durable state without replaying announcements/effects.
         if (!replaying && data.type !== "event_skipped") {
@@ -328,18 +336,26 @@
             }
         } catch { /* Cached observations expire independently; money is unaffected. */ }
     }
-    function setFeedingState(state) {
+    function renderFeedingBanner() {
         const banner = el("feeding-state");
-        banner.dataset.state = state;
-        banner.textContent = state === "paused" ? "⏸ Feeder Paused"
-            : state === "unknown" ? "⏸ Feeder Paused · status unavailable"
-            : state === "pending" ? "Feeding pending confirmation" : "";
+        banner.dataset.state = availability;
+        banner.hidden = availability === "ready";
+        el("feeding-state-label").textContent = availability === "paused" ? "⏸ Feeder Paused"
+            : availability === "unknown" ? "⏸ Feeder Paused · status unavailable"
+            : availability === "pending" ? "Feeding pending confirmation" : "";
+        const queued = queuedFeedings();
+        let note = queued ? `${queued} feeding${queued === 1 ? "" : "s"} queued to run when feeding resumes, subject to safety limits.`
+            : "0 feedings queued · credit saved toward the next feeding.";
+        if (awaitingConfirmation) note += " An earlier feeding is awaiting confirmation.";
+        el("feeding-queue").textContent = availability === "ready" ? "" : note;
     }
+    function setFeedingState(state) { availability = state; renderFeedingBanner(); }
     async function status() {
         try {
             const data = await readJson("/api/v1/status");
             if (!["shadow", "canary", "active"].includes(data.mode)) return;
             statusTime = Date.now();
+            awaitingConfirmation = typeof data.unresolved_feed_attempt === "string";
             const paused = data.mode === "shadow" || !data.gateway_reachable || data.remote_feeding_enabled !== true || data.feeder_override_active !== false;
             setFeedingState(paused ? "paused" : data.unresolved_feed_attempt ? "pending" : "ready");
             el("feeding-state").title = data.feeder_override_active === true

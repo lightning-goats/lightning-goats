@@ -248,12 +248,12 @@ class OverlayBrowserTests(unittest.TestCase):
         self.assertEqual(self.page.locator("#connection").inner_text(),"")
         self.status_payload.update(mode="canary", feeder_override_active=True)
         self.page.clock.run_for(11000)
-        self.assertEqual(self.page.locator("#feeding-state").inner_text(),"⏸ Feeder Paused")
+        self.assertEqual(self.page.locator("#feeding-state-label").inner_text(),"⏸ Feeder Paused")
         self.assertEqual(self.page.locator("#feeding-state").get_attribute("data-state"),"paused")
         self.assertGreaterEqual(self.page.locator("#feeding-state").evaluate("node=>parseInt(getComputedStyle(node).fontSize)"),28)
         self.status_payload["feeder_override_active"] = False
         self.page.clock.run_for(11000)
-        self.assertEqual(self.page.locator("#feeding-state").inner_text(),"")
+        self.assertTrue(self.page.locator("#feeding-state").is_hidden())
         self.assertEqual(self.page.locator("#credit").inner_text(),"3 sats credit")
         self.assertEqual(self.errors,[])
 
@@ -275,4 +275,34 @@ class OverlayBrowserTests(unittest.TestCase):
         self.assertEqual(self.page.locator("#sats-received-overlay").inner_text(),"⚡ 10 sats ⚡")
         self.assertTrue(self.page.locator("#lightning-img").is_visible())
         self.assertEqual(self.page.locator(".user-profile-name").inner_text(),"Dexter")
+        self.assertEqual(self.errors,[])
+
+
+    def test_paused_banner_counts_queued_feedings_without_debit_or_false_feed(self):
+        self.snapshot(credit=2340)
+        self.page.clock.run_for(11000)
+        self.assertIn("2 feedings queued to run when feeding resumes", self.page.locator("#feeding-queue").inner_text())
+        self.assertIn("2 feedings queued",self.page.locator("#sats_left").inner_text())
+        self.assertEqual(self.page.locator("#credit").inner_text(),"2,340 sats credit")
+        self.assertFalse(self.page.locator("#feeder-triggered").is_visible())
+        self.status_payload.update(mode="canary",feeder_override_active=False)
+        self.page.clock.run_for(11000)
+        self.assertTrue(self.page.locator("#feeding-state").is_hidden())
+        self.assertEqual(self.page.locator("#credit").inner_text(),"2,340 sats credit")
+        self.send({"type":"feeder_trigger","source_type":"feeder_confirmed","seq":1,"feed_credit_sats":1340,"message":"Confirmed"})
+        self.status_payload["feeder_override_active"]=True
+        self.page.clock.run_for(11000)
+        self.assertIn("1 feeding queued to run when feeding resumes",self.page.locator("#feeding-queue").inner_text())
+        self.assertEqual(self.page.locator("#credit").inner_text(),"1,340 sats credit")
+        self.assertEqual(self.errors,[])
+
+    def test_pending_confirmation_is_not_promised_as_another_queued_feeding(self):
+        self.snapshot(credit=2340,unresolved_feed_attempt=STREAM)
+        self.status_payload.update(unresolved_feed_attempt=STREAM)
+        self.page.clock.run_for(11000)
+        text=self.page.locator("#feeding-queue").inner_text()
+        self.assertIn("1 feeding queued",text)
+        self.assertIn("earlier feeding is awaiting confirmation",text)
+        self.assertEqual(self.page.locator("#credit").inner_text(),"2,340 sats credit")
+        self.assertFalse(self.page.locator("#feeder-triggered").is_visible())
         self.assertEqual(self.errors,[])

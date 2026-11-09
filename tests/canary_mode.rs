@@ -126,6 +126,17 @@ async fn operator_credit_respects_override_and_real_worker_debits_without_paymen
         address_user: "herd".into(),
         reason: "Harmless gateway fixture".into(),
     };
+    ledger
+        .update_feeding_presentation(
+            1000,
+            RuntimeMode::Canary,
+            Some(FeederSafety {
+                override_enabled: true,
+                remote_enabled: true,
+            }),
+        )
+        .await
+        .unwrap();
     ledger.grant_operator_credit(&grant, false).await.unwrap();
     let requests = Arc::new(AtomicUsize::new(0));
     let gate = Arc::new(AtomicBool::new(true));
@@ -148,6 +159,25 @@ async fn operator_credit_respects_override_and_real_worker_debits_without_paymen
     ));
     assert_eq!(requests.load(Ordering::SeqCst), 0);
     assert_eq!(ledger.feed_credit_sats().await.unwrap(), 2340);
+    // Advisory ready metadata must never bypass the actual local override.
+    ledger
+        .update_feeding_presentation(
+            1000,
+            RuntimeMode::Canary,
+            Some(FeederSafety {
+                override_enabled: false,
+                remote_enabled: true,
+            }),
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        run_feed_step(&ledger, &gateway, 1000, RuntimeMode::Canary)
+            .await
+            .unwrap(),
+        FeedWorkerStep::OverrideBlocked { .. }
+    ));
+    assert_eq!(requests.load(Ordering::SeqCst), 0);
     gate.store(false, Ordering::SeqCst);
     for expected in [1340, 340] {
         assert!(

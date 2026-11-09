@@ -7,6 +7,8 @@ The operator-supplied OBS layout and its current data/QR contracts are documente
 in [`deployment/obs-overlay-restoration.md`](deployment/obs-overlay-restoration.md).
 Local CLI grants and the 10-sat message threshold are documented in
 [`deployment/operator-credits.md`](deployment/operator-credits.md).
+Paused credit retention, queued-feed messaging and confirmation-only debits are
+documented in [`deployment/paused-feeding-queue.md`](deployment/paused-feeding-queue.md).
 
 ## Current delivery order — 2026-09-17
 

@@ -16,6 +16,7 @@ use clap::Parser;
 use lightning_goats::{
     config::AppConfig,
     feeder::run_feed_worker,
+    feeding_presentation::run_feeding_presentation_worker,
     gateway::GatewayClient,
     informational::run_informational_worker,
     ledger::LedgerStore,
@@ -100,6 +101,12 @@ async fn main() -> Result<()> {
     }
 
     let gateway = GatewayClient::new(&config.gateway.url)?;
+    if let Err(error) = ledger
+        .update_feeding_presentation(config.feeder.threshold_sats, config.service.mode, None)
+        .await
+    {
+        tracing::warn!(%error,"initial feeding message state unavailable; settlement is unaffected");
+    }
     let strike = StrikeRuntime::from_config(&config.strike).await?;
     let lnurl = LnurlService::new(
         &config.lnurl,
@@ -144,6 +151,12 @@ async fn main() -> Result<()> {
         Duration::from_secs(config.feeder.inter_feed_delay_seconds),
         config.service.mode,
     ));
+    let mut feeding_presentation = tokio::spawn(run_feeding_presentation_worker(
+        ledger.clone(),
+        gateway.clone(),
+        config.feeder.threshold_sats,
+        config.service.mode,
+    ));
     let mut informational = tokio::spawn(run_informational_worker(
         ledger.clone(),
         gateway,
@@ -176,6 +189,7 @@ async fn main() -> Result<()> {
         result = &mut recovery => task_exit("settlement recovery", result),
         result = &mut feeder => task_exit("feed worker", result),
         result = &mut informational => task_exit("informational worker", result),
+        result = &mut feeding_presentation => task_exit("feeding presentation worker", result),
         result = &mut message_processor => task_exit("Nostr message processor", result),
         result = &mut publisher => task_exit("Nostr outbox publisher", result),
     };
@@ -184,6 +198,7 @@ async fn main() -> Result<()> {
     recovery.abort();
     feeder.abort();
     informational.abort();
+    feeding_presentation.abort();
     message_processor.abort();
     publisher.abort();
     result

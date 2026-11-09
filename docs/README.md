@@ -9,6 +9,8 @@ Local CLI grants and the 10-sat message threshold are documented in
 [`deployment/operator-credits.md`](deployment/operator-credits.md).
 Paused credit retention, queued-feed messaging and confirmation-only debits are
 documented in [`deployment/paused-feeding-queue.md`](deployment/paused-feeding-queue.md).
+Household NIP-46 client preparation and the remaining signer/activation steps are
+recorded in [`deployment/household-nostr-bunker.md`](deployment/household-nostr-bunker.md).
 
 ## Current delivery order — 2026-09-17
 

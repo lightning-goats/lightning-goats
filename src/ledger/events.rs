@@ -143,8 +143,28 @@ pub(super) async fn append_event_in_transaction<T: Serialize>(
     event_type: &str,
     payload: &T,
 ) -> Result<u64> {
-    let payload_json =
-        serde_json::to_string(payload).context("failed serializing durable event")?;
+    let mut value = serde_json::to_value(payload).context("failed serializing durable event")?;
+    if matches!(
+        event_type,
+        "payment_received"
+            | "operator_credit_added"
+            | "feeder_confirmed"
+            | "interface_info"
+            | "weather_status"
+    ) {
+        match super::feeding_presentation::snapshot(transaction, &value).await {
+            Ok(Some(state)) => {
+                if let Some(object) = value.as_object_mut() {
+                    object.insert("feeding".into(), state);
+                }
+            }
+            Ok(None) => {}
+            Err(error) => {
+                tracing::warn!(%error,"feeding presentation context unavailable; durable event still commits")
+            }
+        }
+    }
+    let payload_json = serde_json::to_string(&value).context("failed serializing durable event")?;
     let result = sqlx::query("INSERT INTO event_log (event_type, payload_json) VALUES (?, ?)")
         .bind(event_type)
         .bind(payload_json)

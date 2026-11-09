@@ -36,7 +36,7 @@
         "description": "Watch the Lightning Goats live, feed the herd with Bitcoin, and join the live Nostr chat.",
         "contactPoint": {
             "@type": "ContactPoint",
-            "url": "nostr:npub1v60thnx0gz0wq3n6xdnq46y069l9x70xgmjp6lprdl6fv0eux6mqgjj4rp",
+            "email": "herd_contact.uq7n0@passmail.net",
             "contactType": "Sat"
         },
         "sameAs": [
@@ -46,7 +46,7 @@
     }
     </script>
 
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="/vendor/bootstrap.min.css">
     <style>
         :root {
             color-scheme: dark;
@@ -112,17 +112,16 @@
         }
 
         .video-column { min-width: 0; }
+        @media (min-width: 881px) { .chat-panel { height: clamp(380px, 37vw, 660px); } }
+        .qr-code-overlay:focus-visible { outline: 3px solid var(--lg-yellow); outline-offset: 3px; }
 
         .video-wrapper {
             position: relative;
             width: 100%;
         }
 
-        #video-container { position: relative; isolation: isolate; }
-
         .iframe-container {
             position: relative;
-            z-index: 0;
             width: 100%;
             padding-bottom: 56.25%;
             height: 0;
@@ -145,15 +144,14 @@
             position: absolute;
             top: 10px;
             right: 10px;
-            width: 180px;
-            height: 190px;
+            width: 120px;
+            height: 120px;
             cursor: pointer;
             z-index: 10;
-            background: transparent;
             transition: transform 0.3s;
         }
 
-        .qr-code-overlay:hover:not(:disabled) { transform: scale(1.05); }
+        .qr-code-overlay:hover { transform: scale(1.05); }
 
         .chat-panel {
             min-width: 0;
@@ -531,6 +529,7 @@
         .modal-header, .modal-body { border: none; }
         .btn-close { filter: invert(1); }
 
+
         @media (max-width: 1100px) {
             #content { width: 98%; padding: 16px; }
             .media-grid { grid-template-columns: minmax(0, 1.65fr) minmax(320px, 0.9fr); }
@@ -557,14 +556,6 @@
             .lg-title { font-size: 0.95rem; }
             .nostr-auth-button { max-width: 112px; }
         }
-        .feed-action { display: flex; align-items: flex-end; justify-content: center;
-            padding: 6px; border: 2px solid var(--lg-yellow); border-radius: 8px;
-            color: #111; font-weight: 700; }
-        .feed-action span { padding: 6px 10px; border-radius: 16px;
-            background: var(--lg-yellow); box-shadow: 0 2px 6px #000; }
-        .feed-action:disabled { opacity: 1; cursor: not-allowed; }
-        .feed-action:focus-visible { outline: 3px solid white; outline-offset: 3px; }
-        #invoiceText { overflow-wrap: anywhere; }
     </style>
 </head>
 
@@ -572,6 +563,8 @@
     <div id="content">
         <header>
             <div class="service-links d-flex justify-content-center">
+                <a href="/feed.html">Feed the herd</a>
+                <span>•</span>
                 <a href="#" id="contactLink" data-bs-toggle="modal" data-bs-target="#contactModal">Contact</a>
             </div>
         </header>
@@ -590,8 +583,11 @@
                             ></iframe>
                         </div>
 
-                        <button id="feedLink" class="qr-code-overlay feed-action" type="button" disabled
-                            data-bs-toggle="modal" data-bs-target="#feedModal"><span>Feed the herd</span></button>
+                        <a
+                            href="lightning:herd@lightning-goats.com"
+                            class="qr-code-overlay"
+                            aria-label="Send Lightning to herd@lightning-goats.com"
+                        ></a>
                     </div>
                 </div>
             </section>
@@ -610,6 +606,23 @@
                         <button id="nostrAuthButton" class="nostr-auth-button" type="button">Connect Nostr</button>
                     </div>
 
+                    <div id="chatGoal" class="chat-goal" hidden>
+                        <div class="chat-goal-row">
+                            <div id="chatGoalLabel" class="chat-goal-label">Loading zap goal…</div>
+                            <button id="chatZapButton" class="chat-zap-button" type="button" disabled hidden>⚡ Zap</button>
+                        </div>
+                        <div
+                            id="chatGoalTrack"
+                            class="chat-goal-track"
+                            role="progressbar"
+                            aria-label="Livestream zap goal"
+                            aria-valuemin="0"
+                            aria-valuemax="100"
+                            aria-valuenow="0"
+                        >
+                            <div id="chatGoalProgress" class="chat-goal-progress"></div>
+                        </div>
+                    </div>
                 </div>
 
                 <div id="chatMessages" class="chat-messages" role="log" aria-live="polite" aria-relevant="additions text">
@@ -636,11 +649,16 @@
             </aside>
         </main>
 
-        <p class="lg-title">Watch the Lightning Goats live and join the herd in Nostr chat.</p>
-        <p id="paymentAvailability" class="lg-title" role="status">Payments are paused while the site is being prepared.</p>
+        <p class="lg-title">
+            Lightning payments build feed credit for the herd. Feeding follows the local override and safety controls.
+            <br>
+            The Lightning Goats bitcoin-powered interactive goat feeder is open for business from morning to evening Mountain Time.
+            Use <a href="/feed.html">native Lightning payments</a> or send sats to:
+            <a href="lightning:herd@lightning-goats.com">herd@lightning-goats.com</a>
+        </p>
     </div>
 
-    <footer>© 2024 Lightning Goats. All rights reserved.</footer>
+    <footer>© 2026 Lightning Goats. All rights reserved.</footer>
 
     <div class="modal fade" id="contactModal" tabindex="-1" aria-labelledby="contactModalLabel" aria-hidden="true">
         <div class="modal-dialog modal-dialog-centered">
@@ -650,11 +668,7 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
-                    <p>Open our Nostr profile to send a direct message, or copy the public key.</p>
-                    <p><a href="nostr:npub1v60thnx0gz0wq3n6xdnq46y069l9x70xgmjp6lprdl6fv0eux6mqgjj4rp">Contact via Nostr</a></p>
-                    <input id="contactNpub" class="form-control" readonly aria-label="Nostr contact public key" value="npub1v60thnx0gz0wq3n6xdnq46y069l9x70xgmjp6lprdl6fv0eux6mqgjj4rp">
-                    <button id="copyContact" type="button" class="btn btn-outline-warning mt-2">Copy public key</button>
-                    <p id="contactStatus" role="status" class="small mt-2"></p>
+                    <p><a href="nostr:npub1v60thnx0gz0wq3n6xdnq46y069l9x70xgmjp6lprdl6fv0eux6mqgjj4rp">Contact the Lightning Goats on Nostr</a></p>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
@@ -663,34 +677,34 @@
         </div>
     </div>
 
-    <div class="modal fade" id="feedModal" tabindex="-1" aria-labelledby="feedModalLabel" aria-hidden="true">
-        <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
-            <div class="modal-header"><h5 id="feedModalLabel" class="modal-title">Feed the herd</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
-            <div class="modal-body">
-                <form id="feedForm">
-                    <label for="feedAddress" class="form-label">Lightning Address</label>
-                    <select id="feedAddress" class="form-select">
-                        <option value="herd">The herd</option><option value="dexter">Dexter</option>
-                        <option value="rowan">Rowan</option><option value="cosmo">Cosmo</option>
-                        <option value="newton">Newton</option><option value="nova">Nova</option>
-                    </select>
-                    <label for="feedAmount" class="form-label mt-2">Amount in sats</label>
-                    <input id="feedAmount" class="form-control" type="number" min="1" step="1" value="1000" required>
-                    <button id="createInvoice" class="btn btn-warning mt-3" type="submit" disabled>Create invoice</button>
-                </form>
-                <p id="paymentStatus" role="status" class="small mt-2"></p>
-                <div id="invoiceWrap" hidden>
-                    <textarea id="invoiceText" class="form-control" readonly aria-label="Lightning invoice"></textarea>
-                    <button id="copyInvoice" class="btn btn-outline-light mt-2" type="button">Copy invoice</button>
-                    <a id="invoiceWallet" class="btn btn-outline-warning mt-2" hidden>Open wallet</a>
+    <div class="modal fade" id="zapModal" tabindex="-1" aria-labelledby="zapModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="zapModalLabel">⚡ Zap the Lightning Goats</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <label class="form-label" for="zapAmount">Amount in sats</label>
+                    <input id="zapAmount" class="form-control" type="number" min="1" step="1" value="1000" inputmode="numeric">
+                    <div id="zapStatus" class="small text-muted mt-2">This zap contributes to the current livestream goal.</div>
+
+                    <div id="zapInvoiceWrap" class="zap-invoice-wrap" hidden>
+                        <canvas id="zapQr" class="zap-qr" width="240" height="240" aria-label="Lightning invoice QR code"></canvas>
+                        <textarea id="zapInvoice" class="zap-invoice" readonly aria-label="Lightning invoice"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button id="zapCopyButton" type="button" class="btn btn-outline-light" hidden>Copy invoice</button>
+                    <a id="zapWalletButton" class="btn btn-outline-warning" href="#" hidden>Open wallet</a>
+                    <button id="zapCreateButton" type="button" class="btn btn-warning">Create zap</button>
                 </div>
             </div>
-        </div></div>
+        </div>
     </div>
 
-    <script src="/site-config.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/vendor/bootstrap.bundle.min.js"></script>
+    <script src="/vendor/qrcode.js"></script>
 
     <!-- Preserve an injected NIP-07 provider before nostr-login installs its fallback wrapper. -->
     <script>
@@ -701,20 +715,1042 @@
 
     <!-- NIP-07 and NIP-46 login UI. No local/private-key login is enabled. -->
     <script
-        src="https://unpkg.com/nostr-login@1.7.12/dist/unpkg.js"
+        src="/vendor/nostr-login.js"
         data-dark-mode="true"
         data-theme="lemonade"
         data-no-banner="true"
         data-methods="connect,extension"
-        data-perms="sign_event:1311"
+        data-perms="sign_event:1311,sign_event:9734"
         data-title="Lightning Goats Chat"
         data-description="Connect a Nostr signer to join the live goat chat."
     ></script>
 
     <!-- Browser build exposes window.NostrTools. -->
-    <script src="https://unpkg.com/nostr-tools@2.25.0/lib/nostr.bundle.js"></script>
+    <script src="/vendor/nostr.bundle.js"></script>
 
-    <script src="/chat.js"></script>
-    <script src="/site.js"></script>
+    <script>
+    (() => {
+        "use strict";
+
+        const LG_PUBKEY = "669ebbcccf409ee0467a33660ae88fd17e5379e646e41d7c236ff4963f3c36b6";
+        const LIVE_EVENT_KIND = 30311;
+        const LIVE_CHAT_KIND = 1311;
+        const ZAP_GOAL_KIND = 9041;
+        const ZAP_RECEIPT_KIND = 9735;
+        const LIVE_EVENT_MAX_AGE_SECONDS = 36 * 60 * 60;
+        const MAX_CHAT_MESSAGES = 300;
+        const MAX_MESSAGE_LENGTH = 500;
+
+        // These include the relays advertised by the Lightning Goats zap.stream events.
+        const DISCOVERY_RELAYS = [
+            "wss://relay.zap.stream",
+            "wss://relay.snort.social",
+            "wss://nos.lol",
+            "wss://relay.damus.io",
+            "wss://relay.nostr.band",
+            "wss://nostr.land",
+            "wss://nostr.oxtr.dev",
+            "wss://nostr-pub.wellorder.net"
+        ];
+
+        // Add event IDs or pubkeys here if an operator-side hide becomes necessary.
+        const HIDDEN_EVENT_IDS = new Set([]);
+        const MUTED_PUBKEYS = new Set([]);
+
+        const elements = {
+            authButton: document.getElementById("nostrAuthButton"),
+            eventTitle: document.getElementById("chatEventTitle"),
+            form: document.getElementById("chatForm"),
+            goal: document.getElementById("chatGoal"),
+            goalLabel: document.getElementById("chatGoalLabel"),
+            goalProgress: document.getElementById("chatGoalProgress"),
+            goalTrack: document.getElementById("chatGoalTrack"),
+            input: document.getElementById("chatInput"),
+            messages: document.getElementById("chatMessages"),
+            notice: document.getElementById("chatNotice"),
+            send: document.getElementById("chatSend"),
+            state: document.getElementById("chatState"),
+            statusDot: document.getElementById("chatStatusDot"),
+            zapAmount: document.getElementById("zapAmount"),
+            zapButton: document.getElementById("chatZapButton"),
+            zapCopyButton: document.getElementById("zapCopyButton"),
+            zapCreateButton: document.getElementById("zapCreateButton"),
+            zapInvoice: document.getElementById("zapInvoice"),
+            zapInvoiceWrap: document.getElementById("zapInvoiceWrap"),
+            zapQr: document.getElementById("zapQr"),
+            zapStatus: document.getElementById("zapStatus"),
+            zapWalletButton: document.getElementById("zapWalletButton")
+        };
+
+        if (!window.NostrTools) {
+            setChatState("The Nostr library could not be loaded. The video is still available.");
+            elements.eventTitle.textContent = "Nostr unavailable";
+            return;
+        }
+
+        const { SimplePool, nip19, nip57, verifyEvent } = window.NostrTools;
+        const nostrLoginSigner = window.nostr || null;
+        const pool = new SimplePool({ trackRelays: true });
+        const liveEventsByAddress = new Map();
+        const chatEvents = new Map();
+        const chatZapReceipts = new Map();
+        const profiles = new Map();
+        const metadataEvents = new Map();
+        const pendingProfiles = new Set();
+
+        let activeLiveEvent = null;
+        let activeAddress = "";
+        let activeRelays = [...DISCOVERY_RELAYS];
+        let chatSubscription = null;
+        let streamZapSubscription = null;
+        let discoverySubscriptions = [];
+        let goalSubscription = null;
+        let currentUserPubkey = "";
+        let activeNostrSigner = null;
+        let activeGoalEvent = null;
+        let activeGoalTargetSats = 0;
+        let activeGoalRaisedSats = 0;
+        let activeGoalRecipient = "";
+        let activeGoalPayData = null;
+        let activeStreamPayData = null;
+        const goalReceipts = new Map();
+        let profileTimer = null;
+        let discoverySettled = false;
+        let isPublishing = false;
+
+        function getTag(event, name) {
+            return event.tags.find((tag) => tag[0] === name)?.[1] || "";
+        }
+
+        function hasLightningGoatsHostTag(event) {
+            return event.tags.some((tag) => {
+                if (tag[0] !== "p" || tag[1] !== LG_PUBKEY) return false;
+                const role = String(tag[3] || "").toLowerCase();
+                return !role || role === "host";
+            });
+        }
+
+        function isLightningGoatsLiveEvent(event) {
+            return event.pubkey === LG_PUBKEY || hasLightningGoatsHostTag(event);
+        }
+
+        function getAddress(event) {
+            const identifier = getTag(event, "d");
+            return identifier ? `${event.kind}:${event.pubkey}:${identifier}` : "";
+        }
+
+        function isSafeRelay(value) {
+            if (typeof value !== "string" || !value.startsWith("wss://")) return false;
+            try {
+                const url = new URL(value);
+                return url.protocol === "wss:";
+            } catch (_) {
+                return false;
+            }
+        }
+
+        function getEventRelays(event) {
+            const advertised = event.tags
+                .filter((tag) => tag[0] === "relays")
+                .flatMap((tag) => tag.slice(1))
+                .filter(isSafeRelay);
+
+            return [...new Set(["wss://relay.zap.stream", ...advertised, ...DISCOVERY_RELAYS])].slice(0, 12);
+        }
+
+        function isCurrentLiveEvent(event) {
+            const now = Math.floor(Date.now() / 1000);
+            return event.kind === LIVE_EVENT_KIND &&
+                isLightningGoatsLiveEvent(event) &&
+                getTag(event, "status").toLowerCase() === "live" &&
+                event.created_at >= now - LIVE_EVENT_MAX_AGE_SECONDS &&
+                event.created_at <= now + 300;
+        }
+
+        function rememberLiveEvent(event) {
+            if (!verifyEvent(event) || !isLightningGoatsLiveEvent(event)) return;
+            const address = getAddress(event);
+            if (!address) return;
+            const previous = liveEventsByAddress.get(address);
+            if (!previous || event.created_at > previous.created_at) {
+                liveEventsByAddress.set(address, event);
+                selectActiveLiveEvent();
+            }
+        }
+
+        function selectActiveLiveEvent() {
+            const candidates = [...liveEventsByAddress.values()]
+                .filter(isCurrentLiveEvent)
+                .sort((a, b) => b.created_at - a.created_at);
+            const next = candidates[0] || null;
+            const nextAddress = next ? getAddress(next) : "";
+
+            if (!next) {
+                if (activeLiveEvent) clearActiveLiveEvent();
+                else if (discoverySettled) showOfflineState();
+                return;
+            }
+
+            if (nextAddress === activeAddress) {
+                activeLiveEvent = next;
+                activeRelays = getEventRelays(next);
+                elements.eventTitle.textContent = getTag(next, "title") || "Lightning Goats live";
+                return;
+            }
+
+            activateLiveEvent(next);
+        }
+
+        function activateLiveEvent(event) {
+            activeLiveEvent = event;
+            activeAddress = getAddress(event);
+            activeRelays = getEventRelays(event);
+            chatEvents.clear();
+            chatZapReceipts.clear();
+            activeStreamPayData = null;
+
+            elements.statusDot.classList.add("live");
+            elements.eventTitle.textContent = getTag(event, "title") || "Lightning Goats live";
+            setChatState("Loading live chat…");
+            updateComposer();
+
+            if (chatSubscription) chatSubscription.close("live event changed");
+            if (streamZapSubscription) streamZapSubscription.close("live event changed");
+            chatSubscription = pool.subscribe(
+                activeRelays,
+                { kinds: [LIVE_CHAT_KIND], "#a": [activeAddress], limit: 200 },
+                {
+                    onevent: rememberChatEvent,
+                    oneose: () => {
+                        if (chatEvents.size === 0 && chatZapReceipts.size === 0) {
+                            setChatState("The goats are live. Be the first to say hello!");
+                        }
+                    }
+                }
+            );
+
+            streamZapSubscription = pool.subscribe(
+                activeRelays,
+                { kinds: [ZAP_RECEIPT_KIND], "#a": [activeAddress], limit: 200 },
+                { onevent: rememberStreamZapReceipt }
+            );
+
+            getZapPayData(event.pubkey, activeRelays).then((payData) => {
+                if (activeAddress !== getAddress(event)) return;
+                activeStreamPayData = payData;
+                renderMessages(false);
+            }).catch(() => {
+                // Unverifiable receipts stay hidden; ordinary chat remains available.
+            });
+
+            loadGoalForLiveEvent(event);
+        }
+
+        function clearActiveLiveEvent() {
+            activeLiveEvent = null;
+            activeAddress = "";
+            activeRelays = [...DISCOVERY_RELAYS];
+            chatEvents.clear();
+            chatZapReceipts.clear();
+            activeStreamPayData = null;
+            if (chatSubscription) chatSubscription.close("live event ended");
+            chatSubscription = null;
+            if (streamZapSubscription) streamZapSubscription.close("live event ended");
+            streamZapSubscription = null;
+            clearGoal();
+            showOfflineState();
+            updateComposer();
+        }
+
+        function clearGoal() {
+            goalSubscription?.close("goal changed");
+            goalSubscription = null;
+            activeGoalEvent = null;
+            activeGoalTargetSats = 0;
+            activeGoalRaisedSats = 0;
+            activeGoalRecipient = "";
+            activeGoalPayData = null;
+            goalReceipts.clear();
+            elements.goal.hidden = true;
+            elements.zapButton.disabled = true;
+            renderGoal();
+        }
+
+        function goalRelays(event, relayHint = "") {
+            const tagged = event.tags
+                .filter((tag) => tag[0] === "relays")
+                .flatMap((tag) => tag.slice(1))
+                .filter(isSafeRelay);
+            return [...new Set([relayHint, ...tagged, ...activeRelays])].filter(isSafeRelay).slice(0, 12);
+        }
+
+        async function loadGoalForLiveEvent(liveEvent) {
+            clearGoal();
+            const goalTag = liveEvent.tags.find((tag) => tag[0] === "goal" && /^[0-9a-f]{64}$/.test(tag[1] || ""));
+            if (!goalTag) return;
+
+            const requestedAddress = getAddress(liveEvent);
+            const goalId = goalTag[1];
+            const hint = isSafeRelay(goalTag[2]) ? goalTag[2] : "";
+            const lookupRelays = [...new Set([hint, "wss://nos.lol", "wss://relay.damus.io", ...activeRelays])].filter(isSafeRelay);
+
+            elements.goal.hidden = false;
+            elements.goalLabel.textContent = "Loading zap goal…";
+
+            try {
+                const goal = await pool.get(lookupRelays, { ids: [goalId] });
+                if (requestedAddress !== activeAddress) return;
+                if (!goal || !verifyEvent(goal) || goal.kind !== ZAP_GOAL_KIND) throw new Error("Zap goal event was not found.");
+                if (goal.pubkey !== liveEvent.pubkey && goal.pubkey !== LG_PUBKEY) throw new Error("Zap goal author does not match the livestream.");
+
+                const amountMsats = Number(getTag(goal, "amount"));
+                if (!Number.isSafeInteger(amountMsats) || amountMsats <= 0) throw new Error("Zap goal has an invalid target.");
+
+                activeGoalEvent = goal;
+                activeGoalTargetSats = Math.floor(amountMsats / 1000);
+                activeGoalRecipient = goal.pubkey;
+                const receiptRelays = goalRelays(goal, hint);
+                renderGoal();
+
+                goalSubscription = pool.subscribe(
+                    receiptRelays,
+                    { kinds: [ZAP_RECEIPT_KIND], "#e": [goal.id], limit: 500 },
+                    { onevent: rememberGoalReceipt }
+                );
+
+                const payData = await getZapPayData(activeGoalRecipient, receiptRelays);
+                if (requestedAddress !== activeAddress || activeGoalEvent?.id !== goal.id) return;
+                activeGoalPayData = payData;
+                elements.zapButton.disabled = !activeGoalPayData;
+                renderGoal();
+                renderMessages(false);
+            } catch (error) {
+                if (requestedAddress !== activeAddress) return;
+                elements.goalLabel.textContent = error?.message || "Zap goal unavailable.";
+                elements.zapButton.disabled = true;
+            }
+        }
+
+        function rememberGoalReceipt(event) {
+            if (!activeGoalEvent || !verifyEvent(event) || event.kind !== ZAP_RECEIPT_KIND) return;
+            if (!event.tags.some((tag) => tag[0] === "e" && tag[1] === activeGoalEvent.id)) return;
+            goalReceipts.set(event.id, event);
+            chatZapReceipts.set(event.id, event);
+            renderGoal();
+            renderMessages();
+        }
+
+        function rememberStreamZapReceipt(event) {
+            if (!activeAddress || !verifyEvent(event) || event.kind !== ZAP_RECEIPT_KIND) return;
+            if (!event.tags.some((tag) => tag[0] === "a" && tag[1] === activeAddress)) return;
+            if (HIDDEN_EVENT_IDS.has(event.id)) return;
+
+            chatZapReceipts.set(event.id, event);
+            if (chatZapReceipts.size > MAX_CHAT_MESSAGES) {
+                const oldest = [...chatZapReceipts.values()].sort((a, b) => a.created_at - b.created_at)[0];
+                if (oldest) chatZapReceipts.delete(oldest.id);
+            }
+            renderMessages();
+        }
+
+        function receiptSats(event) {
+            if (!activeGoalPayData?.nostrPubkey || event.pubkey !== activeGoalPayData.nostrPubkey) return 0;
+            try {
+                const description = getTag(event, "description");
+                const bolt11 = getTag(event, "bolt11");
+                if (!description || !bolt11 || nip57.validateZapRequest(description)) return 0;
+                const request = JSON.parse(description);
+                if (!request.tags.some((tag) => tag[0] === "e" && tag[1] === activeGoalEvent.id)) return 0;
+                const amountMsats = Number(getTag(request, "amount"));
+                const invoiceSats = nip57.getSatoshisAmountFromBolt11(bolt11);
+                if (!Number.isSafeInteger(amountMsats) || amountMsats <= 0) return 0;
+                if (!Number.isFinite(invoiceSats) || Math.round(invoiceSats * 1000) !== amountMsats) return 0;
+                const closedAt = Number(getTag(activeGoalEvent, "closed_at"));
+                if (closedAt && event.created_at > closedAt) return 0;
+                return invoiceSats;
+            } catch (_) {
+                return 0;
+            }
+        }
+
+        function parseChatZapReceipt(event) {
+            try {
+                if (!activeLiveEvent || !verifyEvent(event) || event.kind !== ZAP_RECEIPT_KIND) return null;
+                const description = getTag(event, "description");
+                const bolt11 = getTag(event, "bolt11");
+                if (!description || !bolt11 || nip57.validateZapRequest(description)) return null;
+
+                const request = JSON.parse(description);
+                const streamTarget = request.tags.some((tag) => tag[0] === "a" && tag[1] === activeAddress) &&
+                    event.tags.some((tag) => tag[0] === "a" && tag[1] === activeAddress);
+                const goalTarget = Boolean(activeGoalEvent) &&
+                    request.tags.some((tag) => tag[0] === "e" && tag[1] === activeGoalEvent.id) &&
+                    event.tags.some((tag) => tag[0] === "e" && tag[1] === activeGoalEvent.id);
+                if (!streamTarget && !goalTarget) return null;
+
+                const payData = streamTarget ? activeStreamPayData : activeGoalPayData;
+                const recipient = streamTarget ? activeLiveEvent.pubkey : activeGoalRecipient;
+                if (!payData?.nostrPubkey || event.pubkey !== payData.nostrPubkey) return null;
+                if (getTag(event, "p") !== recipient || getTag(request, "p") !== recipient) return null;
+                const senderTag = getTag(event, "P");
+                if (senderTag && senderTag !== request.pubkey) return null;
+
+                const invoiceSats = nip57.getSatoshisAmountFromBolt11(bolt11);
+                if (!Number.isFinite(invoiceSats) || invoiceSats <= 0) return null;
+                const amountTag = getTag(request, "amount");
+                if (amountTag) {
+                    const amountMsats = Number(amountTag);
+                    if (!Number.isSafeInteger(amountMsats) || Math.round(invoiceSats * 1000) !== amountMsats) return null;
+                }
+                const requestLnurl = getTag(request, "lnurl");
+                if (requestLnurl && requestLnurl.toLowerCase() !== payData.lnurl.toLowerCase()) return null;
+
+                return {
+                    id: event.id,
+                    created_at: event.created_at,
+                    sender: request.pubkey,
+                    sats: invoiceSats,
+                    comment: typeof request.content === "string" ? request.content.slice(0, 500) : "",
+                    target: streamTarget ? "stream" : "goal"
+                };
+            } catch (_) {
+                return null;
+            }
+        }
+
+        function renderGoal() {
+            if (!activeGoalEvent || !activeGoalTargetSats) {
+                elements.goalProgress.style.width = "0%";
+                elements.goalTrack.setAttribute("aria-valuenow", "0");
+                return;
+            }
+
+            activeGoalRaisedSats = [...goalReceipts.values()].reduce((total, receipt) => total + receiptSats(receipt), 0);
+            const percent = Math.min(100, (activeGoalRaisedSats / activeGoalTargetSats) * 100);
+            elements.goalProgress.style.width = `${percent.toFixed(2)}%`;
+            elements.goalTrack.setAttribute("aria-valuenow", String(Math.round(percent)));
+            elements.goalLabel.replaceChildren(
+                document.createTextNode(`${Math.round(activeGoalRaisedSats).toLocaleString()} / `),
+                Object.assign(document.createElement("strong"), { textContent: `${activeGoalTargetSats.toLocaleString()} sats` })
+            );
+        }
+
+        function showOfflineState() {
+            elements.statusDot.classList.remove("live");
+            elements.eventTitle.textContent = "No current Nostr livestream";
+            setChatState("Chat opens automatically when the Lightning Goats Nostr event goes live.");
+        }
+
+        function rememberChatEvent(event) {
+            if (!verifyEvent(event) || event.kind !== LIVE_CHAT_KIND) return;
+            if (!event.tags.some((tag) => tag[0] === "a" && tag[1] === activeAddress)) return;
+            if (HIDDEN_EVENT_IDS.has(event.id) || MUTED_PUBKEYS.has(event.pubkey)) return;
+            if (typeof event.content !== "string" || event.content.length > 2000) return;
+
+            const now = Math.floor(Date.now() / 1000);
+            if (event.created_at > now + 600) return;
+
+            chatEvents.set(event.id, event);
+            if (chatEvents.size > MAX_CHAT_MESSAGES) {
+                const oldest = [...chatEvents.values()].sort((a, b) => a.created_at - b.created_at)[0];
+                if (oldest) chatEvents.delete(oldest.id);
+            }
+
+            queueProfile(event.pubkey);
+            renderMessages();
+        }
+
+        function queueProfile(pubkey) {
+            if (profiles.has(pubkey)) return;
+            pendingProfiles.add(pubkey);
+            window.clearTimeout(profileTimer);
+            profileTimer = window.setTimeout(fetchPendingProfiles, 180);
+        }
+
+        async function fetchPendingProfiles() {
+            const authors = [...pendingProfiles].slice(0, 100);
+            authors.forEach((pubkey) => pendingProfiles.delete(pubkey));
+            if (!authors.length) return;
+
+            try {
+                const events = await pool.querySync(activeRelays, { kinds: [0], authors, limit: authors.length });
+                const newest = new Map();
+                events.forEach((event) => {
+                    if (!verifyEvent(event)) return;
+                    const previous = newest.get(event.pubkey);
+                    if (!previous || event.created_at > previous.created_at) newest.set(event.pubkey, event);
+                });
+
+                newest.forEach((event, pubkey) => {
+                    metadataEvents.set(pubkey, event);
+                    try {
+                        const profile = JSON.parse(event.content);
+                        profiles.set(pubkey, profile && typeof profile === "object" ? profile : {});
+                    } catch (_) {
+                        profiles.set(pubkey, {});
+                    }
+                });
+
+                authors.forEach((pubkey) => {
+                    if (!profiles.has(pubkey)) profiles.set(pubkey, {});
+                });
+                renderMessages(false);
+            } catch (_) {
+                // Profile metadata is optional; chat remains usable without it.
+            }
+
+            if (pendingProfiles.size) profileTimer = window.setTimeout(fetchPendingProfiles, 250);
+        }
+
+        function safeImageUrl(value) {
+            if (typeof value !== "string") return "";
+            try {
+                const url = new URL(value);
+                return url.protocol === "https:" || url.protocol === "http:" ? url.href : "";
+            } catch (_) {
+                return "";
+            }
+        }
+
+        async function getMetadataEvent(pubkey, relays) {
+            if (metadataEvents.has(pubkey)) return metadataEvents.get(pubkey);
+            const event = await pool.get(relays, { kinds: [0], authors: [pubkey] });
+            if (!event || !verifyEvent(event)) throw new Error("Recipient profile was not found.");
+            metadataEvents.set(pubkey, event);
+            try {
+                profiles.set(pubkey, JSON.parse(event.content));
+            } catch (_) {
+                profiles.set(pubkey, {});
+            }
+            return event;
+        }
+
+        function lightningAddressEndpoint(profile) {
+            const address = String(profile?.lud16 || "").trim();
+            const separator = address.lastIndexOf("@");
+            if (separator <= 0 || separator === address.length - 1) return "";
+            const name = address.slice(0, separator);
+            const domain = address.slice(separator + 1);
+            if (!/^[A-Za-z0-9._-]+$/.test(name) || !/^[A-Za-z0-9.-]+$/.test(domain)) return "";
+            return `https://${domain}/.well-known/lnurlp/${encodeURIComponent(name)}`;
+        }
+
+        async function getZapPayData(pubkey, relays) {
+            const metadata = await getMetadataEvent(pubkey, relays);
+            const profile = profiles.get(pubkey) || JSON.parse(metadata.content);
+            const endpoint = lightningAddressEndpoint(profile);
+            if (!endpoint) throw new Error("The zap recipient has no Lightning address.");
+
+            const response = await fetch(endpoint, { headers: { Accept: "application/json" } });
+            if (!response.ok) throw new Error("The Lightning address could not be loaded.");
+            const data = await response.json();
+            if (!data?.allowsNostr || !/^[0-9a-f]{64}$/.test(data.nostrPubkey || "") || !data.callback) {
+                throw new Error("The Lightning address does not support Nostr zaps.");
+            }
+
+            return {
+                callback: data.callback,
+                endpoint,
+                lnurl: encodeLnurl(endpoint),
+                maxSendable: Number(data.maxSendable || 0),
+                minSendable: Number(data.minSendable || 0),
+                nostrPubkey: data.nostrPubkey
+            };
+        }
+
+        function encodeLnurl(value) {
+            const alphabet = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
+            const bytes = new TextEncoder().encode(value);
+            const words = [];
+            let accumulator = 0;
+            let bits = 0;
+
+            for (const byte of bytes) {
+                accumulator = (accumulator << 8) | byte;
+                bits += 8;
+                while (bits >= 5) {
+                    bits -= 5;
+                    words.push((accumulator >> bits) & 31);
+                }
+                accumulator &= bits ? (1 << bits) - 1 : 0;
+            }
+            if (bits) words.push((accumulator << (5 - bits)) & 31);
+
+            function polymod(values) {
+                const generators = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3];
+                let checksum = 1;
+                for (const value of values) {
+                    const top = checksum >>> 25;
+                    checksum = ((checksum & 0x1ffffff) << 5) ^ value;
+                    for (let i = 0; i < 5; i += 1) if ((top >>> i) & 1) checksum ^= generators[i];
+                }
+                return checksum >>> 0;
+            }
+
+            const hrp = "lnurl";
+            const expanded = [...hrp].map((char) => char.charCodeAt(0) >>> 5)
+                .concat([0], [...hrp].map((char) => char.charCodeAt(0) & 31));
+            const values = expanded.concat(words, [0, 0, 0, 0, 0, 0]);
+            const mod = polymod(values) ^ 1;
+            const checksum = Array.from({ length: 6 }, (_, index) => (mod >>> (5 * (5 - index))) & 31);
+            return `${hrp}1${words.concat(checksum).map((word) => alphabet[word]).join("")}`;
+        }
+
+        function shortNpub(pubkey) {
+            try {
+                const encoded = nip19.npubEncode(pubkey);
+                return `${encoded.slice(0, 10)}…${encoded.slice(-5)}`;
+            } catch (_) {
+                return `${pubkey.slice(0, 8)}…`;
+            }
+        }
+
+        function profileName(pubkey) {
+            const profile = profiles.get(pubkey) || {};
+            return profile.display_name || profile.displayName || profile.name || profile.nip05 || shortNpub(pubkey);
+        }
+
+        function renderMessages(allowScroll = true) {
+            const nearBottom = elements.messages.scrollHeight - elements.messages.scrollTop - elements.messages.clientHeight < 90;
+            const fragment = document.createDocumentFragment();
+            const items = [
+                ...[...chatEvents.values()].map((event) => ({ type: "chat", event, id: event.id, created_at: event.created_at })),
+                ...[...chatZapReceipts.values()]
+                    .map(parseChatZapReceipt)
+                    .filter(Boolean)
+                    .map((zap) => ({ type: "zap", zap, id: zap.id, created_at: zap.created_at }))
+            ].sort((a, b) => a.created_at - b.created_at || a.id.localeCompare(b.id));
+
+            if (!items.length) return;
+
+            function makeAvatar(pubkey, name) {
+                const profile = profiles.get(pubkey) || {};
+                const avatar = document.createElement("div");
+                avatar.className = "chat-avatar";
+                avatar.setAttribute("aria-hidden", "true");
+                const imageUrl = safeImageUrl(profile.picture || profile.image);
+                if (imageUrl) {
+                    const image = document.createElement("img");
+                    image.src = imageUrl;
+                    image.alt = "";
+                    image.loading = "lazy";
+                    image.referrerPolicy = "no-referrer";
+                    image.addEventListener("error", () => {
+                        avatar.replaceChildren(document.createTextNode(name.slice(0, 1) || "N"));
+                    }, { once: true });
+                    avatar.appendChild(image);
+                } else {
+                    avatar.textContent = name.slice(0, 1) || "N";
+                }
+                return avatar;
+            }
+
+            items.forEach((item) => {
+                if (item.type === "zap") {
+                    const { zap } = item;
+                    queueProfile(zap.sender);
+                    const name = profileName(zap.sender);
+                    const row = document.createElement("article");
+                    row.className = "chat-message zap-message";
+                    row.dataset.eventId = zap.id;
+                    row.setAttribute("aria-label", `${name} zapped ${Math.round(zap.sats)} sats`);
+
+                    const body = document.createElement("div");
+                    body.className = "chat-message-body";
+                    const line = document.createElement("div");
+                    line.className = "zap-line";
+                    const author = document.createElement("span");
+                    author.className = "chat-author";
+                    author.textContent = name;
+                    author.title = shortNpub(zap.sender);
+                    const action = document.createElement("span");
+                    action.className = "zap-action";
+                    action.textContent = zap.target === "goal" ? "zapped the goal" : "zapped";
+                    const time = document.createElement("time");
+                    time.className = "chat-time";
+                    time.dateTime = new Date(zap.created_at * 1000).toISOString();
+                    time.textContent = new Date(zap.created_at * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+                    const amount = document.createElement("span");
+                    amount.className = "zap-amount";
+                    amount.textContent = `⚡${Number.isInteger(zap.sats) ? zap.sats.toLocaleString() : zap.sats.toFixed(3)}`;
+                    line.append(author, action, time, amount);
+                    body.appendChild(line);
+
+                    if (zap.comment) {
+                        const comment = document.createElement("div");
+                        comment.className = "chat-content zap-comment";
+                        comment.textContent = zap.comment;
+                        body.appendChild(comment);
+                    }
+
+                    row.append(makeAvatar(zap.sender, name), body);
+                    fragment.appendChild(row);
+                    return;
+                }
+
+                const { event } = item;
+                const name = profileName(event.pubkey);
+                const row = document.createElement("article");
+                row.className = "chat-message";
+                row.dataset.eventId = event.id;
+
+                const body = document.createElement("div");
+                body.className = "chat-message-body";
+                const meta = document.createElement("div");
+                meta.className = "chat-message-meta";
+                const author = document.createElement("span");
+                author.className = "chat-author";
+                author.textContent = name;
+                author.title = shortNpub(event.pubkey);
+                const time = document.createElement("time");
+                time.className = "chat-time";
+                time.dateTime = new Date(event.created_at * 1000).toISOString();
+                time.textContent = new Date(event.created_at * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+                const content = document.createElement("div");
+                content.className = "chat-content";
+                content.textContent = event.content;
+
+                meta.append(author, time);
+                body.append(meta, content);
+                row.append(makeAvatar(event.pubkey, name), body);
+                fragment.appendChild(row);
+            });
+
+            elements.messages.replaceChildren(fragment);
+            if (allowScroll && nearBottom) elements.messages.scrollTop = elements.messages.scrollHeight;
+        }
+
+        function setChatState(message) {
+            const state = document.createElement("div");
+            state.id = "chatState";
+            state.className = "chat-state";
+            state.textContent = message;
+            elements.state = state;
+            elements.messages.replaceChildren(state);
+        }
+
+        function setNotice(message, type = "") {
+            elements.notice.textContent = message;
+            elements.notice.className = `chat-notice${type ? ` ${type}` : ""}`;
+        }
+
+        function updateComposer() {
+            const enabled = Boolean(activeLiveEvent && currentUserPubkey && !isPublishing);
+            elements.input.disabled = !enabled;
+            elements.send.disabled = !enabled;
+
+            if (!activeLiveEvent) elements.input.placeholder = "Chat opens when the goats go live";
+            else if (!currentUserPubkey) elements.input.placeholder = "Connect Nostr to chat";
+            else elements.input.placeholder = "Say something to the herd…";
+        }
+
+        async function refreshAuthenticatedUser() {
+            try {
+                if (!window.nostr?.getPublicKey) throw new Error("No Nostr signer is available");
+                activeNostrSigner = window.nostr;
+                currentUserPubkey = await window.nostr.getPublicKey();
+                elements.authButton.textContent = shortNpub(currentUserPubkey);
+                elements.authButton.title = "Switch Nostr account";
+                queueProfile(currentUserPubkey);
+                updateComposer();
+            } catch (_) {
+                activeNostrSigner = null;
+                currentUserPubkey = "";
+                elements.authButton.textContent = "Connect Nostr";
+                elements.authButton.title = "";
+                updateComposer();
+            }
+        }
+
+        async function connectNostrInteractive() {
+            try {
+                // Prefer the browser's injected NIP-07 provider. This produces the
+                // native Alby/nos2x/etc. approval prompt with no intermediary form.
+                const extension = window.__lightningGoatsNip07 ||
+                    (window.nostr && window.nostr !== nostrLoginSigner ? window.nostr : null);
+                if (extension?.getPublicKey && extension?.signEvent) {
+                    activeNostrSigner = extension;
+                } else if (window.nostr?.getPublicKey) {
+                    // nostr-login supplies the NIP-46 fallback when no extension exists.
+                    activeNostrSigner = window.nostr;
+                } else {
+                    document.dispatchEvent(new CustomEvent("nlLaunch", { detail: "login" }));
+                    throw new Error("Choose a NIP-07 extension or Nostr Connect signer.");
+                }
+                currentUserPubkey = await activeNostrSigner.getPublicKey();
+                if (!/^[0-9a-f]{64}$/.test(currentUserPubkey)) throw new Error("The signer returned an invalid public key.");
+                elements.authButton.textContent = shortNpub(currentUserPubkey);
+                elements.authButton.title = "Switch Nostr account";
+                queueProfile(currentUserPubkey);
+                updateComposer();
+                return currentUserPubkey;
+            } catch (error) {
+                if (!currentUserPubkey) {
+                    activeNostrSigner = null;
+                    elements.authButton.textContent = "Connect Nostr";
+                    elements.authButton.title = "";
+                    updateComposer();
+                }
+                throw error;
+            }
+        }
+
+        async function publishMessage(content) {
+            if (!activeLiveEvent || !activeAddress) throw new Error("The Nostr livestream is not currently active.");
+            if (!activeNostrSigner?.signEvent) throw new Error("Connect a Nostr signer first.");
+
+            const primaryRelay = activeRelays[0] || "wss://relay.zap.stream";
+            const template = {
+                kind: LIVE_CHAT_KIND,
+                created_at: Math.floor(Date.now() / 1000),
+                tags: [["a", activeAddress, primaryRelay, "root"]],
+                content
+            };
+
+            const signedEvent = await activeNostrSigner.signEvent(template);
+            if (!verifyEvent(signedEvent)) throw new Error("The signer returned an invalid event.");
+
+            let userRelays = [];
+            try {
+                const advertised = await activeNostrSigner.getRelays?.();
+                if (advertised && typeof advertised === "object") {
+                    userRelays = Object.entries(advertised)
+                        .filter(([, policy]) => policy?.write !== false)
+                        .map(([relay]) => relay)
+                        .filter(isSafeRelay);
+                }
+            } catch (_) {
+                // Publishing to the activity relays is sufficient.
+            }
+
+            const publishRelays = [...new Set([...activeRelays, ...userRelays])].slice(0, 10);
+            const results = await Promise.allSettled(pool.publish(publishRelays, signedEvent));
+            if (!results.some((result) => result.status === "fulfilled")) {
+                throw new Error("No relay accepted the message. Please try again.");
+            }
+
+            rememberChatEvent(signedEvent);
+        }
+
+        async function createZapInvoice(sats) {
+            if (!activeGoalEvent || !activeGoalPayData || !activeGoalRecipient) {
+                throw new Error("The current zap goal is not ready.");
+            }
+            if (!currentUserPubkey) await connectNostrInteractive();
+
+            const amountMsats = Math.round(sats * 1000);
+            if (!Number.isSafeInteger(amountMsats) || amountMsats <= 0) throw new Error("Enter a valid zap amount.");
+            if (activeGoalPayData.minSendable && amountMsats < activeGoalPayData.minSendable) {
+                throw new Error(`Minimum zap is ${Math.ceil(activeGoalPayData.minSendable / 1000)} sats.`);
+            }
+            if (activeGoalPayData.maxSendable && amountMsats > activeGoalPayData.maxSendable) {
+                throw new Error(`Maximum zap is ${Math.floor(activeGoalPayData.maxSendable / 1000)} sats.`);
+            }
+
+            const relays = goalRelays(activeGoalEvent);
+            const requestTemplate = {
+                kind: 9734,
+                created_at: Math.floor(Date.now() / 1000),
+                content: "",
+                tags: [
+                    ["relays", ...relays],
+                    ["amount", String(amountMsats)],
+                    ["lnurl", activeGoalPayData.lnurl],
+                    ["p", activeGoalRecipient],
+                    ["e", activeGoalEvent.id],
+                    ["k", String(ZAP_GOAL_KIND)]
+                ]
+            };
+
+            const request = await activeNostrSigner.signEvent(requestTemplate);
+            if (!verifyEvent(request)) throw new Error("The signer returned an invalid zap request.");
+
+            const callback = new URL(activeGoalPayData.callback);
+            callback.searchParams.set("amount", String(amountMsats));
+            callback.searchParams.set("nostr", JSON.stringify(request));
+            callback.searchParams.set("lnurl", activeGoalPayData.lnurl);
+            const response = await fetch(callback, { headers: { Accept: "application/json" } });
+            const data = await response.json();
+            if (!response.ok || data?.status === "ERROR" || !data?.pr) {
+                throw new Error(data?.reason || "The Lightning wallet did not return an invoice.");
+            }
+            return data.pr;
+        }
+
+        async function displayOrPayInvoice(invoice) {
+            elements.zapInvoice.value = invoice;
+            elements.zapInvoiceWrap.hidden = false;
+            elements.zapCopyButton.hidden = false;
+            elements.zapWalletButton.hidden = false;
+            elements.zapWalletButton.href = `lightning:${invoice}`;
+
+            if (window.qrcode) {
+                const qr = window.qrcode(0, "M");
+                qr.addData(invoice.toUpperCase());
+                qr.make();
+                const count = qr.getModuleCount();
+                const scale = Math.max(2, Math.floor(320 / (count + 8)));
+                const size = (count + 8) * scale;
+                elements.zapQr.width = elements.zapQr.height = size;
+                const ctx = elements.zapQr.getContext("2d");
+                ctx.fillStyle = "#ffffff";
+                ctx.fillRect(0, 0, size, size);
+                ctx.fillStyle = "#000000";
+                for (let row = 0; row < count; row += 1) {
+                    for (let col = 0; col < count; col += 1) {
+                        if (qr.isDark(row, col)) ctx.fillRect((col + 4) * scale, (row + 4) * scale, scale, scale);
+                    }
+                }
+            }
+
+            if (window.webln?.enable && window.webln?.sendPayment) {
+                try {
+                    elements.zapStatus.textContent = "Waiting for Alby or your WebLN wallet…";
+                    await window.webln.enable();
+                    await window.webln.sendPayment(invoice);
+                    elements.zapStatus.textContent = "Zap paid. Waiting for the Nostr receipt…";
+                    elements.zapStatus.className = "small text-success mt-2";
+                    return;
+                } catch (_) {
+                    // Leave the QR, copy, and wallet controls available.
+                }
+            }
+
+            elements.zapStatus.textContent = "Scan the QR code, open your wallet, or copy the invoice.";
+            elements.zapStatus.className = "small text-muted mt-2";
+        }
+
+        elements.zapButton.addEventListener("click", () => {
+            elements.zapInvoiceWrap.hidden = true;
+            elements.zapCopyButton.hidden = true;
+            elements.zapWalletButton.hidden = true;
+            elements.zapStatus.textContent = "This zap contributes to the current livestream goal.";
+            elements.zapStatus.className = "small text-muted mt-2";
+            bootstrap.Modal.getOrCreateInstance(document.getElementById("zapModal")).show();
+        });
+
+        elements.zapCreateButton.addEventListener("click", async () => {
+            const sats = Number(elements.zapAmount.value);
+            elements.zapCreateButton.disabled = true;
+            elements.zapStatus.textContent = "Creating signed Nostr zap request…";
+            elements.zapStatus.className = "small text-muted mt-2";
+            try {
+                const invoice = await createZapInvoice(sats);
+                await displayOrPayInvoice(invoice);
+            } catch (error) {
+                elements.zapStatus.textContent = error?.message || "The zap could not be created.";
+                elements.zapStatus.className = "small text-danger mt-2";
+            } finally {
+                elements.zapCreateButton.disabled = false;
+            }
+        });
+
+        elements.zapCopyButton.addEventListener("click", async () => {
+            try {
+                await navigator.clipboard.writeText(elements.zapInvoice.value);
+                elements.zapStatus.textContent = "Invoice copied.";
+                elements.zapStatus.className = "small text-success mt-2";
+            } catch (_) {
+                elements.zapInvoice.select();
+                document.execCommand("copy");
+            }
+        });
+
+        elements.authButton.addEventListener("click", async () => {
+            if (currentUserPubkey) {
+                document.dispatchEvent(new CustomEvent("nlLaunch", { detail: "switch-account" }));
+                return;
+            }
+            setNotice("Waiting for your Nostr signer…");
+            try {
+                await connectNostrInteractive();
+                setNotice("Nostr signer connected.", "success");
+            } catch (error) {
+                setNotice(error?.message || "Nostr connection was cancelled.", "error");
+            }
+        });
+
+        elements.form.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const content = elements.input.value.trim();
+            if (!content || content.length > MAX_MESSAGE_LENGTH || isPublishing) return;
+
+            isPublishing = true;
+            updateComposer();
+            setNotice("Requesting your signature…");
+
+            try {
+                await publishMessage(content);
+                elements.input.value = "";
+                setNotice("Message published to Nostr.", "success");
+            } catch (error) {
+                setNotice(error?.message || "The message could not be published.", "error");
+            } finally {
+                isPublishing = false;
+                updateComposer();
+                if (!elements.input.disabled) elements.input.focus();
+            }
+        });
+
+        elements.input.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                elements.form.requestSubmit();
+            }
+        });
+
+        document.addEventListener("nlAuth", (event) => {
+            if (event.detail?.type === "login" || event.detail?.type === "signup") {
+                refreshAuthenticatedUser();
+            } else if (event.detail?.type === "logout") {
+                activeNostrSigner = null;
+                currentUserPubkey = "";
+                elements.authButton.textContent = "Connect Nostr";
+                elements.authButton.title = "";
+                updateComposer();
+            }
+        });
+
+        function startDiscovery() {
+            const callbacks = {
+                onevent: rememberLiveEvent,
+                oneose: () => {
+                    discoverySettled = true;
+                    selectActiveLiveEvent();
+                }
+            };
+
+            // The current self-hosted publisher authors 30311 directly as LG.
+            discoverySubscriptions.push(pool.subscribe(
+                DISCOVERY_RELAYS,
+                { kinds: [LIVE_EVENT_KIND], authors: [LG_PUBKEY], limit: 30 },
+                callbacks
+            ));
+
+            // Keep compatibility with older/provider-authored events that tag LG as host.
+            discoverySubscriptions.push(pool.subscribe(
+                DISCOVERY_RELAYS,
+                { kinds: [LIVE_EVENT_KIND], "#p": [LG_PUBKEY], limit: 30 },
+                callbacks
+            ));
+
+            window.setTimeout(() => {
+                discoverySettled = true;
+                selectActiveLiveEvent();
+            }, 6500);
+        }
+
+        startDiscovery();
+        window.setInterval(selectActiveLiveEvent, 60 * 1000);
+
+        window.addEventListener("beforeunload", () => {
+            discoverySubscriptions.forEach((subscription) => subscription.close("page unloading"));
+            chatSubscription?.close("page unloading");
+            streamZapSubscription?.close("page unloading");
+            goalSubscription?.close("page unloading");
+            pool.close([...new Set([...DISCOVERY_RELAYS, ...activeRelays])]);
+        });
+    })();
+    </script>
 </body>
 </html>

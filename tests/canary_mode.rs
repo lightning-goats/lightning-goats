@@ -1,6 +1,6 @@
 use std::sync::{
     Arc,
-    atomic::{AtomicUsize, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 
 use axum::{
@@ -22,11 +22,12 @@ use tokio::net::TcpListener;
 #[derive(Clone)]
 struct GatewayState {
     requests: Arc<AtomicUsize>,
+    override_enabled: Arc<AtomicBool>,
 }
 
-async fn safety_handler() -> Json<FeederSafety> {
+async fn safety_handler(State(state): State<GatewayState>) -> Json<FeederSafety> {
     Json(FeederSafety {
-        override_enabled: false,
+        override_enabled: state.override_enabled.load(Ordering::SeqCst),
         remote_enabled: true,
     })
 }
@@ -77,6 +78,7 @@ async fn canary_mode_drains_harmless_gateway_without_nostr_capability() {
         .route("/v1/feeder/request/{request_id}", post(feed_handler))
         .with_state(GatewayState {
             requests: Arc::clone(&requests),
+            override_enabled: Arc::new(AtomicBool::new(false)),
         });
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -106,4 +108,97 @@ async fn canary_mode_drains_harmless_gateway_without_nostr_capability() {
 
     assert_eq!(requests.load(Ordering::SeqCst), 2);
     assert_eq!(ledger.feed_credit_sats().await.unwrap(), 340);
+}
+
+#[tokio::test]
+async fn operator_credit_respects_override_and_real_worker_debits_without_payment_provider() {
+    use lightning_goats::ledger::{OperatorCreditGrant, OperatorCreditStatus};
+    let root = TempDir::new().unwrap();
+    let ledger = LedgerStore::connect(&format!(
+        "sqlite://{}",
+        root.path().join("ledger.db").display()
+    ))
+    .await
+    .unwrap();
+    let grant = OperatorCreditGrant {
+        id: "feeding-check".into(),
+        amount_sats: 2340,
+        address_user: "herd".into(),
+        reason: "Harmless gateway fixture".into(),
+    };
+    ledger
+        .update_feeding_presentation(
+            1000,
+            RuntimeMode::Canary,
+            Some(FeederSafety {
+                override_enabled: true,
+                remote_enabled: true,
+            }),
+        )
+        .await
+        .unwrap();
+    ledger.grant_operator_credit(&grant, false).await.unwrap();
+    let requests = Arc::new(AtomicUsize::new(0));
+    let gate = Arc::new(AtomicBool::new(true));
+    let app = Router::new()
+        .route("/v1/feeder/override", get(safety_handler))
+        .route("/v1/feeder/request/{request_id}", post(feed_handler))
+        .with_state(GatewayState {
+            requests: Arc::clone(&requests),
+            override_enabled: Arc::clone(&gate),
+        });
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let gateway = GatewayClient::new(&format!("http://{address}/")).unwrap();
+    assert!(matches!(
+        run_feed_step(&ledger, &gateway, 1000, RuntimeMode::Canary)
+            .await
+            .unwrap(),
+        FeedWorkerStep::OverrideBlocked { feeds_due: 2 }
+    ));
+    assert_eq!(requests.load(Ordering::SeqCst), 0);
+    assert_eq!(ledger.feed_credit_sats().await.unwrap(), 2340);
+    // Advisory ready metadata must never bypass the actual local override.
+    ledger
+        .update_feeding_presentation(
+            1000,
+            RuntimeMode::Canary,
+            Some(FeederSafety {
+                override_enabled: false,
+                remote_enabled: true,
+            }),
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        run_feed_step(&ledger, &gateway, 1000, RuntimeMode::Canary)
+            .await
+            .unwrap(),
+        FeedWorkerStep::OverrideBlocked { .. }
+    ));
+    assert_eq!(requests.load(Ordering::SeqCst), 0);
+    gate.store(false, Ordering::SeqCst);
+    for expected in [1340, 340] {
+        assert!(
+            matches!(run_feed_step(&ledger,&gateway,1000,RuntimeMode::Canary).await.unwrap(),FeedWorkerStep::Fed{remaining_sats,..} if remaining_sats==expected)
+        );
+    }
+    assert_eq!(requests.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        ledger
+            .grant_operator_credit(&grant, false)
+            .await
+            .unwrap()
+            .status,
+        OperatorCreditStatus::Duplicate
+    );
+    assert_eq!(
+        run_feed_step(&ledger, &gateway, 1000, RuntimeMode::Canary)
+            .await
+            .unwrap(),
+        FeedWorkerStep::Idle
+    );
+    assert_eq!(ledger.feed_credit_sats().await.unwrap(), 340);
+    server.abort();
 }

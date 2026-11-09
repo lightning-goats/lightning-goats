@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>⚡ Lightning Goats ⚡</title>
+
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <meta name="description" content="Watch the Lightning Goats live, feed the herd with Bitcoin, and join the live Nostr chat.">
+    <link rel="canonical" href="https://lightning-goats.com/">
+    <meta name="theme-color" content="#000000">
+
+    <meta property="og:title" content="⚡ Lightning Goats ⚡">
+    <meta property="og:description" content="Watch the Lightning Goats live, feed the herd with Bitcoin, and join the live Nostr chat.">
+    <meta property="og:url" content="https://lightning-goats.com/">
+    <meta property="og:type" content="website">
+    <meta property="og:image" content="https://lightning-goats.com/images/preview-image.png">
+    <meta property="og:logo" content="https://lightning-goats.com/images/lightninggoatslogo1.png">
+    <meta property="og:site_name" content="Lightning Goats">
+    <meta property="og:locale" content="en_US">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="⚡ Lightning Goats ⚡">
+    <meta name="twitter:description" content="Watch the Lightning Goats live, feed the herd with Bitcoin, and join the live Nostr chat.">
+    <meta name="twitter:image" content="https://lightning-goats.com/images/preview-image.png">
+
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "Organization",
+        "name": "Lightning Goats",
+        "url": "https://lightning-goats.com",
+        "logo": "https://lightning-goats.com/images/lightninggoatslogo1.png",
+        "description": "Watch the Lightning Goats live, feed the herd with Bitcoin, and join the live Nostr chat.",
+        "contactPoint": {
+            "@type": "ContactPoint",
+            "url": "nostr:npub1v60thnx0gz0wq3n6xdnq46y069l9x70xgmjp6lprdl6fv0eux6mqgjj4rp",
+            "contactType": "Sat"
+        },
+        "sameAs": [
+            "https://www.youtube.com/@lightning-goats",
+            "https://primal.net/p/npub1v60thnx0gz0wq3n6xdnq46y069l9x70xgmjp6lprdl6fv0eux6mqgjj4rp"
+        ]
+    }
+    </script>
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <style>
+        :root {
+            color-scheme: dark;
+            --lg-yellow: #f0c040;
+            --lg-yellow-bright: #ffdd57;
+            --lg-panel: #101010;
+            --lg-panel-soft: #171717;
+            --lg-border: #303030;
+            --lg-muted: #aaa;
+            --lg-success: #59d879;
+            --lg-danger: #ff6b6b;
+        }
+
+        *, *::before, *::after { box-sizing: border-box; }
+
+        body {
+            background: black;
+            color: white;
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+
+        button, textarea { font: inherit; }
+
+        #content {
+            flex: 1 0 auto;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            width: min(96%, 1800px);
+            margin: 0 auto;
+        }
+
+        header { width: 100%; margin-bottom: 20px; }
+
+        .service-links {
+            display: flex;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .service-links a {
+            color: white;
+            text-decoration: none;
+            font-size: 1rem;
+            transition: color 0.3s;
+        }
+
+        .service-links a:hover { color: var(--lg-yellow); }
+
+        .media-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 2fr) minmax(340px, 0.82fr);
+            align-items: stretch;
+            gap: 18px;
+            width: 100%;
+        }
+
+        .video-column { min-width: 0; }
+
+        .video-wrapper {
+            position: relative;
+            width: 100%;
+        }
+
+        #video-container { position: relative; isolation: isolate; }
+
+        .iframe-container {
+            position: relative;
+            z-index: 0;
+            width: 100%;
+            padding-bottom: 56.25%;
+            height: 0;
+            overflow: hidden;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.65);
+            background: #090909;
+        }
+
+        .iframe-container iframe {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            border: 0;
+            border-radius: 8px;
+        }
+
+        .qr-code-overlay {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 180px;
+            height: 190px;
+            cursor: pointer;
+            z-index: 10;
+            background: transparent;
+            transition: transform 0.3s;
+        }
+
+        .qr-code-overlay:hover:not(:disabled) { transform: scale(1.05); }
+
+        .chat-panel {
+            min-width: 0;
+            min-height: 0;
+            display: grid;
+            grid-template-rows: auto minmax(0, 1fr) auto;
+            overflow: hidden;
+            border: 1px solid var(--lg-border);
+            border-radius: 8px;
+            background: var(--lg-panel);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.65);
+        }
+
+        .chat-header {
+            display: grid;
+            gap: 10px;
+            padding: 12px 14px;
+            border-bottom: 1px solid var(--lg-border);
+            background: #0b0b0b;
+        }
+
+        .chat-header-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .chat-heading { min-width: 0; }
+
+        .chat-title-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .chat-title {
+            margin: 0;
+            font-size: 1rem;
+            font-weight: 700;
+        }
+
+        .status-dot {
+            width: 9px;
+            height: 9px;
+            flex: 0 0 auto;
+            border-radius: 50%;
+            background: #666;
+            box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.04);
+        }
+
+        .status-dot.live {
+            background: var(--lg-success);
+            box-shadow: 0 0 8px rgba(89, 216, 121, 0.8);
+        }
+
+        .chat-event-title {
+            margin-top: 3px;
+            color: var(--lg-muted);
+            font-size: 0.76rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .nostr-auth-button {
+            flex: 0 0 auto;
+            max-width: 145px;
+            padding: 7px 10px;
+            border: 1px solid var(--lg-yellow);
+            border-radius: 6px;
+            background: transparent;
+            color: var(--lg-yellow);
+            font-size: 0.78rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            cursor: pointer;
+        }
+
+        .nostr-auth-button:hover,
+        .nostr-auth-button:focus-visible {
+            background: var(--lg-yellow);
+            color: black;
+        }
+
+        .chat-goal[hidden] { display: none; }
+
+        .chat-goal-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 6px;
+        }
+
+        .chat-goal-label {
+            min-width: 0;
+            color: #ddd;
+            font-size: 0.75rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .chat-goal-label strong { color: var(--lg-yellow); }
+
+        .chat-zap-button {
+            flex: 0 0 auto;
+            padding: 5px 10px;
+            border: 0;
+            border-radius: 999px;
+            background: var(--lg-yellow);
+            color: black;
+            font-size: 0.74rem;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .chat-zap-button:hover:not(:disabled) { background: var(--lg-yellow-bright); }
+        .chat-zap-button:disabled { cursor: not-allowed; opacity: 0.5; }
+
+        .chat-goal-track {
+            height: 8px;
+            overflow: hidden;
+            border-radius: 999px;
+            background: #292929;
+        }
+
+        .chat-goal-progress {
+            width: 0;
+            height: 100%;
+            border-radius: inherit;
+            background: linear-gradient(90deg, #f0a800, var(--lg-yellow-bright));
+            transition: width 0.35s ease;
+        }
+
+        .zap-invoice-wrap[hidden] { display: none; }
+
+        .zap-qr {
+            display: block;
+            width: min(240px, 80vw);
+            height: auto;
+            margin: 12px auto;
+            padding: 8px;
+            border-radius: 8px;
+            background: white;
+        }
+
+        .zap-invoice {
+            width: 100%;
+            min-height: 92px;
+            resize: vertical;
+            padding: 8px;
+            border: 1px solid #444;
+            border-radius: 6px;
+            background: #111;
+            color: white;
+            font: 0.72rem/1.35 monospace;
+            overflow-wrap: anywhere;
+        }
+
+        .chat-messages {
+            min-height: 0;
+            overflow-y: auto;
+            overscroll-behavior: contain;
+            scrollbar-color: #444 #111;
+            padding: 8px 0;
+        }
+
+        .chat-state {
+            display: grid;
+            place-items: center;
+            min-height: 100%;
+            padding: 28px;
+            color: var(--lg-muted);
+            text-align: center;
+            line-height: 1.45;
+        }
+
+        .chat-message {
+            display: grid;
+            grid-template-columns: 34px minmax(0, 1fr);
+            gap: 9px;
+            padding: 8px 12px;
+        }
+
+        .chat-message:hover { background: rgba(255, 255, 255, 0.035); }
+
+        .chat-avatar {
+            width: 34px;
+            height: 34px;
+            display: grid;
+            place-items: center;
+            overflow: hidden;
+            border-radius: 50%;
+            background: #292929;
+            color: var(--lg-yellow);
+            font-size: 0.78rem;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .chat-avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .chat-message-body { min-width: 0; }
+
+        .chat-message-meta {
+            display: flex;
+            align-items: baseline;
+            gap: 7px;
+            min-width: 0;
+            line-height: 1.2;
+        }
+
+        .chat-author {
+            min-width: 0;
+            overflow: hidden;
+            color: var(--lg-yellow);
+            font-size: 0.82rem;
+            font-weight: 700;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .chat-time {
+            flex: 0 0 auto;
+            color: #777;
+            font-size: 0.68rem;
+        }
+
+        .chat-content {
+            margin-top: 3px;
+            color: #eee;
+            font-size: 0.88rem;
+            line-height: 1.35;
+            overflow-wrap: anywhere;
+            white-space: pre-wrap;
+        }
+
+        .chat-message.zap-message {
+            margin: 4px 8px;
+            padding: 9px 10px;
+            border: 1px solid #d87900;
+            border-radius: 8px;
+            background: rgba(255, 139, 0, 0.1);
+        }
+
+        .chat-message.zap-message:hover { background: rgba(255, 139, 0, 0.16); }
+
+        .zap-message .chat-avatar {
+            width: 30px;
+            height: 30px;
+            background: #174b9b;
+            color: white;
+        }
+
+        .zap-line {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            min-width: 0;
+        }
+
+        .zap-line .chat-author { color: #ff9f1a; }
+
+        .zap-action {
+            flex: 0 0 auto;
+            color: #f5b55a;
+            font-size: 0.8rem;
+        }
+
+        .zap-amount {
+            flex: 0 0 auto;
+            margin-left: auto;
+            padding: 2px 8px;
+            border-radius: 999px;
+            background: #ff9418;
+            color: #111;
+            font-size: 0.78rem;
+            font-weight: 800;
+            white-space: nowrap;
+        }
+
+        .zap-comment { color: #ffe0b2; }
+
+        .chat-composer {
+            padding: 10px;
+            border-top: 1px solid var(--lg-border);
+            background: #0b0b0b;
+        }
+
+        .chat-form-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            align-items: end;
+            gap: 8px;
+        }
+
+        .chat-input {
+            width: 100%;
+            min-height: 42px;
+            max-height: 104px;
+            resize: vertical;
+            padding: 9px 10px;
+            border: 1px solid #3a3a3a;
+            border-radius: 6px;
+            outline: none;
+            background: var(--lg-panel-soft);
+            color: white;
+            font-size: 0.86rem;
+        }
+
+        .chat-input:focus { border-color: var(--lg-yellow); }
+        .chat-input:disabled { cursor: not-allowed; opacity: 0.58; }
+
+        .chat-send {
+            height: 42px;
+            padding: 0 13px;
+            border: 0;
+            border-radius: 6px;
+            background: var(--lg-yellow);
+            color: black;
+            font-size: 0.82rem;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .chat-send:hover:not(:disabled) { background: var(--lg-yellow-bright); }
+        .chat-send:disabled { cursor: not-allowed; opacity: 0.45; }
+
+        .chat-notice {
+            min-height: 16px;
+            margin-top: 5px;
+            color: #888;
+            font-size: 0.68rem;
+        }
+
+        .chat-notice.error { color: var(--lg-danger); }
+        .chat-notice.success { color: var(--lg-success); }
+
+        .lg-title {
+            width: 100%;
+            max-width: 1200px;
+            margin: 20px auto 0;
+            padding: 0 15px;
+            font-size: 1.2rem;
+            line-height: 1.5;
+            text-align: center;
+        }
+
+        .lg-title a {
+            color: var(--lg-yellow);
+            text-decoration: none;
+            transition: color 0.3s;
+        }
+
+        .lg-title a:hover { color: var(--lg-yellow-bright); }
+
+        footer {
+            flex-shrink: 0;
+            width: 100%;
+            padding: 10px 0;
+            background: #111;
+            color: var(--lg-muted);
+            font-size: 0.9rem;
+            text-align: center;
+        }
+
+        .modal-content { background: rgba(0, 0, 0, 0.95); color: white; }
+        .modal-header, .modal-body { border: none; }
+        .btn-close { filter: invert(1); }
+
+        @media (max-width: 1100px) {
+            #content { width: 98%; padding: 16px; }
+            .media-grid { grid-template-columns: minmax(0, 1.65fr) minmax(320px, 0.9fr); }
+        }
+
+        @media (max-width: 880px) {
+            #content { width: 100%; }
+            .media-grid { grid-template-columns: 1fr; }
+            .chat-panel { height: 480px; }
+        }
+
+        @media (max-width: 768px) {
+            .qr-code-overlay { width: 140px; height: 150px; }
+            .lg-title { font-size: 1rem; }
+            .service-links a { font-size: 0.9rem; }
+        }
+
+        @media (max-width: 576px) {
+            #content { padding: 12px; }
+            .media-grid { gap: 12px; }
+            .chat-panel { height: 440px; }
+            .qr-code-overlay { width: 100px; height: 120px; }
+            .service-links a { font-size: 0.8rem; }
+            .lg-title { font-size: 0.95rem; }
+            .nostr-auth-button { max-width: 112px; }
+        }
+        .feed-action { display: flex; align-items: flex-end; justify-content: center;
+            padding: 6px; border: 2px solid var(--lg-yellow); border-radius: 8px;
+            color: #111; font-weight: 700; }
+        .feed-action span { padding: 6px 10px; border-radius: 16px;
+            background: var(--lg-yellow); box-shadow: 0 2px 6px #000; }
+        .feed-action:disabled { opacity: 1; cursor: not-allowed; }
+        .feed-action:focus-visible { outline: 3px solid white; outline-offset: 3px; }
+        #invoiceText { overflow-wrap: anywhere; }
+    </style>
+</head>
+
+<body>
+    <div id="content">
+        <header>
+            <div class="service-links d-flex justify-content-center">
+                <a href="#" id="contactLink" data-bs-toggle="modal" data-bs-target="#contactModal">Contact</a>
+            </div>
+        </header>
+
+        <main class="media-grid">
+            <section class="video-column" aria-label="Lightning Goats livestream">
+                <div class="video-wrapper">
+                    <div id="video-container" class="position-relative">
+                        <div class="iframe-container">
+                            <iframe
+                                src="https://www.youtube.com/embed/live_stream?channel=UCQD39At16ZBivLzHtkruZxg&amp;autoplay=1&amp;mute=1&amp;playsinline=1&amp;rel=0"
+                                title="Lightning Goats live stream"
+                                allow="autoplay; encrypted-media; picture-in-picture; web-share"
+                                referrerpolicy="strict-origin-when-cross-origin"
+                                allowfullscreen
+                            ></iframe>
+                        </div>
+
+                        <button id="feedLink" class="qr-code-overlay feed-action" type="button" disabled
+                            data-bs-toggle="modal" data-bs-target="#feedModal"><span>Feed the herd</span></button>
+                    </div>
+                </div>
+            </section>
+
+            <aside class="chat-panel" aria-label="Nostr live chat">
+                <div class="chat-header">
+                    <div class="chat-header-top">
+                        <div class="chat-heading">
+                            <div class="chat-title-row">
+                                <span id="chatStatusDot" class="status-dot" aria-hidden="true"></span>
+                                <h2 class="chat-title">Nostr Live Chat</h2>
+                            </div>
+                            <div id="chatEventTitle" class="chat-event-title">Finding the live Nostr room…</div>
+                        </div>
+
+                        <button id="nostrAuthButton" class="nostr-auth-button" type="button">Connect Nostr</button>
+                    </div>
+
+                </div>
+
+                <div id="chatMessages" class="chat-messages" role="log" aria-live="polite" aria-relevant="additions text">
+                    <div id="chatState" class="chat-state">Connecting to Nostr relays…</div>
+                </div>
+
+                <div class="chat-composer">
+                    <form id="chatForm">
+                        <div class="chat-form-row">
+                            <textarea
+                                id="chatInput"
+                                class="chat-input"
+                                rows="1"
+                                maxlength="500"
+                                placeholder="Connect Nostr to chat"
+                                aria-label="Nostr chat message"
+                                disabled
+                            ></textarea>
+                            <button id="chatSend" class="chat-send" type="submit" disabled>Send</button>
+                        </div>
+                        <div id="chatNotice" class="chat-notice">Messages are public NIP-53 events. Your nsec is never requested.</div>
+                    </form>
+                </div>
+            </aside>
+        </main>
+
+        <p class="lg-title">Watch the Lightning Goats live and join the herd in Nostr chat.</p>
+        <p id="paymentAvailability" class="lg-title" role="status">Payments are paused while the site is being prepared.</p>
+    </div>
+
+    <footer>© 2024 Lightning Goats. All rights reserved.</footer>
+
+    <div class="modal fade" id="contactModal" tabindex="-1" aria-labelledby="contactModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="contactModalLabel">Contact Us</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Open our Nostr profile to send a direct message, or copy the public key.</p>
+                    <p><a href="nostr:npub1v60thnx0gz0wq3n6xdnq46y069l9x70xgmjp6lprdl6fv0eux6mqgjj4rp">Contact via Nostr</a></p>
+                    <input id="contactNpub" class="form-control" readonly aria-label="Nostr contact public key" value="npub1v60thnx0gz0wq3n6xdnq46y069l9x70xgmjp6lprdl6fv0eux6mqgjj4rp">
+                    <button id="copyContact" type="button" class="btn btn-outline-warning mt-2">Copy public key</button>
+                    <p id="contactStatus" role="status" class="small mt-2"></p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="feedModal" tabindex="-1" aria-labelledby="feedModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+            <div class="modal-header"><h5 id="feedModalLabel" class="modal-title">Feed the herd</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+            <div class="modal-body">
+                <form id="feedForm">
+                    <label for="feedAddress" class="form-label">Lightning Address</label>
+                    <select id="feedAddress" class="form-select">
+                        <option value="herd">The herd</option><option value="dexter">Dexter</option>
+                        <option value="rowan">Rowan</option><option value="cosmo">Cosmo</option>
+                        <option value="newton">Newton</option><option value="nova">Nova</option>
+                    </select>
+                    <label for="feedAmount" class="form-label mt-2">Amount in sats</label>
+                    <input id="feedAmount" class="form-control" type="number" min="1" step="1" value="1000" required>
+                    <button id="createInvoice" class="btn btn-warning mt-3" type="submit" disabled>Create invoice</button>
+                </form>
+                <p id="paymentStatus" role="status" class="small mt-2"></p>
+                <div id="invoiceWrap" hidden>
+                    <textarea id="invoiceText" class="form-control" readonly aria-label="Lightning invoice"></textarea>
+                    <button id="copyInvoice" class="btn btn-outline-light mt-2" type="button">Copy invoice</button>
+                    <a id="invoiceWallet" class="btn btn-outline-warning mt-2" hidden>Open wallet</a>
+                </div>
+            </div>
+        </div></div>
+    </div>
+
+    <script src="/site-config.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Preserve an injected NIP-07 provider before nostr-login installs its fallback wrapper. -->
+    <script>
+        window.__lightningGoatsNip07 = window.nostr?.getPublicKey && window.nostr?.signEvent
+            ? window.nostr
+            : null;
+    </script>
+
+    <!-- NIP-07 and NIP-46 login UI. No local/private-key login is enabled. -->
+    <script
+        src="https://unpkg.com/nostr-login@1.7.12/dist/unpkg.js"
+        data-dark-mode="true"
+        data-theme="lemonade"
+        data-no-banner="true"
+        data-methods="connect,extension"
+        data-perms="sign_event:1311"
+        data-title="Lightning Goats Chat"
+        data-description="Connect a Nostr signer to join the live goat chat."
+    ></script>
+
+    <!-- Browser build exposes window.NostrTools. -->
+    <script src="https://unpkg.com/nostr-tools@2.25.0/lib/nostr.bundle.js"></script>
+
+    <script src="/chat.js"></script>
+    <script src="/site.js"></script>
+</body>
+</html>

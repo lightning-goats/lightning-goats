@@ -1,5 +1,17 @@
 # Lightning Goats documentation
 
+The operator-directed 2026-11-08 Strike restoration is recorded in
+[`deployment/strike-receive-restoration.md`](deployment/strike-receive-restoration.md),
+including exact API scopes, webhook staging, WAF and payment-only deployment.
+The operator-supplied OBS layout and its current data/QR contracts are documented
+in [`deployment/obs-overlay-restoration.md`](deployment/obs-overlay-restoration.md).
+Local CLI grants and the 10-sat message threshold are documented in
+[`deployment/operator-credits.md`](deployment/operator-credits.md).
+Paused credit retention, queued-feed messaging and confirmation-only debits are
+documented in [`deployment/paused-feeding-queue.md`](deployment/paused-feeding-queue.md).
+Household NIP-46 client preparation and the remaining signer/activation steps are
+recorded in [`deployment/household-nostr-bunker.md`](deployment/household-nostr-bunker.md).
+
 ## Current delivery order — 2026-09-17
 
 Start with [the delivery roadmap](planning/delivery-roadmap.md):

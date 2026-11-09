@@ -74,7 +74,9 @@
 
     byId("feedLink").disabled = !enabled;
     byId("createInvoice").disabled = !enabled;
-    if (enabled) byId("paymentAvailability").textContent = "Choose a Lightning Address and amount to create an invoice.";
+    if (enabled) byId("paymentAvailability").textContent = window.LightningGoatsSite?.feedingAvailable === true
+        ? "Choose a Lightning Address and amount to create an invoice."
+        : "Lightning payments are available. Feed credit is saved; automatic feeding is currently paused.";
 
     byId("feedForm").addEventListener("submit", async (event) => {
         event.preventDefault();

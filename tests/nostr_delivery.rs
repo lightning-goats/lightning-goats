@@ -34,6 +34,7 @@ impl Fixture {
             nak_config_path: runtime,
             bunker_pubkey: "ab".repeat(32),
             relays: vec!["wss://relay.invalid".to_owned()],
+            bunker_relays: None,
         };
         Self { root, config }
     }
@@ -57,6 +58,29 @@ impl Fixture {
 
 fn tags() -> Vec<Vec<String>> {
     vec![vec!["t".to_owned(), "LightningGoats".to_owned()]]
+}
+
+#[tokio::test]
+async fn signing_transport_and_announcement_relays_are_independent() {
+    let mut fixture = Fixture::new("success");
+    fixture.config.bunker_relays = Some(vec!["wss://bunker.invalid".to_owned()]);
+    fixture.config.relays = vec![
+        "wss://publication-one.invalid".to_owned(),
+        "wss://publication-two.invalid".to_owned(),
+    ];
+    let client = fixture.client();
+    let event = client.sign_kind1("separate routes", tags()).await.unwrap();
+    client.publish_signed(&event).await.unwrap();
+    let calls = fixture.trace();
+    let sign = calls.iter().find(|call| call["phase"] == "sign").unwrap();
+    let publish = calls
+        .iter()
+        .find(|call| call["phase"] == "publish")
+        .unwrap();
+    assert_eq!(sign["bunker_relays"], json!(["wss://bunker.invalid"]));
+    assert_eq!(publish["relay_args"], json!(fixture.config.relays));
+    assert_eq!(publish["bunker_relays"], json!([]));
+    assert_eq!(publish["payload"], serde_json::to_value(event).unwrap());
 }
 
 #[tokio::test]
@@ -270,4 +294,155 @@ async fn failed_publication_reopens_and_retries_exact_persisted_event_without_re
     assert_eq!(publications.len(), 2);
     assert_eq!(publications[0]["payload"], publications[1]["payload"]);
     assert_eq!(publications[0]["payload"]["id"], saved.event_id);
+}
+
+#[tokio::test]
+async fn below_minimum_never_signs_and_operator_credit_uses_normal_outbox() {
+    let fixture = Fixture::new("success");
+    let ledger = LedgerStore::connect(&fixture.database()).await.unwrap();
+    let renderer = MessageRenderer::embedded().unwrap();
+    for kind in ["payment_received", "operator_credit_added"] {
+        ledger
+            .append_event(
+                kind,
+                &json!({"amount_sats":9,"feed_credit_sats":9,"address_user":"herd"}),
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            process_next_message(
+                &ledger,
+                Some(&fixture.client()),
+                &renderer,
+                1000,
+                RuntimeMode::Active
+            )
+            .await
+            .unwrap(),
+            lightning_goats::messaging::MessageProcessorStep::NonPublicSkipped { .. }
+        ));
+    }
+    assert!(fixture.trace().is_empty());
+    assert!(ledger.next_outbox_entry().await.unwrap().is_none());
+    ledger
+        .append_event(
+            "operator_credit_added",
+            &json!({"amount_sats":10,"feed_credit_sats":19,"address_user":"dexter"}),
+        )
+        .await
+        .unwrap();
+    process_next_message(
+        &ledger,
+        Some(&fixture.client()),
+        &renderer,
+        1000,
+        RuntimeMode::Active,
+    )
+    .await
+    .unwrap();
+    let outbox = ledger.next_outbox_entry().await.unwrap().unwrap();
+    let signed: Value = serde_json::from_str(&outbox.signed_event_json).unwrap();
+    let message = signed["content"].as_str().unwrap();
+    assert!(message.contains("10"));
+    assert!(!message.contains("TEST"));
+    assert!(!message.contains("operator"));
+    assert_eq!(
+        fixture
+            .trace()
+            .iter()
+            .filter(|call| call["phase"] == "sign")
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn paused_payment_publication_freezes_queue_context_and_weather_stays_nonpublic() {
+    let fixture = Fixture::new("success");
+    let ledger = LedgerStore::connect(&fixture.database()).await.unwrap();
+    ledger
+        .update_feeding_presentation(
+            1000,
+            RuntimeMode::Active,
+            Some(lightning_goats::gateway::FeederSafety {
+                override_enabled: true,
+                remote_enabled: true,
+            }),
+        )
+        .await
+        .unwrap();
+    ledger
+        .append_event(
+            "payment_received",
+            &json!({"amount_sats":1000,"feed_credit_sats":2340,"address_user":"herd"}),
+        )
+        .await
+        .unwrap();
+    ledger
+        .update_feeding_presentation(
+            1000,
+            RuntimeMode::Active,
+            Some(lightning_goats::gateway::FeederSafety {
+                override_enabled: false,
+                remote_enabled: true,
+            }),
+        )
+        .await
+        .unwrap();
+    process_next_message(
+        &ledger,
+        Some(&fixture.client()),
+        &MessageRenderer::embedded().unwrap(),
+        1000,
+        RuntimeMode::Active,
+    )
+    .await
+    .unwrap();
+    let signed: Value = serde_json::from_str(
+        &ledger
+            .next_outbox_entry()
+            .await
+            .unwrap()
+            .unwrap()
+            .signed_event_json,
+    )
+    .unwrap();
+    let text = signed["content"].as_str().unwrap();
+    assert!(text.contains("Feeding is paused."));
+    assert!(text.contains("2 feedings are queued"));
+    ledger
+        .update_feeding_presentation(
+            1000,
+            RuntimeMode::Active,
+            Some(lightning_goats::gateway::FeederSafety {
+                override_enabled: true,
+                remote_enabled: true,
+            }),
+        )
+        .await
+        .unwrap();
+    ledger
+        .append_event("weather_status", &json!({"message":"Current weather"}))
+        .await
+        .unwrap();
+    assert!(matches!(
+        process_next_message(
+            &ledger,
+            Some(&fixture.client()),
+            &MessageRenderer::embedded().unwrap(),
+            1000,
+            RuntimeMode::Active
+        )
+        .await
+        .unwrap(),
+        lightning_goats::messaging::MessageProcessorStep::NonPublicSkipped { .. }
+    ));
+    assert_eq!(
+        fixture
+            .trace()
+            .iter()
+            .filter(|call| call["phase"] == "sign")
+            .count(),
+        1
+    );
 }

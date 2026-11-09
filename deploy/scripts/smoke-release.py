@@ -24,6 +24,16 @@ REQUIRED = BINARIES | {
     "deploy/systemd/lightning-goats-gateway.service",
     "docs/deployment/deployment-artifacts.md",
     "web/index.html", "web/chat.js", "web/site.js", "web/site-config.js",
+    "web/feed.html", "web/overlay.html", "web/overlay.js", "web/overlay.css",
+    "deploy/scripts/lg-credit", "migrations/0012_operator_credits.sql", "migrations/0013_feeding_presentation.sql",
+    "deploy/scripts/enable-feeding.py",
+    "deploy/scripts/deploy-obs-overlay.py", "deploy/scripts/update-overlay-data.py",
+    "deploy/systemd/lightning-goats-display-firewall.service",
+    "deploy/systemd/lightning-goats-display.service", "deploy/systemd/lightning-goats-display.timer",
+    "deploy/nftables/lightning-goats-display.nft.example", "web/vendor/qrcode.js",
+    "web/nip05.json", "deploy/nginx/lightning-goats-nip05.conf.example",
+    "deploy/nginx/lightning-goats-address-alias.conf.example",
+    "web/vendor/nostr.bundle.js", "web/vendor/bootstrap.min.css",
     "web/images/preview-image.png", "web/images/lightninggoatslogo1.png",
 }
 

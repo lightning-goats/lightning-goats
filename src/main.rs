@@ -16,6 +16,7 @@ use clap::Parser;
 use lightning_goats::{
     config::AppConfig,
     feeder::run_feed_worker,
+    feeding_presentation::run_feeding_presentation_worker,
     gateway::GatewayClient,
     informational::run_informational_worker,
     ledger::LedgerStore,
@@ -100,6 +101,12 @@ async fn main() -> Result<()> {
     }
 
     let gateway = GatewayClient::new(&config.gateway.url)?;
+    if let Err(error) = ledger
+        .update_feeding_presentation(config.feeder.threshold_sats, config.service.mode, None)
+        .await
+    {
+        tracing::warn!(%error,"initial feeding message state unavailable; settlement is unaffected");
+    }
     let strike = StrikeRuntime::from_config(&config.strike).await?;
     let lnurl = LnurlService::new(
         &config.lnurl,
@@ -144,6 +151,12 @@ async fn main() -> Result<()> {
         Duration::from_secs(config.feeder.inter_feed_delay_seconds),
         config.service.mode,
     ));
+    let mut feeding_presentation = tokio::spawn(run_feeding_presentation_worker(
+        ledger.clone(),
+        gateway.clone(),
+        config.feeder.threshold_sats,
+        config.service.mode,
+    ));
     let mut informational = tokio::spawn(run_informational_worker(
         ledger.clone(),
         gateway,
@@ -176,6 +189,7 @@ async fn main() -> Result<()> {
         result = &mut recovery => task_exit("settlement recovery", result),
         result = &mut feeder => task_exit("feed worker", result),
         result = &mut informational => task_exit("informational worker", result),
+        result = &mut feeding_presentation => task_exit("feeding presentation worker", result),
         result = &mut message_processor => task_exit("Nostr message processor", result),
         result = &mut publisher => task_exit("Nostr outbox publisher", result),
     };
@@ -184,6 +198,7 @@ async fn main() -> Result<()> {
     recovery.abort();
     feeder.abort();
     informational.abort();
+    feeding_presentation.abort();
     message_processor.abort();
     publisher.abort();
     result
@@ -198,7 +213,10 @@ fn app(state: AppState) -> Router {
             post(strike_webhook).layer(DefaultBodyLimit::max(MAX_STRIKE_WEBHOOK_BODY)),
         )
         .route("/.well-known/lnurlp/{user}", get(lnurl_discovery))
-        .route("/lnurlp/{user}/callback", get(lnurl_callback))
+        .route(
+            "/lnurlp/{user}/callback",
+            get(lnurl_callback).head(|| async { StatusCode::METHOD_NOT_ALLOWED }),
+        )
         .route("/ws/overlay", get(overlay_ws))
         .with_state(state)
         .layer(middleware::from_fn_with_state(
@@ -501,6 +519,24 @@ mod tests {
             .timeout(Duration::from_secs(2))
             .build()
             .unwrap();
+        // Axum normally runs GET handlers for HEAD. A probe must never issue
+        // a provider invoice or consume the durable invoice admission budget.
+        assert_eq!(
+            client
+                .head(format!("http://{address}/lnurlp/herd/callback?amount=1000"))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::METHOD_NOT_ALLOWED
+        );
+        let pool = sqlx::SqlitePool::connect(&db).await.unwrap();
+        let admissions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM invoice_admissions")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(admissions, 0);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
         let body = serde_json::json!({"id":uuid::Uuid::new_v4(),"eventType":"receive-request.receive-completed","webhookVersion":"v1","data":{"entityId":uuid::Uuid::new_v4(),"receiveId":uuid::Uuid::new_v4()}}).to_string();
         let signature = |body: &str| {
             let mut mac = Hmac::<Sha256>::new_from_slice(b"synthetic-webhook-secret").unwrap();

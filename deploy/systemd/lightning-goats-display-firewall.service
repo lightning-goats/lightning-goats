@@ -1,0 +1,13 @@
+[Unit]
+Description=Lightning Goats display cache network restrictions
+After=firewalld.service
+Before=lightning-goats-display.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/nft -f /etc/nftables/lightning-goats-display.nft
+ExecReload=/usr/sbin/nft -f /etc/nftables/lightning-goats-display.nft
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

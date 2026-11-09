@@ -43,8 +43,16 @@ pub(crate) fn verify_issuance_expiry(invoice: &Bolt11Invoice, expected_seconds: 
 }
 
 fn verify_expiry_at(invoice: &Bolt11Invoice, expected_seconds: u64, now: Duration) -> Result<()> {
-    if expected_seconds == 0 || invoice.expiry_time() != Duration::from_secs(expected_seconds) {
-        bail!("BOLT11 expiry differs from requested expiry");
+    // Strike derives an integer BOLT11 expiry from an absolute expiration and
+    // can round it down by one second. Never accept a longer lifetime, zero,
+    // or any larger shortening; all timestamp/expired checks still apply.
+    let actual_seconds = invoice.expiry_time().as_secs();
+    if expected_seconds == 0
+        || actual_seconds == 0
+        || actual_seconds > expected_seconds
+        || expected_seconds - actual_seconds > 1
+    {
+        bail!("BOLT11 expiry is outside the requested one-second rounding bound");
     }
     // Permit small provider clock skew, never an arbitrarily future invoice.
     if invoice.duration_since_epoch() > now.saturating_add(Duration::from_secs(30)) {
@@ -136,10 +144,33 @@ mod tests {
         let invoice = verify(&encoded, 1_000, &"22".repeat(32), &"11".repeat(32)).unwrap();
         let created = invoice.duration_since_epoch();
         verify_expiry_at(&invoice, 300, created).unwrap();
-        assert!(verify_expiry_at(&invoice, 301, created).is_err());
+        verify_expiry_at(&invoice, 301, created).unwrap();
+        assert!(verify_expiry_at(&invoice, 302, created).is_err());
+        assert!(verify_expiry_at(&invoice, 299, created).is_err());
         assert!(verify_expiry_at(&invoice, 300, created - Duration::from_secs(31)).is_err());
         assert!(verify_expiry_at(&invoice, 300, created + Duration::from_secs(300)).is_err());
         // Recovery uses verify(), not issuance-only expiry checks.
         verify(&encoded, 1_000, &"22".repeat(32), &"11".repeat(32)).unwrap();
+    }
+
+    #[test]
+    fn accepts_only_one_second_of_provider_expiry_rounding() {
+        let encoded = crate::test_invoices::invoice(1_000, &"11".repeat(32));
+        let invoice = verify(&encoded, 1_000, &"22".repeat(32), &"11".repeat(32)).unwrap();
+        let (mut raw, _, _) = invoice.into_signed_raw().into_parts();
+        for field in &mut raw.data.tagged_fields {
+            if let lightning_invoice::RawTaggedField::KnownSemantics(
+                lightning_invoice::TaggedField::ExpiryTime(expiry),
+            ) = field
+            {
+                *expiry = lightning_invoice::ExpiryTime::from_seconds(299);
+            }
+        }
+        let rounded = verify(&sign(raw, 42), 1_000, &"22".repeat(32), &"11".repeat(32)).unwrap();
+        let created = rounded.duration_since_epoch();
+        verify_expiry_at(&rounded, 300, created).unwrap();
+        assert!(verify_expiry_at(&rounded, 301, created).is_err());
+        assert!(verify_expiry_at(&rounded, 298, created).is_err());
+        assert!(verify_expiry_at(&rounded, 300, created + Duration::from_secs(299)).is_err());
     }
 }

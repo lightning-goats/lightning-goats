@@ -1,0 +1,33 @@
+[Unit]
+Description=Lightning Goats public overlay weather and BTC cache
+After=network-online.target lightning-goats-display-firewall.service
+Requires=lightning-goats-display-firewall.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=lightning-goats-display
+Group=lightning-goats-display
+ExecStart=/usr/bin/python3 -B /usr/local/libexec/lightning-goats/update-overlay-data.py
+CacheDirectory=lightning-goats-display
+CacheDirectoryMode=0755
+UMask=0022
+TimeoutStartSec=25s
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectKernelLogs=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+AmbientCapabilities=

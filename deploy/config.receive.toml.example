@@ -10,6 +10,9 @@
 # socket = "/run/lightning-goats-bridge/core.sock"
 # peer_uid = 0
 # group_gid = 0
+# Optional distinct payout read role. No outgoing worker is installed by this.
+# payout_peer_uid = 0
+# payout_execution_enabled = false
 #
 # Optional bounded reward reservations, still with no spend key in the core.
 # This explicitly initializes remaining funding provenance and never back-pays

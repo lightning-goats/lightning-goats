@@ -7,9 +7,121 @@ use sqlx::{Row, Sqlite, Transaction};
 use uuid::Uuid;
 
 use super::{LedgerStore, to_i64, to_u64};
-use crate::reward_funding::{Allowance, Funding, Reservation, RewardPolicy};
+use crate::reward_funding::{
+    Allowance, Funding, FundingPage, FundingPart, MAX_FUNDING_PARTS, Reservation, RewardPolicy,
+    StrikeFundingAnchor,
+};
 
 impl LedgerStore {
+    /// Payout-only readback of a core reservation and its actual consumed
+    /// sources. The execution flag is a fresh policy snapshot, not a lease or
+    /// a provider payment. Old reservations remain readable while held.
+    pub(crate) async fn payout_funding_page(
+        &self,
+        epoch: Uuid,
+        reservation_id: Uuid,
+        owner: &str,
+        after: i64,
+        policy: Option<&RewardPolicy>,
+        execution_enabled: bool,
+    ) -> Result<FundingPage> {
+        crate::nostr_event::validate_public_key(owner)?;
+        if after < 0 || epoch.is_nil() || reservation_id.is_nil() {
+            bail!("invalid payout funding scope");
+        }
+        let mut tx = self.pool.begin().await?;
+        let current: String =
+            sqlx::query_scalar("SELECT stream_id FROM overlay_identity WHERE singleton=1")
+                .fetch_one(&mut *tx)
+                .await?;
+        if current != epoch.to_string() {
+            bail!("payout read requires pinned core epoch");
+        }
+        let row = sqlx::query("SELECT * FROM reward_reservations WHERE id=?")
+            .bind(reservation_id.to_string())
+            .fetch_one(&mut *tx)
+            .await?;
+        let reservation = decode_reservation(&row)?;
+        if reservation.owner != owner || reservation.epoch != epoch {
+            bail!("payout reservation scope mismatch");
+        }
+        let funding = confirmed_funding(&mut tx, reservation.request_id)
+            .await?
+            .context("reservation funding missing")?;
+        let frozen: RewardPolicy = serde_json::from_str(&row.try_get::<String, _>("policy_json")?)?;
+        if frozen.owner != owner
+            || funding.proof_hash != reservation.funding_hash
+            || reservation.reserved_sats > frozen.budget(funding.strike_sats)?
+        {
+            bail!("reservation violates frozen financial scope");
+        }
+        let threshold: i64 =
+            sqlx::query_scalar("SELECT total_sats FROM feed_reward_funding WHERE request_id=?")
+                .bind(reservation.request_id.to_string())
+                .fetch_one(&mut *tx)
+                .await?;
+        // A caller cannot manufacture a starting cursor that skips a source.
+        // Clients still have to start at zero and complete the page sequence.
+        if after > 0 {
+            let valid: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM feed_reward_funding_parts WHERE request_id=? AND ledger_id=?)")
+                .bind(reservation.request_id.to_string()).bind(after).fetch_one(&mut *tx).await?;
+            if !valid {
+                bail!("payout funding cursor is not a consumed part");
+            }
+        }
+        let rows = sqlx::query("SELECT p.ledger_id,p.sats,l.kind,l.proof_hash FROM feed_reward_funding_parts p JOIN reward_funding_lots l ON l.ledger_id=p.ledger_id WHERE p.request_id=? AND p.ledger_id>? ORDER BY p.ledger_id LIMIT ?")
+            .bind(reservation.request_id.to_string()).bind(after).bind((MAX_FUNDING_PARTS+1) as i64).fetch_all(&mut *tx).await?;
+        let more = rows.len() > MAX_FUNDING_PARTS;
+        let mut parts = Vec::new();
+        let mut through = after;
+        for row in rows.into_iter().take(MAX_FUNDING_PARTS) {
+            let ledger_id: i64 = row.try_get("ledger_id")?;
+            let kind: String = row.try_get("kind")?;
+            let hash: String = row.try_get("proof_hash")?;
+            let actual = lot_proof(&mut tx, ledger_id).await?;
+            if actual.0 != kind || actual.1 != hash {
+                bail!("consumed funding provenance changed");
+            }
+            let anchor = if kind == "strike_btc" {
+                Some(strike_anchor(&mut tx, ledger_id).await?)
+            } else {
+                None
+            };
+            parts.push(FundingPart {
+                ledger_id,
+                consumed_sats: to_u64(row.try_get("sats")?, "consumed sats")?,
+                anchor,
+            });
+            through = ledger_id;
+        }
+        let used: i64 =
+            sqlx::query_scalar("SELECT COALESCE(SUM(reserved_sats),0) FROM reward_reservations")
+                .fetch_one(&mut *tx)
+                .await?;
+        let allowed = match policy {
+            Some(p) => {
+                p.owner == owner
+                    && reservation.reserved_sats <= p.budget(funding.strike_sats)?
+                    && to_u64(used, "outstanding rewards")? <= p.max_sats_per_24h
+            }
+            None => false,
+        };
+        let page = FundingPage {
+            reservation,
+            funding,
+            threshold_sats: to_u64(threshold, "funded threshold")?,
+            execution_enabled: execution_enabled && allowed,
+            observed_at: crate::cyberherd::calendar::now()?,
+            after,
+            through,
+            more,
+            parts,
+        };
+        page.validate()?;
+        tx.commit().await?;
+        Ok(page)
+    }
+
     pub(crate) async fn reward_allowance(
         &self,
         policy: &RewardPolicy,
@@ -167,6 +279,50 @@ impl LedgerStore {
         tx.commit().await?;
         Ok(reservation)
     }
+}
+
+async fn strike_anchor(
+    tx: &mut Transaction<'_, Sqlite>,
+    ledger_id: i64,
+) -> Result<StrikeFundingAnchor> {
+    let p = sqlx::query("SELECT p.source,p.source_id,p.payment_hash,p.amount_msat,p.address_user,p.credit_pool,CASE WHEN length(CAST(p.context_json AS BLOB))<=32768 THEN p.context_json ELSE NULL END AS context_json FROM credit_grants g JOIN asset_receipts a ON a.id=g.receipt_id JOIN settled_payments p ON p.id=a.btc_settlement_id WHERE g.ledger_entry_id=?")
+        .bind(ledger_id).fetch_one(&mut **tx).await?;
+    if p.try_get::<String, _>("source")? != "strike" {
+        bail!("payout funding source is not Strike");
+    }
+    let context: serde_json::Value = serde_json::from_str(
+        &p.try_get::<Option<String>, _>("context_json")?
+            .context("Strike receive lacks request correlation")?,
+    )?;
+    let request_id: Uuid = context["receive_request_id"]
+        .as_str()
+        .context("Strike request correlation missing")?
+        .parse()?;
+    let request = sqlx::query("SELECT * FROM strike_receive_requests WHERE receive_request_id=?")
+        .bind(request_id.to_string())
+        .fetch_one(&mut **tx)
+        .await?;
+    let address_user: String = p.try_get("address_user")?;
+    let credit_pool: String = p.try_get("credit_pool")?;
+    if address_user != request.try_get::<String, _>("address_user")?
+        || credit_pool != request.try_get::<String, _>("credit_pool")?
+    {
+        bail!("Strike request and consumed credit address/pool mismatch");
+    }
+    let anchor = StrikeFundingAnchor {
+        receive_request_id: request_id,
+        receive_id: p.try_get::<String, _>("source_id")?.parse()?,
+        address_user,
+        credit_pool,
+        requested_msat: to_u64(request.try_get("amount_msat")?, "requested msat")?,
+        settled_msat: to_u64(p.try_get("amount_msat")?, "settled msat")?,
+        invoice: request.try_get("invoice")?,
+        payment_hash: request.try_get("payment_hash")?,
+        description_hash: request.try_get("description_hash")?,
+        settled_hash: p.try_get("payment_hash")?,
+    };
+    anchor.validate()?;
+    Ok(anchor)
 }
 
 /// Sync only positive grants after activation. Every later debit must have

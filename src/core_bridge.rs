@@ -15,12 +15,24 @@ pub struct BridgeConfig {
     pub group_gid: u32,
     #[serde(default)]
     pub reward_policy: Option<crate::reward_funding::RewardPolicy>,
+    #[serde(default)]
+    pub payout_peer_uid: Option<u32>,
+    #[serde(default)]
+    pub payout_execution_enabled: bool,
 }
 
 impl BridgeConfig {
     pub fn validate(&self) -> Result<()> {
         if let Some(policy) = &self.reward_policy {
             policy.validate()?;
+        }
+        if self
+            .payout_peer_uid
+            .is_some_and(|uid| uid == 0 || uid == self.peer_uid)
+            || (self.payout_execution_enabled
+                && (self.payout_peer_uid.is_none() || self.reward_policy.is_none()))
+        {
+            bail!("payout role requires a separate non-root UID and explicit execution policy");
         }
         if !self.socket.is_absolute()
             || self.socket.as_os_str().len() > 100
@@ -49,6 +61,12 @@ pub enum Request {
         limit: u16,
     },
     Safety,
+    PayoutFunding {
+        expected_epoch: Uuid,
+        reservation_id: Uuid,
+        owner: String,
+        after: i64,
+    },
     RewardAllowance {
         expected_epoch: Uuid,
         request_id: Uuid,
@@ -79,6 +97,9 @@ pub enum Response {
         allowance: Box<crate::reward_funding::Allowance>,
     },
     Rejected,
+    PayoutFunding {
+        page: Box<crate::reward_funding::FundingPage>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -136,6 +157,21 @@ pub struct AuthenticatedReservation {
 pub struct AuthenticatedAllowance {
     allowance: crate::reward_funding::Allowance,
     core_uid: u32,
+}
+
+#[derive(Clone)]
+pub struct AuthenticatedFundingPage {
+    page: crate::reward_funding::FundingPage,
+    core_uid: u32,
+}
+
+impl AuthenticatedFundingPage {
+    pub fn page(&self) -> &crate::reward_funding::FundingPage {
+        &self.page
+    }
+    pub fn core_uid(&self) -> u32 {
+        self.core_uid
+    }
 }
 
 impl AuthenticatedAllowance {
@@ -350,6 +386,8 @@ mod tests {
             peer_uid: 10001,
             group_gid: 10002,
             reward_policy: None,
+            payout_peer_uid: None,
+            payout_execution_enabled: false,
         };
         good.validate().unwrap();
         for bad in [

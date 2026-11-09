@@ -43,6 +43,10 @@ them to the overlay/Nostr.
 
 ## Persist before each boundary
 
+The [private payout authority](cyberherd-payout-authority.md) now implements
+separate-role reservation/source readback and consumed-receive credential
+qualification. The remaining store/execution lifecycle below is still unfinished.
+
 The payout identity must first authenticate the core reservation independently;
 copied membership DB rows/JSON are not financial authority. Pin its actual provider
 account/environment and credential identity, with no public ingress or feeder

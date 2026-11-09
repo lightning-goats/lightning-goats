@@ -11,10 +11,10 @@ sats_received = [
 
 feeder_trigger = [
   "🎉 Feeder activated! {new_amount} sats triggered a feeding. {difference_message} Scientific fact: Goats, such as {goat_name}, have uniquely shaped rectangular pupils, which provide them a wide field of vision, aiding in predator detection.\n\nhttps://lightning-goats.com",
-  "⚡ Feeder trigger reached! {new_amount} sats were redeemed for treats. {difference_message} Fun fact: {goat_name} and other goats are incredibly agile climbers, capable of scaling steep terrain with ease.\n\nhttps://lightning-goats.com",
+  "⚡ A payment of {new_amount} sats triggered a feeding! {difference_message} Fun fact: {goat_name} and other goats are incredibly agile climbers, capable of scaling steep terrain with ease.\n\nhttps://lightning-goats.com",
   "🎊 Feeding time! The Lightning Goats just received treats funded by {new_amount} sats. {difference_message} Did you know? {goat_name} represents the curious and intelligent nature of goats in general.\n\nhttps://lightning-goats.com",
   "🚀 Feeder activated with {new_amount} sats! {difference_message} Interesting: Goats like {goat_name} have excellent memories and can recognize other goats and humans for years.\n\nhttps://lightning-goats.com",
-  "⚡ Lightning Goats feeding initiated! {new_amount} sats were redeemed for treats. {difference_message} Goat trivia: {goat_name} exemplifies how goats use their prehensile tongues to be selective eaters, often choosing the most nutritious parts of a plant.\n\nhttps://lightning-goats.com",
+  "⚡ Lightning Goats feeding confirmed! A payment of {new_amount} sats triggered it. {difference_message} Goat trivia: {goat_name} exemplifies how goats use their prehensile tongues to be selective eaters, often choosing the most nutritious parts of a plant.\n\nhttps://lightning-goats.com",
 ]
 
 interface_info = [

@@ -14,8 +14,8 @@ use tokio::{
 };
 
 use super::{
-    AuthenticatedAllowance, AuthenticatedBatch, AuthenticatedReservation, BridgeConfig, MAX_FRAME,
-    Request, Response, Safety,
+    AuthenticatedAllowance, AuthenticatedBatch, AuthenticatedFundingPage, AuthenticatedReservation,
+    BridgeConfig, MAX_FRAME, Request, Response, Safety,
 };
 use crate::{config::RuntimeMode, ledger::LedgerStore};
 
@@ -29,6 +29,29 @@ pub struct Server {
     listener: UnixListener,
     peer_uid: u32,
     reward_policy: Option<crate::reward_funding::RewardPolicy>,
+    payout_peer_uid: Option<u32>,
+    payout_execution_enabled: bool,
+}
+
+#[derive(Clone, Copy)]
+enum Role {
+    Intake,
+    Payout,
+}
+
+impl Role {
+    fn permits(self, request: &Request) -> bool {
+        match self {
+            Self::Intake => matches!(
+                request,
+                Request::Events { .. }
+                    | Request::Safety
+                    | Request::RewardAllowance { .. }
+                    | Request::ReserveReward { .. }
+            ),
+            Self::Payout => matches!(request, Request::PayoutFunding { .. }),
+        }
+    }
 }
 
 struct ReadBudget {
@@ -124,6 +147,8 @@ impl Server {
             listener,
             peer_uid: config.peer_uid,
             reward_policy: config.reward_policy.clone(),
+            payout_peer_uid: config.payout_peer_uid,
+            payout_execution_enabled: config.payout_execution_enabled,
         })
     }
 
@@ -136,9 +161,14 @@ impl Server {
         let mut budget = ReadBudget::new(Instant::now());
         loop {
             let (stream, _) = self.listener.accept().await?;
-            if stream.peer_cred()?.uid() != self.peer_uid {
+            let uid = stream.peer_cred()?.uid();
+            let role = if uid == self.peer_uid {
+                Role::Intake
+            } else if self.payout_peer_uid == Some(uid) {
+                Role::Payout
+            } else {
                 continue;
-            }
+            };
             // Admission precedes frame parsing/crypto so malformed requests
             // cannot transfer unbounded work into the financial runtime UID.
             if !budget.allow(Instant::now()) {
@@ -150,11 +180,20 @@ impl Server {
             let ledger = ledger.clone();
             let reads = Arc::clone(&reads);
             let reward_policy = self.reward_policy.clone();
+            let payout_execution_enabled = self.payout_execution_enabled;
             tokio::spawn(async move {
                 let _permit = permit;
                 let _ = timeout(
                     Duration::from_secs(10),
-                    serve_one(stream, &ledger, mode, &reads, reward_policy.as_ref()),
+                    serve_one(
+                        stream,
+                        &ledger,
+                        mode,
+                        &reads,
+                        reward_policy.as_ref(),
+                        role,
+                        payout_execution_enabled,
+                    ),
                 )
                 .await;
             });
@@ -168,11 +207,16 @@ async fn serve_one(
     mode: RuntimeMode,
     reads: &Arc<Semaphore>,
     reward_policy: Option<&crate::reward_funding::RewardPolicy>,
+    role: Role,
+    payout_execution_enabled: bool,
 ) -> Result<()> {
     let request: Request = match timeout(Duration::from_secs(2), read_frame(&mut stream)).await {
         Ok(Ok(request)) => request,
         _ => return Ok(()),
     };
+    if !role.permits(&request) {
+        return write_frame(&mut stream, &Response::Rejected).await;
+    }
     let response = if let Ok(_permit) = Arc::clone(reads).try_acquire_owned() {
         match request {
             Request::Events {
@@ -187,6 +231,27 @@ async fn serve_one(
             },
             Request::Safety => match ledger.core_safety(mode).await {
                 Ok(state) => Response::Safety { state },
+                Err(_) => Response::Rejected,
+            },
+            Request::PayoutFunding {
+                expected_epoch,
+                reservation_id,
+                owner,
+                after,
+            } => match ledger
+                .payout_funding_page(
+                    expected_epoch,
+                    reservation_id,
+                    &owner,
+                    after,
+                    reward_policy,
+                    payout_execution_enabled && mode.feeder_enabled(),
+                )
+                .await
+            {
+                Ok(page) => Response::PayoutFunding {
+                    page: Box::new(page),
+                },
                 Err(_) => Response::Rejected,
             },
             Request::RewardAllowance {
@@ -329,6 +394,46 @@ impl Client {
         }
     }
 
+    pub async fn payout_funding(
+        &self,
+        epoch: uuid::Uuid,
+        reservation_id: uuid::Uuid,
+        owner: &str,
+        after: i64,
+    ) -> Result<AuthenticatedFundingPage> {
+        crate::nostr_event::validate_public_key(owner)?;
+        if epoch.is_nil() || reservation_id.is_nil() || after < 0 {
+            bail!("invalid payout funding read scope");
+        }
+        match self
+            .request(&Request::PayoutFunding {
+                expected_epoch: epoch,
+                reservation_id,
+                owner: owner.into(),
+                after,
+            })
+            .await?
+        {
+            Response::PayoutFunding { mut page } => {
+                page.validate()?;
+                page.execution_enabled =
+                    page.execution_permitted(crate::cyberherd::calendar::now()?);
+                if page.reservation.epoch != epoch
+                    || page.reservation.id != reservation_id
+                    || page.reservation.owner != owner
+                    || page.after != after
+                {
+                    bail!("core returned a different payout funding scope");
+                }
+                Ok(AuthenticatedFundingPage {
+                    page: *page,
+                    core_uid: self.expected_uid,
+                })
+            }
+            _ => bail!("core did not authorize payout funding read"),
+        }
+    }
+
     pub async fn reward_allowance(
         &self,
         epoch: uuid::Uuid,
@@ -450,6 +555,8 @@ mod tests {
             peer_uid: uid + peer_offset,
             group_gid: gid,
             reward_policy: None,
+            payout_peer_uid: None,
+            payout_execution_enabled: false,
         };
         let ledger = LedgerStore::connect(&format!(
             "sqlite://{}",

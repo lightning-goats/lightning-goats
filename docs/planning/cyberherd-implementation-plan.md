@@ -245,3 +245,13 @@ These are source components and an uninstalled worker binary, not a live CyberHe
 service. The isolated payout worker, durable note/chat destinations, lifecycle notices,
 operator/client interfaces, installation and end-to-end verification remain work.
 No CyberHerd payout or membership worker is activated by this checkpoint.
+
+The [private payout authority](../architecture/cyberherd-payout-authority.md)
+now adds a distinct UID role, bounded reservation/source pages and qualification
+of every consumed real receive with the sender credential. It is not an outgoing
+payment engine. The [independent payout journal](../architecture/cyberherd-payout-journal.md)
+now retains qualified source slices, frozen destinations and gross allocations
+across retries/restarts. Every grant stays held pending the unfinished authoritative
+terminal-outcome protocol. Execution, signing, delivery and operations above remain
+open. The triggering-payment amount correction from #114 is also retained in the
+feature source without changing the original legacy export or template edits.

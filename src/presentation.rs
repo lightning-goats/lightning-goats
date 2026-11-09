@@ -375,7 +375,7 @@ fn feeding_pause_note(value: Option<&Value>) -> Result<Option<String>> {
         "0 feedings are queued; credit is saved toward the next feeding.".to_owned()
     } else {
         format!(
-            "{queued} feeding{} queued to run after unpausing, subject to local safety limits.",
+            "{queued} feeding{} queued to run after unpausing.",
             if queued == 1 { " is" } else { "s are" }
         )
     };

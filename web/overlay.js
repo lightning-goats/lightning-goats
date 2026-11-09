@@ -344,7 +344,7 @@
             : availability === "unknown" ? "⏸ Feeder Paused · status unavailable"
             : availability === "pending" ? "Feeding pending confirmation" : "";
         const queued = queuedFeedings();
-        let note = queued ? `${queued} feeding${queued === 1 ? "" : "s"} queued to run when feeding resumes, subject to safety limits.`
+        let note = queued ? `${queued} feeding${queued === 1 ? "" : "s"} queued to run when feeding resumes.`
             : "0 feedings queued · credit saved toward the next feeding.";
         if (awaitingConfirmation) note += " An earlier feeding is awaiting confirmation.";
         el("feeding-queue").textContent = availability === "ready" ? "" : note;

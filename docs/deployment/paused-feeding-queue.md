@@ -26,13 +26,13 @@ UUID retry. This update does not alter actuation, debit or reconciliation rules.
 ## User-visible behavior
 
 - The prominent paused banner includes the number of queued feedings and states
-  that they wait for feeding to resume, subject to local safety limits.
+  that they wait for feeding to resume.
 - The credit/progress display stays tied to ordered durable financial state.
   HTTP availability responses cannot overwrite credit. The top line says
   "queued" rather than claiming a paused feeder is ready to actuate.
 - Normal eligible payment/credit announcements retain their amount/goat content,
   with a leading pause/queue notice. Example: "Feeding is paused. 2 feedings are
-  queued to run after unpausing, subject to local safety limits. …"
+  queued to run after unpausing. …"
 - Zero queued feedings is stated explicitly; remaining credit is saved toward
   the next feeding. Unknown/stale status is described as unavailable, rather
   than promising readiness. In-flight confirmation is distinguished from queue.
@@ -121,3 +121,10 @@ message prefixed by the pause/queue notice. No JavaScript errors occurred.
 Existing history was observed without replaying its animations to viewers.
 Production credit remained below 1000; no additional credit, threshold crossing,
 physical actuation or home switch write was used for this verification.
+
+## Queue-message wording follow-up
+
+The operator requested removal of the user-facing safety-limits qualifier.
+Queued-feed captions and the overlay banner now simply say they run after
+unpausing/when feeding resumes. Physical safety enforcement, spacing and caps
+remain unchanged. The script cache version is 6.

@@ -527,15 +527,12 @@ mod tests {
             ),
             (1000, 305, ready),
         ] {
+            let mut payload = json!({"amount_sats":amount,"feed_credit_sats":credit});
+            if !feeding.is_null() {
+                payload["feeding"] = feeding;
+            }
             let rendered = renderer
-                .render(
-                    &event(
-                        42,
-                        "payment_received",
-                        json!({"amount_sats":amount,"feed_credit_sats":credit,"feeding":feeding}),
-                    ),
-                    1000,
-                )
+                .render(&event(42, "payment_received", payload), 1000)
                 .unwrap();
             assert!(rendered.nostr_content.is_some());
             assert!(rendered.overlay_message.is_some());

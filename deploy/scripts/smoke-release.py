@@ -27,6 +27,7 @@ REQUIRED = BINARIES | {
     "web/feed.html", "web/overlay.html", "web/overlay.js", "web/overlay.css",
     "deploy/scripts/lg-credit", "migrations/0012_operator_credits.sql", "migrations/0013_feeding_presentation.sql",
     "migrations/0014_nip57_receive_context.sql", "docs/architecture/native-nip57.md",
+    "migrations/0015_core_feed_event_sources.sql", "docs/architecture/cyberherd-core-bridge.md",
     "deploy/scripts/enable-feeding.py",
     "deploy/scripts/deploy-obs-overlay.py", "deploy/scripts/update-overlay-data.py",
     "deploy/systemd/lightning-goats-display-firewall.service",

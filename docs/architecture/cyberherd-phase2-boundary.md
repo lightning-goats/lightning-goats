@@ -4,7 +4,12 @@
 
 Phase 1 must leave a stable foundation for restoring CyberHerd functionality after the new Strike-backed Lightning Goats stack is live.
 
-This document defines what Phase 1 preserves without implementing CyberHerd now.
+This document originally defined the Phase 1 seam. The current
+[CyberHerd implementation plan](../planning/cyberherd-implementation-plan.md)
+now restores that domain through separate components while preserving these
+financial/physical authority boundaries. The optional
+[private bridge](cyberherd-core-bridge.md) supplies authenticated reads; it grants
+no generic financial or actuator write API.
 
 ## Phase 1 owns
 

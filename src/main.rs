@@ -145,6 +145,14 @@ async fn main() -> Result<()> {
 
     let mut server =
         tokio::spawn(async move { lightning_goats::server::serve(listener, app).await });
+    #[cfg(unix)]
+    let core_bridge = config.core_bridge.clone().map(|bridge| {
+        tokio::spawn(lightning_goats::core_bridge::unix::run_optional(
+            Some(bridge),
+            ledger.clone(),
+            config.service.mode,
+        ))
+    });
     let mut recovery = tokio::spawn(strike.run_recovery_worker(ledger.clone()));
     let mut feeder = tokio::spawn(run_feed_worker(
         ledger.clone(),
@@ -221,6 +229,10 @@ async fn main() -> Result<()> {
     message_processor.abort();
     publisher.abort();
     zap_receipts.abort();
+    #[cfg(unix)]
+    if let Some(bridge) = core_bridge {
+        bridge.abort();
+    }
     result
 }
 

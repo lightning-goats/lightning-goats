@@ -272,7 +272,7 @@ impl LedgerStore {
         .await?;
 
         let feed_credit_sats = feed_credit_in_transaction(&mut transaction).await?;
-        append_event_in_transaction(
+        let event_seq = append_event_in_transaction(
             &mut transaction,
             "feeder_confirmed",
             &json!({
@@ -282,6 +282,12 @@ impl LedgerStore {
             }),
         )
         .await?;
+
+        sqlx::query("INSERT INTO feed_event_sources(feed_attempt_id,event_seq) VALUES(?,?)")
+            .bind(id.to_string())
+            .bind(to_i64(event_seq, "feed event sequence")?)
+            .execute(&mut *transaction)
+            .await?;
 
         transaction.commit().await?;
         Ok(())

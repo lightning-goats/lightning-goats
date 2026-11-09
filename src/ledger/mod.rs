@@ -13,6 +13,7 @@ use sqlx::{Row, SqlitePool};
 
 use crate::domain::payment::SettledPayment;
 
+mod core_bridge;
 mod events;
 mod feed;
 mod feeding_presentation;

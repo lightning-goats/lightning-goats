@@ -27,6 +27,8 @@ pub struct AppConfig {
     pub gateway: IntegrationGatewayConfig,
     pub informational: InformationalConfig,
     pub nostr: NostrConfig,
+    #[serde(default)]
+    pub core_bridge: Option<crate::core_bridge::BridgeConfig>,
 }
 
 impl AppConfig {
@@ -67,6 +69,9 @@ impl AppConfig {
         validate_gateway_origin(&self.gateway.url)?;
         self.validate_informational()?;
         self.validate_nostr()?;
+        if let Some(bridge) = &self.core_bridge {
+            bridge.validate()?;
+        }
         Ok(())
     }
 
@@ -429,6 +434,7 @@ mod tests {
                 relays: vec!["wss://relay.example".to_owned()],
                 bunker_relays: None,
             },
+            core_bridge: None,
         }
     }
 

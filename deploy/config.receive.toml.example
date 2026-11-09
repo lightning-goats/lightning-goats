@@ -1,6 +1,15 @@
 # Non-secret Lightning Goats production configuration.
 # Secrets are loaded through systemd credentials, not this file.
 
+# Optional private read-only CyberHerd event bridge. Leave disabled until the
+# dedicated runtime users/group and protected socket directory are provisioned.
+# Replace both IDs with actual non-root values; zero is intentionally invalid.
+# Never give the CyberHerd user the core's credential-bearing primary group.
+# [core_bridge]
+# socket = "/run/lightning-goats-bridge/core.sock"
+# peer_uid = 0
+# group_gid = 0
+
 [service]
 listen = "127.0.0.1:8787"
 # Use shadow during production ingress verification. Change to active only after

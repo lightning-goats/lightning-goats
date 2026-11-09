@@ -1,7 +1,9 @@
 # New SQLite audit finding — 2026-11-09
 
-Status: audit failure recorded; no exception added or dependency change made.
-The Nostr/overlay candidate is not installed while disposition is pending.
+Status: audit failure remains open and unignored; no dependency or workflow
+exception introduced. The scoped Nostr/overlay update proceeds under the existing
+[risk-tiered policy](../testing/phase1-verification-matrix.md), preserving the
+verified private database conditions and without importing database/WAL files.
 
 The fresh documented gate reported `RUSTSEC-2026-0459` / `CVE-2026-119375` in
 locked `libsqlite3-sys 0.30.1`. The unreachable-RSA check still reports no active
@@ -28,8 +30,12 @@ still caps the SQLite binding below 0.38, so that major upgrade alone does not
 fix this advisory. The repository/compiler remain Rust 1.88. No opportunistic
 toolchain/financial-adapter migration or ad-hoc SQLite fork was introduced.
 
-A bounded temporary exception, if approved by the operator, must explicitly
-name this advisory and the current private, operator-managed database conditions.
-It must not be represented as a clean unqualified audit or applied to untrusted
-restore inputs. Otherwise keep the native candidate held and qualify an upstream
-compatible SQLite correction/backport separately with ledger/recovery tests.
+The operator has already authorized the bounded relay/presentation work. Its
+enabled public path does not provide the attacker-written files described by
+the advisory; no database parser, dependency, import or restore behavior changes.
+The practical pilot policy blocks an affected unsafe path rather than every
+unrelated change. Consequently this finding is retained separately while that
+scoped update proceeds; no new approval or audit ignore is inferred or added.
+This is not a clean audit result or proof that SQLite is patched. Do not apply
+this assessment to untrusted restore inputs. A compatible upstream correction
+or reviewed backport remains follow-up and needs ledger/recovery qualification.

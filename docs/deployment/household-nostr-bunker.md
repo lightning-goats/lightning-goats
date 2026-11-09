@@ -98,8 +98,10 @@ cover legacy parsing and invalid lists. The installer permits only these two
 relay-field changes and the credential drop-in while preserving canary mode.
 
 Read-only WebSocket probes connected and received EOSE from Primal, Chaima and
-ArtX. The browser's Damus connection failed, and its HTTPS metadata returned 403;
-this remains a qualification limitation. Chaima's NIP-11 metadata was readable
+ArtX. The browser's Damus connection failed, and its HTTPS metadata returned 403.
+A subsequent Go-style TLS/WebSocket handshake as daemon UID 985 returned 101
+with a verified WebSocket accept value, distinguishing that browser limitation
+from actual service reachability. Chaima's NIP-11 metadata was readable
 as the daemon user and advertised neither payment nor restricted-write requirements.
 None of these read-only checks proves public note acceptance/readback.
 
@@ -109,9 +111,11 @@ audience, including while paused; eligible payment and confirmed-feed Nostr text
 keeps its frozen queue context. CyberHerd events remain future implementation.
 
 The fresh audit identified an existing SQLite dependency advisory; see
-[its scoped assessment](../security/sqlite-wal-advisory-20261109.md). The new
-native candidate is not installed pending that gate's disposition. Initial
-Primal/client staging above uses the previously installed binary.
+[its scoped assessment](../security/sqlite-wal-advisory-20261109.md). That finding
+remains open and unignored. The existing risk-tiered policy permits this scoped
+relay/presentation update under the verified private-file conditions; it does
+not fix SQLite or establish a clean audit. Initial Primal/client staging above
+used the previously installed binary; final installation is recorded below.
 
 ## Public activation remains separate
 
@@ -123,3 +127,31 @@ Keep the existing confirmed-feeding behavior, 10-sat announcement threshold,
 overlay-only informational/weather audiences and exact signed-event retries.
 No Lightning payment, added credit or physical feeding is needed for the
 signing-only connection check.
+
+## Installed scoped update — 2026-11-09
+
+Native source `333040010c8f4c632174c73c6ee3b9f5ee303929` was packaged with archive
+SHA256 `6aa1e6c460b970ac6b0860aa3f460c4e98fadca829784cc824b091bd345bc902`.
+Formatting and strict Clippy passed. The regular suite passed 260 tests with the
+dedicated real-nak case ignored there; that case was then executed separately in
+a fresh loopback-only namespace and passed, including exact durable retry without
+the signer. Archive completeness, checksums, source identity and all binary help
+smokes passed. The audit remains flagged as assessed above; it is not a clean gate.
+
+Native backup: `/var/backups/lightning-goats/receive-upgrade-20261109T140606Z`.
+Final four-relay/client configuration backup:
+`/var/backups/lightning-goats/household-nostr-20261109T140621Z`.
+Installed daemon SHA256 is
+`629df18a46fc3a0ef1052f802174d10e217e3687fff0eeef770a84525e5b7e8d`.
+Readback verified all four publication destinations, independent Primal bunker
+transport, a loaded client-only credential, active canary service and zero
+restarts. Credit remained 1142 sats; feed attempts/debits and Nostr outbox rows
+remained zero. Message cursor and latest durable event both read 651.
+
+Actual public Chromium verification replayed nine existing messages in a private
+observer (eight interface-info and one weather); every scrolling message omitted
+the paused prefix. The visible paused banner still showed one queued feeding,
+and there were no JavaScript errors. No credit, Lightning payment, physical
+feeding, public payment/feed post, home switch, DNS or firewall change was used.
+The static overlay assets were unchanged. Public note delivery/readback on the
+four relays remains for the separately selected public activation step.

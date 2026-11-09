@@ -108,3 +108,7 @@ intents/quotes/execute reconciliation and terminal-outcome budget accounting. Th
 conservative outstanding cap still counts every reservation. Only authoritative
 completed payouts may create treat notices. Installation/activation and the full
 presentation/lifecycle/interface port remain unfinished.
+
+The [outgoing provider contract](cyberherd-outgoing-contract.md) records the
+verified endpoint/scoping and ambiguous-execution recovery constraints for that
+next implementation; it is not a claim that an outgoing worker exists.

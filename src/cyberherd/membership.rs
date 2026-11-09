@@ -66,6 +66,7 @@ pub fn validate_lud16(address: &str) -> Result<()> {
         .split_once('@')
         .context("Lightning address requires user@domain")?;
     if user.is_empty()
+        || matches!(user, "." | "..")
         || user.len() > 128
         || !user
             .bytes()
@@ -98,6 +99,16 @@ pub fn validate_lud16(address: &str) -> Result<()> {
         {
             bail!("invalid Lightning address domain");
         }
+    }
+    // Use the same non-network syntax policy as the eventual resolver. A
+    // reserved suffix or numeric IP alias must become an ineligible profile,
+    // not poison the whole reward plan after it passed admission validation.
+    let url = crate::public_network::validate_destination(&format!("https://{domain}/"), "https")?;
+    if url
+        .host_str()
+        .is_some_and(|host| host.parse::<std::net::IpAddr>().is_ok())
+    {
+        bail!("Lightning address requires a DNS name rather than an IP alias");
     }
     Ok(())
 }
@@ -655,6 +666,14 @@ mod tests {
             "a@@evil.com",
             "a@-evil.com",
             "a@evil.com.",
+            "a@pay.test",
+            "a@pay.TEST",
+            "a@pay.invalid",
+            "a@pay.home",
+            "a@1.2.3",
+            "a@8.8.8.8",
+            ".@example.com",
+            "..@example.com",
         ] {
             assert!(validate_lud16(address).is_err(), "{address}");
         }

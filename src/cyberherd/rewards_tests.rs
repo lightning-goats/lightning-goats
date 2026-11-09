@@ -413,7 +413,9 @@ async fn mixed_funding_freezes_whole_sat_shares_and_exact_reservation_across_res
 async fn current_signed_negative_and_failed_reads_do_not_reuse_historical_payout_addresses() {
     let f = Fixture::new(0).await;
     let old = f.reads().await;
-    let negative = profile(2, f.now, None);
+    // Reserved domains must be a negative payout update, not pass profile
+    // validation and then abort the whole plan in the stricter resolver.
+    let negative = profile(2, f.now, Some("member@pay.test"));
     f.store.remember_profile(&f.owner, &negative).await.unwrap();
     assert!(
         f.store

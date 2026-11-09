@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Lightning Goats OBS overlay</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/overlay.css?v=5">
+  <link rel="stylesheet" href="/overlay.css?v=6">
   <script src="/vendor/qrcode.js" defer></script>
-  <script src="/overlay.js?v=6" defer></script>
+  <script src="/overlay.js?v=7" defer></script>
 </head>
 <body>
   <main id="container" aria-label="Lightning Goats stream overlay">
@@ -20,8 +20,8 @@
     </div>
     <a id="qr-code" href="lightning:herd@lightning-goats.com" aria-label="Pay herd@lightning-goats.com">
       <div id="qr-image" role="img" aria-label="Lightning payment QR for herd@lightning-goats.com"></div>
-      <div id="qr-brand"><img src="/images/lightninggoatslogo1.png" alt=""></div>
-      <span id="lightning-img" aria-hidden="true">ϟ</span>
+      <div id="qr-brand"><img src="/images/lightninggoatslogo1.png?v=artwork-20261109" alt=""></div>
+      <img id="lightning-img" src="/images/lightning.png?v=artwork-20261109" alt="" aria-hidden="true">
     </a>
     <div id="connection" role="status">Connecting…</div>
     <div id="feeding-state" role="status" aria-live="polite" hidden><span id="feeding-state-label"></span><span id="feeding-queue"></span></div>

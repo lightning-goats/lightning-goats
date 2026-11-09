@@ -5,7 +5,8 @@
     const identity = (s) => typeof s === "string" && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(s);
     const fresh = (time) => Number.isFinite(time) && Date.now() - time <= 300000 && time - Date.now() <= 30000;
     const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const logo = "/images/lightninggoatslogo1.png";
+    const artworkVersion = "artwork-20261109";
+    const logo = `/images/lightninggoatslogo1.png?v=${artworkVersion}`;
     const goats = new Map(["Dexter", "Rowan", "Cosmo", "Newton", "Nova"].map((name) => [name.toLowerCase(), name]));
     const timers = new Set(), animations = new Set();
     let stream = null, seq = null, credit = 0, threshold = 1000;
@@ -146,7 +147,7 @@
             }
             const image = document.createElement("img");
             image.alt = name; image.referrerPolicy = "no-referrer";
-            image.src = members ? picture(item.picture || item.imageUrl) : `/images/${known.toLowerCase()}.png`;
+            image.src = members ? picture(item.picture || item.imageUrl) : `/images/${known.toLowerCase()}.png?v=${artworkVersion}`;
             image.onerror = () => { image.onerror = null; image.src = logo; };
             const title = document.createElement("span"); title.className = "user-profile-name"; title.textContent = name;
             content.append(image, title);

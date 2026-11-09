@@ -11,7 +11,7 @@ html, body { margin: 0; padding: 0; width: 1920px; height: 1080px; overflow: hid
 #qr-image, #qr-image svg { display: block; width: 180px; height: 180px; }
 #qr-brand { position: absolute; width: 32px; height: 32px; top: 74px; left: 74px; padding: 3px; border-radius: 7px; background: white; }
 #qr-brand img { width: 100%; height: 100%; display: block; object-fit: contain; border-radius: 3px; }
-#lightning-img { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; background: white; color: var(--orange); font-size: 170px; line-height: 1; font-weight: bold; text-shadow: 0 0 12px #ffdb5880; }
+#lightning-img { position: absolute; inset: 0; display: none; width: 100%; height: 100%; object-fit: contain; background: white; }
 #connection, #feeding-state { position: absolute; right: 8px; top: 188px; color: var(--cream); font-size: 12px; background: #000b; border-radius: 6px; padding: 3px 7px; text-shadow: 0 1px 2px black; }
 #feeding-state { top: 211px; color: #ffdb58; }
 #connection:empty, #feeding-state[hidden] { display: none; }

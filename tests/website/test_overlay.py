@@ -210,7 +210,7 @@ class OverlayBrowserTests(unittest.TestCase):
         self.assertEqual(self.page.locator(".user-profile-name").first.inner_text(),"<img src=x onerror=alert(1)>")
         self.assertEqual(self.page.locator(".accordion-item[data-newest=true]").count(),1)
         self.assertEqual(self.page.locator(".user-profile-name img").count(),0)
-        self.assertTrue(self.page.locator(".accordion-content img").first.get_attribute("src").endswith("lightninggoatslogo1.png"))
+        self.assertEqual(urlsplit(self.page.locator(".accordion-content img").first.get_attribute("src")).path, "/images/lightninggoatslogo1.png")
         self.send({"type":"cyberherd_daily_reset","source_type":"cyberherd_daily_reset","seq":2})
         self.assertEqual(self.page.locator(".accordion-item").count(),0)
         self.assertEqual(self.errors,[])

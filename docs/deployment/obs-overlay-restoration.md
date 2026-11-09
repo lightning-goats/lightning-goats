@@ -203,3 +203,19 @@ positive live credit, computed animation names for both the track and fill were
 in [operator-credits.md](operator-credits.md). Credit finished at 47 sats, with no
 feeding due or physical attempt. Existing OBS sources need a refresh to load the
 stylesheet cache version 4. Payment binaries and physical mode were unchanged.
+
+## Uploaded OBS artwork — 2026-11-09
+
+The operator supplied original artwork in `/home/sat/images`. The five goat
+portraits (Newton, Nova, Cosmo, Dexter and Rowan), lightning image and project
+logo are now source assets under `web/images/`, retaining their original bytes.
+Portraits are 850×850, the lightning image 400×400, and the logo 1024×1024 PNGs.
+Goat cards use the portraits; the payment QR swap uses the uploaded lightning
+image; the QR center uses the uploaded logo. CSS/JS and artwork URLs have cache
+versions so existing browser sources can refresh to the new artwork.
+
+The dynamic high-error-correction QR still encodes the canonical
+`herd@lightning-goats.com` LNURL. Uploaded historical QR images and unrelated
+background/preview assets do not replace it or the homepage artwork.
+No native source, payment credential, financial state, gateway setting or Nostr
+publication mode changes are required for this static update.

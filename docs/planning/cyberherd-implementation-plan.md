@@ -96,7 +96,9 @@ The list is the full port contract, not a completion claim for an initial slice.
 3. **Durable cycles:** transactional membership/score/award/event updates;
    owner isolation; immutable source identities; distinct settled invoices count
    separately even if their signed zap request is reused. Daily local-time reset
-   is optional and catches up before work after downtime, including DST. Manual
+   uses operator-selected `America/Denver` (Mountain time, including DST), is
+   optional and catches up before work after downtime. The same calendar decides
+   which announcement is today's note. Manual
    reset is atomic, starts a new cycle and emits no public daily-reset notice.
    Neither reset erases the core paid ledger or enables pre-reset replay.
    Manual edits/removals/activations are auditable and idempotent.
@@ -205,8 +207,15 @@ The feature source also implements native NIP-01/BIP-340 verification and the
 invoice context, independent receipt intents, remote signing and bounded public
 relay transport. It is opt-in and has not been activated on the live service.
 
-These are source components, not a running CyberHerd service. The authenticated
-relay/target adapters, local core bridge, real-fund reward planning,
+The [authenticated ingress components](../architecture/cyberherd-ingress.md)
+now add the selected Mountain-time calendar/catch-up operation, project/host/provider
+stream authority, durable heads/aliases and signed profile replacement, bounded
+read-only relay queries, a raw social inbox and the replay-safe membership adapter.
+They freeze conversation evidence with applied domain state. These are library
+components; they do not themselves start discovery or recovery services.
+
+These are source components, not a running CyberHerd service. The discovery/
+refresh/recovery orchestration, local core bridge, real-fund reward planning,
 isolated payout worker, durable note/chat destinations, scheduled lifecycle/reset,
 operator/client interfaces, installation and end-to-end verification remain work.
 No CyberHerd payout or membership worker is activated by this checkpoint.

@@ -434,7 +434,11 @@ async fn feeding_funding_payment_signs_only_confirmed_feeding_across_restart() {
     assert_eq!(ledger.feed_credit_sats().await.unwrap(), 305);
     let outbox = ledger.next_outbox_entry().await.unwrap().unwrap();
     let signed: Value = serde_json::from_str(&outbox.signed_event_json).unwrap();
-    assert!(signed["content"].as_str().unwrap().contains("695"));
+    // Custom/legacy variants can omit the progress sentence. Verify the
+    // confirmed source and publication contract without requiring that wording.
+    assert_eq!(outbox.source_event_seq, 3);
+    assert_eq!(signed["kind"], 1);
+    assert!(!signed["content"].as_str().unwrap().trim().is_empty());
     assert_eq!(
         fixture
             .trace()

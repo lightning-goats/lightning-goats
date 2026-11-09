@@ -11,6 +11,9 @@ use super::membership::{
 };
 use super::templates::Catalog;
 
+#[path = "target_store.rs"]
+mod target_state;
+
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./cyberherd-migrations");
 
 #[derive(Debug, Clone)]
@@ -159,6 +162,18 @@ impl Store {
         target: Target,
         feeder: FeederAvailability,
     ) -> Result<Receipt> {
+        self.process_with_context(owner, interaction, target, feeder, None)
+            .await
+    }
+
+    pub(crate) async fn process_with_context(
+        &self,
+        owner: &str,
+        interaction: &Interaction,
+        target: Target,
+        feeder: FeederAvailability,
+        context: Option<&super::targets::InteractionContext>,
+    ) -> Result<Receipt> {
         validate_pubkey(owner)?;
         interaction.validate()?;
         let input_json = serde_json::to_string(interaction)?;
@@ -229,7 +244,7 @@ impl Store {
                 // The entire post-transition state and outcome are frozen together.
                 // Message adapters must not look up mutable scores on retries.
                 snapshot.revision = revision;
-                let payload = serde_json::json!({"interaction":interaction,"transition":receipt.transition,"snapshot":snapshot});
+                let payload = serde_json::json!({"interaction":interaction,"transition":receipt.transition,"snapshot":snapshot,"context":context});
                 let event = sqlx::query("INSERT INTO domain_events(owner,cycle,source_id,event_type,snapshot_json) VALUES(?,?,?,'interaction',?)")
                     .bind(owner).bind(snapshot.cycle).bind(&interaction.source_id).bind(serde_json::to_string(&payload)?).execute(&mut *tx).await?;
                 receipt.event_seq = Some(event.last_insert_rowid());

@@ -23,6 +23,7 @@ anyhow = "1"
 axum = { version = "0.8", features = ["ws"] }
 bitcoin = { version = "0.32", default-features = false, features = ["std", "secp-recovery"] }
 chrono = { version = "0.4", default-features = false, features = ["std"] }
+chrono-tz = "=0.10.4"
 clap = { version = "4", features = ["derive"] }
 futures-util = "0.3"
 form_urlencoded = "1"

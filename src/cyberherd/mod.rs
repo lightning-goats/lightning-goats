@@ -5,7 +5,11 @@
 //! feeder/payout command. The current implementation progress is tracked in
 //! docs/planning/cyberherd-implementation-plan.md.
 
+pub mod calendar;
 pub mod membership;
+pub mod relay;
 pub mod shares;
+pub mod social;
 pub mod store;
+pub mod targets;
 pub mod templates;

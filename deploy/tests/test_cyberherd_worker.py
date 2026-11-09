@@ -44,6 +44,23 @@ class CyberHerdWorkerCLI(unittest.TestCase):
                      self.text.replace("required_relays = 1", "required_relays = 8")]:
             self.assertNotEqual(self.invoke(text, "--check").returncode, 0)
 
+    def test_optional_planning_is_bounded_and_accepts_no_spending_credential(self):
+        policy = '''
+[rewards]
+fee_basis_points = 0
+minimum_fee_sats = 1
+minimum_net_sats = 1
+profile_max_age_seconds = 3600
+operation_addresses = ["herd@lightning-goats.com"]
+'''
+        result = self.invoke(self.text + policy, "--check")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for invalid in [policy.replace("fee_basis_points = 0", "fee_basis_points = 10001"),
+                        policy.replace("minimum_net_sats = 1", "minimum_net_sats = 0"),
+                        policy.replace("profile_max_age_seconds = 3600", "profile_max_age_seconds = 0"),
+                        policy + 'strike_api_key = "synthetic-placeholder"\n']:
+            self.assertNotEqual(self.invoke(self.text + invalid, "--check").returncode, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

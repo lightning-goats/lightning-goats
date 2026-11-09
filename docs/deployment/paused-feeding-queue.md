@@ -94,3 +94,30 @@ tests with the dedicated real-nak namespace case explicitly ignored, all 20
 mocked browser tests, and 126 deployment cases with five existing skips. The
 security gate passed with the documented unreachable-RSA exception. The live
 physical threshold test remains reserved for the operator.
+
+## Installed acceptance — 2026-11-09
+
+Source `1e333706eb29948df0dd3929daaa5b6c068e0dcb` was packaged with archive SHA256
+`08ab7bf9aaebe3194099055f5d1a5dbd9f933fc9604d29d39d6f3ca561b95488`.
+Before installation, a root-private, network-isolated copy of the actual schema-12
+ledger migrated to 13 with identical financial/grant/feed/outbox/cursor row
+fingerprints and 97 sats retained. No production credit or gateway command was
+created by the rehearsal.
+
+The native upgrade retained backup
+`/var/backups/lightning-goats/receive-upgrade-20261109T010146Z`; the static deployment
+retained `/var/backups/lightning-goats/obs-20261109T010250Z`. The root install
+records identify the exact source/archive/binaries. Mode remained canary, Nostr
+publication stayed disabled, and the operator's override remained under their
+control. Live readback established schema 13 and a fresh override-paused advisory
+row, 97 sats, three provider settlements, five existing operator grants, zero
+feed attempts/debits and no Nostr outbox rows.
+
+Actual public Chromium verification showed the prominent paused label and
+"0 feedings queued · credit saved toward the next feeding." A separate read-only
+WebSocket observer validated a genuine periodic weather event generated while
+paused, with frozen `feeding.paused=true`, queued count zero and the normal
+message prefixed by the pause/queue notice. No JavaScript errors occurred.
+Existing history was observed without replaying its animations to viewers.
+Production credit remained below 1000; no additional credit, threshold crossing,
+physical actuation or home switch write was used for this verification.

@@ -128,3 +128,15 @@ The operator requested removal of the user-facing safety-limits qualifier.
 Queued-feed captions and the overlay banner now simply say they run after
 unpausing/when feeding resumes. Physical safety enforcement, spacing and caps
 remain unchanged. The script cache version is 6.
+
+Installed source `093645dd431672cda0e5b10f9f8d835c4cc4d14d`, archive SHA256
+`0d340e553522b312e69cef1d622d3651baf2d10b5d6c03cafe49d44d2d3e1f9d`.
+Formatting, strict Clippy, 256 Rust tests (one existing ignored case), 14 overlay
+browser tests, the documented security gate and archive smoke/checksums passed.
+Native backup: `/var/backups/lightning-goats/receive-upgrade-20261109T012723Z`;
+static backup: `/var/backups/lightning-goats/obs-20261109T012738Z`.
+Public Chromium showed "1 feeding queued to run when feeding resumes." with no
+JavaScript errors; a separate read-only replay verified eight existing messages
+with the shorter native queue caption. Credit remained 1142 sats (one queued
+feeding and 142 remainder), with no feed attempts or debits. Mode remained canary,
+with Nostr disabled. No credits, payments or gateway commands were created.

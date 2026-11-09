@@ -117,12 +117,12 @@ relay/presentation update under the verified private-file conditions; it does
 not fix SQLite or establish a clean audit. Initial Primal/client staging above
 used the previously installed binary; final installation is recorded below.
 
-## Public activation remains separate
+## Public activation boundary
 
-The daemon is still `canary`; public Nostr remains disabled and its outbox is
-empty. Public messaging activation remains a separate operator step. Before
-switching to `active`, preserve the paid ledger, verify no unresolved feed, and
-check the message cursor is caught up so earlier test activity is not published.
+Preparation retained `canary` until the operator's explicit public activation
+recorded below. Before switching to `active`, preserve the paid ledger, verify
+no unresolved feed, and check the message cursor is caught up so earlier test
+activity is not published.
 Keep the existing confirmed-feeding behavior, 10-sat announcement threshold,
 overlay-only informational/weather audiences and exact signed-event retries.
 No Lightning payment, added credit or physical feeding is needed for the
@@ -155,3 +155,31 @@ and there were no JavaScript errors. No credit, Lightning payment, physical
 feeding, public payment/feed post, home switch, DNS or firewall change was used.
 The static overlay assets were unchanged. Public note delivery/readback on the
 four relays remains for the separately selected public activation step.
+
+## Public publishing enabled — 2026-11-09 14:17:09 UTC
+
+The operator explicitly requested "Enable Nostr publishing." The reviewed
+`deploy/scripts/enable-nostr.py` helper changed only `service.mode` from canary
+to active, after quiescing the daemon and verifying cursor/latest-event equality
+and an empty unpublished outbox. No cursor, financial row or historical event
+was edited. The cutoff is event **658**; earlier activity remains unpublished.
+The focused configuration check preserved unrelated modes/amounts and rejected
+non-canary transformation. Python syntax and whitespace checks passed; no Rust
+source, binary, dependency, credential, relay or audience changed in this step.
+
+Consistent private backup:
+`/var/backups/lightning-goats/nostr-enable-20261109T141708Z`.
+Root-owned `/etc/lightning-goats/NOSTR-ACTIVATION.json` records the cutoff, time,
+relay selections and backup. On activation failure the helper restores only its
+configuration change and restarts canary; paid/event/outbox state is retained.
+Repeating the helper while already active makes no changes.
+
+Live readback: active service, runtime user `lightning-goats`, zero restarts,
+1142 sats, one funded feeding plus 142 remainder, no unresolved/feed attempts,
+and unchanged local override ON / remote enable ON. Public posting is enabled
+for new eligible payment/operator-credit events (10-sat minimum) and confirmed
+feedings, using the household signer and all four configured announcement relays.
+Information/weather remain WebSocket-only; CyberHerd producers are future work.
+No test credit, payment, physical feeding or public test note was created to
+activate it. Actual public note acceptance/readback awaits the next qualifying
+payment/credit or confirmed feeding; service activation alone is not that evidence.

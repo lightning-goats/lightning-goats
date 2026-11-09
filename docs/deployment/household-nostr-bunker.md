@@ -50,13 +50,70 @@ and binary-digest settings; idempotent repeat; rejection of malformed/injected
 client keys and duplicate allowlist definitions. Python parsing, shell syntax
 and whitespace checks passed. These are not live household acceptance.
 
-## Remaining connection and activation
+## Connection verification and initial staging
 
-After the operator runs the household script, read back its public relay list
-and service state. Match the VPS relay list, load only the client credential in
-the payment service and obtain/verify one remote kind-1 signature without
-publishing it. Confirm the expected author/content/tags and actual service-user
-access. Do not print bunker output, pairing URLs or process environments.
+The operator ran the household script, retaining backup
+`/etc/nostr-bunker/earthship-operator.env.lg-20261109T131749Z`. Readback confirmed
+both client public keys in the running process arguments. The selected instance
+was active/running with zero restarts; the two older named Lightning Goats
+instances were inactive. The household's existing offline verifier matched the
+signing credential to the operator's existing DM recipient.
+
+Two actual signing-only challenges through `wss://relay.primal.net` succeeded as
+daemon UID 985 using its encrypted client credential. Expected author, exact
+content/tags, canonical hash and signature verified; no public kind-1 note was
+sent. Live response observation verified one acknowledgement and one successful
+result. The initial local precheck passed empty stdin to `nak key public`; that
+helper error is corrected to explicit key stdin. The preparation helper also
+re-derived the same existing client identity without replacing its credential.
+
+The combined signing relay check returned an authorization failure, while
+individual nos.lol and Damus signing attempts timed out. Cause is unproven;
+these are not evidence that the verified household key/allowlist is incorrect,
+nor proof that kind-1 publication is refused. Primal is the qualified NIP-46
+transport. No household relay or credential changes were made during diagnostics.
+
+Initial VPS staging retained backup
+`/var/backups/lightning-goats/household-nostr-20261109T134003Z`, configured Primal,
+and loaded the client-only systemd drop-in. Readback: active daemon, zero restarts,
+canary mode, 1142 sats (one funded feeding, 142 remainder), no feed attempts/debits,
+and empty Nostr outbox. No local signing credential exists. Assembled systemd
+validation passed. Do not print bunker output, pairing URLs or process environments.
+
+## Requested announcement destinations
+
+The operator selected these alongside Primal:
+
+- `wss://nostr.chaima.info/`
+- `wss://relay.damus.io/`
+- `wss://relay.artx.market/`
+
+The candidate sets `nostr.bunker_relays = ["wss://relay.primal.net"]` independently
+from `nostr.relays`, which contains all four public destinations. An omitted
+`bunker_relays` preserves legacy shared-list behavior; explicit empty/insecure
+transport lists are rejected. Signing receives the client credential; publication
+sends the exact persisted event to all configured destinations without contacting
+the bunker. Subprocess regressions cover that separation and configuration tests
+cover legacy parsing and invalid lists. The installer permits only these two
+relay-field changes and the credential drop-in while preserving canary mode.
+
+Read-only WebSocket probes connected and received EOSE from Primal, Chaima and
+ArtX. The browser's Damus connection failed, and its HTTPS metadata returned 403;
+this remains a qualification limitation. Chaima's NIP-11 metadata was readable
+as the daemon user and advertised neither payment nor restricted-write requirements.
+None of these read-only checks proves public note acceptance/readback.
+
+The candidate also removes paused-status prefixes from overlay scrolling text.
+The prominent paused/queued banner remains. Information/weather retain no Nostr
+audience, including while paused; eligible payment and confirmed-feed Nostr text
+keeps its frozen queue context. CyberHerd events remain future implementation.
+
+The fresh audit identified an existing SQLite dependency advisory; see
+[its scoped assessment](../security/sqlite-wal-advisory-20261109.md). The new
+native candidate is not installed pending that gate's disposition. Initial
+Primal/client staging above uses the previously installed binary.
+
+## Public activation remains separate
 
 The daemon is still `canary`; public Nostr remains disabled and its outbox is
 empty. Public messaging activation remains a separate operator step. Before

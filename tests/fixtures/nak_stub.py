@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import sys
 import time
+from urllib.parse import parse_qs, urlparse
 
 args = sys.argv[1:]
 assert args[0] == "--config-path"
@@ -25,6 +26,8 @@ phase = "verify" if args[0] == "verify" else ("publish" if "--sec" in args else 
 with (root / "calls.jsonl").open("a") as stream:
     stream.write(json.dumps({"phase": phase, "payload": payload,
         "has_client_key": bool(os.environ.get("NOSTR_CLIENT_KEY")),
+        "bunker_relays": parse_qs(urlparse(os.environ.get("NOSTR_SECRET_KEY", "")).query).get("relay", []),
+        "relay_args": [arg for arg in args if arg.startswith("wss://")],
         "has_signer_uri": bool(os.environ.get("NOSTR_SECRET_KEY"))}) + "\n")
 if mode == "nonzero_secret":
     sys.stderr.write(os.environ.get("NOSTR_CLIENT_KEY", "") + "\n")

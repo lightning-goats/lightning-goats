@@ -124,14 +124,12 @@ mod tests {
         assert_eq!(debits, 0);
         let renderer = MessageRenderer::embedded().unwrap();
         let rendered = renderer.render(&event, 1000).unwrap();
-        for text in [
-            rendered.overlay_message.as_ref().unwrap(),
-            rendered.nostr_content.as_ref().unwrap(),
-        ] {
-            assert!(text.contains("Feeding is paused."));
-            assert!(text.contains("2 feedings are queued"));
-            assert!(!text.contains("Feeder ready!"));
-        }
+        let public = rendered.nostr_content.as_ref().unwrap();
+        assert!(public.contains("Feeding is paused."));
+        assert!(public.contains("2 feedings are queued"));
+        let overlay = rendered.overlay_message.as_ref().unwrap();
+        assert!(!overlay.contains("Feeding is paused."));
+        assert!(!overlay.contains("Feeder ready!"));
         drop(ledger);
         let reopened = LedgerStore::connect(&url).await.unwrap();
         reopened
@@ -277,8 +275,8 @@ mod tests {
             let rendered = renderer.render(&event, 1000).unwrap();
             assert!(rendered.nostr_content.is_none());
             let message = rendered.overlay_message.unwrap();
-            assert!(message.contains("Feeding is paused."));
-            assert!(message.contains("2 feedings are queued"));
+            assert!(!message.contains("Feeding is paused."));
+            assert!(!message.contains("2 feedings are queued"));
         }
     }
 }

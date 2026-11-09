@@ -182,7 +182,10 @@ impl AppConfig {
         if self.nostr.relays.is_empty() {
             bail!("nostr.relays must contain at least one relay");
         }
-        for relay in &self.nostr.relays {
+        if self.nostr.bunker_relays().is_empty() {
+            bail!("nostr.bunker_relays must contain at least one relay when specified");
+        }
+        for relay in self.nostr.relays.iter().chain(self.nostr.bunker_relays()) {
             let parsed =
                 Url::parse(relay).with_context(|| format!("invalid Nostr relay URL {relay}"))?;
             if parsed.scheme() != "wss" || parsed.host_str().is_none() {
@@ -281,6 +284,16 @@ pub struct NostrConfig {
     pub bunker_pubkey: String,
     #[serde(default)]
     pub relays: Vec<String>,
+    /// Optional NIP-46 transport relays, independent from announcement delivery.
+    #[serde(default)]
+    pub bunker_relays: Option<Vec<String>>,
+}
+
+impl NostrConfig {
+    #[must_use]
+    pub fn bunker_relays(&self) -> &[String] {
+        self.bunker_relays.as_deref().unwrap_or(&self.relays)
+    }
 }
 
 fn validate_gateway_origin(raw: &str) -> Result<()> {
@@ -377,6 +390,7 @@ mod tests {
                 nak_config_path: PathBuf::from("/run/lightning-goats/nak"),
                 bunker_pubkey: "00".repeat(32),
                 relays: vec!["wss://relay.example".to_owned()],
+                bunker_relays: None,
             },
         }
     }
@@ -457,5 +471,27 @@ mod tests {
         let mut config = valid_config();
         config.nostr.relays = vec!["ws://relay.example".to_owned()];
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn validates_separate_bunker_relays() {
+        let mut config = valid_config();
+        config.nostr.bunker_relays = Some(vec!["wss://signer-relay.example".to_owned()]);
+        config.validate().unwrap();
+        for relays in [vec![], vec!["ws://signer-relay.example".to_owned()]] {
+            config.nostr.bunker_relays = Some(relays);
+            assert!(config.validate().is_err());
+        }
+    }
+
+    #[test]
+    fn legacy_nostr_config_keeps_shared_relays() {
+        let raw = format!(
+            "nak_path='/usr/local/bin/nak'\nnak_config_path='/run/nak'\nbunker_pubkey='{}'\nrelays=['wss://legacy.example']",
+            "ab".repeat(32)
+        );
+        let config: NostrConfig = toml::from_str(&raw).unwrap();
+        assert!(config.bunker_relays.is_none());
+        assert_eq!(config.bunker_relays(), config.relays);
     }
 }

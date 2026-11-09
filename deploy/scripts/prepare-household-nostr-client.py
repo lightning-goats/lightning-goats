@@ -66,8 +66,8 @@ def main():
         if not re.fullmatch(rb'[0-9a-f]{64}', key):
             raise ValueError('client credential is not a valid hex private key')
         public = run([str(NAK), '--config-path', str(temporary / 'cache'),
-                      'key', 'public'], environment={**clean_env,
-                      'NOSTR_SECRET_KEY': key.decode()}).strip().decode()
+                      'key', 'public'], data=key + b'\n',
+                     environment=clean_env).strip().decode()
         if not re.fullmatch(r'[0-9a-f]{64}', public):
             raise ValueError('invalid client public key')
         if created:

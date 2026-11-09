@@ -107,9 +107,6 @@ impl MessageRenderer {
             _ => Ok(RenderedPresentation::empty()),
         }?;
         if let Some(note) = feeding_pause_note(object.get("feeding"))? {
-            if let Some(message) = rendered.overlay_message.as_mut() {
-                *message = format!("{note} {message}");
-            }
             if let Some(message) = rendered.nostr_content.as_mut() {
                 *message = format!("{note} {message}");
             }
@@ -513,6 +510,40 @@ mod tests {
             .unwrap();
         assert!(weather.nostr_content.is_none());
         assert_eq!(weather.overlay_message.as_deref(), Some("Sunny and 72°F"));
+    }
+
+    #[test]
+    fn paused_context_does_not_prefix_overlay_or_expand_nostr_audiences() {
+        let renderer = MessageRenderer::embedded().unwrap();
+        for kind in [
+            "payment_received",
+            "operator_credit_added",
+            "feeder_confirmed",
+            "interface_info",
+            "weather_status",
+        ] {
+            let mut payload = json!({
+                "amount_sats":25,"threshold_sats":1000,"feed_credit_sats":2340,
+                "address_user":"herd","message":"Current weather"
+            });
+            let normal = renderer
+                .render(&event(42, kind, payload.clone()), 1000)
+                .unwrap();
+            payload["feeding"] = json!({"paused":true,"reason":"override",
+                "queued_feedings":2,"awaiting_confirmation":false});
+            let paused = renderer.render(&event(42, kind, payload), 1000).unwrap();
+            assert_eq!(paused.overlay_message, normal.overlay_message, "{kind}");
+            if matches!(kind, "interface_info" | "weather_status") {
+                assert!(paused.nostr_content.is_none(), "{kind}");
+            } else {
+                assert!(
+                    paused
+                        .nostr_content
+                        .unwrap()
+                        .starts_with("Feeding is paused.")
+                );
+            }
+        }
     }
 
     #[test]

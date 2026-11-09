@@ -34,6 +34,7 @@ impl Fixture {
             nak_config_path: runtime,
             bunker_pubkey: "ab".repeat(32),
             relays: vec!["wss://relay.invalid".to_owned()],
+            bunker_relays: None,
         };
         Self { root, config }
     }
@@ -57,6 +58,29 @@ impl Fixture {
 
 fn tags() -> Vec<Vec<String>> {
     vec![vec!["t".to_owned(), "LightningGoats".to_owned()]]
+}
+
+#[tokio::test]
+async fn signing_transport_and_announcement_relays_are_independent() {
+    let mut fixture = Fixture::new("success");
+    fixture.config.bunker_relays = Some(vec!["wss://bunker.invalid".to_owned()]);
+    fixture.config.relays = vec![
+        "wss://publication-one.invalid".to_owned(),
+        "wss://publication-two.invalid".to_owned(),
+    ];
+    let client = fixture.client();
+    let event = client.sign_kind1("separate routes", tags()).await.unwrap();
+    client.publish_signed(&event).await.unwrap();
+    let calls = fixture.trace();
+    let sign = calls.iter().find(|call| call["phase"] == "sign").unwrap();
+    let publish = calls
+        .iter()
+        .find(|call| call["phase"] == "publish")
+        .unwrap();
+    assert_eq!(sign["bunker_relays"], json!(["wss://bunker.invalid"]));
+    assert_eq!(publish["relay_args"], json!(fixture.config.relays));
+    assert_eq!(publish["bunker_relays"], json!([]));
+    assert_eq!(publish["payload"], serde_json::to_value(event).unwrap());
 }
 
 #[tokio::test]

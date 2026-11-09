@@ -134,3 +134,15 @@ authorize dispatch or block financial credit. Cover queued versus pending counts
 restart/retry stability, normal information/weather while paused and their
 nonpublic audience. The implementation/acceptance contract is in
 [paused-feeding-queue.md](../deployment/paused-feeding-queue.md).
+
+## Household NIP-46 and audience separation — 2026-11-09
+
+Verify legacy shared-relay compatibility, independent bunker/publication routes,
+client credentials only during signing, and identical persisted events on relay
+retry. Validate the actual household identity/allowlist and a signing-only round
+trip as the daemon UID before public activation. Weather/information must remain
+overlay-only, including paused events; scrolling overlay text omits the paused
+prefix while the banner remains. Current configuration/evidence is in
+[household-nostr-bunker.md](../deployment/household-nostr-bunker.md). Do not treat
+relay EOSE or a signature as proof of public note acceptance. The new audit
+finding is recorded [separately](../security/sqlite-wal-advisory-20261109.md).

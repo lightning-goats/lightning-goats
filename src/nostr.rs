@@ -50,7 +50,10 @@ impl NakClient {
         if client_key.trim().is_empty() {
             bail!("NIP-46 client key is empty");
         }
-        let bunker_uri = build_bunker_uri(&config.bunker_pubkey, &config.relays)?;
+        if config.bunker_relays().is_empty() {
+            bail!("NIP-46 transport requires at least one relay");
+        }
+        let bunker_uri = build_bunker_uri(&config.bunker_pubkey, config.bunker_relays())?;
         Ok(Self {
             nak_path: config.nak_path.clone(),
             nak_config_path: config.nak_config_path.clone(),
@@ -304,6 +307,7 @@ mod tests {
             nak_path: PathBuf::from("/usr/local/bin/nak"),
             nak_config_path: PathBuf::from("/run/lightning-goats/nak"),
             bunker_pubkey: "ab".repeat(32),
+            bunker_relays: None,
             relays: vec![
                 "wss://relay-one.example".to_owned(),
                 "wss://relay-two.example".to_owned(),

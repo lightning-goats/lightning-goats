@@ -22,6 +22,22 @@ The shared `MessageRenderer` consumes durable events and produces two independen
 
 No other event type is publicly published by the Phase 1 renderer.
 
+## Household signing and publication relays
+
+`nostr.relays` lists public announcement destinations. Optional
+`nostr.bunker_relays` selects the NIP-46 transport independently; when omitted,
+existing configurations keep using `nostr.relays` for both operations. An
+explicit empty or insecure bunker-relay list is rejected. Only signing receives
+the client credential. Publication still sends the exact persisted signed event
+to every configured announcement relay without contacting the bunker again.
+
+The household connection uses Primal for NIP-46 signing. The operator-selected
+announcement destinations are Primal, `wss://nostr.chaima.info/`,
+`wss://relay.damus.io/`, and `wss://relay.artx.market/`. Adding a publication
+destination does not add it to the household signer's connection or client
+allowlist. See [household deployment](../deployment/household-nostr-bunker.md)
+for actual verification and public-activation state.
+
 ## Deterministic selection
 
 Template and goat selection is derived from SHA-256 over the durable event sequence/type plus a purpose namespace. It is intentionally not runtime-random.

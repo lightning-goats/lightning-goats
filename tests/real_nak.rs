@@ -163,6 +163,7 @@ async fn real_nip46_sign_verify_and_durable_retry_without_signer() {
         nak_config_path: root.path().join("client"),
         bunker_pubkey: SIGNER.to_owned(),
         relays: vec![url.clone()],
+        bunker_relays: None,
     };
     let client = NakClient::new(&config, "02".to_owned()).unwrap();
     let tags = vec![vec!["t".to_owned(), "isolated-test".to_owned()]];

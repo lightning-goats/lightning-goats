@@ -1,0 +1,207 @@
+# CyberHerd implementation — operator decision, 2026-11-09
+
+This is the current implementation work, following the restored live Strike,
+feeding, Nostr and OBS path. It supersedes the older roadmap's deferral of
+CyberHerd; it does not resume Monero or change the paid ledger, physical owner,
+domain/WireGuard setup or existing receive-only daemon credential.
+
+## Authorities and explicit overrides
+
+The behavioral reference is
+[the current explanation](https://github.com/lightning-goats/cyberherd_extension/blob/main/cyberherd_explanation.md),
+pinned at file-changing commit `92ecf6c52482de17d404dbf2def3c71213408140`.
+The raw UTF-8 file has SHA256
+`e56c6793ed0687e4fcac7df54dac48a375673308dc65e988e0dcd987af46e67a`.
+Implementation and tests in that extension are behavioral references; LNbits
+framework code and credentials are not new runtime dependencies. Local ownership
+remains defined by [the Phase 2 boundary](../architecture/cyberherd-phase2-boundary.md).
+
+Operator instructions take precedence where the reference differs:
+
+- **Membership never requires NIP-05.** Signed-event identity remains mandatory;
+  a payout address must still be valid before paying. Free social entry retains
+  its Lightning-address requirement. Zap displacement provides the incentive.
+- **Rewards follow confirmed feedings.** There is one reward opportunity per
+  confirmed feeder UUID. Reaching a balance threshold, receipt/command acceptance,
+  failed/paused requests or uncertain outcomes do not authorize distribution.
+  Do not port the legacy three-feed/four-distribution batch rule or introduce
+  debits for food that was not delivered. Existing feed credit, queue and local
+  caps remain under the current daemon/gateway/owner authority.
+- Preserve the existing 10-sat payment-announcement floor; smaller legitimate
+  settled zaps can update an active member's score without a payment announcement.
+  Social notifications are separate from payment announcements.
+- Weather/information remain overlay-only. Existing scrolling messages have no
+  paused prefix; the prominent paused/queued banner remains. CyberHerd adds only
+  its specifically defined public event categories.
+
+The uploaded original OBS artwork is already deployed and must be retained.
+
+The operator-supplied legacy template export is imported as
+`templates/cyberherd-legacy.json`: 50 categories, 653 variants. The original export
+SHA256 is `aeed7d7c1b6c08e577ae8635f4b55fab2b0bec6efb7f4158741f0f687be51361`.
+Only wording is imported; the two structured thank-you entries contribute their
+`content`, without importing per-template relay routing. Rendering normalizes the
+single known `{new_amount:g}` modifier to a simple placeholder with an already
+formatted numeric value. No Python expression, attribute or indexed access runs.
+The behavioral messaging reference is
+[`cyberherd_messaging`](https://github.com/lightning-goats/cyberherd_messaging).
+Payment/feed/information pools now use this export in the feature source. The
+operator explicitly retains optional goat naming: selected variants containing
+`{goat_name}` name a goat; generic variants remain generic, without an appended
+name. Selection varies across events and stays stable on retries. Payment notices
+still require 10 sats; information/weather remain overlay-only. This source change
+does not claim installation on the live service.
+
+## Runtime and money boundaries
+
+Implement a separate `cyberherdd` trust domain for identity/target ingestion,
+durable membership/interaction state, reward planning and presentation. Keep
+`lightning-goatsd` receive-only and independent of membership availability.
+Outbound Strike authority belongs only to a separately configured
+`cyberherd-payoutd`, without public ingress, an OpenHAB token or feeder commands.
+All components use root-owned installed code/config and non-admin identities.
+Nostr signing remains with the household nak/NIP-46 bunker.
+
+Core settlement and feeder records are authoritative. A social action or relay
+receipt cannot mint feed credit, forge a settlement, or reserve physical work.
+Any local event/API bridge must expose bounded authenticated roles, prohibit
+forged payment/feed events, and preserve source identities and replay protection.
+CyberHerd must not gain writable access to the core financial store or a generic
+trusted-network proxy. New source stays isolated from the running services until
+its actual installation/activation is selected.
+
+Payout plans consume actual reserved funds, not an assumed wallet balance or
+synthetic operator credit. Operator-funded reward reserves, if supported, require
+their own explicit auditable funding authority; do not fabricate provider receipts.
+Remainders and fees cannot overspend the configured member allocation. The goat
+portion stays assigned to operations; no implicit balance/sweep-policy change.
+
+## Complete behavior to implement and verify
+
+The list is the full port contract, not a completion claim for an initial slice.
+
+1. **Membership and exact arithmetic:** configurable joining minimum/capacity/member
+   pool; no NIP-05 requirement; validated identities/addresses; active-member
+   positive zap increases; zap-first displacement, strict exceed-lowest for paid
+   members, repost replacement of zero-zap members, and no reaction headbutts.
+   Eviction resets current zap score and preserves cycle social awards/lifetime
+   history. Bans require explicit unban. Zero configured allocations stay zero.
+2. **Points and shares:** weights `10*zap_sats + max(1,minimum)*(3*repost + like)`;
+   first social types once per owner/pubkey/cycle across all targets, pre-join
+   evidence promoted once after successful admission, no extra reconciliation
+   message, replay-safe rejection, and no free re-entry using an already awarded
+   type. Shares use exact six-decimal micro-percentages with stable largest
+   remainders, matching legacy `services/shares.py`; only eligible active payout
+   addresses divide the member pool. No extra per-slot reservation.
+3. **Durable cycles:** transactional membership/score/award/event updates;
+   owner isolation; immutable source identities; distinct settled invoices count
+   separately even if their signed zap request is reused. Daily local-time reset
+   is optional and catches up before work after downtime, including DST. Manual
+   reset is atomic, starts a new cycle and emits no public daily-reset notice.
+   Neither reset erases the core paid ledger or enables pre-reset replay.
+   Manual edits/removals/activations are auditable and idempotent.
+4. **Authenticated targets and profiles:** discover one current-day tagged project
+   announcement, one latest live 30311 stream, and its signed linked 9041 goal;
+   prefer the announcement associated with the stream goal. Preserve older
+   versions of the same stream as aliases. Project signatures, NIP-53 host proof
+   or the fixed supported provider metadata establish host authority; an arbitrary
+   host tag/URL is insufficient. Newer ended/stale updates cannot be reverted by
+   older live events. Live streams can cross local midnight while fresh.
+5. **Nostr ingestion and pause recovery:** bounded reconnect/backfill and separate
+   OR queries for `e`/`a` references; valid kinds 6/7 and stream kind-16 reposts;
+   positive reactions only; chat text earns no points. While override is ON,
+   unknown or unavailable, defer membership changes and membership-thread posts
+   without claiming work as applied. On resumption refresh targets first, then
+   replay only still-active targets/aliases. Stale deferred work receives a
+   minimal durable discard receipt; unavailable discovery must not discard it.
+   Active ordinary member zaps retain their broader project-content eligibility.
+6. **Native incoming NIP-57:** optional authenticated zap request on LNURL callback,
+   invoice description hash bound to its exact saved bytes, source payee/amount/
+   note or stream identity validation before provider contact, immutable context,
+   authoritative Strike settlement and exact-once membership consumption. Relay
+   receipts alone never credit money or points. Financial validity does not
+   depend on profile fetch, membership admission, pause state or payout health.
+   Publish any supported incoming receipt from a dedicated durable payment-receipt
+   intent; retain ordinary Lightning compatibility and existing ingress limits.
+7. **Confirmed-feeding reward plans:** stable owner/feed UUID deduplication, frozen
+   eligible roster/points/shares/fees and real funding evidence; no distribution
+   for merely funded credit or ambiguous feeding. Payment processing preceding a
+   confirmation must be classified before freezing its reward plan. Whole-sat
+   rounding and fee/recipient minima skip unaffordable shares with no carry-forward
+   member balance; unused allocation remains for goats. Shared/ambiguous recipient
+   addresses and operator transfers do not create false member treat notices.
+8. **Isolated outgoing payments:** bounded credential and spending policy; persisted
+   intents, provider correlation/idempotency and reconciliation before retry;
+   unknown submission outcomes never get a fresh payment. Recipient LNURL fetching
+   is SSRF/redirect/body/time bounded. When NIP-57 is supported, freeze/sign 9734
+   before invoice request, use its exact description hash, exact whole-sat amount,
+   expiry and valid mainnet signature. Never publish 9734 directly to relays or
+   silently downgrade a supported recipient on failure. Record unsupported-recipient
+   ordinary-Lightning fallback. Only authoritative settled payout state authorizes
+   a treat notice; recipient 9735 receipt publication is separate evidence.
+9. **Messages and exact delivery:** editable safe templates preserving custom edits
+   and intentional deletions; frozen per-interaction contribution increments,
+   cumulative score/percentages and capacity. Changed-allocation compact roster
+   footer is part of the same message, with names and no extra mentions. Duplicate
+   and unchanged allocations do not emit another footer. Payout messages use their
+   own frozen payout breakdown. Interaction identity is owner/member/source-scoped
+   across live/recovery/type aliases and `msg:` aliases; never re-sign a retry.
+10. **Conversation destinations:** regular per-user note thread plus active-stream
+    kind-1311 chat per interaction, one WebSocket copy with human display names.
+    Treats retain the original associated note/member thread; wait for real joining
+    receipts rather than inventing anchors, independently of money movement.
+    Feed announcements preserve historical templates and one active-stream copy;
+    no command-acceptance/batch/uncertainty diagnostics become public food claims.
+    Stream replies retain stable `a` root and direct joining-message `e` reply;
+    separate branches share one score and survive stream changes/restarts.
+11. **Optional lifecycle messages:** authenticated live-stream invitation at most
+    once per two hours per stream, confirmed unpaused only, with template opt-out.
+    Durable ordered pause/resume notices once per destination, quiet initial OFF,
+    initial ON announcement, and unknown readings never announcing resumption.
+    Evening wording uses sanitized gateway solar context or conservative local
+    time fallback, never operates the feeder/stream, never repeats due to changing
+    daylight, and can use an authenticated stream ended within 15 minutes.
+12. **Interfaces and operations:** readonly roster/targets/scores API and live OBS
+    cards; browser Nostr identity through the existing extension/bunker flow,
+    never raw nsec; authenticated operator settings/templates/member/reset tools;
+    separate daemon/payout units and credentials, reviewed inactive installation,
+    restart/restore/idempotency evidence and explicit live financial activation.
+    Daily CyberHerd announcement publication remains a separate process; missing
+    today's valid note does not cause the membership worker to fabricate one.
+
+## Work sequence and evidence
+
+- Domain/state: exact points, headbutts, pre-join evidence, transactional replay,
+  pause/defer/discard and reset behavior, with source-reference regression fixtures.
+- Protocol/bridge: signatures/target authentication, incoming zap-bound invoices,
+  core event export and capability-limited CyberHerd event import, cursor recovery.
+- Isolated rewards: confirmed-feed funding reservation, frozen planning, guarded
+  outgoing invoice/provider adapters and ambiguity-safe reconciliation.
+- Presentation: persisted custom templates, frozen note/chat/receipt outboxes,
+  human-name overlay roster, operator/client interfaces and lifecycle messages.
+- Operations: all required Rust checks, security gate with known findings reported,
+  relevant integration/browser/sandbox tests, clean source-pinned artifacts and
+  truthful inactive/live acceptance. Never claim a passing plan or domain test
+  proves external transfers or the full port is finished.
+
+Track evidence for every numbered requirement and explicit operator override.
+The active thread goal stays open until the requested implementation is complete
+and verified; partial engines/models or a plan alone do not satisfy it.
+
+## Current source checkpoint — incomplete port
+
+Implemented in the isolated `feat/cyberherd-20261109` source:
+
+- Exact contribution weights, largest-remainder shares and deterministic admission,
+  displacement, pre-join/social-award, pause and ban/reset transitions.
+- A separate WAL/FULL CyberHerd store with atomic membership/event/receipt updates,
+  source conflict rejection, concurrent/restart replay protection, deferred recovery,
+  stale discard receipts, owner isolation and auditable idempotent cycle resets.
+- Imported wording, safe bounded rendering, deterministic variant selection, and
+  stored template editing with deletion tombstones/category opt-out surviving seeds.
+
+These are library components, not a running CyberHerd service. The authenticated
+relay/target adapters, local core bridge, incoming NIP-57, real-fund reward planning,
+isolated payout worker, durable note/chat destinations, scheduled lifecycle/reset,
+operator/client interfaces, installation and end-to-end verification remain work.
+No CyberHerd payout or membership worker is activated by this checkpoint.

@@ -4,6 +4,7 @@ mod bolt11;
 mod sqlite;
 
 pub mod config;
+pub mod cyberherd;
 pub mod domain;
 pub mod feeder;
 pub mod feeding_presentation;

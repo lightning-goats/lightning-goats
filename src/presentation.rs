@@ -1,15 +1,13 @@
 use std::{collections::HashMap, sync::Arc};
 
 use anyhow::{Context, Result, bail};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::ledger::DurableEvent;
+use crate::{cyberherd::templates::Catalog, ledger::DurableEvent};
 
 pub const PAYMENT_MESSAGE_MIN_SATS: u64 = 10;
-
-const EMBEDDED_TEMPLATES: &str = include_str!("../templates/phase1.toml");
 
 #[derive(Clone)]
 pub struct MessageRenderer {
@@ -31,7 +29,7 @@ pub struct OverlayGoat {
     pub image_url: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug)]
 struct TemplateCatalog {
     sats_received: Vec<String>,
     feeder_trigger: Vec<String>,
@@ -75,8 +73,12 @@ const GOATS: [Goat; 5] = [
 
 impl MessageRenderer {
     pub fn embedded() -> Result<Self> {
-        let catalog: TemplateCatalog = toml::from_str(EMBEDDED_TEMPLATES)
-            .context("invalid embedded Phase 1 message templates")?;
+        let legacy = Catalog::legacy()?;
+        let catalog = TemplateCatalog {
+            sats_received: legacy.category_templates("sats_received"),
+            feeder_trigger: legacy.category_templates("feeder_trigger"),
+            interface_info: legacy.category_templates("interface_info"),
+        };
         validate_catalog(&catalog)?;
         Ok(Self {
             catalog: Arc::new(catalog),
@@ -443,8 +445,82 @@ mod tests {
     }
 
     #[test]
+    fn imported_variants_decide_whether_to_name_a_goat_and_preserve_audiences() {
+        let legacy = Catalog::legacy().unwrap();
+        let mut named = 0;
+        let mut unnamed = 0;
+        for template in legacy.category_templates("sats_received") {
+            let names_goat = template.contains("{goat_name}");
+            if names_goat {
+                named += 1;
+            } else {
+                unnamed += 1;
+            }
+            let expected_overlay = safe_substitute(
+                &template,
+                &common_values(25, &difference_message(142, 1000), "Dexter"),
+            )
+            .unwrap();
+            let renderer = MessageRenderer {
+                catalog: Arc::new(TemplateCatalog {
+                    sats_received: vec![template],
+                    feeder_trigger: legacy.category_templates("feeder_trigger"),
+                    interface_info: legacy.category_templates("interface_info"),
+                }),
+            };
+            let rendered = renderer
+                .render(
+                    &event(
+                        42,
+                        "payment_received",
+                        json!({"amount_sats":25,"feed_credit_sats":142,"address_user":"dexter"}),
+                    ),
+                    1000,
+                )
+                .unwrap();
+            assert_eq!(rendered.overlay_message.unwrap(), expected_overlay);
+            assert_eq!(
+                rendered
+                    .nostr_content
+                    .unwrap()
+                    .contains(GOATS[0].nostr_profile),
+                names_goat
+            );
+            assert_eq!(rendered.overlay_goats[0].name, "Dexter");
+            assert!(
+                renderer
+                    .render(
+                        &event(
+                            43,
+                            "payment_received",
+                            json!({"amount_sats":9,"feed_credit_sats":151,"address_user":"dexter"})
+                        ),
+                        1000
+                    )
+                    .unwrap()
+                    .nostr_content
+                    .is_none()
+            );
+        }
+        assert!(named > 0);
+        assert!(unnamed > 0);
+    }
+
+    #[test]
     fn individual_address_uses_that_goat_for_overlay_and_nostr() {
-        let renderer = MessageRenderer::embedded().unwrap();
+        let legacy = Catalog::legacy().unwrap();
+        let named_variant = legacy
+            .category_templates("sats_received")
+            .into_iter()
+            .find(|text| text.contains("{goat_name}"))
+            .unwrap();
+        let renderer = MessageRenderer {
+            catalog: Arc::new(TemplateCatalog {
+                sats_received: vec![named_variant],
+                feeder_trigger: legacy.category_templates("feeder_trigger"),
+                interface_info: legacy.category_templates("interface_info"),
+            }),
+        };
         let rendered = renderer
             .render(
                 &event(
@@ -486,7 +562,7 @@ mod tests {
                 if let Some(message) = rendered.overlay_message {
                     assert!(!message.contains("TEST"));
                     assert!(!message.contains("operator"));
-                    assert!(message.contains("Dexter"));
+                    assert_eq!(rendered.overlay_goats[0].name, "Dexter");
                 }
             }
         }

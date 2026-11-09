@@ -16,11 +16,14 @@ The shared `MessageRenderer` consumes durable events and produces two independen
 | Durable event | Template category | Nostr | Overlay type |
 | --- | --- | --- | --- |
 | `payment_received` | `sats_received` | yes | `sats_received` |
+| `operator_credit_added` | `sats_received` | yes | `sats_received` |
 | `feeder_confirmed` | `feeder_trigger` | yes | `feeder_trigger` |
 | `interface_info` | `interface_info` | no | `interface_info` |
 | `weather_status` | preformatted weather message | no | `weather_status` |
 
-No other event type is publicly published by the Phase 1 renderer.
+No other event type is publicly published by the Phase 1 renderer. Payment and
+operator-credit announcements require at least 10 sats; smaller amounts still
+credit the ledger normally. Operator credits use normal wording, as requested.
 
 ## Household signing and publication relays
 
@@ -46,6 +49,12 @@ This preserves variety between events while ensuring the same durable event rend
 
 For payments to an individual goat Lightning Address, that goat is used for presentation. Payments to `herd` and feeder events select a goat deterministically.
 
+Goat names are optional in the text. The selected original variant determines
+whether `{goat_name}` appears; do not append a name to generic variants. The
+operator-provided pool has 80 named/70 generic payment variants and 13 named/87
+generic feeding variants. This preserves the legacy variety without changing a
+message's wording on retry. The overlay can still show the associated goat image.
+
 ## Separate Nostr and overlay values
 
 When a template uses `{goat_name}`:
@@ -57,11 +66,25 @@ The overlay image convention remains `images/<lowercase-goat>.png`.
 
 ## Safe substitution
 
-Templates are data (`templates/phase1.toml`), not Rust source. Only simple `{identifier}` placeholders are accepted. Attribute/index access such as `{x.__class__}` or `{x[0]}` is rejected. Missing required fields fail rendering without changing the durable source event or financial/feeder state.
+Templates are data (`templates/cyberherd-legacy.json`), not executable code. Only
+simple `{identifier}` placeholders are accepted. The import normalizes the sole
+legacy `{new_amount:g}` modifier to `{new_amount}`; numeric strings are supplied
+by the renderer. Attribute/index access such as `{x.__class__}` or `{x[0]}` is
+rejected. Missing required fields fail rendering without changing the durable
+source event or financial/feeder state.
 
 ## Initial template corpus
 
-The initial Phase 1 catalog is adapted from the existing `lightning-goats/cyberherd_messaging` payment, feeder, and interface-info seed templates. Obsolete CyberHerd wording is adapted to Lightning Goats where appropriate. The renderer is data-driven so larger historical pools can be added without redesign.
+The 2026-11-09 operator export restores the original wording: 150 payment, 100
+confirmed-feeding and 39 interface-information variants. The full imported file
+contains 653 variants in 50 categories for the CyberHerd port. Loading those
+additional categories does not grant them a Phase 1 publication audience. The
+former `templates/phase1.toml` remains a historical adapted corpus, and is no
+longer the embedded renderer source. Provenance and the incomplete CyberHerd
+implementation are tracked in the [current plan](../planning/cyberherd-implementation-plan.md).
+
+This describes the feature source; deployment/acceptance records determine which
+binary and template corpus are actually running.
 
 ## Weather
 

@@ -13,10 +13,15 @@ pub struct BridgeConfig {
     pub socket: std::path::PathBuf,
     pub peer_uid: u32,
     pub group_gid: u32,
+    #[serde(default)]
+    pub reward_policy: Option<crate::reward_funding::RewardPolicy>,
 }
 
 impl BridgeConfig {
     pub fn validate(&self) -> Result<()> {
+        if let Some(policy) = &self.reward_policy {
+            policy.validate()?;
+        }
         if !self.socket.is_absolute()
             || self.socket.as_os_str().len() > 100
             || self.socket.file_name().is_none()
@@ -44,13 +49,27 @@ pub enum Request {
         limit: u16,
     },
     Safety,
+    ReserveReward {
+        expected_epoch: Uuid,
+        request_id: Uuid,
+        owner: String,
+        plan_hash: String,
+        amount_sats: u64,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "result", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Response {
-    Events { batch: Box<Batch> },
-    Safety { state: Safety },
+    Events {
+        batch: Box<Batch>,
+    },
+    Safety {
+        state: Safety,
+    },
+    Reservation {
+        reservation: Box<crate::reward_funding::Reservation>,
+    },
     Rejected,
 }
 
@@ -84,7 +103,7 @@ impl Safety {
     }
 }
 
-pub const VERSION: u8 = 1;
+pub const VERSION: u8 = 2;
 pub const MAX_FRAME: usize = 262_144;
 pub const MAX_BATCH_BYTES: usize = 196_608;
 pub const MAX_PAGE: u16 = 128;
@@ -95,6 +114,22 @@ pub const MAX_PAGE: u16 = 128;
 pub struct AuthenticatedBatch {
     batch: Batch,
     core_uid: u32,
+}
+
+/// Private transport capability, never constructed from a persisted DTO.
+#[derive(Clone)]
+pub struct AuthenticatedReservation {
+    reservation: crate::reward_funding::Reservation,
+    core_uid: u32,
+}
+
+impl AuthenticatedReservation {
+    pub fn reservation(&self) -> &crate::reward_funding::Reservation {
+        &self.reservation
+    }
+    pub fn core_uid(&self) -> u32 {
+        self.core_uid
+    }
 }
 
 impl AuthenticatedBatch {
@@ -192,6 +227,9 @@ impl Batch {
                     }
                 }
                 EventBody::Feeding(feed) => {
+                    if let Some(funding) = &feed.funding {
+                        funding.validate(feed.threshold_sats)?;
+                    }
                     if feed.request_id.is_nil()
                         || feed.threshold_sats == 0
                         || feed.threshold_sats > i64::MAX as u64
@@ -273,6 +311,8 @@ pub struct Feeding {
     pub request_id: Uuid,
     pub threshold_sats: u64,
     pub confirmed_at: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub funding: Option<crate::reward_funding::Funding>,
 }
 
 #[cfg(test)]
@@ -285,6 +325,7 @@ mod tests {
             socket: "/run/example-bridge/core.sock".into(),
             peer_uid: 10001,
             group_gid: 10002,
+            reward_policy: None,
         };
         good.validate().unwrap();
         for bad in [

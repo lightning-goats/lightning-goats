@@ -546,7 +546,7 @@ async fn feed_snapshot_and_queue_completion_are_atomic() {
 async fn virtual_credit_and_unlinked_events_never_become_membership_or_reward_work() {
     let f = Fixture::new().await;
     let page = Batch {
-        version: 1,
+        version: crate::core_bridge::VERSION,
         epoch: f.binding.epoch,
         after: 0,
         through: 2,

@@ -19,6 +19,7 @@ mod feed;
 mod feeding_presentation;
 mod operator_credit;
 mod outbox;
+mod reward_funding;
 pub use operator_credit::{OperatorCreditGrant, OperatorCreditResult, OperatorCreditStatus};
 mod overlay;
 mod strike;

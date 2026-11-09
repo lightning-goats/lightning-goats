@@ -2,11 +2,13 @@
 
 The optional `core_bridge` endpoint supplies bounded, authenticated event/safety
 reads to a separate CyberHerd identity. It has no public HTTP route and accepts
-no payment, grant, feeder, SQL, gateway URL or generic event-import command. Its
+no payment, credit grant, feeder, SQL, gateway URL or generic event-import command. Its
 absence/failure does not stop the core settlement, feeding or message workers.
 The [intake worker](cyberherd-worker.md) now supplies ordered receiving and
 membership orchestration in source. The [full port](../planning/cyberherd-implementation-plan.md)
-still requires reward funding, payout and delivery capabilities.
+still requires payout and delivery capabilities. The optional
+[root-bounded funding reservation](cyberherd-reward-funding.md) is a separate
+typed capability; absent that policy, this endpoint remains read-only.
 
 ## Authority and roles
 

@@ -21,6 +21,7 @@ pub mod overlay;
 pub mod presentation;
 pub mod public_network;
 pub mod quotes;
+pub mod reward_funding;
 pub mod secrets;
 pub mod strike;
 pub mod zap;

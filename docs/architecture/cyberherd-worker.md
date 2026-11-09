@@ -65,6 +65,11 @@ and reservation still require separate planning. It does not authorize a transfe
 or additional physical action. Feeding proof remains the core's correlated UUID
 and debit; no copied JSON or threshold-only notification can supply it.
 
+Private protocol version 2 also retains the core's optional
+[consumed-funding proof](cyberherd-reward-funding.md) in that barrier. Its client
+offers a root-bounded reservation capability, disabled without explicit core
+policy. The worker does not yet build eligible payout plans or call that method.
+
 ## Discovery and recovery
 
 Each runtime round catches up the optional Mountain-time reset, receives a bounded
@@ -105,7 +110,7 @@ new core epoch. Source-level integration tests use synthetic signed requests,
 temporary core/membership databases and private Unix sockets. They do not prove
 the provisioned cross-UID runtime or authorize production membership/payouts.
 
-Real-fund tracking/reservation, outgoing provider reconciliation, frozen eligible
+Outgoing provider reconciliation, frozen eligible
 payout plans, note/chat/overlay outboxes, lifecycle notices, public roster/OBS and
 authenticated operator interfaces remain unfinished. The known SQLite audit
 finding remains open; private state permissions mitigate its local-file condition

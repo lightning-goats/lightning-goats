@@ -13,7 +13,10 @@ use tokio::{
     time::{Instant, timeout},
 };
 
-use super::{AuthenticatedBatch, BridgeConfig, MAX_FRAME, Request, Response, Safety};
+use super::{
+    AuthenticatedBatch, AuthenticatedReservation, BridgeConfig, MAX_FRAME, Request, Response,
+    Safety,
+};
 use crate::{config::RuntimeMode, ledger::LedgerStore};
 
 pub fn self_credentials() -> Result<(u32, u32)> {
@@ -25,6 +28,7 @@ pub fn self_credentials() -> Result<(u32, u32)> {
 pub struct Server {
     listener: UnixListener,
     peer_uid: u32,
+    reward_policy: Option<crate::reward_funding::RewardPolicy>,
 }
 
 struct ReadBudget {
@@ -119,12 +123,14 @@ impl Server {
         Ok(Self {
             listener,
             peer_uid: config.peer_uid,
+            reward_policy: config.reward_policy.clone(),
         })
     }
 
     pub async fn run(self, ledger: LedgerStore, mode: RuntimeMode) -> Result<()> {
         let clients = Arc::new(Semaphore::new(8));
-        // At most one bridge read transaction competes for the financial pool.
+        // At most one bridge database operation competes for the financial pool,
+        // including the explicitly enabled bounded reservation write.
         // Other clients get a bounded rejection, never an unbounded waiter queue.
         let reads = Arc::new(Semaphore::new(1));
         let mut budget = ReadBudget::new(Instant::now());
@@ -143,11 +149,12 @@ impl Server {
             };
             let ledger = ledger.clone();
             let reads = Arc::clone(&reads);
+            let reward_policy = self.reward_policy.clone();
             tokio::spawn(async move {
                 let _permit = permit;
                 let _ = timeout(
                     Duration::from_secs(10),
-                    serve_one(stream, &ledger, mode, &reads),
+                    serve_one(stream, &ledger, mode, &reads, reward_policy.as_ref()),
                 )
                 .await;
             });
@@ -160,6 +167,7 @@ async fn serve_one(
     ledger: &LedgerStore,
     mode: RuntimeMode,
     reads: &Arc<Semaphore>,
+    reward_policy: Option<&crate::reward_funding::RewardPolicy>,
 ) -> Result<()> {
     let request: Request = match timeout(Duration::from_secs(2), read_frame(&mut stream)).await {
         Ok(Ok(request)) => request,
@@ -180,6 +188,24 @@ async fn serve_one(
             Request::Safety => match ledger.core_safety(mode).await {
                 Ok(state) => Response::Safety { state },
                 Err(_) => Response::Rejected,
+            },
+            Request::ReserveReward {
+                expected_epoch,
+                request_id,
+                owner,
+                plan_hash,
+                amount_sats,
+            } => match reward_policy {
+                Some(policy) if policy.owner == owner && mode.feeder_enabled() => match ledger
+                    .reserve_reward(policy, expected_epoch, request_id, &plan_hash, amount_sats)
+                    .await
+                {
+                    Ok(reservation) => Response::Reservation {
+                        reservation: Box::new(reservation),
+                    },
+                    Err(_) => Response::Rejected,
+                },
+                _ => Response::Rejected,
             },
         }
     } else {
@@ -248,6 +274,44 @@ impl Client {
             _ => bail!("core did not return authenticated safety state"),
         }
     }
+    pub async fn reserve_reward(
+        &self,
+        epoch: uuid::Uuid,
+        request_id: uuid::Uuid,
+        owner: &str,
+        plan_hash: &str,
+        amount_sats: u64,
+    ) -> Result<AuthenticatedReservation> {
+        crate::nostr_event::validate_public_key(owner)?;
+        crate::nostr_event::validate_hex(plan_hash, 32)?;
+        match self
+            .request(&Request::ReserveReward {
+                expected_epoch: epoch,
+                request_id,
+                owner: owner.into(),
+                plan_hash: plan_hash.into(),
+                amount_sats,
+            })
+            .await?
+        {
+            Response::Reservation { reservation } => {
+                reservation.validate()?;
+                if reservation.epoch != epoch
+                    || reservation.request_id != request_id
+                    || reservation.owner != owner
+                    || reservation.plan_hash != plan_hash
+                    || reservation.reserved_sats != amount_sats
+                {
+                    bail!("core reservation does not match frozen request");
+                }
+                Ok(AuthenticatedReservation {
+                    reservation: *reservation,
+                    core_uid: self.expected_uid,
+                })
+            }
+            _ => bail!("core did not authorize this reward reservation"),
+        }
+    }
 }
 
 async fn read_frame<T: DeserializeOwned>(stream: &mut UnixStream) -> Result<T> {
@@ -288,6 +352,13 @@ pub async fn run_optional(config: Option<BridgeConfig>, ledger: LedgerStore, mod
         return;
     }
     loop {
+        if config.reward_policy.is_some() && ledger.initialize_reward_funding().await.is_err() {
+            tracing::warn!(
+                "reward funding unavailable; core financial workers continue independently"
+            );
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            continue;
+        }
         match Server::bind(&config).await {
             Ok(server) => {
                 let _ = server.run(ledger.clone(), mode).await;
@@ -330,6 +401,7 @@ mod tests {
             socket: root.path().join("core.sock"),
             peer_uid: uid + peer_offset,
             group_gid: gid,
+            reward_policy: None,
         };
         let ledger = LedgerStore::connect(&format!(
             "sqlite://{}",
@@ -442,5 +514,85 @@ mod tests {
         std::fs::remove_file(&config.socket).unwrap();
         std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o770)).unwrap();
         assert!(Server::bind(&config).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn typed_reward_reservations_require_root_policy_mode_owner_and_exact_frozen_plan() {
+        use crate::{nostr_event::test_event, reward_funding::RewardPolicy};
+        for (enabled, mode) in [
+            (false, RuntimeMode::Active),
+            (true, RuntimeMode::Shadow),
+            (true, RuntimeMode::Active),
+        ] {
+            let (root, mut config, ledger) = fixture(0).await;
+            ledger.initialize_reward_funding().await.unwrap();
+            let id = ledger.begin_feed_attempt(1000).await.unwrap().unwrap();
+            ledger.confirm_feed_attempt(id).await.unwrap();
+            let epoch = ledger.overlay_stream_id().await.unwrap();
+            let owner = test_event(1, 1, 100, "", vec![]).pubkey;
+            if enabled {
+                config.reward_policy = Some(RewardPolicy {
+                    owner: owner.clone(),
+                    member_percent_ceiling: 10,
+                    max_sats_per_feed: 100,
+                    max_sats_per_24h: 1000,
+                });
+            }
+            let server = Server::bind(&config).await.unwrap();
+            let task = tokio::spawn(server.run(ledger.clone(), mode));
+            let uid = self_credentials().unwrap().0;
+            let client = Client::new(config.socket.clone(), uid).unwrap();
+            let hash = "ab".repeat(32);
+            if !enabled || mode == RuntimeMode::Shadow {
+                assert!(
+                    client
+                        .reserve_reward(epoch, id, &owner, &hash, 100)
+                        .await
+                        .is_err()
+                );
+                let pool = sqlx::SqlitePool::connect(&format!(
+                    "sqlite://{}",
+                    root.path().join("core.db").display()
+                ))
+                .await
+                .unwrap();
+                let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM reward_reservations")
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+                assert_eq!(n, 0);
+            } else {
+                let wrong = test_event(2, 1, 100, "", vec![]).pubkey;
+                assert!(
+                    client
+                        .reserve_reward(epoch, id, &wrong, &hash, 100)
+                        .await
+                        .is_err()
+                );
+                let first = client
+                    .reserve_reward(epoch, id, &owner, &hash, 100)
+                    .await
+                    .unwrap();
+                assert_eq!(first.core_uid(), uid);
+                assert_eq!(first.reservation().reserved_sats, 100);
+                assert_eq!(
+                    client
+                        .reserve_reward(epoch, id, &owner, &hash, 100)
+                        .await
+                        .unwrap()
+                        .reservation(),
+                    first.reservation()
+                );
+                assert!(
+                    client
+                        .reserve_reward(epoch, id, &owner, &"cd".repeat(32), 100)
+                        .await
+                        .is_err()
+                );
+            }
+            assert_eq!(ledger.feed_credit_sats().await.unwrap(), 0);
+            task.abort();
+            let _ = task.await;
+        }
     }
 }

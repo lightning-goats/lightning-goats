@@ -1,7 +1,8 @@
 # Non-secret Lightning Goats production configuration.
 # Secrets are loaded through systemd credentials, not this file.
 
-# Optional private read-only CyberHerd event bridge. Leave disabled until the
+# Optional private CyberHerd event bridge (read-only without reward_policy).
+# Leave disabled until the
 # dedicated runtime users/group and protected socket directory are provisioned.
 # Replace both IDs with actual non-root values; zero is intentionally invalid.
 # Never give the CyberHerd user the core's credential-bearing primary group.
@@ -9,6 +10,15 @@
 # socket = "/run/lightning-goats-bridge/core.sock"
 # peer_uid = 0
 # group_gid = 0
+#
+# Optional bounded reward reservations, still with no spend key in the core.
+# This explicitly initializes remaining funding provenance and never back-pays
+# old confirmed feedings. Review owner/limits before enabling; zero limits deny.
+# [core_bridge.reward_policy]
+# owner = "0000000000000000000000000000000000000000000000000000000000000000"
+# member_percent_ceiling = 0
+# max_sats_per_feed = 0
+# max_sats_per_24h = 0
 
 [service]
 listen = "127.0.0.1:8787"

@@ -224,7 +224,8 @@ impl LedgerStore {
     }
 
     async fn resolve_as_fed(&self, id: Uuid, expected_status: &str) -> Result<()> {
-        let mut transaction = self.pool.begin().await?;
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let funding_enabled = super::reward_funding::prepare(&mut transaction).await?;
         let row =
             sqlx::query("SELECT threshold_sats FROM feed_attempts WHERE id = ? AND status = ?")
                 .bind(id.to_string())
@@ -258,7 +259,7 @@ impl LedgerStore {
         }
 
         let source_key = format!("feed:{id}");
-        sqlx::query(
+        let debit_id = sqlx::query(
             r#"
             INSERT INTO ledger_entries
                 (entry_type, source_key, delta_sats, feed_attempt_id)
@@ -269,7 +270,8 @@ impl LedgerStore {
         .bind(-threshold_i64)
         .bind(id.to_string())
         .execute(&mut *transaction)
-        .await?;
+        .await?
+        .last_insert_rowid();
 
         let feed_credit_sats = feed_credit_in_transaction(&mut transaction).await?;
         let event_seq = append_event_in_transaction(
@@ -288,6 +290,16 @@ impl LedgerStore {
             .bind(to_i64(event_seq, "feed event sequence")?)
             .execute(&mut *transaction)
             .await?;
+
+        if funding_enabled {
+            super::reward_funding::record_confirmation(
+                &mut transaction,
+                id,
+                debit_id,
+                threshold_sats,
+            )
+            .await?;
+        }
 
         transaction.commit().await?;
         Ok(())

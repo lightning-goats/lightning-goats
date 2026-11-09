@@ -222,7 +222,9 @@ async fn export_body(
             || value["threshold_sats"].as_u64()!=Some(to_u64(threshold,"feed threshold")?) {
             bail!("feed export does not match a confirmed UUID and debit");
         }
-        return Ok(EventBody::Feeding(Feeding {request_id:Uuid::parse_str(&id)?,threshold_sats:to_u64(threshold,"feed threshold")?,confirmed_at:row.try_get::<Option<i64>,_>("resolved_at")?.context("confirmed feed lacks completion time")?}));
+        let request_id=Uuid::parse_str(&id)?;
+        let funding=super::reward_funding::confirmed_funding(tx,request_id).await?;
+        return Ok(EventBody::Feeding(Feeding {request_id,threshold_sats:to_u64(threshold,"feed threshold")?,confirmed_at:row.try_get::<Option<i64>,_>("resolved_at")?.context("confirmed feed lacks completion time")?,funding}));
     }
     if let Some(row)=sqlx::query("SELECT g.*,l.entry_type,l.source_key,l.delta_sats,l.address_user AS ledger_user,l.credit_pool AS ledger_pool FROM operator_credit_grants g JOIN ledger_entries l ON l.id=g.ledger_entry_id WHERE g.event_seq=?")
         .bind(seq).fetch_optional(&mut **tx).await? {

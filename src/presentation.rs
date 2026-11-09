@@ -127,6 +127,17 @@ impl MessageRenderer {
             return Ok(RenderedPresentation::empty());
         }
         let credit = required_u64(payload, "feed_credit_sats")?;
+        if payment_funds_ready_feeding(payload, amount, credit) {
+            // Keep the payment/progress notification, but let the independently
+            // confirmed feeding own the text announcement. This never claims
+            // success or authorizes a feeding from presentation state.
+            return Ok(RenderedPresentation {
+                nostr_content: None,
+                overlay_type: Some("sats_received".to_owned()),
+                overlay_message: None,
+                overlay_goats: Vec::new(),
+            });
+        }
         let address_user = payload
             .get("address_user")
             .and_then(Value::as_str)
@@ -205,6 +216,29 @@ impl MessageRenderer {
             overlay_goats: Vec::new(),
         })
     }
+}
+
+fn payment_funds_ready_feeding(
+    payload: &serde_json::Map<String, Value>,
+    amount: u64,
+    credit: u64,
+) -> bool {
+    let Some(feeding) = payload.get("feeding") else {
+        return false;
+    };
+    if feeding["paused"].as_bool() != Some(false)
+        || feeding["reason"].as_str() != Some("ready")
+        || feeding["awaiting_confirmation"].as_bool() != Some(false)
+    {
+        return false;
+    }
+    let Some(threshold) = feeding["threshold_sats"].as_u64().filter(|v| *v > 0) else {
+        return false;
+    };
+    let Some(previous_credit) = credit.checked_sub(amount) else {
+        return false;
+    };
+    credit / threshold > previous_credit / threshold
 }
 
 impl RenderedPresentation {
@@ -423,6 +457,88 @@ mod tests {
             seq,
             event_type: event_type.to_owned(),
             payload_json: payload.to_string(),
+        }
+    }
+
+    #[test]
+    fn ready_funded_payment_defers_text_to_confirmation_but_keeps_overlay_payment() {
+        let renderer = MessageRenderer::embedded().unwrap();
+        for kind in ["payment_received", "operator_credit_added"] {
+            for (amount, credit) in [(1000, 1305), (10, 1000), (2345, 2650)] {
+                let payload = json!({"amount_sats":amount,"feed_credit_sats":credit,
+                    "feeding":{"paused":false,"reason":"ready","threshold_sats":1000,
+                    "awaiting_confirmation":false}});
+                let source = event(42, kind, payload);
+                let rendered = renderer.render(&source, 1000).unwrap();
+                assert!(rendered.nostr_content.is_none());
+                assert!(rendered.overlay_message.is_none());
+                assert_eq!(rendered.overlay_type.as_deref(), Some("sats_received"));
+                // Use the frozen funding threshold, even after a config change.
+                assert_eq!(renderer.render(&source, 2000).unwrap(), rendered);
+            }
+        }
+        let confirmed = renderer
+            .render(
+                &event(
+                    43,
+                    "feeder_confirmed",
+                    json!({"threshold_sats":1000,"feed_credit_sats":305}),
+                ),
+                1000,
+            )
+            .unwrap();
+        assert!(confirmed.nostr_content.is_some());
+        assert!(confirmed.overlay_message.is_some());
+    }
+
+    #[test]
+    fn paused_uncertain_and_nonfunding_payments_keep_receipt_announcements() {
+        let renderer = MessageRenderer::embedded().unwrap();
+        let ready = json!({"paused":false,"reason":"ready","threshold_sats":1000,
+            "awaiting_confirmation":false});
+        for (amount, credit, feeding) in [
+            (10, 999, ready.clone()),
+            (10, 1315, ready.clone()),
+            (
+                1000,
+                1305,
+                json!({"paused":true,"reason":"override","threshold_sats":1000,
+                "queued_feedings":1,"awaiting_confirmation":false}),
+            ),
+            (
+                1000,
+                1305,
+                json!({"paused":true,"reason":"unavailable","threshold_sats":1000,
+                "queued_feedings":1,"awaiting_confirmation":false}),
+            ),
+            (
+                1000,
+                1305,
+                json!({"paused":false,"reason":"ready","threshold_sats":1000,
+                "awaiting_confirmation":true}),
+            ),
+            (1000, 1305, Value::Null),
+            (1000, 1305, json!({"paused":false,"reason":"ready"})),
+            (
+                1000,
+                1305,
+                json!({"paused":false,"reason":"ready","threshold_sats":0,
+                "awaiting_confirmation":false}),
+            ),
+            (1000, 305, ready),
+        ] {
+            let rendered = renderer
+                .render(
+                    &event(
+                        42,
+                        "payment_received",
+                        json!({"amount_sats":amount,"feed_credit_sats":credit,"feeding":feeding}),
+                    ),
+                    1000,
+                )
+                .unwrap();
+            assert!(rendered.nostr_content.is_some());
+            assert!(rendered.overlay_message.is_some());
         }
     }
 

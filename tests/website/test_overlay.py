@@ -145,7 +145,28 @@ class OverlayBrowserTests(unittest.TestCase):
         self.assertEqual(decoded, "https://lightning-goats.com/.well-known/lnurlp/herd")
         self.assertEqual(self.errors, [])
 
+    def test_funding_payment_without_receipt_text_waits_for_confirmed_feeding(self):
+        self.page.clock.pause_at(datetime.now(timezone.utc))
+        self.snapshot(credit=305)
+        self.send({"type":"sats_received", "source_type":"payment_received", "seq":1,
+                   "feed_credit_sats":1305, "amount_sats":1000})
+        self.assertEqual(self.page.locator("#credit").inner_text(), "1,305 sats credit")
+        self.assertIn("1,000 sats", self.page.locator("#sats-received-overlay").inner_text())
+        self.assertTrue(self.page.locator("#lightning-img").is_visible())
+        self.assertEqual(self.page.locator("#message .message").count(), 0)
+        self.assertFalse(self.page.locator("#feeder-triggered").is_visible())
+        self.send({"type":"feeder_trigger", "source_type":"feeder_confirmed", "seq":2,
+                   "feed_credit_sats":305, "message":"Feeding confirmed. 695 sats to go."})
+        self.assertTrue(self.page.locator("#feeder-triggered").is_visible())
+        self.assertFalse(self.page.locator("#sats-received-overlay").is_visible())
+        self.page.clock.fast_forward(4000)
+        self.assertEqual(self.page.locator("#credit").inner_text(), "305 sats credit")
+        self.assertEqual(self.errors, [])
+
     def test_payment_reaching_threshold_never_fakes_a_feed(self):
+        # Hold the short spark animation while assertions run, even when the
+        # host is busy compiling Rust. Advance it explicitly below.
+        self.page.clock.pause_at(datetime.now(timezone.utc))
         self.snapshot(credit=990)
         payment = {"type":"sats_received", "source_type":"payment_received", "seq":1,
                    "feed_credit_sats":1010, "amount_sats":20, "message":"Thanks, Dexter!",

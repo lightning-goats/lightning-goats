@@ -272,7 +272,7 @@ fn durable_event_message(
     if matches!(
         event.event_type.as_str(),
         "payment_received" | "operator_credit_added"
-    ) && presentation.overlay_message.is_none()
+    ) && presentation.overlay_type.is_none()
     {
         return Ok(
             json!({"type":"event_skipped", "source_type":event.event_type,
@@ -284,6 +284,13 @@ fn durable_event_message(
     let object = payload
         .as_object_mut()
         .context("durable overlay event payload must be a JSON object")?;
+    if matches!(
+        event.event_type.as_str(),
+        "payment_received" | "operator_credit_added"
+    ) && presentation.overlay_message.is_none()
+    {
+        object.remove("message");
+    }
 
     let overlay_type = presentation
         .overlay_type
@@ -339,6 +346,34 @@ mod tests {
         assert!(value["message"].as_str().unwrap().contains("Dexter"));
         assert_eq!(value["goats"][0]["name"], "Dexter");
         assert_eq!(value["goats"][0]["imageUrl"], "images/dexter.png");
+    }
+
+    #[test]
+    fn feeding_funding_payment_keeps_amount_and_progress_without_receipt_text() {
+        for kind in ["payment_received", "operator_credit_added"] {
+            let wire = durable_event_message(
+                DurableEvent {
+                    seq: 42,
+                    event_type: kind.into(),
+                    payload_json: json!({
+                        "amount_sats":1000,"feed_credit_sats":1305,"message":"old receipt text",
+                        "feeding":{"paused":false,"reason":"ready","threshold_sats":1000,
+                            "awaiting_confirmation":false}
+                    })
+                    .to_string(),
+                },
+                &renderer(),
+                1000,
+            )
+            .unwrap();
+            let value: Value = serde_json::from_str(&wire).unwrap();
+            assert_eq!(value["type"], "sats_received");
+            assert_eq!(value["source_type"], kind);
+            assert_eq!(value["seq"], 42);
+            assert_eq!(value["amount_sats"], 1000);
+            assert_eq!(value["feed_credit_sats"], 1305);
+            assert!(value.get("message").is_none());
+        }
     }
 
     #[test]

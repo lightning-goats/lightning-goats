@@ -25,6 +25,21 @@ No other event type is publicly published by the Phase 1 renderer. Payment and
 operator-credit announcements require at least 10 sats; smaller amounts still
 credit the ledger normally. Operator credits use normal wording, as requested.
 
+When a payment funds a new complete feeding, suppress its separate receipt text
+on both Nostr and the overlay if its frozen feeding snapshot says ready and has
+no unresolved feeding. A later `feeder_confirmed` event supplies the feeding
+announcement. The payment still updates the overlay amount, QR and progress;
+it never produces a feeding animation or success claim itself. A payment merely
+adding to the next partial feeding retains its receipt text. This applies equally
+to provider payments and operator test credits; the 10-sat message minimum remains.
+
+Paused, unavailable, unresolved or missing feeding status keeps the normal
+receipt/queue message. Selection uses the threshold frozen with the source event,
+so subsequent configuration/status changes cannot change suppression on replay.
+Readiness is advisory: a later refusal or pause can leave a suppressed payment
+without an announcement until a feeding is confirmed; paid credit is preserved.
+Already signed/published outbox entries are immutable and are not rewritten.
+
 ## Household signing and publication relays
 
 `nostr.relays` lists public announcement destinations. Optional

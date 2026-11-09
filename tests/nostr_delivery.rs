@@ -357,6 +357,110 @@ async fn below_minimum_never_signs_and_operator_credit_uses_normal_outbox() {
 }
 
 #[tokio::test]
+async fn feeding_funding_payment_signs_only_confirmed_feeding_across_restart() {
+    let fixture = Fixture::new("success");
+    let url = fixture.database();
+    let ledger = LedgerStore::connect(&url).await.unwrap();
+    ledger
+        .grant_operator_credit(
+            &lightning_goats::ledger::OperatorCreditGrant {
+                id: "initial-partial-credit".into(),
+                amount_sats: 305,
+                address_user: "herd".into(),
+                reason: "Isolated messaging regression fixture".into(),
+            },
+            false,
+        )
+        .await
+        .unwrap();
+    ledger.advance_message_cursor(1).await.unwrap();
+    ledger
+        .update_feeding_presentation(
+            1000,
+            RuntimeMode::Active,
+            Some(lightning_goats::gateway::FeederSafety {
+                override_enabled: false,
+                remote_enabled: true,
+            }),
+        )
+        .await
+        .unwrap();
+    ledger
+        .record_payment(&lightning_goats::domain::payment::SettledPayment {
+            source: "strike".into(),
+            source_id: "isolated-funding-payment".into(),
+            payment_hash: None,
+            address_user: "herd".into(),
+            credit_pool: "herd".into(),
+            amount_msat: 1_000_000,
+            settled_at: None,
+            context_json: None,
+        })
+        .await
+        .unwrap();
+    let renderer = MessageRenderer::embedded().unwrap();
+    assert_eq!(
+        process_next_message(&ledger, None, &renderer, 1000, RuntimeMode::Active)
+            .await
+            .unwrap(),
+        lightning_goats::messaging::MessageProcessorStep::NonPublicSkipped { seq: 2 }
+    );
+    assert!(ledger.next_outbox_entry().await.unwrap().is_none());
+    assert_eq!(ledger.feed_credit_sats().await.unwrap(), 1305);
+    // An intent alone is not a success announcement and consumes no credit.
+    let attempt = ledger.begin_feed_attempt(1000).await.unwrap().unwrap();
+    assert_eq!(
+        process_next_message(&ledger, None, &renderer, 1000, RuntimeMode::Active)
+            .await
+            .unwrap(),
+        lightning_goats::messaging::MessageProcessorStep::Idle
+    );
+    assert_eq!(ledger.feed_credit_sats().await.unwrap(), 1305);
+    ledger.confirm_feed_attempt(attempt).await.unwrap();
+    drop(ledger);
+    let ledger = LedgerStore::connect(&url).await.unwrap();
+    assert_eq!(
+        process_next_message(
+            &ledger,
+            Some(&fixture.client()),
+            &renderer,
+            1000,
+            RuntimeMode::Active
+        )
+        .await
+        .unwrap(),
+        lightning_goats::messaging::MessageProcessorStep::Enqueued { seq: 3 }
+    );
+    assert_eq!(ledger.feed_credit_sats().await.unwrap(), 305);
+    let outbox = ledger.next_outbox_entry().await.unwrap().unwrap();
+    let signed: Value = serde_json::from_str(&outbox.signed_event_json).unwrap();
+    assert!(signed["content"].as_str().unwrap().contains("695"));
+    assert_eq!(
+        fixture
+            .trace()
+            .iter()
+            .filter(|call| call["phase"] == "sign")
+            .count(),
+        1
+    );
+    assert_eq!(
+        process_next_message(&ledger, None, &renderer, 1000, RuntimeMode::Active)
+            .await
+            .unwrap(),
+        lightning_goats::messaging::MessageProcessorStep::Idle
+    );
+    assert_eq!(
+        ledger
+            .next_outbox_entry()
+            .await
+            .unwrap()
+            .unwrap()
+            .signed_event_json,
+        outbox.signed_event_json
+    );
+}
+
+#[tokio::test]
 async fn paused_payment_publication_freezes_queue_context_and_weather_stays_nonpublic() {
     let fixture = Fixture::new("success");
     let ledger = LedgerStore::connect(&fixture.database()).await.unwrap();

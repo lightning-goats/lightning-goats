@@ -461,6 +461,15 @@ async fn wait_credit(ledger: &lightning_goats::ledger::LedgerStore, sats: u64) {
 
 #[tokio::test]
 async fn shipped_examples_real_daemon_gateway_two_confirmed_commands_leave_340() {
+    verify_two_confirmed_commands(false).await;
+}
+
+#[tokio::test]
+async fn lost_post_responses_real_daemon_gateway_two_commands_leave_340() {
+    verify_two_confirmed_commands(true).await;
+}
+
+async fn verify_two_confirmed_commands(drop_post_responses: bool) {
     let owner = Owner {
         auto_ack: true,
         owner_v1: true,
@@ -470,7 +479,57 @@ async fn shipped_examples_real_daemon_gateway_two_confirmed_commands_leave_340()
     let directory = TempDir::new().unwrap();
     let ledger = credited(&directory, 2340).await;
     let (_gateway, base) = gateway_protocol(&directory, &owner_url, 1, true).await;
-    let process = daemon(&directory, &base).await;
+    let mut proxy_process = None;
+    let daemon_gateway = if drop_post_responses {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        drop(listener);
+        let mut child = Process(
+            Command::new("python3")
+                .arg("-B")
+                .arg(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/deploy/scripts/cross-host-fault-proxy.py"
+                ))
+                .arg("--upstream")
+                .arg(&base)
+                .arg("--listen-port")
+                .arg(address.port().to_string())
+                .arg("--journal")
+                .arg(directory.path().join("proxy.jsonl"))
+                .arg("--run-id")
+                .arg(Uuid::new_v4().to_string())
+                .arg("--drop-post-responses")
+                .arg("--serve")
+                .stdout(Stdio::null())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .unwrap(),
+        );
+        let origin = format!("http://{address}");
+        let client = Client::new();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                assert!(child.0.try_wait().unwrap().is_none(), "proxy exited");
+                if client
+                    .get(format!("{origin}/healthz"))
+                    .send()
+                    .await
+                    .is_ok_and(|response| response.status().is_success())
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .expect("proxy startup timed out");
+        proxy_process = Some(child);
+        origin
+    } else {
+        base.clone()
+    };
+    let process = daemon(&directory, &daemon_gateway).await;
     wait_credit(&ledger, 340).await;
     drop(process);
     assert_eq!(owner.commands.lock().unwrap().len(), 2);
@@ -482,10 +541,52 @@ async fn shipped_examples_real_daemon_gateway_two_confirmed_commands_leave_340()
             .count(),
         2
     );
-    let _restarted = daemon(&directory, &base).await;
+    let restarted = daemon(&directory, &daemon_gateway).await;
     tokio::time::sleep(Duration::from_millis(200)).await;
     assert_eq!(ledger.feed_credit_sats().await.unwrap(), 340);
     assert_eq!(owner.commands.lock().unwrap().len(), 2);
+    drop(restarted);
+    if drop_post_responses {
+        drop(proxy_process);
+        let journal: Vec<serde_json::Value> =
+            std::fs::read_to_string(directory.path().join("proxy.jsonl"))
+                .unwrap()
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+        let posts: Vec<_> = journal
+            .iter()
+            .filter(|row| row["stage"] == "intent" && row["method"] == "POST")
+            .collect();
+        assert_eq!(
+            posts.len(),
+            2,
+            "daemon must never resend after response loss"
+        );
+        let commands = owner.commands.lock().unwrap().clone();
+        assert_ne!(commands[0], commands[1]);
+        for (post, id) in posts.iter().zip(&commands) {
+            let path = format!("/v1/feeder/request/{id}");
+            assert_eq!(post["path"], path);
+            let discarded = journal
+                .iter()
+                .position(|row| {
+                    row["stage"] == "response"
+                        && row["exchange"] == post["exchange"]
+                        && row["status"] == 200
+                        && row["disposition"] == "discarded"
+                })
+                .expect("successful gateway POST response was not discarded");
+            assert!(
+                journal[discarded + 1..].iter().any(|row| {
+                    row["stage"] == "intent" && row["method"] == "GET" && row["path"] == path
+                }),
+                "completion must recover by GET of the original UUID"
+            );
+        }
+        assert!(ledger.unresolved_feed_attempt().await.unwrap().is_none());
+        assert!(ledger.next_outbox_entry().await.unwrap().is_none());
+    }
     mock.abort();
 }
 

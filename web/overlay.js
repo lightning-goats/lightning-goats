@@ -346,7 +346,7 @@
             : availability === "pending" ? "Feeding pending confirmation" : "";
         const queued = queuedFeedings();
         let note = queued ? `${queued} feeding${queued === 1 ? "" : "s"} queued to run when feeding resumes.`
-            : "0 feedings queued · credit saved toward the next feeding.";
+            : "0 feedings queued.";
         if (awaitingConfirmation) note += " An earlier feeding is awaiting confirmation.";
         el("feeding-queue").textContent = availability === "ready" ? "" : note;
     }
@@ -360,8 +360,8 @@
             const paused = data.mode === "shadow" || !data.gateway_reachable || data.remote_feeding_enabled !== true || data.feeder_override_active !== false;
             setFeedingState(paused ? "paused" : data.unresolved_feed_attempt ? "pending" : "ready");
             el("feeding-state").title = data.feeder_override_active === true
-                ? "FeederOverride is on. Feed credit is saved."
-                : paused ? "Local feeding controls are paused. Feed credit is saved." : "";
+                ? "FeederOverride is on."
+                : paused ? "Local feeding controls are paused." : "";
             // HTTP status is for availability only. Credit/progress come from the
             // ordered socket; a slower HTTP response must never regress the ledger.
         } catch { setFeedingState("unknown"); }

@@ -3,8 +3,10 @@
 These library components authenticate targets and social input, persist replay
 state, and apply membership transitions. They do not start a CyberHerd daemon,
 hold payment/signing/gateway credentials, or authorize financial or feeder work.
+The [core bridge](cyberherd-core-bridge.md) and
+[intake worker](cyberherd-worker.md) now connect these components in source.
 The [complete implementation contract](../planning/cyberherd-implementation-plan.md)
-still includes the core event bridge, refresh/recovery worker, payouts and delivery.
+still includes funded payouts, delivery, interfaces and operational qualification.
 
 ## Calendar and target authority
 

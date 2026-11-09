@@ -225,9 +225,11 @@ replay-safe settled-zap membership and confirmed-feeding membership barriers.
 It refreshes targets/profiles before recovery and backfills social queries with
 bounded durable windows. It has no publishing, funding or payout capabilities;
 a membership barrier is not a funded payout plan.
+The [worker checkpoint](../testing/cyberherd-worker-checkpoint-20261109.md)
+records 351 passing Rust tests and the remaining qualification boundaries.
 
 These are source components and an uninstalled intake binary, not a live CyberHerd
 service. Real-fund reward planning,
-isolated payout worker, durable note/chat destinations, scheduled lifecycle/reset,
+isolated payout worker, durable note/chat destinations, lifecycle notices,
 operator/client interfaces, installation and end-to-end verification remain work.
 No CyberHerd payout or membership worker is activated by this checkpoint.

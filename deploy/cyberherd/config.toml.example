@@ -1,4 +1,4 @@
-# Intake/membership only. Inactive until identities, core epoch/cutoff and socket
+# Intake/membership, with optional private reward planning. Inactive until identities, core epoch/cutoff and socket
 # access are provisioned and reviewed. This file contains no production values.
 enabled = false
 state_dir = "/var/lib/cyberherd"
@@ -29,3 +29,14 @@ credit_pool = "herd"
 [core.payees]
 # Configure all actual receive user -> native payee mappings for this one roster.
 herd = "0000000000000000000000000000000000000000000000000000000000000000"
+
+# Optional private plan/reservation rounds. Requires explicit matching core
+# reward_policy. No invoice requests, spending credential or public publication.
+# Fee limits are an operator choice; the values below are illustrative only.
+# [rewards]
+# fee_basis_points = 0
+# minimum_fee_sats = 1
+# minimum_net_sats = 1
+# profile_max_age_seconds = 3600
+# operation_addresses = ["herd@lightning-goats.com", "herd@lnb.bolverker.com"]
+# Include every operational wallet/address alias to exclude self-transfers.

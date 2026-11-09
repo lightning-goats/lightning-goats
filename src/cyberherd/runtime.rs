@@ -28,7 +28,7 @@ use crate::{
     zap::ZapRequest,
 };
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     pub enabled: bool,
@@ -43,6 +43,8 @@ pub struct Config {
     pub required_relays: usize,
     pub poll_seconds: u64,
     pub settings: Settings,
+    #[serde(default)]
+    pub rewards: Option<super::rewards::PlanningPolicy>,
 }
 
 impl Config {
@@ -58,6 +60,9 @@ impl Config {
     pub fn validate(&self) -> Result<()> {
         self.core.validate()?;
         self.settings.validate()?;
+        if let Some(rewards) = &self.rewards {
+            rewards.validate()?;
+        }
         self.policy().validate()?;
         DayWindow::at(&self.timezone, calendar::now()?)?;
         let reader = Reader::new(self.relays.clone())?;
@@ -294,11 +299,50 @@ impl Runtime {
     }
 
     pub async fn run(mut self) -> Result<()> {
+        // Independent bounded planning rounds cannot hold up intake while a
+        // recipient/relay is slow. There is still no provider-spend capability.
+        let reward_worker = self
+            .config
+            .rewards
+            .clone()
+            .map(|policy| -> Result<_> {
+                Ok(super::reward_worker::Worker {
+                    store: self.store.clone(),
+                    client: Client::new(
+                        self.config.core_socket.clone(),
+                        self.config.core.core_uid,
+                    )?,
+                    discovery: Discovery::new(
+                        Reader::new(self.config.relays.clone())?,
+                        self.config.required_relays,
+                    )?,
+                    owner: self.config.project_pubkey.clone(),
+                    policy,
+                })
+            })
+            .transpose()?;
+        let mut tasks = tokio::task::JoinSet::new();
+        if let Some(worker) = reward_worker {
+            let seconds = self.config.poll_seconds;
+            tasks.spawn(async move {
+                let mut reward_ticks = tokio::time::interval(Duration::from_secs(seconds));
+                reward_ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                loop {
+                    reward_ticks.tick().await;
+                    if worker.tick().await.is_err() {
+                        tracing::warn!(
+                            "CyberHerd reward planning held; retaining frozen work for retry"
+                        );
+                    }
+                }
+            });
+        }
         let mut ticks = tokio::time::interval(Duration::from_secs(self.config.poll_seconds));
         ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             tokio::select! {
                 _=tokio::signal::ctrl_c()=>return Ok(()),
+                Some(_)=tasks.join_next(), if !tasks.is_empty()=>bail!("reward planner stopped unexpectedly"),
                 _=ticks.tick()=>{
                     if let Err(error)=self.tick().await {
                         // Do not print private core proof/request/source fields.

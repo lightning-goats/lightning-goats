@@ -68,7 +68,9 @@ and debit; no copied JSON or threshold-only notification can supply it.
 Private protocol version 2 also retains the core's optional
 [consumed-funding proof](cyberherd-reward-funding.md) in that barrier. Its client
 offers a root-bounded reservation capability, disabled without explicit core
-policy. The worker does not yet build eligible payout plans or call that method.
+policy. Optional [reward planning](cyberherd-reward-planning.md) now runs independent
+bounded rounds, freezing eligible plans before requesting their reservation.
+There is no provider-spend, signer or publication capability in this worker.
 
 ## Discovery and recovery
 
@@ -110,8 +112,8 @@ new core epoch. Source-level integration tests use synthetic signed requests,
 temporary core/membership databases and private Unix sockets. They do not prove
 the provisioned cross-UID runtime or authorize production membership/payouts.
 
-Outgoing provider reconciliation, frozen eligible
-payout plans, note/chat/overlay outboxes, lifecycle notices, public roster/OBS and
+Outgoing provider reconciliation,
+note/chat/overlay outboxes, lifecycle notices, public roster/OBS and
 authenticated operator interfaces remain unfinished. The known SQLite audit
 finding remains open; private state permissions mitigate its local-file condition
 without claiming that the dependency is patched.

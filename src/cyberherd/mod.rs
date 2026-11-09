@@ -11,6 +11,9 @@ pub mod ingress;
 pub mod membership;
 pub mod relay;
 #[cfg(unix)]
+pub mod reward_worker;
+pub mod rewards;
+#[cfg(unix)]
 pub mod runtime;
 pub mod shares;
 pub mod social;
@@ -21,3 +24,6 @@ pub mod worker;
 
 #[cfg(all(test, unix))]
 mod ingress_tests;
+
+#[cfg(all(test, unix))]
+mod rewards_tests;

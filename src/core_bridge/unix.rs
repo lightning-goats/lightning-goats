@@ -14,8 +14,8 @@ use tokio::{
 };
 
 use super::{
-    AuthenticatedBatch, AuthenticatedReservation, BridgeConfig, MAX_FRAME, Request, Response,
-    Safety,
+    AuthenticatedAllowance, AuthenticatedBatch, AuthenticatedReservation, BridgeConfig, MAX_FRAME,
+    Request, Response, Safety,
 };
 use crate::{config::RuntimeMode, ledger::LedgerStore};
 
@@ -189,6 +189,22 @@ async fn serve_one(
                 Ok(state) => Response::Safety { state },
                 Err(_) => Response::Rejected,
             },
+            Request::RewardAllowance {
+                expected_epoch,
+                request_id,
+                owner,
+            } => match reward_policy {
+                Some(policy) if policy.owner == owner && mode.feeder_enabled() => match ledger
+                    .reward_allowance(policy, expected_epoch, request_id)
+                    .await
+                {
+                    Ok(allowance) => Response::Allowance {
+                        allowance: Box::new(allowance),
+                    },
+                    Err(_) => Response::Rejected,
+                },
+                _ => Response::Rejected,
+            },
             Request::ReserveReward {
                 expected_epoch,
                 request_id,
@@ -310,6 +326,38 @@ impl Client {
                 })
             }
             _ => bail!("core did not authorize this reward reservation"),
+        }
+    }
+
+    pub async fn reward_allowance(
+        &self,
+        epoch: uuid::Uuid,
+        request_id: uuid::Uuid,
+        owner: &str,
+    ) -> Result<AuthenticatedAllowance> {
+        crate::nostr_event::validate_public_key(owner)?;
+        match self
+            .request(&Request::RewardAllowance {
+                expected_epoch: epoch,
+                request_id,
+                owner: owner.into(),
+            })
+            .await?
+        {
+            Response::Allowance { allowance } => {
+                allowance.validate()?;
+                if allowance.epoch != epoch
+                    || allowance.request_id != request_id
+                    || allowance.owner != owner
+                {
+                    bail!("core allowance does not match confirmed feeding scope");
+                }
+                Ok(AuthenticatedAllowance {
+                    allowance: *allowance,
+                    core_uid: self.expected_uid,
+                })
+            }
+            _ => bail!("core did not authorize reward planning"),
         }
     }
 }
@@ -514,6 +562,67 @@ mod tests {
         std::fs::remove_file(&config.socket).unwrap();
         std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o770)).unwrap();
         assert!(Server::bind(&config).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn typed_allowance_requires_policy_mode_owner_epoch_and_actual_confirmation() {
+        use crate::{nostr_event::test_event, reward_funding::RewardPolicy};
+        for (enabled, mode) in [
+            (false, RuntimeMode::Active),
+            (true, RuntimeMode::Shadow),
+            (true, RuntimeMode::Active),
+        ] {
+            let (_root, mut config, ledger) = fixture(0).await;
+            ledger.initialize_reward_funding().await.unwrap();
+            let id = ledger.begin_feed_attempt(1000).await.unwrap().unwrap();
+            ledger.confirm_feed_attempt(id).await.unwrap();
+            let epoch = ledger.overlay_stream_id().await.unwrap();
+            let owner = test_event(1, 1, 100, "", vec![]).pubkey;
+            if enabled {
+                config.reward_policy = Some(RewardPolicy {
+                    owner: owner.clone(),
+                    member_percent_ceiling: 10,
+                    max_sats_per_feed: 100,
+                    max_sats_per_24h: 1000,
+                });
+            }
+            let server = Server::bind(&config).await.unwrap();
+            let task = tokio::spawn(server.run(ledger.clone(), mode));
+            let uid = self_credentials().unwrap().0;
+            let client = Client::new(config.socket.clone(), uid).unwrap();
+            let value = client.reward_allowance(epoch, id, &owner).await;
+            if enabled && mode != RuntimeMode::Shadow {
+                let value = value.unwrap();
+                assert_eq!(value.core_uid(), uid);
+                assert_eq!(
+                    (
+                        value.allowance().funding.strike_sats,
+                        value.allowance().threshold_sats,
+                        value.allowance().available_sats
+                    ),
+                    (1000, 1000, 1000)
+                );
+                let wrong = test_event(2, 1, 100, "", vec![]).pubkey;
+                assert!(client.reward_allowance(epoch, id, &wrong).await.is_err());
+                assert!(
+                    client
+                        .reward_allowance(uuid::Uuid::new_v4(), id, &owner)
+                        .await
+                        .is_err()
+                );
+                assert!(
+                    client
+                        .reward_allowance(epoch, uuid::Uuid::new_v4(), &owner)
+                        .await
+                        .is_err()
+                );
+            } else {
+                assert!(value.is_err());
+            }
+            assert_eq!(ledger.feed_credit_sats().await.unwrap(), 0);
+            task.abort();
+            let _ = task.await;
+        }
     }
 
     #[tokio::test]

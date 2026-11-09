@@ -18,6 +18,7 @@ pub mod nostr;
 pub mod nostr_event;
 pub mod openhab;
 pub mod overlay;
+pub mod payout;
 pub mod presentation;
 pub mod public_network;
 pub mod quotes;

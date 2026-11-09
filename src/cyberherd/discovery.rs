@@ -237,6 +237,9 @@ impl<R: Query> Discovery<R> {
                 store.remember_profile(owner, &profile).await?;
             }
         }
+        store
+            .record_reward_profile_read(owner, pubkey, complete, now)
+            .await?;
         if !complete {
             return Ok(None);
         }
@@ -251,6 +254,44 @@ impl<R: Query> Discovery<R> {
             ),
             Err(_) => (vec![], false),
         }
+    }
+
+    /// One bounded query, rather than serially opening relays for each member.
+    /// A saturated/incomplete batch is not proof of a missing payout address.
+    pub async fn refresh_reward_profiles(
+        &self,
+        store: &Store,
+        owner: &str,
+        keys: &[String],
+        now: i64,
+    ) -> Result<()> {
+        if keys.is_empty() || keys.len() > 8 || now < 0 {
+            bail!("reward profile batch exceeds bound");
+        }
+        let mut filters = Vec::new();
+        for key in keys {
+            crate::nostr_event::validate_public_key(key)?;
+            let mut query = filter(vec![0]);
+            query.authors.push(key.clone());
+            query.until = Some(now as u64);
+            filters.push(query);
+        }
+        let (events, complete) = self.read(&filters).await;
+        for event in events {
+            if keys.contains(&event.event().pubkey) {
+                if let Ok(profile) =
+                    AuthenticatedProfile::parse(event.clone(), &event.event().pubkey, now)
+                {
+                    store.remember_profile(owner, &profile).await?;
+                }
+            }
+        }
+        for key in keys {
+            store
+                .record_reward_profile_read(owner, key, complete, now)
+                .await?;
+        }
+        Ok(())
     }
 }
 

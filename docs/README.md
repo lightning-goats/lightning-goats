@@ -12,7 +12,9 @@ ordinary LNURL payments and requires explicit feature activation.
 
 The [separate CyberHerd intake worker](architecture/cyberherd-worker.md) now
 connects core events, authenticated discovery and ordered membership in source.
-It is uninstalled and has no payout or publication capability.
+It is uninstalled and has no provider-spend or publication capability. Optional
+[reward planning](architecture/cyberherd-reward-planning.md) freezes eligible
+confirmed-feeding plans before obtaining bounded core reservations.
 
 The operator-directed 2026-11-08 Strike restoration is recorded in
 [`deployment/strike-receive-restoration.md`](deployment/strike-receive-restoration.md),

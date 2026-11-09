@@ -223,8 +223,10 @@ The [separate intake worker](../architecture/cyberherd-worker.md) consumes
 authenticated pages with an atomic checkpoint, one durable observation order,
 replay-safe settled-zap membership and confirmed-feeding membership barriers.
 It refreshes targets/profiles before recovery and backfills social queries with
-bounded durable windows. It does not yet create payout plans, reserve their
-budgets, publish messages or pay; a membership barrier is not a funded payout plan.
+bounded durable windows. Optional
+[eligible reward planning](../architecture/cyberherd-reward-planning.md) now
+freezes current signed payees, amounts and fees before reserving the plan.
+Neither a membership barrier nor a reserved plan proves a payout.
 The [worker checkpoint](../testing/cyberherd-worker-checkpoint-20261109.md)
 records 351 passing Rust tests and the remaining qualification boundaries.
 
@@ -237,8 +239,7 @@ delivery; eligible plan/fee freezing and authoritative outgoing outcomes remain.
 The [funding checkpoint](../testing/cyberherd-funding-checkpoint-20261109.md)
 records 359 passing Rust tests and the conservative outstanding-budget limit.
 
-These are source components and an uninstalled intake binary, not a live CyberHerd
-service. Frozen eligible reward planning,
-isolated payout worker, durable note/chat destinations, lifecycle notices,
+These are source components and an uninstalled worker binary, not a live CyberHerd
+service. The isolated payout worker, durable note/chat destinations, lifecycle notices,
 operator/client interfaces, installation and end-to-end verification remain work.
 No CyberHerd payout or membership worker is activated by this checkpoint.

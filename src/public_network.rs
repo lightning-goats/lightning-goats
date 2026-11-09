@@ -129,7 +129,7 @@ async fn resolve(url: &Url) -> Result<Vec<SocketAddr>> {
 }
 
 pub async fn get_json(raw: &str, max_bytes: usize) -> Result<Vec<u8>> {
-    if max_bytes == 0 || max_bytes > 65_536 {
+    if max_bytes == 0 || max_bytes > 262_144 {
         bail!("invalid public response bound");
     }
     timeout(Duration::from_secs(12), async {

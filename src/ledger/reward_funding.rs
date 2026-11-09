@@ -7,9 +7,54 @@ use sqlx::{Row, Sqlite, Transaction};
 use uuid::Uuid;
 
 use super::{LedgerStore, to_i64, to_u64};
-use crate::reward_funding::{Funding, Reservation, RewardPolicy};
+use crate::reward_funding::{Allowance, Funding, Reservation, RewardPolicy};
 
 impl LedgerStore {
+    pub(crate) async fn reward_allowance(
+        &self,
+        policy: &RewardPolicy,
+        epoch: Uuid,
+        request_id: Uuid,
+    ) -> Result<Allowance> {
+        policy.validate()?;
+        let mut tx = self.pool.begin().await?;
+        let current: String =
+            sqlx::query_scalar("SELECT stream_id FROM overlay_identity WHERE singleton=1")
+                .fetch_one(&mut *tx)
+                .await?;
+        if current != epoch.to_string() {
+            bail!("reward planning requires pinned core epoch");
+        }
+        let funding = confirmed_funding(&mut tx, request_id)
+            .await?
+            .context("feeding has no eligible funding proof")?;
+        let threshold: i64 =
+            sqlx::query_scalar("SELECT total_sats FROM feed_reward_funding WHERE request_id=?")
+                .bind(request_id.to_string())
+                .fetch_one(&mut *tx)
+                .await?;
+        let used: i64 =
+            sqlx::query_scalar("SELECT COALESCE(SUM(reserved_sats),0) FROM reward_reservations")
+                .fetch_one(&mut *tx)
+                .await?;
+        let value = Allowance {
+            epoch,
+            request_id,
+            owner: policy.owner.clone(),
+            funding,
+            threshold_sats: to_u64(threshold, "funded threshold")?,
+            member_percent_ceiling: policy.member_percent_ceiling,
+            max_sats_per_feed: policy.max_sats_per_feed,
+            available_sats: policy
+                .max_sats_per_24h
+                .saturating_sub(to_u64(used, "outstanding rewards")?),
+            policy_hash: hex::encode(Sha256::digest(serde_json::to_vec(policy)?)),
+        };
+        value.validate()?;
+        tx.commit().await?;
+        Ok(value)
+    }
+
     /// Explicit root-policy activation. Replay old deltas only to establish
     /// remaining FIFO lots; never create a historical feed/reward opportunity.
     pub(crate) async fn initialize_reward_funding(&self) -> Result<()> {

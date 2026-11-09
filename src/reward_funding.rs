@@ -40,6 +40,40 @@ pub struct Funding {
     pub proof_hash: String,
 }
 
+/// A fresh advisory read, not a reservation or provider balance. The core
+/// repeats all limits atomically when reserving the completed plan.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct Allowance {
+    pub epoch: Uuid,
+    pub request_id: Uuid,
+    pub owner: String,
+    pub funding: Funding,
+    pub threshold_sats: u64,
+    pub member_percent_ceiling: u8,
+    pub max_sats_per_feed: u64,
+    pub available_sats: u64,
+    pub policy_hash: String,
+}
+
+impl Allowance {
+    pub fn validate(&self) -> Result<()> {
+        if self.epoch.is_nil()
+            || self.request_id.is_nil()
+            || self.threshold_sats == 0
+            || self.threshold_sats > i64::MAX as u64
+            || self.member_percent_ceiling > 100
+            || self.max_sats_per_feed > i64::MAX as u64
+            || self.available_sats > i64::MAX as u64
+        {
+            bail!("invalid reward planning allowance");
+        }
+        crate::nostr_event::validate_public_key(&self.owner)?;
+        self.funding.validate(self.threshold_sats)?;
+        crate::nostr_event::validate_hex(&self.policy_hash, 32)
+    }
+}
+
 impl Funding {
     pub fn validate(&self, threshold_sats: u64) -> Result<()> {
         if self.strike_sats > threshold_sats {

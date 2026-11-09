@@ -49,6 +49,11 @@ pub enum Request {
         limit: u16,
     },
     Safety,
+    RewardAllowance {
+        expected_epoch: Uuid,
+        request_id: Uuid,
+        owner: String,
+    },
     ReserveReward {
         expected_epoch: Uuid,
         request_id: Uuid,
@@ -69,6 +74,9 @@ pub enum Response {
     },
     Reservation {
         reservation: Box<crate::reward_funding::Reservation>,
+    },
+    Allowance {
+        allowance: Box<crate::reward_funding::Allowance>,
     },
     Rejected,
 }
@@ -121,6 +129,22 @@ pub struct AuthenticatedBatch {
 pub struct AuthenticatedReservation {
     reservation: crate::reward_funding::Reservation,
     core_uid: u32,
+}
+
+/// Constructible only after checking the kernel peer and complete scope.
+#[derive(Clone)]
+pub struct AuthenticatedAllowance {
+    allowance: crate::reward_funding::Allowance,
+    core_uid: u32,
+}
+
+impl AuthenticatedAllowance {
+    pub fn allowance(&self) -> &crate::reward_funding::Allowance {
+        &self.allowance
+    }
+    pub fn core_uid(&self) -> u32 {
+        self.core_uid
+    }
 }
 
 impl AuthenticatedReservation {

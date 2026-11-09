@@ -1,4 +1,4 @@
-# Eligible reward planning — verification in progress
+# Eligible reward planning — source verification
 
 Code source: `fb0ee590c8d0cc3924b6368068382012ff1434e8`.
 Scope: [immutable eligible reward planning](../architecture/cyberherd-reward-planning.md),
@@ -10,17 +10,17 @@ validation. This is not full-port completion, installation or payout activation.
 | Check | Observed result |
 | --- | --- |
 | Formatting on the code source | passed |
-| Final strict locked all-target/all-feature Clippy | running; earlier planning source passed |
-| Final locked all-feature Rust suite | pending final Clippy |
+| Final strict locked all-target/all-feature Clippy | passed |
+| Final locked all-feature Rust suite | 373 passed, zero failed, one ignored |
 | Separate worker build and non-applying CLI | build passed; three CLI tests passed |
 | Release/preflight/prepare/upgrade fixtures | 25 passed, two privileged fixtures skipped |
 | Refreshed dependency audit | open unignored RUSTSEC-2026-0459 remains |
 | RSA reverse dependency | unreachable from active graph |
 | Dependency/lockfile changes | none |
 
-This checkpoint deliberately retains pending status until the final check handles
-finish. Do not cite the earlier funding suite's 359 passing tests as evidence for
-this newer source. The ordinary real-nak qualification remains a separate fixture.
+The final command handles completed successfully on the pinned code source.
+Do not substitute the earlier funding suite's 359-test result for this newer run.
+The ignored real-nak qualification remains a separate fixture, not executed here.
 
 The first planning run passed ten of eleven reward tests. Its expected mixed-fund
 split incorrectly assumed full-rational allocation after the required six-decimal
@@ -36,7 +36,8 @@ test passed in that intermediate source. The failure occurred during concurrent
 worker compilation; resource contention is a possible cause, not a proven fix.
 No signer assertion or timeout was changed. The final source additionally rejects
 reserved domains, numeric IP aliases and dot path segments consistently before
-membership/planning; its final full run is still required.
+membership/planning. Its final full run passed, including the unchanged signer
+deadline test. This does not prove contention caused the earlier failure.
 
 The first deployment-fixture invocation failed because the filesystem sandbox
 made its temporary `/var/tmp` directory read-only. The unchanged permitted rerun

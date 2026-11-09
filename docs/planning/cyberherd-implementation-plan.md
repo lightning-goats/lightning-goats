@@ -228,7 +228,7 @@ bounded durable windows. Optional
 freezes current signed payees, amounts and fees before reserving the plan.
 Neither a membership barrier nor a reserved plan proves a payout.
 The [planning checkpoint](../testing/cyberherd-planning-checkpoint-20261109.md)
-distinguishes executed regressions from final checks still in progress.
+records 373 passing Rust tests, the ignored qualification and remaining boundaries.
 The [worker checkpoint](../testing/cyberherd-worker-checkpoint-20261109.md)
 records 351 passing Rust tests and the remaining qualification boundaries.
 

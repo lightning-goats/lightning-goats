@@ -234,6 +234,8 @@ and a bounded private reservation method under explicit root policy. Bootstrap
 establishes remaining credit without back-paying old feedings. Virtual credit
 cannot authorize Strike payouts. A reservation is not provider availability or
 delivery; eligible plan/fee freezing and authoritative outgoing outcomes remain.
+The [funding checkpoint](../testing/cyberherd-funding-checkpoint-20261109.md)
+records 359 passing Rust tests and the conservative outstanding-budget limit.
 
 These are source components and an uninstalled intake binary, not a live CyberHerd
 service. Frozen eligible reward planning,

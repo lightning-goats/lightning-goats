@@ -219,3 +219,13 @@ The dynamic high-error-correction QR still encodes the canonical
 background/preview assets do not replace it or the homepage artwork.
 No native source, payment credential, financial state, gateway setting or Nostr
 publication mode changes are required for this static update.
+
+Installed static source `136086fb2777a9c5807657bcce15d7b8887c3922`, archive SHA256
+`943eb89569e3a3edb07d46b8356d923e84e41307019386f1d9ac1bc580157cef`, with backup
+`/var/backups/lightning-goats/obs-20261109T144801Z`. All 14 existing overlay browser
+regressions passed. Real public-browser verification fetched all seven images
+byte-for-byte, checked natural dimensions, verified the uploaded lightning IMG,
+and independently decoded the 180-pixel branded QR to its canonical payload.
+There were no JavaScript errors. The payment PID and configuration hash were
+unchanged, and Nostr remained active. Refresh an existing OBS browser source to
+load stylesheet version 6 and script version 7.

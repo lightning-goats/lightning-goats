@@ -1,7 +1,8 @@
 # CyberHerd source checkpoint — 2026-11-09
 
 This is an incomplete library/presentation checkpoint on
-`feat/cyberherd-20261109`, based on restoration commit
+`feat/cyberherd-20261109`, source commit
+`88d051b0a3c521be5aa059591e54f7e42319d6ee`, based on restoration commit
 `51f330b`. The [implementation plan](../planning/cyberherd-implementation-plan.md)
 retains the complete port scope and remaining work. No CyberHerd worker, spending
 credential, membership ingestion or payout service is installed/activated here.
@@ -23,7 +24,7 @@ credential, membership ingestion or payout service is installed/activated here.
   pause/invitation categories do not silently gain defaults. Weather/information
   audience remains overlay-only, and the payment message minimum remains 10 sats.
 
-## Checks at checkpoint publication
+## Completed checks
 
 - `cargo fmt --all --check`: passed.
 - `cargo clippy --locked --all-targets --all-features -- -D warnings`: passed.
@@ -31,9 +32,11 @@ credential, membership ingestion or payout service is installed/activated here.
   presentation/accounting tests passed. This includes rendering every imported
   template, checking every payment variant's optional naming, and durable-store
   restart/concurrency/opt-out scenarios.
-- `cargo test --locked --all-features`: running at checkpoint publication; do not
-  interpret the focused results as a completed whole-repository regression run.
-  The obsolete pre-correction run was stopped to release the build directory.
+- `cargo test --locked --all-features`: passed, 281 tests passed, zero failures,
+  one existing real-NIP-46 test ignored because it requires pinned real nak and a
+  fresh loopback-only network namespace. The 160 library tests and all integration
+  groups passed. The obsolete pre-correction run was stopped to release the build
+  directory; this completed run includes the corrected optional-name behavior.
 - `cargo tree -i rsa --locked`: no active reverse dependency.
 - `cargo audit --ignore RUSTSEC-2023-0071`: failed on the already documented
   `RUSTSEC-2026-0459` in locked `libsqlite3-sys 0.30.1`. Dependencies/lockfile remain

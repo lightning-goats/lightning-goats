@@ -58,6 +58,15 @@ pub struct CreatedStrikeReceiveRequest {
     pub created_provider: Option<String>,
 }
 
+struct ReceiveIssuance<'a> {
+    address_user: &'a str,
+    credit_pool: &'a str,
+    amount_msat: u64,
+    description_hash: &'a str,
+    expiry_seconds: u64,
+    zap: Option<&'a crate::zap::ZapRequest>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StrikeCompletedReceiveEvent {
     pub event_id: Uuid,
@@ -512,6 +521,56 @@ impl StrikeRuntime {
         description_hash: &str,
         expiry_seconds: u64,
     ) -> Result<CreatedStrikeReceiveRequest> {
+        self.issue_receive_request(
+            ledger,
+            ReceiveIssuance {
+                address_user,
+                credit_pool,
+                amount_msat,
+                description_hash,
+                expiry_seconds,
+                zap: None,
+            },
+        )
+        .await
+    }
+
+    pub(crate) async fn create_and_record_zap_receive_request(
+        &self,
+        ledger: &LedgerStore,
+        address_user: &str,
+        credit_pool: &str,
+        zap: &crate::zap::ZapRequest,
+        expiry_seconds: u64,
+    ) -> Result<CreatedStrikeReceiveRequest> {
+        let description_hash = zap.description_hash();
+        self.issue_receive_request(
+            ledger,
+            ReceiveIssuance {
+                address_user,
+                credit_pool,
+                amount_msat: zap.amount_msat(),
+                description_hash: &description_hash,
+                expiry_seconds,
+                zap: Some(zap),
+            },
+        )
+        .await
+    }
+
+    async fn issue_receive_request(
+        &self,
+        ledger: &LedgerStore,
+        issuance: ReceiveIssuance<'_>,
+    ) -> Result<CreatedStrikeReceiveRequest> {
+        let ReceiveIssuance {
+            address_user,
+            credit_pool,
+            amount_msat,
+            description_hash,
+            expiry_seconds,
+            zap,
+        } = issuance;
         crate::domain::invoice::validate_user(address_user)?;
         crate::domain::invoice::validate_user(credit_pool)?;
         if amount_msat == 0
@@ -540,16 +599,19 @@ impl StrikeRuntime {
                 .create_bolt11_receive_request(amount_msat, description_hash, expiry_seconds)
                 .await?;
             ledger
-                .record_strike_receive_request(&StoredStrikeReceiveRequest {
-                    receive_request_id: created.receive_request_id,
-                    address_user: address_user.to_owned(),
-                    credit_pool: credit_pool.to_owned(),
-                    amount_msat,
-                    description_hash: created.description_hash.clone(),
-                    payment_hash: created.payment_hash.clone(),
-                    invoice: created.invoice.clone(),
-                    created_provider: created.created_provider.clone(),
-                })
+                .record_strike_receive_request_with_zap(
+                    &StoredStrikeReceiveRequest {
+                        receive_request_id: created.receive_request_id,
+                        address_user: address_user.to_owned(),
+                        credit_pool: credit_pool.to_owned(),
+                        amount_msat,
+                        description_hash: created.description_hash.clone(),
+                        payment_hash: created.payment_hash.clone(),
+                        invoice: created.invoice.clone(),
+                        created_provider: created.created_provider.clone(),
+                    },
+                    zap,
+                )
                 .await?;
             Ok(created)
         })

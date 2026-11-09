@@ -77,6 +77,8 @@ struct StatusResponse {
 #[derive(Debug, Deserialize)]
 struct LnurlCallbackQuery {
     amount: Option<String>,
+    nostr: Option<String>,
+    lnurl: Option<String>,
 }
 
 #[tokio::main]
@@ -171,9 +173,25 @@ async fn main() -> Result<()> {
     ));
     let mut publisher = tokio::spawn({
         let ledger = ledger.clone();
+        let nostr = nostr.clone();
         async move {
             if let Some(nak) = nostr {
                 run_outbox_publisher(ledger, nak).await
+            } else {
+                pending::<Result<()>>().await
+            }
+        }
+    });
+    let mut zap_receipts = tokio::spawn({
+        let ledger = ledger.clone();
+        let nostr = if config.lnurl.zap.is_some() {
+            nostr.clone()
+        } else {
+            None
+        };
+        async move {
+            if let Some(nak) = nostr {
+                lightning_goats::zap_receipts::run_receipt_worker(ledger, nak).await
             } else {
                 pending::<Result<()>>().await
             }
@@ -192,6 +210,7 @@ async fn main() -> Result<()> {
         result = &mut feeding_presentation => task_exit("feeding presentation worker", result),
         result = &mut message_processor => task_exit("Nostr message processor", result),
         result = &mut publisher => task_exit("Nostr outbox publisher", result),
+        result = &mut zap_receipts => task_exit("zap receipt publisher", result),
     };
 
     server.abort();
@@ -201,6 +220,7 @@ async fn main() -> Result<()> {
     feeding_presentation.abort();
     message_processor.abort();
     publisher.abort();
+    zap_receipts.abort();
     result
 }
 
@@ -345,12 +365,24 @@ async fn lnurl_callback(
         Err(_) => return lnurl_error(StatusCode::OK, "Invalid amount"),
     };
 
-    match state.lnurl.callback(&user, amount_msat).await {
+    match state
+        .lnurl
+        .callback_with_zap(
+            &user,
+            amount_msat,
+            query.nostr.as_deref(),
+            query.lnurl.as_deref(),
+        )
+        .await
+    {
         Ok(response) => (StatusCode::OK, Json(response)).into_response(),
         Err(LnurlServiceError::UnknownUser) => {
             lnurl_error(StatusCode::NOT_FOUND, "Unknown Lightning Address")
         }
         Err(LnurlServiceError::InvalidAmount(reason)) => lnurl_error(StatusCode::OK, reason),
+        Err(LnurlServiceError::InvalidZap) => {
+            lnurl_error(StatusCode::OK, "Invalid or unsupported zap request")
+        }
         Err(LnurlServiceError::Busy) => lnurl_error(
             StatusCode::TOO_MANY_REQUESTS,
             "Invoice service is busy; retry later",

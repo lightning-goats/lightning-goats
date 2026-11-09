@@ -6,6 +6,10 @@ including the updated explanation/code references and the explicit no-NIP-05 and
 confirmed-feeding reward rules. That request supersedes the older CyberHerd
 deferral in the historical delivery order below.
 
+The native incoming zap/receipt contract is described in
+[`architecture/native-nip57.md`](architecture/native-nip57.md). It preserves
+ordinary LNURL payments and requires explicit feature activation.
+
 The operator-directed 2026-11-08 Strike restoration is recorded in
 [`deployment/strike-receive-restoration.md`](deployment/strike-receive-restoration.md),
 including exact API scopes, webhook staging, WAF and payment-only deployment.

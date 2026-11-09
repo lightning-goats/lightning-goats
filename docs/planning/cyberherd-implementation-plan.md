@@ -200,8 +200,13 @@ Implemented in the isolated `feat/cyberherd-20261109` source:
 - Imported wording, safe bounded rendering, deterministic variant selection, and
   stored template editing with deletion tombstones/category opt-out surviving seeds.
 
-These are library components, not a running CyberHerd service. The authenticated
-relay/target adapters, local core bridge, incoming NIP-57, real-fund reward planning,
+The feature source also implements native NIP-01/BIP-340 verification and the
+[incoming NIP-57/receipt path](../architecture/native-nip57.md), with immutable
+invoice context, independent receipt intents, remote signing and bounded public
+relay transport. It is opt-in and has not been activated on the live service.
+
+These are source components, not a running CyberHerd service. The authenticated
+relay/target adapters, local core bridge, real-fund reward planning,
 isolated payout worker, durable note/chat destinations, scheduled lifecycle/reset,
 operator/client interfaces, installation and end-to-end verification remain work.
 No CyberHerd payout or membership worker is activated by this checkpoint.

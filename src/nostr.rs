@@ -27,6 +27,7 @@ pub struct NakClient {
     project_pubkey: String,
     client_key: Arc<Zeroizing<String>>,
     relays: Vec<String>,
+    signing_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -41,6 +42,78 @@ pub struct SignedNostrEvent {
 }
 
 impl NakClient {
+    /// Typed protocol callers freeze all unsigned fields before signing. Native
+    /// verification prevents a signer/tool response from changing that intent.
+    pub(crate) async fn sign_protocol_event(
+        &self,
+        kind: u64,
+        created_at: u64,
+        content: &str,
+        tags: Vec<Vec<String>>,
+    ) -> Result<crate::nostr_event::VerifiedEvent> {
+        if !matches!(kind, 1 | 1311 | 9734 | 9735)
+            || created_at > i64::MAX as u64
+            || content.len() > 32_768
+            || tags.len() > 1024
+            || tags.iter().any(|tag| {
+                tag.is_empty() || tag.len() > 32 || tag.iter().any(|value| value.len() > 8192)
+            })
+        {
+            bail!("unsupported or oversized protocol signing intent");
+        }
+        let _signing_guard = self.signing_lock.lock().await;
+        tokio::fs::create_dir_all(&self.nak_config_path).await?;
+        let partial =
+            serde_json::json!({"kind":kind,"created_at":created_at,"content":content,"tags":tags})
+                .to_string();
+        let output = self
+            .run_nak(
+                [OsStr::new("event")],
+                &partial,
+                Some((&self.bunker_uri, self.client_key.as_str())),
+            )
+            .await
+            .context("remote protocol signing failed")?;
+        // Malformed helper output can contain a credential. Never include that
+        // output or its deserialization error in logs or returned diagnostics.
+        let event: SignedNostrEvent = serde_json::from_str(output.trim())
+            .map_err(|_| anyhow::anyhow!("remote signer returned malformed protocol event"))?;
+        if event.pubkey != self.project_pubkey
+            || event.kind != kind
+            || event.created_at != created_at
+            || event.content != content
+            || event.tags != tags
+        {
+            bail!("remote signer changed the frozen protocol intent");
+        }
+        crate::nostr_event::VerifiedEvent::verify(event)
+            .map_err(|_| anyhow::anyhow!("remote signer returned an invalid protocol signature"))
+    }
+
+    pub async fn sign_zap_receipt(
+        &self,
+        job: &crate::ledger::ZapReceiptJob,
+    ) -> Result<crate::nostr_event::VerifiedEvent> {
+        if job.request.receipt_signer() != self.project_pubkey {
+            bail!("zap receipt requires another remote signing identity");
+        }
+        let invoice: lightning_invoice::Bolt11Invoice =
+            job.invoice.parse().context("invalid receipt invoice")?;
+        crate::bolt11::verify(
+            &job.invoice,
+            job.request.amount_msat(),
+            &invoice.payment_hash().to_string(),
+            &job.request.description_hash(),
+        )?;
+        self.sign_protocol_event(
+            9735,
+            job.paid_at,
+            "",
+            job.request.receipt_tags(&job.invoice)?,
+        )
+        .await
+    }
+
     pub async fn from_config(config: &NostrConfig) -> Result<Self> {
         let client_key = read_systemd_credential("nostr-client-key").await?;
         Self::new(config, client_key)
@@ -61,6 +134,7 @@ impl NakClient {
             project_pubkey: config.bunker_pubkey.to_ascii_lowercase(),
             client_key: Arc::new(Zeroizing::new(client_key)),
             relays: config.relays.clone(),
+            signing_lock: Arc::new(tokio::sync::Mutex::new(())),
         })
     }
 
@@ -69,6 +143,7 @@ impl NakClient {
         content: &str,
         tags: Vec<Vec<String>>,
     ) -> Result<SignedNostrEvent> {
+        let _signing_guard = self.signing_lock.lock().await;
         tokio::fs::create_dir_all(&self.nak_config_path)
             .await
             .with_context(|| {
@@ -313,6 +388,71 @@ mod tests {
                 "wss://relay-two.example".to_owned(),
             ],
         }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn protocol_signing_freezes_timestamp_verifies_signature_and_redacts_bad_helper_output() {
+        use std::{fs, os::unix::fs::PermissionsExt};
+        let directory = tempfile::TempDir::new().unwrap();
+        let script = directory.path().join("nak-stub");
+        fs::write(&script, include_str!("../tests/fixtures/nak_stub.py")).unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o700)).unwrap();
+        let event = crate::nostr_event::test_event(
+            3,
+            9735,
+            100,
+            "",
+            vec![vec![
+                "p".into(),
+                crate::nostr_event::test_event(2, 1, 100, "", vec![]).pubkey,
+            ]],
+        );
+        fs::write(
+            directory.path().join("protocol-event.json"),
+            serde_json::to_string(&event).unwrap(),
+        )
+        .unwrap();
+        let mut config = config();
+        config.nak_path = script;
+        config.nak_config_path = directory.path().to_owned();
+        config.bunker_pubkey = event.pubkey.clone();
+        let client = NakClient::new(&config, "synthetic-secret-client-key".into()).unwrap();
+        for mode in [
+            "protocol_fixture",
+            "protocol_wrong_signature",
+            "protocol_mutated_created",
+            "protocol_malformed_secret",
+        ] {
+            fs::write(directory.path().join("mode"), mode).unwrap();
+            let result = client
+                .sign_protocol_event(9735, 100, "", event.tags.clone())
+                .await;
+            if mode == "protocol_fixture" {
+                assert_eq!(result.unwrap().event(), &event);
+            } else {
+                let error = result.unwrap_err();
+                assert!(!format!("{error:#}").contains("synthetic-secret-client-key"));
+            }
+        }
+        let calls = fs::read_to_string(directory.path().join("calls.jsonl")).unwrap();
+        assert_eq!(calls.lines().count(), 4);
+        for line in calls.lines() {
+            let call: serde_json::Value = serde_json::from_str(line).unwrap();
+            assert_eq!(call["phase"], "sign");
+            assert_eq!(call["payload"]["created_at"], 100);
+            assert_eq!(call["has_client_key"], true);
+        }
+        assert!(
+            client
+                .sign_protocol_event(0, 100, "", vec![])
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            fs::read_to_string(directory.path().join("calls.jsonl")).unwrap(),
+            calls
+        );
     }
 
     #[test]

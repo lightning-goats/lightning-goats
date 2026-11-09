@@ -21,12 +21,14 @@ mod outbox;
 pub use operator_credit::{OperatorCreditGrant, OperatorCreditResult, OperatorCreditStatus};
 mod overlay;
 mod strike;
+mod zap;
 pub use events::DurableEvent;
 use events::append_event_in_transaction;
 use feed::feed_credit_in_transaction;
 pub use feed::{StoredFeedAttempt, StoredFeedAttemptStatus};
 pub use outbox::OutboxEntry;
 pub use strike::StoredStrikeReceiveRequest;
+pub use zap::ZapReceiptJob;
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
@@ -211,6 +213,7 @@ impl LedgerStore {
         .await?;
 
         credit::record_native_btc(&mut transaction, settlement_id, ledger_id, event_seq).await?;
+        zap::stage_receipt(&mut transaction, payment, settlement_id, event_seq).await?;
         transaction.commit().await?;
 
         Ok(SettlementOutcome::Credited {

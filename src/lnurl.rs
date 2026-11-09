@@ -7,7 +7,7 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 
 use crate::{
-    config::{LightningAddressConfig, LnurlConfig},
+    config::{LightningAddressConfig, LnurlConfig, ZapConfig},
     domain::invoice::validate_user,
     ledger::LedgerStore,
     strike::StrikeRuntime,
@@ -22,6 +22,7 @@ pub struct LnurlService {
     addresses: Arc<HashMap<String, RegisteredAddress>>,
     strike: StrikeRuntime,
     ledger: LedgerStore,
+    zap: Option<Arc<ZapConfig>>,
 }
 
 #[derive(Debug, Clone)]
@@ -33,12 +34,14 @@ struct RegisteredAddress {
     max_sendable_msat: u64,
     metadata: String,
     description_hash: String,
+    nostr_payee: Option<String>,
 }
 
 #[derive(Debug)]
 pub enum LnurlServiceError {
     UnknownUser,
     InvalidAmount(&'static str),
+    InvalidZap,
     Busy,
     Provider(anyhow::Error),
 }
@@ -54,6 +57,7 @@ impl LnurlServiceError {
         match self {
             Self::UnknownUser => "Unknown Lightning Address",
             Self::InvalidAmount(reason) => reason,
+            Self::InvalidZap => "Invalid or unsupported zap request",
             Self::Provider(_) => "Unable to create Lightning invoice",
             Self::Busy => "Invoice service is busy; retry later",
         }
@@ -76,6 +80,10 @@ pub struct LnurlPayRequest {
     pub min_sendable: u64,
     pub metadata: String,
     pub tag: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allows_nostr: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nostr_pubkey: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -113,6 +121,27 @@ impl LnurlService {
             .host_str()
             .context("LNURL public base URL has no host")?;
         let mut addresses = HashMap::with_capacity(configured_addresses.len());
+        if let Some(zap) = &config.zap {
+            crate::nostr_event::validate_public_key(&zap.receipt_pubkey)?;
+            for (user, pubkey) in &zap.payee_pubkeys {
+                if !configured_addresses
+                    .iter()
+                    .any(|address| address.user == *user)
+                {
+                    bail!("zap registry contains an unknown Lightning Address user");
+                }
+                crate::nostr_event::validate_public_key(pubkey)?;
+            }
+            if zap.payee_pubkeys.is_empty() || zap.alias_origins.len() > 8 {
+                bail!("invalid zap registry bounds");
+            }
+            for origin in &zap.alias_origins {
+                let url = crate::public_network::validate_destination(origin, "https")?;
+                if url.path() != "/" || url.query().is_some() {
+                    bail!("zap alias must be a root HTTPS origin");
+                }
+            }
+        }
         for configured in configured_addresses {
             validate_user(&configured.user).context("invalid configured Lightning Address user")?;
             if configured.credit_pool != "herd" {
@@ -133,6 +162,11 @@ impl LnurlService {
                 max_sendable_msat: configured.max_sendable_msat,
                 metadata,
                 description_hash,
+                nostr_payee: config
+                    .zap
+                    .as_ref()
+                    .and_then(|zap| zap.payee_pubkeys.get(&configured.user))
+                    .cloned(),
             };
             if addresses
                 .insert(configured.user.clone(), registered)
@@ -148,6 +182,7 @@ impl LnurlService {
             addresses: Arc::new(addresses),
             strike,
             ledger,
+            zap: config.zap.clone().map(Arc::new),
         })
     }
 
@@ -163,6 +198,11 @@ impl LnurlService {
             min_sendable: address.min_sendable_msat,
             metadata: address.metadata.clone(),
             tag: PAY_REQUEST_TAG,
+            allows_nostr: address.nostr_payee.as_ref().map(|_| true),
+            nostr_pubkey: address
+                .nostr_payee
+                .as_ref()
+                .and(self.zap.as_ref().map(|zap| zap.receipt_pubkey.clone())),
         })
     }
 
@@ -170,6 +210,16 @@ impl LnurlService {
         &self,
         user: &str,
         amount_msat: u64,
+    ) -> Result<LnurlPayCallbackResponse, LnurlServiceError> {
+        self.callback_with_zap(user, amount_msat, None, None).await
+    }
+
+    pub async fn callback_with_zap(
+        &self,
+        user: &str,
+        amount_msat: u64,
+        raw_zap: Option<&str>,
+        encoded_lnurl: Option<&str>,
     ) -> Result<LnurlPayCallbackResponse, LnurlServiceError> {
         let address = self.address(user)?;
         if amount_msat < address.min_sendable_msat {
@@ -188,24 +238,75 @@ impl LnurlService {
             ));
         }
 
-        let created = self
-            .strike
-            .create_and_record_receive_request(
-                &self.ledger,
-                &address.user,
-                &address.credit_pool,
-                amount_msat,
-                &address.description_hash,
-                self.invoice_expiry_seconds,
-            )
-            .await
-            .map_err(|error| {
-                if error.is::<crate::strike::InvoiceCapacityError>() {
-                    LnurlServiceError::Busy
-                } else {
-                    LnurlServiceError::Provider(error)
-                }
-            })?;
+        let zap = if let Some(raw) = raw_zap {
+            let config = self.zap.as_ref().ok_or(LnurlServiceError::InvalidZap)?;
+            let payee = address
+                .nostr_payee
+                .as_deref()
+                .ok_or(LnurlServiceError::InvalidZap)?;
+            let request =
+                crate::zap::ZapRequest::validate(raw, payee, &config.receipt_pubkey, amount_msat)
+                    .map_err(|_| LnurlServiceError::InvalidZap)?;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|_| LnurlServiceError::InvalidZap)?
+                .as_secs();
+            request
+                .event()
+                .require_not_future(i64::try_from(now).map_err(|_| LnurlServiceError::InvalidZap)?)
+                .map_err(|_| LnurlServiceError::InvalidZap)?;
+            let path = format!(".well-known/lnurlp/{}", address.user);
+            let mut expected = vec![
+                self.public_base_url
+                    .join(&path)
+                    .map_err(|_| LnurlServiceError::InvalidZap)?
+                    .to_string(),
+            ];
+            for origin in &config.alias_origins {
+                expected.push(
+                    Url::parse(origin)
+                        .and_then(|url| url.join(&path))
+                        .map_err(|_| LnurlServiceError::InvalidZap)?
+                        .to_string(),
+                );
+            }
+            request
+                .validate_lnurl_binding(encoded_lnurl, &expected)
+                .map_err(|_| LnurlServiceError::InvalidZap)?;
+            Some(request)
+        } else {
+            None
+        };
+
+        let created = if let Some(zap) = zap.as_ref() {
+            self.strike
+                .create_and_record_zap_receive_request(
+                    &self.ledger,
+                    &address.user,
+                    &address.credit_pool,
+                    zap,
+                    self.invoice_expiry_seconds,
+                )
+                .await
+        } else {
+            self.strike
+                .create_and_record_receive_request(
+                    &self.ledger,
+                    &address.user,
+                    &address.credit_pool,
+                    amount_msat,
+                    &address.description_hash,
+                    self.invoice_expiry_seconds,
+                )
+                .await
+        }
+        .map_err(|error| {
+            if error.is::<crate::strike::InvoiceCapacityError>() {
+                LnurlServiceError::Busy
+            } else {
+                LnurlServiceError::Provider(error)
+            }
+        })?;
         Ok(LnurlPayCallbackResponse {
             pr: created.invoice,
             routes: Vec::new(),
@@ -276,6 +377,7 @@ mod tests {
             &LnurlConfig {
                 public_base_url: "https://lightning-goats.com/".to_owned(),
                 invoice_expiry_seconds: 300,
+                zap: None,
             },
             &addresses,
             strike,

@@ -1,5 +1,8 @@
 # HTTP context only. Install once as /etc/nginx/conf.d/lightning-goats-http.conf.
 # nginx.conf must include conf.d/*.conf inside http{}, before the site files.
+# A bounded 8 KiB NIP-57 JSON request can expand to about 24 KiB in a query.
+# Match the daemon's 32 KiB HTTP transport bound without unbounded URI buffers.
+large_client_header_buffers 4 32k;
 upstream lightning_goats_backend {
     server 127.0.0.1:8787;
     keepalive 8;

@@ -21,6 +21,15 @@ impl LedgerStore {
         &self,
         request: &StoredStrikeReceiveRequest,
     ) -> Result<()> {
+        self.record_strike_receive_request_with_zap(request, None)
+            .await
+    }
+
+    pub(crate) async fn record_strike_receive_request_with_zap(
+        &self,
+        request: &StoredStrikeReceiveRequest,
+        zap: Option<&crate::zap::ZapRequest>,
+    ) -> Result<()> {
         validate_hex32(&request.description_hash, "Strike description_hash")?;
         validate_hex32(&request.payment_hash, "Strike payment_hash")?;
         crate::domain::invoice::validate_user(&request.address_user)
@@ -35,8 +44,15 @@ impl LedgerStore {
         }
 
         let amount_msat = to_i64(request.amount_msat, "Strike amount_msat")?;
+        if let Some(zap) = zap {
+            if zap.amount_msat() != request.amount_msat
+                || zap.description_hash() != request.description_hash
+            {
+                bail!("zap request differs from its issued invoice binding");
+            }
+        }
         let id = request.receive_request_id.to_string();
-        let mut transaction = self.pool.begin().await?;
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let existing = sqlx::query(
             r#"
             SELECT address_user, credit_pool, amount_msat, description_hash,
@@ -60,6 +76,19 @@ impl LedgerStore {
                 && row.try_get::<Option<String>, _>("created_provider")?
                     == request.created_provider;
             if matches {
+                let previous=sqlx::query("SELECT request_json,payee_pubkey,receipt_pubkey FROM zap_receive_context WHERE receive_request_id=?").bind(&id).fetch_optional(&mut *transaction).await?;
+                let same = match (previous, zap) {
+                    (None, None) => true,
+                    (Some(row), Some(zap)) => {
+                        row.try_get::<String, _>("request_json")? == zap.raw_json()
+                            && row.try_get::<String, _>("payee_pubkey")? == zap.payee()
+                            && row.try_get::<String, _>("receipt_pubkey")? == zap.receipt_signer()
+                    }
+                    _ => false,
+                };
+                if !same {
+                    bail!("receive request has conflicting immutable zap context");
+                }
                 transaction.commit().await?;
                 return Ok(());
             }
@@ -88,6 +117,11 @@ impl LedgerStore {
         .execute(&mut *transaction)
         .await
         .context("failed persisting Strike receive request")?;
+
+        if let Some(zap) = zap {
+            sqlx::query("INSERT INTO zap_receive_context(receive_request_id,request_json,payee_pubkey,receipt_pubkey) VALUES(?,?,?,?)")
+                .bind(&id).bind(zap.raw_json()).bind(zap.payee()).bind(zap.receipt_signer()).execute(&mut *transaction).await?;
+        }
 
         transaction.commit().await?;
         Ok(())

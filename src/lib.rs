@@ -14,12 +14,16 @@ pub mod ledger;
 pub mod lnurl;
 pub mod messaging;
 pub mod nostr;
+pub mod nostr_event;
 pub mod openhab;
 pub mod overlay;
 pub mod presentation;
+pub mod public_network;
 pub mod quotes;
 pub mod secrets;
 pub mod strike;
+pub mod zap;
+pub mod zap_receipts;
 
 pub mod http;
 

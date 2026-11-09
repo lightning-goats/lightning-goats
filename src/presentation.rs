@@ -169,14 +169,27 @@ impl MessageRenderer {
         payload: &serde_json::Map<String, Value>,
         threshold_sats: u64,
     ) -> Result<RenderedPresentation> {
-        let amount = required_u64(payload, "threshold_sats")?;
+        let amount = payload
+            .get("triggering_payment_amount_sats")
+            .map(|value| {
+                value
+                    .as_u64()
+                    .filter(|amount| *amount > 0)
+                    .context("invalid triggering payment amount for feeding presentation")
+            })
+            .transpose()?;
         let credit = required_u64(payload, "feed_credit_sats")?;
         let goat = goat_for_event(event, None);
         let difference_message = difference_message(credit, threshold_sats);
-        let template = select_template(&self.catalog.feeder_trigger, event, "feeder_trigger")?;
+        let template = if amount.is_some() {
+            select_template(&self.catalog.feeder_trigger, event, "feeder_trigger")?
+        } else {
+            "⚡ The Lightning Goats have been fed! {difference_message}\n\nhttps://lightning-goats.com"
+        };
 
-        let overlay_values = common_values(amount, &difference_message, goat.name);
-        let nostr_values = common_values(amount, &difference_message, goat.nostr_profile);
+        let overlay_values = common_values(amount.unwrap_or(0), &difference_message, goat.name);
+        let nostr_values =
+            common_values(amount.unwrap_or(0), &difference_message, goat.nostr_profile);
 
         Ok(RenderedPresentation {
             nostr_content: Some(safe_substitute(template, &nostr_values)?),
@@ -456,6 +469,66 @@ mod tests {
             event_type: event_type.to_owned(),
             payload_json: payload.to_string(),
         }
+    }
+
+    #[test]
+    fn confirmed_feeding_uses_payment_amount_and_legacy_events_do_not_claim_threshold_payment() {
+        let renderer = MessageRenderer::embedded().unwrap();
+        for amount in [5, 10, 2340] {
+            let rendered = renderer
+                .render(
+                    &event(
+                        43,
+                        "feeder_confirmed",
+                        json!({"threshold_sats":1000,"feed_credit_sats":5,
+                "triggering_payment_amount_sats":amount}),
+                    ),
+                    1000,
+                )
+                .unwrap();
+            assert!(
+                rendered
+                    .nostr_content
+                    .unwrap()
+                    .contains(&format!("{amount} sats"))
+            );
+            assert!(
+                rendered
+                    .overlay_message
+                    .unwrap()
+                    .contains(&format!("{amount} sats"))
+            );
+        }
+        let legacy = renderer
+            .render(
+                &event(
+                    43,
+                    "feeder_confirmed",
+                    json!({"threshold_sats":1000,"feed_credit_sats":5}),
+                ),
+                1000,
+            )
+            .unwrap();
+        for message in [
+            legacy.nostr_content.unwrap(),
+            legacy.overlay_message.unwrap(),
+        ] {
+            assert!(!message.contains("1000 sats"));
+            assert!(message.contains("995 sats"));
+        }
+        assert!(
+            renderer
+                .render(
+                    &event(
+                        43,
+                        "feeder_confirmed",
+                        json!({"threshold_sats":1000,"feed_credit_sats":5,
+            "triggering_payment_amount_sats":0})
+                    ),
+                    1000
+                )
+                .is_err()
+        );
     }
 
     #[test]

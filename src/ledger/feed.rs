@@ -258,7 +258,7 @@ impl LedgerStore {
         }
 
         let source_key = format!("feed:{id}");
-        sqlx::query(
+        let debit = sqlx::query(
             r#"
             INSERT INTO ledger_entries
                 (entry_type, source_key, delta_sats, feed_attempt_id)
@@ -272,20 +272,48 @@ impl LedgerStore {
         .await?;
 
         let feed_credit_sats = feed_credit_in_transaction(&mut transaction).await?;
-        append_event_in_transaction(
+        // Message attribution only: remove the newest still-unspent credit to
+        // find the receipt that completed this FIFO threshold. A later payment
+        // during dispatch cannot replace the original funding contribution.
+        let triggering_payment_amount_sats = triggering_payment_amount(
             &mut transaction,
-            "feeder_confirmed",
-            &json!({
-                "feed_attempt_id": id,
-                "threshold_sats": threshold_sats,
-                "feed_credit_sats": feed_credit_sats
-            }),
+            debit.last_insert_rowid(),
+            feed_credit_sats,
         )
-        .await?;
+        .await
+        .unwrap_or(None);
+        let mut payload = json!({
+            "feed_attempt_id": id,
+            "threshold_sats": threshold_sats,
+            "feed_credit_sats": feed_credit_sats
+        });
+        if let Some(amount) = triggering_payment_amount_sats {
+            payload["triggering_payment_amount_sats"] = amount.into();
+        }
+        append_event_in_transaction(&mut transaction, "feeder_confirmed", &payload).await?;
 
         transaction.commit().await?;
         Ok(())
     }
+}
+
+async fn triggering_payment_amount(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    debit_id: i64,
+    mut unspent_sats: u64,
+) -> Result<Option<u64>> {
+    // Bounded, best-effort presentation lookup, with no schema or accounting
+    // mutation. Missing history never substitutes the threshold as a payment.
+    let rows = sqlx::query("SELECT delta_sats FROM ledger_entries WHERE id<? AND delta_sats>0 ORDER BY id DESC LIMIT 4096")
+        .bind(debit_id).fetch_all(&mut **transaction).await?;
+    for row in rows {
+        let amount = to_u64(row.try_get("delta_sats")?, "credit sats")?;
+        if unspent_sats < amount {
+            return Ok(Some(amount));
+        }
+        unspent_sats -= amount;
+    }
+    Ok(None)
 }
 
 pub(super) async fn feed_credit_in_transaction(
@@ -347,6 +375,17 @@ mod tests {
         store.confirm_feed_attempt(second).await.unwrap();
         assert_eq!(store.feed_credit_sats().await.unwrap(), 340);
         assert!(store.begin_feed_attempt(1_000).await.unwrap().is_none());
+        for event in store
+            .events_after(0, 100)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.event_type == "feeder_confirmed")
+        {
+            let payload: serde_json::Value = serde_json::from_str(&event.payload_json).unwrap();
+            assert_eq!(payload["triggering_payment_amount_sats"], 2340);
+            assert_eq!(payload["threshold_sats"], 1000);
+        }
 
         let events = store.events_after(0, 100).await.unwrap();
         assert_eq!(
@@ -356,6 +395,83 @@ mod tests {
                 .count(),
             2
         );
+    }
+
+    #[tokio::test]
+    async fn triggering_payment_amount_survives_later_payment_confirmation_and_restart() {
+        let (directory, store) = credited_store(995).await;
+        let paid = |id: &str, sats: u64| SettledPayment {
+            source: "test".into(),
+            source_id: id.into(),
+            payment_hash: None,
+            address_user: "herd".into(),
+            credit_pool: "herd".into(),
+            amount_msat: sats * 1000,
+            settled_at: None,
+            context_json: None,
+        };
+        store.record_payment(&paid("trigger", 10)).await.unwrap();
+        let id = store.begin_feed_attempt(1000).await.unwrap().unwrap();
+        // Received after the original intent; this must not steal attribution.
+        store.record_payment(&paid("later", 200)).await.unwrap();
+        store.confirm_feed_attempt(id).await.unwrap();
+        assert_eq!(store.feed_credit_sats().await.unwrap(), 205);
+        let event = store
+            .events_after(0, 100)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|e| e.event_type == "feeder_confirmed")
+            .unwrap();
+        let payload: serde_json::Value = serde_json::from_str(&event.payload_json).unwrap();
+        assert_eq!(payload["triggering_payment_amount_sats"], 10);
+        assert_eq!(payload["threshold_sats"], 1000);
+        let text = crate::presentation::MessageRenderer::embedded()
+            .unwrap()
+            .render(&event, 1000)
+            .unwrap();
+        assert!(text.nostr_content.unwrap().contains("10 sats"));
+        assert!(text.overlay_message.unwrap().contains("10 sats"));
+        let reopened = LedgerStore::connect(&format!(
+            "sqlite://{}",
+            directory.path().join("lightning-goats.db").display()
+        ))
+        .await
+        .unwrap();
+        reopened
+            .record_payment(&paid("much-later", 2000))
+            .await
+            .unwrap();
+        let persisted = reopened
+            .events_after(event.seq - 1, 1)
+            .await
+            .unwrap()
+            .remove(0);
+        assert_eq!(persisted, event);
+    }
+
+    #[tokio::test]
+    async fn attribution_lookup_bound_never_blocks_confirmation_or_invents_an_amount() {
+        let (_directory, store) = credited_store(1000).await;
+        sqlx::query("WITH RECURSIVE credits(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM credits WHERE n<4097) INSERT INTO ledger_entries(entry_type,source_key,delta_sats) SELECT 'HERD_RECEIPT','synthetic-later:'||n,1 FROM credits")
+            .execute(&store.pool).await.unwrap();
+        let id = store.begin_feed_attempt(1000).await.unwrap().unwrap();
+        store.confirm_feed_attempt(id).await.unwrap();
+        assert_eq!(store.feed_credit_sats().await.unwrap(), 4097);
+        let event = store
+            .events_after(0, 100)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|e| e.event_type == "feeder_confirmed")
+            .unwrap();
+        let payload: serde_json::Value = serde_json::from_str(&event.payload_json).unwrap();
+        assert!(payload.get("triggering_payment_amount_sats").is_none());
+        let text = crate::presentation::MessageRenderer::embedded()
+            .unwrap()
+            .render(&event, 1000)
+            .unwrap();
+        assert!(text.nostr_content.unwrap().contains("have been fed"));
     }
 
     #[tokio::test]

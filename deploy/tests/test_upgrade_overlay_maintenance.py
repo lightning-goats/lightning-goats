@@ -27,6 +27,19 @@ with patch.dict(sys.modules, {'inactive_file_transaction': s.C.TX}):
 
 
 class MaintenanceBoundaries(unittest.TestCase):
+    def test_simple_unit_exec_transition_is_observed_without_starting_again(self):
+        state = {'User': 'cyberherd', 'MainPID': '12345', 'ActiveState': 'active',
+                 'SubState': 'running', 'NeedDaemonReload': 'no'}
+        expected = hashlib.sha256(b'actual executable').hexdigest()
+        with (patch.object(m.C, 'status', return_value=state), patch.object(m, 'digest', return_value=expected),
+              patch.object(m.Path, 'read_bytes', side_effect=[b'systemd exec child', b'actual executable']) as reads,
+              patch.object(m.time, 'sleep'), patch.object(m.C, 'command', side_effect=AssertionError('start/restart attempted'))):
+            self.assertEqual(m.running('cyberherd.service', 'cyberherd', Path('/protected/program')), state)
+            self.assertEqual(reads.call_count, 2)
+        with patch.object(m.C, 'status', return_value=dict(state, ActiveState='failed')), patch.object(m, 'digest', return_value=expected):
+            with self.assertRaisesRegex(ValueError, 'failed during startup'):
+                m.running('cyberherd.service', 'cyberherd', Path('/protected/program'))
+
     def test_role_override_cannot_change_identity_commands_groups_or_credentials(self):
         valid = '[Service]\nNetworkNamespacePath=/proc/1/ns/net\n'
         with patch.object(m.S.Path, 'stat', return_value=SimpleNamespace(st_uid=0)):

@@ -420,13 +420,25 @@ def restore_unit(source, expected):
 
 
 def running(name, user, program):
-    value = C.status(name)
-    pid = value['MainPID']
-    if (value['User'] != user or value['ActiveState'] != 'active' or value['SubState'] != 'running'
-            or value['NeedDaemonReload'] != 'no' or not pid.isdecimal() or int(pid) < 2
-            or hashlib.sha256(Path('/proc', pid, 'exe').read_bytes()).hexdigest() != digest(program)):
-        raise ValueError('selected service is not running the protected program')
-    return value
+    # Type=simple's start job may finish before execve. Wait for this existing
+    # process to become the pinned program; never issue another start/restart.
+    expected = digest(program)
+    deadline = time.monotonic() + 10
+    while True:
+        value = C.status(name)
+        pid = value['MainPID']
+        if value['User'] != user or value['NeedDaemonReload'] != 'no' or value['ActiveState'] == 'failed':
+            raise ValueError('selected service identity/state failed during startup')
+        if (value['ActiveState'] == 'active' and value['SubState'] == 'running'
+                and pid.isdecimal() and int(pid) >= 2):
+            try:
+                if hashlib.sha256(Path('/proc', pid, 'exe').read_bytes()).hexdigest() == expected:
+                    return value
+            except (FileNotFoundError, ProcessLookupError):
+                pass
+        if time.monotonic() >= deadline:
+            raise ValueError('selected service is not running the protected program')
+        time.sleep(0.1)
 
 
 def health(url):

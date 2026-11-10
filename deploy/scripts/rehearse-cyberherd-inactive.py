@@ -111,6 +111,11 @@ def overlay_maintenance(launcher, root, fixture_directory, installation):
     """
     import http.server
     import threading
+    if (os.geteuid() != 0 or os.environ.get('GITHUB_ACTIONS') != 'true'
+            or not os.environ.get('GITHUB_RUN_ID', '').isdigit()
+            or os.readlink('/proc/self/ns/net') == os.readlink('/proc/1/ns/net')
+            or {v['ifname'] for v in json.loads(run('/usr/sbin/ip', '-j', 'link', 'show'))} != {'lo'}):
+        raise ValueError('overlay rehearsal requires the guarded disposable isolated CI host')
     tools = root / 'tools'
     spec = importlib.util.spec_from_file_location('ci_overlay_worker_support', tools / 'qualify-cyberherd-workers.py')
     w = importlib.util.module_from_spec(spec); spec.loader.exec_module(w)
@@ -225,6 +230,15 @@ def overlay_maintenance(launcher, root, fixture_directory, installation):
                 'native_core_and_membership_started': True, 'same_epoch_and_paid_pending_signed_counts': True,
                 'all_application_networking_loopback_isolated': True, 'gateway_post_count': 0,
                 'synthetic_credentials_only': True, 'provider_qualified': False, 'live_host_qualified': False}
+    except Exception:
+        # Only synthetic state/credentials exist in this guarded disposable VM.
+        # Never add this diagnostic to a production tool or read live journals.
+        import sys
+        for name in ('lightning-goats-receive.service', 'cyberherd.service'):
+            result = subprocess.run(['/usr/bin/journalctl', '--no-pager', '-u', name, '-n', '30', '-o', 'cat'],
+                                    capture_output=True, text=True, timeout=10)
+            print('DISPOSABLE SYNTHETIC UNIT ' + name + '\n' + result.stdout[-8000:], file=sys.stderr)
+        raise
     finally:
         run('/usr/bin/systemctl', 'stop', 'cyberherd.service', 'lightning-goats-receive.service')
         gateway.shutdown(); gateway.server_close(); thread.join(timeout=2)

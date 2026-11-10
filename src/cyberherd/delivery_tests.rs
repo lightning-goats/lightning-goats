@@ -591,7 +591,7 @@ async fn treat_messages_wait_for_real_joining_ack_and_reply_to_the_saved_stream_
             .unwrap()
             .is_none()
     );
-    // Saving a signature did not create either a thread anchor or a treat post.
+    // Saving a signature did not create either a thread anchor or a Nostr treat post.
     assert!(
         f.store
             .published_joining(&f.owner, &conversation, 1, &key(2))
@@ -599,6 +599,43 @@ async fn treat_messages_wait_for_real_joining_ack_and_reply_to_the_saved_stream_
             .unwrap()
             .is_none()
     );
+    // The verified human-name result is independently deliverable in canary;
+    // it creates no Nostr joining receipt or reply target.
+    let (core, overlay_task) = f.bridge(RuntimeMode::Canary).await;
+    f.ready(Some(false)).await;
+    let initial = f
+        .store
+        .pending_member_overlay(&f.owner)
+        .await
+        .unwrap()
+        .unwrap();
+    let seq = core.member_overlay(&initial).await.unwrap();
+    f.store
+        .acknowledge_member_overlay(&initial, seq)
+        .await
+        .unwrap();
+    let treat = f
+        .store
+        .pending_member_overlay(&f.owner)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(treat.category, "cyber_herd_treats");
+    assert!(treat.message.contains("Alice"));
+    assert!(treat.message.contains("9 sats"));
+    let seq = core.member_overlay(&treat).await.unwrap();
+    f.store
+        .acknowledge_member_overlay(&treat, seq)
+        .await
+        .unwrap();
+    assert!(
+        f.store
+            .published_joining(&f.owner, &conversation, 1, &key(2))
+            .await
+            .unwrap()
+            .is_none()
+    );
+    overlay_task.abort();
     let ack = fake.publish(&first_event, &first.relay).await.unwrap();
     f.store
         .finish_delivery(&first, Some(&ack), calendar::now().unwrap())

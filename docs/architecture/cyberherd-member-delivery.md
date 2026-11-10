@@ -63,6 +63,11 @@ that real joining receipt, independently of completed money movement. Older
 results missing conversation history remain queued until a genuine interaction
 receipt can supply a branch; they never fabricate a separate thread anchor.
 
+WebSocket notices have no Nostr reply anchor: a core-verified human-name treat
+notice can be delivered once during overlay-only staging or a relay outage while
+its public thread reply waits for a joining receipt. It still obeys the independent
+confirmed-unpaused overlay gate and never creates a publication receipt.
+
 Unsigned kind/time/content/tags are saved before nak. Native signature checks
 require the exact frozen fields. Signed bytes are saved before relay delivery.
 Each destination/relay has its own immutable matching-OK receipt; retries use the

@@ -329,34 +329,20 @@ impl Store {
         &self,
         owner: &str,
     ) -> Result<Option<crate::cyberherd::overlay_delivery::Message>> {
-        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let mut tx = self.pool.begin().await?;
         let binding: String =
             sqlx::query_scalar("SELECT binding_json FROM core_streams WHERE owner=?")
                 .bind(owner)
                 .fetch_one(&mut *tx)
                 .await?;
         let binding: crate::cyberherd::ingress::CoreBinding = serde_json::from_str(&binding)?;
-        let rows=sqlx::query("SELECT m.document_json FROM delivery_overlay o JOIN delivery_messages m ON m.owner=o.owner AND m.identity=o.identity WHERE o.owner=? AND o.event_seq IS NULL ORDER BY o.attempted_at,m.source_seq LIMIT 32")
-            .bind(owner).fetch_all(&mut *tx).await?;
-        for row in rows {
+        let row=sqlx::query("SELECT m.document_json FROM delivery_overlay o JOIN delivery_messages m ON m.owner=o.owner AND m.identity=o.identity WHERE o.owner=? AND o.event_seq IS NULL ORDER BY m.source_seq LIMIT 1")
+            .bind(owner).fetch_optional(&mut *tx).await?;
+        if let Some(row) = row {
             let message: Rendered =
                 serde_json::from_str(&row.try_get::<String, _>("document_json")?)?;
-            if message.requires_joining {
-                let branches:Vec<String>=sqlx::query_scalar("SELECT branch FROM delivery_destinations WHERE owner=? AND identity=? AND branch IS NOT NULL")
-                    .bind(owner).bind(&message.identity).fetch_all(&mut *tx).await?;
-                let mut ready = false;
-                for branch in branches {
-                    if joining_reference(&mut tx, owner, &branch).await?.is_some() {
-                        ready = true;
-                        break;
-                    }
-                }
-                if !ready {
-                    sqlx::query("UPDATE delivery_overlay SET attempted_at=MAX(attempted_at,?) WHERE owner=? AND identity=?")
-                        .bind(crate::cyberherd::calendar::now()?).bind(owner).bind(&message.identity).execute(&mut *tx).await?;
-                    continue;
-                }
-            }
+            // WebSocket notices have no Nostr reply anchor. Verified results
+            // remain usable during overlay-only staging or relay outages.
             let value = crate::cyberherd::overlay_delivery::Message {
                 epoch: binding.epoch,
                 owner: owner.into(),

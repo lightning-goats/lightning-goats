@@ -33,8 +33,9 @@ The operator subsequently approved the
 native backup/comparison, preserved paid state/configuration, original-UID migration
 and existing-mode restart passed; health/status return 200. The three CyberHerd
 roles remain absent and financial activation remains disabled. The protected
-[payout-key import command](deployment/cyberherd-payout-credential.md) is installed;
-this alone does not establish provider scopes/account binding or key installation.
+[payout-key import command](deployment/cyberherd-payout-credential.md) successfully
+encrypted the separate operator-supplied key without API calls or service changes;
+provider scopes/account binding and runtime use remain unverified.
 
 The Phase 1 implementation history below was last updated on 2026-09-07; consult
 the dated restoration/implementation records and current plan for later work.

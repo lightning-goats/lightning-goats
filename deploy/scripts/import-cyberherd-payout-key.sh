@@ -26,6 +26,8 @@ def main():
     try:
         if len(sys.argv) == 2:
             source = Path(sys.argv[1])
+            if not source.is_absolute():
+                raise ValueError('the argument must be an absolute private file path, never a key')
         else:
             for path in [*reversed(STORE.parents), STORE]:
                 info = path.lstat()
@@ -45,17 +47,22 @@ def main():
                 os.fsync(output.fileno())
             del key
             source = temporary
-        return subprocess.run([
+        result = subprocess.run([
             '/usr/bin/python3', '-I', '-S', '-B', LAUNCHER, MANIFEST,
             '--cyberherd-payout-key', '--key-file', str(source), '--import-key',
-        ], env={'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'}, check=False).returncode
+        ], env={'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'}, capture_output=True, text=True, timeout=90)
+        if result.returncode:
+            print('Import rejected. Check the private file, root ownership and mode 0600. An existing different credential requires reviewed rotation; nothing is replaced automatically.', file=sys.stderr)
+        else:
+            print(result.stdout, end='')
+        return result.returncode
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
 
 try:
     raise SystemExit(main())
-except (ValueError, OSError, UnicodeError, getpass.GetPassWarning):
+except (ValueError, OSError, UnicodeError, getpass.GetPassWarning, subprocess.TimeoutExpired):
     print('Payout key import failed; key input withheld. Use a private root-owned file if the terminal cannot hide input.', file=sys.stderr)
     raise SystemExit(1)
 except (KeyboardInterrupt, EOFError):

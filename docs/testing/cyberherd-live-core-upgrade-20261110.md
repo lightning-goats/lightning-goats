@@ -39,8 +39,13 @@ The existing active core resumed its previously configured responsibilities.
 
 The authenticated payout importer and protected convenience command are installed;
 see [the credential procedure](../deployment/cyberherd-payout-credential.md).
-Installation alone does not claim that a payout key has been imported or its
-provider scopes/account binding have been verified. Separate role installation,
+The operator subsequently supplied the private input-file path and attempted its
+import. The protected entry point successfully imported the separate key, verified
+its encryption round trip and retained the existing receive credential. It made
+zero API calls, sent no payments and changed no services. A synthetic non-key
+argument also verified that accidental relative key arguments fail without echo.
+The key is installed as encrypted data only: provider scopes/account binding
+remain unverified. Separate role installation,
 household authorization, OS/socket/network/helper/browser qualification,
 independently reconciled recovery adoption and explicit financial activation
 remain unfinished. PR111 remains draft and the full twelve-part goal stays active.

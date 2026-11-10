@@ -2,8 +2,10 @@
 
 The authenticated tool bundle now contains `install-cyberherd-inactive.py`.
 The [495-test checkpoint](../testing/cyberherd-installation-checkpoint-20261110.md)
-records source and disposable installed qualification. It is not installed or
-run on the live host.
+records source and disposable installed qualification. The authenticated tool
+bundle is now installed on the live host; the three new service roles remain
+uninstalled, as recorded in the
+[live core checkpoint](../testing/cyberherd-live-core-upgrade-20261110.md).
 Use Python **3.11 or newer** through the
 [externally authenticated launcher](inactive-upgrade-transaction.md), with its
 complete thirteen-file closure. Authenticate launcher/tool-manifest, source commit
@@ -152,3 +154,15 @@ stopped and never starts the payment daemon. The
 [combined transaction checkpoint](../testing/cyberherd-core-transaction-checkpoint-20261110.md)
 records its passing exact-source result; the earlier checkpoint remains specific
 to its original installer evidence.
+
+The subsequent `rehearse-cyberherd-boundaries.py` source adds a separate CI-only
+qualification step after inactive installation. It starts three short-lived
+Python probes using copies of the shipped unit protections, separate real UIDs
+and synthetic encrypted credentials. It checks cleared kernel capabilities/NNP,
+read-only managed files, writable own state, foreign-journal/credential denial,
+and public-mock reachability alongside private IPv4/IPv6 denial. All endpoints
+are local to a new network namespace, with positive root reachability controls.
+The actual application units stay persistently masked; journal bytes must remain
+unchanged. This new probe extension is pending its own CI result. Even a passing
+OS policy probe does not prove the Rust socket protocol, household, provider,
+live-host or recovery-adoption boundaries.

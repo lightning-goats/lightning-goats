@@ -35,6 +35,8 @@ sudo /usr/local/bin/install-cyberherd-payout-key /root/cyberherd-payout-key.txt
 ```
 
 The argument is a private **file path**, never a key. No webhook secret is needed.
+Use the installed command above; the underlying `.py` helper is not a Bash script
+and deliberately refuses execution without its authenticated launcher.
 These commands install encrypted credential data only; they do not enable payouts,
 contact Strike or prove key permissions. The wrapper invokes the isolated launcher
 with the independently pinned tool manifest, and does not use writable checkout

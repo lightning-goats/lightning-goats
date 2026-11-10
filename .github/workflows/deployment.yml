@@ -170,6 +170,14 @@ jobs:
           sudo install -d -o root -g root -m 0755 /usr/local/lib /usr/local/lib/systemd /usr/local/lib/systemd/system
           sudo --preserve-env=GITHUB_ACTIONS,GITHUB_RUN_ID unshare --net -- python3 -B deploy/scripts/rehearse-cyberherd-inactive.py "$RUNNER_TEMP/cyberherd-systemd-review/cyberherd-review-x86_64-linux-gnu.tar.gz" "$GITHUB_SHA" "$RUNNER_TEMP/cyberherd-systemd-test-only" --core-archive "$RUNNER_TEMP/package-systemd/lightning-goats-smoke-x86_64-linux-gnu.tar.gz" --disposable-ci-host > "$RUNNER_TEMP/CYBERHERD-INACTIVE-SYSTEMD.json"
           (cd "$RUNNER_TEMP" && sha256sum CYBERHERD-INACTIVE-SYSTEMD.json >> SYSTEMD-SHA256SUMS)
+      - name: Probe actual CyberHerd unit identity, credentials and network policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Disposable VM only. Python probes retain the shipped unit protections;
+          # no application worker, real credential or external endpoint is used.
+          sudo --preserve-env=GITHUB_ACTIONS,GITHUB_RUN_ID unshare --net -- python3 -B deploy/scripts/rehearse-cyberherd-boundaries.py --disposable-ci-host > "$RUNNER_TEMP/CYBERHERD-BOUNDARIES.json"
+          (cd "$RUNNER_TEMP" && sha256sum CYBERHERD-BOUNDARIES.json >> SYSTEMD-SHA256SUMS)
       - name: Retain systemd acceptance evidence
         uses: actions/upload-artifact@v4
         with:
@@ -180,6 +188,7 @@ jobs:
             ${{ runner.temp }}/INACTIVE-CANARY-PLAN.json
             ${{ runner.temp }}/INACTIVE-CANARY-INSTALL.json
             ${{ runner.temp }}/CYBERHERD-INACTIVE-SYSTEMD.json
+            ${{ runner.temp }}/CYBERHERD-BOUNDARIES.json
             ${{ runner.temp }}/SYSTEMD-SHA256SUMS
           if-no-files-found: error
           retention-days: 14

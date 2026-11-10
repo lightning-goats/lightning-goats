@@ -50,6 +50,10 @@ advanced or reset. Preparation refuses reused/partial destinations. Failed check
 leave an `INCOMPLETE` record and data for inspection; they never overwrite an
 installation to make a retry pass.
 
+Role-journal bytes are read only for the fresh-install hash comparison; the live
+core journal is not opened and no journal is parsed. The assembled candidate unit
+also passes `systemd-analyze verify` before preparation can be accepted.
+
 The private bundle retains exact original configuration/unit/drop-in/policy
 files, a recoverable two-configuration replacement plan, candidate core and
 membership TOML, a core unit candidate and a dedicated tmpfiles candidate. The

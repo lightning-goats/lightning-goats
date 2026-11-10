@@ -168,7 +168,7 @@ def prepare(installation, validator, validator_sha, destination, message_start_a
     C.TX.sync_directory(destination.parent)
     C.write_json(destination / 'INCOMPLETE', {'prepared': False, 'services_changed': False})
     candidates = {'core.toml': W.toml_text(new_core), 'membership.toml': W.toml_text(new_member),
-                  'core.service': candidate_unit, 'bridge.tmpfiles': tmpfiles}
+                  C.UNIT.name: candidate_unit, 'bridge.tmpfiles': tmpfiles}
     for name, text in candidates.items():
         path = destination / name
         with path.open('x') as stream:
@@ -176,6 +176,7 @@ def prepare(installation, validator, validator_sha, destination, message_start_a
             stream.write(text); stream.flush(); os.fsync(stream.fileno())
     accepted = check_native_report(json.loads(C.command(str(validator), str(destination / 'core.toml'),
                                                        str(destination / 'membership.toml'))))
+    C.command('/usr/bin/systemd-analyze', 'verify', str(destination / C.UNIT.name))
     files = {**original['installation']['core']['files'],
              str(Q.ETC / 'cyberherd/config.toml'): C.TX.fingerprint(Q.ETC / 'cyberherd/config.toml'),
              str(MAINTENANCE): original['maintenance']}
@@ -192,11 +193,13 @@ def prepare(installation, validator, validator_sha, destination, message_start_a
         'message_start_after': message_start_after,
         'candidate_sha256': {name: hashlib.sha256(text.encode()).hexdigest() for name, text in candidates.items()},
         'original_order': list(files), 'original_files': files, 'native_validation': accepted,
-        'services_changed': False, 'state_opened': False, 'activation_supported': False,
+        'services_changed': False, 'journals_parsed': False, 'live_core_journal_opened': False,
+        'role_journals_hashed_only': True, 'activation_supported': False,
     })
     (destination / 'INCOMPLETE').unlink(); C.TX.sync_directory(destination)
     return {'prepared': True, 'native_configuration_validated': True, 'services_changed': False,
-            'state_opened': False, 'credentials_loaded': False, 'activation_supported': False}
+            'journals_parsed': False, 'live_core_journal_opened': False,
+            'credentials_loaded': False, 'activation_supported': False}
 
 
 def require_baseline(installation, validator, validator_sha, expected):

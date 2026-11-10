@@ -908,6 +908,10 @@ async fn legacy_core_snapshot(
         .execute(&mut *connection)
         .await
         .unwrap();
+    sqlx::query("PRAGMA recursive_triggers=OFF")
+        .execute(&mut *connection)
+        .await
+        .unwrap();
     let tables: Vec<String> = sqlx::query_scalar("SELECT name FROM main.sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name<>'_sqlx_migrations' ORDER BY name")
         .fetch_all(&mut *connection).await.unwrap();
     for table in tables {
@@ -919,8 +923,19 @@ async fn legacy_core_snapshot(
         // Singleton clock/default rows may already exist from schema installation.
         // The original values belong in the historical snapshot, without deleting
         // any retained production record: this destination is a fresh test store.
+        let columns: Vec<String> =
+            sqlx::query_scalar(&format!("SELECT name FROM pragma_table_info('{table}')"))
+                .fetch_all(&mut *connection)
+                .await
+                .unwrap();
+        assert!(columns.iter().all(|column| {
+            column
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b == b'_' || b.is_ascii_digit())
+        }));
+        let columns = columns.join(",");
         sqlx::query(&format!(
-            "INSERT OR REPLACE INTO main.{table} SELECT * FROM historical_source.{table}"
+            "INSERT OR REPLACE INTO main.{table} ({columns}) SELECT {columns} FROM historical_source.{table}"
         ))
         .execute(&mut *connection)
         .await

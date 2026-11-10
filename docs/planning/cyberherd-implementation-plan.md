@@ -242,9 +242,10 @@ by these source checkpoints. Keep the full PR draft while required work remains.
 
 Subsequent optional [lifecycle source](../architecture/cyberherd-lifecycle.md)
 adds an actual-override observer, ordered per-relay/destination notices, bounded
-live-stream invitations and sanitized gateway solar context. This source remains
-under verification and is disabled by default; it does not establish production
-installation or public relay/bunker qualification.
+live-stream invitations and sanitized gateway solar context. The
+[449-test checkpoint](../testing/cyberherd-lifecycle-checkpoint-20261110.md)
+records verified source and inactive artifacts. It remains disabled by default
+and does not establish production installation or public relay/bunker qualification.
 
 Remaining implementation and qualification includes the feeder herd summary and
 one authenticated active-stream copy, lifecycle source/installed qualification,

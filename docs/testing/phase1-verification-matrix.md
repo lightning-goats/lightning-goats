@@ -157,3 +157,23 @@ role; permanent never-executed closure; retained execute uncertainty; partial
 hash-chain ordering and rollback on final-write failure. Run full locked Rust,
 deployment and dependency-audit gates for the exact candidate source. These tests
 do not authorize production spending or replace the full CyberHerd port contract.
+
+
+## Optional CyberHerd lifecycle source checks
+
+The standalone port's lifecycle checks are recorded in
+[`cyberherd-lifecycle-checkpoint-20261110.md`](cyberherd-lifecycle-checkpoint-20261110.md).
+Its ten new regressions cover actual-override/unknown handling, quiet initial OFF,
+initial ON, ordered note/chat relay receipts, exact signed retries, invitation
+cooldowns/cancellation/capacity, template opt-out, evening context, backpressure
+and the fixed read-only gateway Astro route. The final code passed all required
+Rust commands through source-pinned CI and inactive artifact checks. The known
+unignored SQLite dependency advisory remains a release blocker.
+
+Before opting into live lifecycle notices, still qualify the installed dedicated
+UIDs/configuration, household gateway's three fixed Astro Items and unknown/error
+behavior, the distinct household NIP-46 client for kinds 1 and 1311, and actual
+relay acknowledgments. Review the retained outbox and baseline before activation;
+do not clear signatures/cooldowns or infer permission for feeding/payments from
+these read-only presentation tests. The full CyberHerd completion contract remains
+in `docs/planning/cyberherd-implementation-plan.md`.

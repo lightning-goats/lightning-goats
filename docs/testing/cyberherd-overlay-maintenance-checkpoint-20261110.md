@@ -1,8 +1,11 @@
 # Qualified overlay maintenance and production plan — 2026-11-10
 
-The complete executor passes its installed disposable systemd rehearsal. The VPS
-now has a protected execution plan and independent readback. **No production
-maintenance or activation has started; operator approval remains required.**
+The complete executor passes its installed disposable systemd rehearsal. The
+operator approved maintenance. The actual apply verified its native backup and
+installed the configuration, but resume refused an inherited Fedora service
+override before starting either application. Configuration rollback and original
+core resumption succeeded; membership remains masked. The bounded compatibility
+correction below is pending qualification and retry under that same approval.
 The full twelve-part port remains incomplete.
 
 Qualified code `6040efc339bb035fa03bad3d544faa2d45e90309` and tested merge
@@ -73,8 +76,8 @@ Execution receipt SHA256:
 `bc6120d2a49eee50cb653684d2223aaa014e46f94b1e6ac0712490b9d39fc77f`.
 Two-configuration manifest SHA256:
 `61ee7632189ecd29f8a205edb838ee6391e5ae9ff1bd21184b84a0f187d3d503`.
-No maintenance marker, tmpfiles entry or bridge runtime directory exists. Plan
-parsed no production journal, loaded no credential and stopped no service. The
+At planning time no maintenance marker, tmpfiles entry or bridge runtime directory
+existed. Plan parsed no production journal, loaded no credential and stopped no service. The
 receive PID and zero-restart count remained unchanged; health/status returned
 200, with all three new roles masked/inactive and zero PIDs.
 
@@ -87,9 +90,35 @@ disabled/zero. DNS, WireGuard, provider policy and public proxy routes are uncha
 The separately requested goat-portrait frontend correction does not activate this
 plan or change its executable/configuration binding.
 
-See the [procedure](../deployment/cyberherd-overlay-maintenance.md). Production
-execution, incoming settlement/receipt and membership delivery, public roster
+See the [procedure](../deployment/cyberherd-overlay-maintenance.md). Successful
+production activation, incoming settlement/receipt and membership delivery, public roster
 integration, global network/provider/payout qualification, nonzero financial
 ceilings and externally reconciled recovery adoption remain open. PR111 stays
 draft. The upstream explanation was fetched again and still matches the plan's
 pinned SHA256 `e56c6793ed0687e4fcac7df54dac48a375673308dc65e988e0dcd987af46e67a`.
+
+## Actual approved attempt and recovery
+
+The operator approved the bounded overlay-stage interruption. Actual apply of
+execution `cyberherd-overlay-maintenance-6040efc` succeeded, including a current
+native four-journal backup and verification. Resume then refused the effective
+membership override set before starting either core or membership. The inherited
+`/usr/lib/systemd/system/service.d/10-timeout-abort.conf` was already frozen in
+the original core inventory but omitted from the expected membership set. Its
+only directive is `TimeoutStopFailureMode=abort`.
+
+The reviewed configuration-only rollback and separate core-only resume succeeded.
+The original receive service is healthy with zero automatic restarts; membership,
+payout and signer remain masked/inactive. No database was adopted, replaced or
+reset. The verified backup and apply/refusal/rollback/resume records are retained;
+paid balances, feeder UUIDs, epoch, signed jobs and replay history are preserved.
+The original transaction is terminal and must never be reused or rewritten.
+
+The correction recognizes only this exact protected, previously frozen timeout
+policy and independently checks effective user/group before startup. Unknown
+common directives, changed fingerprints and command/identity overrides still
+refuse. Root recovery fixtures and the actual systemd rehearsal now include this
+common policy alongside the existing per-role namespace override. Their updated
+results are pending; prior green results do not qualify the correction. A fresh
+review/transaction and current native backup are required for retry. The same
+explicit operator approval covers this bounded compatibility correction.

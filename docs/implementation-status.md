@@ -56,8 +56,11 @@ That checkpoint prepared configuration without activating the new feature.
 The [maintenance executor checkpoint](testing/cyberherd-overlay-maintenance-checkpoint-20261110.md)
 now passes a complete installed systemd/native backup/apply/resume/rollback
 rehearsal with synthetic state and isolated networking. The actual VPS execution
-plan passes independent readback without changing the running core. Live
-maintenance approval remains required; the executor has not run on the live core.
+plan passed independent readback. The operator-approved apply verified a current
+native backup; resume refused an inherited Fedora timeout policy before starting
+applications. Configuration rollback and original-core resume succeeded. The
+bounded compatibility correction awaits exact qualification and a fresh retry
+under the existing approval; membership and outgoing roles remain masked.
 
 Other remaining work includes installed browser/presentation and global network
 qualification, concrete externally reconciled recovery adoption, operator-selected

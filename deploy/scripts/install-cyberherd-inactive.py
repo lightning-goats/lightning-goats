@@ -305,7 +305,7 @@ def masked_reload_current(value, pinned_dropins=None):
         return False
     for name, expected in pinned_dropins.items():
         path = Path(name)
-        if path.parent.name != value['Id'] + '.d' or not path.name.endswith('.conf'):
+        if path.parent.name not in (value['Id'] + '.d', 'service.d') or not path.name.endswith('.conf'):
             return False
         C.protected(path)
         if C.TX.fingerprint(path) != expected:
@@ -321,7 +321,7 @@ def check_masked(masked_dropins=None):
                 or value['ActiveState'] != 'inactive' or value['SubState'] != 'dead'
                 or value['MainPID'] != '0' or value['UnitFileState'] != 'masked'
                 or not masked_reload_current(value, {p: fp for p, fp in (masked_dropins or {}).items()
-                                                    if Path(p).parent.name == role + '.service.d'})):
+                                                    if Path(p).parent.name in (role + '.service.d', 'service.d')})):
             states = {k: value[k] for k in ('LoadState', 'ActiveState', 'SubState', 'UnitFileState', 'NeedDaemonReload')}
             raise ValueError('every new role must remain persistently masked/inactive: ' + role + ' ' + json.dumps(states, sort_keys=True))
 

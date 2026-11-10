@@ -91,6 +91,7 @@ def stable(r):
     base = r['baseline']
     if S.role_dropins() != base.get('role_dropins', {}):
         raise ValueError('role-specific unit overrides changed')
+    S.global_dropins(base['installation']['core'])
     C.protected(MASKS, directory=True)
     if Q.I.check_identities() != base['installation']['runtime']:
         raise ValueError('runtime identity changed')
@@ -267,9 +268,10 @@ def stopped(r):
     stable(r)
     for name in (C.UNIT_NAME, *(role + '.service' for role in Q.ROLES)):
         value = C.status(name)
-        pins = {p: fp for p, fp in r['baseline'].get('role_dropins', {}).items() if Path(p).parent.name == name + '.d'}
+        pins = {**S.global_dropins(r['baseline']['installation']['core']),
+                **{p: fp for p, fp in r['baseline'].get('role_dropins', {}).items() if Path(p).parent.name == name + '.d'}}
         if name == C.UNIT_NAME:
-            pins = {p: fp for p, fp in r['original_files'].items() if Path(p).parent.name == name + '.d'}
+            pins.update({p: fp for p, fp in r['original_files'].items() if Path(p).parent.name == name + '.d'})
         if (value['Id'] != name or value['LoadState'] != 'masked' or value['ActiveState'] != 'inactive'
                 or value['SubState'] != 'dead' or value['MainPID'] != '0'
                 or value['UnitFileState'] != 'masked' or not Q.I.masked_reload_current(value, pins)
@@ -452,6 +454,11 @@ def health(url):
     raise ValueError('local health check failed; preserve maintenance evidence')
 
 
+def start_identity(value, user):
+    if value['User'] != user or value['Group'] not in ('', user):
+        raise ValueError('effective service user/group differs before start')
+
+
 def resume(directory, approved, core_only=False):
     if not approved:
         raise ValueError('explicit service resumption approval required')
@@ -495,15 +502,18 @@ def resume(directory, approved, core_only=False):
         if (core_unit['FragmentPath'] != str(C.UNIT)
                 or core_unit['DropInPaths'] != r['baseline']['installation']['core']['properties']['DropInPaths']):
             raise ValueError('effective core unit changed before start')
+        start_identity(core_unit, 'lightning-goats')
         if core_only:
             if not masked(member_mask) or C.status('cyberherd.service')['MainPID'] != '0':
                 raise ValueError('intake must stay masked for original-core resumption')
         else:
             member_unit = C.status('cyberherd.service')
             expected_dropins = {p for p in r['baseline'].get('role_dropins', {}) if Path(p).parent.name == 'cyberherd.service.d'}
+            expected_dropins.update(S.global_dropins(r['baseline']['installation']['core']))
             if (member_unit['FragmentPath'] != str(Q.UNITS / 'cyberherd.service')
                     or set(member_unit['DropInPaths'].split()) != expected_dropins):
                 raise ValueError('effective membership unit changed before start')
+            start_identity(member_unit, 'cyberherd')
         C.command('/usr/bin/systemctl', 'start', '--', C.UNIT_NAME, timeout=120)
         running(C.UNIT_NAME, 'lightning-goats', Q.BIN / 'lightning-goatsd')
         health('http://127.0.0.1:8787/healthz'); health('http://127.0.0.1:8787/api/v1/status')

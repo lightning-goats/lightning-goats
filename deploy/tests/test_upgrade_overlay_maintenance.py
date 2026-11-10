@@ -27,6 +27,22 @@ with patch.dict(sys.modules, {'inactive_file_transaction': s.C.TX}):
 
 
 class MaintenanceBoundaries(unittest.TestCase):
+    def test_only_frozen_timeout_abort_can_be_inherited_and_identity_is_checked_before_start(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary) / 'service.d'; directory.mkdir()
+            path = directory / 'timeout.conf'; path.write_text('[Service]\nTimeoutStopFailureMode=abort\n')
+            core = {'properties': {'DropInPaths': str(path)}, 'files': {str(path): m.TX.fingerprint(path)}}
+            with patch.object(m.S.C, 'protected'):
+                self.assertEqual(set(m.S.global_dropins(core)), {str(path)})
+                path.write_text('[Service]\nUser=root\n')
+                with self.assertRaises(ValueError): m.S.global_dropins(core)
+                core['files'][str(path)] = m.TX.fingerprint(path)
+                with self.assertRaisesRegex(ValueError, 'unsupported inherited'): m.S.global_dropins(core)
+        m.start_identity({'User': 'cyberherd', 'Group': 'cyberherd'}, 'cyberherd')
+        for identity in ({'User': 'root', 'Group': 'cyberherd'}, {'User': 'cyberherd', 'Group': 'sudo'}):
+            with self.assertRaisesRegex(ValueError, 'before start'): m.start_identity(identity, 'cyberherd')
+
     def test_simple_unit_exec_transition_is_observed_without_starting_again(self):
         state = {'User': 'cyberherd', 'MainPID': '12345', 'ActiveState': 'active',
                  'SubState': 'running', 'NeedDaemonReload': 'no'}
@@ -113,7 +129,11 @@ class OverlayMaintenanceFiles(prep.OverlayStageFiles):
                             ('verified_tool_identity', lambda: {'source': 'maintenance-fixture'})]:
             context = patch.object(m, name, value); context.start(); self.addCleanup(context.stop)
         context = patch.object(s.C, 'UNIT_NAME', self.unit.name); context.start(); self.addCleanup(context.stop)
-        self.original['installation']['core']['properties'] = {'DropInPaths': ''}
+        common = self.etc / 'service.d'; common.mkdir(mode=0o755)
+        self.common = common / '10-timeout-abort.conf'
+        self.common.write_text('[Service]\nTimeoutStopFailureMode=abort\n'); self.common.chmod(0o644)
+        self.original['installation']['core']['files'][str(self.common)] = s.C.TX.fingerprint(self.common)
+        self.original['installation']['core']['properties'] = {'DropInPaths': str(self.common)}
         core, member = configs()
         self.core_path.write_text(s.W.toml_text(core)); self.member_path.write_text(s.W.toml_text(member))
         self.original['installation']['core']['files'][str(self.core_path)] = s.C.TX.fingerprint(self.core_path)
@@ -149,7 +169,8 @@ class OverlayMaintenanceFiles(prep.OverlayStageFiles):
                 'ActiveState': 'active' if live else 'inactive', 'SubState': 'running' if live else 'dead',
                 'MainPID': '12345' if live else '0', 'UnitFileState': 'masked' if masked else 'disabled',
                 'NeedDaemonReload': 'no', 'ControlGroup': '', 'User': 'lightning-goats' if name == self.unit.name else name[:-8],
-                'FragmentPath': str(self.unit if name == self.unit.name else s.Q.UNITS / name), 'DropInPaths': ''}
+                'Group': 'lightning-goats' if name == self.unit.name else name[:-8],
+                'FragmentPath': str(self.unit if name == self.unit.name else s.Q.UNITS / name), 'DropInPaths': str(self.common)}
 
     def command_impl(self, *args, **kwargs):
         self.command_log.append(args)

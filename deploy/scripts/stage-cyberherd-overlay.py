@@ -82,6 +82,24 @@ def role_dropins():
     return result
 
 
+def global_dropins(core):
+    """Only the frozen OS timeout policy may be inherited by a new role."""
+    result = {}
+    for name in core['properties']['DropInPaths'].split():
+        path = Path(name)
+        if path.parent.name != 'service.d':
+            continue
+        expected = core['files'].get(name)
+        C.protected(path)
+        if expected is None or C.TX.fingerprint(path) != expected or path.stat().st_size > 65536:
+            raise ValueError('inherited timeout policy is not the frozen original')
+        lines = [v.strip() for v in path.read_text().splitlines() if v.strip() and not v.strip().startswith(('#', ';'))]
+        if lines != ['[Service]', 'TimeoutStopFailureMode=abort']:
+            raise ValueError('unsupported inherited service policy; review before activation')
+        result[name] = expected
+    return result
+
+
 def render(core, member, peer_uid, group_gid, message_start_after):
     """Only the native receive/zero-budget bridge and presentation may change."""
     if (type(message_start_after) is not int or message_start_after < 0
@@ -134,7 +152,11 @@ def check_native_report(value):
 
 def baseline(installation, validator, validator_sha):
     dropins = role_dropins()
-    original = Q.baseline(installation, masked_dropins=dropins)
+    properties = C.status(C.UNIT_NAME)
+    common = global_dropins({'properties': properties, 'files': C.unit_files(properties)})
+    original = Q.baseline(installation, masked_dropins={**common, **dropins})
+    if global_dropins(original['core']) != common:
+        raise ValueError('inherited service policy changed during baseline inspection')
     core_user = C.pwd.getpwnam('lightning-goats')
     core_groups = {C.grp.getgrgid(gid).gr_name for gid in os.getgrouplist(core_user.pw_name, core_user.pw_gid)}
     if (original['core']['properties']['User'] != core_user.pw_name

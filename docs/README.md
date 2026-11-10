@@ -36,8 +36,9 @@ membership Nostr signer. It implements no activation or service changes.
 The separate [maintenance executor](deployment/cyberherd-overlay-maintenance.md)
 now has a passing [installed rehearsal and VPS execution plan](testing/cyberherd-overlay-maintenance-checkpoint-20261110.md).
 Its native backup/apply/resume/configuration-only rollback ran on synthetic
-state in isolated systemd services. The production plan is ready for the
-operator maintenance decision; no CyberHerd worker has been activated on the VPS.
+state in isolated systemd services. The approved production attempt verified its backup, then refused an inherited
+timeout policy before startup. Recovery restored the original core. A bounded
+compatibility correction and fresh retry remain; CyberHerd stays inactive.
 
 Fresh [offline journal initialization](deployment/cyberherd-offline-initialization.md)
 now has a [492-test source checkpoint](testing/cyberherd-bootstrap-checkpoint-20261110.md),

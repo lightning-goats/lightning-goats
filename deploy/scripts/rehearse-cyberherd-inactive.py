@@ -166,6 +166,14 @@ def overlay_maintenance(launcher, root, fixture_directory, installation):
     dropdir = Path('/etc/systemd/system/cyberherd.service.d'); dropdir.mkdir(mode=0o755)
     drop = dropdir / '90-ci-network.conf'
     drop.write_text('[Service]\nNetworkNamespacePath=' + str(namespace) + '\n'); drop.chmod(0o644)
+    # Exercise the inherited Fedora-style policy as well as role overrides.
+    common_dir = Path('/etc/systemd/system/service.d')
+    common_created = not common_dir.exists()
+    common_dir.mkdir(mode=0o755, exist_ok=True)
+    common = common_dir / '90-ci-timeout-abort.conf'
+    common_text = '[Service]\nTimeoutStopFailureMode=abort\n'
+    with common.open('x') as out: out.write(common_text)
+    common.chmod(0o644)
     payout = tomllib.loads(Path('/etc/cyberherd-payout/config.toml').read_text())
     components = {'core': {'database': '/var/lib/lightning-goats/lightning-goats.db',
                             'uid': core.pw_uid, 'gid': core.pw_gid, 'unit': 'lightning-goats-receive.service'}}
@@ -241,6 +249,10 @@ def overlay_maintenance(launcher, root, fixture_directory, installation):
         raise
     finally:
         run('/usr/bin/systemctl', 'stop', 'cyberherd.service', 'lightning-goats-receive.service')
+        assert common.read_text() == common_text
+        common.unlink()
+        if common_created: common_dir.rmdir()
+        run('/usr/bin/systemctl', 'daemon-reload')
         gateway.shutdown(); gateway.server_close(); thread.join(timeout=2)
 
 

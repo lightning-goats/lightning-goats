@@ -1,9 +1,10 @@
 # Explicit overlay-stage maintenance
 
 The [installed rehearsal and production plan](../testing/cyberherd-overlay-maintenance-checkpoint-20261110.md)
-are qualified. No production maintenance or activation has been performed or
-approved for this stage. The concrete protected plan is ready for the operator
-maintenance decision; source qualification does not grant activation.
+record the qualified rehearsal, approved live attempt and successful recovery.
+The first live resume refused Fedora’s inherited timeout policy before application
+startup. Original payments are restored; a bounded correction requires exact
+qualification and a fresh transaction under the existing maintenance approval.
 
 `maintain-cyberherd-overlay.py` consumes an already sealed
 [configuration review](cyberherd-overlay-stage.md) and its independently reviewed
@@ -20,12 +21,14 @@ unchanged only when no role override exists. This permits a separately reviewed
 namespace override in the disposable rehearsal without changing vendor unit
 bytes or weakening the production invocation.
 Only a single `NetworkNamespacePath` naming an existing root-owned process is
-admissible in each override at this stage. Identity, commands, groups, credential
+admissible in each role override at this stage. An inherited common service
+override is accepted only when its exact protected fingerprint is frozen in the
+original core inventory and its only directive is `TimeoutStopFailureMode=abort`. Identity, commands, groups, credential
 loads, environment and other directives refuse even if their file is protected.
 
 Ubuntu's systemd 255 reports `NeedDaemonReload=yes` for the masked intake with
 its namespace override, despite manager reload. In this masked state only,
-the executor accepts that flag when the exact protected role-specific overrides
+the executor accepts that flag when the exact protected role-specific and admitted common overrides
 match their independently frozen fingerprints. Missing/unpinned/changed files,
 unknown flag values or a non-masked unit refuse. Other masked-state checks,
 zero PIDs/cgroups and the UID scan remain mandatory. Loaded/running service
@@ -114,7 +117,8 @@ transactions, but mock service/native commands and runtime inspection. They are
 not installed systemd or live backup evidence. The existing mandatory native
 four-journal test separately covers a paid core without a bridge, fresh role
 journals, committed WAL, a pending feed UUID and retained signed bytes. A complete
-installed executor rehearsal now passes; explicit live maintenance approval remains open.
+installed executor rehearsal passed; the approved live attempt and recovery
+exposed the inherited-policy compatibility correction described in the checkpoint.
 The disposable systemd harness now exercises this complete executor with actual
 native services and synthetic paid/pending/signed journals. Both services join
 its private loopback-only namespace, all credentials are synthetic and the core

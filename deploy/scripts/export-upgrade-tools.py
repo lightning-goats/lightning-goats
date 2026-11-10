@@ -15,6 +15,7 @@ FILES = (
     'prepare-vps-canary.py', 'smoke-release.py',
     'upgrade-cyberherd-core.py',
     'install-cyberherd-inactive.py', 'verify-cyberherd-package.py', 'verify-sqlite-vendor.py',
+    'prepare-cyberherd-payout-key.py',
 )
 
 

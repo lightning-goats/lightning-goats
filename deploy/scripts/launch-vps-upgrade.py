@@ -20,6 +20,7 @@ FILES = {
     'prepare-vps-canary.py', 'smoke-release.py',
     'upgrade-cyberherd-core.py',
     'install-cyberherd-inactive.py', 'verify-cyberherd-package.py', 'verify-sqlite-vendor.py',
+    'prepare-cyberherd-payout-key.py',
 }
 
 
@@ -81,6 +82,9 @@ def main():
         arguments = arguments[1:]
     elif arguments[:1] == ['--cyberherd-inactive']:
         operation = 'install-cyberherd-inactive.py'
+        arguments = arguments[1:]
+    elif arguments[:1] == ['--cyberherd-payout-key']:
+        operation = 'prepare-cyberherd-payout-key.py'
         arguments = arguments[1:]
     sys.argv = [str(root / operation), *arguments]
     runpy.run_path(sys.argv[0], run_name='__main__', init_globals={

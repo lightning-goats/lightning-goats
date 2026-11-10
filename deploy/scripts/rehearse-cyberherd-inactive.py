@@ -40,7 +40,9 @@ def main():
             or os.environ.get('GITHUB_ACTIONS') != 'true' or not os.environ.get('GITHUB_RUN_ID', '').isdigit()):
         raise ValueError('disposable root systemd CI VM required')
     # Require the private loopback-only namespace used by the other rehearsal.
-    interfaces = {p.name for p in Path('/sys/class/net').iterdir()}
+    # The inherited sysfs mount can still describe the host namespace. Query
+    # netlink in this process's namespace instead; do not weaken isolation.
+    interfaces = {link['ifname'] for link in json.loads(run('/usr/sbin/ip', '-j', 'link', 'show'))}
     if interfaces != {'lo'} or os.readlink('/proc/self/ns/net') == os.readlink('/proc/1/ns/net'):
         raise ValueError('fresh isolated network namespace required')
     core = pwd.getpwnam('lightning-goats')  # Earlier fresh-canary fixture, no activation.
@@ -105,11 +107,20 @@ def main():
     configs = root / 'configs'
     configs.mkdir(mode=0o755)
     configs.chmod(0o755)
+    synthetic_key = root / 'TEST-ONLY-payout-key'
+    synthetic_key.write_bytes(b'test-only-no-installed-spend-key')
+    synthetic_key.chmod(0o600)
+    store = Path('/etc/credstore.encrypted')
+    if not store.exists():
+        store.mkdir(mode=0o700)
+    imported = json.loads(run(*launcher, '--cyberherd-payout-key', '--key-file', str(synthetic_key), '--import-key'))
+    assert imported['created'] is True and imported['permissions_checked'] is False and imported['payments_sent'] == 0
+    assert imported['credential_fingerprint'] == hashlib.sha256(synthetic_key.read_bytes()).hexdigest()
     import grp
     for role, kind in [('cyberherd', 'config'), ('cyberherd-payout', 'payout'), ('cyberherd-signer', 'signer')]:
         text = examples[f'deploy/cyberherd/{kind}.toml.example']
         text = text.replace('credential_fingerprint = "' + '0' * 64 + '"',
-                            'credential_fingerprint = "' + hashlib.sha256(b'test-only-no-installed-spend-key').hexdigest() + '"')
+                            'credential_fingerprint = "' + imported['credential_fingerprint'] + '"')
         text = text.replace('account_id = "00000000-0000-0000-0000-000000000000"',
                             'account_id = "00000000-0000-0000-0000-000000000001"')
         text = text.replace('0' * 64, owner).replace('REPLACE_WITH_CLIENT_PUBLIC_KEY', client)
@@ -136,6 +147,7 @@ def main():
         assert (destination / 'INSTALLED.json').exists() and not (destination / 'INCOMPLETE').exists()
     print(json.dumps({'synthetic': True, 'source_commit': args.source, 'native_engine': prepared['engine'],
                       'actual_nss_identities': 3, 'actual_native_initializers': 3, 'actual_masked_units': 3,
+                      'synthetic_payout_ciphertext_created': True,
                       'services_started': False, 'credentials_loaded': False, 'provider_qualified': False,
                       'household_qualified': False, 'live_host_qualified': False}, sort_keys=True))
 

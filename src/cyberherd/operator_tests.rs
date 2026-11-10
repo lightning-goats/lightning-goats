@@ -600,7 +600,7 @@ async fn manual_notices_freeze_one_share_footer_and_clear_empty_rosters_without_
     assert!(notices[0].overlay.contains("Alice"));
     assert!(!notices[0].overlay.contains("nostr:npub"));
     assert_eq!(notices[0].nostr.matches("nostr:npub").count(), 1); // footer names have no extra mentions
-    assert!(notices[2].overlay.to_lowercase().contains("empty"));
+    assert!(notices[2].overlay.contains("No active CyberHerd members."));
     assert_eq!(notices[0].conversation, notices[2].conversation);
     let reset = command(3, Action::Reset);
     s.operator_command(
@@ -623,4 +623,80 @@ async fn manual_notices_freeze_one_share_footer_and_clear_empty_rosters_without_
         .unwrap()
         .is_none()
     );
+}
+
+#[test]
+fn share_footer_lists_ineligible_active_members_at_zero_and_honors_each_template_opt_out() {
+    let owner = key(1);
+    let member = key(2);
+    let profile = Profile {
+        name: "Alice".into(),
+        picture: None,
+        lud16: None,
+    };
+    let mut roster = crate::cyberherd::membership::Roster::default();
+    roster.members.insert(
+        member.clone(),
+        crate::cyberherd::membership::Member {
+            profile: profile.clone(),
+            active: true,
+            amount_sats: 34,
+            lifetime_sats: 34,
+        },
+    );
+    let snapshot = crate::cyberherd::store::Snapshot {
+        owner: owner.clone(),
+        settings: Settings {
+            minimum_sats: 10,
+            max_members: 10,
+            member_percent: 10,
+        },
+        roster,
+        cycle: 1,
+        cycle_start: 100,
+        revision: 1,
+    };
+    let notice = Notice {
+        member,
+        profile,
+        category: "member_added".into(),
+        snapshot,
+        allocation_changed: true,
+        context: Context::default(),
+        conversation: None,
+        activation: true,
+    };
+    let event = crate::cyberherd::store::StoredEvent {
+        seq: 1,
+        owner,
+        cycle: 1,
+        source_id: "operator:footer".into(),
+        event_type: "operator_member".into(),
+        snapshot_json: serde_json::to_string(&notice).unwrap(),
+    };
+    let catalog = crate::cyberherd::templates::Catalog::legacy().unwrap();
+    let message = crate::cyberherd::delivery::render(&event, &catalog)
+        .unwrap()
+        .unwrap();
+    assert!(message.overlay.contains("Alice"));
+    assert!(message.overlay.contains("0%"));
+    assert!(!message.overlay.contains("No active"));
+    for category in [
+        "cyber_herd_share_header",
+        "cyber_herd_share_row",
+        "cyber_herd_share_empty",
+    ] {
+        let mut variants = catalog.categories().clone();
+        variants.remove(category);
+        let opt_out = crate::cyberherd::templates::Catalog::from_json(
+            &serde_json::to_string(&variants).unwrap(),
+        )
+        .unwrap();
+        let message = crate::cyberherd::delivery::render(&event, &opt_out)
+            .unwrap()
+            .unwrap();
+        assert!(!message.overlay.contains("Current CyberHerd shares"));
+        assert!(!message.overlay.contains("0%"));
+        assert!(message.overlay.contains("Alice"));
+    }
 }

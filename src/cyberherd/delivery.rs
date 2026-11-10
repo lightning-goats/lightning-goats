@@ -480,12 +480,35 @@ fn score(
     Ok(())
 }
 fn roster_footer(catalog: &Catalog, identity: &str, snapshot: &Snapshot) -> Result<String> {
-    let mut parts = vec![];
+    // Each helper is an explicit opt-in. An intentional deletion suppresses the
+    // complete optional footer, rather than emitting a disconnected row/header.
+    if [
+        "cyber_herd_share_header",
+        "cyber_herd_share_row",
+        "cyber_herd_share_empty",
+    ]
+    .iter()
+    .any(|category| catalog.category(category).is_none())
+    {
+        return Ok(String::new());
+    }
+    let members: Vec<_> = snapshot
+        .roster
+        .members
+        .iter()
+        .filter(|(key, m)| m.active && !snapshot.roster.banned.contains(*key))
+        .collect();
     let shares = snapshot.roster.shares(&snapshot.settings)?;
     let values = BTreeMap::from([(
         "pool_percent".into(),
         snapshot.settings.member_percent.to_string(),
     )]);
+    if members.is_empty() {
+        return Ok(catalog
+            .render("cyber_herd_share_empty", identity, &values)?
+            .unwrap_or_default());
+    }
+    let mut parts = vec![];
     append(
         &mut parts,
         catalog,
@@ -493,11 +516,13 @@ fn roster_footer(catalog: &Catalog, identity: &str, snapshot: &Snapshot) -> Resu
         identity,
         &values,
     )?;
-    for (key, share) in shares {
-        let member = &snapshot.roster.members[&key];
+    for (key, member) in members {
         let values = BTreeMap::from([
             ("name".into(), display_name(&member.profile)),
-            ("share_percent".into(), ratio(u128::from(share), 1_000_000)?),
+            (
+                "share_percent".into(),
+                ratio(u128::from(shares.get(key).copied().unwrap_or(0)), 1_000_000)?,
+            ),
         ]);
         append(
             &mut parts,

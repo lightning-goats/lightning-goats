@@ -700,3 +700,94 @@ fn share_footer_lists_ineligible_active_members_at_zero_and_honors_each_template
         assert!(message.overlay.contains("Alice"));
     }
 }
+
+#[tokio::test]
+async fn manual_reset_discards_same_second_deferred_work_atomically_without_erasing_replay_receipts()
+ {
+    let root = tempfile::TempDir::new().unwrap();
+    let (s, url) = store(&root).await;
+    let social = Interaction {
+        source_id: format!("nostr:{}", "77".repeat(32)),
+        source_hash: "88".repeat(32),
+        pubkey: key(2),
+        profile: Profile::from(&profile()),
+        action: InteractionAction::Like,
+        occurred_at: 120,
+    };
+    assert_eq!(
+        s.process(
+            &key(1),
+            &social,
+            Target::Current,
+            FeederAvailability::Paused
+        )
+        .await
+        .unwrap()
+        .status,
+        crate::cyberherd::store::Status::Deferred
+    );
+    let db = SqlitePool::connect(&url).await.unwrap();
+    sqlx::query("INSERT INTO ingress(owner,source_key,kind,payload_json) VALUES(?,'fixture-reset-social','social','{}')").bind(key(1)).execute(&db).await.unwrap();
+    let reset = command(0, Action::Reset);
+    let proof = auth(&reset, 3, 120);
+    sqlx::query("CREATE TRIGGER fixture_reset_failure BEFORE INSERT ON operator_http_audit BEGIN SELECT RAISE(ABORT,'fixture'); END").execute(&db).await.unwrap();
+    assert!(
+        s.operator_command(
+            &key(1),
+            &proof,
+            &reset,
+            env(FeederAvailability::Unknown, 120)
+        )
+        .await
+        .is_err()
+    );
+    assert_eq!(s.deferred(&key(1), 10).await.unwrap().len(), 1);
+    assert_eq!(
+        sqlx::query_scalar::<_, String>(
+            "SELECT state FROM ingress WHERE source_key='fixture-reset-social'"
+        )
+        .fetch_one(&db)
+        .await
+        .unwrap(),
+        "pending"
+    );
+    sqlx::query("DROP TRIGGER fixture_reset_failure")
+        .execute(&db)
+        .await
+        .unwrap();
+    s.operator_command(
+        &key(1),
+        &proof,
+        &reset,
+        env(FeederAvailability::Unknown, 120),
+    )
+    .await
+    .unwrap();
+    let reopened = Store::connect(&url).await.unwrap();
+    assert!(reopened.deferred(&key(1), 10).await.unwrap().is_empty());
+    assert_eq!(
+        sqlx::query_scalar::<_, String>(
+            "SELECT state FROM ingress WHERE source_key='fixture-reset-social'"
+        )
+        .fetch_one(&db)
+        .await
+        .unwrap(),
+        "done"
+    );
+    let receipt = reopened
+        .process(&key(1), &social, Target::Current, FeederAvailability::Ready)
+        .await
+        .unwrap();
+    assert_eq!(receipt.status, crate::cyberherd::store::Status::Discarded);
+    let snapshot = reopened.snapshot(&key(1)).await.unwrap();
+    assert_eq!(snapshot.cycle, 2);
+    assert!(snapshot.roster.awards.is_empty());
+    assert_eq!(snapshot.roster.active_count(), 0);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM interactions")
+            .fetch_one(&db)
+            .await
+            .unwrap(),
+        1
+    );
+}

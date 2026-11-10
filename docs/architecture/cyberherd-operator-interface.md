@@ -71,7 +71,10 @@ Removals, bans, unbans, settings, templates and manual reset do not require the
 feeder to be unpaused. A manual reset starts a fresh cycle and clears current
 scores/awards/evidence while preserving paid state, receipt history, bans and
 lifetime totals. It creates no public reset note. Incoming events older than
-its new cutoff cannot earn a new award after reset.
+its new cutoff cannot earn a new award after reset. Already queued pre-command
+social/payment work and deferred interaction receipts become durably discarded
+in that same transaction, including same-second sources. Their original input,
+payment and source identities remain retained; recovery cannot re-admit them.
 
 ## Ordering and messages
 

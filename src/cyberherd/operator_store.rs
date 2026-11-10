@@ -220,6 +220,19 @@ impl Store {
                 snapshot.roster.reset_cycle();
                 snapshot.cycle = snapshot.cycle.checked_add(1).context("cycle overflow")?;
                 snapshot.cycle_start = now;
+                // Manual reset closes the pre-command observation boundary,
+                // including same-second deferred work. Keep every source/input
+                // receipt; never let it earn a new-cycle award on recovery.
+                let discarded = serde_json::to_string(&super::Receipt {
+                    status: super::Status::Discarded,
+                    cycle: snapshot.cycle,
+                    transition: None,
+                    event_seq: None,
+                })?;
+                sqlx::query("UPDATE ingress SET state='done',result_json=? WHERE owner=? AND state='pending' AND kind IN ('social','payment')")
+                    .bind(&discarded).bind(owner).execute(&mut *tx).await?;
+                sqlx::query("UPDATE interactions SET status='discarded',result_json=? WHERE owner=? AND status='deferred'")
+                    .bind(discarded).bind(owner).execute(&mut *tx).await?;
             }
             Action::Template { edit } => {
                 edit_template(&mut tx, owner, edit).await?;

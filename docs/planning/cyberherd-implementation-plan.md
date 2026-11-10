@@ -148,6 +148,8 @@ The list is the full port contract, not a completion claim for an initial slice.
    and unchanged allocations do not emit another footer. Payout messages use their
    own frozen payout breakdown. Interaction identity is owner/member/source-scoped
    across live/recovery/type aliases and `msg:` aliases; never re-sign a retry.
+   Optional no-treat repost suggestions appear only without an already-earned
+   repost award and at most once per owner/member/membership cycle.
 10. **Conversation destinations:** regular per-user note thread plus active-stream
     kind-1311 chat per interaction, one WebSocket copy with human display names.
     Treats retain the original associated note/member thread; wait for real joining
@@ -249,12 +251,14 @@ and does not establish production installation or public relay/bunker qualificat
 
 Subsequent [confirmed-feeding announcement source](../architecture/cyberherd-feeding-announcements.md)
 adds a default-off core presentation handoff, frozen herd summary, one note/chat/
-overlay per triggering payment and a correlated typed overlay import. It is under
-source verification and has not been installed or activated.
+overlay per triggering payment and a correlated typed overlay import. The
+[458-test checkpoint](../testing/cyberherd-feeding-announcements-checkpoint-20261110.md)
+records verified source and inactive artifacts. It has not been installed or activated.
 
-Remaining implementation and qualification includes feeder announcement source/
-installed qualification, lifecycle installed qualification,
-readonly roster/targets/scores and OBS cards, browser Nostr
+Remaining implementation and qualification includes feeder announcement and
+lifecycle installed qualification,
+optional once-per-cycle no-treat repost hints, readonly roster/targets/scores and
+OBS cards, browser Nostr
 authentication and authenticated operator settings/template/member/reset tools.
 Also required: explicit failed-cost/consistent-restore and retention operations,
 installed identity/network/helper/NIP-46/provider qualification, dependency-audit

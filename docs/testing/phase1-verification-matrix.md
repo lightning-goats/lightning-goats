@@ -177,3 +177,23 @@ relay acknowledgments. Review the retained outbox and baseline before activation
 do not clear signatures/cooldowns or infer permission for feeding/payments from
 these read-only presentation tests. The full CyberHerd completion contract remains
 in `docs/planning/cyberherd-implementation-plan.md`.
+
+
+## Optional CyberHerd confirmed-feeding presentation checks
+
+The [458-test source checkpoint](cyberherd-feeding-announcements-checkpoint-20261110.md)
+records nine new regressions for original triggering-payment attribution, frozen
+herd summary/stream context, per-payment presentation deduplication without loss
+of per-UUID rewards, native event-ID uniqueness, exact retries, optional templates,
+legacy operation, nonpublic/ambiguous states and correlated private overlay import.
+The full source-pinned Rust and inactive artifact checks passed; the unignored
+SQLite advisory remains open. These temporary-ledger fixtures are not physical
+feeding, provider-spend or public Nostr acceptance evidence.
+
+Keep `core_bridge.delegated_feeder_messages=false` until the compatible intake,
+root-pinned owner/epoch/cursors and separate identities/signer have been qualified.
+An inactive installation rehearsal must also prove that lost overlay ACKs and a
+paused member queue cannot duplicate physical effects, food/debits or text, and
+that new equal-valued payments remain distinct while same-payment batches share
+one announcement. Public relay and household-client acceptance are separate from
+the synthetic fixtures. Follow the full CyberHerd contract before activation.

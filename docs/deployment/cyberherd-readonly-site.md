@@ -41,3 +41,27 @@ clearing. Actual acceptance must additionally check the public HTTPS aliases,
 current roster/cards/targets, disabled auth/operator paths, unchanged LNURL/OBS
 and application PIDs, and WAF denial of an actual malicious read query. Never
 relax the WAF merely to make a new route pass.
+
+## SELinux backend-port boundary
+
+On the actual Fedora host, enforcing SELinux permits nginx HTTP relaying while
+general `httpd_can_network_connect` remains off. The new loopback view port must
+be labeled as an HTTP backend, as the existing receive port already is. After
+checking that TCP 3340 has no conflicting explicit service assignment, the exact
+reviewed host change is:
+
+```sh
+sudo semanage port -a -t http_port_t -p tcp 3340
+```
+
+Do not enable a general network-connect boolean or disable enforcing mode to
+resolve a backend failure. If this stage is rolled back, remove its exact owned
+local mapping only after restoring/reloading the old nginx site, and only if no
+later reviewed service depends on it:
+
+```sh
+sudo semanage port -d -p tcp 3340
+```
+
+The [live site checkpoint](../testing/cyberherd-live-readonly-site-20261110.md)
+records the actual port-label correction, HTTP/WAF and browser results.

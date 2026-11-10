@@ -219,6 +219,14 @@ the existing approval. Public OBS roster delivery passes actual browser readback
 reaction/zap admission, settlement/receipt and member-message acceptance remain
 open. Both outgoing roles and membership Nostr publishing remain disabled.
 
+The [live social intake](../testing/cyberherd-live-social-intake-20261110.md)
+subsequently recovered current and earlier users' reaction/repost awards, exact
+OBS messages/cards and restart idempotency. The
+[public read-only site](../testing/cyberherd-live-readonly-site-20261110.md) now
+serves the leaderboard, exact roster API and target links with actual browser/WAF
+verification. Operator routes, membership public Nostr and payouts remain disabled.
+Incoming paid zap/receipt and the other full-port acceptance steps remain open.
+
 The subsequent [installed OS checkpoint](../testing/cyberherd-installed-qualification-checkpoint-20261110.md)
 passes the exact authenticated fourteen-file tool in disposable CI and on the
 actual host, using synthetic Python probes with unchanged application journals

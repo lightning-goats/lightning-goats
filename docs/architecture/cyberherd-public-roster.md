@@ -67,3 +67,11 @@ identities, a loopback HTTP server and fully mocked browser traffic. They are
 not installation, public relay, provider-payment or physical-feeding evidence.
 New roles, API proxy and feature flags require separate installed qualification;
 this source does not enable them on the live service.
+
+## Current live rollout
+
+The [2026-11-10 public site checkpoint](../testing/cyberherd-live-readonly-site-20261110.md)
+now verifies the exact read proxy, aliases, current browser rendering, disabled
+auth/operator routes and WAF behavior on the live host. Payment/feeding flags and
+OBS/artwork are preserved. This read-only rollout does not enable rewards,
+payouts, membership public Nostr or operator commands.

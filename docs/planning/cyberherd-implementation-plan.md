@@ -326,7 +326,7 @@ The legacy pair restore helper rejects CyberHerd schema; its historical process
 regression remains covered without claiming multi-journal recovery.
 
 Also required: concrete external recovery adoption,
-installed identity/network/helper/NIP-46/provider/engine qualification and
+remaining global-network/helper/NIP-46/provider/browser qualification and
 explicit financial activation. The twelve numbered groups above
 remain the completion contract; a library fixture or green artifact build does
 not establish live behavior.
@@ -338,6 +338,14 @@ disposable-systemd and actual-host runs. Its
 retains unchanged production journals/receive process. Production workers remain
 masked and all financial/signing limits remain zero. Actual household/provider/
 browser, DNS/global containment, recovery adoption and activation remain separate.
+
+The subsequent [native recipient/DNS checkpoint](../testing/cyberherd-recipient-checkpoint-20261110.md)
+now passes actual public LNURL discovery and exact private IPv4/IPv6/mixed-answer
+refusal under the payout identity, with no credentials, invoice or provider call.
+It does not establish global firewall/forwarding or all recipients. Household
+signing remains unqualified after operator-confirmed reload and bounded checks;
+the [loaded-client inspection](../testing/cyberherd-bunker-checkpoint-20261110.md)
+is pending. No key regeneration or financial activation follows from that failure.
 
 A [SQLite binding backport](../security/sqlite-binding-backport.md) now has a
 [486-test source checkpoint](../testing/cyberherd-sqlite-checkpoint-20261110.md),

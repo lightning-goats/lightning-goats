@@ -6,7 +6,8 @@ loads a credential, follows an invoice callback, creates an invoice or uses a
 provider/signing API. It refuses a systemd credential environment. The deployment
 job builds it into the separately checksummed test-only artifact as
 `READ-ONLY-check-recipient`; it is not a production daemon or activation command.
-This source is prepared; installed network results remain unqualified.
+The [source-pinned checkpoint](../testing/cyberherd-recipient-checkpoint-20261110.md)
+records passing CI and actual installed discovery/DNS checks, with their limits.
 
 After source/build/artifact verification, install the helper into a fresh protected
 prefix and use temporary one-shot systemd units under the actual payout identity.

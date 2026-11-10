@@ -102,6 +102,7 @@ fixed purposes, child time/output bounds, root refusal, unit isolation and fake
 helper orchestration. They do not claim actual cryptography or household success.
 
 The [actual check checkpoint](../testing/cyberherd-bunker-checkpoint-20261110.md)
-records both matching local client identities and two sanitized household
-authorization refusals. A household reload was requested; successful kinds remain
-unqualified. Do not regenerate credentials merely because authorization failed.
+records matching local client identities, authorization refusals and timeouts
+after an operator-confirmed household reload. Successful kinds remain unqualified;
+the read-only loaded-client inspection is pending. Do not regenerate credentials
+merely because authorization failed.

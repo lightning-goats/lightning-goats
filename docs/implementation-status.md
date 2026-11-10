@@ -1,79 +1,51 @@
-# Phase 1 Implementation Status
+# Lightning Goats implementation status
 
-Current CyberHerd source checkpoint: **2026-11-10**. The operator-directed port
-follows the full [implementation plan](planning/cyberherd-implementation-plan.md),
-which supersedes older CyberHerd deferrals below. Explicit failed-payment cost
-recovery and the legacy-restore refusal now have a
-[485-test checkpoint](testing/cyberherd-failed-cost-checkpoint-20261110.md).
-The subsequent [486-test SQLite checkpoint](testing/cyberherd-sqlite-checkpoint-20261110.md)
-passes the dependency audit with the patched bundled engine and no SQLite waiver.
-Native four-journal snapshots, retention reports and startup-blocked restore
-staging have a [491-test checkpoint](testing/cyberherd-state-maintenance-checkpoint-20261110.md).
-External recovery adoption and actual installed qualification remain unfinished.
-The new components remain uninstalled and no financial activation is implied.
+Current CyberHerd checkpoint: **2026-11-10**. The full
+[twelve-part implementation plan](planning/cyberherd-implementation-plan.md)
+remains incomplete. It supersedes older CyberHerd deferrals; it does not resume
+Monero or authorize financial/physical activation.
 
-Fresh offline initialization now has a
-[492-test checkpoint](testing/cyberherd-bootstrap-checkpoint-20261110.md),
-with required actual per-runtime UID/process/file checks and sixteen non-skipped
-CLI checks. The reviewed inactive installer and actual host qualification remain
-unfinished; no existing paid journal or live service is changed by these commands.
+The existing receive service is running after the operator-approved
+[live core upgrade](testing/cyberherd-live-core-upgrade-20261110.md), preserving
+paid accounting, IDs, epoch, exact signed bytes and configuration. The
+[three separate CyberHerd roles](testing/cyberherd-live-inactive-installation-20261110.md)
+are installed and initialized under locked non-admin users. Production units stay
+masked/inactive, all new monetary/signing limits are zero, and the receive core
+has no enabled CyberHerd bridge or native incoming-zap configuration.
 
-The subsequent [495-test installation checkpoint](testing/cyberherd-installation-checkpoint-20261110.md)
-qualifies the prepared installer on a disposable systemd VM with actual separate
-NSS identities, persistent masks and native journal initialization. Core upgrade,
-payout credential and distinct NIP-46 client commands are prepared. Actual
-live-host/core-transaction/provider/household/browser/recovery adoption and
-financial activation remain unfinished. The full twelve-part goal stays active.
-The [combined core rehearsal](testing/cyberherd-core-transaction-checkpoint-20261110.md)
-now passes actual systemd/UID migration on a disposable VM. Actual live-host
-maintenance, provider/household/recovery qualification and activation remain open.
+[Installed OS probes](testing/cyberherd-installed-qualification-checkpoint-20261110.md)
+and [actual native worker checks](testing/cyberherd-worker-qualification-checkpoint-20261110.md)
+passed with synthetic credentials/private journals. Four separate native users
+completed socket boundary checks, restart and native four-journal snapshot
+verification while preserving original production journals and receive process.
+These fixtures do not establish live transfers or external recovery adoption.
 
-The operator subsequently approved the
-[live core maintenance](testing/cyberherd-live-core-upgrade-20261110.md): accepted
-native backup/comparison, preserved paid state/configuration, original-UID migration
-and existing-mode restart passed; health/status return 200. The three CyberHerd
-roles remain absent and financial activation remains disabled. The protected
-[payout-key import command](deployment/cyberherd-payout-credential.md) successfully
-encrypted the separate operator-supplied key without API calls or service changes;
-the operator-regenerated key subsequently passed read-only receive-request and
-same-core-resource access. Payment-read/quote/execute qualification and runtime
-use remain unfinished. Separate encrypted NIP-46 clients are prepared; household
-authorization remains outstanding.
+The [native recipient/DNS checkpoint](testing/cyberherd-recipient-checkpoint-20261110.md)
+now passes exact CI and actual-host checks: credential-free public LNURL metadata
+validation plus exact private IPv4/IPv6 and mixed-answer refusal before HTTP.
+Only temporary units/fixture mounts were used. Global firewall/forwarding,
+all recipients and external public IPv6 remain separate.
 
-The [OS policy checkpoint](testing/cyberherd-os-boundaries-checkpoint-20261110.md)
-qualifies three actual systemd Python probes on a disposable VM: separate kernel
-identities/capabilities, encrypted credential scope, managed-file and foreign-state
-denial, and public/private IPv4/IPv6 controls. Application runtime, actual-host,
-provider, household, browser and recovery adoption remain separate.
+The separate [payout credential](deployment/cyberherd-payout-credential.md) is
+host-encrypted and passed receive-request/same-core-resource read checks after
+the operator corrected an omitted scope. Payment-read, quote/execute and controlled
+payment qualification remain unfinished; no payout was sent.
 
-The [actual inactive installation](testing/cyberherd-live-inactive-installation-20261110.md)
-now passed on the VPS: three locked separate identities, persistent masks,
-protected four-program/config installation, actual native journal initialization
-and configuration-only maintenance-policy validation. The receive daemon kept
-its original process/configuration and health 200. New workers remain stopped,
-all financial/signing limits are zero, and no core bridge is enabled. Actual
-runtime/provider/household/browser/recovery qualification and activation remain
-unfinished.
+Separate NIP-46 clients are prepared. The operator reports both in the household
+allowlist and confirmed a bunker restart. [Actual signing checks](testing/cyberherd-bunker-checkpoint-20261110.md)
+matched the local stored client identities but returned authorization refusals
+or timeouts, including membership checks on all three approved transports.
+Required kinds remain unqualified. A read-only household loaded-client inspection
+is pending; no new key, successful signature or public CyberHerd post is claimed.
 
-The [installed OS qualifier](testing/cyberherd-installed-qualification-checkpoint-20261110.md)
-now passes its authenticated disposable-systemd and actual-host runs. Three
-synthetic Python probes preserve installed journals/core process while checking
-actual role identity/capabilities, credential/state/file isolation and private
-IPv4/IPv6 denial. Actual Rust worker/socket, DNS/global-firewall, household,
-provider, browser, recovery adoption and activation remain unqualified.
-
-A separate [installed native worker qualifier](testing/cyberherd-worker-qualification-checkpoint-20261110.md)
-now passes disposable-systemd and actual-host runs: four mixed-UID Rust processes,
-synthetic private journals/credentials, zero limits, authenticated socket checks,
-restart and native four-journal snapshot verification. Production journals and
-receive process remain unchanged. No production CyberHerd worker or money path
-is enabled. Actual DNS/global containment, household/provider/browser, recovery
-adoption and activation remain separate.
-
-The separate [native recipient/DNS helper](deployment/cyberherd-recipient-qualification.md)
-now prepares credential-free public LNURL discovery and private/mixed DNS-answer
-refusal using the actual payout networking code. Build/installed network results
-remain outstanding; it makes no provider, invoice or payment request.
+Other remaining work includes installed browser/presentation and global network
+qualification, concrete externally reconciled recovery adoption, operator-selected
+nonzero financial ceilings and explicit activation. Native protected
+[four-journal maintenance](deployment/cyberherd-state-maintenance.md) preserves
+replay/signed history and blocks staged restore startup pending reconciliation.
+No live financial restore or automatic marker clearance is supported or implied.
+Keep PR111 draft and the full goal active until every planned behavior and actual
+qualification is complete.
 
 The Phase 1 implementation history below was last updated on 2026-09-07; consult
 the dated restoration/implementation records and current plan for later work.

@@ -45,11 +45,30 @@ are terminal failed, with no automatic restart. Their reviewed files and private
 evidence are retained pending the operator's household reload; no repeated
 attempt has been made without a state change.
 
-The operator was asked to restart only the existing household bunker to reload
-its retained allowlist. A stale running allowlist is a hypothesis, not a proven
-cause. No new client/key generation or household setting change is needed or
-authorized by the failure itself. After confirmed reload, retry the bounded
-checks, require exact author/bytes/hash/signature for every expected kind, and
-retain the result before any publication or financial activation. If refusal
-persists, inspect only public running-client identities rather than dumping
-raw process arguments, environments, bunker logs or pairing capabilities.
+The operator subsequently confirmed restarting only the existing household
+bunker. One fresh Primal retry per client produced a membership timeout and a
+payout-client authorization refusal. Membership-only checks on the other two
+approved household transports, nos.lol and Damus, timed out. No payout check on
+those alternate transports was executed. The full expected kinds remain
+unqualified; no partial signature or successful publication is inferred from a
+timeout. A stale allowlist remains an unproven hypothesis, not the established
+cause. No key was regenerated or household setting changed by these checks.
+
+All check processes were terminal, with no automatic retry. Original role-journal
+hashes and all original service states still matched after these attempts. The
+five exact temporary unit copies were removed, including one alternate payout
+unit that was staged but never run. Private reports retain the failures and
+`household_qualified=false`; the pinned non-admin helper remains available.
+
+Next evidence is the household's actual loaded public clients. A separate
+read-only script is prepared at
+`/home/linuxuser/lightning-goats/check-household-cyberherd-clients.sh` on the VPS,
+from `deploy/scripts/check-household-cyberherd-clients.py`. Its three disposable
+tests passed locally: only explicit authorized-key flags are selected, raw
+argument secrets cannot enter the report, and unexpected errors emit no private
+input. It prints service health, four known public-client yes/no comparisons and
+the running program's digest, never raw arguments, process environment, signing
+credential files, journals or pairing capabilities. It modifies nothing. The
+operator was asked to copy/run it on the household and return its JSON because
+household administrator access is not configured from this VPS. That result is
+pending; do not infer it or repeat identical signing attempts without new evidence.

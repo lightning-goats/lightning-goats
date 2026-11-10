@@ -155,9 +155,8 @@ namespace, in addition to ordinary unprivileged rejection checks. Recovery schem
 checks refuse missing/empty/old/private-path violations. These are not a live
 financial review, provider refund qualification or new-role installation evidence.
 
-Whole-stack backup/consistent restore, retention operations,
-installed UID/network/helper/provider/signer/engine qualification and explicit
-activation remain required by the complete CyberHerd plan.
+External recovery adoption, installed UID/network/helper/provider/signer/engine
+qualification and explicit activation remain required by the complete CyberHerd plan.
 The subsequent [native maintenance tool](../deployment/cyberherd-state-maintenance.md)
 adds offline four-journal copies, exact verification and marker-blocked staging.
 It does not authorize financial resumption after rollback or adopt restored state.

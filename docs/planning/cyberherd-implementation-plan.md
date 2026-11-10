@@ -194,7 +194,8 @@ and verified; partial engines/models or a plan alone do not satisfy it.
 
 ## Current source checkpoint — incomplete port
 
-Work in progress adds [native four-journal retention and recovery staging](../deployment/cyberherd-state-maintenance.md).
+The [491-test checkpoint](../testing/cyberherd-state-maintenance-checkpoint-20261110.md)
+adds [native four-journal retention and recovery staging](../deployment/cyberherd-state-maintenance.md).
 It preserves original scopes and signed bytes, requires stopped/masked writers
 and blocks restored store startup pending external reconciliation. This does not
 qualify installed recovery adoption or financial resumption.
@@ -288,7 +289,7 @@ now records completed Rust/root-ownership/browser/CLI/inactive artifact checks.
 The legacy pair restore helper rejects CyberHerd schema; its historical process
 regression remains covered without claiming multi-journal recovery.
 
-Also required: consistent-restore and retention operations,
+Also required: concrete external recovery adoption,
 installed identity/network/helper/NIP-46/provider/engine qualification and
 explicit financial activation. The twelve numbered groups above
 remain the completion contract; a library fixture or green artifact build does
@@ -299,7 +300,9 @@ A [SQLite binding backport](../security/sqlite-binding-backport.md) now has a
 including a passing dependency audit and native engine check. It preserves Rust
 1.88 and SQLx 0.8.6, retains exact published driver
 provenance and pins the fixed native binding without a SQLite advisory waiver.
-It does not update installed binaries or replace the remaining recovery work.
+It does not update installed binaries. Subsequent native four-journal maintenance
+now has the [491-test checkpoint](../testing/cyberherd-state-maintenance-checkpoint-20261110.md);
+external recovery adoption and installation qualification remain unfinished.
 
 Earlier source-specific evidence remains available in the
 [351-test worker](../testing/cyberherd-worker-checkpoint-20261109.md),

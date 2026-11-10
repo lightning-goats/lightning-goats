@@ -7,7 +7,9 @@ recovery and the legacy-restore refusal now have a
 [485-test checkpoint](testing/cyberherd-failed-cost-checkpoint-20261110.md).
 The subsequent [486-test SQLite checkpoint](testing/cyberherd-sqlite-checkpoint-20261110.md)
 passes the dependency audit with the patched bundled engine and no SQLite waiver.
-Consistent whole-stack recovery/retention and installed qualification remain unfinished.
+Native four-journal snapshots, retention reports and startup-blocked restore
+staging have a [491-test checkpoint](testing/cyberherd-state-maintenance-checkpoint-20261110.md).
+External recovery adoption and actual installed qualification remain unfinished.
 The new components remain uninstalled and no financial activation is implied.
 
 The Phase 1 implementation history below was last updated on 2026-09-07; consult

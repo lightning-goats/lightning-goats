@@ -25,7 +25,8 @@ dependency audit and native engine check. It does not update installed programs.
 
 Native [four-journal maintenance](deployment/cyberherd-state-maintenance.md)
 provides offline snapshots, retention reports and startup-blocked restore staging.
-Its source is under verification and grants no automatic financial resumption.
+Its [491-test checkpoint](testing/cyberherd-state-maintenance-checkpoint-20261110.md)
+records verified source and inactive artifacts, without financial resumption authority.
 
 The native incoming zap/receipt contract is described in
 [`architecture/native-nip57.md`](architecture/native-nip57.md). It preserves

@@ -119,7 +119,7 @@ Subsequent source also provides [feeding broadcasts](cyberherd-feeding-announcem
 [lifecycle notices](cyberherd-lifecycle.md), [roster/OBS](cyberherd-public-roster.md),
 [operator tools](cyberherd-operator-interface.md) and
 [explicit failed-cost review](cyberherd-failed-cost-recovery.md).
-The full port still needs consistent restore/retention,
+The full port still needs external recovery adoption,
 reviewed inactive installation and actual installed qualification before live
 financial activation. These examples and unit/library tests do not prove actual
 cross-process installation, production provider behavior or a completed port.

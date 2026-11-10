@@ -18,6 +18,28 @@ async fn bootstrap_child_uses_actual_runtime_identity_and_never_opens_a_network_
     let (uid, gid) = crate::core_bridge::unix::self_credentials().unwrap();
     assert_ne!(uid, 0);
     assert_ne!(gid, 0);
+    let status = std::fs::read_to_string("/proc/self/status").unwrap();
+    let fields: std::collections::BTreeMap<_, _> =
+        status.lines().filter_map(|l| l.split_once(':')).collect();
+    assert_eq!(
+        fields["Uid"]
+            .split_whitespace()
+            .map(|v| v.parse::<u32>().unwrap())
+            .collect::<Vec<_>>(),
+        vec![uid; 4]
+    );
+    assert_eq!(
+        fields["Gid"]
+            .split_whitespace()
+            .map(|v| v.parse::<u32>().unwrap())
+            .collect::<Vec<_>>(),
+        vec![gid; 4]
+    );
+    assert!(fields["Groups"].trim().is_empty());
+    assert_eq!(fields["NoNewPrivs"].trim(), "1");
+    for name in ["CapEff", "CapPrm"] {
+        assert_eq!(u64::from_str_radix(fields[name].trim(), 16).unwrap(), 0);
+    }
     assert!(std::env::var_os("CREDENTIALS_DIRECTORY").is_none());
     let initialize = || async {
         match role.as_str() {

@@ -33,7 +33,12 @@ for name, marker in fixtures.items():
     if name + ": test" not in listed.stdout.splitlines():
         raise ValueError("required native ownership fixture is missing")
     result = subprocess.run(["sudo", "unshare", "--net", "--", binary, name, "--exact", "--include-ignored", "--nocapture"],
-                            capture_output=True, text=True, check=True)
+                            capture_output=True, text=True, check=False)
+    if result.returncode:
+        # Synthetic disposable fixtures only; preserve bounded failure evidence.
+        print(result.stdout[-65536:], end="")
+        print(result.stderr[-65536:], end="", file=sys.stderr)
+        raise ValueError("isolated native ownership fixture failed")
     if marker not in result.stdout or "1 passed; 0 failed" not in result.stdout:
         raise ValueError("actual root-owned positive fixture did not complete")
     print(result.stdout, end="")

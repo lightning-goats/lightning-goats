@@ -21,6 +21,8 @@ jobs:
           toolchain: "1.88"
       - name: Require committed lockfile
         run: test -f Cargo.lock
+      - name: Verify published SQLite driver backport
+        run: python3 deploy/scripts/verify-sqlite-vendor.py
       - name: Assert advisory RSA crate is unreachable
         shell: bash
         run: |

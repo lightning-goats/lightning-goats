@@ -2,8 +2,9 @@
 """Verify a review archive without extracting, installing or executing it."""
 import hashlib
 import json
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 import re
+import runpy
 import sys
 import tarfile
 import tomllib
@@ -42,6 +43,7 @@ def verify(path, source):
                 "deploy/cyberherd/config.toml.example", "deploy/cyberherd/payout.toml.example", "deploy/cyberherd/signer.toml.example"}
     if not required.issubset(files):
         raise ValueError("review archive is missing required artifacts")
+    runpy.run_path(str(Path(__file__).with_name("verify-sqlite-vendor.py")))["verify_payload"](files)
     info = dict(line.split("=", 1) for line in files["BUILD-INFO.txt"].decode().splitlines())
     if info["source_commit"] != source or info["activation"] != "none":
         raise ValueError("review source/activation mismatch")

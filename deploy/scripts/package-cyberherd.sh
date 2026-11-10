@@ -27,6 +27,10 @@ for LG_UNIT in cyberherd cyberherd-payout cyberherd-signer; do
     cp "$LG_REPO/deploy/systemd/$LG_UNIT.service.example" "$LG_STAGE/deploy/systemd/"
 done
 cp "$LG_REPO/Cargo.lock" "$LG_REPO/Cargo.toml" "$LG_STAGE/"
+cp -R "$LG_REPO/vendor" "$LG_STAGE/"
+mkdir -p "$LG_STAGE/deploy/scripts"
+cp "$LG_REPO/deploy/scripts/verify-sqlite-vendor.py" "$LG_STAGE/deploy/scripts/"
+python3 "$LG_REPO/deploy/scripts/verify-sqlite-vendor.py" "$LG_STAGE"
 cp "$LG_REPO/docs/architecture/cyberherd-payout-runtime.md" "$LG_STAGE/README.md"
 printf 'source_commit=%s\nversion=%s\nactivation=none\n' "$LG_SOURCE" "$LG_VERSION" > "$LG_STAGE/BUILD-INFO.txt"
 (

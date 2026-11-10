@@ -25,6 +25,9 @@ jobs:
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
 
+      - name: Verify published SQLite driver backport
+        run: python3 deploy/scripts/verify-sqlite-vendor.py
+
       - name: Format
         run: cargo fmt --all --check
 

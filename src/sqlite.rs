@@ -147,6 +147,22 @@ mod tests {
     use tempfile::TempDir;
 
     #[tokio::test]
+    async fn native_engine_is_the_reviewed_sqlite_release_with_the_wal_memory_fix() {
+        let directory = TempDir::new().unwrap();
+        let url = format!("sqlite://{}/engine.db", directory.path().display());
+        let pool = connect_durable(&url, 1).await.unwrap();
+        let version: String = sqlx::query_scalar("SELECT sqlite_version()")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            version, "3.54.1",
+            "the executable must use the reviewed patched native engine, not a manifest-only or system-library substitution"
+        );
+        pool.close().await;
+    }
+
+    #[tokio::test]
     async fn existing_only_open_cannot_recreate_a_database_after_path_validation() {
         let directory = TempDir::new().unwrap();
         let path = directory.path().join("missing.db");

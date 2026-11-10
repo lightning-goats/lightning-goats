@@ -289,6 +289,11 @@ remediation and explicit financial activation. The twelve numbered groups above
 remain the completion contract; a library fixture or green artifact build does
 not establish live behavior.
 
+A [SQLite binding backport](../security/sqlite-binding-backport.md) is now under
+verification. It preserves Rust 1.88 and SQLx 0.8.6, retains exact published driver
+provenance and pins the fixed native binding without a SQLite advisory waiver.
+It does not update installed binaries or replace the remaining recovery work.
+
 Earlier source-specific evidence remains available in the
 [351-test worker](../testing/cyberherd-worker-checkpoint-20261109.md),
 [359-test funding](../testing/cyberherd-funding-checkpoint-20261109.md),

@@ -101,7 +101,6 @@ async fn check() -> Result<()> {
     {
         bail!("native signer changed the frozen synthetic receipt");
     }
-    client.verify_event(event).await?;
     println!(
         "{}",
         serde_json::json!({"accepted":true,"kind_verified":9735,

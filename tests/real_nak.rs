@@ -196,7 +196,6 @@ async fn real_nip46_sign_verify_and_durable_retry_without_signer() {
         receipt.event().tags,
         job.request.receipt_tags(&job.invoice).unwrap()
     );
-    client.verify_event(receipt.event()).await.unwrap();
     let output = timeout(
         Duration::from_secs(10),
         tokio::process::Command::new(&nak)

@@ -6,8 +6,8 @@ Incoming kind 9735 remains a separate check. Nothing here activates incoming
 zaps, publishes a receipt or authorizes a payment.
 
 `examples/check_household_zap_receipt.rs` calls the actual
-`NakClient::sign_zap_receipt`, native frozen-field/hash/signature verifier and
-pinned nak verifier. Its sole accepted argument is
+`NakClient::sign_zap_receipt` with the checksum-pinned nak signer and native
+frozen-field/hash/signature verification. Its sole accepted argument is
 `--synthetic-receipt-signing-only`. It uses the existing core authentication
 client and expected project author over Primal; it never loads a project signing
 secret or a financial credential.

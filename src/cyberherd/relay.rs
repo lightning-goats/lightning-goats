@@ -123,6 +123,18 @@ pub fn engagement_filters(
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect();
+    engagement_scope_filters(ids, coordinates, since, until)
+}
+
+pub(crate) fn engagement_scope_filters(
+    ids: Vec<String>,
+    coordinates: Vec<String>,
+    since: u64,
+    until: u64,
+) -> Result<Vec<Filter>> {
+    if ids.len() > 128 || coordinates.len() > 128 {
+        bail!("engagement scope bound exceeded");
+    }
     let base = Filter {
         ids: vec![],
         authors: vec![],

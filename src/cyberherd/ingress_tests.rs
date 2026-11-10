@@ -85,6 +85,9 @@ struct Fixture {
 }
 impl Fixture {
     async fn new() -> Self {
+        Self::with_clock(crate::cyberherd::calendar::now().unwrap(), 100).await
+    }
+    async fn with_clock(now: i64, history_seconds: i64) -> Self {
         let root = TempDir::new().unwrap();
         let core = LedgerStore::connect(&format!(
             "sqlite://{}",
@@ -94,7 +97,6 @@ impl Fixture {
         .unwrap();
         let database = format!("sqlite://{}", root.path().join("herd.db").display());
         let store = Store::connect(&database).await.unwrap();
-        let now = crate::cyberherd::calendar::now().unwrap();
         let owner = public(1);
         store
             .initialize(
@@ -104,11 +106,17 @@ impl Fixture {
                     max_members: 10,
                     member_percent: 10,
                 },
-                now - 100,
+                now - history_seconds,
             )
             .await
             .unwrap();
-        let note = signed(1, 1, now - 50, "today", vec![tag(&["t", "CyberHerd"])]);
+        let note = signed(
+            1,
+            1,
+            now - history_seconds / 2,
+            "today",
+            vec![tag(&["t", "CyberHerd"])],
+        );
         let targets = Targets::project(
             TargetPolicy {
                 project_pubkey: owner.clone(),
@@ -734,7 +742,7 @@ async fn social_backfill_advances_only_complete_unsaturated_windows_and_reuses_r
             .unwrap()
     );
     let key =
-        crate::cyberherd::ingress::hash(&(f.now - 100, f.targets.current(), Vec::<String>::new()))
+        crate::cyberherd::ingress::hash(&("engagement-v2", f.now - 100, false, &f.note.event().id))
             .unwrap();
     assert_eq!(
         f.store
@@ -770,6 +778,166 @@ async fn social_backfill_advances_only_complete_unsaturated_windows_and_reuses_r
     f.run(Some(&profile), FeederAvailability::Ready).await;
     assert!(f.store.ingress_head(&f.owner).await.unwrap().is_none());
     assert_eq!(f.store.snapshot(&f.owner).await.unwrap().revision, 1);
+}
+
+#[tokio::test]
+async fn cold_social_start_recovers_earlier_users_and_recent_reactions_without_skipping_history() {
+    let today =
+        DayWindow::at(DEFAULT_TIMEZONE, crate::cyberherd::calendar::now().unwrap()).unwrap();
+    let f = Fixture::with_clock(today.start + 43200, 36000).await;
+    let old = signed(
+        2,
+        7,
+        f.now - 3600,
+        "+",
+        vec![tag(&["e", &f.note.event().id])],
+    );
+    let recent = signed(3, 7, f.now - 1, "+", vec![tag(&["e", &f.note.event().id])]);
+    let discovery = Discovery::new(
+        RelayFixture {
+            events: vec![old.clone(), recent.clone()],
+            complete: 1,
+            saturated: false,
+            queries: Default::default(),
+        },
+        1,
+    )
+    .unwrap();
+    let start = f.now - 36000;
+    assert!(
+        discovery
+            .backfill(&f.store, &f.owner, &f.targets, start, f.now)
+            .await
+            .unwrap()
+    );
+    for event in [&old, &recent] {
+        assert!(
+            f.store
+                .observed_event(&f.owner, &event.event().id)
+                .await
+                .unwrap()
+                .is_some()
+        );
+    }
+    {
+        let queries = discovery.source().queries.lock().unwrap();
+        assert_eq!(queries.len(), 2);
+        assert_eq!(queries[0][0].since, Some((f.now - 300) as u64));
+        assert_eq!(queries[1][0].since, Some(start as u64));
+    }
+    let key = crate::cyberherd::ingress::hash(&("engagement-v2", start, false, &f.note.event().id))
+        .unwrap();
+    assert_eq!(
+        f.store.relay_window(&f.owner, &key, start).await.unwrap(),
+        f.now
+    );
+    // Retrying/restarting keeps exact source identities; it cannot re-award.
+    discovery
+        .backfill(&f.store, &f.owner, &f.targets, start, f.now + 1)
+        .await
+        .unwrap();
+    let pool = SqlitePool::connect(&f.database).await.unwrap();
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM ingress WHERE owner=?")
+        .bind(&f.owner)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 2);
+    f.run(Some(&f.profile(3)), FeederAvailability::Ready).await;
+    f.run(Some(&f.profile(2)), FeederAvailability::Ready).await;
+    let snapshot = f.store.snapshot(&f.owner).await.unwrap();
+    assert_eq!(snapshot.roster.active_count(), 2);
+    for key in [2, 3] {
+        assert!(snapshot.roster.members[&public(key)].active);
+        assert!(snapshot.roster.awards[&public(key)].like);
+    }
+}
+
+#[tokio::test]
+async fn stream_updates_keep_prior_scope_cursors_and_recover_new_aliases_without_quorum_skips() {
+    let f = Fixture::new().await;
+    let policy = TargetPolicy {
+        project_pubkey: f.owner.clone(),
+        tracked_tags: vec!["CyberHerd".into()],
+    };
+    let start = f.now - 36000;
+    let note_key =
+        crate::cyberherd::ingress::hash(&("engagement-v2", start, false, &f.note.event().id))
+            .unwrap();
+    for offset in [20, 10] {
+        let stream = signed(
+            1,
+            30311,
+            f.now - offset,
+            "",
+            vec![tag(&["d", "live"]), tag(&["status", "live"])],
+        );
+        let stream_key =
+            crate::cyberherd::ingress::hash(&("engagement-v2", start, false, &stream.event().id))
+                .unwrap();
+        let mut discovery = Discovery::new(
+            RelayFixture {
+                events: vec![f.note.clone(), stream],
+                complete: 1,
+                saturated: false,
+                queries: Default::default(),
+            },
+            1,
+        )
+        .unwrap();
+        let refreshed = discovery
+            .refresh(
+                &f.store,
+                &policy,
+                &DayWindow::at(DEFAULT_TIMEZONE, f.now).unwrap(),
+                &[],
+                f.now,
+            )
+            .await
+            .unwrap();
+        assert!(refreshed.available);
+        discovery
+            .backfill(&f.store, &f.owner, &refreshed.targets, start, f.now)
+            .await
+            .unwrap();
+        assert_eq!(
+            f.store
+                .relay_window(&f.owner, &note_key, start)
+                .await
+                .unwrap(),
+            f.now
+        );
+        assert_eq!(
+            f.store
+                .relay_window(&f.owner, &stream_key, start)
+                .await
+                .unwrap(),
+            f.now
+        );
+    }
+    let incomplete = Discovery::new(
+        RelayFixture {
+            events: vec![],
+            complete: 0,
+            saturated: false,
+            queries: Default::default(),
+        },
+        1,
+    )
+    .unwrap();
+    assert!(
+        !incomplete
+            .backfill(&f.store, &f.owner, &f.targets, start, f.now + 100)
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        f.store
+            .relay_window(&f.owner, &note_key, start)
+            .await
+            .unwrap(),
+        f.now
+    );
 }
 
 #[tokio::test]

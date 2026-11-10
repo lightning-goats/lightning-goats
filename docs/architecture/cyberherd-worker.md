@@ -117,3 +117,25 @@ note/chat/overlay outboxes, lifecycle notices, public roster/OBS and
 authenticated operator interfaces remain unfinished. The known SQLite audit
 finding remains open; private state permissions mitigate its local-file condition
 without claiming that the dependency is patched.
+
+## Live reaction catch-up correction — 2026-11-10
+
+The first overlay-stage reaction test exposed delayed social intake: recovery
+scanned five-minute slices from cycle start, and a refreshed stream version or
+alias changed the combined cursor identity. Recent eligible reactions could
+therefore wait behind history or repeated scan restarts.
+
+The correction queries a bounded recent window independently, then recovers the
+oldest pending per-event/per-stream-coordinate scopes. A quiet historical day can
+complete in one bounded query; saturation bisects rather than skipping records.
+Only complete unsaturated windows advance covered scope cursors. A recent scan
+never advances a cursor across an unscanned gap. New stream versions/aliases gain
+their own recovery scope without resetting the daily note or prior stream scopes.
+Legacy cursor rows and all observed/ingress/award receipts remain retained.
+
+This applies to every eligible user's reaction/repost, including earlier events
+from the current cycle. Native signatures, authenticated targets, latest signed
+profile/Lightning-address eligibility, pause rules, capacity and once-per-cycle
+awards remain unchanged. No NIP-05 requirement, synthetic membership, financial
+state reset, public publication or payout capability is added. New source awaits
+exact Rust/CI/installed qualification and bounded worker replacement.

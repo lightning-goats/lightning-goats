@@ -7,7 +7,7 @@ use anyhow::{Result, bail};
 
 use super::{
     calendar::DayWindow,
-    relay::{Filter, Query, engagement_filters},
+    relay::{Filter, Query, engagement_filters, engagement_scope_filters},
     store::Store,
     targets::{
         AuthenticatedProfile, ProviderCache, StreamAuthentication, TargetPolicy, Targets,
@@ -43,9 +43,9 @@ impl<R: Query> Discovery<R> {
         &self.source
     }
 
-    /// Bounded time windows with a durable overlap. A saturated second is held
-    /// for recovery rather than skipped; a full/missing-quorum inbox never moves
-    /// its cursor. Newly selected targets get their own backfill identity.
+    /// Recent intake cannot wait behind historical recovery. Each event/stream
+    /// coordinate retains its own cursor, so a new stream version or alias never
+    /// resets an already scanned announcement. Old cursors/receipts are retained.
     pub async fn backfill(
         &self,
         store: &Store,
@@ -64,53 +64,104 @@ impl<R: Query> Discovery<R> {
                 aliases.extend(store.stream_alias_ids(owner, root).await?);
             }
         }
-        let key = super::ingress::hash(&(cycle_start, &current, &aliases))?;
-        let cursor = store.relay_window(owner, &key, cycle_start).await?;
-        if cursor >= now {
+        let recent_since = now.saturating_sub(300).max(cycle_start);
+        let recent = engagement_filters(&current, &aliases, recent_since as u64, now as u64)?;
+        if recent.is_empty() {
             return Ok(false);
         }
-        let since = cursor.saturating_sub(30).max(cycle_start);
-        let mut until = now.min(cursor.saturating_add(300));
-        // At most ten bisections reach one second from a five-minute window.
-        for _ in 0..10 {
-            let filters = engagement_filters(&current, &aliases, since as u64, until as u64)?;
-            if filters.is_empty() {
-                return Ok(false);
+        let mut scopes = BTreeSet::new();
+        for target in &current {
+            scopes.insert((false, target.event_id.clone()));
+            if let Some(root) = &target.coordinate {
+                scopes.insert((true, root.clone()));
             }
-            let batch = match self.source.query(&filters).await {
-                Ok(batch) => batch,
-                Err(_) => return Ok(false),
-            };
-            // Stage before network/profile resolution. A later failure or
-            // backpressure leaves already staged identities available on retry.
-            for event in batch.events {
-                if event.require_not_future(now).is_ok() {
-                    // Invalid shapes earn nothing and cannot poison the bounded
-                    // query's progress; storage failures must stop advancement.
-                    if super::social::SocialEvent::parse(event.clone(), owner, now)
-                        .is_ok_and(|v| v.is_some())
-                    {
-                        super::social::stage(store, owner, event, now).await?;
+        }
+        scopes.extend(aliases.into_iter().map(|id| (false, id)));
+        let mut cursors = Vec::new();
+        for (coordinate, id) in scopes {
+            let key = super::ingress::hash(&("engagement-v2", cycle_start, coordinate, &id))?;
+            let cursor = store.relay_window(owner, &key, cycle_start).await?;
+            cursors.push((coordinate, id, key, cursor));
+        }
+        let mut advanced = false;
+        match self.scan_social(store, owner, &recent, now).await? {
+            None => return Ok(false),
+            Some(false) => {
+                // Only a cursor already covered by this complete recent window
+                // may advance. A recent scan never skips an older recovery gap.
+                for (_, _, key, cursor) in &mut cursors {
+                    if *cursor >= recent_since && *cursor < now {
+                        store.advance_relay_window(owner, key, now).await?;
+                        *cursor = now;
+                        advanced = true;
                     }
                 }
             }
-            if batch.completed_relays < self.required_relays {
-                return Ok(false);
-            }
-            if !batch.saturated {
-                store.advance_relay_window(owner, &key, until).await?;
-                return Ok(true);
+            Some(true) => {}
+        }
+        let Some(cursor) = cursors.iter().map(|row| row.3).filter(|v| *v < now).min() else {
+            return Ok(advanced);
+        };
+        let selected: Vec<_> = cursors.iter().filter(|row| row.3 == cursor).collect();
+        let since = cursor.saturating_sub(30).max(cycle_start);
+        let mut until = now.min(cursor.saturating_add(86400));
+        // An empty/quiet day catches up in one bounded query; a saturated day
+        // bisects down to a second. Missing quorum/full inbox never advances it.
+        for _ in 0..18 {
+            let ids = selected
+                .iter()
+                .filter(|row| !row.0)
+                .map(|row| row.1.clone())
+                .collect();
+            let coordinates = selected
+                .iter()
+                .filter(|row| row.0)
+                .map(|row| row.1.clone())
+                .collect();
+            let filters = engagement_scope_filters(ids, coordinates, since as u64, until as u64)?;
+            match self.scan_social(store, owner, &filters, now).await? {
+                None => return Ok(advanced),
+                Some(false) => {
+                    for row in selected {
+                        store.advance_relay_window(owner, &row.2, until).await?;
+                    }
+                    return Ok(true);
+                }
+                Some(true) => {}
             }
             if until <= since + 1 {
-                return Ok(false);
+                return Ok(advanced);
             }
             until = since + (until - since) / 2;
-            // Do not let the overlap move the durable cursor backwards.
             if until <= cursor {
-                return Ok(false);
+                return Ok(advanced);
             }
         }
-        Ok(false)
+        Ok(advanced)
+    }
+
+    async fn scan_social(
+        &self,
+        store: &Store,
+        owner: &str,
+        filters: &[Filter],
+        now: i64,
+    ) -> Result<Option<bool>> {
+        let batch = match self.source.query(filters).await {
+            Ok(batch) => batch,
+            Err(_) => return Ok(None),
+        };
+        // Native verification and durable staging precede profile resolution.
+        // Missing quorum still retains validated events, without skipping gaps.
+        for event in batch.events {
+            if event.require_not_future(now).is_ok()
+                && super::social::SocialEvent::parse(event.clone(), owner, now)
+                    .is_ok_and(|v| v.is_some())
+            {
+                super::social::stage(store, owner, event, now).await?;
+            }
+        }
+        Ok((batch.completed_relays >= self.required_relays).then_some(batch.saturated))
     }
 
     pub async fn refresh(

@@ -89,9 +89,6 @@ pub(crate) struct Worker<T> {
 }
 impl<T: Transport> Worker<T> {
     pub async fn tick(&self) -> Result<Step> {
-        if !permitted(&self.core).await? {
-            return Ok(Step::Waiting);
-        }
         let Some(job) = self
             .store
             .reserve_delivery(&self.owner, calendar::now()?)
@@ -122,6 +119,11 @@ impl<T: Transport> Worker<T> {
         }
     }
     async fn deliver(&self, job: &Job) -> Result<Option<RelayAck>> {
+        // Idle/backoff work does not consume the core's bounded IPC admission.
+        // Once selected, fresh permission still precedes signing and publication.
+        if !permitted(&self.core).await? {
+            return Ok(None);
+        }
         let raw = match &job.signed {
             Some(raw) => raw.clone(),
             None => {

@@ -392,7 +392,10 @@ async fn paused_unknown_and_canary_never_sign_or_publish_member_threads() {
     };
     for paused in [Some(true), None] {
         f.ready(paused).await;
-        assert_eq!(worker.tick().await.unwrap(), Step::Waiting);
+        assert!(matches!(
+            worker.tick().await.unwrap(),
+            Step::Waiting | Step::Idle
+        ));
         tokio::time::sleep(std::time::Duration::from_millis(600)).await;
     }
     task.abort();
@@ -404,7 +407,10 @@ async fn paused_unknown_and_canary_never_sign_or_publish_member_threads() {
         owner: f.owner.clone(),
     };
     f.ready(Some(false)).await;
-    assert_eq!(worker.tick().await.unwrap(), Step::Waiting);
+    assert!(matches!(
+        worker.tick().await.unwrap(),
+        Step::Waiting | Step::Idle
+    ));
     assert_eq!(fake.signs.load(Ordering::SeqCst), 0);
     assert!(fake.events.lock().unwrap().is_empty());
     // Canary still supports overlay-only staged testing under the same owner.
@@ -469,6 +475,25 @@ async fn low_payment_floor_template_opt_out_and_unchanged_allocation_do_not_emit
             .unwrap(),
         crate::cyberherd::conversation::identity(&f.owner, &key(2), "settlement:join").unwrap()
     );
+}
+
+#[tokio::test]
+async fn idle_member_publisher_uses_neither_core_admission_nor_remote_signing() {
+    let f = Fixture::new().await;
+    let fake = Fake::default();
+    let worker = Worker {
+        store: f.store.clone(),
+        core: Client::new(
+            f.root.path().join("no-core-listener.sock"),
+            self_credentials().unwrap().0,
+        )
+        .unwrap(),
+        transport: fake.clone(),
+        owner: f.owner.clone(),
+    };
+    assert_eq!(worker.tick().await.unwrap(), Step::Idle);
+    assert_eq!(fake.signs.load(Ordering::SeqCst), 0);
+    assert!(fake.events.lock().unwrap().is_empty());
 }
 
 #[tokio::test]

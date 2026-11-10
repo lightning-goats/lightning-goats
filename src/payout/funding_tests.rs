@@ -52,6 +52,7 @@ fn sample_plan(
         rows:vec![Row{pubkey:key,profile_event_id:Some("55".repeat(32)),profile:Some(Profile{name:"Member".into(),picture:None,lud16:Some(address.into())}),
             amount_sats:1,awards:SocialAwards::default(),point_units:"10".into(),share_micro_percent:10_000_000,
             gross_sats:2,fee_limit_sats:1,net_sats:1,gross_micro_percent_of_feed:8_695_652,
+            conversation:None, score_basis:None, zap_content:None,
             recipient:Some(crate::payout::recipient::Recipient::parse(address,&serde_json::to_vec(&json!({
                 "tag":"payRequest","minSendable":1000,"maxSendable":100000,"callback":"https://pay.example.com/invoice",
                 "metadata":"[[\"text/plain\",\"Treats\"]]"})).unwrap()).unwrap()),skip:None}]}

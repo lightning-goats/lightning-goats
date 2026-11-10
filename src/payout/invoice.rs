@@ -22,6 +22,10 @@ pub(crate) struct Document {
     pub net_sats: u64,
     pub created_at: i64,
     pub relays: Vec<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub joining: Option<crate::cyberherd::conversation::PublishedReference>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -66,8 +70,12 @@ impl Intent {
             || amount < document.recipient.min_msat
             || amount > document.recipient.max_msat
             || document.relays != receipt_relays(&document.relays)?
+            || document.content.len() > 2048
         {
             bail!("invalid frozen payout invoice intent");
+        }
+        if let Some(joining) = &document.joining {
+            joining.validate(&document.owner, &document.member)?;
         }
         Ok(Self(document))
     }
@@ -77,17 +85,26 @@ impl Intent {
         };
         let mut relays = vec!["relays".into()];
         relays.extend(self.0.relays.clone());
+        let mut tags = vec![
+            relays,
+            vec!["amount".into(), (self.0.net_sats * 1000).to_string()],
+            vec!["lnurl".into(), self.lnurl()?],
+            vec!["p".into(), self.0.member.clone()],
+            vec!["P".into(), signer.clone()],
+        ];
+        if let Some(joining) = &self.0.joining {
+            tags.push(vec![
+                "e".into(),
+                joining.event.id.clone(),
+                joining.relay.clone(),
+            ]);
+            tags.push(vec!["k".into(), joining.event.kind.to_string()]);
+        }
         Ok(Some(UnsignedZap {
             kind: 9734,
             created_at: u64::try_from(self.0.created_at)?,
-            content: String::new(),
-            tags: vec![
-                relays,
-                vec!["amount".into(), (self.0.net_sats * 1000).to_string()],
-                vec!["lnurl".into(), self.lnurl()?],
-                vec!["p".into(), self.0.member.clone()],
-                vec!["P".into(), signer.clone()],
-            ],
+            content: self.0.content.clone(),
+            tags,
         }))
     }
     fn lnurl(&self) -> Result<String> {
@@ -283,6 +300,8 @@ mod tests {
             created_at: 1000,
             relays: receipt_relays(&["wss://relay.damus.io/".into(), "wss://nos.lol/".into()])
                 .unwrap(),
+            content: String::new(),
+            joining: None,
         })
         .unwrap()
     }
@@ -296,6 +315,58 @@ mod tests {
             u.tags,
         ))
         .unwrap()
+    }
+
+    #[test]
+    fn outgoing_zap_freezes_editable_wording_and_verified_joining_chat_kind_without_publishing_it()
+    {
+        let mut document = intent(true).0;
+        document.content = "🐐 Frozen operator wording: 5 sats".into();
+        let joining = crate::nostr_event::test_event(
+            1,
+            1311,
+            999,
+            "Welcome Alice",
+            vec![
+                vec!["p".into(), document.member.clone()],
+                vec![
+                    "a".into(),
+                    format!("30311:{}:saved-stream", document.owner),
+                    String::new(),
+                    "root".into(),
+                ],
+            ],
+        );
+        document.joining = Some(crate::cyberherd::conversation::PublishedReference {
+            event: joining.clone(),
+            relay: "wss://relay.damus.io/".into(),
+            acknowledged_at: 1000,
+        });
+        let frozen = Intent::restore(document).unwrap();
+        let unsigned = frozen.unsigned_zap().unwrap().unwrap();
+        assert_eq!(unsigned.content, "🐐 Frozen operator wording: 5 sats");
+        assert!(unsigned.tags.contains(&vec![
+            "e".into(),
+            joining.id.clone(),
+            "wss://relay.damus.io/".into()
+        ]));
+        assert!(unsigned.tags.contains(&vec!["k".into(), "1311".into()]));
+        let raw = signed(&frozen);
+        let request = Request::restore(frozen.clone(), Some(raw.clone())).unwrap();
+        assert_eq!(
+            request.description_hash(),
+            hex::encode(Sha256::digest(raw.as_bytes()))
+        );
+        let mut changed = frozen.0.clone();
+        changed.content = "new wording".into();
+        assert!(Request::restore(Intent::restore(changed).unwrap(), Some(raw)).is_err());
+        let ordinary = intent(true).unsigned_zap().unwrap().unwrap();
+        assert!(
+            !ordinary
+                .tags
+                .iter()
+                .any(|t| t.first().is_some_and(|name| name == "e"))
+        );
     }
     #[test]
     fn explicit_ordinary_fallback_uses_raw_metadata_and_checks_exact_invoice_amount_hash_and_time()

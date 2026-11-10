@@ -5,6 +5,16 @@ use sqlx::{Sqlite, Transaction};
 
 impl Store {
     pub async fn prepare_invoice(&self, grant_id: Uuid, member: &str, now: i64) -> Result<Intent> {
+        self.prepare_invoice_with_reference(grant_id, member, now, None)
+            .await
+    }
+    pub(crate) async fn prepare_invoice_with_reference(
+        &self,
+        grant_id: Uuid,
+        member: &str,
+        now: i64,
+        joining: Option<&crate::cyberherd::conversation::PublishedReference>,
+    ) -> Result<Intent> {
         crate::nostr_event::validate_public_key(member)?;
         let mut tx = self.pool.begin().await?;
         write_lock(&mut tx).await?;
@@ -25,13 +35,20 @@ impl Store {
             tx.commit().await?;
             return Ok(intent);
         }
-        let row=sqlx::query("SELECT r.*,g.admitted_at FROM payout_rows r JOIN payout_grants g ON g.id=r.grant_id WHERE r.grant_id=? AND r.member=?")
+        let row=sqlx::query("SELECT r.*,g.admitted_at,g.plan_json FROM payout_rows r JOIN payout_grants g ON g.id=r.grant_id WHERE r.grant_id=? AND r.member=?")
             .bind(grant_id.to_string()).bind(member).fetch_one(&mut *tx).await?;
         if now < row.try_get::<i64, _>("admitted_at")?
             || u64::try_from(row.try_get::<i64, _>("fee_limit_sats")?)? > self.policy.max_fee_sats
         {
             bail!("invoice preparation precedes funding or exceeds current fee policy");
         }
+        let plan: crate::cyberherd::rewards::Plan =
+            serde_json::from_str(&row.try_get::<String, _>("plan_json")?)?;
+        let planned = plan
+            .rows
+            .iter()
+            .find(|r| r.pubkey == member)
+            .context("invoice lost its frozen plan row")?;
         let intent = Intent::restore(invoice::Document {
             id: Uuid::new_v4(),
             grant_id,
@@ -42,6 +59,8 @@ impl Store {
             net_sats: row.try_get::<i64, _>("net_sats")?.try_into()?,
             created_at: now,
             relays: invoice::receipt_relays(&self.policy.receipt_relays)?,
+            content: planned.zap_content.clone().unwrap_or_default(),
+            joining: joining.cloned(),
         })?;
         touch_clock(&mut tx, now).await?;
         sqlx::query(

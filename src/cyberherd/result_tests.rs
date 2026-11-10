@@ -2,6 +2,117 @@ use super::*;
 use crate::cyberherd::rewards::StoredPlan;
 use crate::payout::results::{AuthenticatedPage, Page, Row, Status};
 
+#[tokio::test]
+async fn feeding_freezes_original_member_conversations_and_editable_zap_wording_before_later_interactions()
+ {
+    let f = Fixture::with_conversations(0, true).await;
+    f.store
+        .seed_templates(
+            &f.owner,
+            &crate::cyberherd::templates::Catalog::legacy().unwrap(),
+        )
+        .await
+        .unwrap();
+    f.store
+        .edit_template(
+            &f.owner,
+            "zap-wording",
+            &crate::cyberherd::store::TemplateEdit::Set {
+                category: "cyber_herd_zap_request".into(),
+                variant: "only".into(),
+                text: "Treats for {name}: {new_amount} sats, frozen at feeding.".into(),
+            },
+        )
+        .await
+        .unwrap();
+    // Opt out of original variants explicitly, retaining only the new edit.
+    let source = crate::cyberherd::templates::Catalog::legacy().unwrap();
+    for variant in source.category("cyber_herd_zap_request").unwrap().keys() {
+        f.store
+            .edit_template(
+                &f.owner,
+                &format!("remove-{variant}"),
+                &crate::cyberherd::store::TemplateEdit::Delete {
+                    category: "cyber_herd_zap_request".into(),
+                    variant: variant.clone(),
+                },
+            )
+            .await
+            .unwrap();
+    }
+    let later:super::super::targets::InteractionContext=serde_json::from_value(json!({
+        "matched":{"event_id":"88".repeat(32),"kind":1,"coordinate":null,"payee_pubkey":f.owner},
+        "destinations":[{"event_id":"99".repeat(32),"kind":30311,"coordinate":format!("30311:{}:later",f.owner),"payee_pubkey":f.owner}]
+    })).unwrap();
+    f.store
+        .process_with_context(
+            &f.owner,
+            &Interaction {
+                source_id: "settlement:after-feeding".into(),
+                source_hash: "aa".repeat(32),
+                pubkey: key(2),
+                profile: profile(2, f.now, Some("member2@example.com"))
+                    .profile()
+                    .clone(),
+                action: Action::Zap { amount_sats: 34 },
+                occurred_at: f.now,
+            },
+            Target::ProjectContent,
+            FeederAvailability::Ready,
+            Some(&later),
+        )
+        .await
+        .unwrap();
+    let frozen = f.freeze(&policy()).await.unwrap();
+    let row = frozen
+        .plan
+        .rows
+        .iter()
+        .find(|r| r.pubkey == key(2))
+        .unwrap();
+    assert_eq!(row.amount_sats, 10);
+    let context = &row.conversation.as_ref().unwrap().context;
+    assert_eq!(context.note.as_ref().unwrap().event_id, "66".repeat(32));
+    assert!(
+        context
+            .stream
+            .as_ref()
+            .unwrap()
+            .coordinate
+            .as_ref()
+            .unwrap()
+            .ends_with(":original")
+    );
+    assert!(
+        row.zap_content
+            .as_ref()
+            .unwrap()
+            .contains(&format!("{} sats", row.net_sats))
+    );
+    assert!(
+        row.zap_content
+            .as_ref()
+            .unwrap()
+            .contains("frozen at feeding")
+    );
+    f.store
+        .edit_template(
+            &f.owner,
+            "change-after-freeze",
+            &crate::cyberherd::store::TemplateEdit::Set {
+                category: "cyber_herd_zap_request".into(),
+                variant: "only".into(),
+                text: "Different words".into(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        f.store.reward_plan(&f.owner, f.id).await.unwrap().unwrap(),
+        frozen
+    );
+}
+
 async fn plan(f: &Fixture) -> StoredPlan {
     let frozen = f.freeze(&policy()).await.unwrap();
     let reservation = f

@@ -182,6 +182,9 @@ impl Store {
             ingress_seq: barrier.try_get("ingress_seq")?,
             feeding: serde_json::from_str(&barrier.try_get::<String, _>("feeding_json")?)?,
             snapshot: serde_json::from_str(&barrier.try_get::<String, _>("snapshot_json")?)?,
+            conversations: serde_json::from_str(
+                &barrier.try_get::<String, _>("conversations_json")?,
+            )?,
         };
         if barrier.snapshot.owner != owner || barrier.feeding.request_id != id {
             bail!("stored feeding scope mismatch");
@@ -213,7 +216,7 @@ impl Store {
                 bail!("reward profile changed during recipient resolution");
             }
         }
-        let plan = rewards::build(
+        let mut plan = rewards::build(
             &barrier,
             &binding,
             policy,
@@ -222,6 +225,36 @@ impl Store {
             recipients,
             now,
         )?;
+        let catalog = super::load_catalog(&mut tx, owner).await?;
+        for row in &mut plan.rows {
+            if let Some(conversation) = &row.conversation {
+                conversation.validate(owner)?;
+            }
+            if row.skip.is_none() {
+                let values = std::collections::BTreeMap::from([
+                    (
+                        "name".into(),
+                        row.profile
+                            .as_ref()
+                            .map_or("Anon", |p| p.name.as_str())
+                            .to_owned(),
+                    ),
+                    ("new_amount".into(), row.net_sats.to_string()),
+                ]);
+                row.zap_content = catalog.render(
+                    "cyber_herd_zap_request",
+                    &format!("{}:{}", id, row.pubkey),
+                    &values,
+                )?;
+                if row
+                    .zap_content
+                    .as_ref()
+                    .is_some_and(|text| text.len() > 2048)
+                {
+                    bail!("outgoing zap wording exceeds the invoice intent bound");
+                }
+            }
+        }
         let hash = plan.hash()?;
         let state = if plan.reserved_sats == 0 {
             "no_payout"
@@ -230,6 +263,22 @@ impl Store {
         };
         sqlx::query("INSERT INTO reward_plans(owner,request_id,plan_hash,plan_json,state) VALUES(?,?,?,?,?)")
             .bind(owner).bind(id.to_string()).bind(&hash).bind(serde_json::to_string(&plan)?).bind(state).execute(&mut *tx).await?;
+        for row in &plan.rows {
+            if matches!(
+                row.skip,
+                Some(
+                    rewards::Skip::ZeroShare
+                        | rewards::Skip::BelowMinimum
+                        | rewards::Skip::RecipientMinimum
+                        | rewards::Skip::RecipientMaximum
+                        | rewards::Skip::RecipientUnavailable
+                )
+            ) {
+                let payload = serde_json::json!({"request_id":id,"breakdown":row});
+                sqlx::query("INSERT INTO domain_events(owner,cycle,source_id,event_type,snapshot_json) VALUES(?,?,?,'payout_skipped',?)")
+                    .bind(owner).bind(plan.cycle).bind(format!("payout-skipped:{id}:{}",row.pubkey)).bind(serde_json::to_string(&payload)?).execute(&mut *tx).await?;
+            }
+        }
         tx.commit().await?;
         Ok(StoredPlan {
             hash,

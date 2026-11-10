@@ -61,6 +61,31 @@ operation_addresses = ["herd@lightning-goats.com"]
                         policy + 'strike_api_key = "synthetic-placeholder"\n']:
             self.assertNotEqual(self.invoke(self.text + invalid, "--check").returncode, 0)
 
+    def test_optional_messaging_check_reads_no_credential_and_rejects_raw_keys(self):
+        messaging = '''
+[messaging]
+enabled = false
+start_after = 0
+poll_millis = 1000
+relays = ["wss://relay.damus.io/"]
+'''
+        self.assertEqual(self.invoke(self.text + messaging, "--check").returncode, 0)
+        public = "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
+        client = "c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5"
+        signer = f'''
+[messaging.signer]
+nak_path = "/uninstalled/nak"
+bunker_pubkey = "{public}"
+client_pubkey = "{client}"
+bunker_relays = ["wss://nos.lol/"]
+'''
+        self.assertEqual(self.invoke(self.text + messaging + signer, "--check").returncode, 0)
+        for invalid in [messaging.replace("start_after = 0", "start_after = -1"),
+                        messaging.replace("poll_millis = 1000", "poll_millis = 0"),
+                        messaging + signer.replace(client, public),
+                        messaging + signer + 'nsec = "synthetic-placeholder"\n']:
+            self.assertNotEqual(self.invoke(self.text + invalid, "--check").returncode, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

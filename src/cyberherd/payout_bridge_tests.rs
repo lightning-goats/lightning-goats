@@ -95,3 +95,75 @@ async fn no_payout_plan_can_advance_without_creating_a_reservation() {
     );
     task.abort();
 }
+
+#[tokio::test]
+async fn payout_reference_uses_only_real_recorded_joining_receipts_from_the_frozen_member_conversation()
+ {
+    let f = Fixture::with_conversations(0, true).await;
+    f.store
+        .seed_templates(
+            &f.owner,
+            &crate::cyberherd::templates::Catalog::legacy().unwrap(),
+        )
+        .await
+        .unwrap();
+    f.freeze(&policy()).await.unwrap();
+    let (client, task) = serve(&f).await;
+    assert!(client.joining(f.id, &key(2)).await.unwrap().is_none());
+    f.store.initialize_delivery(&f.owner, 0).await.unwrap();
+    while f
+        .store
+        .queue_next_delivery(
+            &f.owner,
+            &["wss://relay.damus.io/".into()],
+            calendar::now().unwrap(),
+        )
+        .await
+        .unwrap()
+    {}
+    while let Some(job) = f
+        .store
+        .reserve_delivery(&f.owner, calendar::now().unwrap())
+        .await
+        .unwrap()
+    {
+        let event = crate::nostr_event::VerifiedEvent::verify(crate::nostr_event::test_event(
+            1,
+            job.unsigned.kind,
+            job.unsigned.created_at,
+            &job.unsigned.content,
+            job.unsigned.tags.clone(),
+        ))
+        .unwrap();
+        f.store.save_delivery_signature(&job, &event).await.unwrap();
+        // An unsigned intent or saved signature alone was never sufficient.
+        if job
+            .unsigned
+            .tags
+            .iter()
+            .any(|t| t.first().is_some_and(|x| x == "p") && t.get(1) == Some(&key(2)))
+        {
+            let before = client.joining(f.id, &key(2)).await.unwrap();
+            if job.unsigned.kind == 1 {
+                assert!(before.is_none());
+            }
+        }
+        let ack = crate::cyberherd::delivery_worker::RelayAck::synthetic(&event, &job.relay);
+        f.store
+            .finish_delivery(&job, Some(&ack), calendar::now().unwrap())
+            .await
+            .unwrap();
+    }
+    let reference = client.joining(f.id, &key(2)).await.unwrap().unwrap();
+    reference.validate(&f.owner, &key(2)).unwrap();
+    assert_eq!(reference.event.kind, 1);
+    assert!(
+        reference
+            .event
+            .tags
+            .iter()
+            .any(|t| t.first().is_some_and(|x| x == "e") && t.get(1) == Some(&"66".repeat(32)))
+    );
+    assert!(client.joining(Uuid::new_v4(), &key(2)).await.is_err());
+    task.abort();
+}

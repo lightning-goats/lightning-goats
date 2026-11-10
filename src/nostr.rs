@@ -19,6 +19,26 @@ const MAX_NAK_STDOUT: usize = 64 * 1024;
 const MAX_NAK_STDERR: usize = 8 * 1024;
 const PUBLISH_DUMMY_SECRET: &str = "01";
 
+pub(crate) fn validate_client_credential(owner: &str, client: &str, key: &str) -> Result<()> {
+    let bytes = Zeroizing::new(
+        hex::decode(key).map_err(|_| anyhow::anyhow!("NIP-46 client credential must be hex"))?,
+    );
+    let mut secret = bitcoin::secp256k1::SecretKey::from_slice(&bytes)
+        .map_err(|_| anyhow::anyhow!("invalid NIP-46 client credential"))?;
+    let public = bitcoin::secp256k1::PublicKey::from_secret_key(
+        &bitcoin::secp256k1::Secp256k1::new(),
+        &secret,
+    )
+    .x_only_public_key()
+    .0
+    .to_string();
+    secret.non_secure_erase();
+    if public != client || public == owner {
+        bail!("credential must match the pinned NIP-46 client, distinct from project identity");
+    }
+    Ok(())
+}
+
 #[derive(Clone)]
 pub struct NakClient {
     nak_path: PathBuf,

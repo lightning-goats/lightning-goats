@@ -47,6 +47,8 @@ pub(crate) fn intent() -> Intent {
         net_sats: 1,
         created_at: crate::cyberherd::calendar::now().unwrap(),
         relays: vec!["wss://relay.damus.io/".into()],
+        content: String::new(),
+        joining: None,
     })
     .unwrap()
 }

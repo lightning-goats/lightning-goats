@@ -6,9 +6,16 @@
 //! docs/planning/cyberherd-implementation-plan.md.
 
 pub mod calendar;
+pub mod conversation;
+pub mod delivery;
+#[cfg(unix)]
+pub mod delivery_runtime;
+#[cfg(unix)]
+pub mod delivery_worker;
 pub mod discovery;
 pub mod ingress;
 pub mod membership;
+pub mod overlay_delivery;
 #[cfg(unix)]
 pub mod payout_bridge;
 pub mod relay;

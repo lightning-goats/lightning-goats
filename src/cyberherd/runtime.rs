@@ -1,5 +1,5 @@
 //! Separate intake/membership process. No Strike credential, core DB handle,
-//! Nostr signer or physical gateway is present. Funded payouts and public
+//! project signing key or physical gateway is present. Funded payouts and public
 //! delivery are deliberately separate capabilities, not inferred from a feed.
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
@@ -47,6 +47,8 @@ pub struct Config {
     pub rewards: Option<super::rewards::PlanningPolicy>,
     #[serde(default)]
     pub payout_bridge: Option<super::payout_bridge::Config>,
+    #[serde(default)]
+    pub messaging: Option<super::delivery_runtime::Config>,
 }
 
 impl Config {
@@ -70,6 +72,9 @@ impl Config {
             if bridge.peer_uid == self.core.core_uid {
                 bail!("payout and core identities must differ");
             }
+        }
+        if let Some(messaging) = &self.messaging {
+            messaging.validate(&self.project_pubkey)?;
         }
         self.policy().validate()?;
         DayWindow::at(&self.timezone, calendar::now()?)?;
@@ -158,6 +163,12 @@ impl Runtime {
             .seed_templates(
                 &config.project_pubkey,
                 &super::templates::Catalog::legacy()?,
+            )
+            .await?;
+        store
+            .seed_templates(
+                &config.project_pubkey,
+                &super::templates::Catalog::delivery_defaults()?,
             )
             .await?;
         let client = Client::new(config.core_socket.clone(), config.core.core_uid)?;
@@ -330,6 +341,18 @@ impl Runtime {
             })
             .transpose()?;
         let mut tasks = tokio::task::JoinSet::new();
+        if let Some(messaging) = &self.config.messaging {
+            messaging
+                .start(
+                    self.store.clone(),
+                    &self.config.project_pubkey,
+                    &self.config.state_dir,
+                    &self.config.core_socket,
+                    self.config.core.core_uid,
+                    &mut tasks,
+                )
+                .await?;
+        }
         if let Some(config) = &self.config.payout_bridge {
             if config.peer_uid == crate::private_ipc::uid()? {
                 bail!("payout requires a separate UID");

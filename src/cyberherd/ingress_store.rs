@@ -297,8 +297,25 @@ impl Store {
             .fetch_one(&mut *tx)
             .await?;
         let snapshot = decode_snapshot(&row)?;
-        sqlx::query("INSERT INTO feeding_barriers(owner,request_id,ingress_seq,feeding_json,snapshot_json) VALUES(?,?,?,?,?)")
-            .bind(owner).bind(feeding.request_id.to_string()).bind(seq).bind(feeding_json).bind(serde_json::to_string(&snapshot)?).execute(&mut *tx).await?;
+        let records = sqlx::query("SELECT member,conversation_json FROM member_conversations WHERE owner=? AND cycle=? ORDER BY member")
+            .bind(owner).bind(snapshot.cycle).fetch_all(&mut *tx).await?;
+        let mut conversations = std::collections::BTreeMap::new();
+        for record in records {
+            let member: String = record.try_get("member")?;
+            if snapshot
+                .roster
+                .members
+                .get(&member)
+                .is_some_and(|m| m.active)
+            {
+                let value: super::super::conversation::MemberConversation =
+                    serde_json::from_str(&record.try_get::<String, _>("conversation_json")?)?;
+                value.validate(owner)?;
+                conversations.insert(member, value);
+            }
+        }
+        sqlx::query("INSERT INTO feeding_barriers(owner,request_id,ingress_seq,feeding_json,snapshot_json,conversations_json) VALUES(?,?,?,?,?,?)")
+            .bind(owner).bind(feeding.request_id.to_string()).bind(seq).bind(feeding_json).bind(serde_json::to_string(&snapshot)?).bind(serde_json::to_string(&conversations)?).execute(&mut *tx).await?;
         sqlx::query("UPDATE ingress SET state='done',result_json='\"membership_barrier\"' WHERE owner=? AND seq=?")
             .bind(owner).bind(seq).execute(&mut *tx).await?;
         tx.commit().await?;
@@ -306,18 +323,22 @@ impl Store {
             ingress_seq: seq,
             feeding,
             snapshot,
+            conversations,
         })
     }
 
     pub async fn feeding_barrier(&self, owner: &str, id: Uuid) -> Result<Option<FeedingBarrier>> {
         validate_owner(owner)?;
-        let row = sqlx::query("SELECT ingress_seq,feeding_json,snapshot_json FROM feeding_barriers WHERE owner=? AND request_id=?")
+        let row = sqlx::query("SELECT ingress_seq,feeding_json,snapshot_json,conversations_json FROM feeding_barriers WHERE owner=? AND request_id=?")
             .bind(owner).bind(id.to_string()).fetch_optional(&self.pool).await?;
         row.map(|row| {
             Ok(FeedingBarrier {
                 ingress_seq: row.try_get("ingress_seq")?,
                 feeding: serde_json::from_str(&row.try_get::<String, _>("feeding_json")?)?,
                 snapshot: serde_json::from_str(&row.try_get::<String, _>("snapshot_json")?)?,
+                conversations: serde_json::from_str(
+                    &row.try_get::<String, _>("conversations_json")?,
+                )?,
             })
         })
         .transpose()

@@ -129,6 +129,9 @@ struct Fixture {
 }
 impl Fixture {
     async fn new(virtual_sats: u64) -> Self {
+        Self::with_conversations(virtual_sats, false).await
+    }
+    async fn with_conversations(virtual_sats: u64, with_conversations: bool) -> Self {
         let root = TempDir::new().unwrap();
         let core = LedgerStore::connect(&format!(
             "sqlite://{}",
@@ -199,6 +202,15 @@ impl Fixture {
             (3, Action::Repost),
             (4, Action::Like),
         ] {
+            let context = if with_conversations {
+                Some(serde_json::from_value::<super::targets::InteractionContext>(json!({
+                    "matched":{"event_id":"66".repeat(32),"kind":1,"coordinate":null,"payee_pubkey":owner},
+                    "destinations":[{"event_id":"66".repeat(32),"kind":1,"coordinate":null,"payee_pubkey":owner},
+                    {"event_id":"77".repeat(32),"kind":30311,"coordinate":format!("30311:{owner}:original"),"payee_pubkey":owner}]
+                })).unwrap())
+            } else {
+                None
+            };
             let address = format!("member{n}@example.com");
             let p = profile(n, now - 2, Some(&address));
             let source_id = if n == 2 {
@@ -207,7 +219,7 @@ impl Fixture {
                 format!("nostr:{}", format!("{n:02x}").repeat(32))
             };
             store
-                .process(
+                .process_with_context(
                     &owner,
                     &Interaction {
                         source_id,
@@ -219,6 +231,7 @@ impl Fixture {
                     },
                     Target::Current,
                     FeederAvailability::Ready,
+                    context.as_ref(),
                 )
                 .await
                 .unwrap();

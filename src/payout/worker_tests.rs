@@ -37,6 +37,7 @@ async fn core(
 }
 fn worker(w: &Workflow, core: Client, store: Store) -> Worker {
     Worker {
+        presentation: None,
         store,
         core,
         signer: signer::Client::new(

@@ -14,6 +14,7 @@ use sqlx::{Row, SqlitePool};
 use crate::domain::payment::SettledPayment;
 
 mod core_bridge;
+mod cyberherd_overlay;
 mod events;
 mod feed;
 mod feeding_presentation;

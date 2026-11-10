@@ -1,5 +1,5 @@
 [Unit]
-Description=CyberHerd intake and membership (no payouts or publishing)
+Description=CyberHerd intake, membership and optional NIP-46 presentation (no payouts)
 After=network-online.target lightning-goats-receive.service
 Wants=network-online.target
 
@@ -9,6 +9,9 @@ User=cyberherd
 Group=cyberherd
 SupplementaryGroups=cyberherd-bridge cyberherd-plans
 ExecStart=/usr/local/bin/cyberherdd --config /etc/cyberherd/config.toml
+# Optional only when [messaging.signer] is deliberately configured. This is a
+# separate NIP-46 authentication client, never the project identity's secret.
+# LoadCredential=nostr-client-key:/etc/cyberherd/nostr-client-key
 Restart=on-failure
 RestartSec=5s
 StateDirectory=cyberherd

@@ -12,7 +12,7 @@ use std::{
 };
 use tokio::{net::UnixListener, sync::Semaphore, time::timeout};
 
-const MAX_FRAME: usize = 65536;
+const MAX_FRAME: usize = 131072;
 #[cfg(test)]
 #[path = "signer_tests.rs"]
 pub(crate) mod tests;
@@ -157,23 +157,7 @@ impl Config {
 }
 
 fn validate_client_key(policy: &Policy, key: &str) -> Result<()> {
-    let bytes = zeroize::Zeroizing::new(
-        hex::decode(key).map_err(|_| anyhow::anyhow!("NIP-46 client credential must be hex"))?,
-    );
-    let mut secret = bitcoin::secp256k1::SecretKey::from_slice(&bytes)
-        .map_err(|_| anyhow::anyhow!("invalid NIP-46 client credential"))?;
-    let public = bitcoin::secp256k1::PublicKey::from_secret_key(
-        &bitcoin::secp256k1::Secp256k1::new(),
-        &secret,
-    )
-    .x_only_public_key()
-    .0
-    .to_string();
-    secret.non_secure_erase();
-    if public != policy.client_pubkey || public == policy.owner {
-        bail!("credential must match the pinned NIP-46 client, distinct from project identity");
-    }
-    Ok(())
+    crate::nostr::validate_client_credential(&policy.owner, &policy.client_pubkey, key)
 }
 
 #[derive(Clone)]

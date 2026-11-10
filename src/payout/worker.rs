@@ -32,6 +32,7 @@ pub struct Worker {
     pub core: Core,
     pub signer: Signer,
     pub sender: Sender,
+    pub presentation: Option<crate::cyberherd::payout_bridge::Client>,
 }
 pub(crate) trait InvoiceFetcher {
     fn fetch(
@@ -70,8 +71,28 @@ impl Worker {
                 if self.permission(work.grant, &member, nostr).await?.is_none() {
                     return Ok(Step::Waiting);
                 }
+                let joining = if let Some(presentation) = &self.presentation {
+                    let grant = self
+                        .store
+                        .grant(work.grant)
+                        .await?
+                        .context("payout work lost its grant")?;
+                    // Receipt availability never blocks or downgrades a zap:
+                    // absent/unavailable joining evidence uses a profile zap.
+                    presentation
+                        .joining(grant.request_id, &member)
+                        .await
+                        .unwrap_or(None)
+                } else {
+                    None
+                };
                 self.store
-                    .prepare_invoice(work.grant, &member, calendar::now()?)
+                    .prepare_invoice_with_reference(
+                        work.grant,
+                        &member,
+                        calendar::now()?,
+                        joining.as_ref(),
+                    )
                     .await?;
                 return Ok(Step::InvoiceIntent);
             }

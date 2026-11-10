@@ -83,6 +83,8 @@ pub struct FeedingBarrier {
     pub ingress_seq: i64,
     pub feeding: Feeding,
     pub snapshot: Snapshot,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub conversations: BTreeMap<String, super::conversation::MemberConversation>,
 }
 
 pub(crate) fn hash(value: &impl Serialize) -> Result<String> {

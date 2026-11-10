@@ -31,6 +31,10 @@ pub fn audience(category: &str) -> Option<Audience> {
         | "feeder_trigger"
         | "cyber_herd"
         | "cyber_herd_treats"
+        | "cyber_herd_no_treats"
+        | "cyber_herd_unadmitted"
+        | "cyber_herd_delivery_failed"
+        | "cyber_herd_unsubmitted"
         | "member_increase"
         | "member_added"
         | "member_removed"
@@ -63,6 +67,9 @@ impl Catalog {
 
     pub fn legacy() -> Result<Self> {
         Self::from_json(LEGACY)
+    }
+    pub fn delivery_defaults() -> Result<Self> {
+        Self::from_json(include_str!("../../templates/cyberherd-delivery.json"))
     }
 
     pub fn from_json(json: &str) -> Result<Self> {

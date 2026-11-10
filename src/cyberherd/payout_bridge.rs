@@ -76,14 +76,30 @@ impl AuthenticatedExport {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "method", rename_all = "snake_case", deny_unknown_fields)]
 enum Call {
-    Next { owner: String, after: i64 },
+    Next {
+        owner: String,
+        after: i64,
+    },
+    Joining {
+        owner: String,
+        request_id: uuid::Uuid,
+        member: String,
+    },
 }
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "result", rename_all = "snake_case", deny_unknown_fields)]
 enum Reply {
-    Plan { export: Box<Export> },
+    Plan {
+        export: Box<Export>,
+    },
     Waiting,
     Rejected,
+    Joining {
+        owner: String,
+        request_id: uuid::Uuid,
+        member: String,
+        reference: Option<Box<super::conversation::PublishedReference>>,
+    },
 }
 pub struct Server {
     listener: UnixListener,
@@ -131,6 +147,45 @@ impl Server {
                                     Err(_) => Reply::Rejected,
                                 }
                             }
+                            Ok(Ok(Call::Joining {
+                                owner: claimed,
+                                request_id,
+                                member,
+                            })) if claimed == owner => {
+                                match store.reward_plan(&owner, request_id).await {
+                                    Ok(Some(plan)) => {
+                                        let conversation = plan
+                                            .plan
+                                            .rows
+                                            .iter()
+                                            .find(|r| r.pubkey == member && r.skip.is_none())
+                                            .and_then(|r| r.conversation.as_ref());
+                                        let reference = match conversation {
+                                            Some(conversation) => {
+                                                store
+                                                    .published_joining(
+                                                        &owner,
+                                                        conversation,
+                                                        plan.plan.cycle,
+                                                        &member,
+                                                    )
+                                                    .await
+                                            }
+                                            None => Ok(None),
+                                        };
+                                        match reference {
+                                            Ok(reference) => Reply::Joining {
+                                                owner: owner.clone(),
+                                                request_id,
+                                                member,
+                                                reference: reference.map(Box::new),
+                                            },
+                                            Err(_) => Reply::Rejected,
+                                        }
+                                    }
+                                    _ => Reply::Rejected,
+                                }
+                            }
                             _ => Reply::Rejected,
                         };
                     ipc::write(&mut stream, &reply, MAX_FRAME).await
@@ -146,6 +201,39 @@ pub struct Client {
     owner: String,
 }
 impl Client {
+    pub async fn joining(
+        &self,
+        request_id: uuid::Uuid,
+        member: &str,
+    ) -> Result<Option<super::conversation::PublishedReference>> {
+        crate::nostr_event::validate_public_key(member)?;
+        let reply: Reply = ipc::request(
+            &self.socket,
+            self.peer_uid,
+            &Call::Joining {
+                owner: self.owner.clone(),
+                request_id,
+                member: member.into(),
+            },
+            MAX_FRAME,
+            3,
+        )
+        .await?;
+        match reply {
+            Reply::Joining {
+                owner,
+                request_id: actual,
+                member: actual_member,
+                reference,
+            } if owner == self.owner && actual == request_id && actual_member == member => {
+                if let Some(reference) = &reference {
+                    reference.validate(&self.owner, member)?;
+                }
+                Ok(reference.map(|r| *r))
+            }
+            _ => bail!("intake rejected original joining reference"),
+        }
+    }
     pub fn new(socket: PathBuf, peer_uid: u32, owner: String) -> Result<Self> {
         ipc::socket_path(&socket)?;
         crate::nostr_event::validate_public_key(&owner)?;
@@ -186,6 +274,7 @@ impl Client {
             }
             Reply::Waiting => Ok(None),
             Reply::Rejected => bail!("intake rejected plan export"),
+            _ => bail!("intake returned a different result method"),
         }
     }
 }

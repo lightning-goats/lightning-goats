@@ -415,7 +415,7 @@ pub struct ConversationTarget {
     pub payee_pubkey: String,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InteractionContext {
     matched: ConversationTarget,
     destinations: Vec<ConversationTarget>,

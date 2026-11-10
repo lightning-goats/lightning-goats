@@ -105,6 +105,11 @@ impl Config {
             core: Core::new(self.core_socket.clone(), self.policy.scope.core_uid)?,
             signer: Signer::new(self.signer_socket.clone(), self.signer_uid)?,
             sender,
+            presentation: Some(Plans::new(
+                self.intake_socket.clone(),
+                self.intake_uid,
+                self.policy.scope.owner.clone(),
+            )?),
         };
         let intake = Intake {
             store,

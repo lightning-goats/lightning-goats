@@ -53,6 +53,7 @@ impl Role {
             Self::Intake => matches!(
                 request,
                 Request::Events { .. }
+                    | Request::MemberOverlay { .. }
                     | Request::RewardResults { .. }
                     | Request::Safety
                     | Request::RewardAllowance { .. }
@@ -275,6 +276,19 @@ async fn serve_one(
     }
     let response = if let Ok(_permit) = Arc::clone(&resources.reads).try_acquire_owned() {
         match request {
+            Request::MemberOverlay { message } => {
+                if reward_policy.is_some_and(|policy| policy.owner == message.owner) {
+                    match ledger.accept_member_overlay(&message, mode).await {
+                        Ok(seq) => Response::MemberOverlay {
+                            identity: message.identity.clone(),
+                            seq,
+                        },
+                        Err(_) => Response::Rejected,
+                    }
+                } else {
+                    Response::Rejected
+                }
+            }
             Request::RewardResults { reservation, after } => {
                 match ledger.reward_results(&reservation, after).await {
                     Ok(page) => Response::RewardResults {
@@ -421,6 +435,25 @@ pub struct Client {
 }
 
 impl Client {
+    pub async fn member_overlay(
+        &self,
+        message: &crate::cyberherd::overlay_delivery::Message,
+    ) -> Result<u64> {
+        message.validate()?;
+        match self
+            .request(&Request::MemberOverlay {
+                message: Box::new(message.clone()),
+            })
+            .await?
+        {
+            Response::MemberOverlay { identity, seq }
+                if identity == message.identity && seq > 0 =>
+            {
+                Ok(seq)
+            }
+            _ => bail!("core rejected member overlay; retain original message for retry"),
+        }
+    }
     pub async fn reward_results(
         &self,
         reservation: &crate::reward_funding::Reservation,

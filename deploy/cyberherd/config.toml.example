@@ -47,3 +47,22 @@ herd = "0000000000000000000000000000000000000000000000000000000000000000"
 # socket = "/run/cyberherd-plans/plans.sock"
 # peer_uid = 0
 # group_gid = 0
+
+# Optional exact member note/chat + overlay delivery. Default remains disabled.
+# start_after is an explicit retained domain-event activation boundary; inspect
+# the backlog before selecting it. Core needs a matching reward_policy.owner for
+# this intake UID's overlay method; monetary limits may remain zero.
+# [messaging]
+# enabled = false
+# start_after = 0
+# poll_millis = 1000
+# relays = ["wss://relay.damus.io/", "wss://nostr.chaima.info/", "wss://relay.artx.market/"]
+# Omitting signer enables overlay-only delivery without reading any credential.
+# [messaging.signer]
+# nak_path = "/usr/local/bin/nak"
+# bunker_pubkey = "0000000000000000000000000000000000000000000000000000000000000000"
+# client_pubkey = "0000000000000000000000000000000000000000000000000000000000000000"
+# bunker_relays = ["wss://nos.lol/", "wss://relay.damus.io/"]
+# Use a distinct authorized NIP-46 authentication client, with kinds 1 and 1311.
+# No project secret or spending key is accepted. The publisher sends only its
+# exact stored signed events; supported outgoing 9734 stays with payout signer.

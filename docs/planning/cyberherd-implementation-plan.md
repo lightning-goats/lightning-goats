@@ -294,6 +294,14 @@ events. The [429-test checkpoint](../testing/cyberherd-results-checkpoint-202611
 records its source verification. Actual note/chat/overlay delivery and joining publication receipts remain
 unfinished; a stored result event alone is not a public treat announcement.
 
+The subsequent [member conversation/delivery source](../architecture/cyberherd-member-delivery.md)
+adds admission/feeding-frozen conversation contexts, editable outgoing zap wording,
+real joining-reference reads, and optional exact note/chat/overlay outboxes.
+Member signing and publishing still require confirmed unpaused/public status;
+overlay-only staging needs no Nostr credential. This is not production activation.
+Feeder stream copies/summary, lifecycle, roster/operator interfaces and operational
+qualification remain requirements of the full port.
+
 The next [provider execution source](../architecture/cyberherd-provider-execution.md)
 adds committed quote/execute identities, same-quote uncertain recovery and verified
 payment observations. It still holds all core/payout reservations and supplies

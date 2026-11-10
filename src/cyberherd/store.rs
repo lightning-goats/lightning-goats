@@ -23,6 +23,10 @@ mod reward_state;
 #[path = "result_store.rs"]
 mod result_state;
 
+#[path = "delivery_store.rs"]
+#[cfg(unix)]
+pub(crate) mod delivery_state;
+
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./cyberherd-migrations");
 
 #[derive(Debug, Clone)]
@@ -204,6 +208,8 @@ impl Store {
             .fetch_one(&mut *tx)
             .await?;
         let mut snapshot = decode_snapshot(&row)?;
+        let previous_shares = snapshot.roster.shares(&snapshot.settings)?;
+        let previous_members = snapshot.roster.members.clone();
         let stale_target = feeder == FeederAvailability::Ready
             && (target == Target::Other
                 || (target == Target::ProjectContent
@@ -256,7 +262,49 @@ impl Store {
                 // The entire post-transition state and outcome are frozen together.
                 // Message adapters must not look up mutable scores on retries.
                 snapshot.revision = revision;
-                let payload = serde_json::json!({"interaction":interaction,"transition":receipt.transition,"snapshot":snapshot,"context":context});
+                let mut conversation = None;
+                if let Some(context) = context {
+                    if matches!(
+                        receipt.transition.as_ref().map(|t| &t.decision),
+                        Some(
+                            Decision::Joined
+                                | Decision::Displaced { .. }
+                                | Decision::Increased
+                                | Decision::SocialAwarded
+                        )
+                    ) {
+                        let candidate = super::conversation::MemberConversation {
+                            generation: super::conversation::identity(
+                                owner,
+                                &interaction.pubkey,
+                                &interaction.source_id,
+                            )?,
+                            context: super::conversation::Context::from_interaction(context),
+                        };
+                        candidate.validate(owner)?;
+                        let replace = matches!(
+                            receipt.transition.as_ref().map(|t| &t.decision),
+                            Some(Decision::Joined | Decision::Displaced { .. })
+                        );
+                        sqlx::query("INSERT INTO member_conversations(owner,cycle,member,conversation_json) VALUES(?,?,?,?) ON CONFLICT(owner,cycle,member) DO UPDATE SET conversation_json=excluded.conversation_json WHERE ?")
+                            .bind(owner).bind(snapshot.cycle).bind(&interaction.pubkey).bind(serde_json::to_string(&candidate)?).bind(replace)
+                            .execute(&mut *tx).await?;
+                        let raw:String=sqlx::query_scalar("SELECT conversation_json FROM member_conversations WHERE owner=? AND cycle=? AND member=?")
+                            .bind(owner).bind(snapshot.cycle).bind(&interaction.pubkey).fetch_one(&mut *tx).await?;
+                        conversation = Some(serde_json::from_str::<
+                            super::conversation::MemberConversation,
+                        >(&raw)?);
+                    }
+                }
+                let allocation_changed =
+                    previous_shares != snapshot.roster.shares(&snapshot.settings)?;
+                let victim = receipt.transition.as_ref().and_then(|t| match &t.decision {
+                    Decision::Displaced { victim } => previous_members
+                        .get(victim)
+                        .map(|m| (victim.clone(), m.profile.clone(), m.amount_sats)),
+                    _ => None,
+                });
+                let payload = serde_json::json!({"interaction":interaction,"transition":receipt.transition,"snapshot":snapshot,"context":context,"conversation":conversation,"allocation_changed":allocation_changed,"victim":victim});
                 let event = sqlx::query("INSERT INTO domain_events(owner,cycle,source_id,event_type,snapshot_json) VALUES(?,?,?,'interaction',?)")
                     .bind(owner).bind(snapshot.cycle).bind(&interaction.source_id).bind(serde_json::to_string(&payload)?).execute(&mut *tx).await?;
                 receipt.event_seq = Some(event.last_insert_rowid());
@@ -360,17 +408,10 @@ impl Store {
 
     pub async fn templates(&self, owner: &str) -> Result<Catalog> {
         validate_pubkey(owner)?;
-        let rows = sqlx::query("SELECT t.category,t.variant,t.text FROM templates t JOIN template_categories c ON t.owner=c.owner AND t.category=c.category WHERE t.owner=? AND c.enabled=1 AND t.deleted=0 ORDER BY t.category,t.variant")
-            .bind(owner).fetch_all(&self.pool).await?;
-        let mut categories =
-            std::collections::BTreeMap::<String, std::collections::BTreeMap<String, String>>::new();
-        for row in rows {
-            categories
-                .entry(row.try_get("category")?)
-                .or_default()
-                .insert(row.try_get("variant")?, row.try_get("text")?);
-        }
-        Catalog::from_json(&serde_json::to_string(&categories)?)
+        let mut tx = self.pool.begin().await?;
+        let result = load_catalog(&mut tx, owner).await?;
+        tx.commit().await?;
+        Ok(result)
     }
 
     /// This is an operator capability, not a public profile or relay operation.
@@ -486,6 +527,23 @@ impl Store {
             })
             .collect()
     }
+}
+
+pub(super) async fn load_catalog(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    owner: &str,
+) -> Result<Catalog> {
+    let rows = sqlx::query("SELECT t.category,t.variant,t.text FROM templates t JOIN template_categories c ON t.owner=c.owner AND t.category=c.category WHERE t.owner=? AND c.enabled=1 AND t.deleted=0 ORDER BY t.category,t.variant")
+        .bind(owner).fetch_all(&mut **tx).await?;
+    let mut categories =
+        std::collections::BTreeMap::<String, std::collections::BTreeMap<String, String>>::new();
+    for row in rows {
+        categories
+            .entry(row.try_get("category")?)
+            .or_default()
+            .insert(row.try_get("variant")?, row.try_get("text")?);
+    }
+    Catalog::from_json(&serde_json::to_string(&categories)?)
 }
 
 fn decode_snapshot(row: &sqlx::sqlite::SqliteRow) -> Result<Snapshot> {

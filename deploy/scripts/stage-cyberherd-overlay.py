@@ -43,6 +43,22 @@ MAINTENANCE = Path('/etc/cyberherd/state-maintenance.toml')
 USERS = {'herd', 'dexter', 'rowan', 'cosmo', 'newton', 'nova'}
 
 
+def role_dropins():
+    """Pin existing role-specific overrides, including those hidden by masks."""
+    result = {}
+    for role in Q.ROLES:
+        for parent in (Path('/etc/systemd/system'), Path('/run/systemd/system'), Q.UNITS, Path('/usr/lib/systemd/system')):
+            directory = parent / (role + '.service.d')
+            if not directory.exists() and not directory.is_symlink():
+                continue
+            C.protected(directory, directory=True)
+            for path in directory.iterdir():
+                if path.name.endswith('.conf'):
+                    C.protected(path)
+                    result[str(path)] = C.TX.fingerprint(path)
+    return result
+
+
 def render(core, member, peer_uid, group_gid, message_start_after):
     """Only the native receive/zero-budget bridge and presentation may change."""
     if (type(message_start_after) is not int or message_start_after < 0
@@ -141,7 +157,8 @@ def baseline(installation, validator, validator_sha):
         raise ValueError('running core is not the protected installed program')
     C.command(str(Q.BIN / 'cyberherd-statectl'), '--config', str(MAINTENANCE), 'check')
     return {'installation': original, 'core_programs': programs,
-            'validator': validator_info, 'maintenance': C.TX.fingerprint(MAINTENANCE)}, core, member
+            'validator': validator_info, 'maintenance': C.TX.fingerprint(MAINTENANCE),
+            'role_dropins': role_dropins()}, core, member
 
 
 def prepare(installation, validator, validator_sha, destination, message_start_after):

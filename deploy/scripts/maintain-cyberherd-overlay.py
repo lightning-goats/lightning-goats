@@ -89,6 +89,8 @@ def original_path(directory, r, path):
 def stable(r):
     """Fixed identities/programs/unused capabilities; no database opens."""
     base = r['baseline']
+    if S.role_dropins() != base.get('role_dropins', {}):
+        raise ValueError('role-specific unit overrides changed')
     C.protected(MASKS, directory=True)
     if Q.I.check_identities() != base['installation']['runtime']:
         raise ValueError('runtime identity changed')
@@ -152,7 +154,7 @@ def plan(review, review_sha, directory):
         raise ValueError('new private execution directory required')
     r = read_review(review, review_sha)
     validate_review(review, r)
-    fresh = lambda: S.require_baseline(Path(r['installation']), Path(r['validator']), r['validator_sha256'], r['baseline'])
+    fresh = lambda: require_fresh(r)
     fresh()
     if any(p.exists() or p.is_symlink() for p in (S.SOCKET.parent, S.TMPFILE)):
         raise ValueError('runtime/tmpfiles destination is no longer unused')
@@ -170,6 +172,16 @@ def plan(review, review_sha, directory):
         'config_manifest_sha256': digest(directory / 'configs/TRANSACTION.json')})
     (directory / 'INCOMPLETE').unlink(); TX.sync_directory(directory)
     return {'planned': True, 'services_changed': False, 'maintenance_approved': False}
+
+
+def require_fresh(r):
+    current, _, _ = S.baseline(Path(r['installation']), Path(r['validator']), r['validator_sha256'])
+    # An older sealed review has no override inventory. Accept it unchanged only
+    # when there are no role overrides at all; never manufacture its identity.
+    if 'role_dropins' not in r['baseline'] and not current.get('role_dropins'):
+        current.pop('role_dropins', None)
+    if current != r['baseline']:
+        raise ValueError('original running installation changed since preparation')
 
 
 def load(directory):
@@ -382,7 +394,7 @@ def apply(directory, approved):
         if (directory / 'RESUME-REQUESTED.json').exists() or (directory / 'ROLLED-BACK.json').exists():
             raise ValueError('resume/rollback already began; do not reapply')
         if not (directory / 'MAINTENANCE-STARTED.json').exists():
-            S.require_baseline(Path(r['installation']), Path(r['validator']), r['validator_sha256'], r['baseline'])
+            require_fresh(r)
         note(directory, 'MAINTENANCE-STARTED.json', {'exclusive_maintenance': True, 'database_restore_authorized': False})
         quiesce(r)
         native_backup(directory, r)
@@ -473,7 +485,9 @@ def resume(directory, approved, core_only=False):
                 raise ValueError('intake must stay masked for original-core resumption')
         else:
             member_unit = C.status('cyberherd.service')
-            if member_unit['FragmentPath'] != str(Q.UNITS / 'cyberherd.service') or member_unit['DropInPaths']:
+            expected_dropins = {p for p in r['baseline'].get('role_dropins', {}) if Path(p).parent.name == 'cyberherd.service.d'}
+            if (member_unit['FragmentPath'] != str(Q.UNITS / 'cyberherd.service')
+                    or set(member_unit['DropInPaths'].split()) != expected_dropins):
                 raise ValueError('effective membership unit changed before start')
         C.command('/usr/bin/systemctl', 'start', '--', C.UNIT_NAME, timeout=120)
         running(C.UNIT_NAME, 'lightning-goats', Q.BIN / 'lightning-goatsd')

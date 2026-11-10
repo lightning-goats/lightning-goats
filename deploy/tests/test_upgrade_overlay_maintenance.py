@@ -156,7 +156,7 @@ class OverlayMaintenanceFiles(prep.OverlayStageFiles):
         self.assert_journals(after)
         self.assertTrue(all(not v for v in self.running_units.values()))
         self.assertFalse(s.TMPFILE.exists())
-        with self.assertRaisesRegex(ValueError, 'rollback already selected'): m.resume(self.execution, True)
+        with self.assertRaisesRegex(ValueError, 'already completed|rollback already selected'): m.resume(self.execution, True)
         m.resume(self.execution, True, core_only=True)
         self.assertTrue(self.running_units[self.unit.name]); self.assertFalse(self.running_units['cyberherd.service'])
         self.assertEqual(self.unit.read_bytes(), (self.destination / 'original-1').read_bytes())

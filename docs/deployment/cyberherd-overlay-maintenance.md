@@ -12,6 +12,13 @@ sixteen-file tools, native checker and credential importer are retained unchange
 Never interpret writable checkout code as root or rewrite an old preparation's
 tool identity to make a new launcher accept it.
 
+New preparation inventories protected role-specific unit overrides even while
+the role is masked; exact files and effective membership overrides are checked
+before service start. An older sealed review without that inventory is accepted
+unchanged only when no role override exists. This permits a separately reviewed
+namespace override in the disposable rehearsal without changing vendor unit
+bytes or weakening the production invocation.
+
 `plan` revalidates the original running core, fresh inactive roles, frozen review
 and actual typed candidate configuration. It creates a new root-private execution
 directory with its own two-configuration replacement transaction; it changes no
@@ -94,5 +101,11 @@ not installed systemd or live backup evidence. The existing mandatory native
 four-journal test separately covers a paid core without a bridge, fresh role
 journals, committed WAL, a pending feed UUID and retained signed bytes. A complete
 installed executor rehearsal and explicit live maintenance approval remain open.
+The disposable systemd harness now exercises this complete executor with actual
+native services and synthetic paid/pending/signed journals. Both services join
+its private loopback-only namespace, all credentials are synthetic and the core
+is shadow/paused. It checks native backup, stage view, configuration-only rollback,
+preserved financial/pending/signed counts and original-core resumption, with zero
+mock gateway POSTs. Its actual result must be inspected before claiming success.
 Public nginx/OBS integration and actual receipt/membership delivery remain later
 acceptance work; this executor changes no public proxy or browser files.

@@ -1,0 +1,9 @@
+[Unit]
+Description=Refresh local Monero sync evidence (operator activation only)
+
+[Timer]
+OnBootSec=10
+OnUnitActiveSec=15
+AccuracySec=1
+Unit=lightning-goats-monero-sync.service
+# Deliberately no [Install] section; do not activate during source installation.

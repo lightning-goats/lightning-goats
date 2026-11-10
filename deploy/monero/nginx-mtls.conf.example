@@ -1,0 +1,38 @@
+# Render placeholders; include limit_*_zone in http{}, server{} as a full vhost.
+# Dedicated project-client CA: issue only this VPS client's cert, not all home users.
+limit_req_zone $binary_remote_addr zone=lg_monero_requests:1m rate=2r/s;
+limit_conn_zone $binary_remote_addr zone=lg_monero_connections:1m;
+server {
+    listen __HOME_WG_IPV4__:__MTLS_PORT__ ssl;
+    server_name monero-bridge.internal;
+    ssl_certificate __SERVER_CERT__;
+    ssl_certificate_key __SERVER_KEY__;
+    ssl_client_certificate __PROJECT_CLIENT_CA__;
+    ssl_verify_client on;
+    ssl_verify_depth 1;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    allow __VPS_WG_IPV4__;
+    deny all;
+    client_max_body_size 4k;
+    client_body_timeout 5s;
+    client_header_timeout 5s;
+    keepalive_timeout 15s;
+    limit_conn lg_monero_connections 8;
+    limit_req zone=lg_monero_requests burst=4 nodelay;
+    access_log off;
+    # Bearer token is still required by the Rust service. Never put it in nginx.
+    location ~ "^/(healthz|v1/receives(/[0-9a-f-]{36})?)$" {
+        limit_except GET POST { deny all; }
+        proxy_pass http://127.0.0.1:__BRIDGE_PORT__;
+        proxy_http_version 1.1;
+        proxy_set_header Host monero-bridge.internal;
+        proxy_set_header Connection "";
+        proxy_next_upstream off;
+        proxy_connect_timeout 2s;
+        proxy_send_timeout 10s;
+        proxy_read_timeout 140s;
+        proxy_buffering off;
+    }
+    location / { return 404; }
+    # No callback/receive-address/transfer/balance/wallet-RPC proxy, ever.
+}

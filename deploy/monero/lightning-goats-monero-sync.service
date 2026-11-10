@@ -1,0 +1,23 @@
+[Unit]
+Description=One-way private Monero synchronization report
+After=network.target
+
+[Service]
+Type=oneshot
+User=root
+Group=lightning_goats_monero
+UMask=0027
+RuntimeDirectory=lightning-goats-monero-sync
+RuntimeDirectoryMode=0750
+RuntimeDirectoryPreserve=yes
+ExecStart=/usr/bin/python3 /opt/lightning-goats-monero/sync-probe.py --config /etc/lightning-goats-monero/sync.json
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+RestrictAddressFamilies=AF_INET AF_UNIX
+CapabilityBoundingSet=
+IPAddressDeny=any
+IPAddressAllow=localhost
+TimeoutStartSec=25

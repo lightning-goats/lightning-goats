@@ -1,0 +1,23 @@
+# INACTIVE EXAMPLE. Select unused ports after inspecting the home server.
+listen = "127.0.0.1:18991"
+callback_listen = "127.0.0.1:18992"
+database_url = "sqlite:///var/lib/lightning-goats-monero/bridge.sqlite3"
+provider_url = "http://127.0.0.1:18993/"
+network = "mainnet"
+# Replace with SHA256(account0 primary address), privately verified against wallet.
+account_scope = "REPLACE_WITH_64_LOWERCASE_HEX"
+api_token_file = "/run/credentials/lightning-goats-monero-bridge.service/api-token"
+sync_report_file = "/run/lightning-goats-monero-sync/status.json"
+sync_report_owner_uid = 0
+create_enabled = false
+# EXAMPLE RESOURCE POLICY, not selected production donation limits.
+max_amount_atomic = 1000000000000
+max_intents = 10000
+max_receipts = 256
+max_creates_per_hour = 60
+max_work = 2
+max_http = 16
+poll_seconds = 5
+timeout_seconds = 10
+freshness_seconds = 60
+max_wallet_lag = 0

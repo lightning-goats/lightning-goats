@@ -1,0 +1,36 @@
+[Unit]
+Description=Lightning Goats receive-only MoneroPay bridge
+After=network.target
+
+[Service]
+Type=simple
+User=lightning_goats_monero
+Group=lightning_goats_monero
+ExecStart=/opt/lightning-goats-monero/lightning-goats-monero-bridge --config /etc/lightning-goats-monero/config.toml
+LoadCredential=api-token:/etc/lightning-goats-monero/credentials/api-token
+StateDirectory=lightning-goats-monero
+StateDirectoryMode=0700
+UMask=0077
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_INET AF_UNIX
+CapabilityBoundingSet=
+AmbientCapabilities=
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+IPAddressDeny=any
+IPAddressAllow=localhost
+ReadOnlyPaths=/run/lightning-goats-monero-sync
+ReadWritePaths=/var/lib/lightning-goats-monero
+StandardOutput=journal
+StandardError=journal
+# No [Install] target: deliberately installed inactive, operator starts explicitly.

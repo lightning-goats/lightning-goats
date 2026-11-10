@@ -51,13 +51,13 @@ now passes exact CI and actual-VPS configuration-only preparation. A private
 bundle preserves all six payees and the original core epoch/cutoff, keeps payout
 limits zero and omits membership Nostr signing. Independent readback confirmed
 unchanged installed configuration, inactive journals and running receive process.
-The maintenance/apply/resume executor remains unfinished; no new feature is active.
+That checkpoint prepared configuration without activating the new feature.
 
-The subsequent [maintenance executor candidate](deployment/cyberherd-overlay-maintenance.md)
-adds explicit planning, stopped/masked native backup, recoverable configuration
-replacement, separate service resumption and configuration-only rollback. Its
-protected-file fixtures mock native/service commands; installed executor rehearsal
-and live maintenance approval are still required. It has not run on the live core.
+The [maintenance executor checkpoint](testing/cyberherd-overlay-maintenance-checkpoint-20261110.md)
+now passes a complete installed systemd/native backup/apply/resume/rollback
+rehearsal with synthetic state and isolated networking. The actual VPS execution
+plan passes independent readback without changing the running core. Live
+maintenance approval remains required; the executor has not run on the live core.
 
 Other remaining work includes installed browser/presentation and global network
 qualification, concrete externally reconciled recovery adoption, operator-selected

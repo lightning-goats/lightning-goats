@@ -1,8 +1,9 @@
 # Explicit overlay-stage maintenance
 
-This executor is a source candidate. No maintenance or activation has been
-performed or approved for it. Its actual installed rehearsal remains required
-before asking the operator to approve a concrete maintenance transaction.
+The [installed rehearsal and production plan](../testing/cyberherd-overlay-maintenance-checkpoint-20261110.md)
+are qualified. No production maintenance or activation has been performed or
+approved for this stage. The concrete protected plan is ready for the operator
+maintenance decision; source qualification does not grant activation.
 
 `maintain-cyberherd-overlay.py` consumes an already sealed
 [configuration review](cyberherd-overlay-stage.md) and its independently reviewed
@@ -113,12 +114,12 @@ transactions, but mock service/native commands and runtime inspection. They are
 not installed systemd or live backup evidence. The existing mandatory native
 four-journal test separately covers a paid core without a bridge, fresh role
 journals, committed WAL, a pending feed UUID and retained signed bytes. A complete
-installed executor rehearsal and explicit live maintenance approval remain open.
+installed executor rehearsal now passes; explicit live maintenance approval remains open.
 The disposable systemd harness now exercises this complete executor with actual
 native services and synthetic paid/pending/signed journals. Both services join
 its private loopback-only namespace, all credentials are synthetic and the core
 is shadow/paused. It checks native backup, stage view, configuration-only rollback,
 preserved financial/pending/signed counts and original-core resumption, with zero
-mock gateway POSTs. Its actual result must be inspected before claiming success.
+mock gateway POSTs. The checkpoint records the authenticated successful result.
 Public nginx/OBS integration and actual receipt/membership delivery remain later
 acceptance work; this executor changes no public proxy or browser files.

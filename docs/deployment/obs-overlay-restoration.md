@@ -236,3 +236,27 @@ and independently decoded the 180-pixel branded QR to its canonical payload.
 There were no JavaScript errors. The payment PID and configuration hash were
 unchanged, and Nostr remained active. Refresh an existing OBS browser source to
 load stylesheet version 6 and script version 7.
+
+## Mention-driven goat portraits — 2026-11-10 live correction
+
+Source `ebe09864505539ed334869878c04d69264e93805` is deployed for the overlay HTML
+and script, with script cache version 9. The static release preserves the other
+22 public files, including the existing site settings, CSS, QR library and
+uploaded artwork. The nginx configuration passed validation before its static
+root was reloaded. Retained private rollback data identifies the previous root.
+No application configuration, unit, journal or payment/feeding mode changed.
+
+The new regression verifies generic wording with supplied goat metadata produces
+no portrait, case-insensitive whole-name mentions show all and only named goats,
+and portraits clear after those messages leave the ticker. It also rejects
+substring matches such as supernova/Newtonian. Existing CyberHerd roster/profile
+cards retain their own behavior. Overlay browser regressions pass, including the
+rendered branded QR and payment/feed/override/replay checks. Three old short-timer
+checks were made deterministic after local clock races; all three reruns passed.
+The exact source's CI website and nginx jobs passed before publication.
+
+Public HTTPS readback matched the tested HTML/script, retained site settings and
+sample goat images. The receive process retained its PID and zero restart count;
+CyberHerd roles stayed inactive. OBS needs one browser-source refresh to load the
+new script. This frontend correction does not activate the separate CyberHerd
+maintenance plan.

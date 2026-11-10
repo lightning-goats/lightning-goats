@@ -33,6 +33,12 @@ native-zap, membership and loopback-view configuration for review. It preserves
 the existing receive/feed behavior, keeps payout ceilings zero and omits a
 membership Nostr signer. It implements no activation or service changes.
 
+The separate [maintenance executor](deployment/cyberherd-overlay-maintenance.md)
+now has a passing [installed rehearsal and VPS execution plan](testing/cyberherd-overlay-maintenance-checkpoint-20261110.md).
+Its native backup/apply/resume/configuration-only rollback ran on synthetic
+state in isolated systemd services. The production plan is ready for the
+operator maintenance decision; no CyberHerd worker has been activated on the VPS.
+
 Fresh [offline journal initialization](deployment/cyberherd-offline-initialization.md)
 now has a [492-test source checkpoint](testing/cyberherd-bootstrap-checkpoint-20261110.md),
 including mandatory native subprocess checks under three distinct runtime UIDs.

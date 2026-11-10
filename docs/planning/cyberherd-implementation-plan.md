@@ -208,6 +208,11 @@ readback without installed configuration or service changes. The proposed stage
 omits rewards, payout execution and membership public signing. Its maintenance
 executor, activation and installed presentation/settlement checks remain open.
 
+The later [maintenance checkpoint](../testing/cyberherd-overlay-maintenance-checkpoint-20261110.md)
+qualifies the complete native/systemd executor on isolated synthetic journals and
+records the protected actual-VPS execution plan with independent readback. Live
+maintenance approval and actual presentation/settlement qualification remain open.
+
 The subsequent [installed OS checkpoint](../testing/cyberherd-installed-qualification-checkpoint-20261110.md)
 passes the exact authenticated fourteen-file tool in disposable CI and on the
 actual host, using synthetic Python probes with unchanged application journals

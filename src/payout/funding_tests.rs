@@ -115,7 +115,10 @@ async fn payout_recovery_refuses_missing_empty_old_or_rebound_journals_without_i
     let f = Fixture::new().await;
     let q = qualified(&f).await;
     let policy = journal_policy(&q);
-    let path = f.root.path().join("recovery.db");
+    let private = f.root.path().join("recovery-private");
+    std::fs::create_dir(&private).unwrap();
+    std::fs::set_permissions(&private, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let path = private.join("recovery.db");
     let url = format!("sqlite://{}", path.display());
     assert!(
         Store::connect_existing_recovery(&url, policy.clone())

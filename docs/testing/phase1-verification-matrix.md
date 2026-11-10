@@ -279,3 +279,8 @@ must not be created or migrated by preview/synchronization.
 Run the full locked Rust, audit, root fixture, inactive CLI/archive/browser/systemd
 gates on the exact candidate. Source fixtures do not approve a real financial cost,
 prove a provider refund or qualify whole-stack restore/new installed identities.
+
+Run `python3 -B -m unittest discover -s deploy/tests -p test_restore.py -v`.
+The legacy pair helper must reject even an uninitialized CyberHerd core before
+creating a destination database or changing its epoch. Pre-CyberHerd restore
+fixtures must still pass; neither path establishes consistent four-journal recovery.

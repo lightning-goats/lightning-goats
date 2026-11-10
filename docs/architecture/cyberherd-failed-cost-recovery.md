@@ -155,3 +155,10 @@ financial review, provider refund qualification or new-role installation evidenc
 Whole-stack backup/consistent restore, retention operations, SQLite advisory
 remediation, installed UID/network/helper/provider/signer qualification and explicit
 activation remain required by the complete CyberHerd plan.
+
+The legacy `deploy/scripts/restore-stores.py` supports the pre-CyberHerd core and
+gateway pair only. It now rejects a core containing CyberHerd financial schema
+before copying or rotating its epoch, including an uninitialized new schema.
+An empty funding table does not prove that no independent consumer has bound the
+epoch. Four offline fixtures preserve its legacy behavior and prove this refusal;
+they do not qualify multi-journal restore or automatic resumption.

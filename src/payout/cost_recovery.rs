@@ -226,8 +226,8 @@ mod tests {
             expires_at: now + 3600,
         }
     }
-    #[test]
-    fn root_owned_approval_and_evidence_checks_are_real_filesystem_authority() {
+    #[tokio::test]
+    async fn root_owned_approval_and_evidence_checks_are_real_filesystem_authority() {
         if crate::private_ipc::uid().unwrap() != 0 {
             let root = tempfile::TempDir::new().unwrap();
             let path = root.path().join("decision.json");
@@ -295,6 +295,7 @@ mod recovery_schema_tests {
     #[tokio::test]
     async fn recovery_never_initializes_a_missing_or_empty_database_or_upgrades_an_old_schema() {
         let root = tempfile::TempDir::new().unwrap();
+        std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
         let path = root.path().join("core.db");
         let url = format!("sqlite://{}", path.display());
         assert!(
@@ -333,11 +334,9 @@ mod recovery_schema_tests {
             );
             return;
         }
-        assert!(
-            crate::ledger::LedgerStore::connect_existing_recovery(&url)
-                .await
-                .is_ok()
-        );
+        crate::ledger::LedgerStore::connect_existing_recovery(&url)
+            .await
+            .unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
         assert!(
             crate::ledger::LedgerStore::connect_existing_recovery(&url)

@@ -26,6 +26,8 @@ class RestoreTests(unittest.TestCase):
             if sqlite3.sqlite_version_info < (3, 38, 0):
                 db.create_function("unixepoch", 0, lambda: 1_700_000_000)
             for migration in sorted((ROOT / "migrations").glob("*.sql")):
+                if int(migration.name.split("_", 1)[0]) >= 16:
+                    continue  # This helper supports only the legacy pair.
                 db.executescript(migration.read_text())
             db.execute("INSERT INTO overlay_identity VALUES(1, '11111111-1111-4111-8111-111111111111')")
         with sqlite3.connect(self.source / "gateway.db") as db:
@@ -68,4 +70,17 @@ class RestoreTests(unittest.TestCase):
         (self.source / "gateway.db").write_bytes(b"not sqlite")
         self.assertNotEqual(self.invoke().returncode, 0)
         self.assertTrue((self.destination / "INCOMPLETE").is_file())
+        self.assertFalse((self.destination / "RESTORE.json").exists())
+
+    def test_cyberherd_core_is_refused_before_epoch_rotation_or_destination_copy(self):
+        with sqlite3.connect(self.source / "daemon.db") as db:
+            if sqlite3.sqlite_version_info < (3, 38, 0):
+                db.create_function("unixepoch", 0, lambda: 1_700_000_000)
+            db.executescript((ROOT / "migrations/0016_reward_funding.sql").read_text())
+        path = self.source / "daemon.db"
+        before = hashlib.sha256(path.read_bytes()).hexdigest()
+        self.assertNotEqual(self.invoke().returncode, 0)
+        self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), before)
+        self.assertTrue((self.destination / "INCOMPLETE").is_file())
+        self.assertFalse((self.destination / "daemon.db").exists())
         self.assertFalse((self.destination / "RESTORE.json").exists())

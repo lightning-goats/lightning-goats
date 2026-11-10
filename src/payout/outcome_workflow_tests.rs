@@ -14,6 +14,74 @@ fn reader(w: &Workflow) -> Reader {
 }
 
 #[tokio::test]
+async fn member_result_reads_require_final_core_verification_and_expose_no_payment_capability() {
+    let w = Workflow::new(false).await;
+    execute(&w, PaymentState::Completed).await;
+    let header = w
+        .store
+        .freeze_outcomes(w.f.reservation.id, now())
+        .await
+        .unwrap();
+    let (intake, intake_task) = bridge(&w, false).await;
+    assert!(
+        intake
+            .reward_results(&w.f.reservation, 0)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    intake_task.abort();
+    let packet = w.store.outcome_packet(w.f.reservation.id, 0).await.unwrap();
+    let (payout, payout_task) = bridge(&w, true).await;
+    assert!(payout.reward_results(&w.f.reservation, 0).await.is_err());
+    assert!(
+        payout
+            .payout_outcome(&packet)
+            .await
+            .unwrap()
+            .progress()
+            .finalized
+    );
+    payout_task.abort();
+    let (intake, task) = bridge(&w, false).await;
+    let reads = w.mock.lock().unwrap().get_ids.len();
+    let received = intake
+        .reward_results(&w.f.reservation, 0)
+        .await
+        .unwrap()
+        .unwrap();
+    let page = received.page();
+    assert!(page.complete());
+    assert_eq!(page.manifest_hash, header.final_hash);
+    assert_eq!(page.rows.len(), 1);
+    assert_eq!(page.rows[0].member, w.f.plan.rows[0].pubkey);
+    assert_eq!(
+        page.rows[0].result,
+        crate::payout::results::Status::Completed {
+            net_sats: 1,
+            fee_sats: 1
+        }
+    );
+    assert_eq!(w.mock.lock().unwrap().get_ids.len(), reads);
+    let encoded = serde_json::to_string(page).unwrap();
+    for field in [
+        "payment_id",
+        "payment_hash",
+        "encoded",
+        "callback",
+        "credential_fingerprint",
+    ] {
+        assert!(!encoded.contains(field));
+    }
+    let mut foreign = w.f.reservation.clone();
+    foreign.plan_hash = "00".repeat(32);
+    assert!(intake.reward_results(&foreign, 0).await.is_err());
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    assert!(intake.reward_results(&w.f.reservation, 2).await.is_err());
+    task.abort();
+}
+
+#[tokio::test]
 async fn retained_core_claim_rejects_rolled_back_no_execute_and_omitted_member_reports() {
     let w = Workflow::new(false).await;
     let quote = w.quote().await;

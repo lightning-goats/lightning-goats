@@ -53,6 +53,7 @@ impl Role {
             Self::Intake => matches!(
                 request,
                 Request::Events { .. }
+                    | Request::RewardResults { .. }
                     | Request::Safety
                     | Request::RewardAllowance { .. }
                     | Request::ReserveReward { .. }
@@ -274,6 +275,14 @@ async fn serve_one(
     }
     let response = if let Ok(_permit) = Arc::clone(&resources.reads).try_acquire_owned() {
         match request {
+            Request::RewardResults { reservation, after } => {
+                match ledger.reward_results(&reservation, after).await {
+                    Ok(page) => Response::RewardResults {
+                        page: page.map(Box::new),
+                    },
+                    Err(_) => Response::Rejected,
+                }
+            }
             Request::ClaimPayoutExecution { request } => match ledger
                 .claim_payout_execution(
                     &request,
@@ -412,6 +421,36 @@ pub struct Client {
 }
 
 impl Client {
+    pub async fn reward_results(
+        &self,
+        reservation: &crate::reward_funding::Reservation,
+        after: u16,
+    ) -> Result<Option<super::AuthenticatedRewardResults>> {
+        reservation.validate()?;
+        if after > 1000 {
+            bail!("invalid verified result cursor");
+        }
+        match self
+            .request(&Request::RewardResults {
+                reservation: Box::new(reservation.clone()),
+                after,
+            })
+            .await?
+        {
+            Response::RewardResults { page: Some(page) } => {
+                page.validate()?;
+                if page.reservation != *reservation || page.after != after {
+                    bail!("verified result response has wrong reservation/cursor");
+                }
+                Ok(Some(super::AuthenticatedRewardResults {
+                    page: *page,
+                    core_uid: self.expected_uid,
+                }))
+            }
+            Response::RewardResults { page: None } => Ok(None),
+            _ => bail!("core rejected verified result read"),
+        }
+    }
     pub async fn claim_execution(
         &self,
         request: &crate::payout::execution::Request,

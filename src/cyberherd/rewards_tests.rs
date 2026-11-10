@@ -876,3 +876,5 @@ fn fees_round_up_without_overspending_and_zero_settings_remain_zero() {
     };
     assert!(p.validate().is_err());
 }
+#[path = "result_tests.rs"]
+mod result_tests;

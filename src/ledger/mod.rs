@@ -22,6 +22,7 @@ mod outbox;
 mod payout_execution;
 mod reward_funding;
 mod reward_outcomes;
+mod reward_results;
 pub use operator_credit::{OperatorCreditGrant, OperatorCreditResult, OperatorCreditStatus};
 mod overlay;
 mod strike;

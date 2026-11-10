@@ -349,6 +349,24 @@ impl Runtime {
             });
         }
         if let Some(worker) = reward_worker {
+            let results = super::result_worker::Worker {
+                store: self.store.clone(),
+                client: Client::new(self.config.core_socket.clone(), self.config.core.core_uid)?,
+                owner: self.config.project_pubkey.clone(),
+            };
+            let seconds = self.config.poll_seconds;
+            tasks.spawn(async move {
+                let mut ticks = tokio::time::interval(Duration::from_secs(seconds));
+                ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                loop {
+                    ticks.tick().await;
+                    if results.tick().await.is_err() {
+                        tracing::warn!(
+                            "CyberHerd verified result intake held; retaining original receipts"
+                        );
+                    }
+                }
+            });
             let seconds = self.config.poll_seconds;
             tasks.spawn(async move {
                 let mut reward_ticks = tokio::time::interval(Duration::from_secs(seconds));

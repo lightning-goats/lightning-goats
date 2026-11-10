@@ -281,10 +281,17 @@ and core outcome recovery. The broker freezes only generated 9734 requests and
 never publishes them. The new source passed the [420-test runtime checkpoint](../testing/cyberherd-runtime-checkpoint-20261110.md).
 The subsequent [core execution claims](../architecture/cyberherd-execution-claims.md)
 retain original row/quote identities before submission and fence payout-only
-snapshot rollback; wider consistent-restore qualification still precedes activation.
+snapshot rollback; the [425-test checkpoint](../testing/cyberherd-execution-claims-checkpoint-20261110.md)
+records their verification. Wider consistent-restore qualification still precedes activation.
 Original joining references/editable outgoing zap wording,
 member delivery, lifecycle, interfaces, installation qualification and activation
 remain required; neither new binary is deployed by this work.
+
+The subsequent [verified result handoff](../architecture/cyberherd-verified-results.md)
+returns final core-verified member outcomes to the membership store through a
+read-only role. It freezes the original payout breakdown in durable private domain
+events. Actual note/chat/overlay delivery and joining publication receipts remain
+unfinished; a stored result event alone is not a public treat announcement.
 
 The next [provider execution source](../architecture/cyberherd-provider-execution.md)
 adds committed quote/execute identities, same-quote uncertain recovery and verified

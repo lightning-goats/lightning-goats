@@ -64,6 +64,10 @@ impl BridgeConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "method", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Request {
+    RewardResults {
+        reservation: Box<crate::reward_funding::Reservation>,
+        after: u16,
+    },
     ClaimPayoutExecution {
         request: Box<crate::payout::execution::Request>,
     },
@@ -108,6 +112,9 @@ pub enum Request {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "result", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Response {
+    RewardResults {
+        page: Option<Box<crate::payout::results::Page>>,
+    },
     PayoutExecutionClaim {
         lease: Box<crate::payout::execution::Lease>,
     },
@@ -196,6 +203,19 @@ pub struct AuthenticatedAllowance {
 pub struct AuthenticatedFundingPage {
     page: crate::reward_funding::FundingPage,
     core_uid: u32,
+}
+
+pub struct AuthenticatedRewardResults {
+    page: crate::payout::results::Page,
+    core_uid: u32,
+}
+impl AuthenticatedRewardResults {
+    pub fn page(&self) -> &crate::payout::results::Page {
+        &self.page
+    }
+    pub fn core_uid(&self) -> u32 {
+        self.core_uid
+    }
 }
 
 #[derive(Clone)]

@@ -20,6 +20,9 @@ mod ingress_state;
 #[path = "reward_store.rs"]
 mod reward_state;
 
+#[path = "result_store.rs"]
+mod result_state;
+
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./cyberherd-migrations");
 
 #[derive(Debug, Clone)]

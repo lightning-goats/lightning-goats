@@ -324,7 +324,7 @@ async fn profile_read(
     }))
 }
 
-fn decode(row: &sqlx::sqlite::SqliteRow) -> Result<StoredPlan> {
+pub(super) fn decode(row: &sqlx::sqlite::SqliteRow) -> Result<StoredPlan> {
     let plan: Plan = serde_json::from_str(&row.try_get::<String, _>("plan_json")?)?;
     let hash: String = row.try_get("plan_hash")?;
     if plan.hash()? != hash

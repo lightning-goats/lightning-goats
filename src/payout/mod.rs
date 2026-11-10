@@ -6,6 +6,7 @@ pub mod invoice;
 pub mod outcome;
 pub mod provider;
 pub mod recipient;
+pub mod results;
 #[cfg(unix)]
 pub mod runtime;
 #[cfg(unix)]

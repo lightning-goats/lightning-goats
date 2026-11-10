@@ -55,6 +55,13 @@ all financial/signing limits are zero, and no core bridge is enabled. Actual
 runtime/provider/household/browser/recovery qualification and activation remain
 unfinished.
 
+The [installed OS qualifier](testing/cyberherd-installed-qualification-checkpoint-20261110.md)
+now passes its authenticated disposable-systemd and actual-host runs. Three
+synthetic Python probes preserve installed journals/core process while checking
+actual role identity/capabilities, credential/state/file isolation and private
+IPv4/IPv6 denial. Actual Rust worker/socket, DNS/global-firewall, household,
+provider, browser, recovery adoption and activation remain unqualified.
+
 The Phase 1 implementation history below was last updated on 2026-09-07; consult
 the dated restoration/implementation records and current plan for later work.
 

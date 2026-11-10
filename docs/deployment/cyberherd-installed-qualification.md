@@ -1,8 +1,8 @@
 # Installed disabled-role OS qualification
 
 `qualify-cyberherd-installed.py` is a bounded host qualification tool in the
-authenticated root closure. Its new source is pending its exact CI qualification;
-it has not been installed or run on the VPS. It starts only temporary Python
+authenticated root closure. Its [source-pinned checkpoint](../testing/cyberherd-installed-qualification-checkpoint-20261110.md)
+records passing CI and the actual installed-host run. It starts only temporary Python
 policy probes. The actual CyberHerd units remain masked; no application worker,
 provider, relay, public listener, real API/Nostr credential or feeder is used.
 The earlier `rehearse-cyberherd-boundaries.py` remains **CI-only**; do not bypass
@@ -76,4 +76,4 @@ authorizes publication, nonzero budgets, unmasking, real payment or feeding.
 The disposable systemd installer rehearsal now invokes this exact authenticated
 tool after fresh native initialization. Six local guard/unit/result-contract
 tests cover refusal and exact policy preservation; they simulate no live host
-success. Exact CI evidence is recorded separately after it passes.
+success. Exact CI and actual-host evidence are recorded separately in the checkpoint.

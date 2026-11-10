@@ -172,5 +172,6 @@ live-host or recovery-adoption boundaries.
 The separate [installed OS qualifier](cyberherd-installed-qualification.md) is now
 prepared for independently authenticated use after an actual fresh disabled
 installation. It uses only synthetic credentials in a private qualification
-directory and refuses changed/active state. Its exact CI qualification remains
-pending; it is not installed on the VPS and the CI-only harness stays CI-only.
+directory and refuses changed/active state. Its
+[qualification checkpoint](../testing/cyberherd-installed-qualification-checkpoint-20261110.md)
+records passing CI and actual-host OS probes; the CI-only harness stays CI-only.

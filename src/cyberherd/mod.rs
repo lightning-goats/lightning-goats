@@ -35,6 +35,9 @@ pub mod social;
 pub mod store;
 pub mod targets;
 pub mod templates;
+pub mod view;
+#[cfg(unix)]
+pub mod view_runtime;
 pub mod worker;
 
 #[cfg(all(test, unix))]

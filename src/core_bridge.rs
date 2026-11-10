@@ -69,6 +69,9 @@ impl BridgeConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "method", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Request {
+    RosterOverlay {
+        message: Box<crate::cyberherd::view::Overlay>,
+    },
     MemberOverlay {
         message: Box<crate::cyberherd::overlay_delivery::Message>,
     },
@@ -124,6 +127,10 @@ pub enum Request {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "result", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Response {
+    RosterOverlay {
+        identity: String,
+        seq: u64,
+    },
     MemberOverlay {
         identity: String,
         seq: u64,

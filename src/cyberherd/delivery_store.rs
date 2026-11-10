@@ -105,7 +105,7 @@ impl Store {
             snapshot_json: row.try_get("snapshot_json")?,
         };
         let catalog = load_catalog(&mut tx, owner).await?;
-        if let Some(message) = delivery::render(&event, &catalog)? {
+        if let Some(mut message) = delivery::render(&event, &catalog)? {
             let exists: bool = sqlx::query_scalar(
                 "SELECT EXISTS(SELECT 1 FROM delivery_messages WHERE owner=? AND identity=?)",
             )
@@ -118,6 +118,41 @@ impl Store {
                     .bind(owner).fetch_one(&mut *tx).await?;
                 if pending >= 2048 {
                     bail!("member presentation backlog is full");
+                }
+                if let Some((public, human)) = delivery::repost_hint(&event, &catalog, &message)? {
+                    let current = super::decode_snapshot(
+                        &sqlx::query("SELECT * FROM owners WHERE owner=?")
+                            .bind(owner)
+                            .fetch_one(&mut *tx)
+                            .await?,
+                    )?;
+                    let eligible = current.cycle == message.cycle
+                        && current
+                            .roster
+                            .members
+                            .get(&message.member)
+                            .is_some_and(|m| m.active)
+                        && !current.roster.banned.contains(&message.member)
+                        && !current
+                            .roster
+                            .awards
+                            .get(&message.member)
+                            .is_some_and(|a| a.repost);
+                    if eligible {
+                        let claimed=sqlx::query("INSERT INTO delivery_repost_hints(owner,cycle,member,identity) VALUES(?,?,?,?) ON CONFLICT(owner,cycle,member) DO NOTHING")
+                            .bind(owner).bind(message.cycle).bind(&message.member).bind(&message.identity).execute(&mut *tx).await?.rows_affected()==1;
+                        if claimed {
+                            if message.nostr.len() + public.len() + 2 > 32768
+                                || message.overlay.len() + human.len() + 2 > 32768
+                            {
+                                bail!("repost hint exceeds message bound");
+                            }
+                            message.nostr.push_str("\n\n");
+                            message.nostr.push_str(&public);
+                            message.overlay.push_str("\n\n");
+                            message.overlay.push_str(&human);
+                        }
+                    }
                 }
                 sqlx::query("INSERT INTO delivery_messages(owner,identity,source_seq,document_json,relays_json,created_at) VALUES(?,?,?,?,?,?)")
                     .bind(owner).bind(&message.identity).bind(event.seq).bind(serde_json::to_string(&message)?).bind(serde_json::to_string(&relays)?).bind(now).execute(&mut *tx).await?;

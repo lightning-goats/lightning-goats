@@ -233,6 +233,13 @@ impl Fixture {
             .unwrap();
     }
     async fn bridge(&self, mode: RuntimeMode) -> (Client, tokio::task::JoinHandle<Result<()>>) {
+        self.bridge_role(mode, false).await
+    }
+    async fn bridge_role(
+        &self,
+        mode: RuntimeMode,
+        payout: bool,
+    ) -> (Client, tokio::task::JoinHandle<Result<()>>) {
         let (uid, gid) = self_credentials().unwrap();
         std::fs::set_permissions(
             self.root.path(),
@@ -244,7 +251,7 @@ impl Fixture {
                 .root
                 .path()
                 .join(format!("{}.sock", Uuid::new_v4().simple())),
-            peer_uid: uid,
+            peer_uid: if payout { uid + 1 } else { uid },
             group_gid: gid,
             reward_policy: Some(crate::reward_funding::RewardPolicy {
                 owner: self.owner.clone(),
@@ -252,7 +259,7 @@ impl Fixture {
                 max_sats_per_feed: 0,
                 max_sats_per_24h: 0,
             }),
-            payout_peer_uid: Some(uid + 1),
+            payout_peer_uid: Some(if payout { uid } else { uid + 1 }),
             delegated_feeder_messages: false,
             payout_execution_enabled: false,
             payout_account_id: None,
@@ -1498,4 +1505,392 @@ async fn feeding_missing_bounded_attribution_uses_editable_neutral_wording_witho
     assert!(!message.message.contains("1000 sats"));
     assert!(!message.message.contains("0 sats"));
     task.abort();
+}
+
+async fn hint_catalog(f: &Fixture) {
+    let catalog = f.store.templates(&f.owner).await.unwrap();
+    let keys = catalog
+        .category("repost_hint")
+        .unwrap()
+        .keys()
+        .cloned()
+        .collect::<Vec<_>>();
+    for (i, key) in keys.into_iter().enumerate() {
+        f.store
+            .edit_template(
+                &f.owner,
+                &format!("delete-hint-{i}"),
+                &crate::cyberherd::store::TemplateEdit::Delete {
+                    category: "repost_hint".into(),
+                    variant: key,
+                },
+            )
+            .await
+            .unwrap();
+    }
+    f.store
+        .edit_template(
+            &f.owner,
+            "custom-hint",
+            &crate::cyberherd::store::TemplateEdit::Set {
+                category: "repost_hint".into(),
+                variant: "custom".into(),
+                text: "HINT_ONLY {name}: a first repost can help next time.".into(),
+            },
+        )
+        .await
+        .unwrap();
+}
+async fn no_treat(f: &Fixture, start: u64, frozen_repost: bool) -> i64 {
+    let cycle = f.store.snapshot(&f.owner).await.unwrap().cycle;
+    let source = (start..start + 1000)
+        .map(|i| format!("payout:hint:{i}"))
+        .find(|source| {
+            let id = crate::cyberherd::conversation::identity(&f.owner, &key(2), source).unwrap();
+            u8::from_str_radix(&id[..2], 16).unwrap() % 3 == 0
+        })
+        .unwrap();
+    let row = crate::cyberherd::rewards::Row {
+        pubkey: key(2),
+        profile_event_id: None,
+        profile: Some(Profile {
+            name: "Alice".into(),
+            picture: None,
+            lud16: Some("alice@example.com".into()),
+        }),
+        amount_sats: 34,
+        awards: crate::cyberherd::shares::SocialAwards {
+            repost: frozen_repost,
+            like: false,
+        },
+        point_units: "340".into(),
+        share_micro_percent: 10_000_000,
+        gross_sats: 0,
+        fee_limit_sats: 1,
+        net_sats: 0,
+        gross_micro_percent_of_feed: 0,
+        recipient: None,
+        skip: Some(crate::cyberherd::rewards::Skip::RecipientMinimum),
+        conversation: None,
+        score_basis: Some(10),
+        zap_content: None,
+    };
+    let db = SqlitePool::connect(&f.url).await.unwrap();
+    sqlx::query("INSERT INTO domain_events(owner,cycle,source_id,event_type,snapshot_json) VALUES(?,?,?,'payout_skipped',?)")
+        .bind(&f.owner).bind(cycle).bind(source).bind(serde_json::json!({"result":null,"breakdown":row}).to_string()).execute(&db).await.unwrap().last_insert_rowid()
+}
+#[tokio::test]
+async fn no_treat_hint_is_once_per_cycle_exact_after_reopen_and_uses_human_overlay_names() {
+    let f = Fixture::new().await;
+    f.apply("join-hints", 34).await;
+    hint_catalog(&f).await;
+    let first = no_treat(&f, 0, false).await;
+    f.queue().await;
+    let db = SqlitePool::connect(&f.url).await.unwrap();
+    sqlx::query("INSERT INTO domain_events(owner,cycle,source_id,event_type,snapshot_json) SELECT owner,cycle,'msg:msg:'||source_id,event_type,snapshot_json FROM domain_events WHERE seq=?")
+        .bind(first).execute(&db).await.unwrap();
+    let reopened = Store::connect(&f.url).await.unwrap();
+    no_treat(&f, 1000, false).await;
+    while reopened
+        .queue_next_delivery(
+            &f.owner,
+            &["wss://relay.damus.io/".into()],
+            calendar::now().unwrap(),
+        )
+        .await
+        .unwrap()
+    {}
+    let db = SqlitePool::connect(&f.url).await.unwrap();
+    let messages:Vec<String>=sqlx::query_scalar("SELECT document_json FROM delivery_messages WHERE json_extract(document_json,'$.category')='cyber_herd_no_treats'").fetch_all(&db).await.unwrap();
+    assert_eq!(messages.len(), 2);
+    assert_eq!(
+        messages.iter().filter(|m| m.contains("HINT_ONLY")).count(),
+        1
+    );
+    let hinted: crate::cyberherd::delivery::Rendered =
+        serde_json::from_str(messages.iter().find(|m| m.contains("HINT_ONLY")).unwrap()).unwrap();
+    assert!(hinted.nostr.contains("HINT_ONLY nostr:npub"));
+    assert!(hinted.overlay.contains("HINT_ONLY Alice"));
+    assert!(
+        sqlx::query("DELETE FROM delivery_repost_hints")
+            .execute(&db)
+            .await
+            .is_err()
+    );
+    f.store
+        .reset(&f.owner, "next-hint-cycle", calendar::now().unwrap())
+        .await
+        .unwrap();
+    f.apply("join-next-cycle", 34).await;
+    no_treat(&f, 2000, false).await;
+    f.queue().await;
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM delivery_repost_hints")
+        .fetch_one(&db)
+        .await
+        .unwrap();
+    assert_eq!(count, 2);
+}
+#[tokio::test]
+async fn no_treat_hint_checks_later_repost_and_preserves_template_opt_out_without_claiming_slot() {
+    let f = Fixture::new().await;
+    f.apply("join", 34).await;
+    hint_catalog(&f).await;
+    f.store
+        .edit_template(
+            &f.owner,
+            "no-hint",
+            &crate::cyberherd::store::TemplateEdit::DisableCategory {
+                category: "repost_hint".into(),
+            },
+        )
+        .await
+        .unwrap();
+    no_treat(&f, 0, false).await;
+    f.queue().await;
+    let db = SqlitePool::connect(&f.url).await.unwrap();
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM delivery_repost_hints")
+            .fetch_one(&db)
+            .await
+            .unwrap(),
+        0
+    );
+    f.store
+        .edit_template(
+            &f.owner,
+            "allow-hint",
+            &crate::cyberherd::store::TemplateEdit::EnableCategory {
+                category: "repost_hint".into(),
+            },
+        )
+        .await
+        .unwrap();
+    no_treat(&f, 1000, false).await;
+    // A repost earned after the payout snapshot still suppresses the hint.
+    f.store
+        .process(
+            &f.owner,
+            &Interaction {
+                source_id: format!("nostr:{}", "55".repeat(32)),
+                source_hash: "66".repeat(32),
+                pubkey: key(2),
+                profile: Profile {
+                    name: "Alice".into(),
+                    picture: None,
+                    lud16: Some("alice@example.com".into()),
+                },
+                action: Action::Repost,
+                occurred_at: calendar::now().unwrap(),
+            },
+            Target::Current,
+            FeederAvailability::Ready,
+        )
+        .await
+        .unwrap();
+    f.queue().await;
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM delivery_repost_hints")
+            .fetch_one(&db)
+            .await
+            .unwrap(),
+        0
+    );
+}
+#[tokio::test]
+async fn no_treat_hint_claim_and_cursor_roll_back_when_message_insert_fails() {
+    let f = Fixture::new().await;
+    f.apply("join", 34).await;
+    hint_catalog(&f).await;
+    f.queue().await;
+    let event = no_treat(&f, 0, false).await;
+    let db = SqlitePool::connect(&f.url).await.unwrap();
+    sqlx::query("CREATE TRIGGER synthetic_delivery_failure BEFORE INSERT ON delivery_messages BEGIN SELECT RAISE(ABORT,'fixture failure'); END").execute(&db).await.unwrap();
+    assert!(
+        f.store
+            .queue_next_delivery(
+                &f.owner,
+                &["wss://relay.damus.io/".into()],
+                calendar::now().unwrap()
+            )
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM delivery_repost_hints")
+            .fetch_one(&db)
+            .await
+            .unwrap(),
+        0
+    );
+    assert!(
+        sqlx::query_scalar::<_, i64>("SELECT through FROM delivery_cursors")
+            .fetch_one(&db)
+            .await
+            .unwrap()
+            < event
+    );
+    sqlx::query("DROP TRIGGER synthetic_delivery_failure")
+        .execute(&db)
+        .await
+        .unwrap();
+    f.queue().await;
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM delivery_repost_hints")
+            .fetch_one(&db)
+            .await
+            .unwrap(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn public_roster_uses_exact_scores_large_sats_and_read_only_projection() {
+    let f = Fixture::new().await;
+    f.apply("large", 9_007_199_254_740_993).await;
+    let before = f.store.snapshot(&f.owner).await.unwrap();
+    let roster = f.store.public_roster(&f.owner).await.unwrap();
+    assert_eq!(roster.members[0].amount_sats, "9007199254740993");
+    assert_eq!(roster.members[0].points, "9007199254740993");
+    assert_eq!(roster.members[0].share_percent, "10");
+    assert_eq!(f.store.snapshot(&f.owner).await.unwrap(), before);
+    let mut malformed = roster.cards();
+    malformed.members[0].points = "9007199254740992".into();
+    assert!(malformed.validate(true).is_err());
+    let mut malformed = roster.cards();
+    malformed.members[0].picture = Some("https://10.8.0.6/private".into());
+    assert!(malformed.validate(true).is_err());
+}
+#[tokio::test]
+async fn roster_overlay_is_monotone_exact_restart_safe_and_hydrates_snapshot_without_food_or_nostr()
+{
+    let f = Fixture::new().await;
+    f.apply("join-roster", 34).await;
+    let epoch = f.core.overlay_stream_id().await.unwrap();
+    let first = crate::cyberherd::view::Overlay {
+        epoch,
+        roster: f.store.public_roster(&f.owner).await.unwrap().cards(),
+    };
+    let (client, task) = f.bridge(RuntimeMode::Canary).await;
+    f.ready(Some(true)).await;
+    let seq = client.roster_overlay(&first).await.unwrap();
+    assert_eq!(client.roster_overlay(&first).await.unwrap(), seq);
+    f.store.acknowledge_roster(&first, seq).await.unwrap();
+    assert!(
+        !Store::connect(&f.url)
+            .await
+            .unwrap()
+            .roster_needs_delivery(&first)
+            .await
+            .unwrap()
+    );
+    f.apply("increase-roster", 34).await;
+    let second = crate::cyberherd::view::Overlay {
+        epoch,
+        roster: f.store.public_roster(&f.owner).await.unwrap().cards(),
+    };
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    let second_seq = client.roster_overlay(&second).await.unwrap();
+    assert!(second_seq > seq);
+    let mut changed = first.clone();
+    changed.roster.members[0].display_name = "stale replacement".into();
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    assert!(client.roster_overlay(&changed).await.is_err());
+    let mut other = second.clone();
+    other.epoch = Uuid::new_v4();
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    assert!(client.roster_overlay(&other).await.is_err());
+    let mut other = second.clone();
+    other.roster.owner = key(3);
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    assert!(client.roster_overlay(&other).await.is_err());
+    // Exact old ACKs are harmless; they cannot replace the current snapshot.
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    assert_eq!(client.roster_overlay(&first).await.unwrap(), seq);
+    let (_, raw) = f.core.overlay_snapshot_message(1000).await.unwrap();
+    let state: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(state["cyberherd"]["members"][0]["amount_sats"], "68");
+    f.store
+        .reset(&f.owner, "empty-roster", calendar::now().unwrap())
+        .await
+        .unwrap();
+    let empty = crate::cyberherd::view::Overlay {
+        epoch,
+        roster: f.store.public_roster(&f.owner).await.unwrap().cards(),
+    };
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    client.roster_overlay(&empty).await.unwrap();
+    let reopened = LedgerStore::connect(&f.core_url).await.unwrap();
+    let (_, raw) = reopened.overlay_snapshot_message(1000).await.unwrap();
+    let state: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(state["cyberherd"]["members"], serde_json::json!([]));
+    assert_eq!(f.core.feed_credit_sats().await.unwrap(), 0);
+    assert!(f.core.next_outbox_entry().await.unwrap().is_none());
+    assert!(
+        f.core
+            .core_event_batch(Some(epoch), 0, 128)
+            .await
+            .unwrap()
+            .events
+            .iter()
+            .all(|e| matches!(e.body, crate::core_bridge::EventBody::Other))
+    );
+    task.abort();
+    let (payout, payout_task) = f.bridge_role(RuntimeMode::Canary, true).await;
+    let before = reopened.overlay_snapshot_message(1000).await.unwrap();
+    assert!(payout.roster_overlay(&empty).await.is_err());
+    assert_eq!(
+        reopened.overlay_snapshot_message(1000).await.unwrap(),
+        before
+    );
+    payout_task.abort();
+}
+
+#[tokio::test]
+async fn public_targets_distinguish_unknown_from_fresh_empty_and_do_not_reuse_failed_discovery() {
+    let f = Fixture::new().await;
+    let policy = TargetPolicy {
+        project_pubkey: f.owner.clone(),
+        tracked_tags: vec!["CyberHerd".into()],
+    };
+    let now = calendar::now().unwrap();
+    assert!(
+        f.store
+            .public_targets(&policy, "America/Denver", now)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    f.store
+        .observe_view_discovery(&f.owner, true, now)
+        .await
+        .unwrap();
+    assert_eq!(
+        f.store
+            .public_targets(&policy, "America/Denver", now)
+            .await
+            .unwrap(),
+        Some(vec![])
+    );
+    assert!(
+        f.store
+            .public_targets(&policy, "America/Denver", now + 61)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    f.store
+        .observe_view_discovery(&f.owner, false, now + 1)
+        .await
+        .unwrap();
+    f.store
+        .observe_view_discovery(&f.owner, true, now)
+        .await
+        .unwrap();
+    assert!(
+        f.store
+            .public_targets(&policy, "America/Denver", now + 1)
+            .await
+            .unwrap()
+            .is_none()
+    );
 }

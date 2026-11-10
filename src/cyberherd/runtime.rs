@@ -49,6 +49,8 @@ pub struct Config {
     pub payout_bridge: Option<super::payout_bridge::Config>,
     #[serde(default)]
     pub messaging: Option<super::delivery_runtime::Config>,
+    #[serde(default)]
+    pub view: Option<super::view_runtime::Config>,
 }
 
 impl Config {
@@ -75,6 +77,9 @@ impl Config {
         }
         if let Some(messaging) = &self.messaging {
             messaging.validate(&self.project_pubkey)?;
+        }
+        if let Some(view) = &self.view {
+            view.validate()?;
         }
         self.policy().validate()?;
         DayWindow::at(&self.timezone, calendar::now()?)?;
@@ -210,6 +215,9 @@ impl Runtime {
         let refreshed = self
             .discovery
             .refresh(&self.store, &policy, &day, &ids, now)
+            .await?;
+        self.store
+            .observe_view_discovery(owner, refreshed.available, calendar::now()?)
             .await?;
         if refreshed.available {
             let cycle = self.store.snapshot(owner).await?;
@@ -384,6 +392,16 @@ impl Runtime {
             })
             .transpose()?;
         let mut tasks = tokio::task::JoinSet::new();
+        if let Some(view) = &self.config.view {
+            view.start(
+                self.store.clone(),
+                self.config.policy(),
+                self.config.timezone.clone(),
+                Client::new(self.config.core_socket.clone(), self.config.core.core_uid)?,
+                &mut tasks,
+            )
+            .await?;
+        }
         if let Some(messaging) = &self.config.messaging {
             messaging
                 .start(

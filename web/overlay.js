@@ -123,12 +123,16 @@
         return logo;
     }
     function showCards(items, members = false, newestKey = null) {
-        if (!Array.isArray(items) || !items.length) return;
+        if (!Array.isArray(items)) return;
         const host = el("accordion-container");
+        if (!items.length) {
+            if (members) { host.replaceChildren(); host.style.display = "none"; }
+            return;
+        }
         host.replaceChildren();
         if (cardTimer) { clearTimeout(cardTimer); timers.delete(cardTimer); }
         const displayed = members
-            ? [...items].filter((item) => item && typeof item === "object").sort((a, b) => (integer(b.amount) ? b.amount : 0) - (integer(a.amount) ? a.amount : 0)).slice(0, 10)
+            ? [...items].filter((item) => item && typeof item === "object").sort((a, b) => integer(a.rank) && integer(b.rank) ? a.rank - b.rank : (integer(b.amount) ? b.amount : 0) - (integer(a.amount) ? a.amount : 0)).slice(0, 10)
             : items.slice(0, 5);
         displayed.forEach((item, index) => {
             if (!item || typeof item !== "object") return;
@@ -151,14 +155,27 @@
             image.onerror = () => { image.onerror = null; image.src = logo; };
             const title = document.createElement("span"); title.className = "user-profile-name"; title.textContent = name;
             content.append(image, title);
-            if (members && integer(item.amount) && item.amount > 0) {
+            const exact = typeof item.amount_sats === "string" && /^(0|[1-9][0-9]{0,18})$/.test(item.amount_sats) ? BigInt(item.amount_sats) : null;
+            if (members && (exact !== null || integer(item.amount) && item.amount > 0)) {
                 const amount = document.createElement("span"); amount.className = "user-profile-zap";
-                amount.textContent = `⚡ ${item.amount.toLocaleString()} sats`; content.append(amount);
+                amount.textContent = `⚡ ${(exact ?? item.amount).toLocaleString()} sats`;
+                if (typeof item.points === "string" && typeof item.share_percent === "string") amount.title = `${item.points} points · ${item.share_percent}% share`;
+                content.append(amount);
             }
             card.append(content); host.append(card);
         });
         host.style.display = host.childElementCount ? "flex" : "none";
         cardTimer = later(() => { host.style.display = "none"; }, 18000);
+    }
+    function acceptRoster(roster) {
+        if (!roster || !Array.isArray(roster.members) || roster.members.length > 10 || !integer(roster.total_members)
+            || roster.total_members > 1000 || roster.members.length !== Math.min(10, roster.total_members)
+            || !integer(roster.revision) || !/^[0-9a-f]{64}$/.test(roster.owner || "")) return false;
+        if (!roster.members.every((m, i) => m && m.rank === i + 1 && /^[0-9a-f]{64}$/.test(m.pubkey || "")
+            && typeof m.amount_sats === "string" && /^(0|[1-9][0-9]{0,18})$/.test(m.amount_sats)
+            && BigInt(m.amount_sats) <= 9223372036854775807n)) return false;
+        showCards(roster.members, true);
+        return true;
     }
     function toggleQr() {
         if (qrBusy) return;
@@ -258,6 +275,8 @@
             if (stream !== data.stream_id || data.reset_reason) clearPresentation();
             stream = data.stream_id; seq = data.seq; credit = data.feed_credit_sats; threshold = data.threshold_sats;
             awaitingConfirmation = typeof data.unresolved_feed_attempt === "string";
+            if (data.cyberherd === null) showCards([], true);
+            else if (data.cyberherd !== undefined && !acceptRoster(data.cyberherd)) return resetConnection();
             replaying = false; el("connection").dataset.state = "live"; el("connection").textContent = ""; el("connection").ariaLabel = "Connected"; render(); return;
         }
         if (!integer(data.seq) || seq === null || stream === null) return resetConnection();
@@ -286,7 +305,9 @@
                 if (feeds.length < 8) feeds.push(data.seq);
                 showFeed();
             }
-            if (kind.startsWith("cyberherd_") && Array.isArray(data.members)) showCards(data.members, true, data.newest_pubkey);
+            if (kind === "cyberherd_roster") {
+                if (!acceptRoster(data)) return resetConnection();
+            } else if (kind.startsWith("cyberherd_") && Array.isArray(data.members)) showCards(data.members, true, data.newest_pubkey);
             if (kind === "cyberherd_daily_reset") { el("accordion-container").replaceChildren(); el("accordion-container").style.display = "none"; }
         }
         seq = data.seq;

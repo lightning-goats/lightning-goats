@@ -116,3 +116,19 @@ relay acceptance. Record exact verification results only after the checks finish
 The [member delivery checkpoint](../testing/cyberherd-member-delivery-checkpoint-20261110.md)
 records the completed 439-test suite, eight CLI checks, inactive archive evidence
 and unchanged open dependency advisory.
+
+
+## Optional once-per-cycle repost suggestion
+
+A no-treat message may append the existing editable `repost_hint` template.
+Selection is deterministic and occasional (one third of message identities), so
+retrying cannot change wording. Both the frozen payout breakdown and current
+active membership must lack an earned repost award, and the cycle must still
+match. A later repost therefore suppresses a stale suggestion. Banned/inactive
+members receive no hint. Template/category opt-out claims no unused slot.
+
+An immutable unique `(owner, cycle, member)` marker commits in the same
+transaction as the frozen public/human message, destinations and delivery cursor.
+A failed insert rolls the claim back. Reopen, recovery and `msg:` source aliases
+cannot add another hint or alter the original bytes. A new cycle can claim a new
+slot. The hint is presentation only; it grants no points, payment or membership.

@@ -6,6 +6,10 @@ including the updated explanation/code references and the explicit no-NIP-05 and
 confirmed-feeding reward rules. That request supersedes the older CyberHerd
 deferral in the historical delivery order below.
 
+The optional [read-only CyberHerd roster and OBS state](architecture/cyberherd-public-roster.md)
+are disabled by default and add no financial or operator mutation capability.
+Browser/operator authentication remains separate work.
+
 The native incoming zap/receipt contract is described in
 [`architecture/native-nip57.md`](architecture/native-nip57.md). It preserves
 ordinary LNURL payments and requires explicit feature activation.

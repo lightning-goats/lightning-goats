@@ -237,6 +237,21 @@ class OverlayBrowserTests(unittest.TestCase):
         self.assertEqual(self.errors,[])
 
 
+    def test_current_roster_snapshot_restores_exact_cards_and_empty_update_clears_without_food(self):
+        roster = {"owner":"ab" * 32,"cycle":1,"revision":1,"capacity":10,"minimum_sats":"10","member_percent":10,"total_members":1,
+                  "members":[{"rank":1,"pubkey":"cd" * 32,"display_name":"Alice <img src=x>","amount_sats":"9007199254740993","points":"9007199254740993","share_percent":"10","picture":"javascript:alert(1)"}]}
+        self.snapshot(credit=2,cyberherd=roster)
+        self.assertEqual(self.page.locator(".user-profile-name").inner_text(),"Alice <img src=x>")
+        self.assertEqual(self.page.locator(".user-profile-name img").count(),0)
+        self.assertIn("9,007,199,254,740,993",self.page.locator(".user-profile-zap").inner_text())
+        self.assertFalse(self.page.locator("#feeder-triggered").is_visible())
+        self.assertFalse(self.page.locator("#sats-received-overlay").is_visible())
+        roster.update({"revision":2,"total_members":0,"members":[]})
+        self.send({"type":"cyberherd_roster","source_type":"cyberherd_roster","seq":1,**roster})
+        self.assertEqual(self.page.locator(".accordion-item").count(),0)
+        self.assertEqual(self.page.locator("#credit").inner_text(),"2 sats credit")
+        self.assertEqual(self.errors,[])
+
     def test_actual_logo_branded_qr_decodes_at_obs_size(self):
         import io
         from PIL import Image

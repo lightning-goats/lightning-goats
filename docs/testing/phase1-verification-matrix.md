@@ -197,3 +197,24 @@ paused member queue cannot duplicate physical effects, food/debits or text, and
 that new equal-valued payments remain distinct while same-payment batches share
 one announcement. Public relay and household-client acceptance are separate from
 the synthetic fixtures. Follow the full CyberHerd contract before activation.
+
+
+## Optional read-only roster and repost-hint source checks
+
+Verify exact point/share projection and sat strings above the browser safe-integer
+range, active/banned filtering and public-picture bounds. Exercise API pagination,
+revision conflict, stale-cache refusal, unknown-vs-empty target discovery,
+non-loopback configuration refusal and absence of mutation/private fields. Browser
+fixtures must block all external traffic and show that default flags make no API
+request, unsafe names/images stay inert, exact amounts survive and empty rosters
+clear. Private IPC must reject wrong owner/epoch/role and changed stale revisions;
+lost ACK returns one sequence, and the atomic reconnect snapshot retains current
+cards without money, food effects or core Nostr jobs.
+
+For optional no-treat hints verify both frozen/current repost awards, category
+opt-out, once-per-cycle persistence, canonical source aliases and rollback of the
+claim/cursor when message insertion fails. Preserve the full locked Rust checks,
+audit gate, inactive CLI/archive and existing browser/systemd regressions. These
+fixtures do not authorize installing the proxy/roles, signing publicly, spending
+or feeding. Browser authentication/operator controls and full-port operational
+qualification remain separate requirements.

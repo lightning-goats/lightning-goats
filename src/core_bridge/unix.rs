@@ -52,7 +52,8 @@ impl Role {
         match self {
             Self::Intake => matches!(
                 request,
-                Request::Events { .. }
+                Request::RosterOverlay { .. }
+                    | Request::Events { .. }
                     | Request::MemberOverlay { .. }
                     | Request::FeedingOverlay { .. }
                     | Request::RewardResults { .. }
@@ -284,6 +285,19 @@ async fn serve_one(
                     match ledger.accept_feeding_overlay(&message, mode).await {
                         Ok(seq) => Response::FeedingOverlay {
                             identity: message.broadcast.proof.identity.clone(),
+                            seq,
+                        },
+                        Err(_) => Response::Rejected,
+                    }
+                } else {
+                    Response::Rejected
+                }
+            }
+            Request::RosterOverlay { message } => {
+                if reward_policy.is_some_and(|p| p.owner == message.roster.owner) {
+                    match ledger.accept_roster_overlay(&message).await {
+                        Ok(seq) => Response::RosterOverlay {
+                            identity: message.identity()?,
                             seq,
                         },
                         Err(_) => Response::Rejected,
@@ -653,6 +667,18 @@ impl Client {
                 })
             }
             _ => bail!("core did not return an authenticated event batch"),
+        }
+    }
+    pub async fn roster_overlay(&self, message: &crate::cyberherd::view::Overlay) -> Result<u64> {
+        let expected = message.identity()?;
+        match self
+            .request(&Request::RosterOverlay {
+                message: Box::new(message.clone()),
+            })
+            .await?
+        {
+            Response::RosterOverlay { identity, seq } if identity == expected && seq > 0 => Ok(seq),
+            _ => bail!("core did not accept roster overlay"),
         }
     }
     pub async fn feeding_overlay(

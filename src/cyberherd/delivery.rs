@@ -533,3 +533,38 @@ impl Rendered {
         Ok(())
     }
 }
+
+/// Optional wording only; the store atomically claims its once-per-cycle slot.
+pub(crate) fn repost_hint(
+    event: &StoredEvent,
+    catalog: &Catalog,
+    message: &Rendered,
+) -> Result<Option<(String, String)>> {
+    if event.event_type != "payout_skipped" || message.category != "cyber_herd_no_treats" {
+        return Ok(None);
+    }
+    crate::nostr_event::validate_hex(&message.identity, 32)?;
+    let input: ResultEvent = serde_json::from_str(&event.snapshot_json)?;
+    if input.breakdown.awards.repost
+        || input.breakdown.pubkey != message.member
+        || u8::from_str_radix(&message.identity[..2], 16)? % 3 != 0
+    {
+        return Ok(None);
+    }
+    let profile = input
+        .breakdown
+        .profile
+        .as_ref()
+        .context("no-treat hint lacks frozen profile")?;
+    let public = catalog.render(
+        "repost_hint",
+        &message.identity,
+        &values(profile, &message.member, true)?,
+    )?;
+    let human = catalog.render(
+        "repost_hint",
+        &message.identity,
+        &values(profile, &message.member, false)?,
+    )?;
+    Ok(public.zip(human))
+}

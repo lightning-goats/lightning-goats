@@ -35,6 +35,9 @@ pub(crate) mod notice_state;
 #[cfg(unix)]
 pub(crate) mod feeding_state;
 
+#[path = "view_store.rs"]
+mod view_state;
+
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./cyberherd-migrations");
 
 #[derive(Debug, Clone)]

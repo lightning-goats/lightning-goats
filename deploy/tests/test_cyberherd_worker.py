@@ -89,6 +89,15 @@ bunker_relays = ["wss://nos.lol/"]
                         messaging + signer + 'nsec = "synthetic-placeholder"\n']:
             self.assertNotEqual(self.invoke(self.text + invalid, "--check").returncode, 0)
 
+    def test_public_view_check_is_loopback_only_and_creates_no_state(self):
+        view = '\n[view]\nenabled = false\nlisten = "127.0.0.1:3340"\noverlay = true\n'
+        self.assertEqual(self.invoke(self.text + view, "--check").returncode, 0)
+        for invalid in [view.replace("127.0.0.1:3340", "0.0.0.0:3340"),
+                        view.replace("127.0.0.1:3340", "10.8.0.6:3340"),
+                        view.replace("127.0.0.1:3340", "127.0.0.1:0"),
+                        view + 'api_key = "synthetic-placeholder"\n']:
+            self.assertNotEqual(self.invoke(self.text + invalid, "--check").returncode, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

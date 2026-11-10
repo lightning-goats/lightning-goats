@@ -27,6 +27,7 @@ mod reward_outcomes;
 mod reward_results;
 pub use operator_credit::{OperatorCreditGrant, OperatorCreditResult, OperatorCreditStatus};
 mod overlay;
+mod roster_overlay;
 mod strike;
 mod zap;
 pub use events::DurableEvent;

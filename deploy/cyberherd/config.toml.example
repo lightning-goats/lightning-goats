@@ -69,3 +69,13 @@ herd = "0000000000000000000000000000000000000000000000000000000000000000"
 # Use a distinct authorized NIP-46 authentication client, with kinds 1 and 1311.
 # No project secret or spending key is accepted. The publisher sends only its
 # exact stored signed events; supported outgoing 9734 stays with payout signer.
+
+# Optional public read-only roster API and display-only OBS state. Separate from
+# signer/messaging; does not enable payouts or feeding. The HTTP socket is always
+# loopback-only. Install the optional readonly-nginx.conf.example after review.
+# [view]
+# enabled = false
+# listen = "127.0.0.1:3340"
+# overlay = false
+# OBS imports require the core bridge's matching reward_policy.owner; all
+# monetary ceilings may remain zero. Static cyberherdEnabled remains false.

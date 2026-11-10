@@ -255,11 +255,15 @@ overlay per triggering payment and a correlated typed overlay import. The
 [458-test checkpoint](../testing/cyberherd-feeding-announcements-checkpoint-20261110.md)
 records verified source and inactive artifacts. It has not been installed or activated.
 
-Remaining implementation and qualification includes feeder announcement and
-lifecycle installed qualification,
-optional once-per-cycle no-treat repost hints, readonly roster/targets/scores and
-OBS cards, browser Nostr
-authentication and authenticated operator settings/template/member/reset tools.
+Subsequent [read-only roster/OBS source](../architecture/cyberherd-public-roster.md)
+adds a disabled loopback cache API, exact ranked scores/shares, paginated static
+view and typed snapshot-safe OBS cards. Optional no-treat repost hints now use
+an atomic once-per-owner/member/cycle claim and preserve template opt-out. These
+additions are undergoing exact-source verification; no installation or activation
+is implied by their presence.
+
+Remaining implementation and qualification includes feeder announcement,
+lifecycle and roster installed qualification, browser Nostr authentication and authenticated operator settings/template/member/reset tools.
 Also required: explicit failed-cost/consistent-restore and retention operations,
 installed identity/network/helper/NIP-46/provider qualification, dependency-audit
 remediation and explicit financial activation. The twelve numbered groups above

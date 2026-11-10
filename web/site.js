@@ -3,6 +3,7 @@
     const byId = (id) => document.getElementById(id);
     const enabled = window.LightningGoatsSite?.paymentsEnabled === true;
     const users = new Set(["herd", "dexter", "rowan", "cosmo", "newton", "nova"]);
+    if (byId("cyberherdLink")) byId("cyberherdLink").hidden = window.LightningGoatsSite?.cyberherdEnabled !== true;
     let pending = false;
     let generation = 0;
 

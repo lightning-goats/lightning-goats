@@ -35,8 +35,15 @@ Separate NIP-46 clients are prepared. The operator reports both in the household
 allowlist and confirmed a bunker restart. [Actual signing checks](testing/cyberherd-bunker-checkpoint-20261110.md)
 matched the local stored client identities but returned authorization refusals
 or timeouts, including membership checks on all three approved transports.
-Required kinds remain unqualified. A read-only household loaded-client inspection
-is pending; no new key, successful signature or public CyberHerd post is claimed.
+The household's read-only inspection now confirms all four public clients in the
+stable running process arguments and the expected executable digest. Diagnostic
+checks positively confirm nak selects the intended authentication key, but both
+the new payout-signing client and existing receive-client control are refused.
+A fresh payout check identifies a decrypted `response error: unauthorized`,
+rather than an HTTP/WebSocket refusal. No competing bunker runs on this VPS;
+the household inventory finds exactly one bunker with all four client arguments.
+Another host's signer or a compatibility problem remains unproven. Required kinds remain
+unqualified; no key regeneration, signature or public CyberHerd post is claimed.
 
 Other remaining work includes installed browser/presentation and global network
 qualification, concrete externally reconciled recovery adoption, operator-selected

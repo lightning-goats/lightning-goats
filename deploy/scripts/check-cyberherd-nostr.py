@@ -44,6 +44,7 @@ def safe_trace(stderr, expected_client_key):
     labels = ('unauthorized', 'auth-required', 'auth required', 'forbidden',
               'error from bunker', 'failed to connect', 'connect request',
               'failed to sign', 'sign_event', 'get_public_key', 'handshake',
+              'response error: unauthorized', 'unexpected status', 'bad handshake',
               '401', '403', 'connection refused', 'deadline', 'timeout')
     return {'nak_client_key_used_matches': (all(value == expected_client_key for value in selected)
                                           if selected else None),

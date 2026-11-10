@@ -61,6 +61,32 @@ def bounded(path):
     return raw
 
 
+def bunker_processes(selected_pid):
+    """Inventory candidates without exposing argv, environment or unknown keys."""
+    reports = []
+    vanished = 0
+    for process in PROC.iterdir():
+        if not process.name.isdecimal():
+            continue
+        try:
+            arguments = bounded(process / 'cmdline').decode().split('\0')
+            if not arguments or not Path(arguments[0]).name.startswith('nak') or 'bunker' not in arguments:
+                continue
+            keys, malformed = public_clients(arguments)
+            digest = hashlib.sha256()
+            with (process / 'exe').open('rb') as stream:
+                for block in iter(lambda: stream.read(65536), b''):
+                    digest.update(block)
+            reports.append({'selected_service': process.name == selected_pid,
+                            'known_clients': {name: key in keys for name, key in CLIENTS.items()},
+                            'public_client_count': len(keys), 'malformed_public_client_arguments': malformed,
+                            'program_sha256': digest.hexdigest()})
+        except (FileNotFoundError, ProcessLookupError):
+            vanished += 1
+    return {'bunker_processes': reports, 'bunker_process_count': len(reports),
+            'processes_vanished_during_inventory': vanished}
+
+
 def inspect():
     if os.geteuid() != 0:
         raise ValueError('run with sudo on the household host')
@@ -91,6 +117,7 @@ def inspect():
     report['running_program_sha256'] = digest.hexdigest()
     expected = re.findall(r'^NAK_SHA256="?([0-9a-f]{64})"?$', text, re.MULTILINE)
     report['running_program_matches_configured_digest'] = len(expected) == 1 and expected[0] == digest.hexdigest()
+    report.update(bunker_processes(before['MainPID']))
     after = status(UNIT)
     if after != before:
         raise ValueError('service changed during inspection; retry once stable')

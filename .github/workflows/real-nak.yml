@@ -39,6 +39,12 @@ jobs:
           set -euo pipefail
           LG_REAL_TEST_BINARY="$(python3 -c 'import json,sys; rows=[json.loads(line) for line in open(sys.argv[1])]; paths=[r["executable"] for r in rows if r.get("reason")=="compiler-artifact" and r.get("target",{}).get("name")=="real_nak" and r.get("executable")]; assert len(paths)==1; print(paths[0])' "$RUNNER_TEMP/real-nak-build.jsonl")"
           sudo unshare --net -- sh -c 'ip link set lo up; exec runuser -u "$1" -- env LG_TEST_NAK="$2" "$3" --ignored --nocapture' sh "$(id -un)" "$RUNNER_TEMP/nak" "$LG_REAL_TEST_BINARY" | tee "$RUNNER_TEMP/REAL-NAK.txt"
+      - name: Verify four repeated client flags and signing kinds in isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          LG_MULTI_HOST_NETNS="$(readlink /proc/self/ns/net)"
+          sudo unshare --net -- sh -c 'ip link set lo up; exec runuser -u "$1" -- python3 -I -B "$2" --nak "$3" --host-network-namespace "$4"' sh "$(id -un)" "$GITHUB_WORKSPACE/deploy/scripts/check-multi-client-nak.py" "$RUNNER_TEMP/nak" "$LG_MULTI_HOST_NETNS" | tee "$RUNNER_TEMP/REAL-NAK-MULTI-CLIENT.json"
       - name: Rehearse the shipped bunker sandbox with encrypted synthetic credentials
         shell: bash
         run: |
@@ -52,6 +58,7 @@ jobs:
           name: real-nak-${{ github.sha }}
           path: |
             ${{ runner.temp }}/REAL-NAK.txt
+            ${{ runner.temp }}/REAL-NAK-MULTI-CLIENT.json
             ${{ runner.temp }}/BUNKER-SYSTEMD.json
           if-no-files-found: error
           retention-days: 14

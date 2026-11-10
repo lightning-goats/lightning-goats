@@ -71,4 +71,60 @@ the running program's digest, never raw arguments, process environment, signing
 credential files, journals or pairing capabilities. It modifies nothing. The
 operator was asked to copy/run it on the household and return its JSON because
 household administrator access is not configured from this VPS. That result is
-pending; do not infer it or repeat identical signing attempts without new evidence.
+now supplied, as recorded below.
+
+## Running-client result and connection diagnostic
+
+The operator returned all four configured public clients present in the selected
+stable process arguments, zero malformed flags, active/running, zero restarts and
+the expected executable digest. A missing restart is no longer a supported
+hypothesis. No key regeneration or additional restart is requested.
+
+Checker source `978063fcac146579852217d22abb67fb730cd7e9` adds private-pipe
+diagnostics and an existing receive-client control. All ten workflows passed,
+including [Deployment](https://github.com/lightning-goats/lightning-goats/actions/runs/42869089242),
+[CI](https://github.com/lightning-goats/lightning-goats/actions/runs/42869089217),
+[Security](https://github.com/lightning-goats/lightning-goats/actions/runs/42869089173)
+and [real NIP-46](https://github.com/lightning-goats/lightning-goats/actions/runs/42869089262).
+Eight focused helper tests passed locally. A subsequent fixed-label addition
+distinguishes a decrypted RPC refusal without exposing arbitrary error text.
+
+Protected helper bytes and temporary units were independently hashed and verified
+before execution. Sequential Primal checks under separate non-admin users loaded
+only each user's own client credential. Both the payout client and existing
+receive control returned unauthorized with `nak_client_key_used_matches=true`.
+That checks the actual key passed into nak's NIP-46 connector. Membership was not
+retried. A fresh payout diagnostic then returned `failed to connect` and
+`response error: unauthorized`. The pinned dependency's connector issues
+`connect` first and formats decrypted RPC refusals as `response error: ...`;
+this identifies a bunker RPC refusal, without proving which signer instance
+answered. No required kind was verified.
+
+Only fixed labels, booleans and completed-kind numbers leave private pipes. Nak's
+verbose authentication key never reaches a terminal, journal or retained report.
+No signed challenge bytes are retained. The receive control additionally hides
+the running receive service's credentials. No invoice/provider operation or
+project publication occurred.
+
+No nak bunker process runs on this VPS. The operator ran the extended household
+inventory from `/home/linuxuser/lightning-goats/inspect-household-bunkers.sh`:
+exactly one bunker process, matching the selected service, expected digest and
+all four public-client arguments; no malformed flags or vanished processes.
+This rules out an additional household process observed by that inventory,
+not another host answering as the same identity. Four inspector tests pass, including
+multiple-process filtering and secrecy. It reports only candidate counts,
+known-public-client comparisons, executable hashes and whether a candidate is
+the selected service; it reads no process environment or credential file. A
+competing remote instance remains a hypothesis, not an established cause.
+
+All three diagnostic processes were terminal. Their exact temporary unit files
+were removed after byte comparison; private sanitized evidence/helper generations
+remain. Original role journal hashes, configurations and all four original
+service states match before/after. Receive health/status both return 200.
+Production CyberHerd units stay masked/inactive with zero limits.
+
+A synthetic four-client trial is added, pending CI. Using pinned nak, public test
+scalars and a fresh loopback-only namespace, it must verify kinds 1/1311/9734 for
+each of four clients configured through repeated flags, reject an unknown fifth
+client by bunker RPC, retain authorized access and find no project publication.
+It does not qualify the household executable or external relay behavior.

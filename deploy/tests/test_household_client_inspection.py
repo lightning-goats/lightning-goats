@@ -57,6 +57,25 @@ class HouseholdClientInspectionTests(unittest.TestCase):
         self.assertNotIn('VERY_PRIVATE', str(caught.exception))
         self.assertEqual(output.getvalue(), '')
 
+    def test_multiple_bunker_inventory_never_emits_secret_arguments_or_unknown_keys(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for pid, program, command, client in [('42', 'nak', 'bunker', q.CLIENTS['membership']),
+                                                   ('43', 'nak-old', 'bunker', 'f' * 64),
+                                                   ('44', 'nak', 'event', q.CLIENTS['receive'])]:
+                process = root / pid; process.mkdir()
+                (process / 'exe').write_bytes(b'public executable')
+                (process / 'cmdline').write_bytes(('\0'.join([program, command, '--sec', 'VERY_PRIVATE',
+                                                            '--authorized-keys', client]) + '\0').encode())
+            with patch.object(q, 'PROC', root):
+                report = q.bunker_processes('42')
+            self.assertEqual(report['bunker_process_count'], 2)
+            self.assertEqual(sum(r['selected_service'] for r in report['bunker_processes']), 1)
+            self.assertTrue(any(r['known_clients']['membership'] for r in report['bunker_processes']))
+            encoded = json.dumps(report)
+            for secret in ('VERY_PRIVATE', 'f' * 64, q.CLIENTS['membership']):
+                self.assertNotIn(secret, encoded)
+
 
 if __name__ == '__main__':
     unittest.main()

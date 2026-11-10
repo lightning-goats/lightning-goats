@@ -76,10 +76,10 @@ class NostrCheckTests(unittest.TestCase):
 
     def test_private_nak_diagnostics_emit_only_known_labels_and_key_match(self):
         key = b'0' * 63 + b'1'
-        raw = b'PRIVATE with client key ' + key + b'\nfailed to connect: error from bunker: unauthorized SECRET'
+        raw = b'PRIVATE with client key ' + key + b'\nfailed to connect: error from bunker: response error: unauthorized SECRET'
         report = q.safe_trace(raw, key)
         self.assertTrue(report['nak_client_key_used_matches'])
-        self.assertEqual(report['helper_categories'], ['unauthorized', 'error from bunker', 'failed to connect'])
+        self.assertEqual(report['helper_categories'], ['unauthorized', 'error from bunker', 'failed to connect', 'response error: unauthorized'])
         encoded = json.dumps(report)
         self.assertNotIn('PRIVATE', encoded)
         self.assertNotIn('SECRET', encoded)

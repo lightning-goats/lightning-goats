@@ -46,6 +46,15 @@ identities/capabilities, encrypted credential scope, managed-file and foreign-st
 denial, and public/private IPv4/IPv6 controls. Application runtime, actual-host,
 provider, household, browser and recovery adoption remain separate.
 
+The [actual inactive installation](testing/cyberherd-live-inactive-installation-20261110.md)
+now passed on the VPS: three locked separate identities, persistent masks,
+protected four-program/config installation, actual native journal initialization
+and configuration-only maintenance-policy validation. The receive daemon kept
+its original process/configuration and health 200. New workers remain stopped,
+all financial/signing limits are zero, and no core bridge is enabled. Actual
+runtime/provider/household/browser/recovery qualification and activation remain
+unfinished.
+
 The Phase 1 implementation history below was last updated on 2026-09-07; consult
 the dated restoration/implementation records and current plan for later work.
 

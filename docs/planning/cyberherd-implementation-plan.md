@@ -194,6 +194,14 @@ and verified; partial engines/models or a plan alone do not satisfy it.
 
 ## Current source checkpoint — incomplete port
 
+The current upstream explanation was re-read and its raw SHA256 still matches
+the pinned reference above. The
+[actual inactive installation](../testing/cyberherd-live-inactive-installation-20261110.md)
+now provisions the three separate masked roles and fresh journals on the VPS,
+after approved core maintenance. It preserves the existing receive process/config
+and leaves every new worker, financial budget and publication path disabled.
+Actual runtime/household/provider/browser/recovery qualification remains open.
+
 The [495-test installation checkpoint](../testing/cyberherd-installation-checkpoint-20261110.md)
 records the prepared core transaction, disabled-role installer, separate
 credential/client preparation and actual native initialization/NSS/masks on a

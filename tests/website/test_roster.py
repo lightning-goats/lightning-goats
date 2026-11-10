@@ -1,5 +1,6 @@
 """Read-only CyberHerd page. Every HTTP request is fulfilled locally or blocked."""
 import json
+from datetime import datetime, timezone
 import mimetypes
 import os
 from pathlib import Path
@@ -37,7 +38,7 @@ class RosterBrowserTests(unittest.TestCase):
                                "members":[{"rank":1,"pubkey":"cd"*32,"display_name":"Alice <img src=x>","picture":"javascript:alert(1)","amount_sats":"9007199254740993","points":"9007199254740993","share_percent":"10"}]}}
         # Loading the local vendor bundle must not age a synthetic response.
         # Date stays fixed while request/interval timers continue normally.
-        self.page.clock.set_fixed_time(self.data["generated_at"] * 1000)
+        self.page.clock.set_fixed_time(datetime.fromtimestamp(self.data["generated_at"], tz=timezone.utc))
         self.page.route("**/*",self.route)
     def route(self,route):
         url = urlsplit(route.request.url)

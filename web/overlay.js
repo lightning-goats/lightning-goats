@@ -15,6 +15,7 @@
     let feeding = false, qrBusy = false, paymentBusy = false;
     let availability = "unknown", awaitingConfirmation = false;
     let marqueeFrame = null, lastFrame = null, cardTimer = null;
+    let goatCardNames = "";
     const messages = [], activeMessages = [], payments = [], feeds = [];
 
     function later(fn, ms) {
@@ -51,6 +52,7 @@
         animations.clear();
         if (marqueeFrame !== null) cancelAnimationFrame(marqueeFrame);
         marqueeFrame = null; lastFrame = null;
+        goatCardNames = "";
         messages.length = activeMessages.length = payments.length = feeds.length = 0;
         feeding = qrBusy = paymentBusy = false;
         el("message").replaceChildren();
@@ -58,6 +60,7 @@
         weatherTime = null;
         el("current-temperature").textContent = "-- °F";
         el("accordion-container").replaceChildren();
+        delete el("accordion-container").dataset.cards;
         for (const id of ["sats-received-overlay", "feeder-triggered", "accordion-container", "lightning-effect", "lightning-img", "progress-drainer"]) el(id).style.display = "none";
         el("qr-image").style.visibility = el("qr-brand").style.visibility = "visible";
         el("progress-drainer").style.width = "0%";
@@ -72,7 +75,10 @@
         const cleaned = cleanText(text);
         if (!cleaned) return;
         if (messages.length >= 24) messages.shift();
-        messages.push({ text: cleaned, expiresAt });
+        const mentionedGoats = [...goats.values()]
+            .map((name) => ({ name, position: cleaned.search(new RegExp(`\\b${name}\\b`, "i")) }))
+            .filter((goat) => goat.position >= 0).sort((a, b) => a.position - b.position).map((goat) => goat.name);
+        messages.push({ text: cleaned, expiresAt, mentionedGoats });
         if (marqueeFrame === null) marqueeFrame = requestAnimationFrame(scrollMessages);
     }
     function scrollMessages(now) {
@@ -81,11 +87,13 @@
         const width = el("progress-container").clientWidth;
         // Hold the ticker while the confirmed feeder effect owns the screen.
         if (!feeding) {
+            let messageChanged = false;
             for (const message of [...activeMessages]) {
                 message.x -= elapsed * 0.2;
                 if (message.x + message.width <= 0 || (message.expiresAt !== null && message.expiresAt < Date.now())) {
                     message.node.remove();
                     activeMessages.splice(activeMessages.indexOf(message), 1);
+                    messageChanged = true;
                 } else message.node.style.transform = `translateX(${message.x}px)`;
             }
             const newest = activeMessages[activeMessages.length - 1];
@@ -98,8 +106,10 @@
                     node.style.transform = `translateX(${width}px)`;
                     el("message").append(node);
                     activeMessages.push({ ...message, node, x: width, width: node.offsetWidth });
+                    messageChanged = true;
                 }
             }
+            if (messageChanged) syncGoatCards();
             el("progress-percentage").style.opacity = activeMessages.length ? "0.18" : "1";
             const natural = Math.min(1, credit / threshold) * width;
             const edge = activeMessages.reduce((left, item) => Math.min(left, Math.max(0, item.x)), natural);
@@ -108,6 +118,19 @@
         }
         if (messages.length || activeMessages.length) marqueeFrame = requestAnimationFrame(scrollMessages);
         else { marqueeFrame = null; lastFrame = null; render(); }
+    }
+    function syncGoatCards() {
+        const names = [...new Set(activeMessages.flatMap((message) => message.mentionedGoats))];
+        const key = names.join(",");
+        if (key === goatCardNames) return;
+        goatCardNames = key;
+        if (names.length) showCards(names.map((name) => ({ name })));
+        else if (el("accordion-container").dataset.cards === "goats") {
+            el("accordion-container").replaceChildren();
+            el("accordion-container").style.display = "none";
+            delete el("accordion-container").dataset.cards;
+            if (cardTimer) { clearTimeout(cardTimer); timers.delete(cardTimer); cardTimer = null; }
+        }
     }
     function picture(url) {
         if (typeof url !== "string" || url.length > 2048) return logo;
@@ -125,6 +148,7 @@
     function showCards(items, members = false, newestKey = null) {
         if (!Array.isArray(items)) return;
         const host = el("accordion-container");
+        host.dataset.cards = members ? "members" : "goats";
         if (!items.length) {
             if (members) { host.replaceChildren(); host.style.display = "none"; }
             return;
@@ -296,7 +320,6 @@
             if (isPayment && (!integer(data.amount_sats) || data.amount_sats < 10)) { seq = data.seq; return; }
             if (kind === "weather_status") acceptWeather(data.data, data.message);
             else addMessage(data.message);
-            if (Array.isArray(data.goats)) showCards(data.goats);
             if (isPayment) {
                 if (payments.length >= 12) payments.shift();
                 payments.push(data.amount_sats); toggleQr(); showPayment();

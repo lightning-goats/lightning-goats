@@ -1,7 +1,6 @@
 """Browser-source tests with synthetic WebSocket messages and no external traffic."""
 import json
 import mimetypes
-from datetime import datetime, timezone
 import os
 from pathlib import Path
 import unittest
@@ -146,7 +145,7 @@ class OverlayBrowserTests(unittest.TestCase):
         self.assertEqual(self.errors, [])
 
     def test_funding_payment_without_receipt_text_waits_for_confirmed_feeding(self):
-        self.page.clock.pause_at(datetime.now(timezone.utc))
+        self.page.clock.pause_at(self.page.evaluate("Date.now() + 60000"))
         self.snapshot(credit=305)
         self.send({"type":"sats_received", "source_type":"payment_received", "seq":1,
                    "feed_credit_sats":1305, "amount_sats":1000})
@@ -166,7 +165,7 @@ class OverlayBrowserTests(unittest.TestCase):
     def test_payment_reaching_threshold_never_fakes_a_feed(self):
         # Hold the short spark animation while assertions run, even when the
         # host is busy compiling Rust. Advance it explicitly below.
-        self.page.clock.pause_at(datetime.now(timezone.utc))
+        self.page.clock.pause_at(self.page.evaluate("Date.now() + 60000"))
         self.snapshot(credit=990)
         payment = {"type":"sats_received", "source_type":"payment_received", "seq":1,
                    "feed_credit_sats":1010, "amount_sats":20, "message":"Thanks, Dexter!",
@@ -179,6 +178,7 @@ class OverlayBrowserTests(unittest.TestCase):
         self.assertFalse(self.page.locator("main").evaluate("node=>node.classList.contains('fed')"))
         self.assertEqual(self.page.locator("#progress").get_attribute("aria-valuenow"),"100")
         self.assertTrue(self.page.locator("#lightning-img").is_visible())
+        self.page.clock.run_for(20)
         self.assertEqual(self.page.locator(".user-profile-name").inner_text(),"Dexter")
         self.send(payment)
         self.send({"type":"feeder_trigger","source_type":"feeder_confirmed","seq":2,"feed_credit_sats":10,"message":"Confirmed"})
@@ -264,6 +264,7 @@ class OverlayBrowserTests(unittest.TestCase):
         self.assertEqual(decoded.text, self.page.locator("#qr-code").get_attribute("data-lnurl"))
 
     def test_two_confirmations_preserve_absolute_remainder_during_visual_drain(self):
+        self.page.clock.pause_at(self.page.evaluate("Date.now() + 60000"))
         self.snapshot(credit=2340)
         for sequence, credit in [(1,1340),(2,340)]:
             self.send({"type":"feeder_trigger","source_type":"feeder_confirmed","seq":sequence,
@@ -310,7 +311,28 @@ class OverlayBrowserTests(unittest.TestCase):
         self.assertTrue(self.page.locator("#sats-received-overlay").is_visible())
         self.assertEqual(self.page.locator("#sats-received-overlay").inner_text(),"⚡ 10 sats ⚡")
         self.assertTrue(self.page.locator("#lightning-img").is_visible())
-        self.assertEqual(self.page.locator(".user-profile-name").inner_text(),"Dexter")
+        self.assertEqual(self.page.locator(".accordion-item").count(),0)
+        self.assertEqual(self.errors,[])
+
+    def test_goat_portraits_follow_only_whole_names_in_scrolling_text(self):
+        self.snapshot()
+        self.send({"type":"sats_received","source_type":"payment_received","seq":1,
+            "amount_sats":10,"feed_credit_sats":10,"message":"10 sats received!",
+            "goats":[{"name":"Dexter"},{"name":"Nova"}]})
+        self.page.clock.run_for(20)
+        self.assertEqual(self.page.locator(".accordion-item").count(),0)
+        self.send({"type":"interface_info","seq":2,"message":"Thanks, NOVA and Dexter!",
+            "goats":[{"name":"Cosmo"}]})
+        self.page.clock.run_for(1800)
+        self.assertEqual(self.page.locator(".user-profile-name").all_inner_texts(),["Nova","Dexter"])
+        self.assertEqual([urlsplit(src).path for src in self.page.locator(".accordion-content img").evaluate_all("nodes=>nodes.map(node=>node.src)")],
+                         ["/images/nova.png","/images/dexter.png"])
+        self.page.clock.run_for(13000)
+        self.assertEqual(self.page.locator(".accordion-item").count(),0)
+        self.send({"type":"interface_info","seq":3,"message":"A supernova, dexterity and Newtonian physics.",
+            "goats":[{"name":"Nova"},{"name":"Dexter"},{"name":"Newton"}]})
+        self.page.clock.run_for(20)
+        self.assertEqual(self.page.locator(".accordion-item").count(),0)
         self.assertEqual(self.errors,[])
 
 

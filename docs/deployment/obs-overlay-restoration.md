@@ -75,6 +75,13 @@ previously configured; this overlay deployment does not authorize feeding.
 
 ## CyberHerd boundary
 
+Goat portraits now follow whole-name mentions in the messages currently scrolling.
+Generic wording shows no goat portrait even if the event carries a selected goat
+in its metadata. Matching is case-insensitive and shows every named goat;
+substrings such as "supernova" and "Newtonian" do not count. Portraits clear when
+their messages leave the ticker. CyberHerd profile cards retain their separate
+roster behavior. The overlay script cache version is incremented for this change.
+
 The frontend can render sorted, bounded ten-member roster cards, newest-member
 highlighting, contribution labels, daily reset and roster/event ticker text when
 future `cyberherd_*` durable events supply them. Browser fixtures exercise this

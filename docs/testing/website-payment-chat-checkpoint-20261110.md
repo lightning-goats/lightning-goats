@@ -44,7 +44,7 @@ request and receipt signatures and refuses forged issuer/content, wrong recipien
 amount mismatch, wrong request kind, duplicate critical tags and future receipts.
 It renders `Sat has zapped 21 sats.` once and treats an HTML comment as text.
 Synthetic BOLT11 strings exercise the client display parser, not invoice settlement.
-The standalone feed-page wallet regression also passes (85.830 seconds). Exact final CI remains to be recorded.
+The standalone feed-page wallet regression also passes (85.830 seconds). The first CI website job passed 34 cases but raced the Bootstrap modal transition in one immediate visibility assertion. Waiting for actual visibility fixes the test synchronization; no payment behavior was relaxed. Exact final CI remains to be recorded.
 
 The contact form/separate 100-sat fee is still under implementation. No new
 financial schema, paid-contact endpoint, membership publication or payout was

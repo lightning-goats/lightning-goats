@@ -129,7 +129,7 @@ class IndexBrowserTests(unittest.TestCase):
         """)
         self.open()
         self.page.locator(".qr-code-overlay").click()
-        self.assertTrue(self.page.locator("#zapModal").is_visible())
+        self.page.locator("#zapModal").wait_for(state="visible")
         self.assertEqual(self.page.locator("#zapCreateButton").inner_text(), "Pay")
         self.assertEqual(self.invoices, [])
         self.pay()

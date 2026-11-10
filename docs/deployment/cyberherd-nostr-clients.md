@@ -107,7 +107,9 @@ after the operator found/stopped a competing streaming-laptop bunker. Membership
 1/1311 and payout 9734 preserve the exact author, frozen unsigned fields, hash and
 valid signature. A final connect observer saw one acknowledgment and no conflict.
 No credential was regenerated and no project event, invoice or payment was sent.
-Incoming receipt 9735 and new CyberHerd public delivery remain separate.
+The separate [native receipt check](../testing/cyberherd-zap-receipt-checkpoint-20261110.md)
+now also passes 9735 using the existing core client and a synthetic invoice.
+Live incoming settlement and new CyberHerd/receipt public delivery remain separate.
 
 The optional `--diagnostics` mode adds only fixed stage labels, completed-kind
 numbers, recognized error labels and a client-key-used match boolean. Pinned nak

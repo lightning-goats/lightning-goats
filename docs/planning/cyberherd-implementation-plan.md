@@ -347,8 +347,11 @@ It does not establish global firewall/forwarding or all recipients. Subsequent
 pass membership 1/1311 and payout 9734 after the operator stopped a competing
 streaming-laptop bunker. Exact author/frozen fields/hash/signature verification
 and one conflict-free connect acknowledgment pass without key regeneration,
-public project events or financial operations. Incoming receipt 9735, public
-CyberHerd delivery, provider qualification and activation remain separate.
+public project events or financial operations. The subsequent
+[native incoming receipt signing checkpoint](../testing/cyberherd-zap-receipt-checkpoint-20261110.md)
+also passes actual kind 9735 with a synthetic invoice and no ledger/provider/
+publication operation. Live incoming settlement, public CyberHerd/receipt delivery,
+provider qualification and activation remain separate.
 
 A [SQLite binding backport](../security/sqlite-binding-backport.md) now has a
 [486-test source checkpoint](../testing/cyberherd-sqlite-checkpoint-20261110.md),

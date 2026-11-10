@@ -2,7 +2,9 @@
 
 Membership 1/1311 and outgoing 9734 already pass actual household signing;
 see the [bunker checkpoint](../testing/cyberherd-bunker-checkpoint-20261110.md).
-Incoming kind 9735 remains a separate check. Nothing here activates incoming
+Incoming kind 9735 now also passes its
+[actual native signing checkpoint](../testing/cyberherd-zap-receipt-checkpoint-20261110.md).
+Nothing here activates incoming
 zaps, publishes a receipt or authorizes a payment.
 
 `examples/check_household_zap_receipt.rs` calls the actual
@@ -53,6 +55,7 @@ These checks do not establish live incoming settlement, receipt durability or
 public delivery. Existing native receive regressions cover those paths with
 mocked Strike; actual activation/controlled settlement remains separate.
 
-Current status: source prepared; exact-source CI/artifact and actual-host signing
-qualification pending. Do not claim a live receipt or new incoming-zap support
-from the existence of the helper.
+Current status: exact-source CI/artifact and actual-host signing qualification
+passed. The terminal temporary unit was removed; original journals/configurations,
+service states and receive executable were preserved. Live incoming settlement,
+public receipt delivery and incoming-zap activation remain separate.

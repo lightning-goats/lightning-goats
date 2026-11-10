@@ -39,8 +39,12 @@ confirmed the intended household instance and local client selection. The final
 connect observation saw one acknowledgment and no authorization refusal/conflict.
 Pinned VPS/household nak versions also pass isolated four-client interoperability
 and bounded observation tests. No key was regenerated, project event published,
-invoice requested or payment sent. Incoming kind-9735 qualification and actual
-CyberHerd public delivery remain separate; production roles stay masked/zero.
+invoice requested or payment sent. The separate
+[native kind-9735 receipt check](testing/cyberherd-zap-receipt-checkpoint-20261110.md)
+also passes on the VPS using a synthetic invoice, with no ledger/provider/publication
+operation and no installed application binary replacement. Live incoming-zap
+settlement and actual CyberHerd/receipt public delivery remain separate;
+production roles stay masked/zero.
 
 Other remaining work includes installed browser/presentation and global network
 qualification, concrete externally reconciled recovery adoption, operator-selected

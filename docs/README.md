@@ -18,6 +18,11 @@ Provider failure alone never releases funds, and the legacy two-store restore
 helper refuses CyberHerd schemas. Whole-stack recovery and installation remain
 unfinished; no financial review or payout is activated by the source checkpoint.
 
+The [SQLite backport](security/sqlite-binding-backport.md) preserves Rust 1.88
+and SQLx 0.8.6 while using the patched engine. Its
+[486-test checkpoint](testing/cyberherd-sqlite-checkpoint-20261110.md) passes the
+dependency audit and native engine check. It does not update installed programs.
+
 The native incoming zap/receipt contract is described in
 [`architecture/native-nip57.md`](architecture/native-nip57.md). It preserves
 ordinary LNURL payments and requires explicit feature activation.

@@ -5,8 +5,9 @@ follows the full [implementation plan](planning/cyberherd-implementation-plan.md
 which supersedes older CyberHerd deferrals below. Explicit failed-payment cost
 recovery and the legacy-restore refusal now have a
 [485-test checkpoint](testing/cyberherd-failed-cost-checkpoint-20261110.md).
-The dependency audit still fails on unignored RUSTSEC-2026-0459; consistent
-whole-stack recovery/retention and installed qualification remain unfinished.
+The subsequent [486-test SQLite checkpoint](testing/cyberherd-sqlite-checkpoint-20261110.md)
+passes the dependency audit with the patched bundled engine and no SQLite waiver.
+Consistent whole-stack recovery/retention and installed qualification remain unfinished.
 The new components remain uninstalled and no financial activation is implied.
 
 The Phase 1 implementation history below was last updated on 2026-09-07; consult

@@ -110,8 +110,8 @@ Native signature, temporary-store, loopback/private-IPC and mocked-browser tests
 cover the contract. They do not qualify an installed household signer, public
 origin/WAF, new UIDs, provider spending or physical feeding. The API proxy and
 feature flags stay uninstalled/default-off until separate qualification. The full
-CyberHerd port also requires restore/retention, dependency remediation and actual
-installed identity/network/provider/NIP-46 checks and explicit activation.
+CyberHerd port also requires restore/retention and actual
+installed identity/network/provider/engine/NIP-46 checks and explicit activation.
 
 Protocol references: [NIP-98](https://github.com/nostr-protocol/nips/blob/master/98.md)
 and [NIP-07](https://github.com/nostr-protocol/nips/blob/master/07.md).

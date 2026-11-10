@@ -109,7 +109,7 @@ Feeder announcements still need the frozen herd summary and one authenticated
 active-stream copy without duplicating their existing regular note. Optional
 invitation/pause/resume/evening lifecycle notices, roster/OBS cards and authenticated
 operator/client interfaces remain separate work. Installed NIP-46/relay/network
-qualification, wider recovery/dependency remediation and explicit activation are
+qualification, wider recovery/patched-engine installation and explicit activation are
 still required. Synthetic relay/signing fixtures do not prove household or public
 relay acceptance. Record exact verification results only after the checks finish.
 

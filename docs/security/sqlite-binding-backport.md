@@ -44,6 +44,9 @@ Review archives retain the original archive, source, licenses and verifier.
 
 ## Verification and storage boundaries
 
+The [486-test source checkpoint](../testing/cyberherd-sqlite-checkpoint-20261110.md)
+records completed Rust, native engine, provenance, audit and artifact verification.
+
 The native engine regression executes `SELECT sqlite_version()` through SQLx and
 requires exactly 3.54.1. This checks the compiled executable, rather than trusting
 only the manifest. The full locked financial/gateway/payout suites must also pass:
@@ -65,8 +68,8 @@ cargo audit --ignore RUSTSEC-2023-0071
 ```
 
 The existing RSA exception remains conditional on its absence from the active
-graph. No SQLite waiver is added. Results belong in an exact-source checkpoint
-after completion; the dependency change alone does not prove passing tests.
+graph. No SQLite waiver is added. The checkpoint above records the actual passing
+checks; the dependency declaration alone would not establish those results.
 
 This covers Rust binaries built with the reviewed bundle. Python's system SQLite,
 other programs and an already installed household/VPS binary need their own actual

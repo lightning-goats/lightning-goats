@@ -93,5 +93,5 @@ final commits. They do not establish live Strike behavior or paid deployment.
 Subsequent source adds the [separate broker/worker](cyberherd-payout-runtime.md),
 [member delivery](cyberherd-member-delivery.md), lifecycle and operator interfaces,
 plus [explicit failed-cost review](cyberherd-failed-cost-recovery.md). These remain
-uninstalled. Consistent restore/retention, dependency remediation, installed
+uninstalled. Consistent restore/retention, patched-engine installed
 qualification and explicit financial activation still remain for the full port.

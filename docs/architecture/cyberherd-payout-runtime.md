@@ -118,7 +118,7 @@ Subsequent source also provides [feeding broadcasts](cyberherd-feeding-announcem
 [lifecycle notices](cyberherd-lifecycle.md), [roster/OBS](cyberherd-public-roster.md),
 [operator tools](cyberherd-operator-interface.md) and
 [explicit failed-cost review](cyberherd-failed-cost-recovery.md).
-The full port still needs consistent restore/retention, dependency remediation,
+The full port still needs consistent restore/retention,
 reviewed inactive installation and actual installed qualification before live
 financial activation. These examples and unit/library tests do not prove actual
 cross-process installation, production provider behavior or a completed port.
@@ -130,3 +130,7 @@ missing history stays held. This does not qualify a whole-stack financial restor
 Explicit consistent restore/reconciliation tooling and installation qualification
 remain required before financial activation. Never rewrite retained financial
 history to clear an unresolved execution.
+
+The subsequent [SQLite source checkpoint](../testing/cyberherd-sqlite-checkpoint-20261110.md)
+passes the dependency audit with the fixed native engine. Installed engine and
+whole-stack recovery qualification remain separate requirements.

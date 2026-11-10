@@ -155,9 +155,11 @@ namespace, in addition to ordinary unprivileged rejection checks. Recovery schem
 checks refuse missing/empty/old/private-path violations. These are not a live
 financial review, provider refund qualification or new-role installation evidence.
 
-Whole-stack backup/consistent restore, retention operations, SQLite advisory
-remediation, installed UID/network/helper/provider/signer qualification and explicit
+Whole-stack backup/consistent restore, retention operations,
+installed UID/network/helper/provider/signer/engine qualification and explicit
 activation remain required by the complete CyberHerd plan.
+The subsequent [SQLite checkpoint](../testing/cyberherd-sqlite-checkpoint-20261110.md)
+resolves the dependency-audit finding in source; it does not patch installed programs.
 
 The legacy `deploy/scripts/restore-stores.py` supports the pre-CyberHerd core and
 gateway pair only. It now rejects a core containing CyberHerd financial schema

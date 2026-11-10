@@ -284,13 +284,15 @@ The legacy pair restore helper rejects CyberHerd schema; its historical process
 regression remains covered without claiming multi-journal recovery.
 
 Also required: consistent-restore and retention operations,
-installed identity/network/helper/NIP-46/provider qualification, dependency-audit
-remediation and explicit financial activation. The twelve numbered groups above
+installed identity/network/helper/NIP-46/provider/engine qualification and
+explicit financial activation. The twelve numbered groups above
 remain the completion contract; a library fixture or green artifact build does
 not establish live behavior.
 
-A [SQLite binding backport](../security/sqlite-binding-backport.md) is now under
-verification. It preserves Rust 1.88 and SQLx 0.8.6, retains exact published driver
+A [SQLite binding backport](../security/sqlite-binding-backport.md) now has a
+[486-test source checkpoint](../testing/cyberherd-sqlite-checkpoint-20261110.md),
+including a passing dependency audit and native engine check. It preserves Rust
+1.88 and SQLx 0.8.6, retains exact published driver
 provenance and pins the fixed native binding without a SQLite advisory waiver.
 It does not update installed binaries or replace the remaining recovery work.
 

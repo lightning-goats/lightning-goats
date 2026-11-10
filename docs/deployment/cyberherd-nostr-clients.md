@@ -118,3 +118,17 @@ user with that user's own credential; it never gives the core client key to a
 CyberHerd user. This control distinguishes a general signer/transport failure
 from new-client behavior and publishes nothing. Eight focused tests cover the
 diagnostic secrecy and bounded child execution alongside existing checks.
+
+The payout-only `--observe-connection` mode subscribes to ephemeral NIP-46
+responses before one fixed signing check. It uses a separate temporary nak
+configuration and no credential environment for its read-only subscription.
+Local decryption uses only that same payout-signing client's authentication key;
+each response's signature/author/recipient is checked first. Only connect RPCs
+contribute grouped acknowledgment/unauthorized/conflict counts. No response ID,
+ciphertext, plaintext or signed event is printed or retained. Observation lasts
+60 seconds, with at most 32 events and 64 KiB output. A missing/failed observer
+is reported as such, never as proof that another signer does not exist. Use a
+temporary check unit with 256 MiB memory allowance; production units stay masked.
+Ten focused tests cover bounds, field secrecy and conflicting-response grouping;
+the isolated real-nak fixture separately verifies actual local decryption and
+observation. This mode neither publishes project events nor makes provider calls.

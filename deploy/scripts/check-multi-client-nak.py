@@ -94,6 +94,14 @@ def check(nak, host_network_namespace, bunker_nak=None):
             else:
                 raise q.Refusal('unknown client was accepted')
             sign(1, 1)
+            def observed_sign():
+                sign(1, 1)
+                return {'accepted': True}
+            observed = q.observe_signing(observed_sign, keys[1].encode(), clients[1],
+                                        [str(nak), '--config-path', str(root / 'observe-local-decryption')], url)
+            observation = observed['connection_observation']
+            if observation.get('ack_groups', 0) < 1 or observation.get('conflicting_groups') != 0:
+                raise q.Refusal('read-only observer did not verify a synthetic connect acknowledgment')
             for kind in (1, 1311, 9734):
                 events = q.run([str(nak), '--config-path', str(root / 'query'), 'req', '--kind', str(kind), url], b'', {'NO_COLOR': '1'})
                 if events.strip():
@@ -101,6 +109,7 @@ def check(nak, host_network_namespace, bunker_nak=None):
             return {'accepted': True, 'client_program_sha256': q.DIGEST, 'bunker_program_sha256': bunker_digest,
                     'synthetic_clients_verified': 4, 'kinds_per_client': [1, 1311, 9734],
                     'unknown_client_rejected_by_bunker': True, 'authorized_client_still_works': True,
+                    'read_only_connect_observer_verified': True,
                     'project_events_published': 0, 'production_credentials_read': False, 'external_network': False}
         finally:
             for child in reversed(processes):

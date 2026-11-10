@@ -115,6 +115,36 @@ class NostrCheckTests(unittest.TestCase):
         with self.assertRaisesRegex(q.Refusal, 'input exceeds'):
             q.run(['/never/exec'], b'x' * 4097, {})
 
+    def test_bounded_observer_returns_only_collected_stdout_at_fixed_deadline(self):
+        code = "import sys,time;print('ENCRYPTED',flush=True);sys.stderr.write('PRIVATE');time.sleep(10)"
+        self.assertEqual(q.run([sys.executable, '-c', code], b'', {}, deadline=.2,
+                               collect_until_deadline=True), b'ENCRYPTED\n')
+
+    def test_connect_observation_reports_conflicts_without_response_or_rpc_ids(self):
+        events = []
+        for index in range(3):
+            events.append(json.dumps({'kind': 24133, 'pubkey': q.AUTHOR, 'tags': [['p', CLIENT]],
+                                      'id': str(index), 'content': 'ENCRYPTED_PRIVATE_' + str(index)}).encode())
+        responses = iter([{'id': 'PRIVATE_RPC-connect', 'result': 'ack', 'error': ''},
+                          {'id': 'PRIVATE_RPC-connect', 'result': '', 'error': 'unauthorized'},
+                          {'id': 'SECRET-sign_event', 'result': 'PRIVATE_SIGNED_BYTES', 'error': ''}])
+        def helper(arguments, data, environment, **kwargs):
+            if arguments[-1] == 'verify':
+                return b''
+            self.assertEqual(arguments[-4:-2], ['decrypt', '--pubkey'])
+            self.assertIn('NOSTR_SECRET_KEY', environment)
+            return json.dumps(next(responses)).encode()
+        with patch.object(q, 'run', side_effect=helper):
+            result = q.connect_observation(b'\n'.join(events), b'0' * 63 + b'1', CLIENT, ['nak'])
+        self.assertEqual(result['connect_rpc_groups'], 1)
+        self.assertEqual(result['conflicting_groups'], 1)
+        self.assertEqual(result['ack_groups'], 1)
+        self.assertEqual(result['unauthorized_groups'], 1)
+        self.assertNotIn('PRIVATE', json.dumps(result))
+        self.assertNotIn('SECRET', json.dumps(result))
+        with self.assertRaisesRegex(q.Refusal, 'event bound'):
+            q.connect_observation(b'{}\n' * 33, b'', CLIENT, ['nak'])
+
     def test_root_refuses_before_helper_or_credential_access(self):
         with patch.object(q.os, 'geteuid', return_value=0), patch.object(q.pwd, 'getpwnam', return_value=SimpleNamespace(pw_uid=0, pw_gid=0)):
             with self.assertRaisesRegex(q.Refusal, 'non-admin'):

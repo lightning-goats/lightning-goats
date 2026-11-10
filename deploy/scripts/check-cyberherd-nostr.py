@@ -6,6 +6,7 @@ credential and private runtime directory. No publication, invoice, provider,
 application journal or arbitrary signing input is supported.
 """
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import os
@@ -51,7 +52,7 @@ def safe_trace(stderr, expected_client_key):
             'helper_categories': [label for label in labels if label.encode() in lowered]}
 
 
-def run(arguments, data, environment, deadline=45, expected_client_key=None):
+def run(arguments, data, environment, deadline=45, expected_client_key=None, collect_until_deadline=False):
     """Never expose child output; concurrently bound both pipes and time."""
     if len(data) > 4096:
         raise Refusal('signing-check input exceeds bound')
@@ -74,6 +75,8 @@ def run(arguments, data, environment, deadline=45, expected_client_key=None):
             while selected.get_map():
                 remaining = end - time.monotonic()
                 if remaining <= 0:
+                    if collect_until_deadline and expected_client_key is None:
+                        return bytes(streams['stdout'])
                     raise Refusal('NIP-46 check timed out; child output withheld' + detail())
                 for item, _ in selected.select(min(remaining, .2)):
                     chunk = os.read(item.fd, 4096)
@@ -135,13 +138,72 @@ def verify_bytes(raw, expected):
         raise Refusal('remote signer changed or malformed the frozen challenge; output withheld') from None
 
 
-def check(role, client, relays, diagnostics=False):
+def connect_observation(raw, key, client, base):
+    """Inspect only connect responses; never emit IDs, plaintext or ciphertext."""
+    groups, seen = {}, set()
+    lines = raw.splitlines()
+    if len(lines) > 32:
+        raise Refusal('response observation exceeds event bound')
+    for line in lines:
+        event = json.loads(line)
+        if (len(line) > 4096 or not isinstance(event, dict) or event.get('kind') != 24133
+                or event.get('pubkey') != AUTHOR or ['p', client] not in event.get('tags', [])
+                or not isinstance(event.get('content'), str) or event.get('id') in seen):
+            continue
+        seen.add(event.get('id'))
+        # `nak req` verifies events by default. Verify again before any local
+        # decryption so a forged relay record cannot contribute evidence.
+        run([*base, 'verify'], line + b'\n', {'NO_COLOR': '1'})
+        plain = run([*base, 'decrypt', '--pubkey', AUTHOR, event['content']], b'',
+                    {'NO_COLOR': '1', 'NOSTR_SECRET_KEY': key.decode()})
+        response = json.loads(plain)
+        if not isinstance(response, dict):
+            continue
+        rpc = response.get('id')
+        if not isinstance(rpc, str) or len(rpc) > 128 or not rpc.endswith('-connect'):
+            continue
+        result, error = response.get('result'), response.get('error')
+        category = ('ack' if result == 'ack' and not error else
+                    'unauthorized' if error == 'unauthorized' else 'other')
+        groups.setdefault(rpc, set()).add(category)
+    return {'connect_rpc_groups': len(groups),
+            'ack_groups': sum('ack' in labels for labels in groups.values()),
+            'unauthorized_groups': sum('unauthorized' in labels for labels in groups.values()),
+            'conflicting_groups': sum({'ack', 'unauthorized'} <= labels for labels in groups.values()),
+            'raw_responses_retained': False}
+
+
+def observe_signing(sign, key, client, base, relay):
+    # Kind 24133 is ephemeral: subscribe before the fixed signing check. This
+    # read-only observer has no credential environment and publishes nothing.
+    observer_base = [*base[:-1], str(Path(base[-1]).with_name('nak-response-observer'))]
+    arguments = [*observer_base, 'req', '--stream', '--kind', '24133', '--author', AUTHOR,
+                 '--tag', 'p=' + client, '--since', str(int(time.time()) - 5), '--limit', '32', relay]
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        pending = pool.submit(run, arguments, b'', {'NO_COLOR': '1'}, deadline=60, collect_until_deadline=True)
+        time.sleep(2)
+        result, error = None, None
+        try:
+            result = sign()
+        except Refusal as failure:
+            error = failure
+        try:
+            observation = connect_observation(pending.result(), key, client, base)
+        except Exception:
+            observation = {'observation_failed': True, 'raw_responses_retained': False}
+        if error is not None:
+            raise Refusal(str(error) + '; connection_observation=' + json.dumps(observation, sort_keys=True)) from None
+        return {**result, 'connection_observation': observation}
+
+
+def check(role, client, relays, diagnostics=False, observe=False):
     user, kinds = ROLES[role]
     identity = pwd.getpwnam(user)
     if (os.geteuid() != identity.pw_uid or os.getegid() != identity.pw_gid or os.geteuid() == 0
             or re.fullmatch('[0-9a-f]{64}', client) is None or client == AUTHOR
             or not relays or len(relays) > len(RELAYS) or len(set(relays)) != len(relays)
-            or any(r not in RELAYS for r in relays)):
+            or any(r not in RELAYS for r in relays)
+            or (observe and (role != 'payout' or len(relays) != 1))):
         raise Refusal('separate non-admin role and pinned public client/relays required')
     info = NAK.lstat()
     if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022
@@ -168,30 +230,37 @@ def check(role, client, relays, diagnostics=False):
     if derived != client or derived == AUTHOR:
         raise Refusal('credential differs from the pinned public client')
     bunker = 'bunker://' + AUTHOR + '?' + urlencode([('relay', r) for r in relays])
-    proofs = []
-    for kind in kinds:
-        expected = challenge(kind, str(uuid.uuid4()), int(time.time()))
-        # No relay arguments: nak signs through NIP-46 and never publishes the
-        # signed event. The bunker transport may exchange kind-24133 envelopes.
-        try:
-            if diagnostics:
-                print(json.dumps({'stage': 'sign', 'kind': kind, 'verified_kinds': proofs}), file=sys.stderr, flush=True)
-            # Verbose output is captured only in private pipes. Pinned nak logs the actual
-            # connect-as key; compare in memory and emit only a boolean. Never
-            # forward/store that log, even when a connection or signature fails.
-            signed = run([*base, *(['--verbose'] if diagnostics else []), 'event'],
-                         json.dumps(expected, ensure_ascii=False).encode() + b'\n',
-                         {**clean, 'NOSTR_SECRET_KEY': bunker, 'NOSTR_CLIENT_KEY': key.decode()},
-                         **({'expected_client_key': key} if diagnostics else {}))
-            verify_bytes(signed, expected)
-            run([*base, 'verify'], signed + b'\n', clean)
-        except Refusal as error:
-            raise Refusal('kind=' + str(kind) + '; verified_kinds=' + json.dumps(proofs) + '; ' + str(error)) from None
-        proofs.append(kind)
-    del key, raw
-    return {'accepted': True, 'role': role, 'client_public_key': client, 'kinds_verified': proofs,
-            'exact_author_bytes_hash_and_signature': True, 'relays': relays,
-            'project_events_published': 0, 'invoice_requests': 0, 'provider_operations': 0}
+    def sign_challenges():
+        proofs = []
+        for kind in kinds:
+            expected = challenge(kind, str(uuid.uuid4()), int(time.time()))
+            # No relay arguments: nak signs through NIP-46 and never publishes the
+            # signed event. The bunker transport may exchange kind-24133 envelopes.
+            try:
+                if diagnostics:
+                    print(json.dumps({'stage': 'sign', 'kind': kind, 'verified_kinds': proofs}), file=sys.stderr, flush=True)
+                # Verbose output is captured only in private pipes. Pinned nak logs the actual
+                # connect-as key; compare in memory and emit only a boolean. Never
+                # forward/store that log, even when a connection or signature fails.
+                signed = run([*base, *(['--verbose'] if diagnostics else []), 'event'],
+                             json.dumps(expected, ensure_ascii=False).encode() + b'\n',
+                             {**clean, 'NOSTR_SECRET_KEY': bunker, 'NOSTR_CLIENT_KEY': key.decode()},
+                             **({'expected_client_key': key} if diagnostics else {}))
+                verify_bytes(signed, expected)
+                run([*base, 'verify'], signed + b'\n', clean)
+            except Refusal as error:
+                raise Refusal('kind=' + str(kind) + '; verified_kinds=' + json.dumps(proofs) + '; ' + str(error)) from None
+            proofs.append(kind)
+        return {'accepted': True, 'role': role, 'client_public_key': client, 'kinds_verified': proofs,
+                'exact_author_bytes_hash_and_signature': True, 'relays': relays,
+                'project_events_published': 0, 'invoice_requests': 0, 'provider_operations': 0}
+
+    try:
+        if observe:
+            return observe_signing(sign_challenges, key, client, base, relays[0])
+        return sign_challenges()
+    finally:
+        del key, raw
 
 
 def main():
@@ -200,9 +269,10 @@ def main():
     parser.add_argument('--client-public-key', required=True)
     parser.add_argument('--relay', choices=RELAYS, action='append')
     parser.add_argument('--diagnostics', action='store_true', help='emit only fixed stage labels and client-key-match booleans')
+    parser.add_argument('--observe-connection', action='store_true', help='payout-only bounded read-only connect-response observation')
     args = parser.parse_args()
     try:
-        print(json.dumps(check(args.role, args.client_public_key, args.relay or ['wss://relay.primal.net'], args.diagnostics), sort_keys=True))
+        print(json.dumps(check(args.role, args.client_public_key, args.relay or ['wss://relay.primal.net'], args.diagnostics or args.observe_connection, args.observe_connection), sort_keys=True))
     except Exception as error:
         # Filesystem/helper errors can include paths or sensitive responses.
         # ValueError messages above are deliberately bounded and sanitized.

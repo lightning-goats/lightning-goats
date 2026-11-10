@@ -38,7 +38,11 @@ now has a passing [installed rehearsal and VPS execution plan](testing/cyberherd
 Its native backup/apply/resume/configuration-only rollback ran on synthetic
 state in isolated systemd services. The approved production attempt verified its backup, then refused an inherited
 timeout policy before startup. Recovery restored the original core. A bounded
-compatibility correction and fresh retry remain; CyberHerd stays inactive.
+compatibility correction subsequently passed exact qualification, and a fresh
+approved transaction successfully started membership/overlay intake. The
+[live checkpoint](testing/cyberherd-live-overlay-stage-20261110.md) records the
+current native backup, six zap-capable addresses and public OBS roster readback.
+CyberHerd Nostr notes, rewards and payouts remain disabled.
 
 Fresh [offline journal initialization](deployment/cyberherd-offline-initialization.md)
 now has a [492-test source checkpoint](testing/cyberherd-bootstrap-checkpoint-20261110.md),
@@ -60,7 +64,8 @@ ordinary LNURL payments and requires explicit feature activation.
 
 The [separate CyberHerd intake worker](architecture/cyberherd-worker.md) now
 connects core events, authenticated discovery and ordered membership in source.
-It is uninstalled and has no provider-spend or publication capability. Optional
+It now runs in the approved overlay-only stage, with no provider-spend or
+membership Nostr publication capability enabled. Optional
 [reward planning](architecture/cyberherd-reward-planning.md) freezes eligible
 confirmed-feeding plans before obtaining bounded core reservations.
 

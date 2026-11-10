@@ -9,9 +9,10 @@ The existing receive service is running after the operator-approved
 [live core upgrade](testing/cyberherd-live-core-upgrade-20261110.md), preserving
 paid accounting, IDs, epoch, exact signed bytes and configuration. The
 [three separate CyberHerd roles](testing/cyberherd-live-inactive-installation-20261110.md)
-are installed and initialized under locked non-admin users. Production units stay
-masked/inactive, all new monetary/signing limits are zero, and the receive core
-has no enabled CyberHerd bridge or native incoming-zap configuration.
+are installed under locked non-admin users. The approved
+[live overlay stage](testing/cyberherd-live-overlay-stage-20261110.md) now runs
+membership with native incoming zaps and a zero-budget core bridge. Payout/signer
+remain masked/inactive; rewards, membership Nostr and lifecycle stay disabled.
 
 [Installed OS probes](testing/cyberherd-installed-qualification-checkpoint-20261110.md)
 and [actual native worker checks](testing/cyberherd-worker-qualification-checkpoint-20261110.md)
@@ -44,7 +45,7 @@ invoice requested or payment sent. The separate
 also passes on the VPS using a synthetic invoice, with no ledger/provider/publication
 operation and no installed application binary replacement. Live incoming-zap
 settlement and actual CyberHerd/receipt public delivery remain separate;
-production roles stay masked/zero.
+only membership/overlay intake is now active, with outgoing roles masked/zero.
 
 The [overlay-stage preparation checkpoint](testing/cyberherd-overlay-stage-checkpoint-20261110.md)
 now passes exact CI and actual-VPS configuration-only preparation. A private
@@ -59,11 +60,15 @@ rehearsal with synthetic state and isolated networking. The actual VPS execution
 plan passed independent readback. The operator-approved apply verified a current
 native backup; resume refused an inherited Fedora timeout policy before starting
 applications. Configuration rollback and original-core resume succeeded. The
-bounded compatibility correction awaits exact qualification and a fresh retry
-under the existing approval; membership and outgoing roles remain masked.
+bounded correction then passed all ten workflows, root recovery tests and the
+actual installed rehearsal. A fresh approved transaction verified a new native
+backup and successfully resumed core plus membership. The actual public OBS
+WebSocket receives the roster with no browser errors; outgoing roles stay masked.
+See the [live checkpoint](testing/cyberherd-live-overlay-stage-20261110.md).
 
-Other remaining work includes installed browser/presentation and global network
-qualification, concrete externally reconciled recovery adoption, operator-selected
+Other remaining work includes observed reaction/repost/zap admission and member
+messages/cards, incoming settlement/receipt delivery, public roster page/API and
+boot persistence, global network qualification, concrete externally reconciled recovery adoption, operator-selected
 nonzero financial ceilings and explicit activation. Native protected
 [four-journal maintenance](deployment/cyberherd-state-maintenance.md) preserves
 replay/signed history and blocks staged restore startup pending reconciliation.

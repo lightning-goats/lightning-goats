@@ -5,7 +5,8 @@ operator approved maintenance. The actual apply verified its native backup and
 installed the configuration, but resume refused an inherited Fedora service
 override before starting either application. Configuration rollback and original
 core resumption succeeded; membership remains masked. The bounded compatibility
-correction below is pending qualification and retry under that same approval.
+correction subsequently passed exact qualification and a fresh approved retry
+started membership successfully. See the [live checkpoint](cyberherd-live-overlay-stage-20261110.md).
 The full twelve-part port remains incomplete.
 
 Qualified code `6040efc339bb035fa03bad3d544faa2d45e90309` and tested merge
@@ -119,6 +120,7 @@ policy and independently checks effective user/group before startup. Unknown
 common directives, changed fingerprints and command/identity overrides still
 refuse. Root recovery fixtures and the actual systemd rehearsal now include this
 common policy alongside the existing per-role namespace override. Their updated
-results are pending; prior green results do not qualify the correction. A fresh
-review/transaction and current native backup are required for retry. The same
-explicit operator approval covers this bounded compatibility correction.
+results passed on exact `34d9b06` source, as recorded in the live checkpoint;
+prior green results alone were not used to qualify the correction. A fresh
+review/transaction and current native backup were used for the successful retry.
+The same explicit operator approval covered this bounded compatibility correction.

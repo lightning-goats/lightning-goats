@@ -212,8 +212,12 @@ The later [maintenance checkpoint](../testing/cyberherd-overlay-maintenance-chec
 qualifies the complete native/systemd executor on isolated synthetic journals and
 records the protected actual-VPS plan, operator-approved apply, pre-start refusal
 of an inherited Fedora timeout policy, and successful original-core recovery.
-The bounded correction requires exact qualification and a fresh retry under the
-existing approval. Actual presentation/settlement qualification remains open.
+The bounded correction then passed exact CI and installed rehearsal. The
+[successful live stage](../testing/cyberherd-live-overlay-stage-20261110.md)
+verified a new native backup and started core plus overlay-only membership under
+the existing approval. Public OBS roster delivery passes actual browser readback;
+reaction/zap admission, settlement/receipt and member-message acceptance remain
+open. Both outgoing roles and membership Nostr publishing remain disabled.
 
 The subsequent [installed OS checkpoint](../testing/cyberherd-installed-qualification-checkpoint-20261110.md)
 passes the exact authenticated fourteen-file tool in disposable CI and on the

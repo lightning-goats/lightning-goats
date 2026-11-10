@@ -3,8 +3,10 @@
 The [installed rehearsal and production plan](../testing/cyberherd-overlay-maintenance-checkpoint-20261110.md)
 record the qualified rehearsal, approved live attempt and successful recovery.
 The first live resume refused Fedora’s inherited timeout policy before application
-startup. Original payments are restored; a bounded correction requires exact
-qualification and a fresh transaction under the existing maintenance approval.
+startup. The bounded correction subsequently passed exact qualification, and
+a fresh transaction successfully started core plus overlay-only membership under
+the same approval. See the [live checkpoint](../testing/cyberherd-live-overlay-stage-20261110.md).
+Completed transactions are evidence, not reusable activation commands.
 
 `maintain-cyberherd-overlay.py` consumes an already sealed
 [configuration review](cyberherd-overlay-stage.md) and its independently reviewed
@@ -23,13 +25,13 @@ bytes or weakening the production invocation.
 Only a single `NetworkNamespacePath` naming an existing root-owned process is
 admissible in each role override at this stage. An inherited common service
 override is accepted only when its exact protected fingerprint is frozen in the
-original core inventory and its only directive is `TimeoutStopFailureMode=abort`. Identity, commands, groups, credential
-loads, environment and other directives refuse even if their file is protected.
+original core inventory and its only directive is `TimeoutStopFailureMode=abort`.
+Identity, commands, groups, credential loads, environment and other directives refuse even if their file is protected.
 
 Ubuntu's systemd 255 reports `NeedDaemonReload=yes` for the masked intake with
 its namespace override, despite manager reload. In this masked state only,
-the executor accepts that flag when the exact protected role-specific and admitted common overrides
-match their independently frozen fingerprints. Missing/unpinned/changed files,
+the executor accepts that flag when the exact protected role-specific and
+admitted common overrides match their independently frozen fingerprints. Missing/unpinned/changed files,
 unknown flag values or a non-masked unit refuse. Other masked-state checks,
 zero PIDs/cgroups and the UID scan remain mandatory. Loaded/running service
 acceptance still requires a reload, the exact effective override set and

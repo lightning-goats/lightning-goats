@@ -11,8 +11,9 @@ remain zero, and both outgoing roles remain masked with their zero policies.
 stop, start, unmask, secret-loading, database or network-configuration command.
 Do not interpret a prepared bundle as authorization or an implementation of
 activation. The separate [maintenance executor](cyberherd-overlay-maintenance.md)
-is a source candidate awaiting installed rehearsal; no approval to run it is
-requested by this document.
+has since passed installed rehearsal and the explicitly approved
+[live stage](../testing/cyberherd-live-overlay-stage-20261110.md). This preparation
+procedure itself grants no activation authority.
 
 Use its externally authenticated root tool closure, selected through
 `launch-vps-upgrade.py TOOL_SHA --cyberherd-overlay-stage`. Older protected tool

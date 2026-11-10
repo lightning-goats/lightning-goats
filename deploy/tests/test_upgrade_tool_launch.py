@@ -64,6 +64,8 @@ class ToolLaunchTests(unittest.TestCase):
             self.assertIn('--core-client-pubkey', run(ok=True).stdout)
             command[6:] = ['--cyberherd-qualify', '--help']
             self.assertIn('--probe-disabled-roles', run(ok=True).stdout)
+            command[6:] = ['--cyberherd-workers', '--help']
+            self.assertIn('--create-isolated-fixture', run(ok=True).stdout)
             command[6:] = ['--help']
             for name in LAUNCH.FILES - {'launch-vps-upgrade.py'}:
                 target = bundle / name

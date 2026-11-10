@@ -4,6 +4,28 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
+#[test]
+fn installed_worker_wire_fixture_is_valid_before_zero_limit_rejection() {
+    let call: Call = serde_json::from_str(include_str!(
+        "../../deploy/tests/fixtures/cyberherd-zero-sign-request.json"
+    ))
+    .unwrap();
+    let Call::SignPayout { intent } = call;
+    let intent = Intent::restore(intent).unwrap();
+    assert!(intent.uses_nostr());
+    assert_eq!(intent.unsigned_zap().unwrap().unwrap().kind, 9734);
+    let policy = Policy {
+        owner: intent.0.owner.clone(),
+        client_pubkey: "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798".into(),
+        peer_uid: 1001,
+        relays: intent.0.relays.clone(),
+        max_net_sats: 0,
+        max_new_per_hour: 0,
+    };
+    policy.validate().unwrap();
+    assert!(policy.intent(&intent).is_err());
+}
+
 pub(crate) struct Fake {
     pub calls: Arc<AtomicUsize>,
     pub fail: bool,

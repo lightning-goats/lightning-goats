@@ -2,9 +2,10 @@
 """TEST ONLY: fresh CyberHerd installer on a disposable systemd CI VM.
 
 Creates actual fixed service users, masks and journals on that disposable VM.
-Only a harmless core stand-in sleep unit starts; no payment/CyberHerd daemon,
-real credential, transfer, public post or feeder call occurs. Uses a new
-synthetic legacy journal in /run, not any original core state. Never use on VPS.
+A harmless core stand-in proves the upgrade first; subsequent isolated native
+worker qualification uses separate synthetic journals, zero budgets and a shadow
+core. No real credential, transfer, public post or physical feeder is used.
+Never use this disposable-runner orchestrator on a VPS.
 """
 import argparse
 import hashlib
@@ -224,10 +225,24 @@ def main():
         raise
     assert qualification['accepted'] is True and qualification['actual_installed_os_policy_probes'] == 3
     assert qualification['application_workers_started'] is False and qualification['real_credentials_loaded'] is False
+    workers_path = base / 'ci-installed-worker-qualification'
+    try:
+        workers = json.loads(run(*launcher, '--cyberherd-workers', '--installation', str(destination),
+                                 '--core-transaction', str(base / 'ci-core-upgrade'),
+                                 '--destination', str(workers_path), '--create-isolated-fixture'))
+    except Exception:
+        failure = workers_path / 'FAILURE.json'
+        if failure.is_file():
+            import sys
+            print(failure.read_text()[-24000:], file=sys.stderr)
+        raise
+    assert workers['accepted'] is True and workers['actual_installed_rust_workers'] == 4
+    assert workers['production_workers_started'] is False and workers['real_credentials_loaded'] is False
     print(json.dumps({'synthetic': True, 'source_commit': args.source, 'native_engine': prepared['engine'],
                       'actual_nss_identities': 3, 'actual_native_initializers': 3, 'actual_masked_units': 3,
                       'synthetic_payout_ciphertext_created': True,
                       'installed_role_qualification': qualification,
+                      'installed_worker_qualification': workers,
                       'actual_core_upgrade_transaction': True, 'harmless_core_fixture_started': True,
                       'payment_daemon_started': False, 'cyberherd_units_started': False,
                       'runtime_credentials_loaded': False, 'provider_qualified': False,

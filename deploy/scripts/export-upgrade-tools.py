@@ -18,6 +18,7 @@ FILES = (
     'prepare-cyberherd-payout-key.py',
     'prepare-cyberherd-nostr-clients.py', 'prepare-household-nostr-client.py',
     'qualify-cyberherd-installed.py',
+    'qualify-cyberherd-workers.py',
 )
 
 

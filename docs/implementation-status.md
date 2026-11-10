@@ -62,6 +62,12 @@ actual role identity/capabilities, credential/state/file isolation and private
 IPv4/IPv6 denial. Actual Rust worker/socket, DNS/global-firewall, household,
 provider, browser, recovery adoption and activation remain unqualified.
 
+A separate [installed native worker qualifier](deployment/cyberherd-worker-qualification.md)
+is now prepared: four mixed-UID Rust processes, synthetic private journals and
+credentials, zero limits, peer-authenticated socket checks, restart and native
+four-journal snapshot verification. Disposable-systemd and actual-host runs of
+this new source remain outstanding. No production worker or money path is enabled.
+
 The Phase 1 implementation history below was last updated on 2026-09-07; consult
 the dated restoration/implementation records and current plan for later work.
 

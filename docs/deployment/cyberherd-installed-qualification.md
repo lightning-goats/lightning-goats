@@ -8,7 +8,7 @@ provider, relay, public listener, real API/Nostr credential or feeder is used.
 The earlier `rehearse-cyberherd-boundaries.py` remains **CI-only**; do not bypass
 its guard to run it on a live host.
 
-Install a fresh independently authenticated **fourteen-file** tool bundle using
+Install a fresh independently authenticated tool bundle using
 the [existing launcher procedure](inactive-upgrade-transaction.md). Keep earlier
 generations intact. Select the actual accepted inactive installation transaction
 and a new private qualification destination directly under the protected upgrade
@@ -77,3 +77,7 @@ The disposable systemd installer rehearsal now invokes this exact authenticated
 tool after fresh native initialization. Six local guard/unit/result-contract
 tests cover refusal and exact policy preservation; they simulate no live host
 success. Exact CI and actual-host evidence are recorded separately in the checkpoint.
+
+The separate [native worker fixture](cyberherd-worker-qualification.md) prepares
+actual Rust socket/restart checks with synthetic journals and zero limits. It
+does not replace or broaden this earlier OS-probe result.

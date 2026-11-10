@@ -641,7 +641,7 @@ async fn lost_rate_refusal_recovers_by_get_and_cooldown_survives_daemon_restart(
 mod invoices;
 
 #[tokio::test]
-async fn paired_store_restore_preserves_pending_identity_settlement_and_signed_bytes() {
+async fn legacy_paired_store_restore_preserves_pending_identity_settlement_and_signed_bytes() {
     use bitcoin::{
         hashes::{Hash, sha256},
         secp256k1::{Keypair, Message, Secp256k1, SecretKey},
@@ -730,17 +730,29 @@ async fn paired_store_restore_preserves_pending_identity_settlement_and_signed_b
     );
 
     // Quiesced, SQLite-consistent snapshots, including WAL state; never cp a live DB.
+    // The legacy restore rotates the core epoch and cannot restore CyberHerd.
+    // Construct the historical pre-CyberHerd schema explicitly while retaining
+    // this end-to-end pending-payment/feed/signed-byte recovery regression.
     let snapshots = TempDir::new().unwrap();
     for name in ["daemon.db", "gateway.db"] {
         let pool =
             sqlx::SqlitePool::connect(&format!("sqlite://{}", source.path().join(name).display()))
                 .await
                 .unwrap();
-        sqlx::query("VACUUM INTO ?")
-            .bind(snapshots.path().join(name).to_str().unwrap())
-            .execute(&pool)
-            .await
-            .unwrap();
+        if name == "daemon.db" {
+            legacy_core_snapshot(
+                &pool,
+                &source.path().join(name),
+                &snapshots.path().join(name),
+            )
+            .await;
+        } else {
+            sqlx::query("VACUUM INTO ?")
+                .bind(snapshots.path().join(name).to_str().unwrap())
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
         pool.close().await;
     }
     let parent = TempDir::new().unwrap();
@@ -844,6 +856,97 @@ async fn paired_store_restore_preserves_pending_identity_settlement_and_signed_b
         1
     );
     mock.abort();
+}
+
+/// A test-only historical schema projection; never a production downgrade tool.
+async fn legacy_core_snapshot(
+    current: &sqlx::SqlitePool,
+    source: &std::path::Path,
+    destination: &std::path::Path,
+) {
+    for table in [
+        "reward_funding_state",
+        "reward_reservations",
+        "payout_execution_claims",
+    ] {
+        let count: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
+            .fetch_one(current)
+            .await
+            .unwrap();
+        assert_eq!(
+            count, 0,
+            "legacy fixture cannot discard active CyberHerd authority"
+        );
+    }
+    let historical = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(
+            sqlx::sqlite::SqliteConnectOptions::new()
+                .filename(destination)
+                .create_if_missing(true),
+        )
+        .await
+        .unwrap();
+    let mut migrations = sqlx::migrate::Migrator::new(std::path::Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/migrations"
+    )))
+    .await
+    .unwrap();
+    migrations
+        .migrations
+        .to_mut()
+        .retain(|migration| migration.version < 16);
+    migrations.run(&historical).await.unwrap();
+    let mut connection = historical.acquire().await.unwrap();
+    sqlx::query("ATTACH DATABASE ? AS historical_source")
+        .bind(source.to_str().unwrap())
+        .execute(&mut *connection)
+        .await
+        .unwrap();
+    sqlx::query("PRAGMA foreign_keys=OFF")
+        .execute(&mut *connection)
+        .await
+        .unwrap();
+    let tables: Vec<String> = sqlx::query_scalar("SELECT name FROM main.sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name<>'_sqlx_migrations' ORDER BY name")
+        .fetch_all(&mut *connection).await.unwrap();
+    for table in tables {
+        assert!(
+            table
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b == b'_' || b.is_ascii_digit())
+        );
+        // Singleton clock/default rows may already exist from schema installation.
+        // The original values belong in the historical snapshot, without deleting
+        // any retained production record: this destination is a fresh test store.
+        sqlx::query(&format!(
+            "INSERT OR REPLACE INTO main.{table} SELECT * FROM historical_source.{table}"
+        ))
+        .execute(&mut *connection)
+        .await
+        .unwrap();
+    }
+    sqlx::query("DELETE FROM main.sqlite_sequence")
+        .execute(&mut *connection)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO main.sqlite_sequence SELECT * FROM historical_source.sqlite_sequence")
+        .execute(&mut *connection)
+        .await
+        .unwrap();
+    sqlx::query("PRAGMA foreign_keys=ON")
+        .execute(&mut *connection)
+        .await
+        .unwrap();
+    assert!(
+        sqlx::query("PRAGMA foreign_key_check")
+            .fetch_optional(&mut *connection)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    drop(connection);
+    historical.close().await;
 }
 
 #[tokio::test]

@@ -284,3 +284,8 @@ Run `python3 -B -m unittest discover -s deploy/tests -p test_restore.py -v`.
 The legacy pair helper must reject even an uninitialized CyberHerd core before
 creating a destination database or changing its epoch. Pre-CyberHerd restore
 fixtures must still pass; neither path establishes consistent four-journal recovery.
+The native `legacy_paired_store_restore_preserves_pending_identity_settlement_and_signed_bytes`
+test builds the historical pre-CyberHerd schema explicitly, preserves its actual
+paid/pending/signed rows and schema history, then exercises migration and real
+loopback daemon/gateway restart. Do not weaken current-schema refusal merely to
+reuse a legacy two-store fixture, or claim this fixture qualifies CyberHerd restore.

@@ -263,8 +263,15 @@ additions passed the [466-test source checkpoint](../testing/cyberherd-roster-ch
 including browser/CLI/inactive archive checks; no installation or activation
 is implied by their presence.
 
+Subsequent [operator-interface source](../architecture/cyberherd-operator-interface.md)
+adds optional exact-request NIP-98 sign-in, self reads, root-pinned operator
+settings/template/member/reset commands and existing-signer browser controls.
+Atomic revisions, retained command receipts and core ordering fences protect
+manual changes and frozen feeding snapshots. This source is undergoing final
+verification and is uninstalled/default-off.
+
 Remaining implementation and qualification includes feeder announcement,
-lifecycle and roster installed qualification, browser Nostr authentication and authenticated operator settings/template/member/reset tools.
+lifecycle, roster and operator-interface installed qualification.
 Also required: explicit failed-cost/consistent-restore and retention operations,
 installed identity/network/helper/NIP-46/provider qualification, dependency-audit
 remediation and explicit financial activation. The twelve numbered groups above

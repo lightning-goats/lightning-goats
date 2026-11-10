@@ -8,7 +8,9 @@ deferral in the historical delivery order below.
 
 The optional [read-only CyberHerd roster and OBS state](architecture/cyberherd-public-roster.md)
 are disabled by default and add no financial or operator mutation capability.
-Browser/operator authentication remains separate work.
+Optional [Nostr sign-in and operator controls](architecture/cyberherd-operator-interface.md)
+remain separately gated and under source verification; they grant no financial
+or physical capability.
 
 The native incoming zap/receipt contract is described in
 [`architecture/native-nip57.md`](architecture/native-nip57.md). It preserves

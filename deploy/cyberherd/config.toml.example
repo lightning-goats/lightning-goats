@@ -79,3 +79,13 @@ herd = "0000000000000000000000000000000000000000000000000000000000000000"
 # overlay = false
 # OBS imports require the core bridge's matching reward_policy.owner; all
 # monetary ceilings may remain zero. Static cyberherdEnabled remains false.
+
+# Optional NIP-98 sign-in/operator routes on the same loopback view listener.
+# These are PUBLIC identities only, not secrets. Keep absent until qualified.
+# [view.auth]
+# public_origin = "https://lightning-goats.com"
+# operators = []
+# An empty allowlist permits only signed self reads. Populate explicit operator
+# public keys to enable commands; HTTP payloads cannot change this allowlist.
+# Static cyberherdAuthEnabled also defaults false. Use NIP-07 or existing
+# Nostr Connect with sign_event:27235. No raw/private-key login is available.

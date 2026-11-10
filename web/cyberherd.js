@@ -79,5 +79,14 @@
     }
     el("previous").addEventListener("click",()=>{if(busy) return;offset=Math.max(0,offset-50);update();});
     el("next").addEventListener("click",()=>{if(!busy && next!==null) {offset=next;update();}});
+    const auth=window.LightningGoatsAuth;
+    async function connectIdentity() {
+        try {await auth.connect();const me=await auth.request("/api/v1/cyberherd/me");if(me.pubkey!==auth.key() || !decimal(me.member?.amount_sats))throw new Error("Invalid membership response.");
+            el("self-status").textContent=me.member.active?`Your CyberHerd score: ${BigInt(me.member.amount_sats).toLocaleString()} sats` : me.member.banned?"Your membership is banned.":"You are not an active member this cycle.";
+            el("operator-link").hidden=me.operator!==true;
+        } catch(error) {el("self-status").textContent=error.message||"Sign-in unavailable.";el("operator-link").hidden=true;}
+    }
+    if(auth?.enabled()) {el("connect-nostr").hidden=false;el("connect-nostr").addEventListener("click",connectIdentity);}
+    document.addEventListener("nlAuth",event=>{if(event.detail?.type==="logout"){el("self-status").textContent="";el("operator-link").hidden=true;}else if(event.detail?.type==="login"&&auth?.enabled())connectIdentity();});
     if(enabled) {update();setInterval(()=>update(true),10000);} else el("status").textContent="CyberHerd is not available yet.";
 })();

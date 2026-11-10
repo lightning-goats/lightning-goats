@@ -1,5 +1,5 @@
-//! Optional loopback-only public read API. Requests read a bounded cache and
-//! cannot access store mutation, payout, feeder or signer capabilities.
+//! Optional loopback-only cached public view. Separately configured NIP-98
+//! routes authorize membership commands, never payout, feeder or signer access.
 use super::{
     calendar,
     store::Store,
@@ -27,11 +27,16 @@ pub struct Config {
     pub listen: SocketAddr,
     #[serde(default)]
     pub overlay: bool,
+    #[serde(default)]
+    pub auth: Option<super::http_auth::Config>,
 }
 impl Config {
     pub fn validate(&self) -> Result<()> {
         if !self.listen.ip().is_loopback() || self.listen.port() == 0 {
             bail!("CyberHerd public view requires an explicit loopback listener");
+        }
+        if let Some(auth) = &self.auth {
+            auth.validate()?;
         }
         Ok(())
     }
@@ -48,8 +53,22 @@ impl Config {
             return Ok(());
         }
         let listener = tokio::net::TcpListener::bind(self.listen).await?;
+        let core = Arc::new(core);
         let cache = Cache::default();
-        let app = router(cache.clone());
+        let mut app = router(cache.clone());
+        if let Some(auth) = &self.auth {
+            app = app.merge(super::operator_http::router(
+                super::operator_http::Service {
+                    store: store.clone(),
+                    owner: policy.project_pubkey.clone(),
+                    policy: policy.clone(),
+                    timezone: timezone.clone(),
+                    config: auth.clone(),
+                    core: core.clone(),
+                    cache: cache.clone(),
+                },
+            ));
+        }
         tasks.spawn(async move {
             let _ = axum::serve(listener, app).await;
         });
@@ -345,7 +364,8 @@ mod tests {
                 Config {
                     enabled: false,
                     listen: address.parse().unwrap(),
-                    overlay: false
+                    overlay: false,
+                    auth: None
                 }
                 .validate()
                 .is_err()
@@ -355,6 +375,7 @@ mod tests {
             enabled: false,
             listen: "127.0.0.1:3340".parse().unwrap(),
             overlay: true,
+            auth: None,
         }
         .validate()
         .unwrap();

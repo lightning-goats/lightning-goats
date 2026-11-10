@@ -38,6 +38,7 @@ pub fn audience(category: &str) -> Option<Audience> {
         | "member_increase"
         | "member_added"
         | "member_removed"
+        | "member_score_updated"
         | "kind_6_repost"
         | "kind_7_reaction"
         | "kind_6_headbutt_failure"

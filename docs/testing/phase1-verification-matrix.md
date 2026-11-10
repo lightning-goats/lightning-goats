@@ -222,3 +222,29 @@ audit gate, inactive CLI/archive and existing browser/systemd regressions. These
 fixtures do not authorize installing the proxy/roles, signing publicly, spending
 or feeding. Browser authentication/operator controls and full-port operational
 qualification remain separate requirements.
+
+
+## Optional Nostr HTTP sign-in and operator commands
+
+Verify native NIP-98 signature/ID, exact configured HTTPS origin/path/query/method,
+mandatory command body hash, time window, singleton tags, GET-body rejection and
+replay prevention across reopen. User self reads must never become operator
+reads through payload/Host/forwarded-header claims. Root configuration alone
+pins operator public keys; templates and commands accept no private-key fields.
+
+Verify atomic revision-fenced settings/member/template/reset changes, explicit
+unban, zero member pool, exact desired totals, no fabricated lifetime payment,
+once-only promotion of retained social types, retained receipts and owner scope.
+Inject failure after state changes and before audit insertion: retry must retain
+its identity with no partial mutation/nonce. Core epoch/UID/high-water/freshness
+and pending-feeding fences must prevent editing an already-confirmed feeding's
+snapshot. Known committed retries recover without a fresh core ordering read.
+Manual notices freeze their own human/public bodies and one optional compact share
+footer; no reset announcement, fake received payment or additional mention is made.
+
+All browser traffic is mocked. Check disabled flags make no API/signing request,
+nonoperators cannot reveal controls, native browser signing binds exact bodies,
+and a lost response retains one command body/UUID while explicit retry signs a
+fresh HTTP event. No automatic mutation retry or raw/private-key login is allowed.
+Keep full locked Rust, audit, inactive CLI/archive/browser/nginx/systemd gates;
+actual new household client, WAF, UIDs and activation remain separate evidence.

@@ -98,6 +98,16 @@ bunker_relays = ["wss://nos.lol/"]
                         view + 'api_key = "synthetic-placeholder"\n']:
             self.assertNotEqual(self.invoke(self.text + invalid, "--check").returncode, 0)
 
+    def test_http_auth_has_pinned_public_origin_allowlist_and_no_secret_fields(self):
+        public = "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
+        view = '\n[view]\nenabled = false\nlisten = "127.0.0.1:3340"\n[view.auth]\npublic_origin = "https://example.com"\noperators = ["' + public + '"]\n'
+        self.assertEqual(self.invoke(self.text + view, "--check").returncode, 0)
+        for invalid in [view.replace("https://example.com", "http://example.com"),
+                        view.replace("https://example.com", "https://10.8.0.6"),
+                        view + 'nsec = "synthetic-placeholder"\n',
+                        view.replace('operators = ["' + public + '"]', 'operators = ["' + public + '","' + public + '"]')]:
+            self.assertNotEqual(self.invoke(self.text + invalid, "--check").returncode, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -14,11 +14,15 @@ pub mod delivery_runtime;
 pub mod delivery_worker;
 pub mod discovery;
 pub mod feeding_delivery;
+pub mod http_auth;
 pub mod ingress;
 pub mod lifecycle;
 pub mod membership;
 #[cfg(unix)]
 pub(crate) mod notice_worker;
+pub mod operator;
+#[cfg(unix)]
+pub mod operator_http;
 pub mod overlay_delivery;
 #[cfg(unix)]
 pub mod payout_bridge;

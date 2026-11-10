@@ -38,6 +38,9 @@ pub(crate) mod feeding_state;
 #[path = "view_store.rs"]
 mod view_state;
 
+#[path = "operator_store.rs"]
+mod operator_state;
+
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./cyberherd-migrations");
 
 #[derive(Debug, Clone)]
@@ -126,6 +129,7 @@ pub struct StoredEvent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub enum TemplateEdit {
     Set {
         category: String,

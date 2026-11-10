@@ -54,6 +54,7 @@ pub(crate) fn render(event: &StoredEvent, catalog: &Catalog) -> Result<Option<Re
             message.validate_broadcast(&event.owner)?;
             Ok(Some(message))
         }
+        "operator_member" => operator_member(event, catalog),
         "interaction" => interaction(event, catalog),
         "payout_result" | "payout_skipped" => payout(event, catalog),
         // Reset, operator edits, weather and information never become member
@@ -567,4 +568,74 @@ pub(crate) fn repost_hint(
         &values(profile, &message.member, false)?,
     )?;
     Ok(public.zip(human))
+}
+
+fn operator_member(event: &StoredEvent, catalog: &Catalog) -> Result<Option<Rendered>> {
+    let notice: super::operator::Notice = serde_json::from_str(&event.snapshot_json)?;
+    if notice.snapshot.owner != event.owner
+        || notice.snapshot.cycle != event.cycle
+        || !matches!(
+            notice.category.as_str(),
+            "member_added" | "member_removed" | "member_score_updated"
+        )
+    {
+        bail!("invalid operator member notice");
+    }
+    notice.context.validate(&event.owner)?;
+    if let Some(c) = &notice.conversation {
+        c.validate(&event.owner)?;
+    }
+    let identity = conversation::identity(&event.owner, &notice.member, &event.source_id)?;
+    let amount = notice
+        .snapshot
+        .roster
+        .members
+        .get(&notice.member)
+        .map_or(0, |m| m.amount_sats);
+    let shares = notice.snapshot.roster.shares(&notice.snapshot.settings)?;
+    let compose = |mentions: bool| -> Result<Option<String>> {
+        let mut v = values(&notice.profile, &notice.member, mentions)?;
+        v.insert("new_total".into(), amount.to_string());
+        score(
+            &mut v,
+            amount,
+            notice
+                .snapshot
+                .roster
+                .awards
+                .get(&notice.member)
+                .copied()
+                .unwrap_or_default(),
+            notice.snapshot.settings.minimum_sats.max(1),
+            shares.get(&notice.member).copied().unwrap_or(0),
+        )?;
+        let Some(body) = catalog.render(&notice.category, &identity, &v)? else {
+            return Ok(None);
+        };
+        let mut parts = vec![body];
+        if notice.allocation_changed {
+            let footer = roster_footer(catalog, &identity, &notice.snapshot)?;
+            if !footer.is_empty() {
+                parts.push(footer);
+            }
+        }
+        Ok(Some(bounded(parts)?))
+    };
+    let (Some(nostr), Some(overlay)) = (compose(true)?, compose(false)?) else {
+        return Ok(None);
+    };
+    Ok(Some(Rendered {
+        identity,
+        cycle: event.cycle,
+        member: notice.member,
+        conversation: notice.conversation,
+        context: notice.context,
+        category: notice.category,
+        nostr,
+        overlay,
+        accepted: notice.activation,
+        requires_joining: !notice.activation,
+        additional_members: vec![],
+        broadcast: None,
+    }))
 }

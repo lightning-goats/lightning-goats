@@ -58,8 +58,9 @@ BigInt. Current target links are encoded with the existing local Nostr bundle.
 Browser requests are same-origin, read-only, size/time bounded and reject
 redirects. Failed/stale data hides the roster instead of showing it as current.
 `cyberherdEnabled` defaults to false and the home-page link stays hidden; with
-that flag false the page makes no API request. No private key or login field is
-present. Authenticated member/operator interfaces are separate remaining work.
+that flag false the page makes no API request. Optional separately gated
+[Nostr sign-in and operator controls](cyberherd-operator-interface.md) reuse the
+existing extension/Nostr Connect signer; no private-key login is present.
 
 The source tests use temporary databases, actual private IPC with synthetic
 identities, a loopback HTTP server and fully mocked browser traffic. They are

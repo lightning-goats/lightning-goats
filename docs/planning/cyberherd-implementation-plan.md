@@ -237,7 +237,8 @@ now adds opt-in FIFO source tracking, confirmation-atomic consumed-fund evidence
 and a bounded private reservation method under explicit root policy. Bootstrap
 establishes remaining credit without back-paying old feedings. Virtual credit
 cannot authorize Strike payouts. A reservation is not provider availability or
-delivery; eligible plan/fee freezing and authoritative outgoing outcomes remain.
+delivery. Eligible plans and provider observations are now separate components;
+core-authoritative terminal budget accounting and service activation remain.
 The [funding checkpoint](../testing/cyberherd-funding-checkpoint-20261109.md)
 records 359 passing Rust tests and the conservative outstanding-budget limit.
 
@@ -269,3 +270,5 @@ The next [provider execution source](../architecture/cyberherd-provider-executio
 adds committed quote/execute identities, same-quote uncertain recovery and verified
 payment observations. It still holds all core/payout reservations and supplies
 neither a signing broker, worker activation nor public treat announcements.
+Its [verified source checkpoint](../testing/cyberherd-provider-checkpoint-20261110.md)
+records 402 passing Rust tests and the unchanged open dependency-audit failure.

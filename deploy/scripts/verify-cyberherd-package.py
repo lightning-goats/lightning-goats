@@ -24,7 +24,7 @@ def verify(path, source):
                 continue
             key = str(name)
             total += member.size
-            if key in files or member.size > 128 * 1024 * 1024 or total > 512 * 1024 * 1024:
+            if key in files or len(files) >= 4096 or member.size > 128 * 1024 * 1024 or total > 512 * 1024 * 1024:
                 raise ValueError("duplicate/oversized review archive")
             files[key] = archive.extractfile(member).read()
     expected = {}
@@ -42,6 +42,7 @@ def verify(path, source):
     required = {"cyberherdd", "cyberherd-payoutd", "cyberherd-signerd", "cyberherd-statectl", "BUILD-INFO.txt", "Cargo.lock", "Cargo.toml",
                 "deploy/cyberherd/state-maintenance.toml.example", "STATE-MAINTENANCE.md", "OFFLINE-INITIALIZATION.md",
                 "deploy/cyberherd/core-upgrade.toml.example", "CORE-UPGRADE.md",
+                "INACTIVE-INSTALLATION.md",
                 "deploy/cyberherd/config.toml.example", "deploy/cyberherd/payout.toml.example", "deploy/cyberherd/signer.toml.example"}
     if not required.issubset(files):
         raise ValueError("review archive is missing required artifacts")

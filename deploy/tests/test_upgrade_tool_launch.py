@@ -56,6 +56,8 @@ class ToolLaunchTests(unittest.TestCase):
             self.assertIn('snapshot', run(ok=True).stdout)
             command[6:] = ['--cyberherd-core', '--help']
             self.assertIn('finish', run(ok=True).stdout)
+            command[6:] = ['--cyberherd-inactive', '--help']
+            self.assertIn('identities', run(ok=True).stdout)
             command[6:] = ['--help']
             for name in LAUNCH.FILES - {'launch-vps-upgrade.py'}:
                 target = bundle / name

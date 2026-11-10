@@ -13,6 +13,8 @@ the existing core UID/epoch, explicit intake cutoff, project owner, provider
 account/fingerprint and separate peer IDs in the protected configuration. Never
 guess these values or invent another epoch to bypass existing financial claims.
 Keep service units inactive/masked during provisioning, with no other writers.
+The [prepared inactive installer](cyberherd-inactive-installation.md) captures
+that fresh-install sequence; it remains separate from activation and recovery.
 
 The initializer requires canonical protected root-owned configuration and state
 ancestors, its separate non-root runtime UID, a non-root primary group and a

@@ -198,6 +198,9 @@ The [494-test checkpoint](../testing/cyberherd-core-upgrade-checkpoint-20261110.
 adds [native pre-CyberHerd core backup and migration comparison](../deployment/cyberherd-core-upgrade.md)
 before the actual paid-store upgrade. It is not the installer, migration or
 restart transaction and cannot restore or activate financial/physical work.
+Subsequent source prepares the [explicit stopped-core upgrade transaction](../deployment/cyberherd-core-upgrade.md)
+and [fresh disabled-role installer](../deployment/cyberherd-inactive-installation.md).
+Their installed acceptance remains required; no actual host mutation is implied.
 
 The [492-test checkpoint](../testing/cyberherd-bootstrap-checkpoint-20261110.md)
 adds [fresh offline journal initialization](../deployment/cyberherd-offline-initialization.md)

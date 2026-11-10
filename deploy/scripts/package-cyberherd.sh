@@ -35,6 +35,7 @@ cp "$LG_REPO/docs/architecture/cyberherd-payout-runtime.md" "$LG_STAGE/README.md
 cp "$LG_REPO/docs/deployment/cyberherd-state-maintenance.md" "$LG_STAGE/STATE-MAINTENANCE.md"
 cp "$LG_REPO/docs/deployment/cyberherd-offline-initialization.md" "$LG_STAGE/OFFLINE-INITIALIZATION.md"
 cp "$LG_REPO/docs/deployment/cyberherd-core-upgrade.md" "$LG_STAGE/CORE-UPGRADE.md"
+cp "$LG_REPO/docs/deployment/cyberherd-inactive-installation.md" "$LG_STAGE/INACTIVE-INSTALLATION.md"
 printf 'source_commit=%s\nversion=%s\nactivation=none\n' "$LG_SOURCE" "$LG_VERSION" > "$LG_STAGE/BUILD-INFO.txt"
 (
     cd "$LG_STAGE"

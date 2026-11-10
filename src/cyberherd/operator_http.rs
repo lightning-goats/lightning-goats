@@ -285,6 +285,7 @@ async fn command(State(s): State<Service>, request: Request) -> Response {
         Availability::Paused => super::membership::FeederAvailability::Paused,
         Availability::Unknown => super::membership::FeederAvailability::Unknown,
     };
+    let now = calendar::now().unwrap_or(-1);
     match s
         .store
         .operator_command(

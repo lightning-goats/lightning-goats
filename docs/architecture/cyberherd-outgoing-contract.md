@@ -1,6 +1,6 @@
-# Outgoing worker contract — next implementation
+# Outgoing worker contract
 
-This records the provider contract rechecked on 2026-11-09 while verifying
+This records the provider contract rechecked on 2026-11-10 while verifying
 [frozen planning](cyberherd-reward-planning.md). It is not implemented spending
 authority or an instruction to change production credentials. The remaining work
 belongs to requirement 8 of the full port and must preserve the operator's
@@ -46,8 +46,10 @@ them to the overlay/Nostr.
 The [private payout authority](cyberherd-payout-authority.md) now implements
 separate-role reservation/source readback and consumed-receive credential
 qualification. The [outgoing invoice boundary](cyberherd-outgoing-invoices.md)
-now persists callback/signature bytes and validated invoices. The provider
-submission/reconciliation and remote-broker lifecycle below is still unfinished.
+now persists callback/signature bytes and validated invoices. The
+[provider execution journal](cyberherd-provider-execution.md) now saves quote and
+execute intent, recovers the original payment ID and verifies payment reads. The
+remote broker/runtime and authoritative terminal budget lifecycle remain unfinished.
 
 The payout identity must first authenticate the core reservation independently;
 copied membership DB rows/JSON are not financial authority. Pin its actual provider

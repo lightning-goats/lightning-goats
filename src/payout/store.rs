@@ -17,6 +17,9 @@ static MIGRATOR: Migrator = sqlx::migrate!("./payout-migrations");
 
 #[path = "store_invoices.rs"]
 mod invoices;
+#[path = "store_provider.rs"]
+mod provider;
+pub use provider::Status as PayoutStatus;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -53,6 +56,8 @@ pub struct Policy {
     pub max_source_parts: u16,
     pub operation_addresses: Vec<String>,
     pub receipt_relays: Vec<String>,
+    #[serde(default)]
+    pub execution_enabled: bool,
 }
 
 impl Policy {
@@ -114,6 +119,14 @@ impl Store {
             "payout_callback_requests",
             "payout_invoices",
             "payout_invoice_journal",
+            "payout_quote_intents",
+            "payout_quote_records",
+            "payout_quote_duplicates",
+            "payout_execute_intents",
+            "payout_payment_bindings",
+            "payout_payment_records",
+            "payout_payment_conflicts",
+            "payout_provider_journal",
         ];
         if names.iter().any(|name| !allowed.contains(&name.as_str())) {
             bail!("payout requires its own database");

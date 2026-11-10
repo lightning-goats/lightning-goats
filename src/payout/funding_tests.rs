@@ -29,6 +29,9 @@ use crate::{
 
 const KEY: &str = "synthetic-payout-read-key";
 
+#[path = "provider_workflow_tests.rs"]
+mod provider_workflow_tests;
+
 fn sample_plan(
     epoch: Uuid,
     feed: Uuid,
@@ -85,6 +88,7 @@ fn journal_policy(q: &QualifiedFunding) -> crate::payout::store::Policy {
         max_source_parts: 100,
         operation_addresses: vec![],
         receipt_relays: vec!["wss://relay.damus.io/".into()],
+        execution_enabled: false,
     }
 }
 
@@ -1011,6 +1015,7 @@ async fn core_role_reads_are_separate_from_intake_and_never_enable_execution_by_
         (false, true, RuntimeMode::Active),
         (true, false, RuntimeMode::Active),
         (true, true, RuntimeMode::Shadow),
+        (true, true, RuntimeMode::Canary),
         (true, true, RuntimeMode::Active),
     ] {
         let f = Fixture::new().await;
@@ -1030,10 +1035,12 @@ async fn core_role_reads_are_separate_from_intake_and_never_enable_execution_by_
             .payout_funding(f.reservation.epoch, f.reservation.id, &owner(), 0)
             .await;
         if payout {
+            let page = page.unwrap();
             assert_eq!(
-                page.unwrap().page().execution_enabled,
-                enabled && mode == RuntimeMode::Active
+                page.page().execution_enabled,
+                enabled && mode.feeder_enabled()
             );
+            assert_eq!(page.page().nostr_enabled, mode.nostr_enabled());
             assert!(client.events(None, 0, 1).await.is_err());
             assert!(
                 client

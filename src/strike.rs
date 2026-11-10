@@ -916,7 +916,7 @@ fn msat_to_btc_decimal(msat: u64) -> String {
     format!("{whole}.{fraction:011}")
 }
 
-fn btc_decimal_to_msat(value: &str) -> Result<u64> {
+pub(crate) fn btc_decimal_to_msat(value: &str) -> Result<u64> {
     let value = value.trim();
     if value.is_empty() || value.starts_with('-') || value.starts_with('+') {
         bail!("BTC amount must be an unsigned decimal string");

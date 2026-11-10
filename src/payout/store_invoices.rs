@@ -148,13 +148,13 @@ impl Store {
     }
 }
 
-async fn write_lock(tx: &mut Transaction<'_, Sqlite>) -> Result<()> {
+pub(super) async fn write_lock(tx: &mut Transaction<'_, Sqlite>) -> Result<()> {
     sqlx::query("UPDATE payout_clock SET observed_at=observed_at WHERE singleton=1")
         .execute(&mut **tx)
         .await?;
     Ok(())
 }
-async fn touch_clock(tx: &mut Transaction<'_, Sqlite>, now: i64) -> Result<()> {
+pub(super) async fn touch_clock(tx: &mut Transaction<'_, Sqlite>, now: i64) -> Result<()> {
     let previous: i64 =
         sqlx::query_scalar("SELECT observed_at FROM payout_clock WHERE singleton=1")
             .fetch_one(&mut **tx)
@@ -211,7 +211,7 @@ async fn load_request(tx: &mut Transaction<'_, Sqlite>, id: &str, owner: &str) -
     }
     Request::restore(intent, raw)
 }
-async fn load_invoice(
+pub(super) async fn load_invoice(
     tx: &mut Transaction<'_, Sqlite>,
     id: Uuid,
     owner: &str,

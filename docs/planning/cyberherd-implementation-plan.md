@@ -264,3 +264,8 @@ no provider execution, terminal accounting or signing-broker runtime.
 Its [verification checkpoint](../testing/cyberherd-outgoing-invoice-checkpoint-20261110.md)
 records 394 passing Rust tests, successful isolated deployment regressions and the
 unchanged open dependency-audit failure. None is a live payout activation.
+
+The next [provider execution source](../architecture/cyberherd-provider-execution.md)
+adds committed quote/execute identities, same-quote uncertain recovery and verified
+payment observations. It still holds all core/payout reservations and supplies
+neither a signing broker, worker activation nor public treat announcements.

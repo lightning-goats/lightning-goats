@@ -249,9 +249,12 @@ async fn serve_one(
                 )
                 .await
             {
-                Ok(page) => Response::PayoutFunding {
-                    page: Box::new(page),
-                },
+                Ok(mut page) => {
+                    page.nostr_enabled = mode.nostr_enabled();
+                    Response::PayoutFunding {
+                        page: Box::new(page),
+                    }
+                }
                 Err(_) => Response::Rejected,
             },
             Request::RewardAllowance {

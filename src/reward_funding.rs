@@ -84,6 +84,8 @@ pub struct FundingPage {
     pub funding: Funding,
     pub threshold_sats: u64,
     pub execution_enabled: bool,
+    #[serde(default)]
+    pub nostr_enabled: bool,
     pub observed_at: i64,
     pub after: i64,
     pub through: i64,

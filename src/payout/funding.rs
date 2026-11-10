@@ -38,7 +38,7 @@ impl SourceVerifier {
         })
     }
 
-    fn scope(account_id: Uuid, expected: &str, key: &str) -> Result<ProviderScope> {
+    pub(crate) fn scope(account_id: Uuid, expected: &str, key: &str) -> Result<ProviderScope> {
         crate::nostr_event::validate_hex(expected, 32)?;
         if account_id.is_nil()
             || key.is_empty()

@@ -247,6 +247,9 @@ impl ValidatedInvoice {
     pub fn payment_hash(&self) -> &str {
         &self.payment_hash
     }
+    pub fn description_hash(&self) -> &str {
+        &self.description_hash
+    }
     pub fn amount_sats(&self) -> u64 {
         self.amount_sats
     }

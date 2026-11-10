@@ -111,6 +111,7 @@ impl LedgerStore {
             funding,
             threshold_sats: to_u64(threshold, "funded threshold")?,
             execution_enabled: execution_enabled && allowed,
+            nostr_enabled: false,
             observed_at: crate::cyberherd::calendar::now()?,
             after,
             through,

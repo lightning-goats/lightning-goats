@@ -94,7 +94,8 @@ cross-UID, IPv4/IPv6 and helper containment still need installation qualificatio
 reading credentials. It is not a provider permission or live-activation check.
 
 `deploy/scripts/package-cyberherd.sh` creates a source-pinned review archive of
-the three CyberHerd binaries, migrations and inactive examples. It has no install,
+the three CyberHerd daemons, offline `cyberherd-statectl`, migrations, maintenance
+runbook and inactive examples. It has no install,
 user-creation or service-start operation. CI builds and checks the CLI programs
 before creating this archive; it is separate from the running Phase 1 package.
 
@@ -134,3 +135,8 @@ history to clear an unresolved execution.
 The subsequent [SQLite source checkpoint](../testing/cyberherd-sqlite-checkpoint-20261110.md)
 passes the dependency audit with the fixed native engine. Installed engine and
 whole-stack recovery qualification remain separate requirements.
+
+The subsequent [native four-journal tool](../deployment/cyberherd-state-maintenance.md)
+adds offline snapshots, retention reports and startup-blocked restore staging.
+The review archive retains that runbook as `STATE-MAINTENANCE.md`. It does not
+adopt restored state or automatically resume external payments or feeding.

@@ -258,6 +258,42 @@ async fn root_four_journal_snapshot_preserves_wal_paid_pending_and_signed_state_
     let mut operator = Operator::load(&path).unwrap();
     let ready = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
     operator.control = control::Control::Fixture(ready.clone());
+    let core_component = &p.components[&Role::Core];
+    let aliased = root.path().join("aliased-core.db");
+    std::fs::hard_link(&core_component.database, &aliased).unwrap();
+    let refused = root.path().join("refused-hardlink");
+    assert!(operator.snapshot(&refused).await.is_err());
+    assert!(!refused.exists());
+    std::fs::remove_file(&aliased).unwrap();
+    let observed = files::Source::open(core_component, p.max_component_bytes).unwrap();
+    std::fs::set_permissions(
+        &core_component.database,
+        std::fs::Permissions::from_mode(0o640),
+    )
+    .unwrap();
+    assert!(observed.unchanged().is_err());
+    assert!(files::Source::open(core_component, p.max_component_bytes).is_err());
+    std::fs::set_permissions(
+        &core_component.database,
+        std::fs::Permissions::from_mode(0o600),
+    )
+    .unwrap();
+    let source_bytes: Vec<_> = p
+        .components
+        .values()
+        .flat_map(|c| {
+            [
+                c.database.clone(),
+                files::sidecar(&c.database, "-wal"),
+                files::sidecar(&c.database, "-shm"),
+            ]
+        })
+        .filter(|path| path.exists())
+        .map(|path| {
+            let digest = files::hash_bytes(&std::fs::read(&path).unwrap());
+            (path, digest)
+        })
+        .collect();
     let bundle = root.path().join("bundle");
     let manifest = operator.snapshot(&bundle).await.unwrap();
     assert!(
@@ -273,6 +309,9 @@ async fn root_four_journal_snapshot_preserves_wal_paid_pending_and_signed_state_
     );
     assert!(!manifest.report.resume_authorized);
     assert_eq!(operator.verify(&bundle).await.unwrap(), manifest);
+    for (path, digest) in &source_bytes {
+        assert_eq!(files::hash_bytes(&std::fs::read(path).unwrap()), *digest);
+    }
     assert!(operator.snapshot(&bundle).await.is_err());
     let destination = root.path().join("restore");
     assert_eq!(

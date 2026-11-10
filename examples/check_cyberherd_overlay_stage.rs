@@ -104,13 +104,18 @@ mod tests {
             "receipt_pubkey":owner,"payee_pubkeys":payees,
             "alias_origins":["https://lnb.bolverker.com/"]
         });
-        core["lnurl"]["zap"] = toml::Value::try_from(zap).unwrap();
+        core["lnurl"]
+            .as_table_mut()
+            .unwrap()
+            .insert("zap".into(), toml::Value::try_from(zap).unwrap());
         let bridge = json!({
             "socket":"/run/lightning-goats-bridge/core.sock","peer_uid":10002,
             "group_gid":10003,"reward_policy":{"owner":owner,
             "member_percent_ceiling":0,"max_sats_per_feed":0,"max_sats_per_24h":0}
         });
-        core["core_bridge"] = toml::Value::try_from(bridge).unwrap();
+        core.as_table_mut()
+            .unwrap()
+            .insert("core_bridge".into(), toml::Value::try_from(bridge).unwrap());
         let mut member: toml::Value =
             toml::from_str(include_str!("../deploy/cyberherd/config.toml.example")).unwrap();
         member["enabled"] = true.into();
@@ -122,11 +127,17 @@ mod tests {
             "enabled":true,"start_after":0,"poll_millis":1000,
             "relays":["wss://relay.primal.net"],"lifecycle":false
         });
-        member["messaging"] = toml::Value::try_from(messaging).unwrap();
-        member["view"] = toml::Value::try_from(json!({
-            "enabled":true,"listen":"127.0.0.1:3340","overlay":true
-        }))
-        .unwrap();
+        member.as_table_mut().unwrap().insert(
+            "messaging".into(),
+            toml::Value::try_from(messaging).unwrap(),
+        );
+        member.as_table_mut().unwrap().insert(
+            "view".into(),
+            toml::Value::try_from(json!({
+                "enabled":true,"listen":"127.0.0.1:3340","overlay":true
+            }))
+            .unwrap(),
+        );
         (core.try_into().unwrap(), member.try_into().unwrap())
     }
 

@@ -13,7 +13,8 @@ const FIXTURE_HOSTS: [&str; 3] = [
 
 fn private_dns_refusal(error: &anyhow::Error) -> bool {
     error.chain().any(|part| {
-        part.to_string() == "DNS response includes a non-public, unsupported or excessive address set"
+        part.to_string()
+            == "DNS response includes a non-public, unsupported or excessive address set"
     })
 }
 

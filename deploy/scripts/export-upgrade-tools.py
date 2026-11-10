@@ -19,6 +19,7 @@ FILES = (
     'prepare-cyberherd-nostr-clients.py', 'prepare-household-nostr-client.py',
     'qualify-cyberherd-installed.py',
     'qualify-cyberherd-workers.py',
+    'stage-cyberherd-overlay.py',
 )
 
 

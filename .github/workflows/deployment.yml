@@ -65,15 +65,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo build --release --locked --example prepare_cyberherd_install_fixture --example check_cyberherd_recipient --example check_household_zap_receipt
+          cargo build --release --locked --example prepare_cyberherd_install_fixture --example check_cyberherd_recipient --example check_household_zap_receipt --example check_cyberherd_overlay_stage
           cargo test --locked --example check_cyberherd_recipient
           cargo test --locked --example check_household_zap_receipt
+          cargo test --locked --example check_cyberherd_overlay_stage
           mkdir "$RUNNER_TEMP/cyberherd-test-only"
           install -m 0755 target/release/examples/prepare_cyberherd_install_fixture "$RUNNER_TEMP/cyberherd-test-only/TEST-ONLY-prepare-legacy-core"
           install -m 0755 target/release/examples/check_cyberherd_recipient "$RUNNER_TEMP/cyberherd-test-only/READ-ONLY-check-recipient"
           install -m 0755 target/release/examples/check_household_zap_receipt "$RUNNER_TEMP/cyberherd-test-only/SIGNING-ONLY-check-zap-receipt"
+          install -m 0755 target/release/examples/check_cyberherd_overlay_stage "$RUNNER_TEMP/cyberherd-test-only/CHECK-ONLY-overlay-stage"
           python3 -I -S -B deploy/scripts/export-upgrade-tools.py "$GITHUB_WORKSPACE" "$GITHUB_SHA" "$RUNNER_TEMP/cyberherd-test-only/tool-bundle" > "$RUNNER_TEMP/cyberherd-test-only/TOOL-EXPORT.json"
-          (cd "$RUNNER_TEMP/cyberherd-test-only" && sha256sum TEST-ONLY-prepare-legacy-core READ-ONLY-check-recipient SIGNING-ONLY-check-zap-receipt TOOL-EXPORT.json > SHA256SUMS)
+          (cd "$RUNNER_TEMP/cyberherd-test-only" && sha256sum TEST-ONLY-prepare-legacy-core READ-ONLY-check-recipient SIGNING-ONLY-check-zap-receipt CHECK-ONLY-overlay-stage TOOL-EXPORT.json > SHA256SUMS)
       - name: Retain test-only installation fixture
         uses: actions/upload-artifact@v4
         with:

@@ -66,6 +66,8 @@ class ToolLaunchTests(unittest.TestCase):
             self.assertIn('--probe-disabled-roles', run(ok=True).stdout)
             command[6:] = ['--cyberherd-workers', '--help']
             self.assertIn('--create-isolated-fixture', run(ok=True).stdout)
+            command[6:] = ['--cyberherd-overlay-stage', '--help']
+            self.assertIn('prepare', run(ok=True).stdout)
             command[6:] = ['--help']
             for name in LAUNCH.FILES - {'launch-vps-upgrade.py'}:
                 target = bundle / name

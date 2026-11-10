@@ -70,6 +70,11 @@ receive process remain unchanged. No production CyberHerd worker or money path
 is enabled. Actual DNS/global containment, household/provider/browser, recovery
 adoption and activation remain separate.
 
+The separate [native recipient/DNS helper](deployment/cyberherd-recipient-qualification.md)
+now prepares credential-free public LNURL discovery and private/mixed DNS-answer
+refusal using the actual payout networking code. Build/installed network results
+remain outstanding; it makes no provider, invoice or payment request.
+
 The Phase 1 implementation history below was last updated on 2026-09-07; consult
 the dated restoration/implementation records and current plan for later work.
 

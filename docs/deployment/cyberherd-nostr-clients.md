@@ -100,3 +100,8 @@ round trip, not evidence that credential bytes should be regenerated. No result
 enables publication or spending. Six local tests cover frozen-byte refusal,
 fixed purposes, child time/output bounds, root refusal, unit isolation and fake
 helper orchestration. They do not claim actual cryptography or household success.
+
+The [actual check checkpoint](../testing/cyberherd-bunker-checkpoint-20261110.md)
+records both matching local client identities and two sanitized household
+authorization refusals. A household reload was requested; successful kinds remain
+unqualified. Do not regenerate credentials merely because authorization failed.

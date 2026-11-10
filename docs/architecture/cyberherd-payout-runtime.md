@@ -114,9 +114,12 @@ scope of archive, core-systemd and new-broker fixtures.
 Subsequent [verified result intake](cyberherd-verified-results.md) and
 [member delivery](cyberherd-member-delivery.md) connect frozen payout summaries,
 editable outgoing text/joining references and exact note/chat/overlay queues.
-The full port still needs feeder stream copies/herd summaries,
-lifecycle notices, roster/OBS and authenticated operator tools, explicit
-failed-cost/consistent restore recovery, reviewed inactive installation and live
+Subsequent source also provides [feeding broadcasts](cyberherd-feeding-announcements.md),
+[lifecycle notices](cyberherd-lifecycle.md), [roster/OBS](cyberherd-public-roster.md),
+[operator tools](cyberherd-operator-interface.md) and
+[explicit failed-cost review](cyberherd-failed-cost-recovery.md).
+The full port still needs consistent restore/retention, dependency remediation,
+reviewed inactive installation and actual installed qualification before live
 financial activation. These examples and unit/library tests do not prove actual
 cross-process installation, production provider behavior or a completed port.
 

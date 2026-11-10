@@ -90,6 +90,8 @@ unused fee release, failed-cost holds, lost ACK/restart, role rejection,
 never-executed closure, uncertain-intent retention, partial reports and failed
 final commits. They do not establish live Strike behavior or paid deployment.
 
-The separate signing broker and payout worker, member treat/thread/receipt and
-overlay outboxes, lifecycle, operator interfaces, consistent restore tooling and
-explicit financial activation remain required for the full implementation.
+Subsequent source adds the [separate broker/worker](cyberherd-payout-runtime.md),
+[member delivery](cyberherd-member-delivery.md), lifecycle and operator interfaces,
+plus [explicit failed-cost review](cyberherd-failed-cost-recovery.md). These remain
+uninstalled. Consistent restore/retention, dependency remediation, installed
+qualification and explicit financial activation still remain for the full port.

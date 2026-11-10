@@ -1,6 +1,16 @@
 # Phase 1 Implementation Status
 
-Last implementation update: 2026-09-07.
+Current CyberHerd source checkpoint: **2026-11-10**. The operator-directed port
+follows the full [implementation plan](planning/cyberherd-implementation-plan.md),
+which supersedes older CyberHerd deferrals below. Explicit failed-payment cost
+recovery and the legacy-restore refusal now have a
+[485-test checkpoint](testing/cyberherd-failed-cost-checkpoint-20261110.md).
+The dependency audit still fails on unignored RUSTSEC-2026-0459; consistent
+whole-stack recovery/retention and installed qualification remain unfinished.
+The new components remain uninstalled and no financial activation is implied.
+
+The Phase 1 implementation history below was last updated on 2026-09-07; consult
+the dated restoration/implementation records and current plan for later work.
 
 Tracker: https://github.com/lightning-goats/lightning-goats/issues/6
 

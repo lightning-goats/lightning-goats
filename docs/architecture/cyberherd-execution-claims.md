@@ -63,5 +63,6 @@ Results must be recorded only after the checks finish on the exact source.
 
 Separate [failed-cost review source](cyberherd-failed-cost-recovery.md) now adds
 protected operator decisions and exact core/payout cost receipts. It remains
-uninstalled and under source verification. Wider consistent-restore tooling,
+uninstalled; the [source checkpoint](../testing/cyberherd-failed-cost-checkpoint-20261110.md)
+records completed verification. Wider consistent-restore tooling,
 installation qualification and live financial activation remain unfinished.

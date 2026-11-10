@@ -12,6 +12,12 @@ Optional [Nostr sign-in and operator controls](architecture/cyberherd-operator-i
 remain separately gated and uninstalled; their [source checkpoint](testing/cyberherd-operator-checkpoint-20261110.md)
 grants no live financial or physical activation.
 
+[Explicit failed-payment cost review](architecture/cyberherd-failed-cost-recovery.md)
+now has a [485-test source checkpoint](testing/cyberherd-failed-cost-checkpoint-20261110.md).
+Provider failure alone never releases funds, and the legacy two-store restore
+helper refuses CyberHerd schemas. Whole-stack recovery and installation remain
+unfinished; no financial review or payout is activated by the source checkpoint.
+
 The native incoming zap/receipt contract is described in
 [`architecture/native-nip57.md`](architecture/native-nip57.md). It preserves
 ordinary LNURL payments and requires explicit feature activation.

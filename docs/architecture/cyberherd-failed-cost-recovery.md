@@ -144,6 +144,9 @@ operator-selected original values, never guessed from a balance or a Nostr note.
 
 ## Source verification and remaining scope
 
+The [485-test source checkpoint](../testing/cyberherd-failed-cost-checkpoint-20261110.md)
+records completed source, root-ownership, CLI/browser and inactive artifact checks.
+
 Temporary-ledger/provider/private-IPC fixtures exercise explicit cost/release,
 rolling-window timing, wrong scope, pending/unfinalized sources, expired reviews,
 insert rollback, immutable retries, independent journal ACK loss and role denial.

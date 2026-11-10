@@ -277,8 +277,11 @@ Subsequent [failed-cost recovery source](../architecture/cyberherd-failed-cost-r
 adds protected operator financial reviews, fresh original-payment verification,
 append-only budget adjustments and exact payout-role receipts. Preview and
 recovery-open cannot initialize or migrate a selected journal; sender credentials
-are not loaded for synchronization. Source verification is in progress and no
-financial review has been applied.
+are not loaded for synchronization. No production financial review has been
+applied. The [485-test source checkpoint](../testing/cyberherd-failed-cost-checkpoint-20261110.md)
+now records completed Rust/root-ownership/browser/CLI/inactive artifact checks.
+The legacy pair restore helper rejects CyberHerd schema; its historical process
+regression remains covered without claiming multi-journal recovery.
 
 Also required: consistent-restore and retention operations,
 installed identity/network/helper/NIP-46/provider qualification, dependency-audit

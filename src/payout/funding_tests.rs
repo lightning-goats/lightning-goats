@@ -84,6 +84,7 @@ fn journal_policy(q: &QualifiedFunding) -> crate::payout::store::Policy {
         max_fee_sats: 1,
         max_source_parts: 100,
         operation_addresses: vec![],
+        receipt_relays: vec!["wss://relay.damus.io/".into()],
     }
 }
 
@@ -272,7 +273,7 @@ async fn payout_journal_accepts_disjoint_parts_of_one_verified_receive_across_fe
         .unwrap();
     let url = format!("sqlite://{}", f.root.path().join("payout.db").display());
     let mut store = None;
-    for _ in 0..2 {
+    for step in 0..2 {
         let feed = f.ledger.begin_feed_attempt(10).await.unwrap().unwrap();
         f.ledger.confirm_feed_attempt(feed).await.unwrap();
         let allowance = f
@@ -314,12 +315,36 @@ async fn payout_journal_accepts_disjoint_parts_of_one_verified_receive_across_fe
         if store.is_none() {
             store = Some(Store::connect(&url, journal_policy(&q)).await.unwrap());
         }
-        store
-            .as_ref()
-            .unwrap()
-            .admit(&plan, &q, f.reservation.created_at + 10)
+        let now = f.reservation.created_at + 10 + step * 100;
+        let grant = store.as_ref().unwrap().admit(&plan, &q, now).await.unwrap();
+        let store = store.as_ref().unwrap();
+        let intent = store
+            .prepare_invoice(grant.id, &plan.rows[0].pubkey, now)
             .await
             .unwrap();
+        let request = store
+            .freeze_request(intent.id(), None, now + 1)
+            .await
+            .unwrap();
+        let encoded = crate::test_invoices::invoice_at(
+            1000,
+            request.description_hash(),
+            std::time::Duration::from_secs((now + 2).try_into().unwrap()),
+        );
+        let invoice = request
+            .validate_response(
+                &serde_json::to_vec(&json!({"pr":encoded})).unwrap(),
+                now + 2,
+            )
+            .unwrap();
+        if step == 0 {
+            store.freeze_invoice(&invoice, now + 3).await.unwrap();
+        } else {
+            // Distinct funding/grants must not pay one BOLT11 payment hash twice.
+            assert!(store.freeze_invoice(&invoice, now + 3).await.is_err());
+            assert!(store.saved_invoice(intent.id()).await.unwrap().is_none());
+            assert!(store.invoice_request(intent.id()).await.is_ok());
+        }
         task.abort();
     }
     let db = sqlx::SqlitePool::connect(&url).await.unwrap();
@@ -332,6 +357,210 @@ async fn payout_journal_accepts_disjoint_parts_of_one_verified_receive_across_fe
     );
     assert_eq!(store.unwrap().held_sats().await.unwrap(), 2);
     assert_eq!(f.ledger.feed_credit_sats().await.unwrap(), 80);
+}
+
+#[tokio::test]
+async fn outgoing_ordinary_invoice_journal_recovers_without_resigning_or_replacing_identity() {
+    use crate::payout::store::Store;
+    let f = Fixture::new().await;
+    let q = qualified(&f).await;
+    let url = format!("sqlite://{}", f.root.path().join("payout.db").display());
+    let policy = journal_policy(&q);
+    let store = Store::connect(&url, policy.clone()).await.unwrap();
+    let now = f.reservation.created_at + 10;
+    let member = &f.plan.rows[0].pubkey;
+    assert!(
+        store
+            .prepare_invoice(q.reservation().id, member, now)
+            .await
+            .is_err()
+    );
+    let grant = store.admit(&f.plan, &q, now).await.unwrap();
+    let (a, b) = tokio::join!(
+        store.prepare_invoice(grant.id, member, now),
+        store.prepare_invoice(grant.id, member, now)
+    );
+    let intent = a.unwrap();
+    assert_eq!(b.unwrap().id(), intent.id());
+    assert!(!intent.uses_nostr());
+    assert!(intent.unsigned_zap().unwrap().is_none());
+    assert!(store.invoice_request(intent.id()).await.is_err());
+    let request = store
+        .freeze_request(intent.id(), None, now + 1)
+        .await
+        .unwrap();
+    let restored = Store::connect(&url, policy).await.unwrap();
+    assert_eq!(
+        restored
+            .prepare_invoice(grant.id, member, now + 1000)
+            .await
+            .unwrap()
+            .id(),
+        intent.id()
+    );
+    assert!(
+        restored
+            .invoice_request(intent.id())
+            .await
+            .unwrap()
+            .raw_zap()
+            .is_none()
+    );
+    let encoded = crate::test_invoices::invoice_at(
+        1000,
+        request.description_hash(),
+        std::time::Duration::from_secs((now + 2).try_into().unwrap()),
+    );
+    let invoice = request
+        .validate_response(
+            &serde_json::to_vec(&json!({"pr":encoded})).unwrap(),
+            now + 2,
+        )
+        .unwrap();
+    restored.freeze_invoice(&invoice, now + 3).await.unwrap();
+    assert_eq!(
+        restored.freeze_invoice(&invoice, now + 1000).await.unwrap(),
+        invoice
+    );
+    assert_eq!(
+        restored.saved_invoice(intent.id()).await.unwrap(),
+        Some(invoice.clone())
+    );
+    assert!(restored.invoice_request(intent.id()).await.is_err());
+    let changed = crate::test_invoices::invoice_at(
+        1000,
+        request.description_hash(),
+        std::time::Duration::from_secs((now + 3).try_into().unwrap()),
+    );
+    let changed = request
+        .validate_response(
+            &serde_json::to_vec(&json!({"pr":changed})).unwrap(),
+            now + 3,
+        )
+        .unwrap();
+    assert!(restored.freeze_invoice(&changed, now + 4).await.is_err());
+    assert_eq!(
+        restored.saved_invoice(intent.id()).await.unwrap(),
+        Some(invoice)
+    );
+    assert_eq!(restored.held_sats().await.unwrap(), 2);
+    let db = sqlx::SqlitePool::connect(&url).await.unwrap();
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM payout_invoice_journal")
+            .fetch_one(&db)
+            .await
+            .unwrap(),
+        3
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT protocol FROM payout_callback_requests")
+            .fetch_one(&db)
+            .await
+            .unwrap(),
+        "ordinary"
+    );
+    for table in [
+        "payout_invoice_intents",
+        "payout_callback_requests",
+        "payout_invoices",
+        "payout_invoice_journal",
+    ] {
+        assert!(
+            sqlx::query(&format!("DELETE FROM {table}"))
+                .execute(&db)
+                .await
+                .is_err()
+        );
+    }
+    assert!(
+        sqlx::query("UPDATE payout_callback_requests SET raw_zap='{}',protocol='nip57'")
+            .execute(&db)
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn outgoing_supported_zap_freezes_exact_bytes_before_callback_and_rejects_downgrades() {
+    use crate::payout::store::Store;
+    let f = Fixture::new_with_nostr(true).await;
+    let q = qualified(&f).await;
+    let url = format!("sqlite://{}", f.root.path().join("payout.db").display());
+    let policy = journal_policy(&q);
+    let store = Store::connect(&url, policy.clone()).await.unwrap();
+    let now = f.reservation.created_at + 10;
+    let grant = store.admit(&f.plan, &q, now).await.unwrap();
+    let intent = store
+        .prepare_invoice(grant.id, &f.plan.rows[0].pubkey, now)
+        .await
+        .unwrap();
+    let unsigned = intent.unsigned_zap().unwrap().unwrap();
+    assert_eq!(unsigned.kind, 9734);
+    assert!(store.freeze_request(intent.id(), None, now).await.is_err());
+    let event = crate::nostr_event::test_event(
+        1,
+        unsigned.kind,
+        unsigned.created_at,
+        &unsigned.content,
+        unsigned.tags,
+    );
+    let pretty = serde_json::to_string_pretty(&event).unwrap();
+    let request = store
+        .freeze_request(intent.id(), Some(&pretty), now + 1)
+        .await
+        .unwrap();
+    assert_eq!(
+        request.description_hash(),
+        hex::encode(Sha256::digest(pretty.as_bytes()))
+    );
+    let compact = serde_json::to_string(&event).unwrap();
+    assert!(
+        store
+            .freeze_request(intent.id(), Some(&compact), now + 2)
+            .await
+            .is_err()
+    );
+    let restored = Store::connect(&url, policy).await.unwrap();
+    let request = restored.invoice_request(intent.id()).await.unwrap();
+    assert_eq!(request.raw_zap(), Some(pretty.as_str()));
+    let wrong = crate::test_invoices::invoice_at(
+        1000,
+        &f.plan.rows[0].recipient.as_ref().unwrap().metadata_hash,
+        std::time::Duration::from_secs((now + 2).try_into().unwrap()),
+    );
+    assert!(
+        request
+            .validate_response(&serde_json::to_vec(&json!({"pr":wrong})).unwrap(), now + 2)
+            .is_err()
+    );
+    let encoded = crate::test_invoices::invoice_at(
+        1000,
+        request.description_hash(),
+        std::time::Duration::from_secs((now + 2).try_into().unwrap()),
+    );
+    let invoice = request
+        .validate_response(
+            &serde_json::to_vec(&json!({"pr":encoded})).unwrap(),
+            now + 2,
+        )
+        .unwrap();
+    restored.freeze_invoice(&invoice, now + 3).await.unwrap();
+    assert_eq!(restored.held_sats().await.unwrap(), 2);
+    let db = sqlx::SqlitePool::connect(&url).await.unwrap();
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT protocol FROM payout_callback_requests")
+            .fetch_one(&db)
+            .await
+            .unwrap(),
+        "nip57"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT raw_zap FROM payout_callback_requests")
+            .fetch_one(&db)
+            .await
+            .unwrap(),
+        pretty
+    );
 }
 
 #[tokio::test]
@@ -424,6 +653,9 @@ struct Fixture {
 }
 impl Fixture {
     async fn new() -> Self {
+        Self::new_with_nostr(false).await
+    }
+    async fn new_with_nostr(nostr: bool) -> Self {
         let root = TempDir::new().unwrap();
         std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o750)).unwrap();
         let database = format!("sqlite://{}", root.path().join("core.db").display());
@@ -473,7 +705,11 @@ impl Fixture {
             max_sats_per_24h: 1000,
         };
         let allowance = ledger.reward_allowance(&policy, epoch, feed).await.unwrap();
-        let plan = sample_plan(epoch, feed, &allowance);
+        let mut plan = sample_plan(epoch, feed, &allowance);
+        if nostr {
+            plan.rows[0].recipient.as_mut().unwrap().receipt_pubkey =
+                Some(crate::nostr_event::test_event(3, 1, 100, "", vec![]).pubkey);
+        }
         let reservation = ledger
             .reserve_reward(&policy, epoch, feed, &plan.hash().unwrap(), 2)
             .await

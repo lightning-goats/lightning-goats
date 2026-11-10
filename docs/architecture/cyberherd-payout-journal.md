@@ -62,8 +62,10 @@ whole-transaction rollback, held capacity after a day, clock reversal and payee
 exclusions. Private test constructors additionally model adversarial restored-core
 evidence; production callers cannot deserialize it into qualified funding.
 
-This is library source, not an installed payout service. Quote/execute intents,
-strict outgoing invoice and NIP-57 handling, authenticated terminal budget outcomes,
-treat/thread messages, worker deployment and financial activation remain unfinished.
+The [outgoing invoice boundary](cyberherd-outgoing-invoices.md) adds persisted
+callback/signature bytes and exact invoice validation. This is library source,
+not an installed payout service. Quote/execute intents, the remote signing broker,
+authenticated terminal budget outcomes, treat/thread messages, worker deployment
+and financial activation remain unfinished.
 The public receive daemon remains receive-only; no runtime credential changes are
 made by this implementation.

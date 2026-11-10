@@ -129,11 +129,44 @@ async fn resolve(url: &Url) -> Result<Vec<SocketAddr>> {
 }
 
 pub async fn get_json(raw: &str, max_bytes: usize) -> Result<Vec<u8>> {
+    get_json_url(validate_destination(raw, "https")?, max_bytes).await
+}
+
+/// Protocol-created query values may contain a signed NIP-57 JSON event. Bound
+/// those separately; never relax validation of the recipient-supplied origin.
+pub(crate) async fn get_json_query(
+    base: &str,
+    query: &[(String, String)],
+    max_bytes: usize,
+) -> Result<Vec<u8>> {
+    get_json_url(query_url(base, query)?, max_bytes).await
+}
+
+fn query_url(base: &str, query: &[(String, String)]) -> Result<Url> {
+    let mut url = validate_destination(base, "https")?;
+    if query.len() > 4
+        || query
+            .iter()
+            .any(|(key, value)| key.is_empty() || key.len() > 64 || value.len() > 8192)
+    {
+        bail!("public JSON query exceeds protocol bound");
+    }
+    url.query_pairs_mut().extend_pairs(
+        query
+            .iter()
+            .map(|(key, value)| (key.as_str(), value.as_str())),
+    );
+    if url.as_str().len() > 32768 {
+        bail!("public JSON URL exceeds protocol bound");
+    }
+    Ok(url)
+}
+
+async fn get_json_url(url: Url, max_bytes: usize) -> Result<Vec<u8>> {
     if max_bytes == 0 || max_bytes > 262_144 {
         bail!("invalid public response bound");
     }
     timeout(Duration::from_secs(12), async {
-        let url = validate_destination(raw, "https")?;
         let addresses = resolve(&url).await?;
         let host = url.host_str().context("destination is missing a host")?;
         let client = Client::builder()
@@ -197,6 +230,52 @@ pub async fn connect_relay(raw: &str) -> Result<WebSocketStream<MaybeTlsStream<T
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn signed_query_bytes_are_bounded_separately_without_relaxing_origin_checks() {
+        let raw = "{\"content\":\"".to_owned() + &"⚡".repeat(600) + "\"}";
+        let query = vec![
+            ("nostr".into(), raw.clone()),
+            ("amount".into(), "5000".into()),
+        ];
+        let url = query_url("https://pay.example.com/cb?token=synthetic-private", &query).unwrap();
+        assert!(url.as_str().len() > 2048);
+        assert_eq!(url.host_str(), Some("pay.example.com"));
+        assert_eq!(
+            url.query_pairs().find(|(key, _)| key == "nostr").unwrap().1,
+            raw
+        );
+        for base in [
+            "http://pay.example.com/",
+            "https://10.8.0.6/",
+            "https://user:pass@pay.example.com/",
+            "https://pay.example.com:8080/",
+            "https://pay.example.com/#f",
+        ] {
+            assert!(query_url(base, &query).is_err());
+        }
+        assert!(
+            query_url(
+                "https://pay.example.com/",
+                &[("nostr".into(), "x".repeat(8193))]
+            )
+            .is_err()
+        );
+        assert!(
+            query_url(
+                "https://pay.example.com/",
+                &vec![("nostr".into(), "x".into()); 5]
+            )
+            .is_err()
+        );
+        assert!(
+            query_url(
+                "https://pay.example.com/",
+                &vec![("nostr".into(), "⚡".repeat(2700)); 4]
+            )
+            .is_err()
+        );
+    }
 
     #[test]
     fn blocks_private_documentation_special_mapped_and_mixed_dns_answers() {

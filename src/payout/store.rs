@@ -15,6 +15,9 @@ use crate::cyberherd::rewards::Plan;
 
 static MIGRATOR: Migrator = sqlx::migrate!("./payout-migrations");
 
+#[path = "store_invoices.rs"]
+mod invoices;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Scope {
@@ -49,6 +52,7 @@ pub struct Policy {
     pub max_fee_sats: u64,
     pub max_source_parts: u16,
     pub operation_addresses: Vec<String>,
+    pub receipt_relays: Vec<String>,
 }
 
 impl Policy {
@@ -66,6 +70,7 @@ impl Policy {
         for address in &self.operation_addresses {
             address_identity(address)?;
         }
+        super::invoice::receipt_relays(&self.receipt_relays)?;
         Ok(())
     }
 }
@@ -105,6 +110,10 @@ impl Store {
             "payout_source_parts",
             "payout_rows",
             "payout_journal",
+            "payout_invoice_intents",
+            "payout_callback_requests",
+            "payout_invoices",
+            "payout_invoice_journal",
         ];
         if names.iter().any(|name| !allowed.contains(&name.as_str())) {
             bail!("payout requires its own database");

@@ -255,3 +255,9 @@ across retries/restarts. Every grant stays held pending the unfinished authorita
 terminal-outcome protocol. Execution, signing, delivery and operations above remain
 open. The triggering-payment amount correction from #114 is also retained in the
 feature source without changing the original legacy export or template edits.
+
+The [funding checkpoint](../testing/cyberherd-payout-funding-checkpoint-20261109.md)
+records 388 passing Rust tests on that source. The next
+[outgoing invoice boundary](../architecture/cyberherd-outgoing-invoices.md) freezes
+callback/signature bytes and validates exact returned invoices; it still supplies
+no provider execution, terminal accounting or signing-broker runtime.

@@ -18,6 +18,9 @@ before service start. An older sealed review without that inventory is accepted
 unchanged only when no role override exists. This permits a separately reviewed
 namespace override in the disposable rehearsal without changing vendor unit
 bytes or weakening the production invocation.
+Only a single `NetworkNamespacePath` naming an existing root-owned process is
+admissible in each override at this stage. Identity, commands, groups, credential
+loads, environment and other directives refuse even if their file is protected.
 
 Ubuntu's systemd 255 reports `NeedDaemonReload=yes` for the masked intake with
 its namespace override, despite manager reload. In this masked state only,

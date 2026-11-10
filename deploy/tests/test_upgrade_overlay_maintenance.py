@@ -13,6 +13,7 @@ import subprocess
 import sys
 import unittest
 import uuid
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import test_upgrade_overlay_stage as prep
@@ -26,6 +27,16 @@ with patch.dict(sys.modules, {'inactive_file_transaction': s.C.TX}):
 
 
 class MaintenanceBoundaries(unittest.TestCase):
+    def test_role_override_cannot_change_identity_commands_groups_or_credentials(self):
+        valid = '[Service]\nNetworkNamespacePath=/proc/1/ns/net\n'
+        with patch.object(m.S.Path, 'stat', return_value=SimpleNamespace(st_uid=0)):
+            self.assertEqual(m.S.namespace_override(valid), '/proc/1/ns/net')
+            for directive in ('User=root', 'SupplementaryGroups=sudo', 'ExecStartPre=/bin/true',
+                              'LoadCredential=key:/private', 'Environment=secret', 'NetworkNamespacePath=/proc/1/ns/net'):
+                with self.assertRaises(ValueError): m.S.namespace_override(valid + directive + '\n')
+        with patch.object(m.S.Path, 'stat', return_value=SimpleNamespace(st_uid=1001)):
+            with self.assertRaises(ValueError): m.S.namespace_override(valid)
+
     def test_masked_reload_flag_requires_exact_frozen_protected_override(self):
         import tempfile
         check = m.Q.I.masked_reload_current

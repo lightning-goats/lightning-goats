@@ -43,6 +43,26 @@ MAINTENANCE = Path('/etc/cyberherd/state-maintenance.toml')
 USERS = {'herd', 'dexter', 'rowan', 'cosmo', 'newton', 'nova'}
 
 
+def namespace_override(text):
+    section, namespace = False, None
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith(('#', ';')):
+            continue
+        if line == '[Service]':
+            section = True
+        elif section and line.startswith('NetworkNamespacePath=') and namespace is None:
+            namespace = line.split('=', 1)[1]
+            found = re.fullmatch(r'/proc/([1-9][0-9]{0,9})/ns/net', namespace)
+            if found is None or Path('/proc', found[1]).stat().st_uid != 0:
+                raise ValueError('namespace override must name an existing root-owned process')
+        else:
+            raise ValueError('only an explicit network namespace override is supported in this stage')
+    if namespace is None:
+        raise ValueError('missing explicit namespace override')
+    return namespace
+
+
 def role_dropins():
     """Pin existing role-specific overrides, including those hidden by masks."""
     result = {}
@@ -55,6 +75,9 @@ def role_dropins():
             for path in directory.iterdir():
                 if path.name.endswith('.conf'):
                     C.protected(path)
+                    if path.stat().st_size > 65536:
+                        raise ValueError('role override exceeds configuration bound')
+                    namespace_override(path.read_text())
                     result[str(path)] = C.TX.fingerprint(path)
     return result
 

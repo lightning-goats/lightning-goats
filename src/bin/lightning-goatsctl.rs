@@ -104,6 +104,15 @@ enum ReconcileOutcome {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+    #[cfg(not(unix))]
+    if matches!(
+        args.command,
+        Command::CheckCoreUpgrade { .. }
+            | Command::BackupLegacyCore { .. }
+            | Command::VerifyCoreUpgrade { .. }
+    ) {
+        bail!("legacy core upgrade operations require Unix protected-file authority");
+    }
     // These commands must branch BEFORE AppConfig/LedgerStore::connect, which
     // would migrate the selected live database even for the ordinary status path.
     #[cfg(unix)]

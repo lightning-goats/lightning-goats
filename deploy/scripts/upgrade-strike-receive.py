@@ -29,6 +29,15 @@ def digest(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
+def require_legacy_upgrade_payload(payload):
+    # This historical helper has no native four-journal or migration-comparison
+    # transaction. It must not silently apply the new financial core.
+    for migration in (payload / "migrations").glob("*.sql"):
+        prefix = migration.name.split("_", 1)[0]
+        if prefix.isdecimal() and int(prefix) >= 16:
+            raise ValueError("CyberHerd core requires the reviewed native upgrade transaction; no service changed")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("archive", type=Path)
@@ -52,6 +61,7 @@ def main():
                           "configuration_preserved": True, "database_preserved": True}), flush=True)
         if not args.apply:
             return
+        require_legacy_upgrade_payload(payload)
         if os.geteuid() != 0:
             raise ValueError("root required")
         config_path = Path("/etc/lightning-goats/config.receive.toml")

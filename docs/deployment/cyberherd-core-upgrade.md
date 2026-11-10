@@ -11,7 +11,8 @@ Do not use the new ordinary `status` command to discover the old database before
 backup: its normal store constructor applies current migrations. These explicit
 commands branch before app configuration and that constructor. The existing
 `upgrade-strike-receive.py` still uses system Python SQLite to inspect the original
-database; its old apply path has not been qualified for the CyberHerd upgrade.
+database; its old apply path now refuses a CyberHerd financial archive before any
+service command. It has not been qualified for the CyberHerd upgrade.
 Do not mistake the patched Rust engine for qualification of that Python parser.
 
 Resolve `deploy/cyberherd/core-upgrade.toml.example` using the actual existing

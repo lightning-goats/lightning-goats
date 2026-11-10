@@ -10,7 +10,7 @@ use std::{fs::OpenOptions, os::unix::fs::OpenOptionsExt, path::PathBuf};
 async fn main() -> Result<()> {
     let path = PathBuf::from(std::env::args().nth(1).context("new /run fixture path")?);
     let parent = path.parent().context("fixture parent")?;
-    if lightning_goats::private_ipc::uid()? == 0
+    if tokio::net::UnixStream::pair()?.0.peer_cred()?.uid() == 0
         || !path.starts_with("/run")
         || path.file_name().is_none()
         || parent.canonicalize()? != parent

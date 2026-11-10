@@ -56,6 +56,7 @@ impl Role {
                     | Request::MemberOverlay { .. }
                     | Request::RewardResults { .. }
                     | Request::Safety
+                    | Request::LifecycleContext
                     | Request::RewardAllowance { .. }
                     | Request::ReserveReward { .. }
             ),
@@ -358,6 +359,10 @@ async fn serve_one(
                 },
                 Err(_) => Response::Rejected,
             },
+            Request::LifecycleContext => match ledger.lifecycle_context(mode).await {
+                Ok(state) => Response::LifecycleContext { state },
+                Err(_) => Response::Rejected,
+            },
             Request::Safety => match ledger.core_safety(mode).await {
                 Ok(state) => Response::Safety { state },
                 Err(_) => Response::Rejected,
@@ -633,6 +638,17 @@ impl Client {
                 })
             }
             _ => bail!("core did not return an authenticated event batch"),
+        }
+    }
+    pub async fn lifecycle_context(&self) -> Result<super::LifecycleContext> {
+        match self.request(&Request::LifecycleContext).await? {
+            Response::LifecycleContext { state } => {
+                if let Some(solar) = &state.solar {
+                    solar.validate()?;
+                }
+                Ok(state)
+            }
+            _ => bail!("core did not return authenticated lifecycle context"),
         }
     }
     pub async fn safety(&self) -> Result<Safety> {

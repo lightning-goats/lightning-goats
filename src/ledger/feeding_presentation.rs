@@ -26,8 +26,8 @@ impl LedgerStore {
                 Some(_) => "ready",
             }
         };
-        sqlx::query("INSERT INTO feeding_presentation(singleton,paused,reason,threshold_sats,observed_at) VALUES(1,?,?,?,unixepoch()) ON CONFLICT(singleton) DO UPDATE SET paused=excluded.paused,reason=excluded.reason,threshold_sats=excluded.threshold_sats,observed_at=excluded.observed_at")
-            .bind(reason!="ready").bind(reason).bind(to_i64(threshold_sats,"feeding threshold")?)
+        sqlx::query("INSERT INTO feeding_presentation(singleton,paused,reason,threshold_sats,observed_at,override_enabled) VALUES(1,?,?,?,unixepoch(),?) ON CONFLICT(singleton) DO UPDATE SET paused=excluded.paused,reason=excluded.reason,threshold_sats=excluded.threshold_sats,observed_at=excluded.observed_at,override_enabled=excluded.override_enabled")
+            .bind(reason!="ready").bind(reason).bind(to_i64(threshold_sats,"feeding threshold")?).bind(safety.map(|s| s.override_enabled))
             .execute(&self.pool).await?;
         Ok(())
     }

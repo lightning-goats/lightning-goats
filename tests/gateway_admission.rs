@@ -37,6 +37,9 @@ async fn item(State(owner): State<Owner>, Path(item): Path<String>) -> String {
     }
     match item.as_str() {
         "FeederOverride" => "OFF".into(),
+        "Sun_SunPhaseName" => "DAYLIGHT".into(),
+        "Sun_Set_Start" => "2026-11-10T17:00:00-07:00".into(),
+        "Sun_DirectRadiation" => "0.5 W/m²".into(),
         "LightningGoatsCanaryRemoteEnabled" => "ON".into(),
         "LightningGoatsCanaryAck" => owner.ack.lock().unwrap().clone(),
         _ => "UNDEF".into(),
@@ -929,5 +932,42 @@ async fn owner_progress_denials_and_failure_never_resend_or_release_reservation(
         .unwrap();
     assert_eq!(result["status"], "confirmed");
     assert_eq!(owner.commands.lock().unwrap().len(), 1);
+    mock.abort();
+}
+
+#[tokio::test]
+async fn solar_route_is_sanitized_read_only_and_has_no_item_proxy_or_commands() {
+    let owner = Owner::default();
+    let (mock, owner_url) = mock_owner(owner.clone()).await;
+    let directory = TempDir::new().unwrap();
+    let (_gateway, base) = gateway(&directory, &owner_url, 1).await;
+    let client = Client::new();
+    let response = client.get(format!("{base}/v1/solar")).send().await.unwrap();
+    assert!(response.status().is_success());
+    let context: lightning_goats::gateway::SolarContext = response.json().await.unwrap();
+    assert!(context.fresh(lightning_goats::cyberherd::calendar::now().unwrap()));
+    assert_eq!(
+        context.phase,
+        Some(lightning_goats::gateway::SunPhase::Daylight)
+    );
+    assert_eq!(context.direct_milli_w_m2, Some(500));
+    assert!(context.sunset_at.is_some());
+    for path in [
+        "/v1/solar",
+        "/v1/solar/FeederOverride",
+        "/rest/items/FeederOverride",
+    ] {
+        assert!(
+            !client
+                .post(format!("{base}{path}"))
+                .body("ON")
+                .send()
+                .await
+                .unwrap()
+                .status()
+                .is_success()
+        );
+    }
+    assert!(owner.commands.lock().unwrap().is_empty());
     mock.abort();
 }

@@ -56,6 +56,9 @@ herd = "0000000000000000000000000000000000000000000000000000000000000000"
 # enabled = false
 # start_after = 0
 # poll_millis = 1000
+# lifecycle = false
+# Explicit optional pause/resume/evening notices and live-stream invitations.
+# Requires enabled messaging + signer; template deletion disables each category.
 # relays = ["wss://relay.damus.io/", "wss://nostr.chaima.info/", "wss://relay.artx.market/"]
 # Omitting signer enables overlay-only delivery without reading any credential.
 # [messaging.signer]

@@ -1,0 +1,28 @@
+{
+  "feeder_requests_paused": {
+    "0": "🐐 The feeder is taking a little break. The goats will have to wait for their next round of snacks!",
+    "1": "🐐 Snack time is on hold—the feeder is paused for now. Zaps can still arrive while the treat chute takes a breather.",
+    "2": "🐐 A little pause at the trough! The feeder is resting, but you can still send zaps to the herd.",
+    "3": "🐐 The goats are saving their appetites. The feeder is paused; we’ll let you know when snack time is back.",
+    "4": "🐐 The treat chute is taking five. The feeder is paused for now, though zaps are still welcome.",
+    "5": "🐐 Hold those hungry headbutts—the feeder is on a break! The next round of snacks will have to wait."
+  },
+  "feeder_requests_enabled": {
+    "0": "🐐 The feeder is back on the menu! Time to line up at the trough again.",
+    "1": "🐐 Snack time is back! The feeder has resumed, and the goats are keeping an eye on the treat chute.",
+    "2": "🐐 Break’s over at the trough. The feeder is ready for the next round of snacks!",
+    "3": "🐐 The feeder’s little rest is over. Let’s get those hungry goats back in line!",
+    "4": "🐐 Back to the snack business! The feeder is unpaused and the herd is all ears.",
+    "5": "🐐 The wait at the trough is over—the feeder is back in action. Who’s ready for the next bite?"
+  },
+  "feeder_requests_paused_night": {
+    "0": "🐐 The feeder is resting for the evening while the goats head out to forage. The stream is signing off for the night; we’ll be back when the sun comes up!",
+    "1": "🐐 Evening browsing calls! The goats are off to forage, the feeder is paused, and the stream is winding down for the night. See you when the sun comes up.",
+    "2": "🐐 Bushes and branches are on tonight’s menu. The goats are heading out to forage while the feeder and stream rest until morning. Zaps are still welcome!",
+    "3": "🐐 Time for an evening wander and a few leafy bites. The feeder is paused and the stream is signing off for the night. We’ll see you in the sunshine!",
+    "4": "🐐 The goats are trading feeder snacks for evening forage. The feeder is paused and the stream is closing for the night; back when the sun comes up.",
+    "5": "🐐 That’s our cue to browse! The goats are heading out to forage, and the feeder and stream are settling down for the night. Catch us again in the morning.",
+    "6": "🐐 The feeder is taking its evening rest while the goats go foraging. The stream is signing off until sunrise. Zaps can still arrive while we’re away!",
+    "7": "🐐 A few more leaves before bedtime! The goats are off to forage, the feeder is paused, and the stream is wrapping up for the night. Back with the morning sun."
+  }
+}

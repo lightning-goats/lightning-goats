@@ -17,6 +17,8 @@ pub struct Config {
     pub poll_millis: u64,
     pub relays: Vec<String>,
     #[serde(default)]
+    pub lifecycle: bool,
+    #[serde(default)]
     pub signer: Option<Signer>,
 }
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -30,6 +32,9 @@ pub struct Signer {
 impl Config {
     pub fn validate(&self, owner: &str) -> Result<()> {
         crate::payout::invoice::receipt_relays(&self.relays)?;
+        if self.lifecycle && (!self.enabled || self.signer.is_none()) {
+            bail!("lifecycle notices require explicitly enabled messaging and its NIP-46 client");
+        }
         if self.start_after < 0 || !(500..=60000).contains(&self.poll_millis) {
             bail!("invalid member messaging activation/poll configuration");
         }
@@ -130,6 +135,26 @@ impl Config {
             }
         });
         if let Some(nak) = nak {
+            if self.lifecycle {
+                let notices = super::notice_worker::Worker {
+                    store: store.clone(),
+                    core: Client::new(core_socket.to_path_buf(), core_uid)?,
+                    transport: nak.clone(),
+                    owner: owner.into(),
+                };
+                tasks.spawn(async move {
+                    let mut ticks = tokio::time::interval(Duration::from_millis(millis));
+                    ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                    loop {
+                        ticks.tick().await;
+                        if notices.tick().await.is_err() {
+                            tracing::warn!(
+                                "broadcast notice delivery held; frozen record retained"
+                            );
+                        }
+                    }
+                });
+            }
             let worker = super::delivery_worker::Worker {
                 store,
                 core: Client::new(core_socket.to_path_buf(), core_uid)?,

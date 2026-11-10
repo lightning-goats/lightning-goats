@@ -11,6 +11,40 @@ use crate::core_bridge::{
 };
 
 impl LedgerStore {
+    pub async fn update_solar_context(&self, context: &crate::gateway::SolarContext) -> Result<()> {
+        context.validate()?;
+        sqlx::query("INSERT INTO solar_presentation(singleton,document_json) VALUES(1,?) ON CONFLICT(singleton) DO UPDATE SET document_json=excluded.document_json")
+            .bind(serde_json::to_string(context)?).execute(&self.pool).await?;
+        Ok(())
+    }
+    pub async fn lifecycle_context(
+        &self,
+        mode: crate::config::RuntimeMode,
+    ) -> Result<crate::core_bridge::LifecycleContext> {
+        let mut tx = self.pool.begin().await?;
+        let row = sqlx::query(
+            "SELECT override_enabled,observed_at FROM feeding_presentation WHERE singleton=1",
+        )
+        .fetch_optional(&mut *tx)
+        .await?;
+        let solar: Option<String> =
+            sqlx::query_scalar("SELECT document_json FROM solar_presentation WHERE singleton=1")
+                .fetch_optional(&mut *tx)
+                .await?;
+        let state = crate::core_bridge::LifecycleContext {
+            override_enabled: row
+                .as_ref()
+                .map(|r| r.try_get::<Option<bool>, _>("override_enabled"))
+                .transpose()?
+                .flatten(),
+            observed_at: row.as_ref().map(|r| r.try_get("observed_at")).transpose()?,
+            solar: solar.map(|r| serde_json::from_str(&r)).transpose()?,
+            nostr_enabled: mode.nostr_enabled(),
+        };
+        tx.commit().await?;
+        Ok(state)
+    }
+
     pub async fn core_safety(
         &self,
         mode: crate::config::RuntimeMode,

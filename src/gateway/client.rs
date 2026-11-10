@@ -142,6 +142,17 @@ impl GatewayClient {
         self.get_json(endpoint, "feeder safety").await
     }
 
+    pub async fn solar_context(&self) -> Result<super::SolarContext> {
+        let context: super::SolarContext = self
+            .get_json(self.base_url.join("v1/solar")?, "solar context")
+            .await?;
+        context.validate()?;
+        if !context.fresh(super::now_epoch()?) {
+            bail!("stale gateway solar context");
+        }
+        Ok(context)
+    }
+
     pub async fn temperature_f(&self) -> Result<Option<f64>> {
         #[derive(Deserialize)]
         struct TemperatureResponse {

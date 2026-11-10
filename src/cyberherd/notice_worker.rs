@@ -1,0 +1,76 @@
+//! Exact ordered broadcast delivery, independent of member reply anchors.
+use super::{
+    calendar,
+    delivery_worker::{RelayAck, Step, Transport},
+    store::{Store, notice_state::Job},
+};
+use crate::{core_bridge::unix::Client, nostr_event::VerifiedEvent};
+use anyhow::{Result, bail};
+
+pub(crate) struct Worker<T> {
+    pub store: Store,
+    pub core: Client,
+    pub transport: T,
+    pub owner: String,
+}
+impl<T: Transport> Worker<T> {
+    pub async fn tick(&self) -> Result<Step> {
+        let Some(job) = self
+            .store
+            .reserve_notice(&self.owner, calendar::now()?)
+            .await?
+        else {
+            return Ok(Step::Idle);
+        };
+        let result = self.deliver(&job).await;
+        self.store
+            .finish_notice(
+                &job,
+                result.as_ref().ok().and_then(|a| a.as_ref()),
+                calendar::now()?,
+            )
+            .await?;
+        match result {
+            Ok(Some(_)) => Ok(Step::Published),
+            Ok(None) => Ok(Step::Waiting),
+            Err(_) => bail!("broadcast delivery held; exact notice retained"),
+        }
+    }
+    async fn permitted(&self, job: &Job) -> Result<bool> {
+        let now = calendar::now()?;
+        let state = self.core.lifecycle_context().await?;
+        let Some(paused) = state.confirmed_override(now) else {
+            return Ok(false);
+        };
+        if !state.nostr_enabled {
+            return Ok(false);
+        }
+        if job.purpose == "invitation" {
+            if paused {
+                return Ok(false);
+            }
+            return self.store.notice_invitation_live(job, now).await;
+        }
+        // Ordered historical transitions may be delivered after a subsequent
+        // transition. Unlike membership updates, a pause must publish while ON.
+        Ok(true)
+    }
+    async fn deliver(&self, job: &Job) -> Result<Option<RelayAck>> {
+        if !self.permitted(job).await? {
+            return Ok(None);
+        }
+        let raw = match &job.signed {
+            Some(raw) => raw.clone(),
+            None => {
+                let event = self.transport.sign(&job.unsigned).await?;
+                self.store.save_notice_signature(job, &event).await?
+            }
+        };
+        let event = VerifiedEvent::from_json(&raw)?;
+        job.unsigned.validate_signed(&event)?;
+        if !self.permitted(job).await? {
+            return Ok(None);
+        }
+        Ok(Some(self.transport.publish(&event, &job.relay).await?))
+    }
+}

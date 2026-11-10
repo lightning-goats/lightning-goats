@@ -177,6 +177,21 @@ async fn main() -> Result<()> {
         config.feeder.threshold_sats,
         config.service.mode,
     ));
+    let mut solar_presentation = tokio::spawn({
+        let enabled = config.core_bridge.is_some();
+        let ledger = ledger.clone();
+        let gateway = gateway.clone();
+        async move {
+            if enabled {
+                lightning_goats::feeding_presentation::run_solar_presentation_worker(
+                    ledger, gateway,
+                )
+                .await
+            } else {
+                pending::<Result<()>>().await
+            }
+        }
+    });
     let mut informational = tokio::spawn(run_informational_worker(
         ledger.clone(),
         gateway,
@@ -225,6 +240,7 @@ async fn main() -> Result<()> {
         result = &mut recovery => task_exit("settlement recovery", result),
         result = &mut feeder => task_exit("feed worker", result),
         result = &mut informational => task_exit("informational worker", result),
+        result = &mut solar_presentation => task_exit("solar presentation worker", result),
         result = &mut feeding_presentation => task_exit("feeding presentation worker", result),
         result = &mut message_processor => task_exit("Nostr message processor", result),
         result = &mut publisher => task_exit("Nostr outbox publisher", result),
@@ -236,6 +252,7 @@ async fn main() -> Result<()> {
     feeder.abort();
     informational.abort();
     feeding_presentation.abort();
+    solar_presentation.abort();
     message_processor.abort();
     publisher.abort();
     zap_receipts.abort();

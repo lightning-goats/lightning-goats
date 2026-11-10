@@ -55,7 +55,10 @@ pub fn audience(category: &str) -> Option<Audience> {
         | "cyber_herd_invitation"
         | "cyber_herd_pause"
         | "cyber_herd_resume"
-        | "cyber_herd_evening" => Some(Audience::NostrAndOverlay),
+        | "cyber_herd_evening"
+        | "feeder_requests_paused"
+        | "feeder_requests_enabled"
+        | "feeder_requests_paused_night" => Some(Audience::NostrAndOverlay),
         _ => None,
     }
 }
@@ -67,6 +70,9 @@ impl Catalog {
 
     pub fn legacy() -> Result<Self> {
         Self::from_json(LEGACY)
+    }
+    pub fn lifecycle_defaults() -> Result<Self> {
+        Self::from_json(include_str!("../../templates/cyberherd-lifecycle.json"))
     }
     pub fn delivery_defaults() -> Result<Self> {
         Self::from_json(include_str!("../../templates/cyberherd-delivery.json"))

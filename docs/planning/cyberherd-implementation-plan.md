@@ -240,9 +240,15 @@ The uploaded OBS artwork, base feed-credit accounting and feeder owner remain
 unchanged. No new CyberHerd service or financial operation is installed or enabled
 by these source checkpoints. Keep the full PR draft while required work remains.
 
+Subsequent optional [lifecycle source](../architecture/cyberherd-lifecycle.md)
+adds an actual-override observer, ordered per-relay/destination notices, bounded
+live-stream invitations and sanitized gateway solar context. This source remains
+under verification and is disabled by default; it does not establish production
+installation or public relay/bunker qualification.
+
 Remaining implementation and qualification includes the feeder herd summary and
-one authenticated active-stream copy, optional invitation/pause/resume/evening
-lifecycle notices, readonly roster/targets/scores and OBS cards, browser Nostr
+one authenticated active-stream copy, lifecycle source/installed qualification,
+readonly roster/targets/scores and OBS cards, browser Nostr
 authentication and authenticated operator settings/template/member/reset tools.
 Also required: explicit failed-cost/consistent-restore and retention operations,
 installed identity/network/helper/NIP-46/provider qualification, dependency-audit

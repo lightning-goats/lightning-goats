@@ -171,6 +171,12 @@ impl Runtime {
                 &super::templates::Catalog::delivery_defaults()?,
             )
             .await?;
+        store
+            .seed_templates(
+                &config.project_pubkey,
+                &super::templates::Catalog::lifecycle_defaults()?,
+            )
+            .await?;
         let client = Client::new(config.core_socket.clone(), config.core.core_uid)?;
         let discovery =
             Discovery::new(Reader::new(config.relays.clone())?, config.required_relays)?;
@@ -248,6 +254,32 @@ impl Runtime {
         let feeder = self.availability().await;
         if feeder != FeederAvailability::Ready {
             self.store.defer_pending_payments(owner).await?;
+        }
+        if let Some(messaging) = self
+            .config
+            .messaging
+            .as_ref()
+            .filter(|m| m.enabled && m.lifecycle)
+        {
+            let result = async {
+                let state = self.client.lifecycle_context().await?;
+                self.store
+                    .observe_lifecycle(
+                        owner,
+                        super::lifecycle::Observation {
+                            state: &state,
+                            discovery_available: refreshed.available,
+                            timezone: &self.config.timezone,
+                            relays: &messaging.relays,
+                            now: calendar::now()?,
+                        },
+                    )
+                    .await
+            }
+            .await;
+            if result.is_err() {
+                tracing::warn!("lifecycle observation held; confirmed transition retained");
+            }
         }
         worker::step(
             &self.store,

@@ -92,6 +92,7 @@ pub enum Request {
         limit: u16,
     },
     Safety,
+    LifecycleContext,
     PayoutFunding {
         expected_epoch: Uuid,
         reservation_id: Uuid,
@@ -137,6 +138,9 @@ pub enum Response {
     Safety {
         state: Safety,
     },
+    LifecycleContext {
+        state: LifecycleContext,
+    },
     Reservation {
         reservation: Box<crate::reward_funding::Reservation>,
     },
@@ -163,6 +167,24 @@ pub struct Safety {
     pub availability: Availability,
     pub observed_at: Option<i64>,
     pub nostr_enabled: bool,
+}
+
+/// Advisory observer input. Actual override state is kept distinct from modes
+/// and remote-enable failures; none can masquerade as an operator resumption.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LifecycleContext {
+    pub override_enabled: Option<bool>,
+    pub observed_at: Option<i64>,
+    pub nostr_enabled: bool,
+    pub solar: Option<crate::gateway::SolarContext>,
+}
+impl LifecycleContext {
+    pub fn confirmed_override(&self, now: i64) -> Option<bool> {
+        self.observed_at
+            .filter(|at| *at >= 0 && (0..=5).contains(&now.saturating_sub(*at)))?;
+        self.override_enabled
+    }
 }
 
 impl Safety {
@@ -544,5 +566,14 @@ mod tests {
         assert_eq!(state.current_availability(100), Availability::Ready);
         assert_eq!(state.current_availability(106), Availability::Unknown);
         assert_eq!(state.current_availability(99), Availability::Unknown);
+        let context = LifecycleContext {
+            override_enabled: Some(false),
+            observed_at: Some(100),
+            nostr_enabled: true,
+            solar: None,
+        };
+        assert_eq!(context.confirmed_override(100), Some(false));
+        assert_eq!(context.confirmed_override(106), None);
+        assert_eq!(context.confirmed_override(99), None);
     }
 }

@@ -80,6 +80,9 @@ client_pubkey = "{client}"
 bunker_relays = ["wss://nos.lol/"]
 '''
         self.assertEqual(self.invoke(self.text + messaging + signer, "--check").returncode, 0)
+        self.assertNotEqual(self.invoke(self.text + messaging.replace("enabled = false", "enabled = true") + "lifecycle = true\n", "--check").returncode, 0)
+        public_notices = messaging.replace("enabled = false", "enabled = true") + "lifecycle = true\n" + signer
+        self.assertEqual(self.invoke(self.text + public_notices, "--check").returncode, 0)
         for invalid in [messaging.replace("start_after = 0", "start_after = -1"),
                         messaging.replace("poll_millis = 1000", "poll_millis = 0"),
                         messaging + signer.replace(client, public),

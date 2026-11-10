@@ -24,6 +24,9 @@ NSS identities, persistent masks and native journal initialization. Core upgrade
 payout credential and distinct NIP-46 client commands are prepared. Actual
 live-host/core-transaction/provider/household/browser/recovery adoption and
 financial activation remain unfinished. The full twelve-part goal stays active.
+The [combined core rehearsal](testing/cyberherd-core-transaction-checkpoint-20261110.md)
+now passes actual systemd/UID migration on a disposable VM. Actual live-host
+maintenance, provider/household/recovery qualification and activation remain open.
 
 The Phase 1 implementation history below was last updated on 2026-09-07; consult
 the dated restoration/implementation records and current plan for later work.

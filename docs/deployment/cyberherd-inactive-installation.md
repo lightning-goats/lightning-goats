@@ -148,5 +148,7 @@ and valid signed outbox, and uses harmless old binary stand-ins plus a non-admin
 sleep unit. It runs actual prepare/apply/finish, verifies persistent masking,
 native migration as the original core UID, exact old-row comparison, binary
 replacement and original unit/configuration restoration. It leaves the unit
-stopped and never starts the payment daemon. This combined extension is being
-qualified; the earlier checkpoint does not claim its result.
+stopped and never starts the payment daemon. The
+[combined transaction checkpoint](../testing/cyberherd-core-transaction-checkpoint-20261110.md)
+records its passing exact-source result; the earlier checkpoint remains specific
+to its original installer evidence.

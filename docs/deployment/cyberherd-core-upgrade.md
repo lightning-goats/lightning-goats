@@ -189,3 +189,9 @@ separately exercises actual native migration/comparison. Neither fixture proves
 this combined transaction on a real systemd host or production paid data.
 Installed UID migration, effective unit handling, independent recovery adoption
 and explicit restart still require qualification before actual installation.
+
+The [combined transaction rehearsal](../testing/cyberherd-core-transaction-checkpoint-20261110.md)
+now verifies actual systemd stop/mask/restore, original-UID migration and native
+comparison together on a disposable VM with synthetic paid/pending/signed state.
+The actual live-host maintenance/restart decision and independently reconciled
+recovery adoption remain separate.

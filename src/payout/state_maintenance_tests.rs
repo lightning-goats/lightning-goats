@@ -211,6 +211,26 @@ async fn native_four_journal_inspection_retains_original_claim_signed_bytes_fail
     assert_eq!(report.payout_held_sats, 0);
     assert_eq!(w.store.held_sats().await.unwrap(), 0);
     assert_eq!(w.store.budget_usage_sats().await.unwrap(), 1);
+    let altered = root.join("altered-membership-images");
+    images(&altered, &urls).await;
+    let damaged = SqlitePool::connect(&format!(
+        "sqlite://{}",
+        altered.join("membership.db").display()
+    ))
+    .await
+    .unwrap();
+    // Corrupt only a disposable copy: matching hash columns and a successful
+    // SQLite integrity check cannot substitute for the committed plan bytes.
+    sqlx::query("DROP TRIGGER immutable_reward_plan")
+        .execute(&damaged)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE reward_plans SET plan_json=json_set(plan_json,'$.real_sats',999)")
+        .execute(&damaged)
+        .await
+        .unwrap();
+    damaged.close().await;
+    assert!(inspect_fixture(&altered, &p).await.is_err());
     let db = SqlitePool::connect(&format!(
         "sqlite://{}",
         reviewed.join("signer.db").display()

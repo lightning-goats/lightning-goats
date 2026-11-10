@@ -210,7 +210,7 @@ async fn cross_check(pools: &BTreeMap<Role, SqlitePool>, policy: &Policy) -> Res
         bail!("signer does not belong to the selected payout identity");
     }
 
-    let mut grants = sqlx::query("SELECT id,request_id,plan_hash,reserved_sats FROM payout_grants")
+    let mut grants = sqlx::query("SELECT id,request_id,plan_hash,reserved_sats,CASE WHEN length(CAST(plan_json AS BLOB))<=4194304 THEN plan_json END AS plan_json FROM payout_grants")
         .fetch(payout);
     while let Some(row) = grants.try_next().await? {
         let id: String = row.try_get("id")?;
@@ -225,13 +225,24 @@ async fn cross_check(pools: &BTreeMap<Role, SqlitePool>, policy: &Policy) -> Res
         {
             bail!("payout grant lost its original core reservation");
         }
-        let plan_hash: Option<String> =
-            sqlx::query_scalar("SELECT plan_hash FROM reward_plans WHERE owner=? AND request_id=?")
+        let frozen =
+            sqlx::query("SELECT plan_hash,CASE WHEN length(CAST(plan_json AS BLOB))<=4194304 THEN plan_json END AS plan_json FROM reward_plans WHERE owner=? AND request_id=?")
                 .bind(&policy.owner)
                 .bind(row.try_get::<String, _>("request_id")?)
-                .fetch_optional(membership)
+                .fetch_one(membership)
                 .await?;
-        if plan_hash.as_deref() != Some(row.try_get::<String, _>("plan_hash")?.as_str()) {
+        let payout_plan: String = row.try_get("plan_json")?;
+        let frozen_plan: String = frozen.try_get("plan_json")?;
+        let plan: crate::cyberherd::rewards::Plan = serde_json::from_str(&frozen_plan)?;
+        if frozen.try_get::<String, _>("plan_hash")? != row.try_get::<String, _>("plan_hash")?
+            || payout_plan != frozen_plan
+            || plan.hash()? != frozen.try_get::<String, _>("plan_hash")?
+            || plan.owner != policy.owner
+            || plan.epoch != policy.epoch
+            || plan.core_uid != policy.components[&Role::Core].uid
+            || plan.request_id.to_string() != row.try_get::<String, _>("request_id")?
+            || i64::try_from(plan.reserved_sats)? != row.try_get::<i64, _>("reserved_sats")?
+        {
             bail!("payout grant lost its frozen membership plan");
         }
     }

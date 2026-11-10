@@ -298,6 +298,8 @@ four separate runtime owners, stopped/masked exact units and writer attestation.
 Use committed WAL and real schemas to prove unchanged original main/WAL/SHM,
 pending feed UUIDs, paid receipts and exact signed bytes. Reverify all image
 hashes, private manifests, migration checksums and selected owner/epoch/provider.
+Changed frozen plan JSON must fail even if hash columns and SQLite integrity
+still agree. Recompute the original plan hash and compare both journal copies.
 Missing/changed files, old payout quotes, changed scope, active writers or a reused
 output destination must fail. Incomplete output cannot become a backup.
 

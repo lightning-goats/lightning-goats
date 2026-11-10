@@ -10,10 +10,11 @@ remain zero, and both outgoing roles remain masked with their zero policies.
 `stage-cyberherd-overlay.py prepare` is **preparation only**. It has no apply,
 stop, start, unmask, secret-loading, database or network-configuration command.
 Do not interpret a prepared bundle as authorization or an implementation of
-activation. The reviewed maintenance/apply/resume procedure remains unfinished;
-no approval to run it is requested by this document.
+activation. The separate [maintenance executor](cyberherd-overlay-maintenance.md)
+is a source candidate awaiting installed rehearsal; no approval to run it is
+requested by this document.
 
-Use its externally authenticated sixteen-file root tool closure, selected through
+Use its externally authenticated root tool closure, selected through
 `launch-vps-upgrade.py TOOL_SHA --cyberherd-overlay-stage`. Older protected tool
 generations and the existing credential importer remain unchanged. Never run a
 writable checkout as root or import a helper from a downloaded archive.
@@ -71,7 +72,7 @@ absent. Existing settings, core epoch/cutoff, source attribution and both outgoi
 policies remain unchanged. Whole configuration is rendered with a round-trip
 check; original bytes/comments remain in the protected backups.
 
-Only after the complete maintenance executor and its installed rehearsal are
+Only after the separate maintenance executor and its installed rehearsal are
 reviewed should an operator be asked to approve the brief interruption. That
 executor must quiesce/mask all four writers, take and verify a current native
 four-journal snapshot, preserve the custom `/etc` core unit, apply only these

@@ -53,6 +53,12 @@ limits zero and omits membership Nostr signing. Independent readback confirmed
 unchanged installed configuration, inactive journals and running receive process.
 The maintenance/apply/resume executor remains unfinished; no new feature is active.
 
+The subsequent [maintenance executor candidate](deployment/cyberherd-overlay-maintenance.md)
+adds explicit planning, stopped/masked native backup, recoverable configuration
+replacement, separate service resumption and configuration-only rollback. Its
+protected-file fixtures mock native/service commands; installed executor rehearsal
+and live maintenance approval are still required. It has not run on the live core.
+
 Other remaining work includes installed browser/presentation and global network
 qualification, concrete externally reconciled recovery adoption, operator-selected
 nonzero financial ceilings and explicit activation. Native protected

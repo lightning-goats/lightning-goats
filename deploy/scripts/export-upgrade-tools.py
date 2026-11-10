@@ -20,6 +20,7 @@ FILES = (
     'qualify-cyberherd-installed.py',
     'qualify-cyberherd-workers.py',
     'stage-cyberherd-overlay.py',
+    'maintain-cyberherd-overlay.py',
 )
 
 

@@ -1,4 +1,5 @@
 {
+  "feeder_confirmed_unattributed": {"0": "⚡ The Lightning Goats have been fed! {difference_message}\n\nhttps://lightning-goats.com"},
   "cyber_herd_unadmitted": {"0": "🐐 {name}, this interaction could not join the CyberHerd."},
   "cyber_herd_delivery_failed": {"0": "🐐 A treat payment for {name} was not confirmed as delivered this round."},
   "cyber_herd_unsubmitted": {"0": "🐐 No treat payment was sent to {name} this round."}

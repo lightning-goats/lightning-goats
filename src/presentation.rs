@@ -230,15 +230,24 @@ impl MessageRenderer {
                         .collect(),
                 )
             } else {
-                Ok(Some(format!(
-                    "⚡ The Lightning Goats have been fed! {difference}\n\nhttps://lightning-goats.com"
-                )))
+                catalog.render(
+                    "feeder_confirmed_unattributed",
+                    &proof.identity,
+                    &std::collections::BTreeMap::from([
+                        ("difference_message".into(), difference.clone()),
+                        ("goat_name".into(), name.into()),
+                    ]),
+                )
             }
         };
+        let (Some(nostr), Some(overlay)) = (compose(goat.nostr_profile)?, compose(goat.name)?)
+        else {
+            return Ok(None);
+        };
         Ok(Some(RenderedPresentation {
-            nostr_content: compose(goat.nostr_profile)?,
+            nostr_content: Some(nostr),
             overlay_type: Some("feeder_trigger".into()),
-            overlay_message: compose(goat.name)?,
+            overlay_message: Some(overlay),
             overlay_goats: vec![overlay_goat(goat)],
         }))
     }

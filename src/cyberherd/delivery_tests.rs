@@ -1437,6 +1437,65 @@ async fn funded_or_uncertain_food_does_not_create_feeding_notice_or_debit() {
         f.core.unresolved_feed_attempt().await.unwrap().unwrap().id,
         id
     );
-    assert!(f.core.begin_feed_attempt(1000).await.unwrap().is_none());
+    assert!(f.core.begin_feed_attempt(1000).await.is_err());
+    task.abort();
+}
+
+#[tokio::test]
+async fn feeding_missing_bounded_attribution_uses_editable_neutral_wording_without_threshold_claim()
+{
+    let f = Fixture::new().await;
+    f.core
+        .configure_feeding_notices(Some(&f.owner))
+        .await
+        .unwrap();
+    feed_credit(&f, "saved", 1000).await;
+    let core = SqlitePool::connect(&f.core_url).await.unwrap();
+    sqlx::query("WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<4097) INSERT INTO ledger_entries(entry_type,source_key,delta_sats) SELECT 'HERD_RECEIPT','synthetic-later:'||x,1 FROM n").execute(&core).await.unwrap();
+    let id = confirm_food(&f).await;
+    assert_eq!(f.core.feed_credit_sats().await.unwrap(), 4097);
+    let (client, task) = f.bridge(RuntimeMode::Canary).await;
+    freeze_food(&f, &client).await;
+    let barrier = f
+        .store
+        .feeding_barrier(&f.owner, id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        barrier
+            .feeding
+            .presentation
+            .as_ref()
+            .unwrap()
+            .triggering_payment_amount_sats
+            .is_none()
+    );
+    f.store
+        .edit_template(
+            &f.owner,
+            "custom-neutral",
+            &crate::cyberherd::store::TemplateEdit::Set {
+                category: "feeder_confirmed_unattributed".into(),
+                variant: "0".into(),
+                text: "Confirmed food, with attribution unavailable. {difference_message}".into(),
+            },
+        )
+        .await
+        .unwrap();
+    generate_food(&f, &f.targets).await;
+    let message = f
+        .store
+        .pending_feeding_overlay(&f.owner)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        message
+            .message
+            .starts_with("Confirmed food, with attribution unavailable.")
+    );
+    assert!(!message.message.contains("1000 sats"));
+    assert!(!message.message.contains("0 sats"));
     task.abort();
 }

@@ -38,6 +38,8 @@ thresholds has one presentation identity, while each confirmed UUID still has it
 own financial/reward barrier. Distinct equally sized payments remain distinct.
 Bounded missing attribution uses neutral confirmed-feeding wording and a
 UUID-scoped identity; it never substitutes the threshold as a payment amount.
+That optional fallback uses editable `feeder_confirmed_unattributed` wording;
+its deletion is retained rather than restoring hardcoded text.
 
 ## Frozen membership and destinations
 

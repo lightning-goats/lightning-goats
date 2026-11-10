@@ -4,11 +4,12 @@
 
 use anyhow::{Result, bail};
 use lightning_goats::{payout::recipient::Recipient, public_network};
+use std::{collections::BTreeSet, net::IpAddr, time::Duration};
 
-const FIXTURE_HOSTS: [&str; 3] = [
-    "private-v4.cyberherd.example.net",
-    "private-v6.cyberherd.example.net",
-    "mixed.cyberherd.example.net",
+const FIXTURE_HOSTS: [(&str, &[&str]); 3] = [
+    ("private-v4.cyberherd.example.net", &["127.0.0.1"]),
+    ("private-v6.cyberherd.example.net", &["fd00:abcd::1"]),
+    ("mixed.cyberherd.example.net", &["1.1.1.1", "127.0.0.1"]),
 ];
 
 fn private_dns_refusal(error: &anyhow::Error) -> bool {
@@ -40,7 +41,22 @@ async fn main() -> Result<()> {
         [mode] if mode == "private-dns-fixture" => {
             // The temporary unit must bind its own reviewed hosts file. This
             // never changes host DNS; NXDOMAIN/connection errors cannot pass.
-            for host in FIXTURE_HOSTS {
+            for (host, expected) in FIXTURE_HOSTS {
+                let answers: BTreeSet<IpAddr> = tokio::time::timeout(
+                    Duration::from_secs(4),
+                    tokio::net::lookup_host((host, 443)),
+                )
+                .await??
+                .take(17)
+                .map(|address| address.ip())
+                .collect();
+                let expected: BTreeSet<IpAddr> = expected
+                    .iter()
+                    .map(|address| address.parse())
+                    .collect::<std::result::Result<_, _>>()?;
+                if answers != expected {
+                    bail!("fixture DNS answers differ from the reviewed hosts file");
+                }
                 let url = format!("https://{host}/.well-known/lnurlp/member");
                 public_network::validate_destination(&url, "https")?;
                 match public_network::get_json(&url, 4096).await {
@@ -50,7 +66,7 @@ async fn main() -> Result<()> {
             }
             println!(
                 "{}",
-                serde_json::json!({"private_dns_fixtures_rejected":3,
+                serde_json::json!({"private_dns_fixtures_rejected":3,"fixture_answer_sets_verified":true,
                     "native_dns_refusal_before_http":true,"credentials_loaded":false,
                     "invoice_requests":0,"provider_operations":0})
             );

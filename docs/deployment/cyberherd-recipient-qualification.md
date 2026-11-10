@@ -48,7 +48,8 @@ DNS, hosts file, routing or firewall. The negative command is:
 ```
 
 The three syntactically valid public DNS names must resolve through actual native
-lookup to private IPv4, private IPv6 and mixed public/private sets. Only the exact
+lookup to the exact reviewed private IPv4, private IPv6 and mixed public/private
+sets; missing, additional or partial sets fail before probing. Only the exact
 native DNS-admission refusal passes. NXDOMAIN, timeout, connection/TLS errors or
 a successful fetch cannot count as private-address enforcement. The refusal
 occurs before HTTP-client creation or connection. An example unit test covers

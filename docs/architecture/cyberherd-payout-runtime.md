@@ -107,6 +107,9 @@ signing, ordered reserved/no-payout export, worker lost-execute recovery, disabl
 execution recovery and the supported NIP-57 path without downgrade. Non-applying
 CLI fixtures check disabled startup, secret-field rejection and separate roles.
 Exact results belong in a source-pinned checkpoint after CI completes.
+The [runtime checkpoint](../testing/cyberherd-runtime-checkpoint-20261110.md)
+records 420 passing Rust tests, seven non-skipped CLI checks and the distinct
+scope of archive, core-systemd and new-broker fixtures.
 
 The full port still needs verified payout summaries returned to membership
 delivery, editable outgoing-zap text and original joining-message references,
@@ -115,3 +118,9 @@ lifecycle notices, roster/OBS and authenticated operator tools, explicit
 failed-cost/consistent restore recovery, reviewed inactive installation and live
 financial activation. These examples and unit/library tests do not prove actual
 cross-process installation, production provider behavior or a completed port.
+
+Crash recovery assumes retained journals. An older payout-only database rollback
+can lose an execute intent before core has a terminal report. Financial activation
+must wait for independent core execution claims and explicit restore/reconciliation
+tooling; never automatically resume spending from an older snapshot. This limit
+does not authorize rolling back or rewriting existing financial state.

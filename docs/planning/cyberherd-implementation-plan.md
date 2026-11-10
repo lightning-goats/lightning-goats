@@ -278,8 +278,9 @@ the unfinished treat messages, lifecycle and interfaces.
 The [separate payout runtime and signing broker](../architecture/cyberherd-payout-runtime.md)
 now connect ordered private plan export, sender-key qualification, journaled work
 and core outcome recovery. The broker freezes only generated 9734 requests and
-never publishes them. The new source, inactive examples and synthetic tests are
-under verification. Original joining references/editable outgoing zap wording,
+never publishes them. The new source passed the [420-test runtime checkpoint](../testing/cyberherd-runtime-checkpoint-20261110.md).
+Independent core execution claims and financial snapshot-restore qualification
+must precede activation. Original joining references/editable outgoing zap wording,
 member delivery, lifecycle, interfaces, installation qualification and activation
 remain required; neither new binary is deployed by this work.
 

@@ -259,7 +259,8 @@ Subsequent [read-only roster/OBS source](../architecture/cyberherd-public-roster
 adds a disabled loopback cache API, exact ranked scores/shares, paginated static
 view and typed snapshot-safe OBS cards. Optional no-treat repost hints now use
 an atomic once-per-owner/member/cycle claim and preserve template opt-out. These
-additions are undergoing exact-source verification; no installation or activation
+additions passed the [466-test source checkpoint](../testing/cyberherd-roster-checkpoint-20261110.md),
+including browser/CLI/inactive archive checks; no installation or activation
 is implied by their presence.
 
 Remaining implementation and qualification includes feeder announcement,

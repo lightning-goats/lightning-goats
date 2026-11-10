@@ -201,6 +201,10 @@ the synthetic fixtures. Follow the full CyberHerd contract before activation.
 
 ## Optional read-only roster and repost-hint source checks
 
+The [466-test checkpoint](cyberherd-roster-checkpoint-20261110.md) records the
+completed exact-source Rust, 24 browser, nine CLI and inactive archive checks.
+The existing SQLite audit remains open; new live roles/features are disabled.
+
 Verify exact point/share projection and sat strings above the browser safe-integer
 range, active/banned filtering and public-picture bounds. Exercise API pagination,
 revision conflict, stale-cache refusal, unknown-vs-empty target discovery,

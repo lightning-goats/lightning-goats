@@ -76,6 +76,8 @@ now works at `/leaderboard` with exact API, disabled auth/operator routes, actua
 browser rendering and WAF checks. The nginx-only release and exact SELinux port
 label preserved application PIDs, payment settings and OBS/artwork.
 
+The operator-requested [website payment/zap-display source checkpoint](testing/website-payment-chat-checkpoint-20261110.md) adds a one-action WebLN flow and authenticated herd receipts in the actual index. Its source tests are distinct from production activation and incoming payment acceptance. The separate paid contact form remains unfinished.
+
 Other remaining work includes observed zap admission and incoming settlement/
 receipt delivery, boot persistence, operator interfaces, global network qualification, concrete externally reconciled recovery adoption, operator-selected
 nonzero financial ceilings and explicit activation. Native protected

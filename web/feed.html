@@ -143,17 +143,20 @@
 
         .qr-code-overlay {
             position: absolute;
-            top: 10px;
-            right: 10px;
-            width: 180px;
-            height: 190px;
+            top: 0.2777777778%;
+            right: 0.4166666667%;
+            width: 9.375%;
+            height: auto;
+            aspect-ratio: 1;
             cursor: pointer;
             z-index: 10;
+            opacity: 0;
             background: transparent;
-            transition: transform 0.3s;
+            border: 0;
+            outline: none;
+            box-shadow: none;
         }
-
-        .qr-code-overlay:hover:not(:disabled) { transform: scale(1.05); }
+        .qr-code-overlay:focus-visible { outline: none; }
 
         .chat-panel {
             min-width: 0;
@@ -543,7 +546,6 @@
         }
 
         @media (max-width: 768px) {
-            .qr-code-overlay { width: 140px; height: 150px; }
             .lg-title { font-size: 1rem; }
             .service-links a { font-size: 0.9rem; }
         }
@@ -552,18 +554,10 @@
             #content { padding: 12px; }
             .media-grid { gap: 12px; }
             .chat-panel { height: 440px; }
-            .qr-code-overlay { width: 100px; height: 120px; }
             .service-links a { font-size: 0.8rem; }
             .lg-title { font-size: 0.95rem; }
             .nostr-auth-button { max-width: 112px; }
         }
-        .feed-action { display: flex; align-items: flex-end; justify-content: center;
-            padding: 6px; border: 2px solid var(--lg-yellow); border-radius: 8px;
-            color: #111; font-weight: 700; }
-        .feed-action span { padding: 6px 10px; border-radius: 16px;
-            background: var(--lg-yellow); box-shadow: 0 2px 6px #000; }
-        .feed-action:disabled { opacity: 1; cursor: not-allowed; }
-        .feed-action:focus-visible { outline: 3px solid white; outline-offset: 3px; }
         #invoiceText { overflow-wrap: anywhere; }
     </style>
 </head>
@@ -591,7 +585,7 @@
                         </div>
 
                         <button id="feedLink" class="qr-code-overlay feed-action" type="button" disabled
-                            data-bs-toggle="modal" data-bs-target="#feedModal"><span>Feed the herd</span></button>
+                            aria-label="Pay the Lightning Goats" data-bs-toggle="modal" data-bs-target="#feedModal"></button>
                     </div>
                 </div>
             </section>
@@ -677,10 +671,11 @@
                     </select>
                     <label for="feedAmount" class="form-label mt-2">Amount in sats</label>
                     <input id="feedAmount" class="form-control" type="number" min="1" step="1" value="1000" required>
-                    <button id="createInvoice" class="btn btn-warning mt-3" type="submit" disabled>Create invoice</button>
+                    <button id="createInvoice" class="btn btn-warning mt-3" type="submit" disabled>Pay</button>
                 </form>
                 <p id="paymentStatus" role="status" class="small mt-2"></p>
                 <div id="invoiceWrap" hidden>
+                    <canvas id="invoiceQr" class="zap-qr" style="max-width:100%;height:auto" aria-label="Lightning invoice QR code"></canvas>
                     <textarea id="invoiceText" class="form-control" readonly aria-label="Lightning invoice"></textarea>
                     <button id="copyInvoice" class="btn btn-outline-light mt-2" type="button">Copy invoice</button>
                     <a id="invoiceWallet" class="btn btn-outline-warning mt-2" hidden>Open wallet</a>
@@ -715,6 +710,8 @@
     <script src="https://unpkg.com/nostr-tools@2.25.0/lib/nostr.bundle.js"></script>
 
     <script src="/chat.js"></script>
+    <script src="/vendor/qrcode.js"></script>
+    <script src="/lightning-payment.js"></script>
     <script src="/site.js"></script>
 </body>
 </html>

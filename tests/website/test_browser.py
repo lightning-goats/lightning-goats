@@ -145,7 +145,7 @@ class WebsiteBrowserTests(unittest.TestCase):
               const button = document.getElementById('feedLink');
               const video = document.querySelector('.iframe-container').getBoundingClientRect();
               const rect = button.getBoundingClientRect();
-              const x = video.right - 50, y = video.top + 50;
+              const x = rect.x + rect.width / 2, y = rect.y + rect.height / 2;
               return {above: button.contains(document.elementFromPoint(x, y)),
                 contained: rect.left >= video.left && rect.right <= video.right &&
                   rect.top >= video.top && rect.bottom <= video.bottom,
@@ -153,7 +153,7 @@ class WebsiteBrowserTests(unittest.TestCase):
             }""")
             self.assertTrue(result["above"], (width, result))
             self.assertTrue(result["contained"], (width, result))
-            self.assertEqual(result["opacity"], "1")
+            self.assertEqual(result["opacity"], "0")
             self.assertTrue(result["disabled"])
         self.assertEqual(self.payments, [])
 
@@ -198,6 +198,26 @@ class WebsiteBrowserTests(unittest.TestCase):
         self.assertEqual(len(self.payments), 2)
         self.assertEqual(self.page.locator("#invoiceText").input_value(), "")
         self.assertIn("No automatic retry", self.page.locator("#paymentStatus").inner_text())
+
+    def test_feed_pay_uses_webln_and_retains_invoice_after_uncertain_send(self):
+        self.context.add_init_script("""
+          window.walletCalls=[];
+          window.webln={async enable(){walletCalls.push('enable')},async sendPayment(invoice){
+            walletCalls.push(invoice); throw Error('response lost');
+          }};
+        """)
+        self.open(enabled=True)
+        self.assertEqual(self.page.locator("#createInvoice").inner_text(), "Pay")
+        self.submit()
+        self.wait_finished()
+        self.assertEqual(self.page.evaluate("walletCalls"), ["enable", INVOICE])
+        self.assertEqual(len(self.payments), 2)
+        self.assertEqual(self.page.locator("#invoiceText").input_value(), INVOICE)
+        self.assertIn("same invoice", self.page.locator("#paymentStatus").inner_text())
+        self.submit()
+        self.wait_finished()
+        self.assertEqual(len(self.payments), 2)
+        self.assertEqual(self.page.evaluate("walletCalls"), ["enable", INVOICE, "enable", INVOICE])
 
     def test_live_chat_renders_untrusted_text_without_html(self):
         self.open()

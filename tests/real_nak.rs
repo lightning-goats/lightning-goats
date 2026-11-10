@@ -1,5 +1,8 @@
 #![cfg(target_os = "linux")]
 
+#[path = "support/zap_receipt.rs"]
+mod receipt_fixture;
+
 use lightning_goats::{
     config::{NostrConfig, RuntimeMode},
     ledger::LedgerStore,
@@ -181,6 +184,35 @@ async fn real_nip46_sign_verify_and_durable_retry_without_signer() {
         read_notes(&nak, &runtime, &url).await.is_empty(),
         "signing must not publish kind 1"
     );
+
+    // Exercise the actual incoming-receipt signer through the real bunker.
+    // The invoice/request are wholly synthetic, with no settlement or store.
+    let job = receipt_fixture::synthetic_job(SIGNER).unwrap();
+    let receipt = client.sign_zap_receipt(&job).await.unwrap();
+    assert_eq!(receipt.event().kind, 9735);
+    assert_eq!(receipt.event().pubkey, SIGNER);
+    assert_eq!(receipt.event().created_at, job.paid_at);
+    assert_eq!(
+        receipt.event().tags,
+        job.request.receipt_tags(&job.invoice).unwrap()
+    );
+    client.verify_event(receipt.event()).await.unwrap();
+    let output = timeout(
+        Duration::from_secs(10),
+        tokio::process::Command::new(&nak)
+            .arg("--config-path")
+            .arg(&runtime)
+            .args(["req", "--kind", "9735", &url])
+            .env_clear()
+            .env("NO_COLOR", "1")
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(output.status.success());
+    assert!(output.stdout.is_empty(), "synthetic receipt was published");
 
     let database = format!("sqlite://{}", root.path().join("ledger.db").display());
     let ledger = LedgerStore::connect(&database).await.unwrap();

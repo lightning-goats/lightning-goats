@@ -1,0 +1,33 @@
+# Review-only placeholders. Both process and execution start disabled. Operator
+# selects limits and provisions separate identities before any activation.
+enabled = false
+state_dir = "/var/lib/cyberherd-payout"
+core_socket = "/run/lightning-goats-bridge/core.sock"
+intake_socket = "/run/cyberherd-plans/plans.sock"
+intake_uid = 0
+signer_socket = "/run/cyberherd-signer/signer.sock"
+signer_uid = 0
+poll_millis = 1000
+intake_poll_seconds = 5
+
+[policy]
+execution_enabled = false
+member_percent_ceiling = 0
+max_sats_per_feed = 0
+max_sats_per_24h = 0
+max_fee_sats = 0
+max_source_parts = 8192
+operation_addresses = ["herd@lightning-goats.com", "herd@lnb.bolverker.com"]
+receipt_relays = ["wss://nostr.chaima.info/", "wss://relay.artx.market/", "wss://relay.damus.io/"]
+
+[policy.scope]
+core_uid = 0
+epoch = "00000000-0000-0000-0000-000000000000"
+owner = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[policy.scope.provider]
+environment = "strike-production"
+# Operator label, tied to actual consumed receives by same-key API reads.
+account_id = "00000000-0000-0000-0000-000000000000"
+# SHA256 of exact payout credential. The key itself is a systemd credential.
+credential_fingerprint = "0000000000000000000000000000000000000000000000000000000000000000"

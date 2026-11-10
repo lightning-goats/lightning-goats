@@ -40,3 +40,10 @@ herd = "0000000000000000000000000000000000000000000000000000000000000000"
 # profile_max_age_seconds = 3600
 # operation_addresses = ["herd@lightning-goats.com", "herd@lnb.bolverker.com"]
 # Include every operational wallet/address alias to exclude self-transfers.
+
+# Optional read-only ordered export to the separate payout UID. No spend or
+# signer credential is added here. Requires the matching dedicated IPC group.
+# [payout_bridge]
+# socket = "/run/cyberherd-plans/plans.sock"
+# peer_uid = 0
+# group_gid = 0

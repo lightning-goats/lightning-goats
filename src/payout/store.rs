@@ -21,6 +21,9 @@ mod invoices;
 mod outcomes;
 #[path = "store_provider.rs"]
 mod provider;
+#[cfg(unix)]
+#[path = "store_worker.rs"]
+mod worker;
 pub use provider::Status as PayoutStatus;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -47,7 +50,7 @@ impl Scope {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Policy {
     pub scope: Scope,
@@ -132,6 +135,10 @@ impl Store {
             "payout_unsubmitted",
             "payout_outcome_manifests",
             "payout_outcome_acks",
+            "payout_intake_binding",
+            "payout_intake_receipts",
+            "payout_worker_clock",
+            "payout_worker_attempts",
         ];
         if names.iter().any(|name| !allowed.contains(&name.as_str())) {
             bail!("payout requires its own database");

@@ -1,0 +1,14 @@
+CREATE TABLE signer_binding(singleton INTEGER PRIMARY KEY CHECK(singleton=1),owner TEXT NOT NULL,peer_uid INTEGER NOT NULL CHECK(peer_uid>0));
+CREATE TABLE signer_clock(singleton INTEGER PRIMARY KEY CHECK(singleton=1),observed_at INTEGER NOT NULL CHECK(observed_at>=0));
+INSERT INTO signer_clock VALUES(1,0);
+CREATE TABLE signer_intents(id TEXT PRIMARY KEY,document_json TEXT NOT NULL,created_at INTEGER NOT NULL CHECK(created_at>=0));
+CREATE INDEX signer_intent_window ON signer_intents(created_at);
+CREATE TABLE signer_results(id TEXT PRIMARY KEY REFERENCES signer_intents(id),event_json TEXT NOT NULL);
+CREATE TRIGGER immutable_signer_binding BEFORE UPDATE ON signer_binding BEGIN SELECT RAISE(ABORT,'signer scope is immutable'); END;
+CREATE TRIGGER retained_signer_binding BEFORE DELETE ON signer_binding BEGIN SELECT RAISE(ABORT,'signer scope is retained'); END;
+CREATE TRIGGER monotone_signer_clock BEFORE UPDATE ON signer_clock WHEN NEW.singleton IS NOT OLD.singleton OR NEW.observed_at<OLD.observed_at BEGIN SELECT RAISE(ABORT,'signer clock is monotone'); END;
+CREATE TRIGGER retained_signer_clock BEFORE DELETE ON signer_clock BEGIN SELECT RAISE(ABORT,'signer clock is retained'); END;
+CREATE TRIGGER immutable_signer_intent BEFORE UPDATE ON signer_intents BEGIN SELECT RAISE(ABORT,'signing fields are frozen'); END;
+CREATE TRIGGER retained_signer_intent BEFORE DELETE ON signer_intents BEGIN SELECT RAISE(ABORT,'signing fields are retained'); END;
+CREATE TRIGGER immutable_signer_result BEFORE UPDATE ON signer_results BEGIN SELECT RAISE(ABORT,'signed bytes are frozen'); END;
+CREATE TRIGGER retained_signer_result BEFORE DELETE ON signer_results BEGIN SELECT RAISE(ABORT,'signed bytes are retained'); END;

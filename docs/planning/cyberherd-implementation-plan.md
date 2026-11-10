@@ -273,7 +273,15 @@ enter the rolling budget; unused allocation is released only after finalization.
 Failed-payment costs remain held until explicit cost reconciliation. This library
 path has passed the [410-test outcome checkpoint](../testing/cyberherd-outcome-checkpoint-20261110.md),
 including budget-window and identity checks. It does not install or enable the payout runtime or supply
-the unfinished signing broker, treat messages, lifecycle and interfaces.
+the unfinished treat messages, lifecycle and interfaces.
+
+The [separate payout runtime and signing broker](../architecture/cyberherd-payout-runtime.md)
+now connect ordered private plan export, sender-key qualification, journaled work
+and core outcome recovery. The broker freezes only generated 9734 requests and
+never publishes them. The new source, inactive examples and synthetic tests are
+under verification. Original joining references/editable outgoing zap wording,
+member delivery, lifecycle, interfaces, installation qualification and activation
+remain required; neither new binary is deployed by this work.
 
 The next [provider execution source](../architecture/cyberherd-provider-execution.md)
 adds committed quote/execute identities, same-quote uncertain recovery and verified

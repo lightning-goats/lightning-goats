@@ -45,6 +45,8 @@ pub struct Config {
     pub settings: Settings,
     #[serde(default)]
     pub rewards: Option<super::rewards::PlanningPolicy>,
+    #[serde(default)]
+    pub payout_bridge: Option<super::payout_bridge::Config>,
 }
 
 impl Config {
@@ -62,6 +64,12 @@ impl Config {
         self.settings.validate()?;
         if let Some(rewards) = &self.rewards {
             rewards.validate()?;
+        }
+        if let Some(bridge) = &self.payout_bridge {
+            bridge.validate()?;
+            if bridge.peer_uid == self.core.core_uid {
+                bail!("payout and core identities must differ");
+            }
         }
         self.policy().validate()?;
         DayWindow::at(&self.timezone, calendar::now()?)?;
@@ -322,6 +330,24 @@ impl Runtime {
             })
             .transpose()?;
         let mut tasks = tokio::task::JoinSet::new();
+        if let Some(config) = &self.config.payout_bridge {
+            if config.peer_uid == crate::private_ipc::uid()? {
+                bail!("payout requires a separate UID");
+            }
+            crate::private_ipc::runtime_group(
+                config
+                    .socket
+                    .parent()
+                    .context("missing plan socket parent")?,
+                config.group_gid,
+            )?;
+            let server =
+                super::payout_bridge::Server::bind(config, &self.config.project_pubkey).await?;
+            let store = self.store.clone();
+            tasks.spawn(async move {
+                let _ = server.run(store).await;
+            });
+        }
         if let Some(worker) = reward_worker {
             let seconds = self.config.poll_seconds;
             tasks.spawn(async move {
@@ -342,7 +368,7 @@ impl Runtime {
         loop {
             tokio::select! {
                 _=tokio::signal::ctrl_c()=>return Ok(()),
-                Some(_)=tasks.join_next(), if !tasks.is_empty()=>bail!("reward planner stopped unexpectedly"),
+                Some(_)=tasks.join_next(), if !tasks.is_empty()=>bail!("CyberHerd child worker stopped unexpectedly"),
                 _=ticks.tick()=>{
                     if let Err(error)=self.tick().await {
                         // Do not print private core proof/request/source fields.

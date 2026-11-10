@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
 mod bolt11;
+#[cfg(unix)]
+mod private_ipc;
 mod sqlite;
 
 pub mod config;

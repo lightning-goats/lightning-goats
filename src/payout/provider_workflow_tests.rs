@@ -8,8 +8,12 @@ use crate::payout::{
 use axum::routing::{patch, post};
 use std::{collections::BTreeMap, sync::Mutex};
 
+#[path = "intake_tests.rs"]
+mod intake_tests;
 #[path = "outcome_workflow_tests.rs"]
 mod outcome_workflow_tests;
+#[path = "worker_tests.rs"]
+mod worker_tests;
 
 fn now() -> i64 {
     crate::cyberherd::calendar::now().unwrap()
@@ -27,6 +31,24 @@ struct Mock {
     bad_money: Option<serde_json::Value>,
     wrong_hash: bool,
     payment_money: Option<serde_json::Value>,
+}
+impl Mock {
+    fn new(invoice: String) -> Self {
+        Self {
+            invoice,
+            quotes: BTreeMap::new(),
+            payments: BTreeMap::new(),
+            post_keys: vec![],
+            patch_ids: vec![],
+            get_ids: vec![],
+            lose_quote: false,
+            lose_execute: false,
+            state: PaymentState::Pending,
+            bad_money: None,
+            wrong_hash: false,
+            payment_money: None,
+        }
+    }
 }
 fn payment(id: Uuid, state: PaymentState) -> serde_json::Value {
     json!({"paymentId":id,"state":state,"amount":{"amount":"0.00000001","currency":"BTC"},
@@ -187,20 +209,7 @@ impl Workflow {
             .validate_response(&serde_json::to_vec(&json!({"pr":encoded})).unwrap(), now())
             .unwrap();
         store.freeze_invoice(&invoice, now()).await.unwrap();
-        let mock = Arc::new(Mutex::new(Mock {
-            invoice: encoded,
-            quotes: BTreeMap::new(),
-            payments: BTreeMap::new(),
-            post_keys: vec![],
-            patch_ids: vec![],
-            get_ids: vec![],
-            lose_quote: false,
-            lose_execute: false,
-            state: PaymentState::Pending,
-            bad_money: None,
-            wrong_hash: false,
-            payment_money: None,
-        }));
+        let mock = Arc::new(Mutex::new(Mock::new(encoded)));
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let app = Router::new()

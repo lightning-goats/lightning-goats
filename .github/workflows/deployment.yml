@@ -50,12 +50,35 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.88"
       - uses: Swatinem/rust-cache@v2
       - name: Build all release binaries
         run: cargo build --release --locked --bins
+      - name: Check inactive CyberHerd CLI boundaries
+        env:
+          LG_CYBERHERDD_TEST_BINARY: ${{ github.workspace }}/target/release/cyberherdd
+          LG_CYBERHERD_SIGNER_TEST_BINARY: ${{ github.workspace }}/target/release/cyberherd-signerd
+          LG_CYBERHERD_PAYOUT_TEST_BINARY: ${{ github.workspace }}/target/release/cyberherd-payoutd
+        run: python3 -m unittest discover -s deploy/tests -p 'test_cyberherd*.py' -v
+      - name: Assemble inactive CyberHerd review archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash deploy/scripts/package-cyberherd.sh target/release "$RUNNER_TEMP/cyberherd-review" review
+          (cd "$RUNNER_TEMP/cyberherd-review" && sha256sum --check SHA256SUMS)
+          python3 deploy/scripts/verify-cyberherd-package.py "$RUNNER_TEMP/cyberherd-review/cyberherd-review-x86_64-linux-gnu.tar.gz" "$GITHUB_SHA"
+      - name: Retain CyberHerd review archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyberherd-review-${{ github.sha }}
+          path: ${{ runner.temp }}/cyberherd-review/
+          if-no-files-found: error
+          retention-days: 14
       - name: Assemble and smoke-test the complete archive
         shell: bash
         run: |

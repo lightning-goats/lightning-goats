@@ -5,4 +5,10 @@ pub mod invoice;
 pub mod outcome;
 pub mod provider;
 pub mod recipient;
+#[cfg(unix)]
+pub mod runtime;
+#[cfg(unix)]
+pub mod signer;
 pub mod store;
+#[cfg(unix)]
+pub mod worker;

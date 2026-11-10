@@ -318,7 +318,7 @@ pub struct InformationalConfig {
     pub weather_probability: f64,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct NostrConfig {
     pub nak_path: PathBuf,
     pub nak_config_path: PathBuf,

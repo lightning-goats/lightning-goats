@@ -32,6 +32,9 @@ use crate::{
     reward_funding::{Allowance, Reservation, RewardPolicy},
 };
 
+#[path = "payout_bridge_tests.rs"]
+mod payout_bridge_tests;
+
 fn key(n: u8) -> String {
     test_event(n, 0, 100, "{}", vec![]).pubkey
 }

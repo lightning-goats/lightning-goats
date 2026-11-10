@@ -9,6 +9,8 @@ pub mod calendar;
 pub mod discovery;
 pub mod ingress;
 pub mod membership;
+#[cfg(unix)]
+pub mod payout_bridge;
 pub mod relay;
 #[cfg(unix)]
 pub mod reward_worker;

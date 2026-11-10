@@ -183,7 +183,11 @@ async fn invoice_stage(
         .await?;
     Ok(())
 }
-async fn load_intent(tx: &mut Transaction<'_, Sqlite>, id: &str, owner: &str) -> Result<Intent> {
+pub(super) async fn load_intent(
+    tx: &mut Transaction<'_, Sqlite>,
+    id: &str,
+    owner: &str,
+) -> Result<Intent> {
     let row = sqlx::query("SELECT * FROM payout_invoice_intents WHERE id=?")
         .bind(id)
         .fetch_one(&mut **tx)

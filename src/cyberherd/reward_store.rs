@@ -16,6 +16,40 @@ use crate::{
 };
 
 impl Store {
+    #[cfg(unix)]
+    pub(crate) async fn next_reward_export(
+        &self,
+        owner: &str,
+        after: i64,
+    ) -> Result<Option<super::super::payout_bridge::Export>> {
+        validate_owner(owner)?;
+        if after < 0 {
+            bail!("invalid plan cursor");
+        }
+        let mut tx = self.pool.begin().await?;
+        // Select the earliest barrier even if planning/reservation is still
+        // pending. Exporting later ready plans must not skip an earlier one.
+        let row=sqlx::query("SELECT b.ingress_seq,p.* FROM feeding_barriers b LEFT JOIN reward_plans p ON p.owner=b.owner AND p.request_id=b.request_id WHERE b.owner=? AND b.ingress_seq>? ORDER BY b.ingress_seq LIMIT 1")
+            .bind(owner).bind(after).fetch_optional(&mut *tx).await?;
+        let Some(row) = row else { return Ok(None) };
+        let state: Option<String> = row.try_get("state")?;
+        if state
+            .as_deref()
+            .is_none_or(|state| state == "awaiting_reservation")
+        {
+            return Ok(None);
+        }
+        let plan = decode(&row)?;
+        let export = super::super::payout_bridge::Export {
+            sequence: row.try_get("ingress_seq")?,
+            hash: plan.hash,
+            plan: plan.plan,
+            reservation: plan.reservation,
+        };
+        export.validate()?;
+        tx.commit().await?;
+        Ok(Some(export))
+    }
     pub(in crate::cyberherd) async fn stage_reward_recipient(
         &self,
         owner: &str,

@@ -26,6 +26,19 @@ with patch.dict(sys.modules, {'inactive_file_transaction': s.C.TX}):
 
 
 class MaintenanceBoundaries(unittest.TestCase):
+    def test_old_sealed_review_only_accepts_an_empty_new_override_inventory(self):
+        import copy
+        previous = {'retained': {'epoch': 'unchanged'}}
+        review = {'installation': '/private/install', 'validator': '/private/check',
+                  'validator_sha256': 'a'*64, 'baseline': copy.deepcopy(previous)}
+        for added, accepted in (({}, True), ({'/private/changed.conf': {'sha256': 'b'*64}}, False)):
+            current = dict(copy.deepcopy(previous), role_dropins=added)
+            with patch.object(m.S, 'baseline', return_value=(current, {}, {})):
+                if accepted: m.require_fresh(review)
+                else:
+                    with self.assertRaisesRegex(ValueError, 'changed since preparation'): m.require_fresh(review)
+            self.assertEqual(review['baseline'], previous)
+
     def test_attestations_refuse_before_any_host_access(self):
         with patch.object(m, 'load', side_effect=AssertionError('host reached')):
             for method in (m.apply, m.rollback, m.resume):

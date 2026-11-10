@@ -302,7 +302,8 @@ def check_masked():
         if (not path.is_symlink() or os.readlink(path) != '/dev/null' or value['LoadState'] != 'masked'
                 or value['ActiveState'] != 'inactive' or value['SubState'] != 'dead'
                 or value['MainPID'] != '0' or value['UnitFileState'] != 'masked' or value['NeedDaemonReload'] != 'no'):
-            raise ValueError('every new role must remain persistently masked/inactive')
+            states = {k: value[k] for k in ('LoadState', 'ActiveState', 'SubState', 'UnitFileState', 'NeedDaemonReload')}
+            raise ValueError('every new role must remain persistently masked/inactive: ' + role + ' ' + json.dumps(states, sort_keys=True))
 
 
 def main():

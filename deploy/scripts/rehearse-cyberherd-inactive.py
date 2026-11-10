@@ -56,8 +56,11 @@ def main():
     if hashlib.sha256((source_tools / 'launch-vps-upgrade.py').read_bytes()).hexdigest() != tool_export['launcher_sha256']:
         raise ValueError('test launcher hash differs from pinned export')
     root = Path(tempfile.mkdtemp(prefix='lg-cyberherd-install-rehearsal-', dir='/run'))
-    os.chown(root, 0, core.pw_gid)
-    root.chmod(0o750)
+    os.chown(root, 0, 0)
+    # The authenticated tool closure requires root:root ancestors. Only its
+    # synthetic fixture binary/configs need traversal by the non-root core UID;
+    # tool, backup, key and source children retain their own private modes.
+    root.chmod(0o755)
     tools = root / 'tools'
     shutil.copytree(source_tools, tools)
     tools.chmod(0o700)

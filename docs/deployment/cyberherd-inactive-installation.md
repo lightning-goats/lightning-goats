@@ -4,7 +4,7 @@ The authenticated tool bundle now contains `install-cyberherd-inactive.py`.
 Its source is being qualified. It is not installed or run on the live host.
 Use Python **3.11 or newer** through the
 [externally authenticated launcher](inactive-upgrade-transaction.md), with its
-complete eleven-file closure. Authenticate launcher/tool-manifest, source commit
+complete thirteen-file closure. Authenticate launcher/tool-manifest, source commit
 and archive SHA256 independently before root execution. An archive's own hashes
 are not provenance. Do not run a writable checkout or import archive helpers.
 
@@ -54,6 +54,9 @@ The separate [payout-key import](cyberherd-payout-credential.md) provides a revi
 file-based command for deriving that fingerprint without a webhook secret,
 changing the receive key, starting a service or making a payment. Actual import
 remains an explicit operator step; offline encryption does not prove API scopes.
+The [separate NIP-46 client preparation](cyberherd-nostr-clients.md) likewise
+creates only authentication clients; household authorization/signing qualification
+remains separate and the project's signing secret never moves to the VPS.
 
 ## Install disabled units and initialize fresh journals
 

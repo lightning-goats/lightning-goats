@@ -16,6 +16,7 @@ FILES = (
     'upgrade-cyberherd-core.py',
     'install-cyberherd-inactive.py', 'verify-cyberherd-package.py', 'verify-sqlite-vendor.py',
     'prepare-cyberherd-payout-key.py',
+    'prepare-cyberherd-nostr-clients.py', 'prepare-household-nostr-client.py',
 )
 
 

@@ -11,7 +11,7 @@ SupplementaryGroups=cyberherd-bridge cyberherd-plans
 ExecStart=/usr/local/bin/cyberherdd --config /etc/cyberherd/config.toml
 # Optional only when [messaging.signer] is deliberately configured. This is a
 # separate NIP-46 authentication client, never the project identity's secret.
-# LoadCredential=nostr-client-key:/etc/cyberherd/nostr-client-key
+# LoadCredentialEncrypted=nostr-client-key:/etc/credstore.encrypted/cyberherd-nostr-client
 Restart=on-failure
 RestartSec=5s
 StateDirectory=cyberherd

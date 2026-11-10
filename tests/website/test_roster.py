@@ -35,6 +35,9 @@ class RosterBrowserTests(unittest.TestCase):
         self.data = {"version":1,"generated_at":int(time.time()),"availability":"paused","targets":[{"event_id":"ab"*32,"kind":1}],
                      "roster":{"owner":OWNER,"cycle":1,"cycle_start":100,"revision":1,"capacity":3,"minimum_sats":"10","member_percent":10,"total_members":1,"next_offset":None,
                                "members":[{"rank":1,"pubkey":"cd"*32,"display_name":"Alice <img src=x>","picture":"javascript:alert(1)","amount_sats":"9007199254740993","points":"9007199254740993","share_percent":"10"}]}}
+        # Loading the local vendor bundle must not age a synthetic response.
+        # Date stays fixed while request/interval timers continue normally.
+        self.page.clock.set_fixed_time(self.data["generated_at"] * 1000)
         self.page.route("**/*",self.route)
     def route(self,route):
         url = urlsplit(route.request.url)
@@ -64,6 +67,8 @@ class RosterBrowserTests(unittest.TestCase):
         self.assertIn("9,007,199,254,740,993",self.page.locator("#members").inner_text())
         self.assertIn("paused",self.page.locator("#status").inner_text())
         self.assertTrue(self.page.locator("#targets a").get_attribute("href").startswith("nostr:nevent1"))
+        self.assertTrue(self.page.locator("#connect-nostr").is_hidden())
+        self.assertTrue(self.page.locator("#operator-link").is_hidden())
         self.assertTrue(all(method=="GET" for method,_ in self.requests))
         self.assertFalse(any("lnurlp" in path or "webhook" in path for _,path in self.requests))
         self.data["roster"].update({"total_members":0,"members":[],"revision":2})
@@ -72,3 +77,14 @@ class RosterBrowserTests(unittest.TestCase):
         self.assertTrue(self.page.locator("#empty").is_visible())
         self.assertEqual(self.page.locator("#members tr").count(),0)
         self.assertEqual(self.errors,[])
+
+    def test_stale_or_future_projection_is_hidden_with_auth_disabled(self):
+        self.enabled = True
+        observed = self.data["generated_at"]
+        for delta in (-31, 31):
+            self.data["generated_at"] = observed + delta
+            self.page.goto(ORIGIN + "/cyberherd.html")
+            self.page.wait_for_function("document.getElementById('status').textContent.includes('invalid data')")
+            self.assertTrue(self.page.locator("#herd").is_hidden())
+            self.assertTrue(self.page.locator("#connect-nostr").is_hidden())
+        self.assertEqual(self.errors, [])

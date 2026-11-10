@@ -64,6 +64,7 @@ class NostrCheckTests(unittest.TestCase):
     def test_roles_have_fixed_purposes_and_nonpublic_synthetic_targets(self):
         self.assertEqual(q.ROLES['membership'], ('cyberherd', (1, 1311)))
         self.assertEqual(q.ROLES['payout'], ('cyberherd-signer', (9734,)))
+        self.assertEqual(q.ROLES['receive'], ('lightning-goats', (1,)))
         nonce = str(uuid.uuid4())
         chat = q.challenge(1311, nonce, 100)
         self.assertIn(['a', '30311:' + q.AUTHOR + ':signing-only-' + nonce, '', 'root'], chat['tags'])
@@ -72,6 +73,33 @@ class NostrCheckTests(unittest.TestCase):
         self.assertNotEqual(q.RECIPIENT, q.AUTHOR)
         with self.assertRaises(q.Refusal):
             q.challenge(0, nonce, 100)
+
+    def test_private_nak_diagnostics_emit_only_known_labels_and_key_match(self):
+        key = b'0' * 63 + b'1'
+        raw = b'PRIVATE with client key ' + key + b'\nfailed to connect: error from bunker: unauthorized SECRET'
+        report = q.safe_trace(raw, key)
+        self.assertTrue(report['nak_client_key_used_matches'])
+        self.assertEqual(report['helper_categories'], ['unauthorized', 'error from bunker', 'failed to connect'])
+        encoded = json.dumps(report)
+        self.assertNotIn('PRIVATE', encoded)
+        self.assertNotIn('SECRET', encoded)
+        self.assertNotIn(key.decode(), encoded)
+        self.assertFalse(q.safe_trace(raw, b'1' * 64)['nak_client_key_used_matches'])
+        self.assertIsNone(q.safe_trace(b'no key diagnostic', key)['nak_client_key_used_matches'])
+
+    def test_real_child_private_diagnostic_is_not_forwarded_on_error_or_success(self):
+        key = b'0' * 63 + b'1'
+        code = "import sys;sys.stderr.write('PRIVATE with client key " + key.decode() + "\\nunauthorized SECRET');sys.exit(3)"
+        with self.assertRaises(q.Refusal) as caught:
+            q.run([sys.executable, '-c', code], b'', {}, expected_client_key=key)
+        message = str(caught.exception)
+        self.assertIn('"nak_client_key_used_matches": true', message)
+        for private in ('PRIVATE', 'SECRET', key.decode()):
+            self.assertNotIn(private, message)
+        code = "import sys;sys.stderr.write('with client key " + key.decode() + "\\n');sys.stdout.write('OK')"
+        self.assertEqual(q.run([sys.executable, '-c', code], b'', {}, expected_client_key=key), b'OK')
+        with self.assertRaisesRegex(q.Refusal, 'not positively verified'):
+            q.run([sys.executable, '-c', code], b'', {}, expected_client_key=b'1' * 64)
 
     def test_actual_child_output_and_deadline_are_bounded_and_sanitized(self):
         for code in ("import sys;sys.stdout.write('PRIVATE'*12000)",
@@ -140,7 +168,7 @@ else:
                   patch.object(q, 'DIGEST', hashlib.sha256(helper.read_bytes()).hexdigest()),
                   patch.object(q.pwd, 'getpwnam', return_value=identity),
                   patch.dict(os.environ, {'RUNTIME_DIRECTORY': str(runtime), 'CREDENTIALS_DIRECTORY': str(creds), 'UNRELATED_PRIVATE': 'not inherited'})):
-                results = [q.check(role, CLIENT, ['wss://relay.primal.net']) for role in q.ROLES]
+                results = [q.check(role, CLIENT, ['wss://relay.primal.net']) for role in ('membership', 'payout')]
             self.assertEqual([r['kinds_verified'] for r in results], [[1, 1311], [9734]])
             self.assertTrue(all(r['project_events_published'] == r['invoice_requests'] == r['provider_operations'] == 0 for r in results))
             calls = [json.loads(line) for line in log.read_text().splitlines()]

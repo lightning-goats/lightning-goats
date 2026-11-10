@@ -103,6 +103,18 @@ helper orchestration. They do not claim actual cryptography or household success
 
 The [actual check checkpoint](../testing/cyberherd-bunker-checkpoint-20261110.md)
 records matching local client identities, authorization refusals and timeouts
-after an operator-confirmed household reload. Successful kinds remain unqualified;
-the read-only loaded-client inspection is pending. Do not regenerate credentials
-merely because authorization failed.
+after an operator-confirmed household reload. The subsequent read-only household
+inspection confirms all four configured clients are actually loaded in the stable
+running process, with the expected program digest. Successful kinds remain
+unqualified. Do not regenerate credentials or restart again on that evidence.
+
+The optional `--diagnostics` mode adds only fixed stage labels, completed-kind
+numbers, recognized error labels and a client-key-used match boolean. Pinned nak
+verbose output contains the authentication key: the helper captures it only in
+bounded private pipes, compares the selected key in memory and discards the raw
+output. It never forwards or persists it. Do not run verbose nak directly into a
+terminal/journal. An optional `receive` role tests kind 1 under the existing core
+user with that user's own credential; it never gives the core client key to a
+CyberHerd user. This control distinguishes a general signer/transport failure
+from new-client behavior and publishes nothing. Eight focused tests cover the
+diagnostic secrecy and bounded child execution alongside existing checks.

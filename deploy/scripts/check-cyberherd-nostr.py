@@ -15,6 +15,7 @@ import re
 import selectors
 import stat
 import subprocess
+import sys
 import time
 from urllib.parse import urlencode
 import uuid
@@ -26,6 +27,7 @@ AUTHOR = '669ebbcccf409ee0467a33660ae88fd17e5379e646e41d7c236ff4963f3c36b6'
 # Publicly known synthetic recipient (scalar 3); never contacted or paid.
 RECIPIENT = 'f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9'
 ROLES = {'membership': ('cyberherd', (1, 1311)), 'payout': ('cyberherd-signer', (9734,))}
+ROLES['receive'] = ('lightning-goats', (1,))  # Existing client control, never shared across users.
 RELAYS = ('wss://relay.primal.net', 'wss://nos.lol', 'wss://relay.damus.io',
           'wss://nostr.chaima.info/', 'wss://relay.artx.market/')
 LIMIT = 65536
@@ -35,13 +37,30 @@ class Refusal(ValueError):
     """Only deliberately sanitized messages may reach the terminal."""
 
 
-def run(arguments, data, environment, deadline=45):
+def safe_trace(stderr, expected_client_key):
+    """Private helper diagnostics stay in memory; return only fixed labels/bools."""
+    selected = re.findall(rb'with client key ([0-9a-f]{64})', stderr)
+    lowered = stderr.lower()
+    labels = ('unauthorized', 'auth-required', 'auth required', 'forbidden',
+              'error from bunker', 'failed to connect', 'connect request',
+              'failed to sign', 'sign_event', 'get_public_key', 'handshake',
+              '401', '403', 'connection refused', 'deadline', 'timeout')
+    return {'nak_client_key_used_matches': (all(value == expected_client_key for value in selected)
+                                          if selected else None),
+            'helper_categories': [label for label in labels if label.encode() in lowered]}
+
+
+def run(arguments, data, environment, deadline=45, expected_client_key=None):
     """Never expose child output; concurrently bound both pipes and time."""
     if len(data) > 4096:
         raise Refusal('signing-check input exceeds bound')
     process = subprocess.Popen(arguments, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, env=environment)
     streams = {'stdout': bytearray(), 'stderr': bytearray()}
+    def detail():
+        if expected_client_key is None:
+            return ''
+        return '; diagnostic=' + json.dumps(safe_trace(bytes(streams['stderr']), expected_client_key), sort_keys=True)
     try:
         # This bounded input is below a normal pipe's capacity. The pinned
         # helper consumes it before producing key/event output.
@@ -54,7 +73,7 @@ def run(arguments, data, environment, deadline=45):
             while selected.get_map():
                 remaining = end - time.monotonic()
                 if remaining <= 0:
-                    raise Refusal('NIP-46 check timed out; child output withheld')
+                    raise Refusal('NIP-46 check timed out; child output withheld' + detail())
                 for item, _ in selected.select(min(remaining, .2)):
                     chunk = os.read(item.fd, 4096)
                     if not chunk:
@@ -66,12 +85,14 @@ def run(arguments, data, environment, deadline=45):
             try:
                 status = process.wait(timeout=max(.01, end - time.monotonic()))
             except subprocess.TimeoutExpired:
-                raise Refusal('NIP-46 check timed out; child output withheld') from None
+                raise Refusal('NIP-46 check timed out; child output withheld' + detail()) from None
         if status:
             lowered = bytes(streams['stderr']).lower()
             category = next((s for s in ('unauthorized', 'auth-required', 'timeout', 'deadline',
                                          'permission denied', 'connection refused') if s.encode() in lowered), 'helper failure')
-            raise Refusal('NIP-46 check failed: ' + category + '; child output withheld')
+            raise Refusal('NIP-46 check failed: ' + category + '; child output withheld' + detail())
+        if expected_client_key is not None and safe_trace(bytes(streams['stderr']), expected_client_key)['nak_client_key_used_matches'] is not True:
+            raise Refusal('nak client selection was not positively verified; output withheld' + detail())
         return bytes(streams['stdout'])
     finally:
         if process.poll() is None:
@@ -113,7 +134,7 @@ def verify_bytes(raw, expected):
         raise Refusal('remote signer changed or malformed the frozen challenge; output withheld') from None
 
 
-def check(role, client, relays):
+def check(role, client, relays, diagnostics=False):
     user, kinds = ROLES[role]
     identity = pwd.getpwnam(user)
     if (os.geteuid() != identity.pw_uid or os.getegid() != identity.pw_gid or os.geteuid() == 0
@@ -151,10 +172,20 @@ def check(role, client, relays):
         expected = challenge(kind, str(uuid.uuid4()), int(time.time()))
         # No relay arguments: nak signs through NIP-46 and never publishes the
         # signed event. The bunker transport may exchange kind-24133 envelopes.
-        signed = run([*base, 'event'], json.dumps(expected, ensure_ascii=False).encode() + b'\n',
-                     {**clean, 'NOSTR_SECRET_KEY': bunker, 'NOSTR_CLIENT_KEY': key.decode()})
-        verify_bytes(signed, expected)
-        run([*base, 'verify'], signed + b'\n', clean)
+        try:
+            if diagnostics:
+                print(json.dumps({'stage': 'sign', 'kind': kind, 'verified_kinds': proofs}), file=sys.stderr, flush=True)
+            # Verbose output is captured only in private pipes. Pinned nak logs the actual
+            # connect-as key; compare in memory and emit only a boolean. Never
+            # forward/store that log, even when a connection or signature fails.
+            signed = run([*base, *(['--verbose'] if diagnostics else []), 'event'],
+                         json.dumps(expected, ensure_ascii=False).encode() + b'\n',
+                         {**clean, 'NOSTR_SECRET_KEY': bunker, 'NOSTR_CLIENT_KEY': key.decode()},
+                         **({'expected_client_key': key} if diagnostics else {}))
+            verify_bytes(signed, expected)
+            run([*base, 'verify'], signed + b'\n', clean)
+        except Refusal as error:
+            raise Refusal('kind=' + str(kind) + '; verified_kinds=' + json.dumps(proofs) + '; ' + str(error)) from None
         proofs.append(kind)
     del key, raw
     return {'accepted': True, 'role': role, 'client_public_key': client, 'kinds_verified': proofs,
@@ -167,9 +198,10 @@ def main():
     parser.add_argument('--role', choices=ROLES, required=True)
     parser.add_argument('--client-public-key', required=True)
     parser.add_argument('--relay', choices=RELAYS, action='append')
+    parser.add_argument('--diagnostics', action='store_true', help='emit only fixed stage labels and client-key-match booleans')
     args = parser.parse_args()
     try:
-        print(json.dumps(check(args.role, args.client_public_key, args.relay or ['wss://relay.primal.net']), sort_keys=True))
+        print(json.dumps(check(args.role, args.client_public_key, args.relay or ['wss://relay.primal.net'], args.diagnostics), sort_keys=True))
     except Exception as error:
         # Filesystem/helper errors can include paths or sensitive responses.
         # ValueError messages above are deliberately bounded and sanitized.

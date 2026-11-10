@@ -110,7 +110,8 @@ def check_native_report(value):
 
 
 def baseline(installation, validator, validator_sha):
-    original = Q.baseline(installation)
+    dropins = role_dropins()
+    original = Q.baseline(installation, masked_dropins=dropins)
     core_user = C.pwd.getpwnam('lightning-goats')
     core_groups = {C.grp.getgrgid(gid).gr_name for gid in os.getgrouplist(core_user.pw_name, core_user.pw_gid)}
     if (original['core']['properties']['User'] != core_user.pw_name
@@ -156,9 +157,11 @@ def baseline(installation, validator, validator_sha):
     if not pid.isdecimal() or int(pid) < 2 or hashlib.sha256(Path('/proc', pid, 'exe').read_bytes()).hexdigest() != programs['lightning-goatsd']['sha256']:
         raise ValueError('running core is not the protected installed program')
     C.command(str(Q.BIN / 'cyberherd-statectl'), '--config', str(MAINTENANCE), 'check')
+    if role_dropins() != dropins:
+        raise ValueError('role unit overrides changed during baseline inspection')
     return {'installation': original, 'core_programs': programs,
             'validator': validator_info, 'maintenance': C.TX.fingerprint(MAINTENANCE),
-            'role_dropins': role_dropins()}, core, member
+            'role_dropins': dropins}, core, member
 
 
 def prepare(installation, validator, validator_sha, destination, message_start_after):

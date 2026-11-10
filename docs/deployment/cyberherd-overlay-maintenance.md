@@ -19,6 +19,16 @@ unchanged only when no role override exists. This permits a separately reviewed
 namespace override in the disposable rehearsal without changing vendor unit
 bytes or weakening the production invocation.
 
+Ubuntu's systemd 255 reports `NeedDaemonReload=yes` for the masked intake with
+its namespace override, despite manager reload. In this masked state only,
+the executor accepts that flag when the exact protected role-specific overrides
+match their independently frozen fingerprints. Missing/unpinned/changed files,
+unknown flag values or a non-masked unit refuse. Other masked-state checks,
+zero PIDs/cgroups and the UID scan remain mandatory. Loaded/running service
+acceptance still requires a reload, the exact effective override set and
+`NeedDaemonReload=no`. Default inactive-install/qualification callers without a
+frozen override inventory keep their original strict behavior.
+
 `plan` revalidates the original running core, fresh inactive roles, frozen review
 and actual typed candidate configuration. It creates a new root-private execution
 directory with its own two-configuration replacement transaction; it changes no

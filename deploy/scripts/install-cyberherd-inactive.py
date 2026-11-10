@@ -295,13 +295,33 @@ def install(archive, source, digest, config_source, policy, bundle, destination,
     return {'installed': True, 'roles': 3, 'services_masked': True, 'services_started': False, 'credentials_loaded': False}
 
 
-def check_masked():
+def masked_reload_current(value, pinned_dropins=None):
+    if value['NeedDaemonReload'] == 'no':
+        return True
+    # systemd 255 can report this for a masked unit whose drop-ins are not
+    # loaded. Permit only separately frozen, protected role-specific files;
+    # callers still require an exact mask, no process and reload before start.
+    if value['NeedDaemonReload'] != 'yes' or value['LoadState'] != 'masked' or not pinned_dropins:
+        return False
+    for name, expected in pinned_dropins.items():
+        path = Path(name)
+        if path.parent.name != value['Id'] + '.d' or not path.name.endswith('.conf'):
+            return False
+        C.protected(path)
+        if C.TX.fingerprint(path) != expected:
+            return False
+    return True
+
+
+def check_masked(masked_dropins=None):
     for role in ROLES:
         path = MASKS / (role + '.service')
         value = C.status(role + '.service')
         if (not path.is_symlink() or os.readlink(path) != '/dev/null' or value['LoadState'] != 'masked'
                 or value['ActiveState'] != 'inactive' or value['SubState'] != 'dead'
-                or value['MainPID'] != '0' or value['UnitFileState'] != 'masked' or value['NeedDaemonReload'] != 'no'):
+                or value['MainPID'] != '0' or value['UnitFileState'] != 'masked'
+                or not masked_reload_current(value, {p: fp for p, fp in (masked_dropins or {}).items()
+                                                    if Path(p).parent.name == role + '.service.d'})):
             states = {k: value[k] for k in ('LoadState', 'ActiveState', 'SubState', 'UnitFileState', 'NeedDaemonReload')}
             raise ValueError('every new role must remain persistently masked/inactive: ' + role + ' ' + json.dumps(states, sort_keys=True))
 

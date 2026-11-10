@@ -26,6 +26,23 @@ with patch.dict(sys.modules, {'inactive_file_transaction': s.C.TX}):
 
 
 class MaintenanceBoundaries(unittest.TestCase):
+    def test_masked_reload_flag_requires_exact_frozen_protected_override(self):
+        import tempfile
+        check = m.Q.I.masked_reload_current
+        value = {'Id': 'cyberherd.service', 'LoadState': 'masked', 'NeedDaemonReload': 'yes'}
+        self.assertFalse(check(value))
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary) / 'cyberherd.service.d'; directory.mkdir()
+            path = directory / 'namespace.conf'; path.write_text('[Service]\nNetworkNamespacePath=/proc/1/ns/net\n')
+            pins = {str(path): m.TX.fingerprint(path)}
+            with patch.object(m.Q.I.C, 'protected'):
+                self.assertTrue(check(value, pins))
+                self.assertFalse(check(dict(value, LoadState='loaded'), pins))
+                self.assertFalse(check(dict(value, NeedDaemonReload='unknown'), pins))
+                self.assertFalse(check(dict(value, Id='other.service'), pins))
+                path.write_text('[Service]\nExecStart=changed\n')
+                self.assertFalse(check(value, pins))
+
     def test_old_sealed_review_only_accepts_an_empty_new_override_inventory(self):
         import copy
         previous = {'retained': {'epoch': 'unchanged'}}

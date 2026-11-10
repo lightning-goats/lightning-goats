@@ -147,14 +147,14 @@ def no_role_processes(runtime):
             raise ValueError('another installed-role process exists')
 
 
-def baseline(installation):
+def baseline(installation, masked_dropins=None):
     C.protected(installation, directory=True, private=True)
     if installation.parent != C.BASE or (installation / 'INCOMPLETE').exists():
         raise ValueError('accepted original inactive installation required')
     meta = C.read_json(installation / 'INSTALLED.json')
     if meta['version'] != 1 or set(meta['roles']) != set(ROLES) or meta['services_started'] or meta['credentials_loaded']:
         raise ValueError('unsupported original installation receipt')
-    I.check_masked()
+    I.check_masked(masked_dropins)
     runtime = I.check_identities()
     no_role_processes(runtime)
     for name in ('cyberherd-plans', 'cyberherd-signer'):

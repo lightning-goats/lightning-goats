@@ -267,9 +267,12 @@ def stopped(r):
     stable(r)
     for name in (C.UNIT_NAME, *(role + '.service' for role in Q.ROLES)):
         value = C.status(name)
+        pins = {p: fp for p, fp in r['baseline'].get('role_dropins', {}).items() if Path(p).parent.name == name + '.d'}
+        if name == C.UNIT_NAME:
+            pins = {p: fp for p, fp in r['original_files'].items() if Path(p).parent.name == name + '.d'}
         if (value['Id'] != name or value['LoadState'] != 'masked' or value['ActiveState'] != 'inactive'
                 or value['SubState'] != 'dead' or value['MainPID'] != '0'
-                or value['UnitFileState'] != 'masked' or value['NeedDaemonReload'] != 'no'
+                or value['UnitFileState'] != 'masked' or not Q.I.masked_reload_current(value, pins)
                 or not masked(MASKS / name)):
             raise ValueError('all four writers must remain stopped and persistently masked')
         group = value['ControlGroup']

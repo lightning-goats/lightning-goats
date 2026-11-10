@@ -66,8 +66,13 @@ backup and successfully resumed core plus membership. The actual public OBS
 WebSocket receives the roster with no browser errors; outgoing roles stay masked.
 See the [live checkpoint](testing/cyberherd-live-overlay-stage-20261110.md).
 
-Other remaining work includes observed reaction/repost/zap admission and member
-messages/cards, incoming settlement/receipt delivery, public roster page/API and
+The [live social-intake correction](testing/cyberherd-live-social-intake-20261110.md)
+now verifies the operator and an earlier user’s reaction/repost, exact awards,
+three retained overlay messages and both actual OBS cards. The membership-only
+binary update preserved the running core, configurations, schemas and paid state.
+
+Other remaining work includes observed zap admission and incoming settlement/
+receipt delivery, public roster page/API and
 boot persistence, global network qualification, concrete externally reconciled recovery adoption, operator-selected
 nonzero financial ceilings and explicit activation. Native protected
 [four-journal maintenance](deployment/cyberherd-state-maintenance.md) preserves

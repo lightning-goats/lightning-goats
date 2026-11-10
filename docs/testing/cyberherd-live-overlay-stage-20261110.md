@@ -97,3 +97,10 @@ and controlled provider/payment qualification, operator-selected nonzero ceiling
 financial recovery reconciliation/adoption and later explicit public/payout
 activation remain open. Membership is running for this stage, not enabled at boot.
 Do not rerun completed resume or reset state to test it. Keep PR111 draft.
+
+The subsequent [live social-intake checkpoint](cyberherd-live-social-intake-20261110.md)
+corrects the cold-start/stream-update recovery delay exposed by the operator's
+reaction. Earlier and current users now appear with exact reaction/repost awards,
+three original overlay announcements and both actual browser profile cards. The
+core remained running during the membership-only executable replacement. Zap
+settlement/receipt and later publication/payout acceptance remain open.

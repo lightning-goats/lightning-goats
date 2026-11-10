@@ -137,5 +137,5 @@ This applies to every eligible user's reaction/repost, including earlier events
 from the current cycle. Native signatures, authenticated targets, latest signed
 profile/Lightning-address eligibility, pause rules, capacity and once-per-cycle
 awards remain unchanged. No NIP-05 requirement, synthetic membership, financial
-state reset, public publication or payout capability is added. New source awaits
-exact Rust/CI/installed qualification and bounded worker replacement.
+state reset, public publication or payout capability is added. Exact Rust/CI/installed qualification and the bounded worker replacement now
+pass; see the [live reaction checkpoint](../testing/cyberherd-live-social-intake-20261110.md).

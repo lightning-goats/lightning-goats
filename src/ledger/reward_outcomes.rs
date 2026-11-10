@@ -6,6 +6,10 @@ use sqlx::{Row, Sqlite, Transaction};
 use super::{LedgerStore, reward_funding::decode_reservation, to_i64, to_u64};
 use crate::payout::outcome::{Header, Packet, Progress, Reader, next_hash};
 
+#[cfg(test)]
+#[path = "reward_outcomes_tests.rs"]
+mod tests;
+
 impl LedgerStore {
     /// Read-only progress is available even after execution/policy is disabled.
     pub(crate) async fn payout_outcome_progress(&self, header: &Header) -> Result<Progress> {

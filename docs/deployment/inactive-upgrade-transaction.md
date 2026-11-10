@@ -99,6 +99,7 @@ non-writable ancestor chain. The exact bundle contains only:
 - `prepare-cyberherd-nostr-clients.py` (explicit new authentication clients only)
 - `prepare-household-nostr-client.py`
 - `qualify-cyberherd-installed.py` (explicit disabled-role OS probes only)
+- `qualify-cyberherd-workers.py` (explicit isolated native worker fixtures only)
 - `TOOL.json`
 
 Export the exact reviewed commit without running its files:

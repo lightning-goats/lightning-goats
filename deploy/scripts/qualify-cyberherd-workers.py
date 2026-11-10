@@ -407,7 +407,12 @@ def run(installation, core_transaction, destination, create):
             raise ValueError('native fixture worker is not running')
         status = (Path('/proc') / props['MainPID'] / 'status').read_text()
         fields = dict(line.split(':', 1) for line in status.splitlines() if ':' in line)
-        if (set(map(int, fields['Uid'].split())) != {users[role].pw_uid} or fields['NoNewPrivs'].strip() != '1'
+        expected_groups = {users[role].pw_gid} | {C.grp.getgrnam(g).gr_gid for g in groups[role]}
+        if (set(map(int, fields['Uid'].split())) != {users[role].pw_uid}
+                or set(map(int, fields['Gid'].split())) != {users[role].pw_gid}
+                or set(map(int, fields['Groups'].split())) != expected_groups
+                or os.readlink(Path('/proc') / props['MainPID'] / 'ns/net') != os.readlink(namespace_path)
+                or fields['NoNewPrivs'].strip() != '1'
                 or any(int(fields[n].strip(), 16) != 0 for n in ('CapEff', 'CapPrm', 'CapBnd', 'CapAmb'))):
             raise ValueError('native worker kernel identity/capabilities differ')
         return int(props['MainPID'])

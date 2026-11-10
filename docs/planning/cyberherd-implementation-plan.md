@@ -290,7 +290,8 @@ remain required; neither new binary is deployed by this work.
 The subsequent [verified result handoff](../architecture/cyberherd-verified-results.md)
 returns final core-verified member outcomes to the membership store through a
 read-only role. It freezes the original payout breakdown in durable private domain
-events. Actual note/chat/overlay delivery and joining publication receipts remain
+events. The [429-test checkpoint](../testing/cyberherd-results-checkpoint-20261110.md)
+records its source verification. Actual note/chat/overlay delivery and joining publication receipts remain
 unfinished; a stored result event alone is not a public treat announcement.
 
 The next [provider execution source](../architecture/cyberherd-provider-execution.md)

@@ -38,3 +38,6 @@ minimal responses, atomic failure/retry, changed allocation rejection, paged
 restart recovery and a result worker waiting before verified data exists. Results
 must be pinned to the exact tested source when verification finishes. No new
 service is installed or enabled by this source.
+
+The [result checkpoint](../testing/cyberherd-results-checkpoint-20261110.md)
+records the completed 429-test suite, artifact checks and open dependency advisory.

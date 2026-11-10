@@ -283,7 +283,7 @@ impl Store {
             bail!("invitation lost authenticated stream");
         };
         let active = self.notice_stream(&job.owner, false, now).await?;
-        if !active.is_some_and(|s| s.coordinate() == original.coordinate) {
+        if active.is_none_or(|s| s.coordinate() != original.coordinate) {
             return Ok(false);
         }
         let ack:Option<i64> = sqlx::query_scalar("SELECT MAX(r.acknowledged_at) FROM notice_receipts r JOIN notice_events e ON r.owner=e.owner AND r.identity=e.identity WHERE e.owner=? AND e.identity<>? AND e.purpose='invitation' AND json_extract(e.context_json,'$.stream.coordinate')=?")
@@ -307,7 +307,7 @@ impl Store {
             let destination: String = row.try_get("destination")?;
             if row.try_get::<String, _>("purpose")? == "invitation" {
                 let current = self.notice_stream(owner, false, now).await?;
-                if !current.is_some_and(|s| destination == format!("stream:{}", s.coordinate())) {
+                if current.is_none_or(|s| destination != format!("stream:{}", s.coordinate())) {
                     sqlx::query("UPDATE notice_destinations SET canceled=1 WHERE owner=? AND identity=? AND destination=?")
                         .bind(owner).bind(&identity).bind(&destination).execute(&mut *tx).await?;
                     continue;

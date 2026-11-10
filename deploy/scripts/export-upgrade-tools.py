@@ -13,6 +13,7 @@ FILES = (
     'launch-vps-upgrade.py', 'upgrade-vps-canary.py',
     'inactive_file_transaction.py', 'preflight-release.py',
     'prepare-vps-canary.py', 'smoke-release.py',
+    'upgrade-cyberherd-core.py',
 )
 
 

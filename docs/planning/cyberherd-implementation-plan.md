@@ -194,7 +194,8 @@ and verified; partial engines/models or a plan alone do not satisfy it.
 
 ## Current source checkpoint — incomplete port
 
-Work in progress adds [native pre-CyberHerd core backup and migration comparison](../deployment/cyberherd-core-upgrade.md)
+The [494-test checkpoint](../testing/cyberherd-core-upgrade-checkpoint-20261110.md)
+adds [native pre-CyberHerd core backup and migration comparison](../deployment/cyberherd-core-upgrade.md)
 before the actual paid-store upgrade. It is not the installer, migration or
 restart transaction and cannot restore or activate financial/physical work.
 

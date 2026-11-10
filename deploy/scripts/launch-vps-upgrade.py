@@ -18,6 +18,7 @@ FILES = {
     'launch-vps-upgrade.py', 'upgrade-vps-canary.py',
     'inactive_file_transaction.py', 'preflight-release.py',
     'prepare-vps-canary.py', 'smoke-release.py',
+    'upgrade-cyberherd-core.py',
 }
 
 
@@ -72,7 +73,12 @@ def main():
     # Only authenticated local files can now participate in imports. -I/-S
     # excluded the caller directory, PYTHONPATH, user site and site customizers.
     sys.path.insert(0, str(root))
-    sys.argv = [str(root / 'upgrade-vps-canary.py'), *sys.argv[2:]]
+    arguments = sys.argv[2:]
+    operation = 'upgrade-vps-canary.py'
+    if arguments[:1] == ['--cyberherd-core']:
+        operation = 'upgrade-cyberherd-core.py'
+        arguments = arguments[1:]
+    sys.argv = [str(root / operation), *arguments]
     runpy.run_path(sys.argv[0], run_name='__main__', init_globals={
         'verified_tool_identity': lambda: verify(root, expected),
     })

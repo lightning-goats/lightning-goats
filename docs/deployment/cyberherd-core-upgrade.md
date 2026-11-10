@@ -5,7 +5,8 @@ maintenance tool intentionally requires current schemas and cannot verify that
 older database. `lightning-goatsctl` therefore provides separate native commands
 for a **pre-CyberHerd core only**. They neither migrate nor restore state, start
 services, load app configuration/credentials or authorize financial activation.
-Source verification is in progress; these commands are not installed here.
+The [494-test checkpoint](../testing/cyberherd-core-upgrade-checkpoint-20261110.md)
+records source verification; these commands are not installed here.
 
 Do not use the new ordinary `status` command to discover the old database before
 backup: its normal store constructor applies current migrations. These explicit
@@ -91,7 +92,95 @@ leaves both originals and copies untouched and services stopped under the
 operator's maintenance procedure. No command applies migrations, installs copied
 data, changes an epoch, releases a hold or restores an older paid ledger.
 
-The remaining installer/upgrade transaction must qualify protected tool/archive
-provenance, all writers and unit handling, actual UID migration, preserved
-configuration/artwork, failure recovery and explicit restart. Passing this evidence
-tool is not installed upgrade acceptance or permission to skip those steps.
+## Prepared transaction for the existing custom core unit
+
+`upgrade-cyberherd-core.py` now coordinates the native commands through the
+[authenticated root-owned tool launcher](inactive-upgrade-transaction.md).
+The export closure includes this script; independently authenticate its pinned
+commit, launcher digest, `TOOL.json` digest and release archive digest before
+installing/executing it. Do not run a writable checkout or import archive Python
+as root. This source has no permission to choose a maintenance window itself.
+
+This bounded transaction supports only the existing receive configuration,
+database and custom `/etc/systemd/system/lightning-goats-receive.service` unit.
+Its baseline checks the effective core identity, non-admin groups, protected
+program/config/unit/drop-ins and the original running service. New CyberHerd
+units must still be absent: perform this legacy-core upgrade before their
+inactive installation. It preserves the entire configuration and uploaded
+artwork; only `lightning-goatsd` and `lightning-goatsctl` are replaced.
+
+Create the protected root-owned mode-0700 upgrade base first if absent. Select
+a **new** transaction path and independently verified source/archive pins:
+
+```sh
+sudo /usr/bin/python3 -I -S -B /ROOT_OWNED_BUNDLE/launch-vps-upgrade.py \
+  TOOL_MANIFEST_SHA256 --cyberherd-core prepare \
+  /PRIVATE/release.tar.gz FULL_SOURCE_COMMIT ARCHIVE_SHA256 \
+  /var/lib/lightning-goats-upgrades/NEW_TRANSACTION
+```
+
+Prepare snapshots reviewed program/configuration/unit metadata and retained
+original bytes, validates a private copy of the pinned archive and stages a
+recoverable file transaction. It does not open the database or stop any service.
+The original unit is retained before any mask operation. Failed preparation is
+retained and never reused. Keep all transaction files private.
+
+Only during the selected maintenance window, after excluding every other
+administrative/helper/database writer, invoke:
+
+```sh
+sudo /usr/bin/python3 -I -S -B /ROOT_OWNED_BUNDLE/launch-vps-upgrade.py \
+  TOOL_MANIFEST_SHA256 --cyberherd-core apply \
+  /var/lib/lightning-goats-upgrades/NEW_TRANSACTION --writers-stopped
+```
+
+The attestation excludes other writers; the transaction itself stops the
+original core. It atomically replaces the backed-up custom unit with a persistent
+`/dev/null` mask, reloads systemd and positively checks mask/inactivity/PID/cgroup
+and absence of any process under the original runtime UID. A runtime mask alone
+would not override this custom unit. Protected configuration/drop-ins remain
+unchanged throughout. No new CyberHerd unit/configuration/key is installed.
+
+The native legacy main/WAL backup and verification must succeed **before** any
+program replacement or migration. Then the file transaction installs the two
+pinned programs with original metadata. The new `status` command is deliberately
+used as the migration step, under the actual original UID/GID with empty groups,
+no capabilities and NoNewPrivs. It loads no credentials and starts no workers.
+Root takes a bounded raw post-migration main/WAL copy, observes SHM without
+parsing the original, and asks the native verifier to compare it with the accepted
+old bundle. Rollback journals, alias/ownership drift and changed source bytes fail.
+New copies keep their destination filesystem label; raw copying never removes a
+security label or re-labels an original database.
+
+Only positive native acceptance writes `COMPARISON.json`. The original core
+stays stopped and persistently masked on success. Failure/interruption keeps
+the exact transaction and its exclusive phase markers for manual diagnosis;
+`apply` cannot silently repeat. It never restores an old database, rolls back a
+completed schema migration, rotates an epoch, retries food or erases signed work.
+If interruption happened before masking, the core may be stopped with its
+original unit still present: inspect actual unit state rather than assuming a
+mask was established. Do not delete a marker to force another invocation.
+
+After reviewing accepted evidence, original paid-state fingerprints and installed
+programs, explicitly restore the exact original unit:
+
+```sh
+sudo /usr/bin/python3 -I -S -B /ROOT_OWNED_BUNDLE/launch-vps-upgrade.py \
+  TOOL_MANIFEST_SHA256 --cyberherd-core finish \
+  /var/lib/lightning-goats-upgrades/NEW_TRANSACTION --restore-original-unit
+```
+
+Finish rejects any post-comparison paid-state/program/configuration drift,
+re-verifies native evidence and restores original unit bytes/metadata/drop-ins.
+It reloads systemd and checks the core is still inactive/dead with PID zero.
+It **does not start the core**. The operator retains a separate explicit restart
+step and must assess accumulated feed credit/physical ambiguity before it.
+No operation enables CyberHerd execution, public messaging or outgoing payments.
+
+The disposable filesystem tests exercise actual file replacement, retained
+configuration, custom-unit mask/restore, migration refusal, stale evidence and
+no implicit restart, with systemd/native calls simulated. The Rust legacy fixture
+separately exercises actual native migration/comparison. Neither fixture proves
+this combined transaction on a real systemd host or production paid data.
+Installed UID migration, effective unit handling, independent recovery adoption
+and explicit restart still require qualification before actual installation.

@@ -54,6 +54,9 @@ class ToolLaunchTests(unittest.TestCase):
                 self.assertFalse(marker.exists())
                 return result
             self.assertIn('snapshot', run(ok=True).stdout)
+            command[6:] = ['--cyberherd-core', '--help']
+            self.assertIn('finish', run(ok=True).stdout)
+            command[6:] = ['--help']
             for name in LAUNCH.FILES - {'launch-vps-upgrade.py'}:
                 target = bundle / name
                 original = target.read_bytes()

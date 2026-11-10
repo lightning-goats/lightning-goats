@@ -33,6 +33,10 @@ now has a [492-test source checkpoint](testing/cyberherd-bootstrap-checkpoint-20
 including mandatory native subprocess checks under three distinct runtime UIDs.
 It uses no credentials and does not install or activate services.
 
+The [494-test checkpoint](testing/cyberherd-core-upgrade-checkpoint-20261110.md)
+qualifies [native legacy-core backup and migration comparison](deployment/cyberherd-core-upgrade.md)
+on separate copies. The actual paid-core upgrade transaction remains required.
+
 The native incoming zap/receipt contract is described in
 [`architecture/native-nip57.md`](architecture/native-nip57.md). It preserves
 ordinary LNURL payments and requires explicit feature activation.

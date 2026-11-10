@@ -194,6 +194,12 @@ and verified; partial engines/models or a plan alone do not satisfy it.
 
 ## Current source checkpoint — incomplete port
 
+The [495-test installation checkpoint](../testing/cyberherd-installation-checkpoint-20261110.md)
+records the prepared core transaction, disabled-role installer, separate
+credential/client preparation and actual native initialization/NSS/masks on a
+disposable systemd VM. It fixes main-only backup inspection while retaining real
+WAL commits. No actual live-host installation or financial activation is implied.
+
 The [494-test checkpoint](../testing/cyberherd-core-upgrade-checkpoint-20261110.md)
 adds [native pre-CyberHerd core backup and migration comparison](../deployment/cyberherd-core-upgrade.md)
 before the actual paid-store upgrade. It is not the installer, migration or

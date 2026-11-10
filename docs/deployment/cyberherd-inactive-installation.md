@@ -1,7 +1,9 @@
 # Fresh inactive CyberHerd installation
 
 The authenticated tool bundle now contains `install-cyberherd-inactive.py`.
-Its source is being qualified. It is not installed or run on the live host.
+The [495-test checkpoint](../testing/cyberherd-installation-checkpoint-20261110.md)
+records source and disposable installed qualification. It is not installed or
+run on the live host.
 Use Python **3.11 or newer** through the
 [externally authenticated launcher](inactive-upgrade-transaction.md), with its
 complete thirteen-file closure. Authenticate launcher/tool-manifest, source commit
@@ -117,7 +119,7 @@ separate mandatory root subprocess fixture.
 
 The Deployment systemd job now prepares a separate **test-only** artifact and
 runs `rehearse-cyberherd-inactive.py` on its disposable Ubuntu 24.04 VM. This
-new rehearsal is being qualified; no passing result is claimed here yet.
+rehearsal passed on the source pinned in the checkpoint above.
 Do not run that harness on the VPS. It requires root, explicit disposable-host
 attestation, GitHub Actions markers and a private loopback-only network namespace.
 
@@ -132,6 +134,19 @@ The harness invokes the actual authenticated launcher/installer, systemd-sysuser
 NSS/password/sudo checks, persistent unit masks and three native initializers
 under actual distinct UIDs. Public fixture project/client/account/fingerprint
 values are explicitly synthetic; no provider or household client is qualified.
+A root-only synthetic token also exercises the actual systemd credential
+encrypt/decrypt importer and supplies its resulting fingerprint. No runtime
+receives that credential, and no real key or API access is involved.
 The result must positively report three real identities, masked units and native
-initializers, with no credentials loaded or units started. Actual-host socket,
+initializers, with no runtime credentials loaded or CyberHerd units started. Actual-host socket,
 network, helper, provider, household, browser and recovery adoption remain separate.
+
+Subsequent rehearsal source also exercises the complete **core upgrade
+transaction** on that disposable VM. It requires the previous canary state
+directory to be empty, creates a new synthetic legacy payment/credit/pending UUID
+and valid signed outbox, and uses harmless old binary stand-ins plus a non-admin
+sleep unit. It runs actual prepare/apply/finish, verifies persistent masking,
+native migration as the original core UID, exact old-row comparison, binary
+replacement and original unit/configuration restoration. It leaves the unit
+stopped and never starts the payment daemon. This combined extension is being
+qualified; the earlier checkpoint does not claim its result.

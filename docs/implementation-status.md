@@ -18,6 +18,13 @@ with required actual per-runtime UID/process/file checks and sixteen non-skipped
 CLI checks. The reviewed inactive installer and actual host qualification remain
 unfinished; no existing paid journal or live service is changed by these commands.
 
+The subsequent [495-test installation checkpoint](testing/cyberherd-installation-checkpoint-20261110.md)
+qualifies the prepared installer on a disposable systemd VM with actual separate
+NSS identities, persistent masks and native journal initialization. Core upgrade,
+payout credential and distinct NIP-46 client commands are prepared. Actual
+live-host/core-transaction/provider/household/browser/recovery adoption and
+financial activation remain unfinished. The full twelve-part goal stays active.
+
 The Phase 1 implementation history below was last updated on 2026-09-07; consult
 the dated restoration/implementation records and current plan for later work.
 

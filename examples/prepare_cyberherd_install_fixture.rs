@@ -8,7 +8,16 @@ use std::{fs::OpenOptions, os::unix::fs::OpenOptionsExt, path::PathBuf};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let path = PathBuf::from(std::env::args().nth(1).context("new /run fixture path")?);
+    let mut args = std::env::args().skip(1);
+    let path = PathBuf::from(args.next().context("new /run fixture path")?);
+    let paid = match args.next().as_deref() {
+        None => false,
+        Some("--paid-fixture") => true,
+        _ => bail!("unknown test-only fixture option"),
+    };
+    if args.next().is_some() {
+        bail!("unexpected test-only fixture argument");
+    }
     let parent = path.parent().context("fixture parent")?;
     if tokio::net::UnixStream::pair()?.0.peer_cred()?.uid() == 0
         || !path.starts_with("/run")
@@ -40,6 +49,49 @@ async fn main() -> Result<()> {
         .bind(epoch.to_string())
         .execute(&pool)
         .await?;
+    let pending = if paid {
+        use bitcoin::secp256k1::{Keypair, Message, Secp256k1, SecretKey};
+        use lightning_goats::nostr::SignedNostrEvent;
+        use sha2::{Digest as _, Sha256};
+        let secp = Secp256k1::new();
+        let key = Keypair::from_secret_key(&secp, &SecretKey::from_slice(&[1; 32])?);
+        let mut signed = SignedNostrEvent {
+            id: String::new(),
+            pubkey: key.x_only_public_key().0.to_string(),
+            created_at: 100,
+            kind: 1,
+            tags: vec![],
+            content: "TEST ONLY: retain exact original signed bytes; never publish".into(),
+            sig: String::new(),
+        };
+        let digest: [u8; 32] =
+            Sha256::digest(lightning_goats::nostr_event::canonical_bytes(&signed)?).into();
+        signed.id = hex::encode(digest);
+        signed.sig = secp
+            .sign_schnorr_no_aux_rand(&Message::from_digest(digest), &key)
+            .to_string();
+        let raw = serde_json::to_string(&signed)?;
+        lightning_goats::nostr_event::VerifiedEvent::from_json(&raw)?;
+        sqlx::query("INSERT INTO settled_payments(source,source_id,address_user,credit_pool,amount_msat) VALUES('strike','TEST-ONLY-original-receipt','herd','herd',2340000)").execute(&pool).await?;
+        sqlx::query("INSERT INTO ledger_entries(entry_type,source_key,delta_sats,payment_source,payment_source_id,address_user,credit_pool) VALUES('CREDIT','TEST-ONLY-original-receipt',2340,'strike','TEST-ONLY-original-receipt','herd','herd')").execute(&pool).await?;
+        let pending = uuid::Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO feed_attempts(id,status,threshold_sats) VALUES(?,'intent_committed',1000)",
+        )
+        .bind(pending.to_string())
+        .execute(&pool)
+        .await?;
+        sqlx::query(
+            "INSERT INTO event_log(event_type,payload_json) VALUES('payment_received','{}')",
+        )
+        .execute(&pool)
+        .await?;
+        sqlx::query("INSERT INTO message_outbox(event_id,signed_event_json,status,source_event_seq) VALUES(?,?,'pending',1)")
+            .bind(&signed.id).bind(raw).execute(&pool).await?;
+        Some(pending)
+    } else {
+        None
+    };
     let engine: String = sqlx::query_scalar("SELECT sqlite_version()")
         .fetch_one(&pool)
         .await?;
@@ -49,7 +101,7 @@ async fn main() -> Result<()> {
     pool.close().await;
     println!(
         "{}",
-        serde_json::json!({"synthetic":true,"epoch":epoch,"engine":engine,"payments":0})
+        serde_json::json!({"synthetic":true,"epoch":epoch,"engine":engine,"payments":u8::from(paid),"pending_feed":pending})
     );
     Ok(())
 }

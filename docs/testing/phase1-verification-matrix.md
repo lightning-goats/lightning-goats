@@ -149,6 +149,15 @@ finding is recorded [separately](../security/sqlite-wal-advisory-20261109.md).
 
 ## CyberHerd payout outcome source regression additions
 
+The current [495-test operations checkpoint](cyberherd-installation-checkpoint-20261110.md)
+adds native main-only/copied-WAL inspection, a prepared paid-core transaction,
+fresh inactive installation and separate credential/client factories. Preserve
+strict unknown-image rejection and committed WAL rows. The disposable systemd
+installer positively checks actual NSS identities, masks and native per-UID init;
+mock filesystem fixtures do not substitute for that job. Combined actual core
+upgrade/migration, live-host sandbox/network/helper/provider/household/browser
+and external recovery-adoption qualification remain distinct, unfinished gates.
+
 For `feat/cyberherd-20261109`, qualify the separate journal/core outcome protocol
 using temporary databases and loopback provider credentials. Verify independent
 core reads disagree safely with a claimed terminal state/cost; exact completed

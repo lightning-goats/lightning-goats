@@ -37,6 +37,11 @@ The [494-test checkpoint](testing/cyberherd-core-upgrade-checkpoint-20261110.md)
 qualifies [native legacy-core backup and migration comparison](deployment/cyberherd-core-upgrade.md)
 on separate copies. The actual paid-core upgrade transaction remains required.
 
+The [495-test checkpoint](testing/cyberherd-installation-checkpoint-20261110.md)
+also qualifies the [fresh disabled-role installer](deployment/cyberherd-inactive-installation.md)
+on a disposable systemd VM, with actual separate identities/masks/native journals.
+The live host and financial activation remain unchanged.
+
 The native incoming zap/receipt contract is described in
 [`architecture/native-nip57.md`](architecture/native-nip57.md). It preserves
 ordinary LNURL payments and requires explicit feature activation.

@@ -527,7 +527,7 @@ struct Lightning {
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct PaymentWire {
+pub(crate) struct PaymentWire {
     payment_id: Uuid,
     state: PaymentState,
     completed: Option<String>,
@@ -535,6 +535,24 @@ struct PaymentWire {
     onchain: Option<serde_json::Value>,
     #[serde(flatten)]
     money: Money,
+}
+pub(crate) fn verify_read_record(
+    binding: &BindingRecord,
+    wire: PaymentWire,
+    now: i64,
+) -> Result<PaymentRecord> {
+    if wire.payment_id != binding.payment_id {
+        bail!("provider returned another payment identity");
+    }
+    let (fee, total, completed) = validate_payment(&binding.quote, &wire, now)?;
+    Ok(PaymentRecord {
+        binding: binding.clone(),
+        state: wire.state,
+        fee_sats: fee,
+        total_sats: total,
+        completed_at: completed,
+        observed_at: now,
+    })
 }
 fn validate_payment(
     quote: &QuoteRecord,

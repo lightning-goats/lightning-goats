@@ -146,3 +146,14 @@ prefix while the banner remains. Current configuration/evidence is in
 [household-nostr-bunker.md](../deployment/household-nostr-bunker.md). Do not treat
 relay EOSE or a signature as proof of public note acceptance. The new audit
 finding is recorded [separately](../security/sqlite-wal-advisory-20261109.md).
+
+## CyberHerd payout outcome source regression additions
+
+For `feat/cyberherd-20261109`, qualify the separate journal/core outcome protocol
+using temporary databases and loopback provider credentials. Verify independent
+core reads disagree safely with a claimed terminal state/cost; exact completed
+costs and unused fees; failed-cost holds; lost final ACK/restart; denied intake
+role; permanent never-executed closure; retained execute uncertainty; partial
+hash-chain ordering and rollback on final-write failure. Run full locked Rust,
+deployment and dependency-audit gates for the exact candidate source. These tests
+do not authorize production spending or replace the full CyberHerd port contract.

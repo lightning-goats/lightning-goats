@@ -94,18 +94,23 @@ impl LedgerStore {
             });
             through = ledger_id;
         }
-        let used: i64 =
-            sqlx::query_scalar("SELECT COALESCE(SUM(reserved_sats),0) FROM reward_reservations")
-                .fetch_one(&mut *tx)
-                .await?;
-        let allowed = match policy {
-            Some(p) => {
-                p.owner == owner
-                    && reservation.reserved_sats <= p.budget(funding.strike_sats)?
-                    && to_u64(used, "outstanding rewards")? <= p.max_sats_per_24h
-            }
-            None => false,
-        };
+        let budget_now = super::reward_outcomes::budget_time(&mut tx, false).await?;
+        let used = super::reward_outcomes::budget_usage(&mut tx, budget_now).await?;
+        let finalized: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM reward_outcome_finals WHERE reservation_id=?)",
+        )
+        .bind(reservation_id.to_string())
+        .fetch_one(&mut *tx)
+        .await?;
+        let allowed = !finalized
+            && match policy {
+                Some(p) => {
+                    p.owner == owner
+                        && reservation.reserved_sats <= p.budget(funding.strike_sats)?
+                        && used <= p.max_sats_per_24h
+                }
+                None => false,
+            };
         let page = FundingPage {
             reservation,
             funding,
@@ -146,10 +151,8 @@ impl LedgerStore {
                 .bind(request_id.to_string())
                 .fetch_one(&mut *tx)
                 .await?;
-        let used: i64 =
-            sqlx::query_scalar("SELECT COALESCE(SUM(reserved_sats),0) FROM reward_reservations")
-                .fetch_one(&mut *tx)
-                .await?;
+        let budget_now = super::reward_outcomes::budget_time(&mut tx, false).await?;
+        let used = super::reward_outcomes::budget_usage(&mut tx, budget_now).await?;
         let value = Allowance {
             epoch,
             request_id,
@@ -158,9 +161,7 @@ impl LedgerStore {
             threshold_sats: to_u64(threshold, "funded threshold")?,
             member_percent_ceiling: policy.member_percent_ceiling,
             max_sats_per_feed: policy.max_sats_per_feed,
-            available_sats: policy
-                .max_sats_per_24h
-                .saturating_sub(to_u64(used, "outstanding rewards")?),
+            available_sats: policy.max_sats_per_24h.saturating_sub(used),
             policy_hash: hex::encode(Sha256::digest(serde_json::to_vec(policy)?)),
         };
         value.validate()?;
@@ -246,20 +247,14 @@ impl LedgerStore {
         if amount_sats > policy.budget(funding.strike_sats)? {
             bail!("reward exceeds real funding or root per-feed ceiling");
         }
-        let now: i64 = sqlx::query_scalar("SELECT unixepoch()")
-            .fetch_one(&mut *tx)
-            .await?;
+        let now = super::reward_outcomes::budget_time(&mut tx, true).await?;
         // All reservations remain outstanding until a separately authenticated
         // payout outcome exists. Never age an unknown/submitted payment out by
         // its creation time: it could still spend later. Verified terminal
         // outcome accounting must precede releasing/aging this conservative cap.
-        let used: i64 =
-            sqlx::query_scalar("SELECT COALESCE(SUM(reserved_sats),0) FROM reward_reservations")
-                .fetch_one(&mut *tx)
-                .await?;
-        if u128::from(to_u64(used, "reserved window total")?) + u128::from(amount_sats)
-            > u128::from(policy.max_sats_per_24h)
-        {
+        let budget_now = super::reward_outcomes::budget_time(&mut tx, false).await?;
+        let used = super::reward_outcomes::budget_usage(&mut tx, budget_now).await?;
+        if u128::from(used) + u128::from(amount_sats) > u128::from(policy.max_sats_per_24h) {
             bail!("root outstanding/recent reward limit reached");
         }
         let policy_json = serde_json::to_string(policy)?;
@@ -599,7 +594,7 @@ pub(super) async fn confirmed_funding(
     Ok(Some(funding))
 }
 
-fn decode_reservation(row: &sqlx::sqlite::SqliteRow) -> Result<Reservation> {
+pub(super) fn decode_reservation(row: &sqlx::sqlite::SqliteRow) -> Result<Reservation> {
     let r = Reservation {
         id: row.try_get::<String, _>("id")?.parse()?,
         request_id: row.try_get::<String, _>("request_id")?.parse()?,

@@ -1027,6 +1027,7 @@ async fn core_role_reads_are_separate_from_intake_and_never_enable_execution_by_
             reward_policy: Some(f.policy.clone()),
             payout_peer_uid: Some(if payout { uid } else { uid + 1 }),
             payout_execution_enabled: enabled,
+            payout_account_id: None,
         };
         let server = Server::bind(&config).await.unwrap();
         let task = tokio::spawn(server.run(f.ledger.clone(), mode));
@@ -1155,6 +1156,7 @@ fn payout_identity_configuration_and_key_fingerprint_cannot_be_silently_rebound(
         reward_policy: None,
         payout_peer_uid: None,
         payout_execution_enabled: false,
+        payout_account_id: None,
     };
     for c in [
         BridgeConfig {
@@ -1167,6 +1169,7 @@ fn payout_identity_configuration_and_key_fingerprint_cannot_be_silently_rebound(
         },
         BridgeConfig {
             payout_execution_enabled: true,
+            payout_account_id: None,
             ..good
         },
     ] {

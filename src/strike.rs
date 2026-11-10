@@ -88,6 +88,23 @@ pub struct ReconciledStrikeReceive {
 }
 
 impl StrikeClient {
+    pub(crate) async fn verify_payout_payment(
+        &self,
+        binding: &crate::payout::provider::BindingRecord,
+    ) -> Result<crate::payout::provider::PaymentRecord> {
+        let endpoint = self
+            .base_url
+            .join(&format!("v1/payments/{}", binding.payment_id))?;
+        let wire = self
+            .send_json(self.client.get(endpoint), "verify outgoing payment")
+            .await
+            .map_err(|_| anyhow::anyhow!("core could not read the original outgoing payment"))?;
+        crate::payout::provider::verify_read_record(
+            binding,
+            wire,
+            crate::cyberherd::calendar::now()?,
+        )
+    }
     pub async fn from_config(config: &StrikeConfig) -> Result<Self> {
         let api_key = read_systemd_credential("strike-api-key").await?;
         Self::new(&config.api_url, api_key)
@@ -413,6 +430,9 @@ impl StrikeWebhookVerifier {
 }
 
 impl StrikeRuntime {
+    pub fn payout_reader(&self, account_id: Uuid) -> Result<crate::payout::outcome::Reader> {
+        crate::payout::outcome::Reader::new(self.client.clone(), account_id)
+    }
     pub async fn from_config(config: &StrikeConfig) -> Result<Self> {
         Ok(Self {
             client: StrikeClient::from_config(config).await?,

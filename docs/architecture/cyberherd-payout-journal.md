@@ -38,11 +38,11 @@ of one larger verified receive; cumulative consumption cannot exceed that receiv
 Changing local ledger IDs or replaying a restored core record cannot reuse an
 already consumed slice. A failure rolls back grant, source, row and journal writes.
 
-Every admitted gross allocation remains held against the independent root budget.
-No grant ages out after 24 hours merely because it was created long ago. This is
-deliberately conservative until authoritative terminal-outcome accounting exists.
-The later outcome protocol must release unused funds and retain actual completed
-spending for the rolling window; that protocol is still required for the full port.
+Every admitted gross allocation remains held until a final authenticated core
+acknowledgement under the [verified outcome protocol](cyberherd-payout-outcomes.md).
+No grant ages out after 24 hours merely because it was created long ago. Completed
+spending enters the rolling window only after verification; unresolved costs stay
+held. Unused allocation is released without creating a carried member balance.
 An admission clock high-water mark rejects backward time for new grants. Reducing
 policy does not delete outstanding grants or prevent readonly recovery inspection.
 
@@ -64,8 +64,8 @@ evidence; production callers cannot deserialize it into qualified funding.
 
 The [outgoing invoice boundary](cyberherd-outgoing-invoices.md) adds persisted
 callback/signature bytes and exact invoice validation. This is library source,
-not an installed payout service. Quote/execute intents, the remote signing broker,
-authenticated terminal budget outcomes, treat/thread messages, worker deployment
-and financial activation remain unfinished.
+not an installed payout service. The provider quote/execute and verified terminal
+budget protocols are library source. The remote signing broker, treat/thread
+messages, worker deployment and financial activation remain unfinished.
 The public receive daemon remains receive-only; no runtime credential changes are
 made by this implementation.

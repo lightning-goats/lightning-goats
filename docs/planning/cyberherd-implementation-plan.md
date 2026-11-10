@@ -238,7 +238,7 @@ and a bounded private reservation method under explicit root policy. Bootstrap
 establishes remaining credit without back-paying old feedings. Virtual credit
 cannot authorize Strike payouts. A reservation is not provider availability or
 delivery. Eligible plans and provider observations are now separate components;
-core-authoritative terminal budget accounting and service activation remain.
+core-authoritative terminal accounting is now described below; service activation remains.
 The [funding checkpoint](../testing/cyberherd-funding-checkpoint-20261109.md)
 records 359 passing Rust tests and the conservative outstanding-budget limit.
 
@@ -252,9 +252,8 @@ now adds a distinct UID role, bounded reservation/source pages and qualification
 of every consumed real receive with the sender credential. It is not an outgoing
 payment engine. The [independent payout journal](../architecture/cyberherd-payout-journal.md)
 now retains qualified source slices, frozen destinations and gross allocations
-across retries/restarts. Every grant stays held pending the unfinished authoritative
-terminal-outcome protocol. Execution, signing, delivery and operations above remain
-open. The triggering-payment amount correction from #114 is also retained in the
+across retries/restarts. Every grant stays held until a final authenticated outcome.
+Signing, delivery and operations above remain open. The triggering-payment amount correction from #114 is also retained in the
 feature source without changing the original legacy export or template edits.
 
 The [funding checkpoint](../testing/cyberherd-payout-funding-checkpoint-20261109.md)
@@ -265,6 +264,15 @@ no provider execution, terminal accounting or signing-broker runtime.
 Its [verification checkpoint](../testing/cyberherd-outgoing-invoice-checkpoint-20261110.md)
 records 394 passing Rust tests, successful isolated deployment regressions and the
 unchanged open dependency-audit failure. None is a live payout activation.
+
+The [verified outcome protocol](../architecture/cyberherd-payout-outcomes.md) adds
+permanent never-executed closures, immutable terminal manifests, bounded payout-only
+reports, independent core provider reads, exact retry progress and final core ACKs.
+Partial/uncertain reports retain the entire reservation. Verified completed costs
+enter the rolling budget; unused allocation is released only after finalization.
+Failed-payment costs remain held until explicit cost reconciliation. This library
+path is being verified; it does not install or enable the payout runtime or supply
+the unfinished signing broker, treat messages, lifecycle and interfaces.
 
 The next [provider execution source](../architecture/cyberherd-provider-execution.md)
 adds committed quote/execute identities, same-quote uncertain recovery and verified

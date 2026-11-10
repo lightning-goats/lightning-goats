@@ -13,6 +13,9 @@
 # Optional distinct payout read role. No outgoing worker is installed by this.
 # payout_peer_uid = 0
 # payout_execution_enabled = false
+# Optional core read-only verification of outgoing results. Must match payout
+# account label; core receive key needs partner.payment.read, never spend scope.
+# payout_account_id = "00000000-0000-4000-8000-000000000001"
 #
 # Optional bounded reward reservations, still with no spend key in the core.
 # This explicitly initializes remaining funding provenance and never back-pays

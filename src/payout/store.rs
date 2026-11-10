@@ -17,6 +17,8 @@ static MIGRATOR: Migrator = sqlx::migrate!("./payout-migrations");
 
 #[path = "store_invoices.rs"]
 mod invoices;
+#[path = "store_outcomes.rs"]
+mod outcomes;
 #[path = "store_provider.rs"]
 mod provider;
 pub use provider::Status as PayoutStatus;
@@ -127,6 +129,9 @@ impl Store {
             "payout_payment_records",
             "payout_payment_conflicts",
             "payout_provider_journal",
+            "payout_unsubmitted",
+            "payout_outcome_manifests",
+            "payout_outcome_acks",
         ];
         if names.iter().any(|name| !allowed.contains(&name.as_str())) {
             bail!("payout requires its own database");
@@ -154,11 +159,11 @@ impl Store {
             .transpose()
     }
 
-    /// No held/unknown amount ages out based on creation time. Until the
-    /// authoritative outcome protocol is implemented, every grant stays held.
+    /// Outstanding grants and final unresolved costs remain held. Completed
+    /// spend is tracked separately by the rolling admission/execution limit.
     pub async fn held_sats(&self) -> Result<u64> {
         let value: i64 =
-            sqlx::query_scalar("SELECT COALESCE(SUM(reserved_sats),0) FROM payout_grants")
+            sqlx::query_scalar("SELECT COALESCE((SELECT SUM(g.reserved_sats) FROM payout_grants g WHERE NOT EXISTS(SELECT 1 FROM payout_outcome_acks a WHERE a.grant_id=g.id)),0)+COALESCE((SELECT SUM(held_sats) FROM payout_outcome_acks),0)")
                 .fetch_one(&self.pool)
                 .await?;
         Ok(value.try_into()?)
@@ -206,11 +211,8 @@ impl Store {
         if now < previous {
             bail!("payout admission clock moved backwards");
         }
-        let held: i64 =
-            sqlx::query_scalar("SELECT COALESCE(SUM(reserved_sats),0) FROM payout_grants")
-                .fetch_one(&mut *tx)
-                .await?;
-        if u64::try_from(held)?
+        let held = outcomes::usage(&mut tx, now).await?;
+        if held
             .checked_add(plan.reserved_sats)
             .is_none_or(|sum| sum > self.policy.max_sats_per_24h)
         {

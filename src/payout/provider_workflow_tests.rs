@@ -8,6 +8,9 @@ use crate::payout::{
 use axum::routing::{patch, post};
 use std::{collections::BTreeMap, sync::Mutex};
 
+#[path = "outcome_workflow_tests.rs"]
+mod outcome_workflow_tests;
+
 fn now() -> i64 {
     crate::cyberherd::calendar::now().unwrap()
 }
@@ -23,6 +26,7 @@ struct Mock {
     state: PaymentState,
     bad_money: Option<serde_json::Value>,
     wrong_hash: bool,
+    payment_money: Option<serde_json::Value>,
 }
 fn payment(id: Uuid, state: PaymentState) -> serde_json::Value {
     json!({"paymentId":id,"state":state,"amount":{"amount":"0.00000001","currency":"BTC"},
@@ -115,11 +119,20 @@ async fn payment_http(
     Path(id): Path<Uuid>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
-    assert!(authorized(&headers));
+    assert!(
+        authorized(&headers)
+            || headers.get("authorization").and_then(|v| v.to_str().ok())
+                == Some("Bearer synthetic-core-read-key")
+    );
     let mut s = s.lock().unwrap();
     assert!(s.payments.values().any(|v| *v == id));
     s.get_ids.push(id);
     let mut value = payment(id, s.state);
+    if let Some(money) = &s.payment_money {
+        for (key, amount) in money.as_object().unwrap() {
+            value[key] = amount.clone();
+        }
+    }
     if s.wrong_hash {
         value["lightning"] = json!({"preImage":"11".repeat(32)});
     }
@@ -186,6 +199,7 @@ impl Workflow {
             state: PaymentState::Pending,
             bad_money: None,
             wrong_hash: false,
+            payment_money: None,
         }));
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();

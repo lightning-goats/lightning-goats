@@ -8,6 +8,7 @@ impl Store {
         crate::nostr_event::validate_public_key(member)?;
         let mut tx = self.pool.begin().await?;
         write_lock(&mut tx).await?;
+        super::outcomes::ensure_open(&mut tx, grant_id, member).await?;
         if let Some(row) =
             sqlx::query("SELECT id FROM payout_invoice_intents WHERE grant_id=? AND member=?")
                 .bind(grant_id.to_string())

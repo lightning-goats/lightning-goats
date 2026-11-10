@@ -19,6 +19,10 @@ pub struct BridgeConfig {
     pub payout_peer_uid: Option<u32>,
     #[serde(default)]
     pub payout_execution_enabled: bool,
+    /// Operator-pinned account label, not an API account self-attestation.
+    /// Read-only verification uses core's own partner.payment.read permission.
+    #[serde(default)]
+    pub payout_account_id: Option<Uuid>,
 }
 
 impl BridgeConfig {
@@ -33,6 +37,11 @@ impl BridgeConfig {
                 && (self.payout_peer_uid.is_none() || self.reward_policy.is_none()))
         {
             bail!("payout role requires a separate non-root UID and explicit execution policy");
+        }
+        if self.payout_account_id.is_some_and(|id| id.is_nil())
+            || (self.payout_account_id.is_some() && self.payout_peer_uid.is_none())
+        {
+            bail!("outcome reader requires a pinned account and separate payout role");
         }
         if !self.socket.is_absolute()
             || self.socket.as_os_str().len() > 100
@@ -55,6 +64,12 @@ impl BridgeConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "method", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Request {
+    PayoutOutcome {
+        packet: Box<crate::payout::outcome::Packet>,
+    },
+    PayoutOutcomeProgress {
+        header: Box<crate::payout::outcome::Header>,
+    },
     Events {
         expected_epoch: Option<Uuid>,
         after: u64,
@@ -84,6 +99,9 @@ pub enum Request {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "result", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Response {
+    PayoutOutcome {
+        progress: Box<crate::payout::outcome::Progress>,
+    },
     Events {
         batch: Box<Batch>,
     },
@@ -163,6 +181,20 @@ pub struct AuthenticatedAllowance {
 pub struct AuthenticatedFundingPage {
     page: crate::reward_funding::FundingPage,
     core_uid: u32,
+}
+
+#[derive(Clone)]
+pub struct AuthenticatedOutcome {
+    progress: crate::payout::outcome::Progress,
+    core_uid: u32,
+}
+impl AuthenticatedOutcome {
+    pub fn progress(&self) -> &crate::payout::outcome::Progress {
+        &self.progress
+    }
+    pub fn core_uid(&self) -> u32 {
+        self.core_uid
+    }
 }
 
 impl AuthenticatedFundingPage {
@@ -388,6 +420,7 @@ mod tests {
             reward_policy: None,
             payout_peer_uid: None,
             payout_execution_enabled: false,
+            payout_account_id: None,
         };
         good.validate().unwrap();
         for bad in [

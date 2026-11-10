@@ -14,8 +14,8 @@ use tokio::{
 };
 
 use super::{
-    AuthenticatedAllowance, AuthenticatedBatch, AuthenticatedFundingPage, AuthenticatedReservation,
-    BridgeConfig, MAX_FRAME, Request, Response, Safety,
+    AuthenticatedAllowance, AuthenticatedBatch, AuthenticatedFundingPage, AuthenticatedOutcome,
+    AuthenticatedReservation, BridgeConfig, MAX_FRAME, Request, Response, Safety,
 };
 use crate::{config::RuntimeMode, ledger::LedgerStore};
 
@@ -31,6 +31,13 @@ pub struct Server {
     reward_policy: Option<crate::reward_funding::RewardPolicy>,
     payout_peer_uid: Option<u32>,
     payout_execution_enabled: bool,
+    payout_account_id: Option<uuid::Uuid>,
+}
+
+struct Resources {
+    reads: Arc<Semaphore>,
+    verification: Arc<Semaphore>,
+    reader: Option<Arc<crate::payout::outcome::Reader>>,
 }
 
 #[derive(Clone, Copy)]
@@ -49,7 +56,12 @@ impl Role {
                     | Request::RewardAllowance { .. }
                     | Request::ReserveReward { .. }
             ),
-            Self::Payout => matches!(request, Request::PayoutFunding { .. }),
+            Self::Payout => matches!(
+                request,
+                Request::PayoutFunding { .. }
+                    | Request::PayoutOutcome { .. }
+                    | Request::PayoutOutcomeProgress { .. }
+            ),
         }
     }
 }
@@ -149,15 +161,35 @@ impl Server {
             reward_policy: config.reward_policy.clone(),
             payout_peer_uid: config.payout_peer_uid,
             payout_execution_enabled: config.payout_execution_enabled,
+            payout_account_id: config.payout_account_id,
         })
     }
 
     pub async fn run(self, ledger: LedgerStore, mode: RuntimeMode) -> Result<()> {
+        self.run_with_reader(ledger, mode, None).await
+    }
+
+    pub async fn run_with_reader(
+        self,
+        ledger: LedgerStore,
+        mode: RuntimeMode,
+        reader: Option<Arc<crate::payout::outcome::Reader>>,
+    ) -> Result<()> {
+        if reader
+            .as_ref()
+            .is_some_and(|reader| Some(reader.account_id()) != self.payout_account_id)
+        {
+            bail!("outcome reader does not match configured account");
+        }
         let clients = Arc::new(Semaphore::new(8));
         // At most one bridge database operation competes for the financial pool,
         // including the explicitly enabled bounded reservation write.
         // Other clients get a bounded rejection, never an unbounded waiter queue.
-        let reads = Arc::new(Semaphore::new(1));
+        let resources = Arc::new(Resources {
+            reads: Arc::new(Semaphore::new(1)),
+            verification: Arc::new(Semaphore::new(1)),
+            reader,
+        });
         let mut budget = ReadBudget::new(Instant::now());
         loop {
             let (stream, _) = self.listener.accept().await?;
@@ -178,18 +210,18 @@ impl Server {
                 continue;
             };
             let ledger = ledger.clone();
-            let reads = Arc::clone(&reads);
+            let resources = Arc::clone(&resources);
             let reward_policy = self.reward_policy.clone();
             let payout_execution_enabled = self.payout_execution_enabled;
             tokio::spawn(async move {
                 let _permit = permit;
                 let _ = timeout(
-                    Duration::from_secs(10),
+                    Duration::from_secs(if matches!(role, Role::Payout) { 22 } else { 10 }),
                     serve_one(
                         stream,
                         &ledger,
                         mode,
-                        &reads,
+                        &resources,
                         reward_policy.as_ref(),
                         role,
                         payout_execution_enabled,
@@ -205,7 +237,7 @@ async fn serve_one(
     mut stream: UnixStream,
     ledger: &LedgerStore,
     mode: RuntimeMode,
-    reads: &Arc<Semaphore>,
+    resources: &Resources,
     reward_policy: Option<&crate::reward_funding::RewardPolicy>,
     role: Role,
     payout_execution_enabled: bool,
@@ -217,8 +249,36 @@ async fn serve_one(
     if !role.permits(&request) {
         return write_frame(&mut stream, &Response::Rejected).await;
     }
-    let response = if let Ok(_permit) = Arc::clone(reads).try_acquire_owned() {
+    // Provider waits do not hold the ordinary event/safety IPC permit or a DB
+    // transaction. At most one verification request exists, with no wait queue.
+    if let Request::PayoutOutcome { packet } = &request {
+        let response = match (
+            &resources.reader,
+            Arc::clone(&resources.verification).try_acquire_owned(),
+        ) {
+            (Some(reader), Ok(_permit)) => {
+                match ledger.reconcile_payout_outcome(packet, reader).await {
+                    Ok(progress) => Response::PayoutOutcome {
+                        progress: Box::new(progress),
+                    },
+                    Err(_) => Response::Rejected,
+                }
+            }
+            _ => Response::Rejected,
+        };
+        return write_frame(&mut stream, &response).await;
+    }
+    let response = if let Ok(_permit) = Arc::clone(&resources.reads).try_acquire_owned() {
         match request {
+            Request::PayoutOutcomeProgress { header } => {
+                match ledger.payout_outcome_progress(&header).await {
+                    Ok(progress) => Response::PayoutOutcome {
+                        progress: Box::new(progress),
+                    },
+                    Err(_) => Response::Rejected,
+                }
+            }
+            Request::PayoutOutcome { .. } => Response::Rejected,
             Request::Events {
                 expected_epoch,
                 after,
@@ -314,16 +374,65 @@ impl Client {
         })
     }
     async fn request(&self, request: &Request) -> Result<Response> {
-        timeout(Duration::from_secs(12), async {
-            let mut stream = UnixStream::connect(&self.socket).await?;
-            if stream.peer_cred()?.uid() != self.expected_uid {
-                bail!("core socket peer UID does not match expected identity");
-            }
-            write_frame(&mut stream, request).await?;
-            read_frame(&mut stream).await
-        })
+        timeout(
+            Duration::from_secs(if matches!(request, Request::PayoutOutcome { .. }) {
+                25
+            } else {
+                12
+            }),
+            async {
+                let mut stream = UnixStream::connect(&self.socket).await?;
+                if stream.peer_cred()?.uid() != self.expected_uid {
+                    bail!("core socket peer UID does not match expected identity");
+                }
+                write_frame(&mut stream, request).await?;
+                read_frame(&mut stream).await
+            },
+        )
         .await
         .context("core request deadline exceeded")?
+    }
+    pub async fn payout_outcome(
+        &self,
+        packet: &crate::payout::outcome::Packet,
+    ) -> Result<AuthenticatedOutcome> {
+        packet.validate()?;
+        self.outcome_request(
+            &Request::PayoutOutcome {
+                packet: Box::new(packet.clone()),
+            },
+            &packet.header,
+        )
+        .await
+    }
+    pub async fn payout_outcome_progress(
+        &self,
+        header: &crate::payout::outcome::Header,
+    ) -> Result<AuthenticatedOutcome> {
+        header.validate()?;
+        self.outcome_request(
+            &Request::PayoutOutcomeProgress {
+                header: Box::new(header.clone()),
+            },
+            header,
+        )
+        .await
+    }
+    async fn outcome_request(
+        &self,
+        request: &Request,
+        header: &crate::payout::outcome::Header,
+    ) -> Result<AuthenticatedOutcome> {
+        match self.request(request).await? {
+            Response::PayoutOutcome { progress } => {
+                progress.validate(header)?;
+                Ok(AuthenticatedOutcome {
+                    progress: *progress,
+                    core_uid: self.expected_uid,
+                })
+            }
+            _ => bail!("core did not verify payout outcome"),
+        }
     }
     pub async fn events(
         &self,
@@ -494,6 +603,16 @@ async fn write_frame<T: Serialize>(stream: &mut UnixStream, value: &T) -> Result
 /// Bridge failure must not stop core settlement/feeding workers. No optional
 /// config means no socket or credential capability is created.
 pub async fn run_optional(config: Option<BridgeConfig>, ledger: LedgerStore, mode: RuntimeMode) {
+    run_optional_with_reader(config, ledger, mode, None).await;
+}
+
+pub async fn run_optional_with_reader(
+    config: Option<BridgeConfig>,
+    ledger: LedgerStore,
+    mode: RuntimeMode,
+    reader: Option<crate::payout::outcome::Reader>,
+) {
+    let reader = reader.map(Arc::new);
     let Some(config) = config else {
         std::future::pending::<()>().await;
         return;
@@ -517,7 +636,9 @@ pub async fn run_optional(config: Option<BridgeConfig>, ledger: LedgerStore, mod
         }
         match Server::bind(&config).await {
             Ok(server) => {
-                let _ = server.run(ledger.clone(), mode).await;
+                let _ = server
+                    .run_with_reader(ledger.clone(), mode, reader.clone())
+                    .await;
             }
             Err(_) => tracing::warn!(
                 "core bridge unavailable; financial processing continues independently"
@@ -560,6 +681,7 @@ mod tests {
             reward_policy: None,
             payout_peer_uid: None,
             payout_execution_enabled: false,
+            payout_account_id: None,
         };
         let ledger = LedgerStore::connect(&format!(
             "sqlite://{}",

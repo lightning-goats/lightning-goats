@@ -20,6 +20,7 @@ impl Store {
     pub async fn prepare_quote(&self, invoice_id: Uuid, now: i64) -> Result<QuoteIntent> {
         let mut tx = self.pool.begin().await?;
         write_lock(&mut tx).await?;
+        super::outcomes::ensure_invoice_open(&mut tx, invoice_id).await?;
         let executed:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM payout_execute_intents e JOIN payout_quote_intents q ON q.id=e.intent_id WHERE q.invoice_id=?)")
             .bind(invoice_id.to_string()).fetch_one(&mut *tx).await?;
         if executed {
@@ -188,6 +189,8 @@ impl Store {
         let mut tx = self.pool.begin().await?;
         write_lock(&mut tx).await?;
         let quote = load_quote(&mut tx, id).await?;
+        super::outcomes::ensure_invoice_open(&mut tx, quote.request.invoice_id).await?;
+        touch_clock(&mut tx, now).await?;
         if load_binding(&mut tx, id).await?.is_some() {
             bail!("original payment ID is known; use read-only reconciliation");
         }
@@ -201,10 +204,7 @@ impl Store {
             serde_json::from_value(evidence["reservation"].clone())?;
         let funding: crate::reward_funding::Funding =
             serde_json::from_value(evidence["funding"].clone())?;
-        let held: i64 =
-            sqlx::query_scalar("SELECT COALESCE(SUM(reserved_sats),0) FROM payout_grants")
-                .fetch_one(&mut *tx)
-                .await?;
+        let held = super::outcomes::usage(&mut tx, now).await?;
         let ceiling = u64::try_from(
             u128::from(funding.strike_sats) * u128::from(self.policy.member_percent_ceiling) / 100,
         )?
@@ -220,7 +220,7 @@ impl Store {
             || quote.request.scope != self.policy.scope.provider
             || quote.request.fee_limit_sats > self.policy.max_fee_sats
             || reservation.reserved_sats > ceiling
-            || u64::try_from(held)? > self.policy.max_sats_per_24h
+            || held > self.policy.max_sats_per_24h
             || (quote.request.nip57 && !page.nostr_enabled)
         {
             bail!("fresh core and independent payout policy do not permit execution");

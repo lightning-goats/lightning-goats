@@ -28,6 +28,11 @@ provides offline snapshots, retention reports and startup-blocked restore stagin
 Its [491-test checkpoint](testing/cyberherd-state-maintenance-checkpoint-20261110.md)
 records verified source and inactive artifacts, without financial resumption authority.
 
+The [overlay-stage preparer](deployment/cyberherd-overlay-stage.md) freezes
+native-zap, membership and loopback-view configuration for review. It preserves
+the existing receive/feed behavior, keeps payout ceilings zero and omits a
+membership Nostr signer. It implements no activation or service changes.
+
 Fresh [offline journal initialization](deployment/cyberherd-offline-initialization.md)
 now has a [492-test source checkpoint](testing/cyberherd-bootstrap-checkpoint-20261110.md),
 including mandatory native subprocess checks under three distinct runtime UIDs.

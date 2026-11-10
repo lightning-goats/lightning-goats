@@ -81,7 +81,7 @@ also refused. It never stops services to make these checks pass.
 ### Authenticate the tool before interpreting Python
 
 Do not run this coordinator or its helpers as root from a checkout. The reviewed
-bootstrap is `launch-vps-upgrade.py`; it and all twelve local/transitive modules
+bootstrap is `launch-vps-upgrade.py`; it and all local/transitive modules
 must be copied into a fresh root-owned directory under an exclusively root-owned,
 non-writable ancestor chain. The exact bundle contains only:
 
@@ -100,6 +100,7 @@ non-writable ancestor chain. The exact bundle contains only:
 - `prepare-household-nostr-client.py`
 - `qualify-cyberherd-installed.py` (explicit disabled-role OS probes only)
 - `qualify-cyberherd-workers.py` (explicit isolated native worker fixtures only)
+- `stage-cyberherd-overlay.py` (explicit configuration preparation only)
 - `TOOL.json`
 
 Export the exact reviewed commit without running its files:
@@ -110,14 +111,14 @@ python3 -I -S -B deploy/scripts/export-upgrade-tools.py /path/to/repository FULL
 
 The exporter refuses root execution and existing destinations. It reads regular
 Git blobs from the literal commit, disables replacement objects and caller Git
-environment overrides, and ignores dirty checkout files. It writes the fifteen tools
+environment overrides, and ignores dirty checkout files. It writes the sixteen tools
 and deterministic `TOOL.json` with private modes and prints the manifest/launcher
 hashes. Failed output directories must be retained for inspection. This is an
 unprivileged preparation utility, not a trusted installer or source approval.
 
 Generate `TOOL.json` from the exact reviewed commit's file bytes, without running
 those files. Its schema is `{"version":1,"source_commit":"FULL_SHA","files":
-{"FILENAME":"SHA256",...}}`; `files` must cover exactly the fifteen Python files,
+{"FILENAME":"SHA256",...}}`; `files` must cover exactly the sixteen Python files,
 including the launcher. Independently review the source commit, every file hash,
 the manifest SHA256 and the launcher SHA256. A manifest supplied alongside files
 is not independently authenticated evidence. No checkout code may run with sudo

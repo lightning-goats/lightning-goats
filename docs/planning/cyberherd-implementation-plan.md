@@ -202,6 +202,12 @@ after approved core maintenance. It preserves the existing receive process/confi
 and leaves every new worker, financial budget and publication path disabled.
 Actual runtime/household/provider/browser/recovery qualification remains open.
 
+The later [overlay-stage preparation checkpoint](../testing/cyberherd-overlay-stage-checkpoint-20261110.md)
+records actual native-validated candidate configuration and independent host
+readback without installed configuration or service changes. The proposed stage
+omits rewards, payout execution and membership public signing. Its maintenance
+executor, activation and installed presentation/settlement checks remain open.
+
 The subsequent [installed OS checkpoint](../testing/cyberherd-installed-qualification-checkpoint-20261110.md)
 passes the exact authenticated fourteen-file tool in disposable CI and on the
 actual host, using synthetic Python probes with unchanged application journals

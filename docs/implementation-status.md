@@ -46,6 +46,13 @@ operation and no installed application binary replacement. Live incoming-zap
 settlement and actual CyberHerd/receipt public delivery remain separate;
 production roles stay masked/zero.
 
+The [overlay-stage preparation checkpoint](testing/cyberherd-overlay-stage-checkpoint-20261110.md)
+now passes exact CI and actual-VPS configuration-only preparation. A private
+bundle preserves all six payees and the original core epoch/cutoff, keeps payout
+limits zero and omits membership Nostr signing. Independent readback confirmed
+unchanged installed configuration, inactive journals and running receive process.
+The maintenance/apply/resume executor remains unfinished; no new feature is active.
+
 Other remaining work includes installed browser/presentation and global network
 qualification, concrete externally reconciled recovery adoption, operator-selected
 nonzero financial ceilings and explicit activation. Native protected

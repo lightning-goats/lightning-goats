@@ -226,6 +226,10 @@ qualification remain separate requirements.
 
 ## Optional Nostr HTTP sign-in and operator commands
 
+The [476-test checkpoint](cyberherd-operator-checkpoint-20261110.md) records the
+completed exact-source Rust, 28 browser, ten CLI and inactive archive checks.
+New live roles/routes/flags remain disabled; the SQLite audit stays open.
+
 Verify native NIP-98 signature/ID, exact configured HTTPS origin/path/query/method,
 mandatory command body hash, time window, singleton tags, GET-body rejection and
 replay prevention across reopen. User self reads must never become operator

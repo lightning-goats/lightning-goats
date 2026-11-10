@@ -267,8 +267,9 @@ Subsequent [operator-interface source](../architecture/cyberherd-operator-interf
 adds optional exact-request NIP-98 sign-in, self reads, root-pinned operator
 settings/template/member/reset commands and existing-signer browser controls.
 Atomic revisions, retained command receipts and core ordering fences protect
-manual changes and frozen feeding snapshots. This source is undergoing final
-verification and is uninstalled/default-off.
+manual changes and frozen feeding snapshots. The [476-test source checkpoint](../testing/cyberherd-operator-checkpoint-20261110.md)
+records completed Rust/browser/CLI/inactive artifact checks. These interfaces
+remain uninstalled/default-off.
 
 Remaining implementation and qualification includes feeder announcement,
 lifecycle, roster and operator-interface installed qualification.

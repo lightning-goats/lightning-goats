@@ -158,6 +158,9 @@ financial review, provider refund qualification or new-role installation evidenc
 Whole-stack backup/consistent restore, retention operations,
 installed UID/network/helper/provider/signer/engine qualification and explicit
 activation remain required by the complete CyberHerd plan.
+The subsequent [native maintenance tool](../deployment/cyberherd-state-maintenance.md)
+adds offline four-journal copies, exact verification and marker-blocked staging.
+It does not authorize financial resumption after rollback or adopt restored state.
 The subsequent [SQLite checkpoint](../testing/cyberherd-sqlite-checkpoint-20261110.md)
 resolves the dependency-audit finding in source; it does not patch installed programs.
 

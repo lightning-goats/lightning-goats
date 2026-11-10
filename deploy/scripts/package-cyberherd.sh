@@ -15,7 +15,7 @@ LG_EPOCH=$(git -C "$LG_REPO" show -s --format=%ct HEAD)
 mkdir -- "$LG_OUTPUT"
 LG_STAGE=$(mktemp -d)
 trap 'rm -rf -- "$LG_STAGE"' EXIT
-for LG_BINARY in cyberherdd cyberherd-payoutd cyberherd-signerd; do
+for LG_BINARY in cyberherdd cyberherd-payoutd cyberherd-signerd cyberherd-statectl; do
     test -x "$LG_BIN_DIR/$LG_BINARY"
     "$LG_BIN_DIR/$LG_BINARY" --help >/dev/null
     install -m 0755 "$LG_BIN_DIR/$LG_BINARY" "$LG_STAGE/$LG_BINARY"

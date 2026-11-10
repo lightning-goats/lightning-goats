@@ -194,6 +194,11 @@ and verified; partial engines/models or a plan alone do not satisfy it.
 
 ## Current source checkpoint — incomplete port
 
+Work in progress adds [native four-journal retention and recovery staging](../deployment/cyberherd-state-maintenance.md).
+It preserves original scopes and signed bytes, requires stopped/masked writers
+and blocks restored store startup pending external reconciliation. This does not
+qualify installed recovery adoption or financial resumption.
+
 The isolated `feat/cyberherd-20261109` source currently contains:
 
 - Exact points/shares, admission/headbutts, social awards and pre-join evidence,

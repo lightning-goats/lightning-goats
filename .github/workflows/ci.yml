@@ -37,7 +37,7 @@ jobs:
       - name: Test
         run: cargo test --locked --all-features
 
-      - name: Verify protected failed-cost approvals with actual root ownership
+      - name: Verify state and financial-review files with actual root ownership
         shell: bash
         run: |
           set -euo pipefail

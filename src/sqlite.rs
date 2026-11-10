@@ -97,6 +97,8 @@ async fn connect_options(
     options: SqliteConnectOptions,
     max_connections: u32,
 ) -> Result<SqlitePool> {
+    #[cfg(unix)]
+    check_recovery_marker(options.get_filename())?;
     // Fail deterministic storage errors before the pool's after_connect retry
     // loop, and before either caller creates tables or runs migrations.
     let mut preflight = SqliteConnection::connect_with(&options)
@@ -112,6 +114,16 @@ async fn connect_options(
         .connect_with(options)
         .await
         .context("failed opening durable SQLite pool")
+}
+
+#[cfg(unix)]
+fn check_recovery_marker(database: &std::path::Path) -> Result<()> {
+    let parent = database.parent().context("database parent is missing")?;
+    match std::fs::symlink_metadata(parent.join(crate::state_maintenance::RECOVERY_MARKER)) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+        Ok(_) => bail!("restored journal requires explicit external reconciliation before startup"),
+    }
 }
 
 /// Recovery tools never initialize/upgrade a selected database. Its complete

@@ -4,6 +4,8 @@ mod bolt11;
 #[cfg(unix)]
 mod private_ipc;
 mod sqlite;
+#[cfg(unix)]
+pub mod state_maintenance;
 
 pub mod config;
 pub mod core_bridge;

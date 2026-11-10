@@ -289,3 +289,25 @@ test builds the historical pre-CyberHerd schema explicitly, preserves its actual
 paid/pending/signed rows and schema history, then exercises migration and real
 loopback daemon/gateway restart. Do not weaken current-schema refusal merely to
 reuse a legacy two-store fixture, or claim this fixture qualifies CyberHerd restore.
+
+## CyberHerd four-journal maintenance
+
+Follow [the offline maintenance contract](../deployment/cyberherd-state-maintenance.md).
+Check policy-only CLI behavior without credentials/state, protected root policy,
+four separate runtime owners, stopped/masked exact units and writer attestation.
+Use committed WAL and real schemas to prove unchanged original main/WAL/SHM,
+pending feed UUIDs, paid receipts and exact signed bytes. Reverify all image
+hashes, private manifests, migration checksums and selected owner/epoch/provider.
+Missing/changed files, old payout quotes, changed scope, active writers or a reused
+output destination must fail. Incomplete output cannot become a backup.
+
+Exercise native four-journal correlation through Pending, Failed-with-held-cost,
+final core ACK, explicit synthetic cost review and payout cost ACK. Inspection
+must not call a provider, sign, submit another payment, release funds or activate
+food. Staged restore must preserve IDs/bytes and make all four normal store opens
+fail before creation/migration while `CYBERHERD_RECOVERY_REQUIRED` exists.
+Run the dedicated root fixture with its positive marker in the isolated CI network
+namespace, separately from ordinary unprivileged rejection tests. Record the real
+root fixture and pure systemctl parser boundaries; do not claim a mocked unit
+observer qualifies actual service quiescence. External Strike/home-owner
+reconciliation and explicit adoption remain required before restored work resumes.

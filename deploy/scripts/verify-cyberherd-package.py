@@ -39,7 +39,8 @@ def verify(path, source):
     for name, digest in expected.items():
         if hashlib.sha256(files[name]).hexdigest() != digest:
             raise ValueError("review file checksum mismatch")
-    required = {"cyberherdd", "cyberherd-payoutd", "cyberherd-signerd", "BUILD-INFO.txt", "Cargo.lock", "Cargo.toml",
+    required = {"cyberherdd", "cyberherd-payoutd", "cyberherd-signerd", "cyberherd-statectl", "BUILD-INFO.txt", "Cargo.lock", "Cargo.toml",
+                "deploy/cyberherd/state-maintenance.toml.example",
                 "deploy/cyberherd/config.toml.example", "deploy/cyberherd/payout.toml.example", "deploy/cyberherd/signer.toml.example"}
     if not required.issubset(files):
         raise ValueError("review archive is missing required artifacts")
@@ -57,7 +58,7 @@ def verify(path, source):
             raise ValueError("review configuration must be disabled")
         if kind == "payout" and (config["policy"]["execution_enabled"] or config["policy"]["max_sats_per_24h"]):
             raise ValueError("review payout must have no execution/budget")
-    return {"source_commit": source, "activation": "none", "binaries": 3, "files": len(files)}
+    return {"source_commit": source, "activation": "none", "binaries": 4, "files": len(files)}
 
 
 if __name__ == "__main__":

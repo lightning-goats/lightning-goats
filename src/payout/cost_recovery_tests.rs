@@ -1,5 +1,8 @@
 use super::*;
 use crate::payout::cost_recovery::{ApprovedDecision, Decision};
+
+#[path = "state_maintenance_tests.rs"]
+mod state_maintenance_tests;
 fn decision(packet: &Packet, cost: u64) -> Decision {
     let binding = packet.validate().unwrap().unwrap();
     let header = &packet.header;

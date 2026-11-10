@@ -20,6 +20,7 @@ async fn core(
         group_gid: gid,
         reward_policy: Some(w.f.policy.clone()),
         payout_peer_uid: Some(uid),
+        delegated_feeder_messages: false,
         payout_execution_enabled: true,
         payout_account_id: Some(w.policy.scope.provider.account_id),
     };

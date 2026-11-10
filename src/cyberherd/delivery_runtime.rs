@@ -134,6 +134,32 @@ impl Config {
                 }
             }
         });
+        let feeding_store = store.clone();
+        let feeding_owner = owner.to_owned();
+        let feeding_core = Client::new(core_socket.to_path_buf(), core_uid)?;
+        tasks.spawn(async move {
+            let mut ticks = tokio::time::interval(Duration::from_millis(millis));
+            ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                ticks.tick().await;
+                let result = async {
+                    if let Some(message) = feeding_store
+                        .pending_feeding_overlay(&feeding_owner)
+                        .await?
+                    {
+                        let seq = feeding_core.feeding_overlay(&message).await?;
+                        feeding_store
+                            .acknowledge_feeding_overlay(&message, seq)
+                            .await?;
+                    }
+                    anyhow::Ok(())
+                }
+                .await;
+                if result.is_err() {
+                    tracing::warn!("confirmed feeding overlay held; original notice retained");
+                }
+            }
+        });
         if let Some(nak) = nak {
             if self.lifecycle {
                 let notices = super::notice_worker::Worker {

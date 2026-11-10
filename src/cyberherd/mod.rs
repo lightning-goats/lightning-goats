@@ -13,6 +13,7 @@ pub mod delivery_runtime;
 #[cfg(unix)]
 pub mod delivery_worker;
 pub mod discovery;
+pub mod feeding_delivery;
 pub mod ingress;
 pub mod lifecycle;
 pub mod membership;

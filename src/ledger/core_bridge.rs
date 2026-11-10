@@ -168,7 +168,7 @@ fn payload(raw: Option<&str>) -> Result<Value> {
     Ok(value)
 }
 
-async fn export_body(
+pub(super) async fn export_body(
     tx: &mut Transaction<'_, Sqlite>,
     seq: u64,
     event_type: &str,
@@ -245,7 +245,7 @@ async fn export_body(
             zap,
         })));
     }
-    if let Some(row)=sqlx::query("SELECT f.id,f.status,f.threshold_sats,f.resolved_at,l.entry_type,l.source_key,l.delta_sats FROM feed_event_sources s JOIN feed_attempts f ON f.id=s.feed_attempt_id JOIN ledger_entries l ON l.feed_attempt_id=f.id WHERE s.event_seq=?")
+    if let Some(row)=sqlx::query("SELECT f.id,f.status,f.threshold_sats,f.resolved_at,l.id AS debit_id,l.entry_type,l.source_key,l.delta_sats FROM feed_event_sources s JOIN feed_attempts f ON f.id=s.feed_attempt_id JOIN ledger_entries l ON l.feed_attempt_id=f.id WHERE s.event_seq=?")
         .bind(seq).fetch_optional(&mut **tx).await? {
         let id:String=row.try_get("id")?;
         let threshold:i64=row.try_get("threshold_sats")?;
@@ -258,7 +258,7 @@ async fn export_body(
         }
         let request_id=Uuid::parse_str(&id)?;
         let funding=super::reward_funding::confirmed_funding(tx,request_id).await?;
-        return Ok(EventBody::Feeding(Feeding {request_id,threshold_sats:to_u64(threshold,"feed threshold")?,confirmed_at:row.try_get::<Option<i64>,_>("resolved_at")?.context("confirmed feed lacks completion time")?,funding}));
+        return Ok(EventBody::Feeding(Feeding {request_id,threshold_sats:to_u64(threshold,"feed threshold")?,confirmed_at:row.try_get::<Option<i64>,_>("resolved_at")?.context("confirmed feed lacks completion time")?,funding,presentation:super::feeding_notices::export_proof(tx,to_u64(seq,"feeding sequence")?,request_id,row.try_get("debit_id")?,&value).await?}));
     }
     if let Some(row)=sqlx::query("SELECT g.*,l.entry_type,l.source_key,l.delta_sats,l.address_user AS ledger_user,l.credit_pool AS ledger_pool FROM operator_credit_grants g JOIN ledger_entries l ON l.id=g.ledger_entry_id WHERE g.event_seq=?")
         .bind(seq).fetch_optional(&mut **tx).await? {

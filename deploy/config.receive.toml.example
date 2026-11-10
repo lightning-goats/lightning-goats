@@ -7,6 +7,10 @@
 # Replace both IDs with actual non-root values; zero is intentionally invalid.
 # Never give the CyberHerd user the core's credential-bearing primary group.
 # [core_bridge]
+# delegated_feeder_messages = false
+# Optional sole feeding presenter, after CyberHerd note/chat/overlay qualification.
+# Requires pinned reward_policy.owner, even with zero monetary ceilings.
+# See docs/architecture/cyberherd-feeding-announcements.md.
 # socket = "/run/lightning-goats-bridge/core.sock"
 # peer_uid = 0
 # group_gid = 0

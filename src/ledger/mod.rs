@@ -17,6 +17,7 @@ mod core_bridge;
 mod cyberherd_overlay;
 mod events;
 mod feed;
+mod feeding_notices;
 mod feeding_presentation;
 mod operator_credit;
 mod outbox;

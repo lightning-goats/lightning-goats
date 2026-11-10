@@ -44,6 +44,7 @@ pub(crate) struct Job {
     pub unsigned: Unsigned,
     pub signed: Option<String>,
     pub relay: String,
+    pub feeding: bool,
 }
 
 impl Store {
@@ -189,15 +190,24 @@ impl Store {
             let unsigned = match saved {
                 Some(raw) => serde_json::from_str(&raw)?,
                 None => {
-                    let target: ConversationTarget =
-                        serde_json::from_str(&row.try_get::<String, _>("target_json")?)?;
-                    let unsigned = unsigned(
-                        owner,
-                        &message,
-                        &target,
-                        reference.as_ref(),
-                        row.try_get("created_at")?,
-                    )?;
+                    let unsigned = if message.broadcast.is_some() {
+                        super::feeding_state::unsigned_broadcast(
+                            owner,
+                            &message,
+                            &destination,
+                            row.try_get("created_at")?,
+                        )?
+                    } else {
+                        let target: ConversationTarget =
+                            serde_json::from_str(&row.try_get::<String, _>("target_json")?)?;
+                        unsigned(
+                            owner,
+                            &message,
+                            &target,
+                            reference.as_ref(),
+                            row.try_get("created_at")?,
+                        )?
+                    };
                     sqlx::query("INSERT INTO delivery_unsigned(owner,identity,destination,document_json) VALUES(?,?,?,?)")
                         .bind(owner).bind(&identity).bind(&destination).bind(serde_json::to_string(&unsigned)?).execute(&mut *tx).await?;
                     unsigned
@@ -217,6 +227,7 @@ impl Store {
                 unsigned,
                 signed,
                 relay,
+                feeding: message.broadcast.is_some(),
             }));
         }
         tx.commit().await?;
@@ -336,7 +347,7 @@ impl Store {
                 .fetch_one(&mut *tx)
                 .await?;
         let binding: crate::cyberherd::ingress::CoreBinding = serde_json::from_str(&binding)?;
-        let row=sqlx::query("SELECT m.document_json FROM delivery_overlay o JOIN delivery_messages m ON m.owner=o.owner AND m.identity=o.identity WHERE o.owner=? AND o.event_seq IS NULL ORDER BY m.source_seq LIMIT 1")
+        let row=sqlx::query("SELECT m.document_json FROM delivery_overlay o JOIN delivery_messages m ON m.owner=o.owner AND m.identity=o.identity WHERE o.owner=? AND o.event_seq IS NULL AND COALESCE(json_type(m.document_json,'$.broadcast'),'null')='null' ORDER BY m.source_seq LIMIT 1")
             .bind(owner).fetch_optional(&mut *tx).await?;
         if let Some(row) = row {
             let message: Rendered =
@@ -395,6 +406,12 @@ pub(super) async fn insert_destinations(
     message: &Rendered,
     override_conversation: Option<&MemberConversation>,
 ) -> Result<()> {
+    if message.broadcast.is_some() {
+        if override_conversation.is_some() {
+            bail!("feeding notice cannot become a member branch");
+        }
+        return super::feeding_state::insert_broadcast(tx, owner, message).await;
+    }
     let context = override_conversation
         .map(|c| &c.context)
         .unwrap_or(&message.context);

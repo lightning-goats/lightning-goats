@@ -24,6 +24,8 @@ pub struct Rendered {
     pub accepted: bool,
     pub requires_joining: bool,
     pub additional_members: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub broadcast: Option<super::feeding_delivery::Broadcast>,
 }
 
 #[derive(Deserialize)]
@@ -47,6 +49,11 @@ struct ResultEvent {
 
 pub(crate) fn render(event: &StoredEvent, catalog: &Catalog) -> Result<Option<Rendered>> {
     match event.event_type.as_str() {
+        "feeding_notice" => {
+            let message: Rendered = serde_json::from_str(&event.snapshot_json)?;
+            message.validate_broadcast(&event.owner)?;
+            Ok(Some(message))
+        }
         "interaction" => interaction(event, catalog),
         "payout_result" | "payout_skipped" => payout(event, catalog),
         // Reset, operator edits, weather and information never become member
@@ -272,6 +279,7 @@ fn interaction(event: &StoredEvent, catalog: &Catalog) -> Result<Option<Rendered
         accepted,
         requires_joining: false,
         additional_members,
+        broadcast: None,
     }))
 }
 
@@ -363,6 +371,7 @@ fn payout(event: &StoredEvent, catalog: &Catalog) -> Result<Option<Rendered>> {
         accepted: false,
         requires_joining: true,
         additional_members: vec![],
+        broadcast: None,
     }))
 }
 
@@ -498,4 +507,29 @@ fn roster_footer(catalog: &Catalog, identity: &str, snapshot: &Snapshot) -> Resu
         )?;
     }
     bounded(parts)
+}
+
+impl Rendered {
+    pub(crate) fn validate_broadcast(&self, owner: &str) -> Result<()> {
+        self.broadcast
+            .as_ref()
+            .context("feeding broadcast proof missing")?
+            .validate(owner, &self.identity)?;
+        self.context.validate(owner)?;
+        if self.category != "feeder_trigger"
+            || self.member != owner
+            || self.conversation.is_some()
+            || self.context.note.is_some()
+            || self.accepted
+            || self.requires_joining
+            || !self.additional_members.is_empty()
+            || self.nostr.trim().is_empty()
+            || self.nostr.len() > 32768
+            || self.overlay.trim().is_empty()
+            || self.overlay.len() > 32768
+        {
+            bail!("invalid confirmed feeding broadcast envelope");
+        }
+        Ok(())
+    }
 }

@@ -92,6 +92,16 @@ async fn main() -> Result<()> {
     let args = Args::parse();
     let config = Arc::new(AppConfig::load(&args.config)?);
     let ledger = LedgerStore::connect(&config.database.url).await?;
+    ledger
+        .configure_feeding_notices(
+            config
+                .core_bridge
+                .as_ref()
+                .filter(|b| b.delegated_feeder_messages)
+                .and_then(|b| b.reward_policy.as_ref())
+                .map(|p| p.owner.as_str()),
+        )
+        .await?;
     let renderer = MessageRenderer::embedded()?;
 
     let interrupted = ledger.mark_interrupted_feed_intents_unknown().await?;

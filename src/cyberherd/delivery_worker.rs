@@ -121,7 +121,7 @@ impl<T: Transport> Worker<T> {
     async fn deliver(&self, job: &Job) -> Result<Option<RelayAck>> {
         // Idle/backoff work does not consume the core's bounded IPC admission.
         // Once selected, fresh permission still precedes signing and publication.
-        if !permitted(&self.core).await? {
+        if !permitted(&self.core, job.feeding).await? {
             return Ok(None);
         }
         let raw = match &job.signed {
@@ -133,13 +133,15 @@ impl<T: Transport> Worker<T> {
         };
         let event = VerifiedEvent::from_json(&raw)?;
         job.unsigned.validate_signed(&event)?;
-        if !permitted(&self.core).await? {
+        if !permitted(&self.core, job.feeding).await? {
             return Ok(None);
         }
         Ok(Some(self.transport.publish(&event, &job.relay).await?))
     }
 }
-async fn permitted(core: &Client) -> Result<bool> {
+async fn permitted(core: &Client, confirmed_feeding: bool) -> Result<bool> {
     let state = core.safety().await?;
-    Ok(state.nostr_enabled && state.current_availability(calendar::now()?) == Availability::Ready)
+    Ok(state.nostr_enabled
+        && (confirmed_feeding
+            || state.current_availability(calendar::now()?) == Availability::Ready))
 }

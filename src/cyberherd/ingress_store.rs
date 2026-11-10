@@ -331,18 +331,17 @@ impl Store {
         validate_owner(owner)?;
         let row = sqlx::query("SELECT ingress_seq,feeding_json,snapshot_json,conversations_json FROM feeding_barriers WHERE owner=? AND request_id=?")
             .bind(owner).bind(id.to_string()).fetch_optional(&self.pool).await?;
-        row.map(|row| {
-            Ok(FeedingBarrier {
-                ingress_seq: row.try_get("ingress_seq")?,
-                feeding: serde_json::from_str(&row.try_get::<String, _>("feeding_json")?)?,
-                snapshot: serde_json::from_str(&row.try_get::<String, _>("snapshot_json")?)?,
-                conversations: serde_json::from_str(
-                    &row.try_get::<String, _>("conversations_json")?,
-                )?,
-            })
-        })
-        .transpose()
+        row.map(|row| decode_barrier(&row)).transpose()
     }
+}
+
+pub(super) fn decode_barrier(row: &sqlx::sqlite::SqliteRow) -> Result<FeedingBarrier> {
+    Ok(FeedingBarrier {
+        ingress_seq: row.try_get("ingress_seq")?,
+        feeding: serde_json::from_str(&row.try_get::<String, _>("feeding_json")?)?,
+        snapshot: serde_json::from_str(&row.try_get::<String, _>("snapshot_json")?)?,
+        conversations: serde_json::from_str(&row.try_get::<String, _>("conversations_json")?)?,
+    })
 }
 
 async fn require_head(tx: &mut Transaction<'_, Sqlite>, owner: &str, seq: i64) -> Result<()> {

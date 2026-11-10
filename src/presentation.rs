@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use anyhow::{Context, Result, bail};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
@@ -22,7 +22,7 @@ pub struct RenderedPresentation {
     pub overlay_goats: Vec<OverlayGoat>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OverlayGoat {
     pub name: String,
     #[serde(rename = "imageUrl")]
@@ -171,6 +171,14 @@ impl MessageRenderer {
         payload: &serde_json::Map<String, Value>,
         threshold_sats: u64,
     ) -> Result<RenderedPresentation> {
+        if payload.get("presentation_owner").is_some() {
+            return Ok(RenderedPresentation {
+                nostr_content: None,
+                overlay_type: Some("feeder_trigger".into()),
+                overlay_message: None,
+                overlay_goats: vec![],
+            });
+        }
         let amount = payload
             .get("triggering_payment_amount_sats")
             .map(|value| {
@@ -199,6 +207,40 @@ impl MessageRenderer {
             overlay_message: Some(safe_substitute(template, &overlay_values)?),
             overlay_goats: vec![overlay_goat(goat)],
         })
+    }
+
+    pub(crate) fn editable_feeding(
+        catalog: &Catalog,
+        event: &DurableEvent,
+        proof: &crate::cyberherd::feeding_delivery::Proof,
+        threshold: u64,
+    ) -> Result<Option<RenderedPresentation>> {
+        if catalog.category("feeder_trigger").is_none() {
+            return Ok(None);
+        }
+        let goat = goat_for_event(event, None);
+        let difference = difference_message(proof.feed_credit_sats, threshold);
+        let compose = |name: &str| -> Result<Option<String>> {
+            if let Some(amount) = proof.triggering_payment_amount_sats {
+                catalog.render(
+                    "feeder_trigger",
+                    &proof.identity,
+                    &common_values(amount, &difference, name)
+                        .into_iter()
+                        .collect(),
+                )
+            } else {
+                Ok(Some(format!(
+                    "⚡ The Lightning Goats have been fed! {difference}\n\nhttps://lightning-goats.com"
+                )))
+            }
+        };
+        Ok(Some(RenderedPresentation {
+            nostr_content: compose(goat.nostr_profile)?,
+            overlay_type: Some("feeder_trigger".into()),
+            overlay_message: compose(goat.name)?,
+            overlay_goats: vec![overlay_goat(goat)],
+        }))
     }
 
     fn render_interface_info(&self, event: &DurableEvent) -> Result<RenderedPresentation> {

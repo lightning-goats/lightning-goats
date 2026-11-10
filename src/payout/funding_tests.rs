@@ -1027,6 +1027,7 @@ async fn core_role_reads_are_separate_from_intake_and_never_enable_execution_by_
             group_gid: gid,
             reward_policy: Some(f.policy.clone()),
             payout_peer_uid: Some(if payout { uid } else { uid + 1 }),
+            delegated_feeder_messages: false,
             payout_execution_enabled: enabled,
             payout_account_id: None,
         };
@@ -1154,6 +1155,7 @@ fn payout_identity_configuration_and_key_fingerprint_cannot_be_silently_rebound(
         group_gid: 10002,
         reward_policy: None,
         payout_peer_uid: None,
+        delegated_feeder_messages: false,
         payout_execution_enabled: false,
         payout_account_id: None,
     };
@@ -1167,6 +1169,7 @@ fn payout_identity_configuration_and_key_fingerprint_cannot_be_silently_rebound(
             ..good.clone()
         },
         BridgeConfig {
+            delegated_feeder_messages: false,
             payout_execution_enabled: true,
             payout_account_id: None,
             ..good

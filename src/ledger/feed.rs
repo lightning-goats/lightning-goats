@@ -277,17 +277,26 @@ impl LedgerStore {
         // Message attribution only: remove the newest still-unspent credit to
         // find the receipt that completed this FIFO threshold. A later payment
         // during dispatch cannot replace the original funding contribution.
-        let triggering_payment_amount_sats =
-            triggering_payment_amount(&mut transaction, debit_id, feed_credit_sats)
-                .await
-                .unwrap_or(None);
+        let triggering_credit = triggering_credit(&mut transaction, debit_id, feed_credit_sats)
+            .await
+            .unwrap_or(None);
         let mut payload = json!({
             "feed_attempt_id": id,
             "threshold_sats": threshold_sats,
             "feed_credit_sats": feed_credit_sats
         });
-        if let Some(amount) = triggering_payment_amount_sats {
+        if let Some((credit_id, amount)) = triggering_credit {
+            payload["triggering_credit_id"] = credit_id.into();
             payload["triggering_payment_amount_sats"] = amount.into();
+        }
+        // Presentation availability can never prevent a financial confirmation.
+        if let Ok(Some(owner)) = sqlx::query_scalar::<_, String>(
+            "SELECT owner FROM feeding_notice_policy WHERE singleton=1",
+        )
+        .fetch_optional(&mut *transaction)
+        .await
+        {
+            payload["presentation_owner"] = owner.into();
         }
         let event_seq =
             append_event_in_transaction(&mut transaction, "feeder_confirmed", &payload).await?;
@@ -313,19 +322,19 @@ impl LedgerStore {
     }
 }
 
-async fn triggering_payment_amount(
+pub(super) async fn triggering_credit(
     transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     debit_id: i64,
     mut unspent_sats: u64,
-) -> Result<Option<u64>> {
+) -> Result<Option<(i64, u64)>> {
     // Bounded, best-effort presentation lookup, with no schema or accounting
     // mutation. Missing history never substitutes the threshold as a payment.
-    let rows = sqlx::query("SELECT delta_sats FROM ledger_entries WHERE id<? AND delta_sats>0 ORDER BY id DESC LIMIT 4096")
+    let rows = sqlx::query("SELECT id,delta_sats FROM ledger_entries WHERE id<? AND delta_sats>0 ORDER BY id DESC LIMIT 4096")
         .bind(debit_id).fetch_all(&mut **transaction).await?;
     for row in rows {
         let amount = to_u64(row.try_get("delta_sats")?, "credit sats")?;
         if unspent_sats < amount {
-            return Ok(Some(amount));
+            return Ok(Some((row.try_get("id")?, amount)));
         }
         unspent_sats -= amount;
     }

@@ -253,6 +253,7 @@ impl Fixture {
                 max_sats_per_24h: 0,
             }),
             payout_peer_uid: Some(uid + 1),
+            delegated_feeder_messages: false,
             payout_execution_enabled: false,
             payout_account_id: None,
         };
@@ -775,6 +776,7 @@ async fn overlay_import_enforces_pause_owner_epoch_role_and_exact_receipts_witho
             max_sats_per_24h: 0,
         }),
         payout_peer_uid: Some(uid),
+        delegated_feeder_messages: false,
         payout_execution_enabled: false,
         payout_account_id: None,
     };
@@ -802,5 +804,639 @@ async fn overlay_import_enforces_pause_owner_epoch_role_and_exact_receipts_witho
             .all(|e| matches!(e.body, crate::core_bridge::EventBody::Other))
     );
     assert_eq!(f.core.feed_credit_sats().await.unwrap(), 0);
+    task.abort();
+}
+
+// Synthetic operator credits below create no real reward authority or physical
+// request. confirm_feed_attempt simulates the gateway's correlated confirmed result.
+async fn feed_credit(f: &Fixture, id: &str, sats: u64) {
+    f.core
+        .grant_operator_credit(
+            &crate::ledger::OperatorCreditGrant {
+                id: id.into(),
+                amount_sats: sats,
+                address_user: "herd".into(),
+                reason: "isolated feeding presentation fixture".into(),
+            },
+            false,
+        )
+        .await
+        .unwrap();
+}
+async fn confirm_food(f: &Fixture) -> Uuid {
+    let id = f.core.begin_feed_attempt(1000).await.unwrap().unwrap();
+    f.core.confirm_feed_attempt(id).await.unwrap();
+    id
+}
+async fn freeze_food(f: &Fixture, client: &Client) {
+    crate::cyberherd::worker::poll_core(&f.store, &f.owner, client)
+        .await
+        .unwrap();
+    loop {
+        let step = crate::cyberherd::worker::step(
+            &f.store,
+            &f.owner,
+            crate::cyberherd::worker::Environment {
+                targets: &f.targets,
+                discovery_available: true,
+                feeder: FeederAvailability::Ready,
+                profile: None,
+                now: calendar::now().unwrap(),
+            },
+        )
+        .await
+        .unwrap();
+        if step == crate::cyberherd::worker::Step::Idle {
+            break;
+        }
+        assert!(matches!(step, crate::cyberherd::worker::Step::Feeding(_)));
+    }
+}
+async fn generate_food(f: &Fixture, targets: &Targets) {
+    while f
+        .store
+        .queue_next_feeding_announcement(&f.owner, targets, calendar::now().unwrap())
+        .await
+        .unwrap()
+    {}
+    f.queue().await;
+}
+
+#[tokio::test]
+async fn confirmed_feeding_uses_frozen_roster_trigger_amount_and_one_standalone_note_stream_pair() {
+    let f = Fixture::new().await;
+    f.apply("join-before-food", 34).await;
+    f.core
+        .configure_feeding_notices(Some(&f.owner))
+        .await
+        .unwrap();
+    feed_credit(&f, "saved", 995).await;
+    feed_credit(&f, "crossing", 10).await;
+    let id = f.core.begin_feed_attempt(1000).await.unwrap().unwrap();
+    feed_credit(&f, "arrived-during-dispatch", 200).await;
+    f.core.confirm_feed_attempt(id).await.unwrap();
+    assert_eq!(f.core.feed_credit_sats().await.unwrap(), 205);
+    let source = f
+        .core
+        .events_after(0, 100)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|e| e.event_type == "feeder_confirmed")
+        .unwrap();
+    let rendered = crate::presentation::MessageRenderer::embedded()
+        .unwrap()
+        .render(&source, 1000)
+        .unwrap();
+    assert_eq!(rendered.overlay_type.as_deref(), Some("feeder_trigger"));
+    assert!(rendered.overlay_message.is_none());
+    assert!(rendered.nostr_content.is_none());
+    f.core.advance_message_cursor(source.seq - 1).await.unwrap();
+    assert_eq!(
+        crate::messaging::process_next_message(
+            &f.core,
+            None,
+            &crate::presentation::MessageRenderer::embedded().unwrap(),
+            1000,
+            RuntimeMode::Active
+        )
+        .await
+        .unwrap(),
+        crate::messaging::MessageProcessorStep::NonPublicSkipped { seq: source.seq }
+    );
+    let (client, task) = f.bridge(RuntimeMode::Active).await;
+    freeze_food(&f, &client).await;
+    let frozen = f
+        .store
+        .feeding_barrier(&f.owner, id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        frozen
+            .feeding
+            .presentation
+            .as_ref()
+            .unwrap()
+            .triggering_payment_amount_sats,
+        Some(10)
+    );
+    f.apply("later-increase", 34).await;
+    generate_food(&f, &f.targets).await;
+    let newer = VerifiedEvent::verify(test_event(
+        1,
+        30311,
+        calendar::now().unwrap() as u64,
+        "",
+        vec![
+            vec!["d".into(), "replacement-stream".into()],
+            vec!["status".into(), "live".into()],
+        ],
+    ))
+    .unwrap();
+    let StreamAuthentication::Accepted(newer) = ProviderCache::default()
+        .authenticate(newer, &f.owner, calendar::now().unwrap())
+        .await
+        .unwrap()
+    else {
+        panic!("new project stream must authenticate")
+    };
+    let changed = Targets::project(
+        TargetPolicy {
+            project_pubkey: f.owner.clone(),
+            tracked_tags: vec!["CyberHerd".into()],
+        },
+        &DayWindow::at("America/Denver", calendar::now().unwrap()).unwrap(),
+        vec![],
+        vec![*newer],
+        BTreeSet::new(),
+        calendar::now().unwrap(),
+    )
+    .unwrap();
+    assert!(
+        !f.store
+            .queue_next_feeding_announcement(&f.owner, &changed, calendar::now().unwrap())
+            .await
+            .unwrap()
+    );
+    let db = SqlitePool::connect(&f.url).await.unwrap();
+    let raw:String=sqlx::query_scalar("SELECT document_json FROM delivery_messages WHERE json_type(document_json,'$.broadcast')='object'").fetch_one(&db).await.unwrap();
+    let message: crate::cyberherd::delivery::Rendered = serde_json::from_str(&raw).unwrap();
+    assert!(message.nostr.contains("10 sats"));
+    assert!(message.overlay.contains("10 sats"));
+    assert!(!message.nostr.contains("1000 sats"));
+    assert!(message.nostr.contains("1 active members · 34 total points"));
+    assert!(message.nostr.contains("Member allocation: 10%"));
+    assert!(!message.overlay.contains("nostr:"));
+    let broadcast = message.broadcast.as_ref().unwrap();
+    assert_eq!(broadcast.request_id, id);
+    assert_eq!(broadcast.proof.feed_credit_sats, 205);
+    let destinations: Vec<String> = sqlx::query_scalar(
+        "SELECT destination FROM delivery_destinations WHERE identity=? ORDER BY destination",
+    )
+    .bind(&message.identity)
+    .fetch_all(&db)
+    .await
+    .unwrap();
+    assert_eq!(destinations.len(), 2);
+    assert!(destinations.contains(&"broadcast:note".to_owned()));
+    assert!(destinations.iter().any(|s| s.ends_with(":original-stream")));
+    let mut jobs = vec![];
+    while let Some(job) = f
+        .store
+        .reserve_delivery(&f.owner, calendar::now().unwrap())
+        .await
+        .unwrap()
+    {
+        if job.feeding {
+            jobs.push(job);
+        }
+        if jobs.len() == 2 {
+            break;
+        }
+    }
+    assert_eq!(jobs.len(), 2);
+    let note = &jobs.iter().find(|j| j.unsigned.kind == 1).unwrap().unsigned;
+    let chat = &jobs
+        .iter()
+        .find(|j| j.unsigned.kind == 1311)
+        .unwrap()
+        .unsigned;
+    assert_eq!(note.kind, 1);
+    assert!(
+        !note
+            .tags
+            .iter()
+            .any(|t| matches!(t[0].as_str(), "e" | "a" | "p"))
+    );
+    assert_eq!(chat.kind, 1311);
+    assert_eq!(chat.content, note.content);
+    assert!(
+        chat.tags
+            .iter()
+            .any(|t| t[0] == "a" && t[1].ends_with(":original-stream") && t[3] == "root")
+    );
+    assert!(!chat.tags.iter().any(|t| matches!(t[0].as_str(), "p" | "e")));
+    assert_eq!(f.core.feed_credit_sats().await.unwrap(), 205);
+    task.abort();
+}
+
+#[tokio::test]
+async fn feeding_batch_deduplicates_presentation_but_retains_every_confirmed_reward_barrier_after_restart()
+ {
+    let f = Fixture::new().await;
+    f.core
+        .configure_feeding_notices(Some(&f.owner))
+        .await
+        .unwrap();
+    feed_credit(&f, "one-payment", 2345).await;
+    let first = confirm_food(&f).await;
+    let second = confirm_food(&f).await;
+    let (client, task) = f.bridge(RuntimeMode::Canary).await;
+    freeze_food(&f, &client).await;
+    let a = f
+        .store
+        .feeding_barrier(&f.owner, first)
+        .await
+        .unwrap()
+        .unwrap();
+    let b = f
+        .store
+        .feeding_barrier(&f.owner, second)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        a.feeding.presentation.as_ref().unwrap().identity,
+        b.feeding.presentation.as_ref().unwrap().identity
+    );
+    assert_eq!(
+        a.feeding
+            .presentation
+            .as_ref()
+            .unwrap()
+            .triggering_payment_amount_sats,
+        Some(2345)
+    );
+    generate_food(&f, &f.targets).await;
+    let reopened = Store::connect(&f.url).await.unwrap();
+    assert!(
+        !reopened
+            .queue_next_feeding_announcement(&f.owner, &f.targets, calendar::now().unwrap())
+            .await
+            .unwrap()
+    );
+    let db = SqlitePool::connect(&f.url).await.unwrap();
+    let receipts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM feeding_announcements")
+        .fetch_one(&db)
+        .await
+        .unwrap();
+    let messages: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM delivery_messages")
+        .fetch_one(&db)
+        .await
+        .unwrap();
+    let barriers: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM feeding_barriers")
+        .fetch_one(&db)
+        .await
+        .unwrap();
+    assert_eq!((receipts, messages, barriers), (2, 1, 2));
+    assert_eq!(f.core.feed_credit_sats().await.unwrap(), 345);
+    assert!(
+        sqlx::query("DELETE FROM feeding_announcements")
+            .execute(&db)
+            .await
+            .is_err()
+    );
+    // Two equally sized but distinct later payments are distinct announcements.
+    feed_credit(&f, "next-payment", 1000).await;
+    confirm_food(&f).await;
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    freeze_food(&f, &client).await;
+    generate_food(&f, &f.targets).await;
+    let messages: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM delivery_messages")
+        .fetch_one(&db)
+        .await
+        .unwrap();
+    assert_eq!(messages, 2);
+    task.abort();
+}
+
+#[tokio::test]
+async fn feeding_overlay_requires_actual_owner_epoch_uuid_and_preserves_exact_receipt_without_extra_food()
+ {
+    let f = Fixture::new().await;
+    f.core
+        .configure_feeding_notices(Some(&f.owner))
+        .await
+        .unwrap();
+    feed_credit(&f, "one-payment", 1005).await;
+    confirm_food(&f).await;
+    let (client, task) = f.bridge(RuntimeMode::Canary).await;
+    freeze_food(&f, &client).await;
+    generate_food(&f, &f.targets).await;
+    let message = f
+        .store
+        .pending_feeding_overlay(&f.owner)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        f.store
+            .pending_member_overlay(&f.owner)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    // An ordinary credit row, even with a plausible message and new identity,
+    // cannot certify food or create an overlay notice.
+    let mut forged = message.clone();
+    forged.broadcast.proof.source_seq = 1;
+    forged.broadcast.proof.identity = "66".repeat(32);
+    forged.broadcast.request_id = Uuid::new_v4();
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    assert!(client.feeding_overlay(&forged).await.is_err());
+    f.ready(Some(true)).await; // Confirmed food stays announceable after a pause.
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    let seq = client.feeding_overlay(&message).await.unwrap();
+    assert_eq!(client.feeding_overlay(&message).await.unwrap(), seq); // lost ACK
+    f.store
+        .acknowledge_feeding_overlay(&message, seq)
+        .await
+        .unwrap();
+    assert!(
+        f.store
+            .pending_feeding_overlay(&f.owner)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let mut invalid = message.clone();
+    invalid.broadcast.request_id = Uuid::new_v4();
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    assert!(client.feeding_overlay(&invalid).await.is_err());
+    let mut invalid = message.clone();
+    invalid.broadcast.proof.owner = key(3);
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    assert!(client.feeding_overlay(&invalid).await.is_err());
+    let mut invalid = message.clone();
+    invalid.epoch = Uuid::new_v4();
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    assert!(client.feeding_overlay(&invalid).await.is_err());
+    let mut invalid = message.clone();
+    invalid.message = "replacement".into();
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    assert!(client.feeding_overlay(&invalid).await.is_err());
+    assert_eq!(f.core.feed_credit_sats().await.unwrap(), 5);
+    let events = f.core.events_after(0, 100).await.unwrap();
+    assert_eq!(
+        events
+            .iter()
+            .filter(|e| e.event_type == "feeder_confirmed")
+            .count(),
+        1
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|e| e.event_type == "cyberherd_message")
+            .count(),
+        1
+    );
+    assert!(f.core.next_outbox_entry().await.unwrap().is_none());
+    task.abort();
+    let (uid, gid) = self_credentials().unwrap();
+    let role = BridgeConfig {
+        socket: f.root.path().join("feeding-payout-role.sock"),
+        peer_uid: uid + 1,
+        group_gid: gid,
+        reward_policy: Some(crate::reward_funding::RewardPolicy {
+            owner: f.owner.clone(),
+            member_percent_ceiling: 0,
+            max_sats_per_feed: 0,
+            max_sats_per_24h: 0,
+        }),
+        payout_peer_uid: Some(uid),
+        payout_execution_enabled: false,
+        delegated_feeder_messages: false,
+        payout_account_id: None,
+    };
+    let task = tokio::spawn(
+        Server::bind(&role)
+            .await
+            .unwrap()
+            .run(f.core.clone(), RuntimeMode::Active),
+    );
+    let payout = Client::new(role.socket, uid).unwrap();
+    assert!(payout.feeding_overlay(&message).await.is_err());
+    task.abort();
+}
+
+#[tokio::test]
+async fn feeding_notes_hold_in_nonpublic_mode_but_retry_same_bytes_during_pause_and_keep_stream_root()
+ {
+    let f = Fixture::new().await;
+    f.core
+        .configure_feeding_notices(Some(&f.owner))
+        .await
+        .unwrap();
+    feed_credit(&f, "one-payment", 1000).await;
+    confirm_food(&f).await;
+    let (client, task) = f.bridge(RuntimeMode::Canary).await;
+    freeze_food(&f, &client).await;
+    generate_food(&f, &f.targets).await;
+    let fake = Fake::default();
+    let worker = Worker {
+        store: f.store.clone(),
+        core: client,
+        transport: fake.clone(),
+        owner: f.owner.clone(),
+    };
+    assert_eq!(tick(&f, &worker).await.unwrap(), Step::Waiting);
+    assert_eq!(fake.signs.load(Ordering::SeqCst), 0);
+    task.abort();
+    // Reopen the same durable store with a public-mode core, not a fresh message.
+    let reopened = Store::connect(&f.url).await.unwrap();
+    let db = SqlitePool::connect(&f.url).await.unwrap();
+    sqlx::query("UPDATE delivery_work SET lease_until=0")
+        .execute(&db)
+        .await
+        .unwrap();
+    let (client, task) = f.bridge(RuntimeMode::Active).await;
+    let worker = Worker {
+        store: reopened,
+        core: client,
+        transport: fake.clone(),
+        owner: f.owner.clone(),
+    };
+    f.ready(Some(true)).await;
+    fake.lose.store(true, Ordering::SeqCst);
+    tokio::time::sleep(std::time::Duration::from_millis(1050)).await;
+    assert!(worker.tick().await.is_err());
+    let original = fake.events.lock().unwrap()[0].clone();
+    sqlx::query("UPDATE delivery_work SET lease_until=0")
+        .execute(&db)
+        .await
+        .unwrap();
+    // Do not let another destination hide the retry assertion.
+    sqlx::query("UPDATE delivery_work SET attempted_at=0 WHERE destination=?")
+        .bind(if original.kind == 1 {
+            "broadcast:note".into()
+        } else {
+            format!(
+                "stream:{}",
+                f.targets
+                    .current()
+                    .into_iter()
+                    .find(|t| t.kind == 30311)
+                    .unwrap()
+                    .coordinate
+                    .unwrap()
+            )
+        })
+        .execute(&db)
+        .await
+        .unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(1050)).await;
+    assert_eq!(worker.tick().await.unwrap(), Step::Published);
+    let events = fake.events.lock().unwrap().clone();
+    assert_eq!(events[0], events[1]);
+    assert_eq!(fake.signs.load(Ordering::SeqCst), 1);
+    task.abort();
+}
+
+#[tokio::test]
+async fn feeding_delegation_is_opt_in_and_legacy_core_announcement_remains_unchanged() {
+    let f = Fixture::new().await;
+    feed_credit(&f, "ordinary", 1000).await;
+    let id = confirm_food(&f).await;
+    let (client, task) = f.bridge(RuntimeMode::Active).await;
+    freeze_food(&f, &client).await;
+    assert!(
+        f.store
+            .feeding_barrier(&f.owner, id)
+            .await
+            .unwrap()
+            .unwrap()
+            .feeding
+            .presentation
+            .is_none()
+    );
+    generate_food(&f, &f.targets).await;
+    assert!(
+        f.store
+            .pending_feeding_overlay(&f.owner)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let source = f
+        .core
+        .events_after(0, 100)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|e| e.event_type == "feeder_confirmed")
+        .unwrap();
+    let message = crate::presentation::MessageRenderer::embedded()
+        .unwrap()
+        .render(&source, 1000)
+        .unwrap();
+    assert!(message.nostr_content.is_some());
+    assert!(message.overlay_message.is_some());
+    let db = SqlitePool::connect(&f.url).await.unwrap();
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM delivery_messages")
+        .fetch_one(&db)
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
+    task.abort();
+}
+
+#[tokio::test]
+async fn feeding_template_opt_out_is_durable_for_a_payment_and_missing_stream_does_not_invent_a_chat()
+ {
+    let f = Fixture::new().await;
+    f.core
+        .configure_feeding_notices(Some(&f.owner))
+        .await
+        .unwrap();
+    f.store
+        .edit_template(
+            &f.owner,
+            "disable-feeding",
+            &crate::cyberherd::store::TemplateEdit::DisableCategory {
+                category: "feeder_trigger".into(),
+            },
+        )
+        .await
+        .unwrap();
+    feed_credit(&f, "batch", 2345).await;
+    confirm_food(&f).await;
+    let (client, task) = f.bridge(RuntimeMode::Canary).await;
+    freeze_food(&f, &client).await;
+    generate_food(&f, &f.targets).await;
+    f.store
+        .edit_template(
+            &f.owner,
+            "enable-feeding",
+            &crate::cyberherd::store::TemplateEdit::EnableCategory {
+                category: "feeder_trigger".into(),
+            },
+        )
+        .await
+        .unwrap();
+    confirm_food(&f).await;
+    freeze_food(&f, &client).await;
+    generate_food(&f, &f.targets).await;
+    assert!(
+        f.store
+            .pending_feeding_overlay(&f.owner)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    feed_credit(&f, "different-payment", 1000).await;
+    confirm_food(&f).await;
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    freeze_food(&f, &client).await;
+    let no_stream = Targets::project(
+        TargetPolicy {
+            project_pubkey: f.owner.clone(),
+            tracked_tags: vec!["CyberHerd".into()],
+        },
+        &DayWindow::at("America/Denver", calendar::now().unwrap()).unwrap(),
+        vec![],
+        vec![],
+        BTreeSet::new(),
+        calendar::now().unwrap(),
+    )
+    .unwrap();
+    generate_food(&f, &no_stream).await;
+    let db = SqlitePool::connect(&f.url).await.unwrap();
+    let destinations: Vec<String> =
+        sqlx::query_scalar("SELECT destination FROM delivery_destinations")
+            .fetch_all(&db)
+            .await
+            .unwrap();
+    assert_eq!(destinations, vec!["broadcast:note"]);
+    assert!(
+        f.store
+            .pending_feeding_overlay(&f.owner)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    task.abort();
+}
+
+#[tokio::test]
+async fn funded_or_uncertain_food_does_not_create_feeding_notice_or_debit() {
+    let f = Fixture::new().await;
+    f.core
+        .configure_feeding_notices(Some(&f.owner))
+        .await
+        .unwrap();
+    feed_credit(&f, "funded", 2345).await;
+    let id = f.core.begin_feed_attempt(1000).await.unwrap().unwrap();
+    f.core
+        .mark_feed_unknown(id, "synthetic uncertain owner result")
+        .await
+        .unwrap();
+    let (client, task) = f.bridge(RuntimeMode::Canary).await;
+    freeze_food(&f, &client).await;
+    generate_food(&f, &f.targets).await;
+    assert!(
+        f.store
+            .pending_feeding_overlay(&f.owner)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(f.core.feed_credit_sats().await.unwrap(), 2345);
+    assert_eq!(
+        f.core.unresolved_feed_attempt().await.unwrap().unwrap().id,
+        id
+    );
+    assert!(f.core.begin_feed_attempt(1000).await.unwrap().is_none());
     task.abort();
 }

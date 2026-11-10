@@ -117,6 +117,7 @@ async fn supported_zap_execution_claim_requires_public_authority_and_intake_cann
         group_gid: gid,
         reward_policy: Some(w.f.policy.clone()),
         payout_peer_uid: Some(uid + 1),
+        delegated_feeder_messages: false,
         payout_execution_enabled: true,
         payout_account_id: Some(w.policy.scope.provider.account_id),
     };

@@ -54,6 +54,7 @@ impl Role {
                 request,
                 Request::Events { .. }
                     | Request::MemberOverlay { .. }
+                    | Request::FeedingOverlay { .. }
                     | Request::RewardResults { .. }
                     | Request::Safety
                     | Request::LifecycleContext
@@ -277,6 +278,20 @@ async fn serve_one(
     }
     let response = if let Ok(_permit) = Arc::clone(&resources.reads).try_acquire_owned() {
         match request {
+            Request::FeedingOverlay { message } => {
+                if reward_policy.is_some_and(|policy| policy.owner == message.broadcast.proof.owner)
+                {
+                    match ledger.accept_feeding_overlay(&message, mode).await {
+                        Ok(seq) => Response::FeedingOverlay {
+                            identity: message.broadcast.proof.identity.clone(),
+                            seq,
+                        },
+                        Err(_) => Response::Rejected,
+                    }
+                } else {
+                    Response::Rejected
+                }
+            }
             Request::MemberOverlay { message } => {
                 if reward_policy.is_some_and(|policy| policy.owner == message.owner) {
                     match ledger.accept_member_overlay(&message, mode).await {
@@ -640,6 +655,25 @@ impl Client {
             _ => bail!("core did not return an authenticated event batch"),
         }
     }
+    pub async fn feeding_overlay(
+        &self,
+        message: &crate::cyberherd::feeding_delivery::Overlay,
+    ) -> Result<u64> {
+        message.validate()?;
+        match self
+            .request(&Request::FeedingOverlay {
+                message: Box::new(message.clone()),
+            })
+            .await?
+        {
+            Response::FeedingOverlay { identity, seq }
+                if identity == message.broadcast.proof.identity && seq > 0 =>
+            {
+                Ok(seq)
+            }
+            _ => bail!("core did not accept confirmed feeding presentation"),
+        }
+    }
     pub async fn lifecycle_context(&self) -> Result<super::LifecycleContext> {
         match self.request(&Request::LifecycleContext).await? {
             Response::LifecycleContext { state } => {
@@ -873,6 +907,7 @@ mod tests {
             group_gid: gid,
             reward_policy: None,
             payout_peer_uid: None,
+            delegated_feeder_messages: false,
             payout_execution_enabled: false,
             payout_account_id: None,
         };

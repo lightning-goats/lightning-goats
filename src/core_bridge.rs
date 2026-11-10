@@ -19,6 +19,8 @@ pub struct BridgeConfig {
     pub payout_peer_uid: Option<u32>,
     #[serde(default)]
     pub payout_execution_enabled: bool,
+    #[serde(default)]
+    pub delegated_feeder_messages: bool,
     /// Operator-pinned account label, not an API account self-attestation.
     /// Read-only verification uses core's own partner.payment.read permission.
     #[serde(default)]
@@ -27,6 +29,9 @@ pub struct BridgeConfig {
 
 impl BridgeConfig {
     pub fn validate(&self) -> Result<()> {
+        if self.delegated_feeder_messages && self.reward_policy.is_none() {
+            bail!("feeding presentation delegation requires a pinned project owner");
+        }
         if let Some(policy) = &self.reward_policy {
             policy.validate()?;
         }
@@ -66,6 +71,9 @@ impl BridgeConfig {
 pub enum Request {
     MemberOverlay {
         message: Box<crate::cyberherd::overlay_delivery::Message>,
+    },
+    FeedingOverlay {
+        message: Box<crate::cyberherd::feeding_delivery::Overlay>,
     },
     RewardResults {
         reservation: Box<crate::reward_funding::Reservation>,
@@ -117,6 +125,10 @@ pub enum Request {
 #[serde(tag = "result", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Response {
     MemberOverlay {
+        identity: String,
+        seq: u64,
+    },
+    FeedingOverlay {
         identity: String,
         seq: u64,
     },
@@ -424,6 +436,12 @@ impl Batch {
                     }
                 }
                 EventBody::Feeding(feed) => {
+                    if let Some(presentation) = &feed.presentation {
+                        presentation.validate()?;
+                        if presentation.source_seq != event.seq {
+                            bail!("feeding presentation has another source event");
+                        }
+                    }
                     if let Some(funding) = &feed.funding {
                         funding.validate(feed.threshold_sats)?;
                     }
@@ -510,6 +528,8 @@ pub struct Feeding {
     pub confirmed_at: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub funding: Option<crate::reward_funding::Funding>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub presentation: Option<crate::cyberherd::feeding_delivery::Proof>,
 }
 
 #[cfg(test)]
@@ -524,10 +544,14 @@ mod tests {
             group_gid: 10002,
             reward_policy: None,
             payout_peer_uid: None,
+            delegated_feeder_messages: false,
             payout_execution_enabled: false,
             payout_account_id: None,
         };
         good.validate().unwrap();
+        let mut unpinned_delegation = good.clone();
+        unpinned_delegation.delegated_feeder_messages = true;
+        assert!(unpinned_delegation.validate().is_err());
         for bad in [
             BridgeConfig {
                 peer_uid: 0,

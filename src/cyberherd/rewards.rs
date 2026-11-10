@@ -389,7 +389,7 @@ mod tests {
             let profile=Profile{name:"Member".into(),picture:None,lud16:Some("member@example.com".into())};
             let binding=CoreBinding{core_uid:10001,epoch:Uuid::new_v4(),start_after:0,credit_pool:"herd".into(),payees:BTreeMap::from([("herd".into(),owner.clone())])};
             let funding=Funding{strike_sats:real,proof_hash:"ab".repeat(32)};
-            let barrier=FeedingBarrier{ingress_seq:1,conversations:BTreeMap::new(),feeding:Feeding{request_id:Uuid::new_v4(),threshold_sats:1_000_000,confirmed_at:100,funding:Some(funding.clone())},
+            let barrier=FeedingBarrier{ingress_seq:1,conversations:BTreeMap::new(),feeding:Feeding{request_id:Uuid::new_v4(),threshold_sats:1_000_000,confirmed_at:100,presentation:None,funding:Some(funding.clone())},
                 snapshot:Snapshot{owner:owner.clone(),settings:Settings{minimum_sats:10,max_members:10,member_percent:percent},roster:Roster{
                     members:BTreeMap::from([(member.clone(),Member{profile:profile.clone(),active:true,amount_sats:amount,lifetime_sats:amount})]),..Roster::default()},cycle:1,cycle_start:0,revision:1}};
             let allowance=Allowance{epoch:binding.epoch,request_id:barrier.feeding.request_id,owner,funding,threshold_sats:1_000_000,

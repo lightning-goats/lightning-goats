@@ -175,6 +175,7 @@ async fn bridge(
         } else {
             Some(uid + 1)
         },
+        delegated_feeder_messages: false,
         payout_execution_enabled: false,
         payout_account_id: Some(w.policy.scope.provider.account_id),
     };

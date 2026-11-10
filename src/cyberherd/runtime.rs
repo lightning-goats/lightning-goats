@@ -281,7 +281,7 @@ impl Runtime {
                 tracing::warn!("lifecycle observation held; confirmed transition retained");
             }
         }
-        worker::step(
+        let step = worker::step(
             &self.store,
             owner,
             Environment {
@@ -292,7 +292,18 @@ impl Runtime {
                 now: applied_at,
             },
         )
-        .await
+        .await?;
+        if self.config.messaging.as_ref().is_some_and(|m| m.enabled)
+            && refreshed.available
+            && self
+                .store
+                .queue_next_feeding_announcement(owner, &targets, applied_at)
+                .await
+                .is_err()
+        {
+            tracing::warn!("feeding announcement generation held; confirmed barrier retained");
+        }
+        Ok(step)
     }
 
     async fn availability(&self) -> FeederAvailability {

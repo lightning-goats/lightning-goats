@@ -545,6 +545,7 @@ async fn lifecycle_publisher_waits_on_unknown_but_sends_pause_while_override_on_
         group_gid: gid,
         reward_policy: None,
         payout_peer_uid: None,
+        delegated_feeder_messages: false,
         payout_execution_enabled: false,
         payout_account_id: None,
     };

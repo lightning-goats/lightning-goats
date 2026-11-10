@@ -247,8 +247,13 @@ live-stream invitations and sanitized gateway solar context. The
 records verified source and inactive artifacts. It remains disabled by default
 and does not establish production installation or public relay/bunker qualification.
 
-Remaining implementation and qualification includes the feeder herd summary and
-one authenticated active-stream copy, lifecycle source/installed qualification,
+Subsequent [confirmed-feeding announcement source](../architecture/cyberherd-feeding-announcements.md)
+adds a default-off core presentation handoff, frozen herd summary, one note/chat/
+overlay per triggering payment and a correlated typed overlay import. It is under
+source verification and has not been installed or activated.
+
+Remaining implementation and qualification includes feeder announcement source/
+installed qualification, lifecycle installed qualification,
 readonly roster/targets/scores and OBS cards, browser Nostr
 authentication and authenticated operator settings/template/member/reset tools.
 Also required: explicit failed-cost/consistent-restore and retention operations,

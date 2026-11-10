@@ -98,6 +98,7 @@ non-writable ancestor chain. The exact bundle contains only:
 - `prepare-cyberherd-payout-key.py` (explicit credential import only)
 - `prepare-cyberherd-nostr-clients.py` (explicit new authentication clients only)
 - `prepare-household-nostr-client.py`
+- `qualify-cyberherd-installed.py` (explicit disabled-role OS probes only)
 - `TOOL.json`
 
 Export the exact reviewed commit without running its files:
@@ -108,14 +109,14 @@ python3 -I -S -B deploy/scripts/export-upgrade-tools.py /path/to/repository FULL
 
 The exporter refuses root execution and existing destinations. It reads regular
 Git blobs from the literal commit, disables replacement objects and caller Git
-environment overrides, and ignores dirty checkout files. It writes the thirteen tools
+environment overrides, and ignores dirty checkout files. It writes the fourteen tools
 and deterministic `TOOL.json` with private modes and prints the manifest/launcher
 hashes. Failed output directories must be retained for inspection. This is an
 unprivileged preparation utility, not a trusted installer or source approval.
 
 Generate `TOOL.json` from the exact reviewed commit's file bytes, without running
 those files. Its schema is `{"version":1,"source_commit":"FULL_SHA","files":
-{"FILENAME":"SHA256",...}}`; `files` must cover exactly the thirteen Python files,
+{"FILENAME":"SHA256",...}}`; `files` must cover exactly the fourteen Python files,
 including the launcher. Independently review the source commit, every file hash,
 the manifest SHA256 and the launcher SHA256. A manifest supplied alongside files
 is not independently authenticated evidence. No checkout code may run with sudo
@@ -123,7 +124,7 @@ to construct or establish this trust boundary.
 
 Using trusted system installation tools and the approved maintenance procedure,
 create a fresh root:root mode-0700 bundle directory under a root-controlled
-installation prefix; copy the seven files as root:root mode-0600. Check every
+installation prefix; copy every manifest-listed file as root:root mode-0600. Check every
 ancestor for ownership, writability, symlinks and ACLs. Do not reuse or overwrite
 a prior generation. Reject links, extra files and bytecode caches. Exclude other
 administrative writers throughout installation and execution. Verify the copied

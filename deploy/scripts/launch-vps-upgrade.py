@@ -22,6 +22,7 @@ FILES = {
     'install-cyberherd-inactive.py', 'verify-cyberherd-package.py', 'verify-sqlite-vendor.py',
     'prepare-cyberherd-payout-key.py',
     'prepare-cyberherd-nostr-clients.py', 'prepare-household-nostr-client.py',
+    'qualify-cyberherd-installed.py',
 }
 
 
@@ -89,6 +90,9 @@ def main():
         arguments = arguments[1:]
     elif arguments[:1] == ['--cyberherd-nostr-clients']:
         operation = 'prepare-cyberherd-nostr-clients.py'
+        arguments = arguments[1:]
+    elif arguments[:1] == ['--cyberherd-qualify']:
+        operation = 'qualify-cyberherd-installed.py'
         arguments = arguments[1:]
     sys.argv = [str(root / operation), *arguments]
     runpy.run_path(sys.argv[0], run_name='__main__', init_globals={

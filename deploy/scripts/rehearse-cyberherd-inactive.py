@@ -210,9 +210,24 @@ def main():
         assert stat.S_IMODE(state.stat().st_mode) == 0o700 and state.stat().st_uid == runtime[role]['uid']
         assert os.readlink(Path('/etc/systemd/system') / (role + '.service')) == '/dev/null'
         assert (destination / 'INSTALLED.json').exists() and not (destination / 'INCOMPLETE').exists()
+    qualification_path = base / 'ci-installed-role-qualification'
+    try:
+        qualification = json.loads(run(*launcher, '--cyberherd-qualify', '--installation', str(destination),
+                                       '--destination', str(qualification_path), '--probe-disabled-roles'))
+    except Exception:
+        # This harness is guarded to a disposable CI host with synthetic state.
+        # Production qualifier diagnostics stay in its private transaction.
+        failure = qualification_path / 'FAILURE.json'
+        if failure.is_file():
+            import sys
+            print(failure.read_text()[-18000:], file=sys.stderr)
+        raise
+    assert qualification['accepted'] is True and qualification['actual_installed_os_policy_probes'] == 3
+    assert qualification['application_workers_started'] is False and qualification['real_credentials_loaded'] is False
     print(json.dumps({'synthetic': True, 'source_commit': args.source, 'native_engine': prepared['engine'],
                       'actual_nss_identities': 3, 'actual_native_initializers': 3, 'actual_masked_units': 3,
                       'synthetic_payout_ciphertext_created': True,
+                      'installed_role_qualification': qualification,
                       'actual_core_upgrade_transaction': True, 'harmless_core_fixture_started': True,
                       'payment_daemon_started': False, 'cyberherd_units_started': False,
                       'runtime_credentials_loaded': False, 'provider_qualified': False,

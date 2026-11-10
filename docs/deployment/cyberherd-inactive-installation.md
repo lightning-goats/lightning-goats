@@ -9,7 +9,7 @@ The services remain masked/inactive; no financial or publication activation is
 implied by installation.
 Use Python **3.11 or newer** through the
 [externally authenticated launcher](inactive-upgrade-transaction.md), with its
-complete thirteen-file closure. Authenticate launcher/tool-manifest, source commit
+complete fourteen-file closure. Authenticate launcher/tool-manifest, source commit
 and archive SHA256 independently before root execution. An archive's own hashes
 are not provenance. Do not run a writable checkout or import archive helpers.
 
@@ -168,3 +168,9 @@ unchanged. The [OS checkpoint](../testing/cyberherd-os-boundaries-checkpoint-202
 records its passing CI result. Even a passing
 OS policy probe does not prove the Rust socket protocol, household, provider,
 live-host or recovery-adoption boundaries.
+
+The separate [installed OS qualifier](cyberherd-installed-qualification.md) is now
+prepared for independently authenticated use after an actual fresh disabled
+installation. It uses only synthetic credentials in a private qualification
+directory and refuses changed/active state. Its exact CI qualification remains
+pending; it is not installed on the VPS and the CI-only harness stays CI-only.

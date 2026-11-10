@@ -1,4 +1,4 @@
-use super::Policy;
+use super::{Component, Policy};
 use anyhow::{Result, bail};
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -10,6 +10,13 @@ pub(super) enum Control {
 }
 impl Control {
     pub(super) async fn check(&self, policy: &Policy) -> Result<()> {
+        self.check_components(&policy.components.values().collect::<Vec<_>>())
+            .await
+    }
+    pub(super) async fn check_component(&self, component: &Component) -> Result<()> {
+        self.check_components(&[component]).await
+    }
+    async fn check_components(&self, components: &[&Component]) -> Result<()> {
         #[cfg(test)]
         if let Self::Fixture(ready) = self {
             if !ready.load(std::sync::atomic::Ordering::SeqCst) {
@@ -17,7 +24,7 @@ impl Control {
             }
             return Ok(());
         }
-        for component in policy.components.values() {
+        for component in components {
             let result=tokio::time::timeout(Duration::from_secs(5),tokio::process::Command::new("/usr/bin/systemctl")
                 .args(["show","--no-pager","--property=Id,LoadState,ActiveState,SubState,MainPID,UnitFileState,ControlGroup","--",&component.unit])
                 .kill_on_drop(true).output()).await??;

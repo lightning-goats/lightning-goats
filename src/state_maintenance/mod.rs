@@ -10,6 +10,7 @@ use uuid::Uuid;
 mod control;
 mod database;
 mod files;
+pub mod legacy;
 
 pub use database::Report;
 
@@ -106,25 +107,30 @@ impl Policy {
                 .components
                 .get(&role)
                 .context("all four journals are required")?;
-            files::absolute(&c.database)?;
-            if c.uid == 0
-                || c.gid == 0
-                || !uids.insert(c.uid)
-                || !paths.insert(&c.database)
-                || !units.insert(&c.unit)
-                || !c.unit.ends_with(".service")
-                || c.unit.len() > 128
-                || !c.unit.starts_with(|c: char| c.is_ascii_alphanumeric())
-                || !c
-                    .unit
-                    .bytes()
-                    .all(|c| c.is_ascii_alphanumeric() || b"@_.-".contains(&c))
-            {
+            validate_component(c)?;
+            if !uids.insert(c.uid) || !paths.insert(&c.database) || !units.insert(&c.unit) {
                 bail!("maintenance requires distinct non-admin owners, paths and units");
             }
         }
         Ok(())
     }
+}
+
+fn validate_component(c: &Component) -> Result<()> {
+    files::absolute(&c.database)?;
+    if c.uid == 0
+        || c.gid == 0
+        || !c.unit.ends_with(".service")
+        || c.unit.len() > 128
+        || !c.unit.starts_with(|c: char| c.is_ascii_alphanumeric())
+        || !c
+            .unit
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || b"@_.-".contains(&c))
+    {
+        bail!("invalid non-admin journal owner, path or service");
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -194,6 +194,10 @@ and verified; partial engines/models or a plan alone do not satisfy it.
 
 ## Current source checkpoint — incomplete port
 
+Work in progress adds [native pre-CyberHerd core backup and migration comparison](../deployment/cyberherd-core-upgrade.md)
+before the actual paid-store upgrade. It is not the installer, migration or
+restart transaction and cannot restore or activate financial/physical work.
+
 The [492-test checkpoint](../testing/cyberherd-bootstrap-checkpoint-20261110.md)
 adds [fresh offline journal initialization](../deployment/cyberherd-offline-initialization.md)
 for the reviewed inactive installation. It takes no credentials and cannot open

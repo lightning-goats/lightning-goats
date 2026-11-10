@@ -271,9 +271,34 @@ pub(super) fn read_private(path: &Path, max: u64) -> Result<Vec<u8>> {
     }
     Ok(bytes)
 }
+pub(super) fn private_image(path: &Path, max: u64) -> Result<Image> {
+    let mut image = OpenImage::open(path.to_owned(), 0, None, max)?;
+    let (bytes, sha256) = image.digest(None)?;
+    Ok(Image {
+        name: path
+            .file_name()
+            .context("image filename missing")?
+            .to_str()
+            .context("image name must be UTF-8")?
+            .to_owned(),
+        bytes,
+        sha256,
+    })
+}
 pub(super) fn check_images(directory: &Path, images: &[Image], max: u64) -> Result<()> {
-    let allowed: std::collections::BTreeSet<_> = Role::ALL
-        .into_iter()
+    check_selected_images(directory, images, max, &Role::ALL)
+}
+pub(super) fn check_core_images(directory: &Path, images: &[Image], max: u64) -> Result<()> {
+    check_selected_images(directory, images, max, &[Role::Core])
+}
+fn check_selected_images(
+    directory: &Path,
+    images: &[Image],
+    max: u64,
+    roles: &[Role],
+) -> Result<()> {
+    let allowed: std::collections::BTreeSet<_> = roles
+        .iter()
         .flat_map(|r| [r.file(), format!("{}-wal", r.file())])
         .collect();
     let mut names = std::collections::BTreeSet::new();
@@ -287,9 +312,9 @@ pub(super) fn check_images(directory: &Path, images: &[Image], max: u64) -> Resu
             bail!("bundle image checksum differs");
         }
     }
-    for role in Role::ALL {
+    for role in roles {
         if !names.contains(&role.file()) {
-            bail!("four complete journals are required");
+            bail!("the complete selected journal set is required");
         }
     }
     for entry in std::fs::read_dir(directory)? {
@@ -302,10 +327,7 @@ pub(super) fn check_images(directory: &Path, images: &[Image], max: u64) -> Resu
             continue;
         }
         // SQLite may create a private, disposable read-index beside a copied WAL.
-        if Role::ALL
-            .iter()
-            .any(|r| name == format!("{}-shm", r.file()))
-        {
+        if roles.iter().any(|r| name == format!("{}-shm", r.file())) {
             OpenImage::open(e.path(), 0, None, max)?;
         } else {
             bail!("bundle has an unlisted file");

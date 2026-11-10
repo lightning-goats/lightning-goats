@@ -41,6 +41,7 @@ def verify(path, source):
             raise ValueError("review file checksum mismatch")
     required = {"cyberherdd", "cyberherd-payoutd", "cyberherd-signerd", "cyberherd-statectl", "BUILD-INFO.txt", "Cargo.lock", "Cargo.toml",
                 "deploy/cyberherd/state-maintenance.toml.example", "STATE-MAINTENANCE.md", "OFFLINE-INITIALIZATION.md",
+                "deploy/cyberherd/core-upgrade.toml.example", "CORE-UPGRADE.md",
                 "deploy/cyberherd/config.toml.example", "deploy/cyberherd/payout.toml.example", "deploy/cyberherd/signer.toml.example"}
     if not required.issubset(files):
         raise ValueError("review archive is missing required artifacts")

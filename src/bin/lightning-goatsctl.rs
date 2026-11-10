@@ -24,6 +24,30 @@ struct Args {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Check only a pre-CyberHerd core upgrade policy; no app config or database.
+    CheckCoreUpgrade {
+        #[arg(long)]
+        policy: PathBuf,
+    },
+    /// Copy a stopped/masked pre-CyberHerd core main/WAL without opening originals.
+    BackupLegacyCore {
+        #[arg(long)]
+        policy: PathBuf,
+        #[arg(long)]
+        destination: PathBuf,
+        #[arg(long, required = true)]
+        writers_stopped: bool,
+    },
+    /// Verify an old core bundle and optionally compare a separate migrated copy.
+    /// Neither operation migrates, restores or starts a service.
+    VerifyCoreUpgrade {
+        #[arg(long)]
+        policy: PathBuf,
+        #[arg(long)]
+        bundle: PathBuf,
+        #[arg(long)]
+        candidate_copy: Option<PathBuf>,
+    },
     /// Resolve an ambiguous feed attempt without directly actuating the feeder.
     ReconcileFeed {
         #[arg(long)]
@@ -80,6 +104,50 @@ enum ReconcileOutcome {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+    // These commands must branch BEFORE AppConfig/LedgerStore::connect, which
+    // would migrate the selected live database even for the ordinary status path.
+    #[cfg(unix)]
+    match &args.command {
+        Command::CheckCoreUpgrade { policy } => {
+            lightning_goats::state_maintenance::legacy::Policy::load_for_check(policy)?;
+            println!("Legacy core policy is valid; no state, credentials or services accessed");
+            return Ok(());
+        }
+        Command::BackupLegacyCore {
+            policy,
+            destination,
+            writers_stopped,
+        } => {
+            if !writers_stopped {
+                bail!("explicit stopped-writer attestation required");
+            }
+            let operator = lightning_goats::state_maintenance::legacy::Operator::load(policy)?;
+            let manifest = operator.snapshot(destination).await?;
+            println!(
+                "{}",
+                serde_json::json!({"operation":"legacy_core_snapshot","id":manifest.id,"accepted":true,"resume_authorized":false})
+            );
+            return Ok(());
+        }
+        Command::VerifyCoreUpgrade {
+            policy,
+            bundle,
+            candidate_copy,
+        } => {
+            let operator = lightning_goats::state_maintenance::legacy::Operator::load(policy)?;
+            let manifest = if let Some(candidate) = candidate_copy {
+                operator.compare_upgrade(bundle, candidate).await?
+            } else {
+                operator.verify(bundle).await?
+            };
+            println!(
+                "{}",
+                serde_json::json!({"operation":"verify_core_upgrade","id":manifest.id,"accepted":true,"candidate_compared":candidate_copy.is_some(),"resume_authorized":false})
+            );
+            return Ok(());
+        }
+        _ => {}
+    }
     #[cfg(unix)]
     if matches!(
         args.command,
@@ -105,6 +173,11 @@ async fn main() -> Result<()> {
     };
 
     match args.command {
+        Command::CheckCoreUpgrade { .. }
+        | Command::BackupLegacyCore { .. }
+        | Command::VerifyCoreUpgrade { .. } => {
+            bail!("legacy core upgrade operations require Unix protected-file authority");
+        }
         Command::FailedCostTemplate {
             reservation,
             member,

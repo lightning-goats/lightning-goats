@@ -65,6 +65,7 @@ jobs:
           LG_CYBERHERD_SIGNER_TEST_BINARY: ${{ github.workspace }}/target/release/cyberherd-signerd
           LG_CYBERHERD_PAYOUT_TEST_BINARY: ${{ github.workspace }}/target/release/cyberherd-payoutd
           LG_CYBERHERD_STATE_TEST_BINARY: ${{ github.workspace }}/target/release/cyberherd-statectl
+          LG_CORE_UPGRADE_TEST_BINARY: ${{ github.workspace }}/target/release/lightning-goatsctl
         run: python3 -m unittest discover -s deploy/tests -p 'test_cyberherd*.py' -v
       - name: Assemble inactive CyberHerd review archive
         shell: bash

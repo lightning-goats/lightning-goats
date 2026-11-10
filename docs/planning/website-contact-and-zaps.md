@@ -57,10 +57,14 @@ message. No visitor or project signing key belongs in service configuration,
 source, logs, argv or environment. Never silently send plaintext or claim a
 logged-in sender when signing/encryption did not prove it.
 
-For free signed contact, verify a fresh payload-bound NIP-98 request using the
-selected public identity, canonical HTTPS origin/method/URL and durable replay
-protection. A claimed login or caller-supplied pubkey alone cannot waive the fee.
-This branch must perform no invoice/provider operation.
+Free signed contact publishes its NIP-17 gift wrapper directly from the browser
+to the recipient's authenticated kind-10050 inbox relays. The selected identity
+signs the exact encrypted kind-13 seal and owns the enclosed kind-14 rumor; a
+claimed login or caller-supplied pubkey does not establish that identity. No
+backend fee waiver, invoice or provider operation is needed for this direct path.
+Persist only the exact encrypted wrapper/public sender for explicit relay retry,
+never visitor keys or plaintext. A later server-mediated free path would require
+fresh payload-bound NIP-98 authorization and durable replay protection.
 
 For the anonymous/email branch, persist the immutable encrypted delivery intent
 before requesting payment, bind the invoice to that exact contact and 100-sat

@@ -670,7 +670,20 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
-                    <p><a href="nostr:npub1v60thnx0gz0wq3n6xdnq46y069l9x70xgmjp6lprdl6fv0eux6mqgjj4rp">Contact the Lightning Goats on Nostr</a></p>
+                    <form id="contactForm">
+                        <p id="contactIdentity" class="small"></p>
+                        <button id="contactConnect" class="btn btn-outline-warning mb-3" type="button">Connect Nostr</button>
+                        <div id="contactEmailRow">
+                            <label for="contactEmail" class="form-label">Your email address</label>
+                            <input id="contactEmail" class="form-control mb-3" type="email" maxlength="254" autocomplete="email" required>
+                        </div>
+                        <label for="contactMessage" class="form-label">Private message</label>
+                        <textarea id="contactMessage" class="form-control" rows="5" maxlength="3000" required></textarea>
+                        <p class="small mt-2">Nostr users send for free. Email contact costs 100 sats and does not add feeder credit.</p>
+                        <button id="contactSend" class="btn btn-warning mt-2" type="submit">Send private message</button>
+                        <button id="contactReset" class="btn btn-outline-light mt-2" type="button" hidden>Clear pending copy</button>
+                        <p id="contactStatus" class="small mt-2" role="status"></p>
+                    </form>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
@@ -724,7 +737,7 @@
         data-theme="lemonade"
         data-no-banner="true"
         data-methods="connect,extension"
-        data-perms="sign_event:1311,sign_event:9734"
+        data-perms="sign_event:1311,sign_event:9734,sign_event:13,nip44_encrypt"
         data-title="Lightning Goats Chat"
         data-description="Connect a Nostr signer to join the live goat chat."
     ></script>
@@ -1779,6 +1792,12 @@
             }
         });
 
+        window.LightningGoatsIdentity = Object.freeze({
+            getSigner: () => activeNostrSigner,
+            getPublicKey: () => currentUserPubkey,
+            connect: connectNostrInteractive
+        });
+
         function startDiscovery() {
             const callbacks = {
                 onevent: rememberLiveEvent,
@@ -1823,5 +1842,6 @@
         });
     })();
     </script>
+    <script src="/contact.js"></script>
 </body>
 </html>

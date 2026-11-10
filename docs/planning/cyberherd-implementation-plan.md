@@ -407,3 +407,5 @@ contact with genuine sender identity, a separate private 100-sat fee with no fee
 reward credit and required email when not logged in, and actual index chat zap notices. These are
 additional required work, not a replacement for the full twelve-part port. They
 remain unfinished until implementation and actual qualification/deployment pass.
+
+The [payment/chat release](../testing/website-payment-chat-checkpoint-20261110.md) now passes exact CI and actual public acceptance. The [contact source checkpoint](../testing/website-contact-checkpoint-20261110.md) covers free sender-bound private DMs and exact ciphertext retries; anonymous fee accounting and installation remain open.

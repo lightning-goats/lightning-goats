@@ -53,6 +53,97 @@ async fn tick(worker: &Worker) -> Step {
     worker.tick().await.unwrap()
 }
 
+/// SQLite creates a consistent snapshot, including committed WAL contents.
+/// The core database is deliberately left at its newer state.
+async fn snapshot(w: &Workflow, name: &str) -> String {
+    let path = w.f.root.path().join(name);
+    let db = sqlx::SqlitePool::connect(&w.url).await.unwrap();
+    sqlx::query("VACUUM INTO ?")
+        .bind(path.to_str().unwrap())
+        .execute(&db)
+        .await
+        .unwrap();
+    db.close().await;
+    format!("sqlite://{}", path.display())
+}
+
+#[tokio::test]
+async fn older_payout_snapshot_without_original_quote_cannot_create_replacement_payment() {
+    let w = Workflow::new(false).await;
+    let old = snapshot(&w, "before-quote.db").await;
+    let (client, task) = core(&w, RuntimeMode::Active).await;
+    let first = worker(&w, client, w.store.clone());
+    assert_eq!(tick(&first).await, Step::QuoteSaved);
+    assert_eq!(tick(&first).await, Step::Submitted);
+    w.mock.lock().unwrap().state = PaymentState::Completed;
+    assert_eq!(tick(&first).await, Step::Observed);
+    let store = Store::connect(&old, w.policy.clone()).await.unwrap();
+    let restored = worker(&w, first.core, store);
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    assert!(restored.tick().await.is_err());
+    assert_eq!(restored.store.held_sats().await.unwrap(), 2);
+    {
+        let state = w.mock.lock().unwrap();
+        assert_eq!(state.payments.len(), 1);
+        assert_eq!(state.post_keys.len(), 1);
+        assert_eq!(state.patch_ids.len(), 1);
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    let state = restored
+        .core
+        .execution_state(
+            w.f.reservation.epoch,
+            w.f.reservation.id,
+            &w.f.reservation.owner,
+            &w.f.plan.rows[0].pubkey,
+        )
+        .await
+        .unwrap();
+    assert!(state.claim().is_some());
+    assert_eq!(
+        state.claim().unwrap().lease().record.request.reservation,
+        w.f.reservation
+    );
+    task.abort();
+}
+
+#[tokio::test]
+async fn older_payout_snapshot_with_original_quote_recovers_same_payment_even_after_quote_expiry() {
+    let w = Workflow::new(false).await;
+    let (client, task) = core(&w, RuntimeMode::Active).await;
+    let first = worker(&w, client, w.store.clone());
+    assert_eq!(tick(&first).await, Step::QuoteSaved);
+    let quote = w.store.current_quote(w.invoice_id).await.unwrap().unwrap();
+    let terms = w.store.quote_terms(quote.id()).await.unwrap().unwrap();
+    let old = snapshot(&w, "after-quote.db").await;
+    assert_eq!(tick(&first).await, Step::Submitted);
+    w.mock.lock().unwrap().state = PaymentState::Completed;
+    assert_eq!(tick(&first).await, Step::Observed);
+    let wait = terms.usable_until.saturating_sub(now()) + 1;
+    tokio::time::sleep(std::time::Duration::from_secs(u64::try_from(wait).unwrap())).await;
+    assert!(now() >= terms.usable_until);
+    let store = Store::connect(&old, w.policy.clone()).await.unwrap();
+    assert_eq!(
+        store.payout_status(w.invoice_id).await.unwrap(),
+        Status::QuoteReady
+    );
+    let restored = worker(&w, first.core, store);
+    assert_eq!(tick(&restored).await, Step::Submitted);
+    assert_eq!(tick(&restored).await, Step::Observed);
+    let Step::Outcome(done) = tick(&restored).await else {
+        panic!("expected final core outcome")
+    };
+    assert!(done.finalized);
+    assert_eq!(done.spent_sats, 2);
+    assert_eq!(restored.store.held_sats().await.unwrap(), 0);
+    let state = w.mock.lock().unwrap();
+    assert_eq!(state.payments.len(), 1);
+    assert_eq!(state.post_keys.len(), 1);
+    assert_eq!(state.patch_ids.len(), 2);
+    assert!(state.patch_ids.iter().all(|id| *id == terms.quote_id));
+    task.abort();
+}
+
 #[tokio::test]
 async fn worker_recovers_lost_submission_after_restart_without_new_quote_payment_or_message() {
     let w = Workflow::new(false).await;

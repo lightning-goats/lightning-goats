@@ -19,6 +19,7 @@ mod feed;
 mod feeding_presentation;
 mod operator_credit;
 mod outbox;
+mod payout_execution;
 mod reward_funding;
 mod reward_outcomes;
 pub use operator_credit::{OperatorCreditGrant, OperatorCreditResult, OperatorCreditStatus};

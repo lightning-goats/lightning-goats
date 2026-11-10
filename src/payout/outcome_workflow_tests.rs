@@ -12,6 +12,66 @@ fn reader(w: &Workflow) -> Reader {
     )
     .unwrap()
 }
+
+#[tokio::test]
+async fn retained_core_claim_rejects_rolled_back_no_execute_and_omitted_member_reports() {
+    let w = Workflow::new(false).await;
+    let quote = w.quote().await;
+    let execute = w
+        .store
+        .prepare_execute(quote.id(), &w.fresh(true, false).await, now())
+        .await
+        .unwrap();
+    // Even if PATCH never returns, its core claim is an enduring obligation.
+    let claim = w.execution_lease(&execute).await;
+    let mut row = Row {
+        member: w.f.plan.rows[0].pubkey.clone(),
+        gross_sats: 2,
+        disposition: Disposition::Unsubmitted {
+            reason: UnsubmittedReason::Expired,
+        },
+    };
+    for omit in [false, true] {
+        if omit {
+            row.member = crate::nostr_event::test_event(9, 0, 100, "", vec![]).pubkey;
+        }
+        let mut header = Header {
+            reservation: w.f.reservation.clone(),
+            scope: w.policy.scope.provider.clone(),
+            rows: 1,
+            final_hash: "00".repeat(32),
+        };
+        let seed = header.seed().unwrap();
+        header.final_hash = next_hash(&seed, &row).unwrap();
+        let packet = Packet {
+            header: header.clone(),
+            after: 0,
+            before_hash: seed,
+            row: row.clone(),
+        };
+        assert!(
+            w.f.ledger
+                .reconcile_payout_outcome(&packet, &reader(&w))
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            w.f.ledger
+                .payout_outcome_progress(&header)
+                .await
+                .unwrap()
+                .through,
+            0
+        );
+    }
+    assert!(w.mock.lock().unwrap().get_ids.is_empty());
+    assert!(w.mock.lock().unwrap().patch_ids.is_empty());
+    assert_eq!(w.store.held_sats().await.unwrap(), 2);
+    assert_eq!(
+        w.execution_lease(&execute).await.lease().record,
+        claim.lease().record
+    );
+}
 async fn execute(w: &Workflow, state: PaymentState) -> crate::payout::provider::BoundPayment {
     let intent = w.quote().await;
     let permit = w
@@ -19,7 +79,7 @@ async fn execute(w: &Workflow, state: PaymentState) -> crate::payout::provider::
         .prepare_execute(intent.id(), &w.fresh(true, false).await, now())
         .await
         .unwrap();
-    let response = w.sender.execute(&permit).await.unwrap();
+    let response = w.execute(&permit).await.unwrap();
     let bound = w.store.bind_payment(&response, now()).await.unwrap();
     w.mock.lock().unwrap().state = state;
     w.store

@@ -1037,10 +1037,8 @@ async fn core_role_reads_are_separate_from_intake_and_never_enable_execution_by_
             .await;
         if payout {
             let page = page.unwrap();
-            assert_eq!(
-                page.page().execution_enabled,
-                enabled && mode.feeder_enabled()
-            );
+            // Legacy funding reads never authorize execution.
+            assert!(!page.page().execution_enabled);
             assert_eq!(page.page().nostr_enabled, mode.nostr_enabled());
             assert!(client.events(None, 0, 1).await.is_err());
             assert!(

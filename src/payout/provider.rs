@@ -136,6 +136,13 @@ pub struct ExecuteIntent {
     pub(crate) quote: QuoteRecord,
     pub(crate) permitted_until: i64,
     pub(crate) recovery: bool,
+    pub(crate) core_uid: u32,
+    pub(crate) request: super::execution::Request,
+}
+impl ExecuteIntent {
+    pub fn claim_request(&self) -> &super::execution::Request {
+        &self.request
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -283,10 +290,18 @@ impl Client {
         parse_quote(intent, status, &raw, crate::cyberherd::calendar::now()?)
     }
 
-    pub async fn execute(&self, intent: &ExecuteIntent) -> Result<ExecutionObservation> {
+    pub async fn execute(
+        &self,
+        intent: &ExecuteIntent,
+        claim: &super::execution::AuthenticatedLease,
+    ) -> Result<ExecutionObservation> {
         self.scope(&intent.quote.request)?;
         intent.quote.validate()?;
         let now = crate::cyberherd::calendar::now()?;
+        if intent.request.quote_json != serde_json::to_string(&intent.quote)? {
+            bail!("execute capability changed claimed quote");
+        }
+        claim.require(&intent.request, intent.core_uid, now)?;
         if now > intent.permitted_until
             || intent.permitted_until > now.saturating_add(5)
             || (!intent.recovery

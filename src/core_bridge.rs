@@ -64,6 +64,15 @@ impl BridgeConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "method", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Request {
+    ClaimPayoutExecution {
+        request: Box<crate::payout::execution::Request>,
+    },
+    PayoutExecutionState {
+        expected_epoch: Uuid,
+        reservation_id: Uuid,
+        owner: String,
+        member: String,
+    },
     PayoutOutcome {
         packet: Box<crate::payout::outcome::Packet>,
     },
@@ -99,6 +108,12 @@ pub enum Request {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "result", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Response {
+    PayoutExecutionClaim {
+        lease: Box<crate::payout::execution::Lease>,
+    },
+    PayoutExecutionState {
+        state: Box<crate::payout::execution::State>,
+    },
     PayoutOutcome {
         progress: Box<crate::payout::outcome::Progress>,
     },
@@ -181,6 +196,47 @@ pub struct AuthenticatedAllowance {
 pub struct AuthenticatedFundingPage {
     page: crate::reward_funding::FundingPage,
     core_uid: u32,
+}
+
+#[derive(Clone)]
+pub struct AuthenticatedExecutionLease {
+    lease: crate::payout::execution::Lease,
+    core_uid: u32,
+}
+impl AuthenticatedExecutionLease {
+    pub fn lease(&self) -> &crate::payout::execution::Lease {
+        &self.lease
+    }
+    pub fn core_uid(&self) -> u32 {
+        self.core_uid
+    }
+    pub(crate) fn require(
+        &self,
+        request: &crate::payout::execution::Request,
+        uid: u32,
+        now: i64,
+    ) -> Result<()> {
+        self.lease.validate()?;
+        if self.core_uid != uid
+            || self.lease.record.request != *request
+            || !self.lease.permitted(now)
+        {
+            bail!("fresh authenticated original execution claim required");
+        }
+        Ok(())
+    }
+}
+pub struct AuthenticatedExecutionState {
+    page: AuthenticatedFundingPage,
+    claim: Option<AuthenticatedExecutionLease>,
+}
+impl AuthenticatedExecutionState {
+    pub fn page(&self) -> &AuthenticatedFundingPage {
+        &self.page
+    }
+    pub fn claim(&self) -> Option<&AuthenticatedExecutionLease> {
+        self.claim.as_ref()
+    }
 }
 
 #[derive(Clone)]

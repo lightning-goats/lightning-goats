@@ -119,8 +119,10 @@ failed-cost/consistent restore recovery, reviewed inactive installation and live
 financial activation. These examples and unit/library tests do not prove actual
 cross-process installation, production provider behavior or a completed port.
 
-Crash recovery assumes retained journals. An older payout-only database rollback
-can lose an execute intent before core has a terminal report. Financial activation
-must wait for independent core execution claims and explicit restore/reconciliation
-tooling; never automatically resume spending from an older snapshot. This limit
-does not authorize rolling back or rewriting existing financial state.
+The subsequent [core execution claim protocol](cyberherd-execution-claims.md)
+retains original row/quote identities before submission and fences payout-only
+snapshot rollback. Matching original history recovers only the original payment;
+missing history stays held. This does not qualify a whole-stack financial restore.
+Explicit consistent restore/reconciliation tooling and installation qualification
+remain required before financial activation. Never rewrite retained financial
+history to clear an unresolved execution.

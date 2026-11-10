@@ -35,6 +35,7 @@ impl LedgerStore {
             return Ok(done);
         }
         validate_cursor(&mut tx, packet).await?;
+        super::payout_execution::validate_outcome(&mut tx, packet).await?;
         tx.commit().await?;
         let verified = reader.verify(packet).await?;
         let packet = verified.packet();
@@ -45,6 +46,7 @@ impl LedgerStore {
             return Ok(done);
         }
         validate_cursor(&mut tx, packet).await?;
+        super::payout_execution::validate_outcome(&mut tx, packet).await?;
         let now = budget_time(&mut tx, true).await?;
         if now < packet.header.reservation.created_at {
             bail!("outcome verification predates reservation");
@@ -68,6 +70,11 @@ impl LedgerStore {
             bail!("manifest exceeds reservation");
         }
         if result.through == packet.header.rows {
+            let missing:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM payout_execution_claims c WHERE c.reservation_id=? AND NOT EXISTS(SELECT 1 FROM reward_outcome_rows r WHERE r.reservation_id=c.reservation_id AND r.member=c.member))")
+                .bind(packet.header.reservation.id.to_string()).fetch_one(&mut *tx).await?;
+            if missing {
+                bail!("manifest omits a core-retained possible execution");
+            }
             if result.chain_hash != packet.header.final_hash
                 || to_u64(gross, "outcome gross total")? != packet.header.reservation.reserved_sats
             {

@@ -38,6 +38,7 @@ struct Resources {
     reads: Arc<Semaphore>,
     verification: Arc<Semaphore>,
     reader: Option<Arc<crate::payout::outcome::Reader>>,
+    account: Option<uuid::Uuid>,
 }
 
 #[derive(Clone, Copy)]
@@ -59,6 +60,8 @@ impl Role {
             Self::Payout => matches!(
                 request,
                 Request::PayoutFunding { .. }
+                    | Request::ClaimPayoutExecution { .. }
+                    | Request::PayoutExecutionState { .. }
                     | Request::PayoutOutcome { .. }
                     | Request::PayoutOutcomeProgress { .. }
             ),
@@ -189,6 +192,7 @@ impl Server {
             reads: Arc::new(Semaphore::new(1)),
             verification: Arc::new(Semaphore::new(1)),
             reader,
+            account: self.payout_account_id,
         });
         let mut budget = ReadBudget::new(Instant::now());
         loop {
@@ -270,6 +274,48 @@ async fn serve_one(
     }
     let response = if let Ok(_permit) = Arc::clone(&resources.reads).try_acquire_owned() {
         match request {
+            Request::ClaimPayoutExecution { request } => match ledger
+                .claim_payout_execution(
+                    &request,
+                    crate::payout::execution::Limits {
+                        policy: reward_policy,
+                        account: resources.account,
+                        enabled: payout_execution_enabled && mode.feeder_enabled(),
+                        nostr: mode.nostr_enabled(),
+                    },
+                )
+                .await
+            {
+                Ok(lease) => Response::PayoutExecutionClaim {
+                    lease: Box::new(lease),
+                },
+                Err(_) => Response::Rejected,
+            },
+            Request::PayoutExecutionState {
+                expected_epoch,
+                reservation_id,
+                owner,
+                member,
+            } => match ledger
+                .payout_execution_state(
+                    expected_epoch,
+                    reservation_id,
+                    &owner,
+                    &member,
+                    crate::payout::execution::Limits {
+                        policy: reward_policy,
+                        account: resources.account,
+                        enabled: payout_execution_enabled && mode.feeder_enabled(),
+                        nostr: mode.nostr_enabled(),
+                    },
+                )
+                .await
+            {
+                Ok(state) => Response::PayoutExecutionState {
+                    state: Box::new(state),
+                },
+                Err(_) => Response::Rejected,
+            },
             Request::PayoutOutcomeProgress { header } => {
                 match ledger.payout_outcome_progress(&header).await {
                     Ok(progress) => Response::PayoutOutcome {
@@ -305,7 +351,9 @@ async fn serve_one(
                     &owner,
                     after,
                     reward_policy,
-                    payout_execution_enabled && mode.feeder_enabled(),
+                    // Legacy clients may qualify funding but cannot execute
+                    // without the new independently retained claim protocol.
+                    false,
                 )
                 .await
             {
@@ -364,6 +412,63 @@ pub struct Client {
 }
 
 impl Client {
+    pub async fn claim_execution(
+        &self,
+        request: &crate::payout::execution::Request,
+    ) -> Result<super::AuthenticatedExecutionLease> {
+        request.quote()?;
+        match self
+            .request(&Request::ClaimPayoutExecution {
+                request: Box::new(request.clone()),
+            })
+            .await?
+        {
+            Response::PayoutExecutionClaim { lease } => {
+                lease.validate()?;
+                if lease.record.request != *request {
+                    bail!("core returned a different execution claim");
+                }
+                Ok(super::AuthenticatedExecutionLease {
+                    lease: *lease,
+                    core_uid: self.expected_uid,
+                })
+            }
+            _ => bail!("core rejected execution identity; retain original work for reconciliation"),
+        }
+    }
+    pub async fn execution_state(
+        &self,
+        epoch: uuid::Uuid,
+        id: uuid::Uuid,
+        owner: &str,
+        member: &str,
+    ) -> Result<super::AuthenticatedExecutionState> {
+        crate::nostr_event::validate_public_key(owner)?;
+        crate::nostr_event::validate_public_key(member)?;
+        match self
+            .request(&Request::PayoutExecutionState {
+                expected_epoch: epoch,
+                reservation_id: id,
+                owner: owner.into(),
+                member: member.into(),
+            })
+            .await?
+        {
+            Response::PayoutExecutionState { state } => {
+                state.validate(epoch, id, owner, member)?;
+                let claim = state.claim.map(|lease| super::AuthenticatedExecutionLease {
+                    lease,
+                    core_uid: self.expected_uid,
+                });
+                let page = AuthenticatedFundingPage {
+                    page: state.page,
+                    core_uid: self.expected_uid,
+                };
+                Ok(super::AuthenticatedExecutionState { page, claim })
+            }
+            _ => bail!("core did not return execution state"),
+        }
+    }
     pub fn new(socket: PathBuf, expected_uid: u32) -> Result<Self> {
         if !socket.is_absolute() || socket.as_os_str().len() > 100 {
             bail!("invalid core socket path");

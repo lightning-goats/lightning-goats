@@ -1,5 +1,6 @@
 //! Outgoing adapters. No receive-daemon credential or physical capability is
 //! accepted here. Recipient discovery alone never authorizes a transfer.
+pub mod execution;
 pub mod funding;
 pub mod invoice;
 pub mod outcome;

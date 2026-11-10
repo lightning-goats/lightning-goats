@@ -64,6 +64,29 @@ async fn reserve(store: &LedgerStore, policy: &RewardPolicy, feed: Uuid, sats: u
         .await
         .unwrap()
 }
+async fn register_claim(store: &LedgerStore, policy: &RewardPolicy, packet: &Packet) {
+    let Disposition::Payment { binding_json, .. } = &packet.row.disposition else {
+        return;
+    };
+    let binding: BindingRecord = serde_json::from_str(binding_json).unwrap();
+    let request = crate::payout::execution::Request {
+        reservation: packet.header.reservation.clone(),
+        member: packet.row.member.clone(),
+        quote_json: serde_json::to_string(&binding.quote).unwrap(),
+    };
+    store
+        .claim_payout_execution(
+            &request,
+            crate::payout::execution::Limits {
+                policy: Some(policy),
+                account: Some(packet.header.scope.account_id),
+                enabled: true,
+                nostr: true,
+            },
+        )
+        .await
+        .unwrap();
+}
 fn report(reservation: Reservation, state: PaymentState) -> Packet {
     let now = crate::cyberherd::calendar::now().unwrap();
     let scope = ProviderScope {
@@ -166,6 +189,7 @@ async fn rolling_budget_ages_only_verified_spend_and_rejects_reused_payment_or_i
     let first = reserve(&store, &policy, feeds[0], 100).await;
     let second = reserve(&store, &policy, feeds[1], 100).await;
     let packet = report(first, PaymentState::Completed);
+    register_claim(&store, &policy, &packet).await;
     let (reader, task) = provider(PaymentState::Completed).await;
     let outcome = store
         .reconcile_payout_outcome(&packet, &reader)
@@ -232,6 +256,7 @@ async fn failed_costs_never_age_out_and_wrong_final_hash_rolls_back_every_write(
     let (_root, store, policy, feeds) = fixture().await;
     let r = reserve(&store, &policy, feeds[0], 100).await;
     let packet = report(r, PaymentState::Failed);
+    register_claim(&store, &policy, &packet).await;
     let (reader, task) = provider(PaymentState::Failed).await;
     let mut bad = packet.clone();
     bad.header.final_hash = "ff".repeat(32);

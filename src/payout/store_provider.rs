@@ -17,6 +17,57 @@ pub enum Status {
 }
 
 impl Store {
+    pub async fn record_execution_claim(
+        &self,
+        claim: &crate::payout::execution::AuthenticatedLease,
+    ) -> Result<()> {
+        let record = &claim.lease().record;
+        record.validate()?;
+        let request = &record.request;
+        let quote = request.quote()?;
+        if claim.core_uid() != self.policy.scope.core_uid
+            || request.reservation.epoch != self.policy.scope.epoch
+            || request.reservation.owner != self.policy.scope.owner
+            || quote.request.scope != self.policy.scope.provider
+        {
+            bail!("execution record has wrong core/provider scope");
+        }
+        let mut tx = self.pool.begin().await?;
+        write_lock(&mut tx).await?;
+        let saved = load_quote(&mut tx, quote.request.id).await?;
+        let row=sqlx::query("SELECT g.qualification_json,i.member FROM payout_grants g JOIN payout_invoice_intents i ON i.grant_id=g.id WHERE i.id=?")
+            .bind(quote.request.invoice_id.to_string()).fetch_one(&mut *tx).await?;
+        let evidence: serde_json::Value =
+            serde_json::from_str(&row.try_get::<String, _>("qualification_json")?)?;
+        let reservation: crate::reward_funding::Reservation =
+            serde_json::from_value(evidence["reservation"].clone())?;
+        if saved != quote
+            || request.member != row.try_get::<String, _>("member")?
+            || request.reservation != reservation
+        {
+            bail!(
+                "core retains a different original row/quote; explicit restore reconciliation required"
+            );
+        }
+        let json = crate::payout::execution::record_json(record)?;
+        let old: Option<String> = sqlx::query_scalar(
+            "SELECT document_json FROM payout_core_execution_claims WHERE grant_id=? AND member=?",
+        )
+        .bind(reservation.id.to_string())
+        .bind(&request.member)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some(old) = old {
+            if old != json {
+                bail!("immutable execution claim changed");
+            }
+        } else {
+            sqlx::query("INSERT INTO payout_core_execution_claims(grant_id,member,claim_id,document_json) VALUES(?,?,?,?)")
+            .bind(reservation.id.to_string()).bind(&request.member).bind(record.id.to_string()).bind(json).execute(&mut *tx).await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
     pub async fn prepare_quote(&self, invoice_id: Uuid, now: i64) -> Result<QuoteIntent> {
         let mut tx = self.pool.begin().await?;
         write_lock(&mut tx).await?;
@@ -196,7 +247,7 @@ impl Store {
         }
         let page = fresh.page();
         page.validate()?;
-        let row=sqlx::query("SELECT g.* FROM payout_grants g JOIN payout_invoice_intents i ON i.grant_id=g.id WHERE i.id=?")
+        let row=sqlx::query("SELECT g.*,i.member AS payout_member FROM payout_grants g JOIN payout_invoice_intents i ON i.grant_id=g.id WHERE i.id=?")
             .bind(quote.request.invoice_id.to_string()).fetch_one(&mut *tx).await?;
         let evidence: serde_json::Value =
             serde_json::from_str(&row.try_get::<String, _>("qualification_json")?)?;
@@ -232,15 +283,35 @@ impl Store {
         .fetch_optional(&mut *tx)
         .await?;
         let json = serde_json::to_string(&quote)?;
-        let recovery = existing.is_some();
+        let request = crate::payout::execution::Request {
+            reservation,
+            member: row.try_get("payout_member")?,
+            quote_json: json.clone(),
+        };
+        let root: Option<String> = sqlx::query_scalar(
+            "SELECT document_json FROM payout_core_execution_claims WHERE grant_id=? AND member=?",
+        )
+        .bind(request.reservation.id.to_string())
+        .bind(&request.member)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some(root) = &root {
+            let root: crate::payout::execution::Record = serde_json::from_str(root)?;
+            root.validate()?;
+            if root.request != request {
+                bail!("core execution record changed the original request");
+            }
+        }
+        let recovery = existing.is_some() || root.is_some();
         if let Some(existing) = existing {
             if existing != json {
                 bail!("execute retry changed original quote");
             }
         } else {
-            if now < quote.observed_at
-                || now >= quote.usable_until
-                || u64::try_from(now)? >= quote.request.invoice_expires_at
+            if root.is_none()
+                && (now < quote.observed_at
+                    || now >= quote.usable_until
+                    || u64::try_from(now)? >= quote.request.invoice_expires_at)
             {
                 bail!("quote expired before first execute intent");
             }
@@ -257,6 +328,8 @@ impl Store {
                 .checked_add(5)
                 .context("execution time overflow")?,
             recovery,
+            core_uid: self.policy.scope.core_uid,
+            request,
         })
     }
 

@@ -279,8 +279,10 @@ The [separate payout runtime and signing broker](../architecture/cyberherd-payou
 now connect ordered private plan export, sender-key qualification, journaled work
 and core outcome recovery. The broker freezes only generated 9734 requests and
 never publishes them. The new source passed the [420-test runtime checkpoint](../testing/cyberherd-runtime-checkpoint-20261110.md).
-Independent core execution claims and financial snapshot-restore qualification
-must precede activation. Original joining references/editable outgoing zap wording,
+The subsequent [core execution claims](../architecture/cyberherd-execution-claims.md)
+retain original row/quote identities before submission and fence payout-only
+snapshot rollback; wider consistent-restore qualification still precedes activation.
+Original joining references/editable outgoing zap wording,
 member delivery, lifecycle, interfaces, installation qualification and activation
 remain required; neither new binary is deployed by this work.
 

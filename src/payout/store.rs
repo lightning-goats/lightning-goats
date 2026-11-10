@@ -139,6 +139,7 @@ impl Store {
             "payout_intake_receipts",
             "payout_worker_clock",
             "payout_worker_attempts",
+            "payout_core_execution_claims",
         ];
         if names.iter().any(|name| !allowed.contains(&name.as_str())) {
             bail!("payout requires its own database");

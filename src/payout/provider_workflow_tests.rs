@@ -8,6 +8,8 @@ use crate::payout::{
 use axum::routing::{patch, post};
 use std::{collections::BTreeMap, sync::Mutex};
 
+#[path = "execution_tests.rs"]
+mod execution_tests;
 #[path = "intake_tests.rs"]
 mod intake_tests;
 #[path = "outcome_workflow_tests.rs"]
@@ -178,6 +180,59 @@ impl Drop for Workflow {
     }
 }
 impl Workflow {
+    async fn execution_lease(
+        &self,
+        intent: &crate::payout::provider::ExecuteIntent,
+    ) -> crate::payout::execution::AuthenticatedLease {
+        let lease = self
+            .f
+            .ledger
+            .claim_payout_execution(
+                intent.claim_request(),
+                crate::payout::execution::Limits {
+                    policy: Some(&self.f.policy),
+                    account: Some(self.policy.scope.provider.account_id),
+                    enabled: true,
+                    nostr: true,
+                },
+            )
+            .await
+            .unwrap();
+        let root = tempfile::TempDir::new().unwrap();
+        let path = root.path().join("claim.sock");
+        let listener = tokio::net::UnixListener::bind(&path).unwrap();
+        let task = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let _: serde_json::Value =
+                crate::private_ipc::read(&mut stream, crate::core_bridge::MAX_FRAME)
+                    .await
+                    .unwrap();
+            crate::private_ipc::write(
+                &mut stream,
+                &Response::PayoutExecutionClaim {
+                    lease: Box::new(lease),
+                },
+                crate::core_bridge::MAX_FRAME,
+            )
+            .await
+            .unwrap();
+        });
+        let client = Client::new(path, self_credentials().unwrap().0).unwrap();
+        let result = client
+            .claim_execution(intent.claim_request())
+            .await
+            .unwrap();
+        task.await.unwrap();
+        result
+    }
+    async fn execute(
+        &self,
+        intent: &crate::payout::provider::ExecuteIntent,
+    ) -> anyhow::Result<crate::payout::provider::ExecutionObservation> {
+        self.sender
+            .execute(intent, &self.execution_lease(intent).await)
+            .await
+    }
     async fn new(nostr: bool) -> Self {
         let f = Fixture::new_with_nostr(nostr).await;
         let q = qualified(&f).await;
@@ -261,7 +316,7 @@ async fn lost_execute_response_recovers_only_same_quote_and_original_payment_acr
         .await
         .unwrap();
     w.mock.lock().unwrap().lose_execute = true;
-    let error = w.sender.execute(&permit).await.err().unwrap();
+    let error = w.execute(&permit).await.err().unwrap();
     assert!(!format!("{error:#}").contains("synthetic-private"));
     assert_eq!(
         w.store.payout_status(w.invoice_id).await.unwrap(),
@@ -274,7 +329,7 @@ async fn lost_execute_response_recovers_only_same_quote_and_original_payment_acr
         .prepare_execute(intent.id(), &w.fresh(true, false).await, now())
         .await
         .unwrap();
-    let recovered = w.sender.execute(&retry).await.unwrap();
+    let recovered = w.execute(&retry).await.unwrap();
     let bound = restored.bind_payment(&recovered, now()).await.unwrap();
     assert_eq!(w.mock.lock().unwrap().patch_ids.len(), 2);
     assert_eq!(w.mock.lock().unwrap().payments.len(), 1);
@@ -421,9 +476,9 @@ async fn independent_holds_stale_core_policy_shrink_and_canary_receipts_block_ex
         .unwrap();
     let mut expired = permit.clone();
     expired.permitted_until = now() - 1;
-    assert!(w.sender.execute(&expired).await.is_err());
+    assert!(w.execute(&expired).await.is_err());
     assert!(w.mock.lock().unwrap().patch_ids.is_empty());
-    let observation = w.sender.execute(&permit).await.unwrap();
+    let observation = w.execute(&permit).await.unwrap();
     w.store.bind_payment(&observation, now()).await.unwrap();
     assert_eq!(w.mock.lock().unwrap().payments.len(), 1);
 }
@@ -472,7 +527,7 @@ async fn authoritative_internal_payment_reads_allow_no_preimage_and_freeze_termi
         .prepare_execute(quote.id(), &w.fresh(true, false).await, now())
         .await
         .unwrap();
-    let execution = w.sender.execute(&permit).await.unwrap();
+    let execution = w.execute(&permit).await.unwrap();
     let bound = w.store.bind_payment(&execution, now()).await.unwrap();
     w.mock.lock().unwrap().state = PaymentState::Completed;
     w.mock.lock().unwrap().wrong_hash = true;

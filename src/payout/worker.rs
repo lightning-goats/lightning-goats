@@ -67,7 +67,7 @@ impl Worker {
             Some(intent) => intent,
             None => {
                 let nostr = self.store.row_uses_nostr(work.grant, &member).await?;
-                if self.permission(work.grant, nostr).await?.is_none() {
+                if self.permission(work.grant, &member, nostr).await?.is_none() {
                     return Ok(Step::Waiting);
                 }
                 self.store
@@ -88,10 +88,13 @@ impl Worker {
                 return Ok(Step::Observed);
             }
         }
-        let Some(fresh) = self.permission(work.grant, intent.uses_nostr()).await? else {
+        let Some(fresh) = self
+            .permission(work.grant, &member, intent.uses_nostr())
+            .await?
+        else {
             return Ok(Step::Waiting);
         };
-        if status == PayoutStatus::ExecutionUnknown {
+        if status == PayoutStatus::ExecutionUnknown || fresh.claim().is_some() {
             let quote = quote.context("uncertain execution lost original quote")?;
             return self.submit(quote.id(), &fresh).await;
         }
@@ -116,7 +119,7 @@ impl Worker {
             return Ok(Step::Closed);
         }
         if saved.is_none() {
-            return self.invoice(&intent, &fresh, fetcher).await;
+            return self.invoice(&intent, fresh.page(), fetcher).await;
         }
         let quote = match quote {
             Some(quote) => quote,
@@ -135,7 +138,7 @@ impl Worker {
             }
             return self.submit(quote.id(), &fresh).await;
         }
-        if !fresh.page().execution_permitted(calendar::now()?) {
+        if !fresh.page().page().execution_permitted(calendar::now()?) {
             return Ok(Step::Waiting);
         }
         match self.sender.create_quote(&quote).await? {
@@ -157,18 +160,22 @@ impl Worker {
     async fn permission(
         &self,
         grant: uuid::Uuid,
+        member: &str,
         nip57: bool,
-    ) -> Result<Option<AuthenticatedFundingPage>> {
+    ) -> Result<Option<crate::payout::execution::AuthenticatedState>> {
         let policy = self.store.policy();
         if !policy.execution_enabled {
             return Ok(None);
         }
         let page = self
             .core
-            .payout_funding(policy.scope.epoch, grant, &policy.scope.owner, 0)
+            .execution_state(policy.scope.epoch, grant, &policy.scope.owner, member)
             .await?;
-        if !page.page().execution_permitted(calendar::now()?)
-            || (nip57 && !page.page().nostr_enabled)
+        if let Some(claim) = page.claim() {
+            self.store.record_execution_claim(claim).await?;
+        }
+        if !page.page().page().execution_permitted(calendar::now()?)
+            || (nip57 && !page.page().page().nostr_enabled)
         {
             return Ok(None);
         }
@@ -204,12 +211,21 @@ impl Worker {
             .await?;
         Ok(Step::InvoiceSaved)
     }
-    async fn submit(&self, quote: uuid::Uuid, fresh: &AuthenticatedFundingPage) -> Result<Step> {
+    async fn submit(
+        &self,
+        quote: uuid::Uuid,
+        fresh: &crate::payout::execution::AuthenticatedState,
+    ) -> Result<Step> {
         let permitted = self
             .store
-            .prepare_execute(quote, fresh, calendar::now()?)
+            .prepare_execute(quote, fresh.page(), calendar::now()?)
             .await?;
-        let observed = self.sender.execute(&permitted).await?;
+        let claim = match fresh.claim() {
+            Some(claim) => claim.clone(),
+            None => self.core.claim_execution(permitted.claim_request()).await?,
+        };
+        self.store.record_execution_claim(&claim).await?;
+        let observed = self.sender.execute(&permitted, &claim).await?;
         self.store.bind_payment(&observed, calendar::now()?).await?;
         Ok(Step::Submitted)
     }

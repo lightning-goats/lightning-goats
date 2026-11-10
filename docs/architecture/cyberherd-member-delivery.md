@@ -112,3 +112,7 @@ operator/client interfaces remain separate work. Installed NIP-46/relay/network
 qualification, wider recovery/dependency remediation and explicit activation are
 still required. Synthetic relay/signing fixtures do not prove household or public
 relay acceptance. Record exact verification results only after the checks finish.
+
+The [member delivery checkpoint](../testing/cyberherd-member-delivery-checkpoint-20261110.md)
+records the completed 439-test suite, eight CLI checks, inactive archive evidence
+and unchanged open dependency advisory.

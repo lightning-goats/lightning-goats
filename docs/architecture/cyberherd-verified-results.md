@@ -27,11 +27,12 @@ with configured reward planning, independently of relay discovery, recipient
 lookup, payout execution and future public delivery. Core outages leave the cursor
 and original receipts available for retry.
 
-This is the accounting-to-presentation handoff. It does not yet sign/publish
-messages or invent joining anchors. Public treat delivery still needs the frozen
-note/stream branches and real joining publication receipts required by the
-[full implementation plan](../planning/cyberherd-implementation-plan.md). Those
-receipts are separate from a recipient's optional kind-9735 zap receipt.
+This is the accounting-to-presentation handoff. It does not itself sign/publish
+messages or invent joining anchors. Subsequent
+[member delivery](cyberherd-member-delivery.md) adds frozen note/stream branches
+and real joining publication receipts. Those receipts are separate from a
+recipient's optional kind-9735 zap receipt, and do not gate the independent
+human-name WebSocket notice.
 
 Temporary-database fixtures cover final core verification and role separation,
 minimal responses, atomic failure/retry, changed allocation rejection, paged

@@ -58,6 +58,10 @@ restart recovery, no downgrade, altered callbacks/invoices, duplicate payment ha
 expiry and protocol-query bounds. Their actual results must be recorded on the
 checked source; adding fixtures does not itself claim they passed.
 
-No production callback is invoked by these tests. The signing broker, provider
-quote/execute/reconciliation state machine, terminal-outcome accounting and isolated
-worker/service installation are unfinished. None is activated by this source.
+No production callback is invoked by these tests. Subsequent
+[payout runtime](cyberherd-payout-runtime.md),
+[core outcome verification](cyberherd-payout-outcomes.md) and
+[member delivery](cyberherd-member-delivery.md) source supplies the broker,
+provider recovery, frozen editable zap text and joining references. Reviewed
+service installation and live qualification remain separate; none is activated
+by an invoice-boundary fixture.

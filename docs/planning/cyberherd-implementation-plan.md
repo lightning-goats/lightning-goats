@@ -192,119 +192,72 @@ and verified; partial engines/models or a plan alone do not satisfy it.
 
 ## Current source checkpoint — incomplete port
 
-Implemented in the isolated `feat/cyberherd-20261109` source:
+The isolated `feat/cyberherd-20261109` source currently contains:
 
-- Exact contribution weights, largest-remainder shares and deterministic admission,
-  displacement, pre-join/social-award, pause and ban/reset transitions.
-- A separate WAL/FULL CyberHerd store with atomic membership/event/receipt updates,
-  source conflict rejection, concurrent/restart replay protection, deferred recovery,
-  stale discard receipts, owner isolation and auditable idempotent cycle resets.
-- Imported wording, safe bounded rendering, deterministic variant selection, and
-  stored template editing with deletion tombstones/category opt-out surviving seeds.
+- Exact points/shares, admission/headbutts, social awards and pre-join evidence,
+  replay protection, bans and Mountain-time cycle resets in a separate store.
+- Imported safe editable templates with deletion tombstones and optional goat
+  naming. Payment announcements retain the 10-sat floor; information/weather
+  remain overlay-only.
+- Optional [native incoming zaps and receipts](../architecture/native-nip57.md),
+  [authenticated targets/profiles](../architecture/cyberherd-ingress.md), and
+  [ordered intake](../architecture/cyberherd-worker.md) through the bounded
+  [private core bridge](../architecture/cyberherd-core-bridge.md). Real settlement
+  and feeder evidence remain independent of membership or relay availability.
+- [Confirmed-feeding planning](../architecture/cyberherd-reward-planning.md) and
+  [core funding reservations](../architecture/cyberherd-reward-funding.md) with
+  frozen eligible payees, fees, source evidence and allocations. Virtual credit
+  cannot authorize payouts, and no member reward balance carries forward.
+- An independent [payout journal](../architecture/cyberherd-payout-journal.md),
+  [source qualification](../architecture/cyberherd-payout-authority.md),
+  [invoice validation](../architecture/cyberherd-outgoing-invoices.md),
+  [provider execution/recovery](../architecture/cyberherd-provider-execution.md),
+  [core outcome verification](../architecture/cyberherd-payout-outcomes.md) and
+  [separate worker/signing broker](../architecture/cyberherd-payout-runtime.md).
+  Unknown execution recovers only its original quote/payment. Failed or uncertain
+  costs remain held. The receive core never loads the spend key.
+- [Core execution claims](../architecture/cyberherd-execution-claims.md) before
+  provider submission, including actual payout-only snapshot rollback fixtures.
+  Missing original history stays held; matching history recovers the same payment
+  even after quote expiry. The [425-test checkpoint](../testing/cyberherd-execution-claims-checkpoint-20261110.md)
+  records this source verification and its wider restore limits.
+- [Final verified result handoff](../architecture/cyberherd-verified-results.md)
+  to membership, with atomic exact receipts and frozen per-member payout
+  breakdowns. The [429-test checkpoint](../testing/cyberherd-results-checkpoint-20261110.md)
+  records the verified accounting-to-presentation boundary.
+- Subsequent [member conversation/delivery source](../architecture/cyberherd-member-delivery.md):
+  admission and feeding-frozen branches, editable outgoing zap text and real
+  joining-reference reads, plus optional exact note/chat/overlay outboxes.
+  Replies wait for actual joining publication receipts. Verified human-name
+  overlay notices remain independent during overlay-only staging. Public signing
+  and publishing require confirmed unpaused/public status. The
+  [439-test checkpoint](../testing/cyberherd-member-delivery-checkpoint-20261110.md)
+  records source verification, not production activation.
 
-The feature source also implements native NIP-01/BIP-340 verification and the
-[incoming NIP-57/receipt path](../architecture/native-nip57.md), with immutable
-invoice context, independent receipt intents, remote signing and bounded public
-relay transport. It is opt-in and has not been activated on the live service.
+The payment announcement deduplication and triggering-payment amount corrections
+are retained without changing the original legacy export or custom templates.
+The uploaded OBS artwork, base feed-credit accounting and feeder owner remain
+unchanged. No new CyberHerd service or financial operation is installed or enabled
+by these source checkpoints. Keep the full PR draft while required work remains.
 
-The [authenticated ingress components](../architecture/cyberherd-ingress.md)
-now add the selected Mountain-time calendar/catch-up operation, project/host/provider
-stream authority, durable heads/aliases and signed profile replacement, bounded
-read-only relay queries, a raw social inbox and the replay-safe membership adapter.
-They freeze conversation evidence with applied domain state. These are library
-components; they do not themselves start discovery or recovery services.
+Remaining implementation and qualification includes the feeder herd summary and
+one authenticated active-stream copy, optional invitation/pause/resume/evening
+lifecycle notices, readonly roster/targets/scores and OBS cards, browser Nostr
+authentication and authenticated operator settings/template/member/reset tools.
+Also required: explicit failed-cost/consistent-restore and retention operations,
+installed identity/network/helper/NIP-46/provider qualification, dependency-audit
+remediation and explicit financial activation. The twelve numbered groups above
+remain the completion contract; a library fixture or green artifact build does
+not establish live behavior.
 
-The optional [private core bridge](../architecture/cyberherd-core-bridge.md)
-adds actual peer-authenticated event/safety reads and checks correlated settlement,
-credit and confirmed-feed sources. Its additive feed-event binding never guesses
-historical JSON into new reward authority.
-
-The [separate intake worker](../architecture/cyberherd-worker.md) consumes
-authenticated pages with an atomic checkpoint, one durable observation order,
-replay-safe settled-zap membership and confirmed-feeding membership barriers.
-It refreshes targets/profiles before recovery and backfills social queries with
-bounded durable windows. Optional
-[eligible reward planning](../architecture/cyberherd-reward-planning.md) now
-freezes current signed payees, amounts and fees before reserving the plan.
-Neither a membership barrier nor a reserved plan proves a payout.
-The [planning checkpoint](../testing/cyberherd-planning-checkpoint-20261109.md)
-records 373 passing Rust tests, the ignored qualification and remaining boundaries.
-The [worker checkpoint](../testing/cyberherd-worker-checkpoint-20261109.md)
-records 351 passing Rust tests and the remaining qualification boundaries.
-
-The [core funding/reservation layer](../architecture/cyberherd-reward-funding.md)
-now adds opt-in FIFO source tracking, confirmation-atomic consumed-fund evidence
-and a bounded private reservation method under explicit root policy. Bootstrap
-establishes remaining credit without back-paying old feedings. Virtual credit
-cannot authorize Strike payouts. A reservation is not provider availability or
-delivery. Eligible plans and provider observations are now separate components;
-core-authoritative terminal accounting is now described below; service activation remains.
-The [funding checkpoint](../testing/cyberherd-funding-checkpoint-20261109.md)
-records 359 passing Rust tests and the conservative outstanding-budget limit.
-
-These are source components and an uninstalled worker binary, not a live CyberHerd
-service. The isolated payout worker, durable note/chat destinations, lifecycle notices,
-operator/client interfaces, installation and end-to-end verification remain work.
-No CyberHerd payout or membership worker is activated by this checkpoint.
-
-The [private payout authority](../architecture/cyberherd-payout-authority.md)
-now adds a distinct UID role, bounded reservation/source pages and qualification
-of every consumed real receive with the sender credential. It is not an outgoing
-payment engine. The [independent payout journal](../architecture/cyberherd-payout-journal.md)
-now retains qualified source slices, frozen destinations and gross allocations
-across retries/restarts. Every grant stays held until a final authenticated outcome.
-Signing, delivery and operations above remain open. The triggering-payment amount correction from #114 is also retained in the
-feature source without changing the original legacy export or template edits.
-
-The [funding checkpoint](../testing/cyberherd-payout-funding-checkpoint-20261109.md)
-records 388 passing Rust tests on that source. The next
-[outgoing invoice boundary](../architecture/cyberherd-outgoing-invoices.md) freezes
-callback/signature bytes and validates exact returned invoices; it still supplies
-no provider execution, terminal accounting or signing-broker runtime.
-Its [verification checkpoint](../testing/cyberherd-outgoing-invoice-checkpoint-20261110.md)
-records 394 passing Rust tests, successful isolated deployment regressions and the
-unchanged open dependency-audit failure. None is a live payout activation.
-
-The [verified outcome protocol](../architecture/cyberherd-payout-outcomes.md) adds
-permanent never-executed closures, immutable terminal manifests, bounded payout-only
-reports, independent core provider reads, exact retry progress and final core ACKs.
-Partial/uncertain reports retain the entire reservation. Verified completed costs
-enter the rolling budget; unused allocation is released only after finalization.
-Failed-payment costs remain held until explicit cost reconciliation. This library
-path has passed the [410-test outcome checkpoint](../testing/cyberherd-outcome-checkpoint-20261110.md),
-including budget-window and identity checks. It does not install or enable the payout runtime or supply
-the unfinished treat messages, lifecycle and interfaces.
-
-The [separate payout runtime and signing broker](../architecture/cyberherd-payout-runtime.md)
-now connect ordered private plan export, sender-key qualification, journaled work
-and core outcome recovery. The broker freezes only generated 9734 requests and
-never publishes them. The new source passed the [420-test runtime checkpoint](../testing/cyberherd-runtime-checkpoint-20261110.md).
-The subsequent [core execution claims](../architecture/cyberherd-execution-claims.md)
-retain original row/quote identities before submission and fence payout-only
-snapshot rollback; the [425-test checkpoint](../testing/cyberherd-execution-claims-checkpoint-20261110.md)
-records their verification. Wider consistent-restore qualification still precedes activation.
-Original joining references/editable outgoing zap wording,
-member delivery, lifecycle, interfaces, installation qualification and activation
-remain required; neither new binary is deployed by this work.
-
-The subsequent [verified result handoff](../architecture/cyberherd-verified-results.md)
-returns final core-verified member outcomes to the membership store through a
-read-only role. It freezes the original payout breakdown in durable private domain
-events. The [429-test checkpoint](../testing/cyberherd-results-checkpoint-20261110.md)
-records its source verification. Actual note/chat/overlay delivery and joining publication receipts remain
-unfinished; a stored result event alone is not a public treat announcement.
-
-The subsequent [member conversation/delivery source](../architecture/cyberherd-member-delivery.md)
-adds admission/feeding-frozen conversation contexts, editable outgoing zap wording,
-real joining-reference reads, and optional exact note/chat/overlay outboxes.
-Member signing and publishing still require confirmed unpaused/public status;
-overlay-only staging needs no Nostr credential. This is not production activation.
-Feeder stream copies/summary, lifecycle, roster/operator interfaces and operational
-qualification remain requirements of the full port.
-
-The next [provider execution source](../architecture/cyberherd-provider-execution.md)
-adds committed quote/execute identities, same-quote uncertain recovery and verified
-payment observations. It still holds all core/payout reservations and supplies
-neither a signing broker, worker activation nor public treat announcements.
-Its [verified source checkpoint](../testing/cyberherd-provider-checkpoint-20261110.md)
-records 402 passing Rust tests and the unchanged open dependency-audit failure.
+Earlier source-specific evidence remains available in the
+[351-test worker](../testing/cyberherd-worker-checkpoint-20261109.md),
+[359-test funding](../testing/cyberherd-funding-checkpoint-20261109.md),
+[373-test planning](../testing/cyberherd-planning-checkpoint-20261109.md),
+[388-test payout qualification](../testing/cyberherd-payout-funding-checkpoint-20261109.md),
+[394-test invoice](../testing/cyberherd-outgoing-invoice-checkpoint-20261110.md),
+[402-test provider](../testing/cyberherd-provider-checkpoint-20261110.md),
+[410-test outcome](../testing/cyberherd-outcome-checkpoint-20261110.md) and
+[420-test runtime](../testing/cyberherd-runtime-checkpoint-20261110.md) checkpoints.
+Those are historical source/fixture records, not descriptions of unfinished
+components that subsequent source has already implemented.

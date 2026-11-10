@@ -111,9 +111,10 @@ The [runtime checkpoint](../testing/cyberherd-runtime-checkpoint-20261110.md)
 records 420 passing Rust tests, seven non-skipped CLI checks and the distinct
 scope of archive, core-systemd and new-broker fixtures.
 
-The full port still needs verified payout summaries returned to membership
-delivery, editable outgoing-zap text and original joining-message references,
-durable note/chat/overlay outboxes and real joining publication receipts,
+Subsequent [verified result intake](cyberherd-verified-results.md) and
+[member delivery](cyberherd-member-delivery.md) connect frozen payout summaries,
+editable outgoing text/joining references and exact note/chat/overlay queues.
+The full port still needs feeder stream copies/herd summaries,
 lifecycle notices, roster/OBS and authenticated operator tools, explicit
 failed-cost/consistent restore recovery, reviewed inactive installation and live
 financial activation. These examples and unit/library tests do not prove actual

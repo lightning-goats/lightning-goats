@@ -25,6 +25,8 @@
 # member_percent_ceiling = 0
 # max_sats_per_feed = 0
 # max_sats_per_24h = 0
+# The matching owner also pins intake-only member overlay presentation. Its
+# limits can remain zero for overlay-only staging; no spend key is needed.
 
 [service]
 listen = "127.0.0.1:8787"

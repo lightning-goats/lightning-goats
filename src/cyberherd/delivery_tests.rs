@@ -655,3 +655,90 @@ async fn treat_messages_wait_for_real_joining_ack_and_reply_to_the_saved_stream_
         assert!(job.unsigned.content.contains("34 sats"));
     }
 }
+
+#[tokio::test]
+async fn overlay_import_enforces_pause_owner_epoch_role_and_exact_receipts_without_financial_events()
+ {
+    let f = Fixture::new().await;
+    f.apply("join", 34).await;
+    f.queue().await;
+    let message = f
+        .store
+        .pending_member_overlay(&f.owner)
+        .await
+        .unwrap()
+        .unwrap();
+    let (core, task) = f.bridge(RuntimeMode::Active).await;
+    f.ready(Some(true)).await;
+    assert!(core.member_overlay(&message).await.is_err());
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    f.ready(None).await;
+    assert!(core.member_overlay(&message).await.is_err());
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    f.ready(Some(false)).await;
+    let seq = core.member_overlay(&message).await.unwrap();
+    let mut changed = message.clone();
+    changed.owner = key(3);
+    assert!(core.member_overlay(&changed).await.is_err());
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    let mut changed = message.clone();
+    changed.epoch = Uuid::new_v4();
+    assert!(core.member_overlay(&changed).await.is_err());
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    let mut changed = message.clone();
+    changed.message = "replacement text".into();
+    assert!(core.member_overlay(&changed).await.is_err());
+    for category in [
+        "payment_received",
+        "feeder_confirmed",
+        "feeder_trigger",
+        "weather_status",
+        "interface_info",
+        "herd_reset_message",
+    ] {
+        let mut changed = message.clone();
+        changed.category = category.into();
+        assert!(changed.validate().is_err());
+    }
+    task.abort();
+    let (uid, gid) = self_credentials().unwrap();
+    let config = BridgeConfig {
+        socket: f.root.path().join("payout-role.sock"),
+        peer_uid: uid + 1,
+        group_gid: gid,
+        reward_policy: Some(crate::reward_funding::RewardPolicy {
+            owner: f.owner.clone(),
+            member_percent_ceiling: 0,
+            max_sats_per_feed: 0,
+            max_sats_per_24h: 0,
+        }),
+        payout_peer_uid: Some(uid),
+        payout_execution_enabled: false,
+        payout_account_id: None,
+    };
+    let task = tokio::spawn(
+        Server::bind(&config)
+            .await
+            .unwrap()
+            .run(f.core.clone(), RuntimeMode::Active),
+    );
+    let payout = Client::new(config.socket, uid).unwrap();
+    assert!(payout.member_overlay(&message).await.is_err());
+    let events = f.core.events_after(0, 100).await.unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].seq, seq);
+    assert_eq!(events[0].event_type, "cyberherd_message");
+    let exported = f
+        .core
+        .core_event_batch(Some(message.epoch), 0, 128)
+        .await
+        .unwrap();
+    assert!(
+        exported
+            .events
+            .iter()
+            .all(|e| matches!(e.body, crate::core_bridge::EventBody::Other))
+    );
+    assert_eq!(f.core.feed_credit_sats().await.unwrap(), 0);
+    task.abort();
+}

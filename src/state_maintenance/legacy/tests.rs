@@ -31,6 +31,48 @@ async fn historical(path: &Path) -> sqlx::SqlitePool {
 }
 
 #[tokio::test]
+async fn legacy_copied_wal_retains_rows_and_main_only_readers_do_not_invent_sidecars() {
+    let root = tempfile::TempDir::new().unwrap();
+    let source = root.path().join("original.db");
+    let pool = historical(&source).await;
+    sqlx::query("CREATE TABLE preserved_probe(value INTEGER NOT NULL)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO preserved_probe VALUES(2340)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let wal = root.path().join("copied-wal");
+    std::fs::create_dir(&wal).unwrap();
+    for (original, name) in [
+        (&source, "core.db"),
+        (&root.path().join("original.db-wal"), "core.db-wal"),
+    ] {
+        std::fs::copy(original, wal.join(name)).unwrap();
+    }
+    let before = ["core.db", "core.db-wal"].map(|name| std::fs::read(wal.join(name)).unwrap());
+    let report = rows::inspect(&wal).await.unwrap();
+    assert_eq!(report.tables["preserved_probe"].rows, 1);
+    assert!(std::fs::read_dir(&wal).unwrap().all(|entry| matches!(
+        entry.unwrap().file_name().to_str().unwrap(),
+        "core.db" | "core.db-wal" | "core.db-shm"
+    )));
+    for (index, name) in ["core.db", "core.db-wal"].iter().enumerate() {
+        assert_eq!(std::fs::read(wal.join(name)).unwrap(), before[index]);
+    }
+    pool.close().await;
+    assert!(!root.path().join("original.db-wal").exists());
+    let main = root.path().join("checkpointed");
+    std::fs::create_dir(&main).unwrap();
+    std::fs::copy(&source, main.join("core.db")).unwrap();
+    let before = std::fs::read(main.join("core.db")).unwrap();
+    assert_eq!(rows::inspect(&main).await.unwrap(), report);
+    assert_eq!(std::fs::read(main.join("core.db")).unwrap(), before);
+    assert_eq!(std::fs::read_dir(&main).unwrap().count(), 1);
+}
+
+#[tokio::test]
 async fn legacy_policy_checks_reject_root_aliases_secrets_before_any_state_access() {
     let root = tempfile::TempDir::new().unwrap();
     let path = root.path().join("policy.toml");

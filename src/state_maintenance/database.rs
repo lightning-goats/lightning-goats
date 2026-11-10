@@ -36,6 +36,13 @@ pub(super) async fn inspect(directory: &Path, policy: &Policy) -> Result<Report>
                 SqliteConnectOptions::new()
                     .filename(directory.join(role.file()))
                     .read_only(true)
+                    // Only a complete main-only copy is immutable. That avoids
+                    // an invented empty WAL without ignoring real copied WAL.
+                    .immutable(
+                        !directory
+                            .join(format!("{}-wal", role.file()))
+                            .try_exists()?,
+                    )
                     .create_if_missing(false)
                     .foreign_keys(true)
                     .pragma("query_only", "ON")

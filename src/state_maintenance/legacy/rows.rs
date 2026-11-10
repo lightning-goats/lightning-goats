@@ -17,6 +17,10 @@ async fn open(directory: &Path) -> Result<SqlitePool> {
             SqliteConnectOptions::new()
                 .filename(directory.join("core.db"))
                 .read_only(true)
+                // Immutable mode must only cover a complete main-only image:
+                // it ignores committed WAL pages. Copied WAL images retain the
+                // normal read-only reader and its permitted private read index.
+                .immutable(!directory.join("core.db-wal").try_exists()?)
                 .create_if_missing(false)
                 .foreign_keys(true)
                 .pragma("query_only", "ON")

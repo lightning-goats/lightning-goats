@@ -87,7 +87,11 @@ Only copies are parsed with native SQLite 3.54.1, read-only/query-only and trust
 schema disabled. Checks cover integrity, foreign keys, exact migration checksums,
 membership/core cursor and epoch, payout/provider identity, original reservation
 and frozen plan, execution claims and original quote bytes, exact final/cost ACKs,
-signer invoice intents and valid signed requests. No migration is applied.
+signer invoice intents and valid signed requests. A complete main-only copy is
+opened immutable to prevent a generated empty WAL. Copies with an existing WAL
+retain the regular read-only WAL reader and its permitted private SHM read-index;
+making those images immutable would ignore committed WAL pages. Byte hashes
+remain authoritative for both layouts. No migration is applied.
 Pending delivery/ACK work is retained. After native inspection, image hashes and
 source stability are checked again, the manifest/directory synced, and
 `INCOMPLETE` removed. Success prints only operation/ID/acceptance and

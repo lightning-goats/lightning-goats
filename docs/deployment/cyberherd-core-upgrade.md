@@ -51,7 +51,12 @@ existing epoch, migration versions and logical table fingerprints. Stdout contai
 only the operation/ID/acceptance and `resume_authorized=false`.
 
 Only copies are parsed, using native SQLite 3.54.1 read-only/query-only with trusted
-schema disabled. Integrity and foreign keys must pass. Migration history must be
+schema disabled. A complete checkpointed main-only copy uses immutable mode so
+inspection cannot invent an empty WAL. If a copied WAL exists, the normal
+read-only WAL reader preserves its committed pages and may create only the
+already permitted private disposable SHM index; immutable mode must not ignore
+that WAL. Both layouts retain exact image-byte checks. Integrity and foreign keys
+must pass. Migration history must be
 an exact successful known prefix ending between versions 9 and 15; gaps, changed
 checksums, dirty/future history and CyberHerd financial tables fail. A current or
 financial core requires four-journal maintenance, even when its reward tables

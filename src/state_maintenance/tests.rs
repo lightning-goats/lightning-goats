@@ -309,6 +309,53 @@ async fn root_four_journal_snapshot_preserves_wal_paid_pending_and_signed_state_
     );
     assert!(!manifest.report.resume_authorized);
     assert_eq!(operator.verify(&bundle).await.unwrap(), manifest);
+    // The same accepted data must also inspect cleanly after a normal last-
+    // connection checkpoint removes every WAL. Work only on additional copies;
+    // neither original sources nor the accepted bundle may be checkpointed.
+    let checkpointed = root.path().join("checkpointed-copies");
+    files::new_private_directory(&checkpointed).unwrap();
+    for image in &manifest.images {
+        files::copy_private(
+            &bundle.join(&image.name),
+            &checkpointed.join(&image.name),
+            image,
+        )
+        .unwrap();
+    }
+    for role in Role::ALL {
+        let db = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                sqlx::sqlite::SqliteConnectOptions::new()
+                    .filename(checkpointed.join(role.file()))
+                    .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
+                    .create_if_missing(false),
+            )
+            .await
+            .unwrap();
+        sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+            .execute(&db)
+            .await
+            .unwrap();
+        db.close().await;
+        assert!(!checkpointed.join(format!("{}-wal", role.file())).exists());
+        assert!(!checkpointed.join(format!("{}-shm", role.file())).exists());
+    }
+    let before: Vec<_> = Role::ALL
+        .iter()
+        .map(|role| std::fs::read(checkpointed.join(role.file())).unwrap())
+        .collect();
+    assert_eq!(
+        database::inspect(&checkpointed, &p).await.unwrap(),
+        manifest.report
+    );
+    assert_eq!(std::fs::read_dir(&checkpointed).unwrap().count(), 4);
+    for (index, role) in Role::ALL.iter().enumerate() {
+        assert_eq!(
+            std::fs::read(checkpointed.join(role.file())).unwrap(),
+            before[index]
+        );
+    }
     for (path, digest) in &source_bytes {
         assert_eq!(files::hash_bytes(&std::fs::read(path).unwrap()), *digest);
     }

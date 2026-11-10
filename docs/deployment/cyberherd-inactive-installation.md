@@ -104,3 +104,26 @@ public presentation and all financial activation remain explicit later steps.
 Filesystem fixtures simulate NSS/systemd/native acceptance and must not be
 reported as real installed qualification; actual native initialization has its
 separate mandatory root subprocess fixture.
+
+## Disposable installed rehearsal
+
+The Deployment systemd job now prepares a separate **test-only** artifact and
+runs `rehearse-cyberherd-inactive.py` on its disposable Ubuntu 24.04 VM. This
+new rehearsal is being qualified; no passing result is claimed here yet.
+Do not run that harness on the VPS. It requires root, explicit disposable-host
+attestation, GitHub Actions markers and a private loopback-only network namespace.
+
+Its native test-only example refuses root, existing files and non-`/run` paths.
+It builds a new synthetic schema through migration 13 with a fresh epoch and
+zero payments, as the existing fixture core UID. A unique masked dummy unit
+allows the real native backup command to observe actual systemd quiescence.
+The source is unrelated to the existing canary database. No fixture generator
+is included in either production archive.
+
+The harness invokes the actual authenticated launcher/installer, systemd-sysusers,
+NSS/password/sudo checks, persistent unit masks and three native initializers
+under actual distinct UIDs. Public fixture project/client/account/fingerprint
+values are explicitly synthetic; no provider or household client is qualified.
+The result must positively report three real identities, masked units and native
+initializers, with no credentials loaded or units started. Actual-host socket,
+network, helper, provider, household, browser and recovery adoption remain separate.

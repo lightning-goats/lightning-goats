@@ -28,6 +28,11 @@ provides offline snapshots, retention reports and startup-blocked restore stagin
 Its [491-test checkpoint](testing/cyberherd-state-maintenance-checkpoint-20261110.md)
 records verified source and inactive artifacts, without financial resumption authority.
 
+Fresh [offline journal initialization](deployment/cyberherd-offline-initialization.md)
+now has a [492-test source checkpoint](testing/cyberherd-bootstrap-checkpoint-20261110.md),
+including mandatory native subprocess checks under three distinct runtime UIDs.
+It uses no credentials and does not install or activate services.
+
 The native incoming zap/receipt contract is described in
 [`architecture/native-nip57.md`](architecture/native-nip57.md). It preserves
 ordinary LNURL payments and requires explicit feature activation.

@@ -12,6 +12,12 @@ staging have a [491-test checkpoint](testing/cyberherd-state-maintenance-checkpo
 External recovery adoption and actual installed qualification remain unfinished.
 The new components remain uninstalled and no financial activation is implied.
 
+Fresh offline initialization now has a
+[492-test checkpoint](testing/cyberherd-bootstrap-checkpoint-20261110.md),
+with required actual per-runtime UID/process/file checks and sixteen non-skipped
+CLI checks. The reviewed inactive installer and actual host qualification remain
+unfinished; no existing paid journal or live service is changed by these commands.
+
 The Phase 1 implementation history below was last updated on 2026-09-07; consult
 the dated restoration/implementation records and current plan for later work.
 

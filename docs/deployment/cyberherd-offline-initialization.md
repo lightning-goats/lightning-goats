@@ -4,7 +4,8 @@ The three CyberHerd daemons provide `--initialize-state` for a **fresh disabled
 installation**. This creates only schema, selected owner/core/provider bindings,
 membership settings and default templates. It is not migration, financial
 recovery, historical intake, credential installation or service activation.
-The feature is under source verification and is not installed by this document.
+The [492-test checkpoint](https://github.com/lightning-goats/lightning-goats/blob/feat/cyberherd-20261109/docs/testing/cyberherd-bootstrap-checkpoint-20261110.md)
+records source verification; this document does not install the feature.
 
 First provision the reviewed root-owned binaries/configuration, three separate
 non-admin identities and each identity's own private state directory. Select
@@ -62,7 +63,7 @@ up by this command.
 
 The resulting journals have empty payment/grant/execute/signing/ingress work and
 their original selected bindings. They can be included in the
-[four-journal maintenance set](cyberherd-state-maintenance.md). Initialization
+[four-journal maintenance set](https://github.com/lightning-goats/lightning-goats/blob/feat/cyberherd-20261109/docs/deployment/cyberherd-state-maintenance.md). Initialization
 does not confirm actual provider permissions, authorize a bunker client, install
 units, change limits, start services or grant financial/physical activation.
 

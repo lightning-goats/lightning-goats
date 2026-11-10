@@ -114,6 +114,33 @@ async fn connect_options(
         .context("failed opening durable SQLite pool")
 }
 
+/// Recovery tools never initialize/upgrade a selected database. Its complete
+/// successful migration history must already match this reviewed binary.
+pub(crate) async fn require_current_schema(
+    pool: &SqlitePool,
+    migrator: &sqlx::migrate::Migrator,
+) -> Result<()> {
+    let rows =
+        sqlx::query("SELECT version,success,checksum FROM _sqlx_migrations ORDER BY version")
+            .fetch_all(pool)
+            .await?;
+    let expected: Vec<_> = migrator.iter().collect();
+    if rows.len() != expected.len() {
+        bail!(
+            "recovery requires the already-installed current schema; it cannot initialize or migrate a database"
+        );
+    }
+    for (row, migration) in rows.iter().zip(expected) {
+        if row.try_get::<i64, _>("version")? != migration.version
+            || !row.try_get::<bool, _>("success")?
+            || row.try_get::<Vec<u8>, _>("checksum")?.as_slice() != migration.checksum.as_ref()
+        {
+            bail!("recovery schema history is dirty, changed or unsupported");
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -210,31 +237,4 @@ mod tests {
             assert!(durable_options(&format!("sqlite://ledger.db{query}")).is_err());
         }
     }
-}
-
-/// Recovery tools never initialize/upgrade a selected database. Its complete
-/// successful migration history must already match this reviewed binary.
-pub(crate) async fn require_current_schema(
-    pool: &SqlitePool,
-    migrator: &sqlx::migrate::Migrator,
-) -> Result<()> {
-    let rows =
-        sqlx::query("SELECT version,success,checksum FROM _sqlx_migrations ORDER BY version")
-            .fetch_all(pool)
-            .await?;
-    let expected: Vec<_> = migrator.iter().collect();
-    if rows.len() != expected.len() {
-        bail!(
-            "recovery requires the already-installed current schema; it cannot initialize or migrate a database"
-        );
-    }
-    for (row, migration) in rows.iter().zip(expected) {
-        if row.try_get::<i64, _>("version")? != migration.version
-            || !row.try_get::<bool, _>("success")?
-            || row.try_get::<Vec<u8>, _>("checksum")?.as_slice() != migration.checksum.as_ref()
-        {
-            bail!("recovery schema history is dirty, changed or unsupported");
-        }
-    }
-    Ok(())
 }

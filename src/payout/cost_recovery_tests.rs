@@ -119,12 +119,13 @@ async fn failed_costs_require_core_receipt_and_survive_both_ack_loss_and_payout_
             .await
             .is_err()
     );
-    let mock = w.mock.lock().unwrap();
-    assert_eq!(mock.post_keys.len(), 1);
-    assert_eq!(mock.patch_ids.len(), 1);
-    assert_eq!(mock.payments.len(), 1);
-    assert_eq!(*mock.payments.values().next().unwrap(), bound.payment_id());
-    drop(mock);
+    {
+        let mock = w.mock.lock().unwrap();
+        assert_eq!(mock.post_keys.len(), 1);
+        assert_eq!(mock.patch_ids.len(), 1);
+        assert_eq!(mock.payments.len(), 1);
+        assert_eq!(*mock.payments.values().next().unwrap(), bound.payment_id());
+    }
     task.abort();
     let (intake, task) = bridge(&w, false).await;
     assert!(intake.failed_cost(&header, member).await.is_err());

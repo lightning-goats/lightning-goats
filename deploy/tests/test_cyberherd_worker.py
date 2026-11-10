@@ -38,6 +38,12 @@ class CyberHerdWorkerCLI(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("disabled", result.stderr)
 
+    def test_initialization_is_separate_requires_protected_configuration_and_creates_no_runtime(self):
+        for args in [("--initialize-state",), ("--initialize-state", "--check")]:
+            result = self.invoke(self.text, *args)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertNotIn("CREDENTIALS_DIRECTORY", result.stderr)
+
     def test_zero_core_identity_and_secret_fields_fail_before_runtime(self):
         for text in [self.text.replace("core_uid = 10001", "core_uid = 0"),
                      'strike_api_key = "synthetic-placeholder"\n' + self.text,

@@ -54,6 +54,56 @@ pub struct Config {
 }
 
 impl Config {
+    /// Initialize only a fresh, disabled journal. No client, key or worker opens.
+    pub async fn initialize_state(&self, path: &Path) -> Result<()> {
+        self.validate()?;
+        crate::private_ipc::protected_config(path)?;
+        let uid = crate::private_ipc::uid()?;
+        if self.enabled
+            || self.messaging.as_ref().is_some_and(|m| m.enabled)
+            || self.view.as_ref().is_some_and(|v| v.enabled)
+            || uid == self.core.core_uid
+            || *self != Config::load(path)?
+        {
+            bail!("initialization requires unchanged disabled configuration and a separate UID");
+        }
+        crate::private_ipc::private_state(&self.state_dir)?;
+        let fresh = crate::state_bootstrap::NewJournal::begin(
+            &self.state_dir,
+            "cyberherd.db",
+            singleton(&self.state_dir, uid)?,
+        )?;
+        let store = Store::connect(&fresh.url()?).await?;
+        let result: Result<()> = async {
+            let now = calendar::now()?;
+            store
+                .initialize(
+                    &self.project_pubkey,
+                    &self.settings,
+                    DayWindow::at(&self.timezone, now)?.start,
+                )
+                .await?;
+            store
+                .initialize_core_ingress(&self.project_pubkey, &self.core)
+                .await?;
+            for catalog in [
+                super::templates::Catalog::legacy()?,
+                super::templates::Catalog::delivery_defaults()?,
+                super::templates::Catalog::lifecycle_defaults()?,
+            ] {
+                store.seed_templates(&self.project_pubkey, &catalog).await?;
+            }
+            Ok(())
+        }
+        .await;
+        store.close_after_initialization().await;
+        result?;
+        if *self != Config::load(path)? {
+            bail!("initialization configuration changed");
+        }
+        fresh.publish().await
+    }
+
     pub fn load(path: &Path) -> Result<Self> {
         let raw = std::fs::read_to_string(path).context("cannot read CyberHerd configuration")?;
         if raw.len() > 65536 {

@@ -103,6 +103,9 @@ pub struct Store {
 }
 
 impl Store {
+    pub(crate) async fn close_after_initialization(self) {
+        self.pool.close().await;
+    }
     pub async fn connect(database_url: &str, policy: Policy) -> Result<Self> {
         policy.validate()?;
         let pool = crate::sqlite::connect_durable(database_url, 5).await?;

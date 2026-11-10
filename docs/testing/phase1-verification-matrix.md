@@ -292,6 +292,14 @@ reuse a legacy two-store fixture, or claim this fixture qualifies CyberHerd rest
 
 ## CyberHerd four-journal maintenance
 
+Before inactive installation, also qualify [fresh offline initialization](../deployment/cyberherd-offline-initialization.md):
+disabled root-protected policy, separate actual runtime UID/primary group and
+private state under protected ancestors; refusal of existing databases/sidecars/
+recovery markers; complete synced image publication without overwrite; no key,
+network worker or financial/signing work. Required ignored root/child fixtures
+must actually run under distinct kernel UIDs and emit their positive markers;
+ordinary test counts alone do not prove this authority.
+
 Follow [the offline maintenance contract](../deployment/cyberherd-state-maintenance.md).
 Check policy-only CLI behavior without credentials/state, protected root policy,
 four separate runtime owners, stopped/masked exact units and writer attestation.

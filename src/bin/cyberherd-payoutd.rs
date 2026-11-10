@@ -7,11 +7,14 @@ use std::path::PathBuf;
 struct Args {
     #[arg(long, default_value = "/etc/cyberherd-payout/config.toml")]
     config: PathBuf,
-    #[arg(long)]
+    #[arg(long, conflicts_with = "initialize_state")]
     check: bool,
+    /// Initialize only a fresh disabled zero-budget journal; no sender credential.
+    #[arg(long)]
+    initialize_state: bool,
     /// Read one original failed-cost receipt from core and acknowledge it locally.
     /// Requires the payout UID; does not load a spending credential or send money.
-    #[arg(long,requires_all=["grant","member"],conflicts_with="check")]
+    #[arg(long,requires_all=["grant","member"],conflicts_with_all=["check","initialize_state"])]
     sync_failed_cost: bool,
     #[arg(long, requires = "sync_failed_cost")]
     grant: Option<uuid::Uuid>,
@@ -30,6 +33,11 @@ async fn main() -> Result<()> {
     let config = lightning_goats::payout::runtime::Config::load(&args.config)?;
     if args.check {
         println!("Payout configuration is valid; no runtime started");
+        return Ok(());
+    }
+    if args.initialize_state {
+        config.initialize_state(&args.config).await?;
+        println!("New payout journal initialized; no runtime started");
         return Ok(());
     }
     if args.sync_failed_cost {

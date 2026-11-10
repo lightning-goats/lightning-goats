@@ -38,6 +38,12 @@ class Checks:
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("disabled", result.stderr)
 
+    def test_offline_initialization_requires_protected_config_and_excludes_check(self):
+        for args in [("--initialize-state",), ("--initialize-state", "--check")]:
+            result = self.invoke(self.text, *args)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertNotIn("CREDENTIALS_DIRECTORY", result.stderr)
+
 
 @unittest.skipUnless(os.environ.get("LG_CYBERHERD_SIGNER_TEST_BINARY"), "select built signer")
 class SignerCLI(Checks, unittest.TestCase):

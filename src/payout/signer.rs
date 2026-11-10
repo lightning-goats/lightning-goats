@@ -87,6 +87,36 @@ fn nostr_settings<'de, D: serde::Deserializer<'de>>(
     })
 }
 impl Config {
+    /// Fresh empty purpose binding only. Never loads nak/client credentials.
+    pub async fn initialize_state(&self, path: &Path) -> Result<()> {
+        self.validate()?;
+        ipc::protected_config(path)?;
+        if self.enabled
+            || self.policy.max_net_sats != 0
+            || self.policy.max_new_per_hour != 0
+            || *self != Config::load(path)?
+            || ipc::uid()? == self.policy.peer_uid
+        {
+            bail!(
+                "initialization requires unchanged disabled zero-admission policy and its own UID"
+            );
+        }
+        ipc::private_state(&self.state_dir)?;
+        let fresh = crate::state_bootstrap::NewJournal::begin(
+            &self.state_dir,
+            "signer.db",
+            ipc::singleton("cyberherd-signer", &self.state_dir)?,
+        )?;
+        Store::connect(&fresh.url()?, self.policy.clone())
+            .await?
+            .close_after_initialization()
+            .await;
+        if *self != Config::load(path)? {
+            bail!("initialization configuration changed");
+        }
+        fresh.publish().await
+    }
+
     pub fn load(path: &Path) -> Result<Self> {
         let raw = std::fs::read_to_string(path)?;
         if raw.len() > 65536 {
@@ -166,6 +196,9 @@ pub struct Store {
     policy: Policy,
 }
 impl Store {
+    pub(crate) async fn close_after_initialization(self) {
+        self.pool.close().await;
+    }
     pub async fn connect(url: &str, policy: Policy) -> Result<Self> {
         policy.validate()?;
         let pool = crate::sqlite::connect_durable(url, 2).await?;

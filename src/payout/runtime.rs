@@ -34,6 +34,37 @@ pub struct Config {
     pub policy: Policy,
 }
 impl Config {
+    /// Fresh empty scope/intake binding only; no sender credential or transport.
+    pub async fn initialize_state(&self, path: &Path) -> Result<()> {
+        self.validate()?;
+        ipc::protected_config(path)?;
+        if self.enabled
+            || self.policy.execution_enabled
+            || self.policy.member_percent_ceiling != 0
+            || self.policy.max_sats_per_feed != 0
+            || self.policy.max_sats_per_24h != 0
+            || self.policy.max_fee_sats != 0
+            || *self != Config::load(path)?
+            || [self.intake_uid, self.signer_uid, self.policy.scope.core_uid].contains(&ipc::uid()?)
+        {
+            bail!("initialization requires unchanged disabled zero-budget policy and its own UID");
+        }
+        ipc::private_state(&self.state_dir)?;
+        let fresh = crate::state_bootstrap::NewJournal::begin(
+            &self.state_dir,
+            "payout.db",
+            ipc::singleton("cyberherd-payout", &self.state_dir)?,
+        )?;
+        let store = Store::connect(&fresh.url()?, self.policy.clone()).await?;
+        let result = store.initialize_intake(self.intake_uid).await;
+        store.close_after_initialization().await;
+        result?;
+        if *self != Config::load(path)? {
+            bail!("initialization configuration changed");
+        }
+        fresh.publish().await
+    }
+
     pub fn load(path: &Path) -> Result<Self> {
         let raw = std::fs::read_to_string(path)?;
         if raw.len() > 65536 {

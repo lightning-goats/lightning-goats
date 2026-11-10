@@ -25,13 +25,14 @@ if len(binaries) != 1:
 fixtures = {
     "payout::cost_recovery::tests::root_owned_approval_and_evidence_checks_are_real_filesystem_authority": "ROOT_OWNERSHIP_FIXTURE_VERIFIED",
     "state_maintenance::tests::root_four_journal_snapshot_preserves_wal_paid_pending_and_signed_state_and_blocks_restore_startup": "ROOT_FOUR_JOURNAL_FIXTURE_VERIFIED",
+    "state_bootstrap::tests::root_offline_bootstrap_qualifies_three_actual_runtime_uids_and_refuses_replacing_journals": "ROOT_OFFLINE_BOOTSTRAP_FIXTURE_VERIFIED",
 }
 binary = str(binaries.pop())
 listed = subprocess.run([binary, "--list"], capture_output=True, text=True, check=True)
 for name, marker in fixtures.items():
     if name + ": test" not in listed.stdout.splitlines():
         raise ValueError("required native ownership fixture is missing")
-    result = subprocess.run(["sudo", "unshare", "--net", "--", binary, name, "--exact", "--nocapture"],
+    result = subprocess.run(["sudo", "unshare", "--net", "--", binary, name, "--exact", "--include-ignored", "--nocapture"],
                             capture_output=True, text=True, check=True)
     if marker not in result.stdout or "1 passed; 0 failed" not in result.stdout:
         raise ValueError("actual root-owned positive fixture did not complete")

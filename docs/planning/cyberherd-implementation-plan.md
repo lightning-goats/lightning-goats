@@ -194,6 +194,10 @@ and verified; partial engines/models or a plan alone do not satisfy it.
 
 ## Current source checkpoint — incomplete port
 
+Work in progress adds [fresh offline journal initialization](../deployment/cyberherd-offline-initialization.md)
+for the reviewed inactive installation. It takes no credentials and cannot open
+an existing journal, start workers or authorize financial/physical activation.
+
 The [491-test checkpoint](../testing/cyberherd-state-maintenance-checkpoint-20261110.md)
 adds [native four-journal retention and recovery staging](../deployment/cyberherd-state-maintenance.md).
 It preserves original scopes and signed bytes, requires stopped/masked writers

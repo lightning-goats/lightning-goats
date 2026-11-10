@@ -66,7 +66,8 @@ unsigned fields, native signatures and real relay-OK receipts. Its regular note
 has no fabricated `e` root, `p` member or reply; its chat has the frozen stable
 stream `a` root and no joining reply. Member conversations and their mandatory
 joining receipts remain unchanged. Broadcasts cannot enter member branches.
-Frozen signed retries keep their bytes/event IDs. Public-mode permission is
+Frozen signed retries keep their bytes/event IDs. A project-specific source-hash
+tag keeps distinct payments distinct even if wording and timestamps coincide. Public-mode permission is
 refreshed before signing and publishing. Confirmed food can still be announced if
 the override changes afterward; member updates retain their existing Ready gate.
 Canary/shadow modes cannot publish these notices to Nostr.

@@ -252,7 +252,12 @@ pub(super) fn unsigned_broadcast(
     now: i64,
 ) -> Result<Unsigned> {
     message.validate_broadcast(owner)?;
-    let mut tags = vec![vec!["t".into(), "LightningGoats".into()]];
+    // Separate equally sized payments can have identical text and timestamps.
+    // Bind the event ID to its original source without exposing provider IDs.
+    let mut tags = vec![
+        vec!["t".into(), "LightningGoats".into()],
+        vec!["lightning-goats".into(), message.identity.clone()],
+    ];
     let kind = if destination == "broadcast:note" {
         1
     } else {
@@ -283,4 +288,61 @@ pub(super) fn unsigned_broadcast(
         content: message.nostr.clone(),
         tags,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn distinct_feeding_sources_cannot_collapse_to_one_nostr_id_with_equal_text_and_timestamp() {
+        let owner = crate::nostr_event::test_event(1, 0, 100, "", vec![]).pubkey;
+        let mut message = Rendered {
+            identity: "11".repeat(32),
+            cycle: 1,
+            member: owner.clone(),
+            conversation: None,
+            context: Context::default(),
+            category: "feeder_trigger".into(),
+            nostr: "Same feeding words".into(),
+            overlay: "Same feeding words".into(),
+            accepted: false,
+            requires_joining: false,
+            additional_members: vec![],
+            broadcast: Some(Broadcast {
+                request_id: uuid::Uuid::new_v4(),
+                proof: crate::cyberherd::feeding_delivery::Proof {
+                    owner: owner.clone(),
+                    identity: "11".repeat(32),
+                    source_seq: 1,
+                    triggering_payment_amount_sats: Some(1000),
+                    feed_credit_sats: 0,
+                },
+                goats: vec![],
+            }),
+        };
+        let first = unsigned_broadcast(&owner, &message, "broadcast:note", 100).unwrap();
+        message.identity = "22".repeat(32);
+        message.broadcast.as_mut().unwrap().proof.identity = message.identity.clone();
+        message.broadcast.as_mut().unwrap().proof.source_seq = 2;
+        let second = unsigned_broadcast(&owner, &message, "broadcast:note", 100).unwrap();
+        assert_eq!(first.content, second.content);
+        assert_eq!(first.created_at, second.created_at);
+        let a = crate::nostr_event::VerifiedEvent::verify(crate::nostr_event::test_event(
+            1,
+            first.kind,
+            first.created_at,
+            &first.content,
+            first.tags,
+        ))
+        .unwrap();
+        let b = crate::nostr_event::VerifiedEvent::verify(crate::nostr_event::test_event(
+            1,
+            second.kind,
+            second.created_at,
+            &second.content,
+            second.tags,
+        ))
+        .unwrap();
+        assert_ne!(a.event().id, b.event().id);
+    }
 }

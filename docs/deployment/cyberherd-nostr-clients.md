@@ -4,7 +4,9 @@
 credentials using the existing pinned `nak` client factory. Two clients are now
 prepared as encrypted data, as recorded in the
 [live preparation checkpoint](../testing/cyberherd-live-core-upgrade-20261110.md).
-They remain unauthorized/unqualified at the household; no new service runs.
+The operator now reports both clients present in the retained household allowlist
+and the bunker active/running with zero restarts. This is operator-reported
+authorization; actual round trips remain unqualified. No new application service runs.
 It never creates/imports the project's signing secret, contacts a bunker, signs
 an event, publishes or changes a service. Keep the existing receive client intact.
 
@@ -57,3 +59,44 @@ Household nak/NIP-46 round trips for kinds 1/1311/9734, exact author/unsigned by
 wrong-purpose refusal and actual relay acknowledgments still require qualification
 before enabling their respective publication/execution paths. Local synthetic
 factory tests prove namespaces/retention, not household authorization.
+
+## Signing-only qualification
+
+`deploy/scripts/check-cyberherd-nostr.py` is a non-admin checker, separate from
+application workers and the root tool closure. Its two one-shot unit examples
+are `cyberherd-nostr-membership-check.service.example` and
+`cyberherd-nostr-payout-check.service.example`. Install only independently reviewed
+helper bytes into a fresh root-owned protected prefix; substitute its exact path
+and the actual public client in copies of the reviewed templates. Keep unique
+temporary unit names, retain their exact bytes/hashes, and verify the assembled
+units before starting. Never run the helper as root or enable it at boot.
+
+Each unit loads only its own encrypted NIP-46 credential, uses its actual non-admin
+identity and a private temporary runtime directory, and hides all application
+journals, configurations, financial credentials and runtime IPC. Production units
+stay masked and unchanged. The qualified existing Primal transport is the default;
+additional approved relays are explicit bounded options, not assumed successes.
+
+Membership signs exactly kinds 1 and 1311; the payout-signing client signs exactly
+9734. Each uses a fresh fixed-purpose challenge, exact timestamp/content/tags,
+expected project author and pinned client identity. Chat references a synthetic
+unpublished activity; the zap request uses a publicly known synthetic recipient.
+No recipient is contacted. Canonical IDs and pinned nak signature verification
+must both pass. Child input/output/time are bounded, unrelated environment is
+cleared and raw child output is withheld on error. Signed challenge bytes are
+never printed or retained.
+
+The only nak commands are public-client derivation, signing without publication
+relay arguments, and local signature verification. NIP-46 transport can exchange
+its encrypted envelopes; no project note/chat/zap request is published, no invoice
+is requested and no provider/feeder operation is performed. The unsigned challenge
+shapes follow [NIP-53](https://github.com/nostr-protocol/nips/blob/master/53.md) and
+[NIP-57](https://github.com/nostr-protocol/nips/blob/master/57.md).
+
+Retain only each sanitized success report and exact helper/unit identities in
+private operator evidence. Stop/remove only the exact temporary unit copies;
+leave changed files for inspection. A timeout or unauthorized response is a failed
+round trip, not evidence that credential bytes should be regenerated. No result
+enables publication or spending. Six local tests cover frozen-byte refusal,
+fixed purposes, child time/output bounds, root refusal, unit isolation and fake
+helper orchestration. They do not claim actual cryptography or household success.

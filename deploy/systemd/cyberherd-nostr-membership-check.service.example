@@ -1,0 +1,43 @@
+[Unit]
+Description=Signing-only CyberHerd membership household check; no publication
+
+[Service]
+Type=oneshot
+User=cyberherd
+Group=cyberherd
+ExecStart=/usr/bin/python3 -I -S -B /usr/local/libexec/lightning-goats-check-cyberherd-nostr.py --role membership --client-public-key REPLACE_WITH_MEMBERSHIP_PUBLIC_CLIENT --relay wss://relay.primal.net
+LoadCredentialEncrypted=nostr-client-key:/etc/credstore.encrypted/cyberherd-nostr-client
+RuntimeDirectory=cyberherd-nostr-membership-check
+RuntimeDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectProc=invisible
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+InaccessiblePaths=-/etc/credstore.encrypted -/etc/lightning-goats -/var/lib/lightning-goats -/etc/cyberherd -/var/lib/cyberherd -/etc/cyberherd-payout -/var/lib/cyberherd-payout -/etc/cyberherd-signer -/var/lib/cyberherd-signer -/run/lightning-goats-bridge -/run/cyberherd-plans -/run/cyberherd-signer
+IPAddressDeny=10.0.0.0/8
+IPAddressDeny=172.16.0.0/12
+IPAddressDeny=192.168.0.0/16
+IPAddressDeny=169.254.0.0/16
+IPAddressDeny=fc00::/7
+IPAddressDeny=fe80::/10
+MemoryMax=128M
+MemorySwapMax=0
+TasksMax=64
+TimeoutStartSec=150
+TimeoutStopSec=10

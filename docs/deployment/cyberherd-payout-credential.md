@@ -16,7 +16,31 @@ The [runtime contract](../architecture/cyberherd-payout-runtime.md) describes th
 separate account/fingerprint and execution-budget checks.
 
 `prepare-cyberherd-payout-key.py` is part of the authenticated root tool bundle.
-It is prepared source, not a claim that a new key exists or is installed.
+The operator-approved maintenance installed its pinned root-owned bundle at
+`/usr/local/libexec/lightning-goats-upgrade-2e3b289/`. The installed convenience
+command prompts privately for the key and removes its own temporary plaintext
+input after importing:
+
+```sh
+sudo /usr/local/bin/install-cyberherd-payout-key
+```
+
+Alternatively, put only the API key (without quotes) in
+`/root/cyberherd-payout-key.txt`, then use the file argument:
+
+```sh
+sudo chown root:root /root/cyberherd-payout-key.txt
+sudo chmod 600 /root/cyberherd-payout-key.txt
+sudo /usr/local/bin/install-cyberherd-payout-key /root/cyberherd-payout-key.txt
+```
+
+The argument is a private **file path**, never a key. No webhook secret is needed.
+These commands install encrypted credential data only; they do not enable payouts,
+contact Strike or prove key permissions. The wrapper invokes the isolated launcher
+with the independently pinned tool manifest, and does not use writable checkout
+code. File arguments are retained; only wrapper-created temporary input is removed.
+
+For a separately reviewed installation, the underlying command is below.
 After independent tool/source review, the operator can place the new key in a
 root-owned 0600 file under protected root-owned parents, for example
 `/root/cyberherd-payout-key.txt`. Keep the key out of chat, command arguments,

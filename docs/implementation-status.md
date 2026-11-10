@@ -28,6 +28,14 @@ The [combined core rehearsal](testing/cyberherd-core-transaction-checkpoint-2026
 now passes actual systemd/UID migration on a disposable VM. Actual live-host
 maintenance, provider/household/recovery qualification and activation remain open.
 
+The operator subsequently approved the
+[live core maintenance](testing/cyberherd-live-core-upgrade-20261110.md): accepted
+native backup/comparison, preserved paid state/configuration, original-UID migration
+and existing-mode restart passed; health/status return 200. The three CyberHerd
+roles remain absent and financial activation remains disabled. The protected
+[payout-key import command](deployment/cyberherd-payout-credential.md) is installed;
+this alone does not establish provider scopes/account binding or key installation.
+
 The Phase 1 implementation history below was last updated on 2026-09-07; consult
 the dated restoration/implementation records and current plan for later work.
 

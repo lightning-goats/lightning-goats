@@ -252,3 +252,30 @@ and a lost response retains one command body/UUID while explicit retry signs a
 fresh HTTP event. No automatic mutation retry or raw/private-key login is allowed.
 Keep full locked Rust, audit, inactive CLI/archive/browser/nginx/systemd gates;
 actual new household client, WAF, UIDs and activation remain separate evidence.
+
+
+## Explicit failed-payment cost recovery
+
+Verify full holds remain until a protected operator decision and matching evidence
+plus a fresh independent original Failed payment read agree. The API state alone
+must never imply refund. Wrong epoch/account/manifest/member/payment/hash, pending
+or incomplete outcomes, expired reviews and changed receipt identities fail. No
+financial mutation enters the browser operator API or intake role.
+
+Exercise actual root-owned private approval/evidence files and protected ancestors,
+not only mocked metadata. Ordinary Rust tests cover unprivileged rejection; the
+CI root fixture must identify exactly one native test and require its positive
+ownership completion marker inside a network namespace. Unknown approval fields,
+changed evidence, group-writable/public files and symlinks must fail.
+
+Test append-only exact retry, final-write rollback, actual cost/window conservation,
+original final ACK/source retention, no extra provider quote/execute or public/member
+message, private payout-role-only receipt reads and payout ACK loss/reopen recovery.
+Synchronization loads no sender key. CLI argument/config/private-state checks must
+run before credentials or new state. Recovery opens require existing private paths
+and the exact successful migration checksum history; missing/empty/old schemas
+must not be created or migrated by preview/synchronization.
+
+Run the full locked Rust, audit, root fixture, inactive CLI/archive/browser/systemd
+gates on the exact candidate. Source fixtures do not approve a real financial cost,
+prove a provider refund or qualify whole-stack restore/new installed identities.

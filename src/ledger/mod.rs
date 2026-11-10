@@ -16,6 +16,7 @@ use crate::domain::payment::SettledPayment;
 mod core_bridge;
 mod cyberherd_overlay;
 mod events;
+mod failed_costs;
 mod feed;
 mod feeding_notices;
 mod feeding_presentation;

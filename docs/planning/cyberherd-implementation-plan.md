@@ -273,7 +273,14 @@ remain uninstalled/default-off.
 
 Remaining implementation and qualification includes feeder announcement,
 lifecycle, roster and operator-interface installed qualification.
-Also required: explicit failed-cost/consistent-restore and retention operations,
+Subsequent [failed-cost recovery source](../architecture/cyberherd-failed-cost-recovery.md)
+adds protected operator financial reviews, fresh original-payment verification,
+append-only budget adjustments and exact payout-role receipts. Preview and
+recovery-open cannot initialize or migrate a selected journal; sender credentials
+are not loaded for synchronization. Source verification is in progress and no
+financial review has been applied.
+
+Also required: consistent-restore and retention operations,
 installed identity/network/helper/NIP-46/provider qualification, dependency-audit
 remediation and explicit financial activation. The twelve numbered groups above
 remain the completion contract; a library fixture or green artifact build does

@@ -49,6 +49,24 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Print a non-authorizing draft from an original finalized failed hold.
+    FailedCostTemplate {
+        #[arg(long)]
+        reservation: Uuid,
+        #[arg(long)]
+        member: String,
+    },
+    /// Preview or apply a protected operator-reviewed failed-payment cost.
+    /// This never resends a payment or claims member delivery.
+    ReconcileFailedCost {
+        #[arg(long)]
+        approval: PathBuf,
+        #[arg(long)]
+        evidence: PathBuf,
+        /// Commit only after the protected approval/evidence and fresh provider read agree.
+        #[arg(long)]
+        apply: bool,
+    },
     /// Print the current durable feed-credit accounting state.
     Status,
 }
@@ -62,10 +80,87 @@ enum ReconcileOutcome {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+    #[cfg(unix)]
+    if matches!(
+        args.command,
+        Command::ReconcileFailedCost { .. } | Command::FailedCostTemplate { .. }
+    ) {
+        lightning_goats::payout::cost_recovery::require_protected_configuration(&args.config)?;
+    }
     let config = AppConfig::load(&args.config)?;
-    let ledger = LedgerStore::connect(&config.database.url).await?;
+    let ledger = if matches!(
+        args.command,
+        Command::ReconcileFailedCost { .. } | Command::FailedCostTemplate { .. }
+    ) {
+        #[cfg(unix)]
+        {
+            LedgerStore::connect_existing_recovery(&config.database.url).await?
+        }
+        #[cfg(not(unix))]
+        {
+            bail!("failed-cost recovery requires Unix protected-file authority");
+        }
+    } else {
+        LedgerStore::connect(&config.database.url).await?
+    };
 
     match args.command {
+        Command::FailedCostTemplate {
+            reservation,
+            member,
+        } => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(
+                    &ledger.failed_cost_draft(reservation, &member).await?
+                )?
+            );
+        }
+        Command::ReconcileFailedCost {
+            approval,
+            evidence,
+            apply,
+        } => {
+            #[cfg(unix)]
+            {
+                let approved = lightning_goats::payout::cost_recovery::ApprovedDecision::load(
+                    &approval, &evidence,
+                )?;
+                let decision = approved.decision();
+                let bridge = config
+                    .core_bridge
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("core payout account binding required"))?;
+                if bridge.payout_account_id != Some(decision.account_id)
+                    || bridge.reward_policy.as_ref().map(|p| p.owner.as_str())
+                        != Some(decision.owner.as_str())
+                {
+                    bail!("protected config differs from failed-cost decision");
+                }
+                let existing = ledger.preview_failed_cost(decision).await?;
+                let receipt = if apply && existing.is_none() {
+                    if config.strike.api_url.trim_end_matches('/') != "https://api.strike.me" {
+                        bail!("cost recovery requires the fixed production Strike API");
+                    }
+                    let client =
+                        lightning_goats::strike::StrikeClient::from_config(&config.strike).await?;
+                    let reader =
+                        lightning_goats::payout::outcome::Reader::new(client, decision.account_id)?;
+                    Some(ledger.reconcile_failed_cost(&approved, &reader).await?)
+                } else {
+                    existing
+                };
+                println!(
+                    "{}",
+                    serde_json::json!({"decision_id":decision.id,"reservation_id":decision.reservation_id,"member":decision.member,"gross_held_sats":decision.gross_sats,"reviewed_actual_cost_sats":decision.actual_cost_sats,"release_sats":decision.gross_sats-decision.actual_cost_sats,"committed":receipt.is_some(),"apply_requested":apply,"payment_sent":false,"member_paid":false})
+                );
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = (approval, evidence, apply);
+                bail!("failed-cost recovery requires Unix");
+            }
+        }
         Command::AddCredit {
             id,
             sats,

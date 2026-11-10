@@ -75,6 +75,16 @@ class PayoutCLI(Checks, unittest.TestCase):
         # Explicit zero spending limits are valid and retain their zero meaning.
         self.assertEqual(self.invoke(self.text, "--check").returncode, 0)
 
+    def test_cost_recovery_is_explicit_cannot_start_runtime_and_reads_no_sender_key(self):
+        for args in [("--sync-failed-cost",),
+                     ("--grant", "11111111-1111-4111-8111-111111111111"),
+                     ("--sync-failed-cost", "--grant", "11111111-1111-4111-8111-111111111111", "--member", PUBLIC),
+                     ("--sync-failed-cost", "--check", "--grant", "11111111-1111-4111-8111-111111111111", "--member", PUBLIC)]:
+            result = self.invoke(self.text, *args)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertNotIn("CREDENTIALS_DIRECTORY", result.stderr)
+            self.assertNotIn("synthetic-private", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

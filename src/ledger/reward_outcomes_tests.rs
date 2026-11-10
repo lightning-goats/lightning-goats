@@ -287,3 +287,6 @@ async fn failed_costs_never_age_out_and_wrong_final_hash_rolls_back_every_write(
     tx.commit().await.unwrap();
     task.abort();
 }
+
+#[path = "failed_costs_tests.rs"]
+mod failed_costs_tests;

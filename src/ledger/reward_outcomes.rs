@@ -98,7 +98,10 @@ impl LedgerStore {
     }
 }
 
-async fn validate_scope(tx: &mut Transaction<'_, Sqlite>, header: &Header) -> Result<()> {
+pub(super) async fn validate_scope(
+    tx: &mut Transaction<'_, Sqlite>,
+    header: &Header,
+) -> Result<()> {
     header.validate()?;
     let epoch: String =
         sqlx::query_scalar("SELECT stream_id FROM overlay_identity WHERE singleton=1")
@@ -200,8 +203,8 @@ async fn progress(tx: &mut Transaction<'_, Sqlite>, header: &Header) -> Result<P
 /// Held/unknown reservations never age out. Only completed, core-verified
 /// spending enters the rolling window; failed/unproved costs remain held.
 pub(super) async fn budget_usage(tx: &mut Transaction<'_, Sqlite>, now: i64) -> Result<u64> {
-    let used:i64=sqlx::query_scalar("SELECT COALESCE((SELECT SUM(r.reserved_sats) FROM reward_reservations r WHERE NOT EXISTS(SELECT 1 FROM reward_outcome_finals f WHERE f.reservation_id=r.id)),0)+COALESCE((SELECT SUM(held_sats) FROM reward_outcome_finals),0)+COALESCE((SELECT SUM(o.spent_sats) FROM reward_outcome_rows o JOIN reward_outcome_finals f ON f.reservation_id=o.reservation_id WHERE o.verified_at>?),0)")
-        .bind(now.saturating_sub(86400)).fetch_one(&mut **tx).await?;
+    let used:i64=sqlx::query_scalar("SELECT COALESCE((SELECT SUM(r.reserved_sats) FROM reward_reservations r WHERE NOT EXISTS(SELECT 1 FROM reward_outcome_finals f WHERE f.reservation_id=r.id)),0)+COALESCE((SELECT SUM(held_sats) FROM reward_outcome_finals),0)-COALESCE((SELECT SUM(gross_sats) FROM payout_failed_costs),0)+COALESCE((SELECT SUM(o.spent_sats) FROM reward_outcome_rows o JOIN reward_outcome_finals f ON f.reservation_id=o.reservation_id WHERE o.verified_at>?),0)+COALESCE((SELECT SUM(spent_sats) FROM payout_failed_costs WHERE verified_at>?),0)")
+        .bind(now.saturating_sub(86400)).bind(now.saturating_sub(86400)).fetch_one(&mut **tx).await?;
     to_u64(used, "held and recent reward spending")
 }
 pub(super) async fn budget_time(tx: &mut Transaction<'_, Sqlite>, touch: bool) -> Result<i64> {

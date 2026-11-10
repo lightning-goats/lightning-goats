@@ -67,6 +67,28 @@ impl Config {
         }
         Ok(())
     }
+    /// Opens only the existing journal; no key, sender, signer or new grant.
+    pub async fn recovery_store(&self, path: &Path) -> Result<(Store, Core)> {
+        self.validate()?;
+        ipc::protected_config(path)?;
+        ipc::private_state(&self.state_dir)?;
+        if [self.intake_uid, self.signer_uid, self.policy.scope.core_uid].contains(&ipc::uid()?) {
+            bail!("recovery requires the separate payout UID");
+        }
+        if *self != Config::load(path)? {
+            bail!("payout recovery configuration changed");
+        }
+        let db = self.state_dir.join("payout.db");
+        let url = format!(
+            "sqlite://{}",
+            db.to_str().context("state path must be UTF-8")?
+        );
+        let store = Store::connect_existing_recovery(&url, self.policy.clone()).await?;
+        Ok((
+            store,
+            Core::new(self.core_socket.clone(), self.policy.scope.core_uid)?,
+        ))
+    }
     pub async fn open(self, path: &Path) -> Result<Runtime> {
         self.validate()?;
         if !self.enabled {

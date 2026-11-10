@@ -64,7 +64,8 @@ impl Role {
             ),
             Self::Payout => matches!(
                 request,
-                Request::PayoutFunding { .. }
+                Request::FailedPayoutCost { .. }
+                    | Request::PayoutFunding { .. }
                     | Request::ClaimPayoutExecution { .. }
                     | Request::PayoutExecutionState { .. }
                     | Request::PayoutOutcome { .. }
@@ -369,6 +370,14 @@ async fn serve_one(
                 },
                 Err(_) => Response::Rejected,
             },
+            Request::FailedPayoutCost { header, member } => {
+                match ledger.failed_cost_receipt(&header, &member).await {
+                    Ok(receipt) => Response::FailedPayoutCost {
+                        receipt: receipt.map(Box::new),
+                    },
+                    Err(_) => Response::Rejected,
+                }
+            }
             Request::PayoutOutcomeProgress { header } => {
                 match ledger.payout_outcome_progress(&header).await {
                     Ok(progress) => Response::PayoutOutcome {
@@ -469,6 +478,38 @@ pub struct Client {
 }
 
 impl Client {
+    pub async fn failed_cost(
+        &self,
+        header: &crate::payout::outcome::Header,
+        member: &str,
+    ) -> Result<super::AuthenticatedFailedCost> {
+        header.validate()?;
+        crate::nostr_event::validate_public_key(member)?;
+        let expected_header = crate::payout::cost_recovery::hash(header)?;
+        match self
+            .request(&Request::FailedPayoutCost {
+                header: Box::new(header.clone()),
+                member: member.into(),
+            })
+            .await?
+        {
+            Response::FailedPayoutCost { receipt } => {
+                if receipt.as_ref().is_some_and(|r| {
+                    r.decision.reservation_id != header.reservation.id
+                        || r.decision.epoch != header.reservation.epoch
+                        || r.decision.member != member
+                        || r.header_hash != expected_header
+                }) {
+                    bail!("core cost receipt changed requested scope");
+                }
+                Ok(super::AuthenticatedFailedCost {
+                    receipt: receipt.map(|r| *r),
+                    core_uid: self.expected_uid,
+                })
+            }
+            _ => bail!("core did not return a failed cost receipt"),
+        }
+    }
     pub async fn member_overlay(
         &self,
         message: &crate::cyberherd::overlay_delivery::Message,

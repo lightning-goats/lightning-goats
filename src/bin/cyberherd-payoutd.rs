@@ -9,6 +9,14 @@ struct Args {
     config: PathBuf,
     #[arg(long)]
     check: bool,
+    /// Read one original failed-cost receipt from core and acknowledge it locally.
+    /// Requires the payout UID; does not load a spending credential or send money.
+    #[arg(long,requires_all=["grant","member"],conflicts_with="check")]
+    sync_failed_cost: bool,
+    #[arg(long, requires = "sync_failed_cost")]
+    grant: Option<uuid::Uuid>,
+    #[arg(long, requires = "sync_failed_cost")]
+    member: Option<String>,
 }
 #[cfg(unix)]
 #[tokio::main]
@@ -22,6 +30,26 @@ async fn main() -> Result<()> {
     let config = lightning_goats::payout::runtime::Config::load(&args.config)?;
     if args.check {
         println!("Payout configuration is valid; no runtime started");
+        return Ok(());
+    }
+    if args.sync_failed_cost {
+        let member = args
+            .member
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("member required"))?;
+        lightning_goats::nostr_event::validate_public_key(member)?;
+        let grant = args
+            .grant
+            .ok_or_else(|| anyhow::anyhow!("grant required"))?;
+        if grant.is_nil() {
+            anyhow::bail!("grant must be non-nil");
+        }
+        let (store, core) = config.recovery_store(&args.config).await?;
+        let receipt = store.sync_failed_cost(&core, grant, member).await?;
+        println!(
+            "{}",
+            serde_json::json!({"grant":grant,"member":member,"reconciled":receipt.is_some(),"held_sats":store.held_sats().await?,"payment_sent":false})
+        );
         return Ok(());
     }
     config.open(&args.config).await?.run().await

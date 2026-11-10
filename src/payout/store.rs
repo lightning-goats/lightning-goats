@@ -15,6 +15,8 @@ use crate::cyberherd::rewards::Plan;
 
 static MIGRATOR: Migrator = sqlx::migrate!("./payout-migrations");
 
+#[path = "store_failed_costs.rs"]
+mod failed_costs;
 #[path = "store_invoices.rs"]
 mod invoices;
 #[path = "store_outcomes.rs"]
@@ -140,6 +142,7 @@ impl Store {
             "payout_worker_clock",
             "payout_worker_attempts",
             "payout_core_execution_claims",
+            "payout_cost_acks",
         ];
         if names.iter().any(|name| !allowed.contains(&name.as_str())) {
             bail!("payout requires its own database");
@@ -171,7 +174,7 @@ impl Store {
     /// spend is tracked separately by the rolling admission/execution limit.
     pub async fn held_sats(&self) -> Result<u64> {
         let value: i64 =
-            sqlx::query_scalar("SELECT COALESCE((SELECT SUM(g.reserved_sats) FROM payout_grants g WHERE NOT EXISTS(SELECT 1 FROM payout_outcome_acks a WHERE a.grant_id=g.id)),0)+COALESCE((SELECT SUM(held_sats) FROM payout_outcome_acks),0)")
+            sqlx::query_scalar("SELECT COALESCE((SELECT SUM(g.reserved_sats) FROM payout_grants g WHERE NOT EXISTS(SELECT 1 FROM payout_outcome_acks a WHERE a.grant_id=g.id)),0)+COALESCE((SELECT SUM(held_sats) FROM payout_outcome_acks),0)-COALESCE((SELECT SUM(gross_sats) FROM payout_cost_acks),0)")
                 .fetch_one(&self.pool)
                 .await?;
         Ok(value.try_into()?)

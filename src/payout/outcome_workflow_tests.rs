@@ -584,3 +584,6 @@ async fn foreign_scope_preimage_and_terminal_cost_conflicts_cannot_release_budge
             .finalized
     );
 }
+
+#[path = "cost_recovery_tests.rs"]
+mod cost_recovery_tests;

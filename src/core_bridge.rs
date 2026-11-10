@@ -69,6 +69,10 @@ impl BridgeConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "method", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Request {
+    FailedPayoutCost {
+        header: Box<crate::payout::outcome::Header>,
+        member: String,
+    },
     RosterOverlay {
         message: Box<crate::cyberherd::view::Overlay>,
     },
@@ -127,6 +131,9 @@ pub enum Request {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "result", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Response {
+    FailedPayoutCost {
+        receipt: Option<Box<crate::payout::cost_recovery::Receipt>>,
+    },
     RosterOverlay {
         identity: String,
         seq: u64,
@@ -260,6 +267,20 @@ pub struct AuthenticatedRewardResults {
 impl AuthenticatedRewardResults {
     pub fn page(&self) -> &crate::payout::results::Page {
         &self.page
+    }
+    pub fn core_uid(&self) -> u32 {
+        self.core_uid
+    }
+}
+
+/// Financial adjustment receipts are readable only from the pinned core peer.
+pub struct AuthenticatedFailedCost {
+    receipt: Option<crate::payout::cost_recovery::Receipt>,
+    core_uid: u32,
+}
+impl AuthenticatedFailedCost {
+    pub fn receipt(&self) -> Option<&crate::payout::cost_recovery::Receipt> {
+        self.receipt.as_ref()
     }
     pub fn core_uid(&self) -> u32 {
         self.core_uid

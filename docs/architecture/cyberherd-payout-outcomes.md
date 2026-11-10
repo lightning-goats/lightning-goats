@@ -57,9 +57,10 @@ recovery; it cannot silently approve the old outcome.
 Completed payments count their verified total cost, including fees, as spent;
 unused fee allocation is released. A durably unsubmitted row releases its entire
 gross reservation. A Failed provider state does not prove fee/refund settlement:
-it claims no member delivery and retains the entire row gross indefinitely until
-a separate explicit cost reconciliation is implemented. It never silently ages
-unknown costs into available budget.
+it claims no member delivery and retains the entire row gross by default. Only a
+separate [protected operator cost review](cyberherd-failed-cost-recovery.md) can
+reclassify a finalized failed hold. Unknown costs never silently age into
+available budget.
 
 Core usage is all non-final reservations, plus final unresolved holds, plus
 completed spending verified within the last 24 hours. Creation time never ages an

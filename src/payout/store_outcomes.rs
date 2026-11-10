@@ -257,7 +257,7 @@ impl Store {
     }
 }
 
-async fn load_manifest(
+pub(super) async fn load_manifest(
     tx: &mut Transaction<'_, Sqlite>,
     grant: Uuid,
 ) -> Result<Option<(Header, Vec<OutcomeRow>)>> {
@@ -295,8 +295,8 @@ async fn load_manifest(
 }
 
 pub(super) async fn usage(tx: &mut Transaction<'_, Sqlite>, now: i64) -> Result<u64> {
-    let used:i64=sqlx::query_scalar("SELECT COALESCE((SELECT SUM(g.reserved_sats) FROM payout_grants g WHERE NOT EXISTS(SELECT 1 FROM payout_outcome_acks a WHERE a.grant_id=g.id)),0)+COALESCE((SELECT SUM(held_sats) FROM payout_outcome_acks),0)+COALESCE((SELECT SUM(spent_sats) FROM payout_outcome_acks WHERE accepted_at>?),0)")
-        .bind(now.saturating_sub(86400)).fetch_one(&mut **tx).await?;
+    let used:i64=sqlx::query_scalar("SELECT COALESCE((SELECT SUM(g.reserved_sats) FROM payout_grants g WHERE NOT EXISTS(SELECT 1 FROM payout_outcome_acks a WHERE a.grant_id=g.id)),0)+COALESCE((SELECT SUM(held_sats) FROM payout_outcome_acks),0)-COALESCE((SELECT SUM(gross_sats) FROM payout_cost_acks),0)+COALESCE((SELECT SUM(spent_sats) FROM payout_outcome_acks WHERE accepted_at>?),0)+COALESCE((SELECT SUM(spent_sats) FROM payout_cost_acks WHERE accepted_at>?),0)")
+        .bind(now.saturating_sub(86400)).bind(now.saturating_sub(86400)).fetch_one(&mut **tx).await?;
     Ok(used.try_into()?)
 }
 pub(super) async fn ensure_open(

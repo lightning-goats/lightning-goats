@@ -61,5 +61,7 @@ execute/binding records, recovery after actual quote expiry, conflicting or
 omitted terminal rows, immutable claim retention and role/policy rejection.
 Results must be recorded only after the checks finish on the exact source.
 
-Explicit failed-cost reconciliation, wider consistent-restore tooling,
+Separate [failed-cost review source](cyberherd-failed-cost-recovery.md) now adds
+protected operator decisions and exact core/payout cost receipts. It remains
+uninstalled and under source verification. Wider consistent-restore tooling,
 installation qualification and live financial activation remain unfinished.

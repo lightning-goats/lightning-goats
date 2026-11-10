@@ -34,6 +34,13 @@ jobs:
       - name: Test
         run: cargo test --locked --all-features
 
+      - name: Verify protected failed-cost approvals with actual root ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked --all-features --lib --no-run --message-format=json > "$RUNNER_TEMP/native-test-artifacts.jsonl"
+          python3 deploy/scripts/test-failed-cost-approval.py "$RUNNER_TEMP/native-test-artifacts.jsonl"
+
       - name: Verify inactive cross-host preparation
         shell: bash
         run: |

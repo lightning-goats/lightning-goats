@@ -110,6 +110,85 @@ fn copy_evidence(q: &QualifiedFunding, plan: &crate::cyberherd::rewards::Plan) -
 }
 
 #[tokio::test]
+async fn payout_recovery_refuses_missing_empty_old_or_rebound_journals_without_initializing_them() {
+    use crate::payout::store::Store;
+    let f = Fixture::new().await;
+    let q = qualified(&f).await;
+    let policy = journal_policy(&q);
+    let path = f.root.path().join("recovery.db");
+    let url = format!("sqlite://{}", path.display());
+    assert!(
+        Store::connect_existing_recovery(&url, policy.clone())
+            .await
+            .is_err()
+    );
+    assert!(!path.exists());
+    let db = sqlx::SqlitePool::connect_with(
+        sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(&path)
+            .create_if_missing(true),
+    )
+    .await
+    .unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    assert!(
+        Store::connect_existing_recovery(&url, policy.clone())
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM sqlite_master WHERE type='table'")
+            .fetch_one(&db)
+            .await
+            .unwrap(),
+        0
+    );
+    db.close().await;
+    let _store = Store::connect(&url, policy.clone()).await.unwrap();
+    if self_credentials().unwrap().0 == 0 {
+        assert!(
+            Store::connect_existing_recovery(&url, policy)
+                .await
+                .is_err()
+        );
+        return;
+    }
+    Store::connect_existing_recovery(&url, policy.clone())
+        .await
+        .unwrap();
+    let mut changed = policy.clone();
+    changed.scope.provider.account_id = Uuid::new_v4();
+    assert!(
+        Store::connect_existing_recovery(&url, changed)
+            .await
+            .is_err()
+    );
+    let db = sqlx::SqlitePool::connect(&url).await.unwrap();
+    let tables: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_master WHERE type='table'")
+        .fetch_one(&db)
+        .await
+        .unwrap();
+    sqlx::query(
+        "DELETE FROM _sqlx_migrations WHERE version=(SELECT MAX(version) FROM _sqlx_migrations)",
+    )
+    .execute(&db)
+    .await
+    .unwrap();
+    assert!(
+        Store::connect_existing_recovery(&url, policy)
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM sqlite_master WHERE type='table'")
+            .fetch_one(&db)
+            .await
+            .unwrap(),
+        tables
+    );
+}
+
+#[tokio::test]
 async fn payout_journal_commits_once_across_concurrency_reopen_and_policy_reduction() {
     use crate::payout::store::Store;
     let f = Fixture::new().await;

@@ -4,7 +4,9 @@ use clap::Parser;
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(about = "Separate CyberHerd intake and membership worker (no payouts or publishing)")]
+#[command(
+    about = "Separate CyberHerd membership, optional presentation and operator service (no payouts)"
+)]
 struct Args {
     #[arg(long, default_value = "/etc/cyberherd/config.toml")]
     config: PathBuf,

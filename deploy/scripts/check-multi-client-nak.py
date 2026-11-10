@@ -20,9 +20,10 @@ spec = importlib.util.spec_from_file_location('bounded_check', Path(__file__).wi
 q = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(q)
 SIGNER = '79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'
+HOUSEHOLD_NAK_DIGEST = 'ba918fafd1b030bc50958a5b218c6386f4c3a57c1e469562d3947e858e0ba56e'
 
 
-def check(nak, host_network_namespace):
+def check(nak, host_network_namespace, bunker_nak=None):
     if (os.geteuid() == 0 or 'CREDENTIALS_DIRECTORY' in os.environ
             or re.fullmatch(r'net:\[[0-9]+\]', host_network_namespace) is None
             or os.readlink('/proc/self/ns/net') == host_network_namespace):
@@ -33,11 +34,15 @@ def check(nak, host_network_namespace):
     nak = nak.resolve(strict=True)
     if hashlib.sha256(nak.read_bytes()).hexdigest() != q.DIGEST:
         raise q.Refusal('pinned nak required')
+    bunker_nak = (bunker_nak or nak).resolve(strict=True)
+    bunker_digest = hashlib.sha256(bunker_nak.read_bytes()).hexdigest()
+    if bunker_digest not in (q.DIGEST, HOUSEHOLD_NAK_DIGEST):
+        raise q.Refusal('pinned stock or household-version bunker required')
     processes = []
     with tempfile.TemporaryDirectory(prefix='lg-synthetic-multi-nak-') as temporary:
         root = Path(temporary)
-        def start(args, environment):
-            child = subprocess.Popen([str(nak), *args], env=environment, stdin=subprocess.DEVNULL,
+        def start(args, environment, binary=nak):
+            child = subprocess.Popen([str(binary), *args], env=environment, stdin=subprocess.DEVNULL,
                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             processes.append(child)
             return child
@@ -65,7 +70,7 @@ def check(nak, host_network_namespace):
             for client in clients[1:5]:
                 arguments.extend(['--authorized-keys', client])
             arguments.append(url)
-            bunker = start(arguments, {'NO_COLOR': '1', 'NOSTR_SECRET_KEY': keys[0]})
+            bunker = start(arguments, {'NO_COLOR': '1', 'NOSTR_SECRET_KEY': keys[0]}, binary=bunker_nak)
             time.sleep(.5)
             if bunker.poll() is not None:
                 raise q.Refusal('synthetic four-client bunker exited')
@@ -93,7 +98,8 @@ def check(nak, host_network_namespace):
                 events = q.run([str(nak), '--config-path', str(root / 'query'), 'req', '--kind', str(kind), url], b'', {'NO_COLOR': '1'})
                 if events.strip():
                     raise q.Refusal('signing unexpectedly published a project event')
-            return {'accepted': True, 'synthetic_clients_verified': 4, 'kinds_per_client': [1, 1311, 9734],
+            return {'accepted': True, 'client_program_sha256': q.DIGEST, 'bunker_program_sha256': bunker_digest,
+                    'synthetic_clients_verified': 4, 'kinds_per_client': [1, 1311, 9734],
                     'unknown_client_rejected_by_bunker': True, 'authorized_client_still_works': True,
                     'project_events_published': 0, 'production_credentials_read': False, 'external_network': False}
         finally:
@@ -106,9 +112,10 @@ def check(nak, host_network_namespace):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--nak', type=Path, required=True)
+    parser.add_argument('--bunker-nak', type=Path)
     parser.add_argument('--host-network-namespace', required=True)
     try:
         args = parser.parse_args()
-        print(json.dumps(check(args.nak, args.host_network_namespace), sort_keys=True))
+        print(json.dumps(check(args.nak, args.host_network_namespace, args.bunker_nak), sort_keys=True))
     except Exception as error:
         raise SystemExit(str(error) if isinstance(error, q.Refusal) else 'Synthetic check failed; child output withheld.') from None

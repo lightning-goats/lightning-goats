@@ -31,19 +31,16 @@ host-encrypted and passed receive-request/same-core-resource read checks after
 the operator corrected an omitted scope. Payment-read, quote/execute and controlled
 payment qualification remain unfinished; no payout was sent.
 
-Separate NIP-46 clients are prepared. The operator reports both in the household
-allowlist and confirmed a bunker restart. [Actual signing checks](testing/cyberherd-bunker-checkpoint-20261110.md)
-matched the local stored client identities but returned authorization refusals
-or timeouts, including membership checks on all three approved transports.
-The household's read-only inspection now confirms all four public clients in the
-stable running process arguments and the expected executable digest. Diagnostic
-checks positively confirm nak selects the intended authentication key, but both
-the new payout-signing client and existing receive-client control are refused.
-A fresh payout check identifies a decrypted `response error: unauthorized`,
-rather than an HTTP/WebSocket refusal. No competing bunker runs on this VPS;
-the household inventory finds exactly one bunker with all four client arguments.
-Another host's signer or a compatibility problem remains unproven. Required kinds remain
-unqualified; no key regeneration, signature or public CyberHerd post is claimed.
+Separate NIP-46 clients now pass [actual household signing checks](testing/cyberherd-bunker-checkpoint-20261110.md):
+membership kinds 1/1311 and payout-signing kind 9734 preserve the exact project
+author, frozen unsigned bytes, canonical hashes and valid signatures. The operator
+found and stopped a competing bunker on the streaming laptop after inspections
+confirmed the intended household instance and local client selection. The final
+connect observation saw one acknowledgment and no authorization refusal/conflict.
+Pinned VPS/household nak versions also pass isolated four-client interoperability
+and bounded observation tests. No key was regenerated, project event published,
+invoice requested or payment sent. Incoming kind-9735 qualification and actual
+CyberHerd public delivery remain separate; production roles stay masked/zero.
 
 Other remaining work includes installed browser/presentation and global network
 qualification, concrete externally reconciled recovery adoption, operator-selected

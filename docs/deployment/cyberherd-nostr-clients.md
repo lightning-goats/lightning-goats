@@ -4,10 +4,10 @@
 credentials using the existing pinned `nak` client factory. Two clients are now
 prepared as encrypted data, as recorded in the
 [live preparation checkpoint](../testing/cyberherd-live-core-upgrade-20261110.md).
-The operator now reports both clients present in the retained household allowlist
-and the bunker active/running with zero restarts. This is operator-reported
-authorization; actual round trips remain unqualified. No new application service runs.
-It never creates/imports the project's signing secret, contacts a bunker, signs
+Both now pass [actual household round trips](../testing/cyberherd-bunker-checkpoint-20261110.md)
+for membership 1/1311 and payout-signing 9734 after the operator stopped a competing
+streaming-laptop bunker. No new production application service runs. The factory
+never creates/imports the project's signing secret, contacts a bunker, signs
 an event, publishes or changes a service. Keep the existing receive client intact.
 
 After reviewing the complete [authenticated tool bundle](inactive-upgrade-transaction.md),
@@ -102,11 +102,12 @@ fixed purposes, child time/output bounds, root refusal, unit isolation and fake
 helper orchestration. They do not claim actual cryptography or household success.
 
 The [actual check checkpoint](../testing/cyberherd-bunker-checkpoint-20261110.md)
-records matching local client identities, authorization refusals and timeouts
-after an operator-confirmed household reload. The subsequent read-only household
-inspection confirms all four configured clients are actually loaded in the stable
-running process, with the expected program digest. Successful kinds remain
-unqualified. Do not regenerate credentials or restart again on that evidence.
+records the earlier refusals/timeouts, inspection and eventual successful checks
+after the operator found/stopped a competing streaming-laptop bunker. Membership
+1/1311 and payout 9734 preserve the exact author, frozen unsigned fields, hash and
+valid signature. A final connect observer saw one acknowledgment and no conflict.
+No credential was regenerated and no project event, invoice or payment was sent.
+Incoming receipt 9735 and new CyberHerd public delivery remain separate.
 
 The optional `--diagnostics` mode adds only fixed stage labels, completed-kind
 numbers, recognized error labels and a client-key-used match boolean. Pinned nak

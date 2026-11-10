@@ -123,8 +123,64 @@ remain. Original role journal hashes, configurations and all four original
 service states match before/after. Receive health/status both return 200.
 Production CyberHerd units stay masked/inactive with zero limits.
 
-A synthetic four-client trial is added, pending CI. Using pinned nak, public test
-scalars and a fresh loopback-only namespace, it must verify kinds 1/1311/9734 for
-each of four clients configured through repeated flags, reject an unknown fifth
-client by bunker RPC, retain authorized access and find no project publication.
-It does not qualify the household executable or external relay behavior.
+A synthetic four-client trial subsequently passed, including the exact VPS
+v0.20.6 client and household v0.20.7 bunker digests. The latter matches the official
+release asset. Using public test scalars and fresh loopback-only namespaces, it
+verified kinds 1/1311/9734 for all four repeated client flags, rejected an unknown
+fifth client by bunker RPC, retained authorized access and found no project
+publication. This rules out that version pair as a general interoperability
+failure; it alone does not establish actual household/relay acceptance.
+
+## Competing streaming-laptop bunker stopped; required client checks pass
+
+The operator found a second bunker on the streaming laptop and reported stopping
+it. No household key, allowlist, relay setting or service was changed on the VPS.
+One new membership signing-only check using qualified helper source
+`978063fcac146579852217d22abb67fb730cd7e9` then passed kinds **1 and 1311**,
+including actual selected-client matching, exact author/content/tags/timestamp,
+canonical IDs and pinned-nak signature verification.
+
+The first subsequent payout check timed out in its 128 MiB sandbox. This is
+retained as a failed attempt, without asserting its cause. The bounded observer
+from source `d894ea0ce7d453c9fe023200b9c3b224a529920f` then ran once in a 256 MiB
+temporary sandbox and passed kind **9734** with the same exact-field/cryptographic
+checks. Its independently signature-verified/local-decrypted connect observation
+reported one RPC group, one acknowledgment, zero unauthorized groups and zero
+conflicting groups. No decrypted response, RPC ID or signed challenge was emitted
+or retained. That successful attempt supersedes the earlier failed qualification.
+
+The [real NIP-46 workflow](https://github.com/lightning-goats/lightning-goats/actions/runs/42874248193)
+passed stock and cross-version four-client fixtures, including actual read-only
+observation/local decryption. Ten focused helper tests also cover fixed purposes,
+frozen fields, bounds, diagnostic secrecy and conflicting-response grouping;
+four separate inspector tests pass. No runtime Rust or dependency change was
+needed. All ten workflows on that source passed, including
+[CI](https://github.com/lightning-goats/lightning-goats/actions/runs/42874247865)
+(format, strict locked all-target/all-feature Clippy and tests),
+[Security](https://github.com/lightning-goats/lightning-goats/actions/runs/42874248110)
+and [Deployment](https://github.com/lightning-goats/lightning-goats/actions/runs/42874247868).
+The observer's initially staged unit was removed without starting; its
+exact reviewed copy was later restored and started only for this post-stop check.
+
+All final temporary checks are terminal and their exact unit copies were removed
+after byte comparison. Private evidence retains both successful reports and the
+intervening timeout. Original three role-journal hashes, configurations, masks
+and all four original service states match before/after; receive health/status
+return 200. New roles remain masked/inactive, with zero execution/signing limits
+and no enabled live core bridge. No invoice, provider/payment operation, public
+project note/chat/zap request or physical actuation was produced by these checks.
+
+This qualifies household signing round trips for membership 1/1311 and outgoing
+9734 only. Incoming receipt kind 9735, actual CyberHerd relay delivery and financial
+activation remain separate. The household bunker broadly authorizes its listed
+clients; the application's purpose-limited broker boundary remains necessary.
+
+The operator also requested the streaming agent's household connection URI. The
+secret-free URI uses the qualified Primal transport (no LAN listener needed):
+
+```text
+bunker://669ebbcccf409ee0467a33660ae88fd17e5379e646e41d7c236ff4963f3c36b6?relay=wss%3A%2F%2Frelay.primal.net
+```
+
+That client needs its own authorized authentication key. Do not transfer either
+CyberHerd credential, reopen the competing signer or share a pairing secret.

@@ -261,3 +261,6 @@ records 388 passing Rust tests on that source. The next
 [outgoing invoice boundary](../architecture/cyberherd-outgoing-invoices.md) freezes
 callback/signature bytes and validates exact returned invoices; it still supplies
 no provider execution, terminal accounting or signing-broker runtime.
+Its [verification checkpoint](../testing/cyberherd-outgoing-invoice-checkpoint-20261110.md)
+records 394 passing Rust tests, successful isolated deployment regressions and the
+unchanged open dependency-audit failure. None is a live payout activation.

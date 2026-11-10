@@ -83,10 +83,11 @@ cannot precede the request or lie arbitrarily in the future.
 Pending/terminal observations are append-only and identical observations do not
 create another transition. Contradictory terminal states/costs persist a conflict
 and hold recovery rather than replacing the earlier evidence. Readonly recovery
-continues while execution is disabled. All grants still count as held: core-owned
-terminal verification, unused-reservation release and actual rolling-window spent
-accounting remain separate unfinished work. Creation time never ages out unknown
-spending. A failed state never claims net delivery.
+continues while execution is disabled. Grants stay held until final core ACK under
+the [verified outcome protocol](cyberherd-payout-outcomes.md), which independently
+checks provider state/costs before releasing unused allocation. Creation time never
+ages out unknown spending. A failed state never claims net delivery or a refund;
+its full gross remains held for explicit cost reconciliation.
 
 The fixtures exercise actual loopback HTTP/private Unix framing and temporary
 stores: lost usable quote/execute results, same-identity recovery, id-only duplicate
@@ -95,5 +96,6 @@ wrong amounts/currencies/fees/expiry, internal transfers and terminal contradict
 Actual check results must be recorded on the source pin. They do not qualify a
 production account or authorize a financial activation.
 
-The isolated payout runtime, signing broker, authoritative core outcome protocol
-and completed-payout/member-thread announcements remain required for the full port.
+The isolated payout runtime, signing broker and completed-payout/member-thread
+announcements remain required for the full port. Core outcome source is not live
+payout-worker acceptance or permission to publish a treat notice.

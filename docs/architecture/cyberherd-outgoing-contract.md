@@ -49,7 +49,9 @@ qualification. The [outgoing invoice boundary](cyberherd-outgoing-invoices.md)
 now persists callback/signature bytes and validated invoices. The
 [provider execution journal](cyberherd-provider-execution.md) now saves quote and
 execute intent, recovers the original payment ID and verifies payment reads. The
-remote broker/runtime and authoritative terminal budget lifecycle remain unfinished.
+core [terminal budget protocol](cyberherd-payout-outcomes.md) now independently
+verifies reported payment IDs and retains retry/ACK progress. The remote
+broker/runtime, delivery and activation remain unfinished.
 
 The payout identity must first authenticate the core reservation independently;
 copied membership DB rows/JSON are not financial authority. Pin its actual provider

@@ -271,7 +271,8 @@ reports, independent core provider reads, exact retry progress and final core AC
 Partial/uncertain reports retain the entire reservation. Verified completed costs
 enter the rolling budget; unused allocation is released only after finalization.
 Failed-payment costs remain held until explicit cost reconciliation. This library
-path is being verified; it does not install or enable the payout runtime or supply
+path has passed the [410-test outcome checkpoint](../testing/cyberherd-outcome-checkpoint-20261110.md),
+including budget-window and identity checks. It does not install or enable the payout runtime or supply
 the unfinished signing broker, treat messages, lifecycle and interfaces.
 
 The next [provider execution source](../architecture/cyberherd-provider-execution.md)

@@ -41,6 +41,7 @@ class OperatorBrowserTests(unittest.TestCase):
         self.operator=True
         self.requests=[]
         self.commands=[]
+        self.receipts={}
         self.drop_first=False
         self.state={"owner":"ab"*32,"cycle":1,"revision":0,"settings":{"minimum_sats":"10","max_members":10,"member_percent":10},"members":[],"next_offset":None,"categories":[{"category":"member_added","enabled":True}]}
         self.page.route("**/*",self.route)
@@ -62,17 +63,25 @@ class OperatorBrowserTests(unittest.TestCase):
                 route.fulfill(content_type="application/json",body=json.dumps({"pubkey":event["pubkey"],"operator":self.operator,"member":{"active":False,"amount_sats":"0"}}))
             elif url.path=="/api/v1/cyberherd/operator/state":
                 route.fulfill(content_type="application/json",body=json.dumps(self.state))
+            elif url.path=="/api/v1/cyberherd/operator/templates":
+                route.fulfill(content_type="application/json",body=json.dumps({"revision":self.state["revision"],"enabled":True,"variants":[{"variant":"custom","text":"Original {name}","deleted":False}],"next_offset":None}))
             elif url.path=="/api/v1/cyberherd/operator/command":
                 body=request.post_data
                 self.assertEqual(tags["payload"],hashlib.sha256(body.encode()).hexdigest())
                 self.commands.append((body,event["id"]))
                 command=json.loads(body)
-                self.state["revision"]=1
-                self.state["settings"].update({"minimum_sats":"20","member_percent":0})
+                if command["id"] not in self.receipts:
+                    if command["expected_revision"]!=self.state["revision"]:
+                        route.fulfill(status=409,body="")
+                        return
+                    self.state["revision"]+=1
+                    if command["action"]["type"]=="settings":
+                        self.state["settings"].update({"minimum_sats":"20","member_percent":0})
+                    self.receipts[command["id"]]={"command_id":command["id"],"revision":self.state["revision"],"cycle":1,"changed":True,"event_seq":1}
                 if self.drop_first and len(self.commands)==1:
                     route.abort()
                 else:
-                    route.fulfill(content_type="application/json",body=json.dumps({"command_id":command["id"],"revision":1,"cycle":1,"changed":True,"event_seq":1}))
+                    route.fulfill(content_type="application/json",body=json.dumps(self.receipts[command["id"]]))
             else:
                 route.abort()
         else:
@@ -119,4 +128,24 @@ class OperatorBrowserTests(unittest.TestCase):
         self.assertEqual(self.page.locator("#percent").input_value(),"0")
         self.assertFalse(self.page.evaluate("Boolean(sessionStorage.getItem('lg-cyberherd-pending-command-v1'))"))
         self.assertTrue(all(path.startswith('/api/v1/cyberherd/') for method,path in self.requests if method=="POST"))
+        self.assertEqual(self.errors,[])
+
+    def test_stale_template_editor_keeps_its_read_revision_after_other_state_is_refreshed(self):
+        self.enabled=True
+        self.page.goto(ORIGIN+"/cyberherd-operator.html")
+        self.page.locator("#connect").click()
+        self.page.wait_for_function("document.querySelector('#revision').textContent.includes('revision 0')")
+        self.page.locator("#load-templates").click()
+        self.page.locator("#variants button").click()
+        self.assertEqual(self.page.locator("#template-text").input_value(),"Original {name}")
+        self.state["revision"]=1
+        self.page.locator("#refresh").click()
+        self.page.wait_for_function("document.querySelector('#revision').textContent.includes('revision 1')")
+        self.page.locator("#template-text").fill("Changed {name}")
+        self.page.locator("#template button").click()
+        self.page.wait_for_function("document.querySelector('#message').textContent.includes('command was held')")
+        self.assertEqual(len(self.commands),1)
+        self.assertEqual(json.loads(self.commands[0][0])["expected_revision"],0)
+        self.assertEqual(self.receipts,{})
+        self.assertTrue(self.page.locator("#retry").is_visible())
         self.assertEqual(self.errors,[])

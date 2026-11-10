@@ -44,8 +44,25 @@ import. The protected entry point successfully imported the separate key, verifi
 its encryption round trip and retained the existing receive credential. It made
 zero API calls, sent no payments and changed no services. A synthetic non-key
 argument also verified that accidental relative key arguments fail without echo.
-The key is installed as encrypted data only: provider scopes/account binding
-remain unverified. Separate role installation,
+The first key's receive-read requests returned 403; the working receive key read
+the same resource with 200, and the imported bytes matched the operator's file.
+The operator confirmed that `partner.receive-request.read` had been omitted and
+explicitly regenerated the key. Before reimport, the three role services/configs/
+journals were positively absent and the original core configuration still had no
+financial bridge. The earlier ciphertext was retained privately; the regenerated
+key was then encrypted through the same authenticated importer.
+
+Read-only requalification passed: listing receive requests returned 200, and the
+new payout key read an existing resource obtained with the core receive key,
+matching its exact request/currency/invoice context. These three GETs sent no
+payments and changed no services. Payment-read, quote and execute access remain
+unverified; this narrow successful read is not full financial qualification.
+Two separate encrypted NIP-46 authentication clients were also generated through
+the pinned factory, verified distinct from the existing core/project/each other.
+No household allowlist, service or publication changed. A household-only command
+file is prepared, but has not been run there.
+
+Separate role installation,
 household authorization, OS/socket/network/helper/browser qualification,
 independently reconciled recovery adoption and explicit financial activation
 remain unfinished. PR111 remains draft and the full twelve-part goal stays active.

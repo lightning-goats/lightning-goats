@@ -1,8 +1,10 @@
 # Separate CyberHerd NIP-46 authentication clients
 
 `prepare-cyberherd-nostr-clients.py` prepares two separate encrypted authentication
-credentials using the existing pinned `nak` client factory. This is prepared
-source, not a claim that new clients exist or are authorized at the household.
+credentials using the existing pinned `nak` client factory. Two clients are now
+prepared as encrypted data, as recorded in the
+[live preparation checkpoint](../testing/cyberherd-live-core-upgrade-20261110.md).
+They remain unauthorized/unqualified at the household; no new service runs.
 It never creates/imports the project's signing secret, contacts a bunker, signs
 an event, publishes or changes a service. Keep the existing receive client intact.
 
@@ -39,8 +41,10 @@ is applied when SELinux is present; directory publication is synced.
 
 The household administrator must separately add both actual public keys while
 retaining existing authorized clients. The existing
-`authorize-household-nostr-client.py PUBLIC_CLIENT_HEX` command remains the
-household-side helper; prepare concrete public-key commands after generation,
+`authorize-household-nostr-client.py PUBLIC_CLIENT_HEX [PUBLIC_CLIENT_HEX ...]`
+command remains the household-side helper. Multiple clients update one retained
+allowlist and restart the bunker once; every key is validated before the backup
+or replacement. Prepare concrete public-key commands after generation,
 rather than authorizing placeholder identities. No SSH administrator access or
 new household port is assumed. Adding an allowlist entry does not itself prove
 actual transport, author, purpose/kind permissions or public relay delivery.

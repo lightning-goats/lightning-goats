@@ -35,7 +35,16 @@ and existing-mode restart passed; health/status return 200. The three CyberHerd
 roles remain absent and financial activation remains disabled. The protected
 [payout-key import command](deployment/cyberherd-payout-credential.md) successfully
 encrypted the separate operator-supplied key without API calls or service changes;
-provider scopes/account binding and runtime use remain unverified.
+the operator-regenerated key subsequently passed read-only receive-request and
+same-core-resource access. Payment-read/quote/execute qualification and runtime
+use remain unfinished. Separate encrypted NIP-46 clients are prepared; household
+authorization remains outstanding.
+
+The [OS policy checkpoint](testing/cyberherd-os-boundaries-checkpoint-20261110.md)
+qualifies three actual systemd Python probes on a disposable VM: separate kernel
+identities/capabilities, encrypted credential scope, managed-file and foreign-state
+denial, and public/private IPv4/IPv6 controls. Application runtime, actual-host,
+provider, household, browser and recovery adoption remain separate.
 
 The Phase 1 implementation history below was last updated on 2026-09-07; consult
 the dated restoration/implementation records and current plan for later work.

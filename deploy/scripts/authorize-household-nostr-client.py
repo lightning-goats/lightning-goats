@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run on the household host: append one public client, retaining existing clients."""
+"""Run on the household host: append public clients, retaining existing clients."""
 import argparse
 import os
 from pathlib import Path
@@ -32,7 +32,7 @@ def updated_environment(text, client):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('client_public_key')
+    parser.add_argument('client_public_key', nargs='+')
     args = parser.parse_args()
     if os.geteuid() != 0:
         raise ValueError('run with sudo on the household host')
@@ -42,7 +42,9 @@ def main():
         raise ValueError('unexpected bunker environment ownership/type/permissions')
     subprocess.run(['systemctl', 'is-active', '--quiet', UNIT], check=True)
     before = ENVIRONMENT.read_text()
-    after = updated_environment(before, args.client_public_key)
+    after = before
+    for client in args.client_public_key:
+        after = updated_environment(after, client)
     if after != before:
         backup = ENVIRONMENT.with_name(ENVIRONMENT.name + time.strftime('.lg-%Y%m%dT%H%M%SZ', time.gmtime()))
         if backup.exists():

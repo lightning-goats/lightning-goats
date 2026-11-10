@@ -398,3 +398,12 @@ Earlier source-specific evidence remains available in the
 [420-test runtime](../testing/cyberherd-runtime-checkpoint-20261110.md) checkpoints.
 Those are historical source/fixture records, not descriptions of unfinished
 components that subsequent source has already implemented.
+
+## Additional operator website requirements — 2026-11-10
+
+The active request also includes the [website contact and live-zap contract](website-contact-and-zaps.md):
+visible leaderboard navigation, no NIP-05 header link, free authenticated Nostr
+contact with genuine sender identity, a separate private 100-sat fee with no feed/
+reward credit and required email when not logged in, and actual index chat zap notices. These are
+additional required work, not a replacement for the full twelve-part port. They
+remain unfinished until implementation and actual qualification/deployment pass.

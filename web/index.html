@@ -113,7 +113,7 @@
 
         .video-column { min-width: 0; }
         @media (min-width: 881px) { .chat-panel { height: clamp(380px, 37vw, 660px); } }
-        .qr-code-overlay:focus-visible { outline: 3px solid var(--lg-yellow); outline-offset: 3px; }
+        .qr-code-overlay:focus-visible { outline: none; }
 
         .video-wrapper {
             position: relative;
@@ -142,16 +142,20 @@
 
         .qr-code-overlay {
             position: absolute;
-            top: 10px;
-            right: 10px;
-            width: 120px;
-            height: 120px;
+            /* OBS canvas 1920×1080: QR is 180×180 at top 3 / right 8. */
+            top: 0.2777777778%;
+            right: 0.4166666667%;
+            width: 9.375%;
+            height: auto;
+            aspect-ratio: 1;
             cursor: pointer;
             z-index: 10;
-            transition: transform 0.3s;
+            opacity: 0;
+            background: transparent;
+            border: 0;
+            outline: none;
+            box-shadow: none;
         }
-
-        .qr-code-overlay:hover { transform: scale(1.05); }
 
         .chat-panel {
             min-width: 0;
@@ -542,7 +546,6 @@
         }
 
         @media (max-width: 768px) {
-            .qr-code-overlay { width: 140px; height: 150px; }
             .lg-title { font-size: 1rem; }
             .service-links a { font-size: 0.9rem; }
         }
@@ -551,7 +554,6 @@
             #content { padding: 12px; }
             .media-grid { gap: 12px; }
             .chat-panel { height: 440px; }
-            .qr-code-overlay { width: 100px; height: 120px; }
             .service-links a { font-size: 0.8rem; }
             .lg-title { font-size: 0.95rem; }
             .nostr-auth-button { max-width: 112px; }
@@ -563,9 +565,8 @@
     <div id="content">
         <header>
             <div class="service-links d-flex justify-content-center">
-                <a href="/feed.html">Feed the herd</a>
-                <a id="cyberherdLink" href="/cyberherd.html" hidden>CyberHerd</a>
-                <span>•</span>
+                <a id="cyberherdLink" href="/leaderboard" hidden>Leaderboard</a>
+                <span id="cyberherdSeparator" hidden>•</span>
                 <a href="#" id="contactLink" data-bs-toggle="modal" data-bs-target="#contactModal">Contact</a>
             </div>
         </header>
@@ -704,6 +705,7 @@
         </div>
     </div>
 
+    <script src="/site-config.js"></script>
     <script src="/vendor/bootstrap.bundle.min.js"></script>
     <script src="/vendor/qrcode.js"></script>
 
@@ -741,6 +743,10 @@
         const LIVE_EVENT_MAX_AGE_SECONDS = 36 * 60 * 60;
         const MAX_CHAT_MESSAGES = 300;
         const MAX_MESSAGE_LENGTH = 500;
+        const leaderboardLink = document.getElementById("cyberherdLink");
+        if (leaderboardLink) leaderboardLink.hidden = window.LightningGoatsSite?.cyberherdEnabled !== true;
+        const leaderboardSeparator = document.getElementById("cyberherdSeparator");
+        if (leaderboardSeparator) leaderboardSeparator.hidden = leaderboardLink?.hidden !== false;
 
         // These include the relays advertised by the Lightning Goats zap.stream events.
         const DISCOVERY_RELAYS = [

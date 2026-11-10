@@ -5,8 +5,8 @@
 installed native core, membership, payout and signer binaries under four distinct
 locked users, with separate synthetic journals. The original receive service
 keeps running and the three production CyberHerd units stay masked. This source
-is prepared for disposable-systemd qualification; it has not yet passed that run
-or been executed on the actual VPS.
+has passed both disposable-systemd and actual-VPS qualification, as recorded in
+the [source-pinned checkpoint](../testing/cyberherd-worker-qualification-checkpoint-20261110.md).
 
 Use a fresh independently authenticated fifteen-file tool generation through the
 [protected launcher](inactive-upgrade-transaction.md). Earlier generations remain
@@ -51,7 +51,9 @@ well-formed payout-signing request rejected by zero limits. Each named proof mus
 be positively reported; an empty/partial report cannot pass. Clients run under
 temporary sandboxed units and check the server's kernel peer UID.
 
-The same four fixture journals reopen after one complete worker restart. Both
+The same four fixture journals reopen after one complete worker restart. Every
+worker's actual kernel UID/GID/groups, capabilities, NoNewPrivs and network
+namespace must match the fixture policy. Both
 cycles check an empty native read-only roster and the same core epoch. The tool
 then stops and masks only its own temporary writers and uses native
 `cyberherd-statectl` to snapshot and verify all four synthetic journals. The

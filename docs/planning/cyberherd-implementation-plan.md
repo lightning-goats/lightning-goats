@@ -332,9 +332,12 @@ remain the completion contract; a library fixture or green artifact build does
 not establish live behavior.
 
 The [installed native worker fixture](../deployment/cyberherd-worker-qualification.md)
-now prepares isolated mixed-UID socket/restart and native snapshot checks. Its
-disposable-systemd and actual-host execution remain unqualified; production
-workers remain masked and all financial/signing limits remain zero.
+now passes isolated mixed-UID socket/restart and native snapshot checks in both
+disposable-systemd and actual-host runs. Its
+[source-pinned checkpoint](../testing/cyberherd-worker-qualification-checkpoint-20261110.md)
+retains unchanged production journals/receive process. Production workers remain
+masked and all financial/signing limits remain zero. Actual household/provider/
+browser, DNS/global containment, recovery adoption and activation remain separate.
 
 A [SQLite binding backport](../security/sqlite-binding-backport.md) now has a
 [486-test source checkpoint](../testing/cyberherd-sqlite-checkpoint-20261110.md),

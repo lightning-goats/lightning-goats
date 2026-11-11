@@ -889,7 +889,7 @@ async fn edge() -> Result<()> {
     ensure!(
         after["revision"] == receipt["revision"]
             && after["cycle"] == before["cycle"]
-            && after["settings"]["minimum_sats"] == minimum.to_string()
+            && after["settings"]["minimum_sats"] == body["action"]["minimum_sats"]
             && after["settings"]["member_percent"] == 0
             && after["total_members"] == 0,
         "TLS edge command readback differs"

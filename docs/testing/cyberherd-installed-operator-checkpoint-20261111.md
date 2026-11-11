@@ -193,3 +193,10 @@ and installed execution of this integrated phase remain pending. Earlier separat
 TLS mocks and direct native HTTP checks do not establish its result. Production
 operator routes/configuration, actual user credentials and financial activation
 remain unchanged. The integrated phase does not yet exercise a browser or WAF.
+
+Initial integrated source `711dbef5270af2c7f2ae47d4a130c567e9d95111`
+failed CI `42978879287`, Rust job `130384310178`, on `clippy::cmp_owned` in
+the test client's settings readback. The assertion now compares directly with
+the saved command's exact JSON value; it does not adopt the numeric-comparison
+suggestion for a string-valued API field or weaken Clippy. Corrected source still
+requires its own complete native and installed qualification.

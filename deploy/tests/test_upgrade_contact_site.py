@@ -4,6 +4,7 @@ nginx, systemd and the core readiness check are mocked. Real nginx/WAF and brows
 semantics have their own tests; no production configuration is read here.
 """
 import hashlib
+import errno
 import importlib.util
 import json
 import os
@@ -27,6 +28,23 @@ FLAGS = 'window.LightningGoatsSite = Object.freeze({ paymentsEnabled: true, feed
 
 
 class ContactSiteBoundaries(unittest.TestCase):
+    def test_serving_context_is_copied_even_without_a_selinux_status_probe(self):
+        context = b'system_u:object_r:httpd_sys_content_t:s0\x00'
+        with patch.object(E.os, 'getxattr', return_value=context) as reading, patch.object(E.os, 'setxattr') as writing:
+            E.copy_selinux_label(Path('/old-public'), Path('/new-public'))
+        writing.assert_called_once_with(Path('/new-public'), 'security.selinux', context, follow_symlinks=False)
+        self.assertEqual(reading.call_count, 2)
+        for code in (errno.ENODATA, errno.ENOTSUP):
+            with patch.object(E.os, 'getxattr', side_effect=OSError(code, 'no label')), patch.object(E.os, 'setxattr') as writing:
+                E.copy_selinux_label(Path('/old-public'), Path('/new-public'))
+                writing.assert_not_called()
+        with patch.object(E.os, 'getxattr', side_effect=PermissionError(errno.EACCES, 'denied')):
+            with self.assertRaises(PermissionError):
+                E.copy_selinux_label(Path('/old-public'), Path('/new-public'))
+        with patch.object(E.os, 'getxattr', side_effect=[context, b'wrong']), patch.object(E.os, 'setxattr'):
+            with self.assertRaisesRegex(ValueError, 'serving label'):
+                E.copy_selinux_label(Path('/old-public'), Path('/new-public'))
+
     def test_flags_preserve_every_existing_choice_and_enable_only_contact(self):
         changed = E.site_flags(FLAGS)
         self.assertIn('feedingAvailable: false', changed)

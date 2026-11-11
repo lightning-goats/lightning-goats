@@ -56,7 +56,11 @@ against that GitHub commit before root-owned data installation. The manifest is
 Preparation requires the contact-configured core already running, clones the
 entire existing public release, preserves artwork/vendor files and all existing
 boolean site choices, and changes only the three browser files plus the new
-contact flag. It installs an unused exact nginx snippet and prepares a one-file
+contact flag. It retains the existing SELinux labels on public directories and
+new/changed files, using the original index label for new contact scripts and the
+original site configuration label for the new snippet. Absence of selinuxfs in a
+caller namespace does not prove the serving worker is unconfined. No MAC policy
+is changed or disabled. It installs an unused exact nginx snippet and prepares a one-file
 site-configuration transaction. No service or public route changes yet.
 `apply DIRECTORY --review-sha256 SHA --activate-contact-site` rechecks all original
 and candidate files, native-core configuration identity and source bindings;

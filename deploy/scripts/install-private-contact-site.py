@@ -16,6 +16,7 @@ if 'verified_tool_identity' not in globals():
         raise ValueError('verified tool launcher required')
 
 import argparse
+import errno
 import importlib.util
 import json
 import os
@@ -34,6 +35,25 @@ SNIPPET = Path('/etc/nginx/snippets/lightning-goats-contact.conf')
 WWW = Path('/var/www/lightning-goats-releases')
 PAYLOAD = {'index.html', 'contact.js', 'contact-fee.js', 'contact.conf'}
 ANCHOR = '    include /etc/nginx/snippets/lightning-goats-cyberherd-readonly.conf;\n'
+
+
+def copy_selinux_label(source, destination):
+    """Retain the existing serving label without changing host MAC policy.
+
+    A caller namespace can lack selinuxfs even while the nginx worker remains
+    confined. Do not infer that labels are irrelevant from getenforce output.
+    Use only the label on the corresponding protected existing public/config
+    object; do not invent a context or copy ACLs/capabilities.
+    """
+    try:
+        context = os.getxattr(source, 'security.selinux', follow_symlinks=False)
+    except OSError as error:
+        if error.errno in (errno.ENODATA, errno.ENOTSUP):
+            return
+        raise
+    os.setxattr(destination, 'security.selinux', context, follow_symlinks=False)
+    if os.getxattr(destination, 'security.selinux', follow_symlinks=False) != context:
+        raise ValueError('existing serving label was not retained')
 
 
 def site_flags(text):
@@ -128,6 +148,7 @@ def prepare(payload, expected, directory):
     C.write_json(directory / 'INCOMPLETE', {'services_changed': False})
     release.mkdir(mode=0o755)
     release.chmod(0o755)
+    copy_selinux_label(original, release)
     for name, fingerprint in before.items():
         destination = release / name
         for parent in reversed(destination.relative_to(release).parents):
@@ -135,19 +156,23 @@ def prepare(payload, expected, directory):
             if not path.exists():
                 path.mkdir(mode=0o755)
                 path.chmod(0o755)
+                copy_selinux_label(original / parent, path)
         TX.copy_durable(original / name, destination, fingerprint)
     for name in ('index.html', 'contact.js', 'contact-fee.js'):
         destination = release / name
         if destination.exists():
             destination.unlink()
         U.Q.I.publish(destination, (payload / name).read_bytes(), 0o644)
+        copy_selinux_label(original / (name if name in before else 'index.html'), destination)
     flags = site_flags((original / 'site-config.js').read_text())
     (release / 'site-config.js').unlink()
     U.Q.I.publish(release / 'site-config.js', flags.encode(), 0o644)
+    copy_selinux_label(original / 'site-config.js', release / 'site-config.js')
     if SNIPPET.exists() or SNIPPET.is_symlink():
         raise ValueError('contact snippet destination must be unused')
     C.protected(SNIPPET.parent, directory=True)
     U.Q.I.publish(SNIPPET, (payload / 'contact.conf').read_bytes(), 0o644)
+    copy_selinux_label(SITE, SNIPPET)
     U.Q.I.publish(directory / 'site.conf', text.encode(), 0o600)
 
     def unchanged():

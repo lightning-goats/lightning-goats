@@ -1,5 +1,9 @@
 # Private contact schema — actual upgrade, 2026-11-11
 
+This records the schema-upgrade boundary. The subsequent
+[live contact deployment](private-contact-live-20261111.md) enables configuration,
+exact ingress and the form; real fee/recipient observation remains open.
+
 The actual receive core now uses schema 24. Core and overlay-only membership are
 running again; the 28-sat feed credit, paused feeder and zero queued/unresolved
 feeding state are preserved. Contact configuration, nginx routes and browser form

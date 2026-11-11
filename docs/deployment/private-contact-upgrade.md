@@ -1,8 +1,10 @@
 # Private contact upgrade preparation
 
 The [actual upgrade checkpoint](../testing/private-contact-schema-live-20261111.md)
-now records the live core on schema 24 with paid state preserved. Contact remains
-disabled. Preparation alone does not authorize or perform a migration, service
+now records the live core on schema 24 with paid state preserved. Contact was
+disabled during that upgrade; subsequent activation is recorded in the
+[live contact checkpoint](../testing/private-contact-live-20261111.md).
+Preparation alone does not authorize or perform a migration, service
 interruption, private-message delivery, payment, feeding or public publication.
 
 Use only independently source-verified build artifacts and a separately

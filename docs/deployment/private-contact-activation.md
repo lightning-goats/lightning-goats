@@ -1,5 +1,9 @@
 # Private contact configuration activation
 
+The [actual live checkpoint](../testing/private-contact-live-20261111.md) records
+configuration activation and the corrected public website with paid state and
+serving labels preserved. Real paid-contact/recipient observation remains open.
+
 This is a configuration-only step after the [actual schema-24 upgrade](../testing/private-contact-schema-live-20261111.md).
 It neither migrates nor restores a database and does not change financial limits,
 physical policy, programs, credentials, nginx or browser flags. CyberHerd public

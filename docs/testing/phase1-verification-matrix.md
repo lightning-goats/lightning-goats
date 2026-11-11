@@ -350,3 +350,15 @@ root fixture with actual distinct-owned sources, committed WAL, writer-fence
 refusal before output creation, unchanged main/WAL/SHM bytes, source revalidation
 and ordinary restore refusal. The tool must still refuse current-schema input,
 dirty/unknown checksums and preexisting contact objects at this upgrade boundary.
+
+For contact configuration activation on current schema 24, exercise native
+contact-only validation, a fresh four-writer native backup, unchanged live
+main/WAL/SHM fingerprints, exact original programs/units, failed-backup refusal
+and independent service resumption. A static release must preserve every existing
+site flag and OBS/artwork/vendor asset except its explicitly selected browser
+files. Retain the existing public-directory/file and nginx SELinux contexts;
+caller namespace status probes do not establish worker confinement. Test exact
+private ingress, WAF/no-store/logging boundaries and actual public desktop/mobile
+rendering without creating a valid contact or invoice. Mock/native/browser and
+[actual deployment evidence](private-contact-live-20261111.md) remain distinct
+from a real fee settlement and recipient-side DM observation.

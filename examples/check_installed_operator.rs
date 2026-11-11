@@ -165,8 +165,8 @@ async fn command(client: &Client, body: &Value) -> Result<Value> {
     let bytes = serde_json::to_vec(body)?;
     // A not-yet-caught-up core fence may refuse a new mutation. Every retry
     // preserves UUID/body and signs a fresh authorization; no receipt is assumed.
-    // The disposable member polls intake every five seconds. Three seconds did
-    // not even span one poll; allow three cycles, bounded by a monotonic deadline.
+    // Allow three five-second intake polls. Back off rather than consuming the
+    // bridge's two-per-second budget before an activation's two reads can finish.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     loop {
         let header = authorization(2, "POST", COMMAND, &bytes)?;
@@ -176,7 +176,7 @@ async fn command(client: &Client, body: &Value) -> Result<Value> {
                 .await
                 .with_context(|| format!("disposable operator action {}", body["action"]["type"]));
         }
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        tokio::time::sleep(Duration::from_secs(2)).await;
     }
 }
 
@@ -428,6 +428,9 @@ fn read_fixture(path: &str) -> Result<Value> {
 }
 
 async fn action(client: &Client, action: Value) -> Result<(Value, Value)> {
+    // Pace distinct operator mutations too, leaving admission for intake and
+    // overlay delivery. No service admission limit or safety fence is changed.
+    tokio::time::sleep(Duration::from_secs(1)).await;
     let state = get(client, 2, OVERVIEW).await?;
     let body =
         json!({"id":uuid::Uuid::new_v4(),"expected_revision":state["revision"],"action":action});
@@ -436,6 +439,8 @@ async fn action(client: &Client, action: Value) -> Result<(Value, Value)> {
 }
 
 async fn refused(client: &Client, body: &Value) -> Result<()> {
+    // A preceding burst must not stand in for the explicit refusal under test.
+    tokio::time::sleep(Duration::from_secs(2)).await;
     let bytes = serde_json::to_vec(body)?;
     ensure!(
         send(

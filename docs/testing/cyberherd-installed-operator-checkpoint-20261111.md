@@ -92,3 +92,28 @@ UUID/body/revision and fresh authorization on each attempt. Explicit refusal
 tests still expect immediate 409, and the service's ordering fence and poll rate
 are unchanged. The fixture pins its five-second configuration; subsequent exact
 qualification remains required, rather than rerunning unchanged failed source.
+
+Source `c66e52c2ca69d264f0ed13c595a80e0d9fa0dc19` also failed the ready
+activation in Deployment `42967307933`, systemd job `130349375348`, after the
+longer deadline. Persistent broken-pipe refusals revealed that the client was
+retrying five times per second against a bridge limited to two admissions per
+second (burst four); activation needs separate ordering and safety reads. The
+client now backs off two seconds after conflict, paces distinct mutations, and
+allows admission to refill before explicit refusal cases. Neither production
+bridge capacity nor the ordering/paused-state checks were relaxed. This correction
+still requires exact installed qualification.
+
+## Optional authenticated edge transport — isolated checks
+
+Three new assembled TLS/nginx tests pass locally with harmless backends: the
+four exact optional routes preserve query, Authorization, Origin and command
+bytes; wrong methods, oversize commands, unlisted paths and canary requests cannot
+reach the backend; synthetic private fields/headers are absent from logs. Native
+signature and operator authorization remain the separate installed exercise.
+
+The installed nginx/ModSecurity connector and pinned CRS 4.30.0 also pass all
+eleven isolated acceptance cases with the optional routes assembled, including
+exact command/header transport, private logging and continuing CRS enforcement.
+Only an unprivileged ephemeral loopback nginx with mocks was used. The actual
+production nginx was neither changed nor reloaded, and these transport fixtures
+do not claim production routing or native authorization accepted a request.

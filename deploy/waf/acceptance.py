@@ -13,10 +13,31 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tests"))
 from test_nginx import NginxAssemblyTests
+from test_cyberherd_authenticated_nginx import transport_header
 
 
 class WafAcceptance(NginxAssemblyTests):
     CONTACT_ENABLED = True
+    CYBERHERD_AUTH_ENABLED = True
+
+    def test_cyberherd_operator_payload_and_authorization_pass_without_private_logs(self):
+        path = "/api/v1/cyberherd/operator/command"
+        sentinel = "LG_PRIVATE_OPERATOR_5a692e"
+        body = json.dumps({"id": "10000000-0000-0000-0000-000000000001", "expected_revision": 7,
+            "action": {"type": "template", "edit": {"Set": {"category": "member_added",
+                "variant": "example", "text": sentinel + " Welcome {member_name}"}}}}).encode()
+        authorization = transport_header(path, "POST", body)
+        status, headers, _ = self.request("production", path, "POST", body,
+            {"Content-Type": "application/json", "Origin": "https://lightning-goats.com",
+             "Authorization": authorization}, source="127.0.4.1")
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["Cache-Control"], "no-store")
+        self.assertEqual(self.backends["production"].bodies[-1], body)
+        self.assertEqual(self.backends["production"].calls[-1][2]["Authorization"], authorization)
+        for file in self.root.rglob("*.log"):
+            text = file.read_text(errors="replace")
+            self.assertNotIn(sentinel, text)
+            self.assertNotIn(authorization, text)
 
     def test_private_contact_body_and_status_are_not_logged(self):
         sentinel = "LG_PRIVATE_CONTACT_66d8af"

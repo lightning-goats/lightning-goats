@@ -105,6 +105,9 @@ class NginxAssemblyTests(unittest.TestCase):
                 if suffix == "conf":
                     if mode == "production" and getattr(cls, "CONTACT_ENABLED", False):
                         data += "\n" + (EXAMPLES / "lightning-goats-contact.conf.example").read_text()
+                    if mode == "production" and getattr(cls, "CYBERHERD_AUTH_ENABLED", False):
+                        auth = (EXAMPLES.parent / "cyberherd/authenticated-nginx.conf.example").read_text()
+                        data += "\n" + auth.replace("127.0.0.1:3340", f"127.0.0.1:{cls.backends[mode].server_port}")
                     (cls.root / "snippets" / f"lightning-goats-{mode}.conf").write_text(data)
                     continue
                 tls_port, http_port = free_port(), free_port()

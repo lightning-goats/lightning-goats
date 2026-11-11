@@ -658,6 +658,49 @@ async fn after_controls_restart(client: &Client) -> Result<()> {
     Ok(())
 }
 
+async fn diagnose_stream() -> Result<()> {
+    use sqlx::{
+        Row as _,
+        sqlite::{SqliteConnectOptions, SqlitePoolOptions},
+    };
+    let path = Path::new("/var/lib/cyberherd/cyberherd.db");
+    let info = std::fs::symlink_metadata(path)?;
+    ensure!(
+        info.is_file()
+            && info.nlink() == 1
+            && info.mode() & 0o077 == 0
+            && info.uid() == std::fs::metadata("/proc/self")?.uid(),
+        "private fixture journal required"
+    );
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(
+            SqliteConnectOptions::new()
+                .filename(path)
+                .read_only(true)
+                .create_if_missing(false)
+                .pragma("query_only", "ON")
+                .pragma("trusted_schema", "OFF")
+                .busy_timeout(Duration::from_secs(5)),
+        )
+        .await?;
+    let rows = sqlx::query(
+        "SELECT received_through,binding_json FROM core_streams ORDER BY owner LIMIT 2",
+    )
+    .fetch_all(&pool)
+    .await?;
+    let cursors = rows.into_iter().map(|row| -> Result<Value> {
+        let binding: Value = serde_json::from_str(&row.try_get::<String,_>("binding_json")?)?;
+        Ok(json!({"received_through":row.try_get::<i64,_>("received_through")?,"epoch":binding["epoch"]}))
+    }).collect::<Result<Vec<_>>>()?;
+    pool.close().await;
+    println!(
+        "{}",
+        json!({"synthetic_only":true,"native_member_cursors":cursors})
+    );
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     isolated_fixture()?;
@@ -673,6 +716,7 @@ async fn main() -> Result<()> {
         Some("after-ready-restart") => after_ready_restart(&client).await,
         Some("paused-controls") => paused_controls(&client).await,
         Some("after-controls-restart") => after_controls_restart(&client).await,
+        Some("diagnose-stream") => diagnose_stream().await,
         _ => bail!("explicit disposable operator exercise required"),
     }
 }

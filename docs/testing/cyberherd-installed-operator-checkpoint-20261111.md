@@ -103,6 +103,18 @@ allows admission to refill before explicit refusal cases. Neither production
 bridge capacity nor the ordering/paused-state checks were relaxed. This correction
 still requires exact installed qualification.
 
+Source `8d4c74cd9fb46e7a106661aa79c2a6eb77d00655` progressed through actual
+activation and manual score assignment, then failed the ban command in Deployment
+`42968691665`, job `130353829643`. Intake now records repeated explicit event-batch
+refusals after the new roster state, so slower test retries are not a complete
+resolution. The extension remains unqualified. Guarded test-only native diagnostics
+now inspect the existing synthetic core export and member cursor on failure,
+without altering the service's admission, export validation or ordering fences.
+The diagnostic core opener requires the original single synthetic payment and
+existing epoch, uses the exact current schema and applies no migration. These
+diagnostics cannot execute without the existing protected disposable namespace
+attestation and original file owners. Neither diagnostic is a production command.
+
 ## Optional authenticated edge transport — isolated checks
 
 Three new assembled TLS/nginx tests pass locally with harmless backends: the

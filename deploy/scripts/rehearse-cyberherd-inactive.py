@@ -590,6 +590,16 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
         # Disposable synthetic fixture only. Never use this diagnostic or the
         # fixture's schema transform against a production host or journal.
         import sys
+        for argv in ((['/usr/bin/setpriv', '--reuid=' + str(runtime.pw_uid), '--regid=' + str(runtime.pw_gid),
+                       '--clear-groups', '--inh-caps=-all', '--ambient-caps=-all', '--bounding-set=-all',
+                       '--no-new-privs', str(fixture), '--diagnose-installed-export']),
+                     ([*client, 'diagnose-stream'] if 'client' in locals() else [])):
+            if not argv:
+                continue
+            try:
+                print('DISPOSABLE NATIVE DIAGNOSTIC ' + run(*argv), file=sys.stderr)
+            except Exception:
+                print('DISPOSABLE NATIVE DIAGNOSTIC unavailable', file=sys.stderr)
         for name in ('lightning-goats-receive.service', 'cyberherd.service'):
             result = subprocess.run(['/usr/bin/journalctl', '--no-pager', '-u', name, '-n', '25', '-o', 'cat'],
                                     capture_output=True, text=True, timeout=10)

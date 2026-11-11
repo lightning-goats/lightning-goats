@@ -151,11 +151,78 @@ async fn strip_empty_contact_schema(uid: u32) -> Result<()> {
     Ok(())
 }
 
+async fn diagnose_export(uid: u32) -> Result<()> {
+    if std::env::var_os("CREDENTIALS_DIRECTORY").is_some() {
+        bail!("diagnostic must not load credentials");
+    }
+    let path = Path::new(DATABASE);
+    let info = std::fs::symlink_metadata(path)?;
+    if !info.is_file() || info.uid() != uid || info.nlink() != 1 || info.mode() & 0o077 != 0 {
+        bail!("private synthetic diagnostic state required");
+    }
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(
+            SqliteConnectOptions::new()
+                .filename(path)
+                .read_only(true)
+                .create_if_missing(false)
+                .pragma("query_only", "ON")
+                .pragma("trusted_schema", "OFF")
+                .busy_timeout(Duration::from_secs(5)),
+        )
+        .await?;
+    let synthetic: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM settled_payments WHERE source='strike' AND source_id='TEST-ONLY-original-receipt' AND amount_msat=2340000").fetch_one(&pool).await?;
+    let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM settled_payments")
+        .fetch_one(&pool)
+        .await?;
+    let identities: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM overlay_identity WHERE singleton=1")
+            .fetch_one(&pool)
+            .await?;
+    let engine: String = sqlx::query_scalar("SELECT sqlite_version()")
+        .fetch_one(&pool)
+        .await?;
+    if synthetic != 1 || total != 1 || identities != 1 || engine != "3.54.1" {
+        bail!("not the synthetic original payment diagnostic fixture");
+    }
+    let rows =
+        sqlx::query("SELECT seq,event_type,created_at FROM event_log ORDER BY seq LIMIT 128")
+            .fetch_all(&pool)
+            .await?;
+    let events = rows.into_iter().map(|row| -> Result<_> {
+        Ok(serde_json::json!({"seq":row.try_get::<i64,_>("seq")?,
+            "type":row.try_get::<String,_>("event_type")?,"created_at":row.try_get::<i64,_>("created_at")?}))
+    }).collect::<Result<Vec<_>>>()?;
+    pool.close().await;
+    // Existing-current-schema opener performs no migration. The existing epoch
+    // is required by this synthetic fixture; the export has no external I/O.
+    let ledger = lightning_goats::ledger::LedgerStore::connect_existing_recovery(&format!(
+        "sqlite://{DATABASE}"
+    ))
+    .await?;
+    let exported = match ledger.core_event_batch(None, 0, 128).await {
+        Ok(batch) => {
+            serde_json::json!({"accepted":true,"through":batch.through,"latest":batch.latest})
+        }
+        Err(error) => {
+            serde_json::json!({"accepted":false,"synthetic_only_error":format!("{error:#}")})
+        }
+    };
+    println!(
+        "{}",
+        serde_json::json!({"synthetic_only":true,"events":events,"native_export":exported})
+    );
+    Ok(())
+}
+
 async fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let uid = isolated_fixture()?;
     if args == ["--strip-empty-contact-schema"] {
         strip_empty_contact_schema(uid).await
+    } else if args == ["--diagnose-installed-export"] {
+        diagnose_export(uid).await
     } else if args == ["--config", "/etc/lightning-goats/config.receive.toml"] {
         // Harmless old-core stand-in. Accept the future native core's exact unit
         // argv without opening its config, journal, credential, IPC or network.

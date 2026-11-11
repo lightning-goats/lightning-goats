@@ -11,7 +11,7 @@ has nineteen files, including `prepare-contact-upgrade.py` and
 `maintain-contact-upgrade.py`. Older preparation-only generations have eighteen
 files and no maintenance entry point. The subsequent
 [configuration-only activation candidate](private-contact-activation.md) has
-twenty files; its separate entry point does not redo the schema upgrade.
+twenty-one files; its separate entry points do not redo the schema upgrade.
 Do not invoke a writable checkout as root or reuse an
 older manifest for the new closure. Independent archive SHA256s
 must cover both the core release and CyberHerd review archive at the same full

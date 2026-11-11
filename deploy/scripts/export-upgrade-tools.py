@@ -24,6 +24,7 @@ FILES = (
     'prepare-contact-upgrade.py',
     'maintain-contact-upgrade.py',
     'activate-private-contact.py',
+    'install-private-contact-site.py',
 )
 
 

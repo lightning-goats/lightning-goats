@@ -76,6 +76,8 @@ class ToolLaunchTests(unittest.TestCase):
             self.assertIn('resume', run(ok=True).stdout)
             command[6:] = ['--private-contact-activation', '--help']
             self.assertIn('prepare', run(ok=True).stdout)
+            command[6:] = ['--private-contact-site', '--help']
+            self.assertIn('prepare', run(ok=True).stdout)
             command[6:] = ['--help']
             for name in LAUNCH.FILES - {'launch-vps-upgrade.py'}:
                 target = bundle / name

@@ -39,7 +39,7 @@
         try {
             const response = await fetch(url.href,{method,body:method==="POST"?body:undefined,headers:{Authorization:authorization,Accept:"application/json",...(method==="POST"?{"Content-Type":"application/json"}:{})},redirect:"error",credentials:"omit",cache:"no-store",signal:controller.signal});
             if (!response.ok) {
-                const message = response.status===401?"The request was not authorized. Check the selected signer and your clock.":response.status===409?"The command was held. Refresh state and check revision, capacity, ban and feeder status before retrying.":"The CyberHerd service is unavailable. An unacknowledged command may already have succeeded.";
+                const message = response.status===401?"The request was not authorized. Check the selected signer and your clock.":response.status===409?(method==="GET"?"The herd changed. Refresh and try again.":"The command was held. Refresh state and check revision, capacity, ban and feeder status before retrying."):(method==="GET"?"Your CyberHerd status is temporarily unavailable. Try again shortly.":"The CyberHerd service is unavailable. An unacknowledged command may already have succeeded.");
                 throw new Error(message);
             }
             if (!response.headers.get("content-type")?.includes("application/json")) throw new Error("The service returned invalid data.");

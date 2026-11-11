@@ -81,6 +81,7 @@ jobs:
           install -m 0755 target/release/examples/check_private_contact_stage "$RUNNER_TEMP/cyberherd-test-only/CHECK-ONLY-private-contact-stage"
           install -m 0755 target/release/examples/check_installed_operator "$RUNNER_TEMP/cyberherd-test-only/TEST-ONLY-installed-operator-client"
           python3 -I -S -B deploy/scripts/export-upgrade-tools.py "$GITHUB_WORKSPACE" "$GITHUB_SHA" "$RUNNER_TEMP/cyberherd-test-only/tool-bundle" > "$RUNNER_TEMP/cyberherd-test-only/TOOL-EXPORT.json"
+          python3 -I -S -B deploy/scripts/export-self-read-site.py "$GITHUB_WORKSPACE" "$GITHUB_SHA" "$RUNNER_TEMP/cyberherd-self-read-site" > "$RUNNER_TEMP/cyberherd-test-only/SELF-READ-SITE-EXPORT.json"
           (cd "$RUNNER_TEMP/cyberherd-test-only" && sha256sum TEST-ONLY-prepare-legacy-core READ-ONLY-check-recipient SIGNING-ONLY-check-zap-receipt CHECK-ONLY-overlay-stage TEST-ONLY-contact-upgrade-fixture CHECK-ONLY-private-contact-stage TEST-ONLY-installed-operator-client TOOL-EXPORT.json > SHA256SUMS)
       - name: Retain test-only installation fixture
         uses: actions/upload-artifact@v4

@@ -103,6 +103,10 @@ remain off; actual operator ingress remains disabled pending the selected
 public-key allowlist. See the retained
 failures, final artifact acceptance and preparation evidence in the
 [operator checkpoint](testing/cyberherd-installed-operator-checkpoint-20261111.md).
+The next source extension adds a self-only public website publisher, five passing
+local roster browser cases, three assembled nginx cases and thirteen WAF cases.
+Protected file/native installed qualification is pending; this does not yet
+change the live auth flag or public ingress.
 
 Other remaining work includes observed zap admission and incoming settlement/
 receipt delivery, operator interfaces, global network qualification, concrete externally reconciled recovery adoption, operator-selected

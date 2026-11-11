@@ -1,5 +1,26 @@
 # Installed operator HTTP qualification — candidate, 2026-11-11
 
+## Public self-status source extension
+
+The next source change exposes only signed self-status GETs and the existing
+browser login. Its [publisher](../deployment/cyberherd-self-read-activation.md#public-self-status-website)
+preserves current contact/payment/OBS assets and flags, pins retained browser
+code, and changes only the auth client and auth-enabled flag in a new static
+release. One exact self-read proxy is added; operator ingress remains closed.
+The authenticated root closure contains 23 files. This paragraph is a source
+checkpoint, not a claim of public activation.
+
+Local results: all five roster browser cases pass with the pinned sandboxed
+Chromium, including synthetic NIP-07 self-read, inactive/active display, logout
+and a read-specific unavailable message. All three assembled TLS/nginx self-read
+cases and thirteen actual ModSecurity/CRS cases pass, including method/body
+refusal, header privacy and a blocked WAF probe. These use mock HTTP backends.
+Six new protected website-file cases require the separate root CI job; native
+signed self-read through the shipped TLS proxy is added to the disposable
+installed systemd rehearsal. Exact CI/native results remain required before
+deployment. No actual public flag, nginx configuration or application state was
+changed for these local checks.
+
 The disposable installed systemd rehearsal now includes an optional operator
 API stage. The actual installed exercise passes on source
 `1240974d798e74503cd20cca6d65dc9e1998875f` in Deployment run `42958315166`.

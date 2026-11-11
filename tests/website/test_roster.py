@@ -1,5 +1,6 @@
 """Read-only CyberHerd page. Every HTTP request is fulfilled locally or blocked."""
 import json
+import base64
 from datetime import datetime, timezone
 import mimetypes
 import os
@@ -32,6 +33,10 @@ class RosterBrowserTests(unittest.TestCase):
         self.errors = []
         self.page.on("pageerror",lambda error:self.errors.append(str(error)))
         self.enabled = False
+        self.auth_enabled = False
+        self.self_status = 200
+        self.self_active = False
+        self.auth_requests = []
         self.requests = []
         self.data = {"version":1,"generated_at":int(time.time()),"availability":"paused","targets":[{"event_id":"ab"*32,"kind":1}],
                      "roster":{"owner":OWNER,"cycle":1,"cycle_start":100,"revision":1,"capacity":3,"minimum_sats":"10","member_percent":10,"total_members":1,"next_offset":None,
@@ -44,9 +49,20 @@ class RosterBrowserTests(unittest.TestCase):
         url = urlsplit(route.request.url)
         self.requests.append((route.request.method,url.path))
         if url.path == "/site-config.js":
-            route.fulfill(content_type="text/javascript",body="window.LightningGoatsSite = " + json.dumps({"paymentsEnabled":False,"cyberherdEnabled":self.enabled}))
+            route.fulfill(content_type="text/javascript",body="window.LightningGoatsSite = " + json.dumps({"paymentsEnabled":False,"cyberherdEnabled":self.enabled,"cyberherdAuthEnabled":self.auth_enabled}))
         elif url.path == "/api/v1/cyberherd":
             route.fulfill(content_type="application/json",body=json.dumps(self.data))
+        elif url.path == "/api/v1/cyberherd/me":
+            header = route.request.headers.get('authorization', '')
+            self.assertTrue(header.startswith('Nostr '))
+            event = json.loads(base64.b64decode(header[6:]))
+            self.assertEqual(event['kind'], 27235)
+            self.assertEqual({t[0]:t[1] for t in event['tags']}['u'], route.request.url)
+            self.assertEqual({t[0]:t[1] for t in event['tags']}['method'], 'GET')
+            self.auth_requests.append(event)
+            route.fulfill(status=self.self_status,content_type='application/json',body=json.dumps({
+                'pubkey':event['pubkey'],'operator':False,'cycle':1,'revision':1,
+                'member':{'active':self.self_active,'banned':False,'amount_sats':'21','lifetime_sats':'21'}}))
         else:
             file = ROOT / url.path.lstrip("/")
             if url.netloc == "lightning-goats.com" and file.is_file() and file.resolve().is_relative_to(ROOT):
@@ -89,3 +105,39 @@ class RosterBrowserTests(unittest.TestCase):
             self.assertTrue(self.page.locator("#herd").is_hidden())
             self.assertTrue(self.page.locator("#connect-nostr").is_hidden())
         self.assertEqual(self.errors, [])
+
+    def synthetic_signer(self):
+        self.page.add_init_script('''
+            const syntheticKey=new Uint8Array(32);syntheticKey[31]=3;
+            window.nostr={getPublicKey:async()=>window.NostrTools.getPublicKey(syntheticKey),
+                signEvent:async event=>window.NostrTools.finalizeEvent(event,syntheticKey)};
+        ''')
+
+    def test_enabled_login_reads_only_self_and_never_opens_operator_controls(self):
+        self.enabled=True;self.auth_enabled=True;self.synthetic_signer()
+        self.page.goto(ORIGIN+'/cyberherd.html')
+        self.page.locator('#connect-nostr').click()
+        self.page.wait_for_function("document.querySelector('#self-status').textContent.includes('not an active member')")
+        self.assertEqual(len(self.auth_requests),1)
+        self.assertTrue(self.page.locator('#operator-link').is_hidden())
+        self.assertTrue(all(method=='GET' for method,_ in self.requests))
+        self.assertFalse(any('/operator/' in path for _,path in self.requests))
+        self.assertEqual(self.page.locator('input[type=password],input[name=nsec]').count(),0)
+        self.page.evaluate("document.dispatchEvent(new CustomEvent('nlAuth',{detail:{type:'logout'}}))")
+        self.assertEqual(self.page.locator('#self-status').inner_text(),'')
+        self.assertEqual(self.errors,[])
+
+    def test_self_score_uses_the_selected_signer_and_read_failure_has_no_command_warning(self):
+        self.enabled=True;self.auth_enabled=True;self.self_active=True;self.synthetic_signer()
+        self.page.goto(ORIGIN+'/cyberherd.html')
+        self.page.locator('#connect-nostr').click()
+        self.page.wait_for_function("document.querySelector('#self-status').textContent==='Your CyberHerd score: 21 sats'")
+        self.self_status=503
+        self.page.locator('#connect-nostr').click()
+        self.page.wait_for_function("document.querySelector('#self-status').textContent.includes('temporarily unavailable')")
+        self.assertNotIn('command',self.page.locator('#self-status').inner_text().lower())
+        self.assertEqual(len(self.auth_requests),2)
+        self.assertNotEqual(self.auth_requests[0]['id'],self.auth_requests[1]['id'])
+        self.assertTrue(self.page.locator('#operator-link').is_hidden())
+        self.assertTrue(all(method=='GET' for method,_ in self.requests))
+        self.assertEqual(self.errors,[])

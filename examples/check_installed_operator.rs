@@ -769,17 +769,7 @@ async fn edge_send(
     header: &str,
     origin: &str,
 ) -> Result<Response> {
-    // Retain the shipped read admission rate, including across exact locations.
-    tokio::time::sleep(Duration::from_millis(2100)).await;
-    let response = client
-        .request(method, format!("{ORIGIN}{path}"))
-        .header("Authorization", header)
-        .header("Origin", origin)
-        .header("X-Forwarded-Host", "untrusted.example")
-        .header("Content-Type", "application/json")
-        .body(body.to_vec())
-        .send()
-        .await?;
+    let response = edge_request(client, method, path, body, header, origin).await?;
     ensure!(
         response
             .headers()
@@ -789,6 +779,27 @@ async fn edge_send(
         "TLS edge omitted no-store"
     );
     Ok(response)
+}
+
+async fn edge_request(
+    client: &Client,
+    method: Method,
+    path: &str,
+    body: &[u8],
+    header: &str,
+    origin: &str,
+) -> Result<Response> {
+    // Retain the shipped read admission rate, including across exact locations.
+    tokio::time::sleep(Duration::from_millis(2100)).await;
+    Ok(client
+        .request(method, format!("{ORIGIN}{path}"))
+        .header("Authorization", header)
+        .header("Origin", origin)
+        .header("X-Forwarded-Host", "untrusted.example")
+        .header("Content-Type", "application/json")
+        .body(body.to_vec())
+        .send()
+        .await?)
 }
 
 async fn edge_get(client: &Client, secret: u8, path: &str) -> Result<Value> {
@@ -826,7 +837,7 @@ async fn edge_command(client: &Client, body: &Value) -> Result<Value> {
     }
 }
 
-async fn edge() -> Result<()> {
+fn edge_client() -> Result<Client> {
     let certificate = std::fs::symlink_metadata(EDGE_CERTIFICATE)?;
     ensure!(
         certificate.is_file()
@@ -837,7 +848,7 @@ async fn edge() -> Result<()> {
             && certificate.len() <= 8192,
         "protected synthetic TLS certificate required"
     );
-    let client = Client::builder()
+    Ok(Client::builder()
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
         .timeout(Duration::from_secs(5))
@@ -847,7 +858,11 @@ async fn edge() -> Result<()> {
         // No DNS or public destination: the fixed canonical HTTPS name is bound
         // to this attested namespace's loopback TLS listener. Verify its cert.
         .resolve("example.com", "127.0.0.1:443".parse()?)
-        .build()?;
+        .build()?)
+}
+
+async fn edge() -> Result<()> {
+    let client = edge_client()?;
     let saved = authorization(3, "GET", ME, &[])?;
     let guest = value(edge_send(&client, Method::GET, ME, &[], &saved, ORIGIN).await?).await?;
     ensure!(
@@ -973,6 +988,67 @@ async fn edge() -> Result<()> {
     Ok(())
 }
 
+async fn self_edge() -> Result<()> {
+    let client = edge_client()?;
+    let header = authorization(3, "GET", ME, &[])?;
+    let me = value(edge_send(&client, Method::GET, ME, &[], &header, ORIGIN).await?).await?;
+    ensure!(
+        me["operator"] == false,
+        "self edge granted operator authority"
+    );
+    ensure!(
+        edge_send(&client, Method::GET, ME, &[], &header, ORIGIN)
+            .await?
+            .status()
+            == StatusCode::UNAUTHORIZED,
+        "self edge admitted nonce replay"
+    );
+    ensure!(
+        edge_request(
+            &client,
+            Method::GET,
+            OVERVIEW,
+            &[],
+            &authorization(3, "GET", OVERVIEW, &[])?,
+            ORIGIN
+        )
+        .await?
+        .status()
+            == StatusCode::NOT_FOUND,
+        "self edge exposed an operator route"
+    );
+    let query = "/api/v1/cyberherd/me?unexpected=1";
+    ensure!(
+        edge_send(
+            &client,
+            Method::GET,
+            query,
+            &[],
+            &authorization(3, "GET", query, &[])?,
+            ORIGIN
+        )
+        .await?
+        .status()
+            == StatusCode::BAD_REQUEST,
+        "self edge changed or accepted the forbidden query"
+    );
+    let after = edge_get(&client, 3, ME).await?;
+    ensure!(
+        after["member"] == me["member"]
+            && after["revision"] == me["revision"]
+            && after["cycle"] == me["cycle"],
+        "self edge changed membership"
+    );
+    println!(
+        "{}",
+        json!({"self_edge_accepted":true,"verified_synthetic_tls":true,
+        "real_native_self_read_through_nginx":true,"nonce_replay_refused":true,
+        "public_operator_route_closed":true,"native_query_refusal":true,
+        "membership_unchanged":true,"provider_operations":0,"publications":0})
+    );
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     isolated_fixture()?;
@@ -991,6 +1067,7 @@ async fn main() -> Result<()> {
         Some("after-controls-restart") => after_controls_restart(&client).await,
         Some("diagnose-stream") => diagnose_stream().await,
         Some("edge") => edge().await,
+        Some("self-edge") => self_edge().await,
         _ => bail!("explicit disposable operator exercise required"),
     }
 }

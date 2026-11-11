@@ -67,3 +67,46 @@ operator authority, unchanged core credit/unknown UUID and zero gateway POSTs.
 Mocked file tests alone do not establish this installed result. Source and actual
 deployment acceptance are recorded in the
 [operator checkpoint](../testing/cyberherd-installed-operator-checkpoint-20261111.md).
+
+## Public self-status website
+
+The separate `--cyberherd-self-read-site` launcher mode prepares an immutable
+clone of the current public release and switches only nginx after review. This
+extends the authenticated tool closure to **23 files**. Export the exact qualified
+commit using `export-upgrade-tools.py` and `export-self-read-site.py` as an
+unprivileged account. Independently authenticate the exported source and manifest
+before installing a fresh root-owned generation; do not run checkout code as root.
+
+The launcher argument shapes are:
+
+```text
+--cyberherd-self-read-site prepare PAYLOAD NEW_PRIVATE_DIRECTORY --source-manifest-sha256 SOURCE_SHA
+--cyberherd-self-read-site apply DIRECTORY --review-sha256 PREPARED_SHA --activate-self-read-site
+```
+
+Preparation requires the already configured loopback self-read backend and empty
+operator allowlist. It checks the four retained browser/login/crypto files against
+the qualified source, clones every current asset with its serving metadata and
+SELinux label, replaces the auth client's read-error wording and changes only
+`cyberherdAuthEnabled` to true. All other flag values, contact/payment files, OBS
+and uploaded artwork remain exact. The default-off source site configuration is
+never substituted for the live flags.
+
+The single fixed nginx replacement changes the static root and adds the exact
+`/api/v1/cyberherd/me` GET proxy. Existing no-store site-config and private-log/WAF
+policies remain. Other methods, oversized bodies, operator paths and unrecognized
+paths stay closed. Native signature, Origin, nonce and query checks still apply.
+
+Apply verifies the reviewed digest, all retained/clone fingerprints and unchanged
+application identity/configuration, then validates nginx before and after the
+single replacement and reloads only nginx. Failed validation restores only the
+old nginx site; a failed reload also attempts to reload that restored site.
+Applications, journals, credentials and financial policy are never replaced or
+restarted. Partial attempts remain recorded for inspection rather than automatic
+reapplication.
+
+Qualification must distinguish protected file transactions with mocked readiness,
+actual TLS/nginx/native signatures in the disposable installed rehearsal, isolated
+WAF/browser tests, and actual public read-only acceptance. Initial local source
+results are recorded in the operator checkpoint; public activation remains a
+separate operation until the exact CI source and installed artifact pass.

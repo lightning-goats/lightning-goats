@@ -594,6 +594,7 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
         w.await_ready(lambda: w.http_json('http://127.0.0.1:3340/api/v1/cyberherd')['roster']['total_members'] == 0,
                       'actual empty public roster after manual reset')
         operator_edge = installed_operator_edge(root / 'core-payload', guard, client)
+        self_edge = installed_operator_edge(root / 'core-payload', guard, client, self_read=True)
         financial_after = w.http_json('http://127.0.0.1:8787/api/v1/status')
         for key in ('feed_credit_sats', 'threshold_sats', 'feeds_due', 'remainder_sats', 'unresolved_feed_attempt'):
             assert financial_after[key] == financial_before[key]
@@ -627,6 +628,7 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
                     'core_credit_and_original_unknown_uuid_unchanged': True, 'gateway_post_count': counts['post'],
                     'provider_operations': 0, 'public_network_used': False, 'live_host_qualified': False},
                 'installed_operator_tls_edge': operator_edge,
+                'installed_self_read_tls_edge': self_edge,
                 'installed_signed_self_read_activation': {'accepted': True,
                     'native_original_uid_configuration_check': True, 'actual_current_four_journal_backup': True,
                     'financial_images_unchanged_during_apply': True, 'only_member_auth_configuration_added': True,
@@ -668,13 +670,16 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
             (guard / 'operator-client').rename(root / 'operator-client-evidence')
         if (guard / 'edge-nginx').exists():
             (guard / 'edge-nginx').rename(root / 'operator-edge-evidence')
+        if (guard / 'self-edge-nginx').exists():
+            (guard / 'self-edge-nginx').rename(root / 'self-edge-evidence')
         if (guard / 'edge.crt').exists():
-            (guard / 'edge.crt').rename(root / 'operator-edge-evidence/cert.pem')
+            evidence = root / ('self-edge-evidence' if (root / 'self-edge-evidence').exists() else 'operator-edge-evidence')
+            (guard / 'edge.crt').rename(evidence / 'cert.pem')
         (guard / 'ALLOW').unlink(); guard.rmdir()
         gateway.shutdown(); gateway.server_close(); thread.join(timeout=2)
 
 
-def installed_operator_edge(payload, guard, client):
+def installed_operator_edge(payload, guard, client, *, self_read=False):
     """Actual TLS/nginx/native path, only in the attested disposable namespace."""
     if (os.geteuid() != 0 or os.environ.get('GITHUB_ACTIONS') != 'true'
             or not os.environ.get('GITHUB_RUN_ID', '').isdigit()
@@ -683,7 +688,9 @@ def installed_operator_edge(payload, guard, client):
             or (guard / 'ALLOW').read_text() != 'LIGHTNING_GOATS_DISPOSABLE_CONTACT_UPGRADE_CI_v1\n'
                 + os.readlink('/proc/self/ns/net') + '\n'):
         raise ValueError('TLS operator rehearsal requires the attested isolated disposable host')
-    directory = guard / 'edge-nginx'
+    if self_read:
+        (guard / 'edge.crt').rename(guard / 'edge-nginx/ca.crt')
+    directory = guard / ('self-edge-nginx' if self_read else 'edge-nginx')
     directory.mkdir(mode=0o755)
     certificate, key = guard / 'edge.crt', directory / 'key.pem'
     server_certificate, ca_key = directory / 'server.crt', directory / 'ca-key.pem'
@@ -711,7 +718,7 @@ def installed_operator_edge(payload, guard, client):
     # Assemble the exact shipped HTTP rate limits and optional locations. No
     # backend mock or weakened signature, Origin or command fence is substituted.
     common = (payload / 'deploy/nginx/lightning-goats-http.conf.example').read_text()
-    routes = (payload / 'deploy/cyberherd/authenticated-nginx.conf.example').read_text()
+    routes = (payload / 'deploy/cyberherd' / ('self-read-nginx.conf.example' if self_read else 'authenticated-nginx.conf.example')).read_text()
     config = directory / 'nginx.conf'
     config.write_text(f'''daemon off;
 user www-data www-data;
@@ -762,11 +769,16 @@ http {{
                 time.sleep(0.05)
         else:
             raise ValueError('disposable TLS nginx did not become ready')
-        result = json.loads(run(*client, 'edge'))
-        assert result == {'edge_accepted': True, 'verified_synthetic_tls': True,
+        result = json.loads(run(*client, 'self-edge' if self_read else 'edge'))
+        expected = {'self_edge_accepted': True, 'verified_synthetic_tls': True,
+            'real_native_self_read_through_nginx': True, 'nonce_replay_refused': True,
+            'public_operator_route_closed': True, 'native_query_refusal': True,
+            'membership_unchanged': True, 'provider_operations': 0, 'publications': 0} if self_read else {
+            'edge_accepted': True, 'verified_synthetic_tls': True,
             'real_native_http_through_nginx': True, 'canonical_signed_query_and_body': True,
             'guest_origin_body_and_nonce_refusals': True, 'settings_and_original_receipt_retained': True,
             'member_percent_zero': True, 'provider_operations': 0, 'publications': 0}
+        assert result == expected
     finally:
         process.terminate()
         process.wait(timeout=10)

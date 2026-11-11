@@ -83,8 +83,36 @@ class WafAcceptance(NginxAssemblyTests):
             self.assertNotIn(sentinel, file.read_text(errors="replace"), str(file))
 
 
+class SelfReadWaf(unittest.TestCase):
+    CYBERHERD_SELF_READ_ENABLED = True
+    setUpClass = classmethod(NginxAssemblyTests.setUpClass.__func__)
+    stop_nginx = classmethod(NginxAssemblyTests.stop_nginx.__func__)
+    request = NginxAssemblyTests.request
+
+    def test_signed_self_transport_and_private_headers_with_crs(self):
+        path = '/api/v1/cyberherd/me'
+        authorization = transport_header(path, 'GET')
+        status, headers, _ = self.request('production', path, headers={
+            'Authorization': authorization, 'Origin': 'https://lightning-goats.com'}, source='127.0.7.1')
+        self.assertEqual(status, 200)
+        self.assertEqual(headers['Cache-Control'], 'no-store')
+        self.assertEqual(self.backends['production'].calls[-1][2]['Authorization'], authorization)
+        for file in self.root.rglob('*.log'):
+            self.assertNotIn(authorization, file.read_text(errors='replace'))
+
+    def test_self_probe_blocks_and_operator_route_remains_closed(self):
+        before = len(self.backends['production'].calls)
+        status, _, _ = self.request('production', '/api/v1/cyberherd/me',
+            headers={'X-Lightning-Goats-Waf-Probe': 'blocked'}, source='127.0.7.2')
+        self.assertEqual(status, 403 if os.environ.get('LG_WAF_MODE', 'On') == 'On' else 200)
+        expected = before if os.environ.get('LG_WAF_MODE', 'On') == 'On' else before + 1
+        self.assertEqual(len(self.backends['production'].calls), expected)
+        self.assertEqual(self.request('production', '/api/v1/cyberherd/operator/state')[0], 404)
+        self.assertEqual(len(self.backends['production'].calls), expected)
+
+
 if __name__ == "__main__":
     if len(sys.argv) != 3:
         raise SystemExit(__doc__)
     os.environ["LG_WAF_CRS"], os.environ["LG_WAF_MODULE"] = sys.argv[1:]
-    unittest.main(argv=[sys.argv[0]], defaultTest="WafAcceptance", verbosity=2)
+    unittest.main(argv=[sys.argv[0]], defaultTest=("WafAcceptance", "SelfReadWaf"), verbosity=2)

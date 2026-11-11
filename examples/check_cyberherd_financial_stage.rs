@@ -124,7 +124,8 @@ fn validate_stage(
         "candidate project, receive, provider or epoch binding differs"
     );
     ensure!(
-        member.settings.member_percent == p.member_percent_ceiling
+        member.settings.max_members == 3
+            && member.settings.member_percent == p.member_percent_ceiling
             && reward.member_percent_ceiling == p.member_percent_ceiling
             && reward.max_sats_per_feed == p.max_sats_per_feed
             && reward.max_sats_per_24h == p.max_sats_per_24h
@@ -341,6 +342,7 @@ mod tests {
             ),
             (3, vec!["policy", "max_net_sats"], toml::Value::Integer(101)),
             (2, vec!["policy", "max_net_sats"], toml::Value::Integer(97)),
+            (1, vec!["settings", "max_members"], toml::Value::Integer(10)),
             (
                 1,
                 vec!["rewards", "maximum_net_sats"],

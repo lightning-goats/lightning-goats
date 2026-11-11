@@ -294,7 +294,8 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
     unit = Path('/etc/systemd/system/lightning-goats-receive.service')
     member_mask = Path('/etc/systemd/system/cyberherd.service')
     program = Path('/usr/local/bin/lightning-goatsd')
-    original = {str(path): path.read_bytes() for path in (config, member, unit)}
+    original = {str(path): path.read_bytes() for path in (config, member, unit,
+        Path('/etc/cyberherd-payout/config.toml'), Path('/etc/cyberherd-signer/config.toml'))}
     for name in ('lightning-goats-receive', 'cyberherd', 'cyberherd-payout', 'cyberherd-signer'):
         assert run('/usr/bin/systemctl', 'show', name + '.service', '-p', 'MainPID', '--value').strip() == '0'
     guard = Path('/run/lightning-goats-contact-fixture')
@@ -682,6 +683,81 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
         for key in ('feed_credit_sats', 'threshold_sats', 'feeds_due', 'remainder_sats', 'unresolved_feed_attempt'):
             assert after_programs[key] == financial_before[key]
         assert counts['post'] == 0
+        # FIRST financial activation on this disposable VM only. Its synthetic
+        # journals have no funded historical barriers or provider submissions.
+        # Every daemon joins the loopback-only fixture namespace. The signer
+        # credential is a known synthetic scalar, and its helper is a trap that
+        # must never run. An acknowledgment here is not real-provider acceptance.
+        for role in ('cyberherd-payout', 'cyberherd-signer'):
+            dropdir = Path('/etc/systemd/system') / (role + '.service.d')
+            dropdir.mkdir(mode=0o755)
+            drop = dropdir / '90-ci-network.conf'
+            drop.write_text('[Service]\nNetworkNamespacePath=/proc/' + str(os.getpid()) + '/ns/net\n')
+            drop.chmod(0o644)
+        run('/usr/bin/systemctl', 'daemon-reload')
+        signer_key = Path('/etc/credstore.encrypted/cyberherd-signer-client')
+        assert not signer_key.exists() and not signer_key.is_symlink()
+        w.encrypt(signer_key, 'nostr-client-key', ('0' * 63 + '2').encode())
+        signer_trap = Path('/usr/local/bin/nak')
+        assert not signer_trap.exists() and not signer_trap.is_symlink()
+        signer_trap.write_text('#!/usr/bin/python3\nfrom pathlib import Path\n'
+            'Path("/var/lib/cyberherd-signer/UNEXPECTED-TEST-SIGNING").write_text("unexpected")\nraise SystemExit(97)\n')
+        signer_trap.chmod(0o755)
+        activation_candidate = base / 'ci-financial-activation-candidate'
+        run(*launcher, '--cyberherd-financial-stage', str(activation_candidate),
+            '--validator', str(financial_checker), '--validator-sha256', hashlib.sha256(financial_checker.read_bytes()).hexdigest(),
+            '--member-percent', '10', '--max-sats-per-feed', '100', '--max-sats-per-24h', '1000',
+            '--max-fee-sats', '2', '--max-net-sats', '98', '--max-new-per-hour', '10')
+        activation_candidate_sha = hashlib.sha256((activation_candidate / 'PREPARED.json').read_bytes()).hexdigest()
+        activation = base / 'ci-financial-activation'
+        planned_financial = json.loads(run(*launcher, '--cyberherd-financial-maintenance', 'plan',
+            str(activation_candidate), str(program_review), str(activation),
+            '--candidate-sha256', activation_candidate_sha, '--program-review-sha256', program_sha))
+        assert planned_financial == {'planned': True, 'configurations': 4, 'activation_authorized': False,
+            'services_changed': False, 'journals_opened': False}
+        activation_sha = hashlib.sha256((activation / 'PREPARED.json').read_bytes()).hexdigest()
+        financial_checkpoint = json.loads(run(*launcher, '--cyberherd-financial-maintenance', 'checkpoint',
+            str(activation), '--review-sha256', activation_sha, '--exclusive-maintenance'))
+        assert financial_checkpoint == {'checkpointed': True, 'current_native_backup_verified': True,
+            'private_reward_review_ready': True, 'configurations_changed': False,
+            'services_started': False, 'activation_authorized': False}
+        checkpoint_sha = hashlib.sha256((activation / 'CHECKPOINT.json').read_bytes()).hexdigest()
+        reward_review_sha = hashlib.sha256((activation / 'reward-review/REVIEW.json').read_bytes()).hexdigest()
+        activation_report = json.loads((activation / 'reward-review/REVIEW.json').read_text())
+        assert activation_report['unreceived_payment_events'] == activation_report['unreceived_feeding_events'] == 0
+        assert activation_report['stored_member_percent'] == 10 and activation_report['stored_max_members'] == 3
+        assert activation_report['stages'] == {}
+        financial_args = [str(activation), '--review-sha256', activation_sha,
+            '--checkpoint-sha256', checkpoint_sha, '--reward-review-sha256', reward_review_sha]
+        installed_financial = json.loads(run(*launcher, '--cyberherd-financial-maintenance', 'apply',
+            *financial_args, '--exclusive-maintenance'))
+        assert installed_financial == {'configured': True, 'configurations': 4,
+            'financial_images_unchanged': True, 'services_started': False}
+        financial_resumed = json.loads(run(*launcher, '--cyberherd-financial-maintenance', 'resume',
+            *financial_args, '--approve-financial-activation', '--acknowledge-provider-recipient-review'))
+        assert financial_resumed == {'core_running': True, 'membership_running': True,
+            'outgoing_roles_started': True, 'outgoing_roles_enabled': True, 'original_configuration': False,
+            'provider_execution_qualified': False, 'external_recovery_adopted': False}
+        for role in ('cyberherd-payout', 'cyberherd-signer'):
+            assert run('/usr/bin/systemctl', 'is-enabled', role + '.service').strip() == 'enabled'
+            assert run('/usr/bin/systemctl', 'is-active', role + '.service').strip() == 'active'
+            assert Path('/etc/systemd/system/multi-user.target.wants', role + '.service').resolve() == Path('/usr/local/lib/systemd/system', role + '.service')
+        # A real UDS server owned by the expected signer identity establishes
+        # startup beyond Type=simple's early exec transition, without an RPC.
+        signer_socket = Path('/run/cyberherd-signer/signer.sock')
+        w.await_ready(lambda: signer_socket.is_socket(), 'actual financial signing broker socket')
+        assert signer_socket.stat().st_uid == pwd.getpwnam('cyberherd-signer').pw_uid
+        assert not Path('/var/lib/cyberherd-signer/UNEXPECTED-TEST-SIGNING').exists()
+        financial_running = w.http_json('http://127.0.0.1:8787/api/v1/status')
+        for key in ('feed_credit_sats', 'threshold_sats', 'feeds_due', 'remainder_sats', 'unresolved_feed_attempt'):
+            assert financial_running[key] == financial_before[key]
+        for role, program in [('payout', 'cyberherd-payoutd'), ('signer', 'cyberherd-signerd')]:
+            role_name = 'cyberherd-' + role
+            pid = run('/usr/bin/systemctl', 'show', role_name + '.service', '-p', 'MainPID', '--value').strip()
+            assert pid.isdecimal() and int(pid) > 1
+            assert os.readlink('/proc/' + pid + '/ns/net') == os.readlink('/proc/self/ns/net')
+            assert hashlib.sha256(Path('/proc', pid, 'exe').read_bytes()).hexdigest() == hashlib.sha256(Path('/usr/local/bin', program).read_bytes()).hexdigest()
+        assert counts['post'] == 0
         finished = True
         return {'accepted': True, 'old_core_was_harmless_elf_standin': True,
                 'actual_native_schema_23_backup': True, 'actual_runtime_uid_clone_migration': True,
@@ -733,6 +809,16 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
                     'outgoing_roles_masked': True, 'payouts_enabled': False, 'live_migration_performed': False,
                     'different_program_builds_used': False, 'provider_operations': 0,
                     'gateway_post_count': counts['post'], 'public_network_used': False, 'live_host_qualified': False},
+                'installed_first_financial_configuration': {'accepted': True,
+                    'actual_completed_program_upgrade_consumed': True, 'actual_four_native_candidate_parsers': True,
+                    'actual_stored_allocation_bound': True, 'fresh_four_journal_backup_verified': True,
+                    'fresh_financial_tail_and_frozen_backlog_reviewed': True, 'live_images_unchanged_during_apply': True,
+                    'only_four_configurations_installed': True, 'actual_four_roles_started': True,
+                    'outgoing_roles_enabled_for_boot': True, 'actual_signer_socket_owner_checked': True,
+                    'core_credit_and_original_unknown_uuid_unchanged': True, 'synthetic_credentials_only': True,
+                    'provider_recipient_acknowledgment_was_synthetic': True, 'nak_helper_calls': 0,
+                    'provider_operations': 0, 'gateway_post_count': counts['post'], 'public_network_used': False,
+                    'provider_execution_qualified': False, 'external_recovery_adopted': False, 'live_host_qualified': False},
                 'installed_signed_self_read_activation': {'accepted': True,
                     'native_original_uid_configuration_check': True, 'actual_current_four_journal_backup': True,
                     'financial_images_unchanged_during_apply': True, 'only_member_auth_configuration_added': True,
@@ -754,12 +840,26 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
                 print('DISPOSABLE NATIVE DIAGNOSTIC ' + run(*argv), file=sys.stderr)
             except Exception:
                 print('DISPOSABLE NATIVE DIAGNOSTIC unavailable', file=sys.stderr)
-        for name in ('lightning-goats-receive.service', 'cyberherd.service'):
+        for name in ('lightning-goats-receive.service', 'cyberherd.service', 'cyberherd-payout.service', 'cyberherd-signer.service'):
             result = subprocess.run(['/usr/bin/journalctl', '--no-pager', '-u', name, '-n', '25', '-o', 'cat'],
                                     capture_output=True, text=True, timeout=10)
             print('DISPOSABLE CONTACT FIXTURE ' + name + '\n' + result.stdout[-8000:], file=sys.stderr)
         raise
     finally:
+        # Only disposable synthetic roles exist here. Stop outgoing workers
+        # before core/member, remove only this phase's enablement, and remask
+        # them before configuration-only cleanup. Retain every journal byte.
+        for role in ('cyberherd-payout', 'cyberherd-signer'):
+            mask = Path('/etc/systemd/system') / (role + '.service')
+            if not mask.is_symlink():
+                assert not mask.exists()
+                run('/usr/bin/systemctl', 'stop', role + '.service')
+                wanted = Path('/etc/systemd/system/multi-user.target.wants') / (role + '.service')
+                if wanted.is_symlink():
+                    assert wanted.resolve() == Path('/usr/local/lib/systemd/system') / (role + '.service')
+                    run('/usr/bin/systemctl', 'disable', role + '.service')
+                mask.symlink_to('/dev/null')
+            assert os.readlink(mask) == '/dev/null'
         run('/usr/bin/systemctl', 'stop', 'cyberherd.service', 'lightning-goats-receive.service')
         if not member_mask.exists() and not member_mask.is_symlink(): member_mask.symlink_to('/dev/null')
         assert member_mask.is_symlink() and os.readlink(member_mask) == '/dev/null'

@@ -107,6 +107,9 @@ def render(original, identities, plans_gid, limits):
     # This aligns the seed/configuration with the separately observed stored
     # setting. It is never a command to modify the running membership journal.
     member['settings']['member_percent'] = limits['member_percent']
+    # Operator decision 2026-11-11: three seats. As with the allocation seed,
+    # this must match separately selected stored state, not reset an owner.
+    member['settings']['max_members'] = 3
     member['rewards'] = {'fee_basis_points': 0, 'minimum_fee_sats': limits['max_fee_sats'],
         'minimum_net_sats': 1, 'maximum_net_sats': limits['max_net_sats'],
         'profile_max_age_seconds': 3600, 'operation_addresses': sorted(operations)}
@@ -134,9 +137,10 @@ def observed_allocation(owner, percent):
     if (value.get('version') != 1 or type(value.get('generated_at')) is not int
             or abs(time.time() - value['generated_at']) > 30
             or roster.get('owner') != owner or type(roster.get('member_percent')) is not int
-            or roster['member_percent'] != percent):
-        raise ValueError('select the requested stored allocation through the operator interface before preparation')
-    return {'owner': owner, 'member_percent': percent, 'generated_at': value['generated_at']}
+            or roster['member_percent'] != percent or type(roster.get('capacity')) is not int
+            or roster['capacity'] != 3):
+        raise ValueError('select the requested stored allocation and three-user capacity through the operator interface before preparation')
+    return {'owner': owner, 'member_percent': percent, 'capacity': 3, 'generated_at': value['generated_at']}
 
 
 def check_report(raw):

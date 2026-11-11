@@ -21,6 +21,10 @@ Operator instructions take precedence where the reference differs:
 - **Membership never requires NIP-05.** Signed-event identity remains mandatory;
   a payout address must still be valid before paying. Free social entry retains
   its Lightning-address requirement. Zap displacement provides the incentive.
+- **The operator-selected CyberHerd capacity is three users**, not ten
+  (2026-11-11). New deployment configuration uses three slots. Existing stored
+  settings require an explicit audited settings change; changing a configuration
+  seed alone does not update an existing owner or authorize implicit eviction.
 - **Rewards follow confirmed feedings.** There is one reward opportunity per
   confirmed feeder UUID. Reaching a balance threshold, receipt/command acceptance,
   failed/paused requests or uncertain outcomes do not authorize distribution.

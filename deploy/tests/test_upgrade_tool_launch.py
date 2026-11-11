@@ -88,6 +88,12 @@ class ToolLaunchTests(unittest.TestCase):
             self.assertIn('--max-sats-per-feed', run(ok=True).stdout)
             command[6:] = ['--cyberherd-program-maintenance', '--help']
             self.assertIn('resume-original', run(ok=True).stdout)
+            command[6:] = ['--cyberherd-financial-maintenance', '--help']
+            self.assertIn('checkpoint', run(ok=True).stdout)
+            command[6:] = ['--cyberherd-financial-maintenance', 'resume', '--help']
+            self.assertIn('--acknowledge-provider-recipient-review', run(ok=True).stdout)
+            command[6:] = ['--cyberherd-project-operator', 'apply', '--help']
+            self.assertIn('--approve-project-operator', run(ok=True).stdout)
             command[6:] = ['--help']
             for name in LAUNCH.FILES - {'launch-vps-upgrade.py'}:
                 target = bundle / name

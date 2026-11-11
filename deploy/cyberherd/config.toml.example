@@ -15,7 +15,7 @@ poll_seconds = 5
 
 [settings]
 minimum_sats = 10
-max_members = 10
+max_members = 3
 member_percent = 10
 
 [core]

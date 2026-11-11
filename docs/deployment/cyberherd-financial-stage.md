@@ -112,6 +112,14 @@ the six programs, with separate resumption and pre-resumption program rollback.
 It does not apply this financial candidate or activate outgoing roles; that later
 configuration/activation executor and actual qualification remain required.
 
+The separate [first financial transaction](cyberherd-financial-maintenance.md)
+now implements that configuration checkpoint/application/resumption path in source.
+It requires the completed selected-program upgrade and a fresh stopped-writer
+backup, binds the private reward review and refuses unclassified financial intake,
+funded historical work or existing monetary holds. Explicit financial activation
+and provider/recipient review acknowledgment are separate from installation.
+No actual-host financial transaction or provider execution is established by it.
+
 The [native backlog review](cyberherd-state-maintenance.md#review-retained-reward-backlog)
 must use a current verified native snapshot, not the running
 membership journal or a Python SQLite reader. `reward_worker::Worker::tick`

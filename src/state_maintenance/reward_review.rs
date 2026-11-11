@@ -58,8 +58,11 @@ pub struct RewardReview {
     pub owner: String,
     pub epoch: Uuid,
     pub stored_member_percent: u8,
+    pub stored_max_members: u16,
     pub received_through: u64,
     pub core_event_head: u64,
+    pub unreceived_payment_events: u64,
+    pub unreceived_feeding_events: u64,
     pub pending_ingress: u64,
     pub pending_feeding_ingress: u64,
     pub pending_feeds: u64,
@@ -182,12 +185,28 @@ async fn inspect_pools(
         binding.epoch == policy.epoch && binding.core_uid == policy.components[&Role::Core].uid,
         "reward binding differs from verified backup scope"
     );
+    let received_through = row.try_get::<i64, _>("received_through")?;
+    let unreceived = |kind: &'static str| async move {
+        u64::try_from(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM event_log WHERE seq>? AND event_type=?",
+            )
+            .bind(received_through)
+            .bind(kind)
+            .fetch_one(core)
+            .await?,
+        )
+        .map_err(anyhow::Error::from)
+    };
     let mut report = RewardReview {
         version: 1, id: Uuid::new_v4(), bundle_id: manifest.id, bundle_created_at: manifest.created_at,
         bundle_manifest_sha256: digest, reviewed_at: crate::cyberherd::calendar::now()?,
         owner: policy.owner.clone(), epoch: policy.epoch, stored_member_percent: settings.member_percent,
-        received_through: u64::try_from(row.try_get::<i64, _>("received_through")?)?,
+        stored_max_members: settings.max_members,
+        received_through: u64::try_from(received_through)?,
         core_event_head: u64::try_from(sqlx::query_scalar::<_, i64>("SELECT COALESCE(MAX(seq),0) FROM event_log").fetch_one(core).await?)?,
+        unreceived_payment_events: unreceived("payment_received").await?,
+        unreceived_feeding_events: unreceived("feeder_confirmed").await?,
         pending_ingress: count(member, "SELECT COUNT(*) FROM ingress WHERE owner=? AND state='pending'", &policy.owner).await?,
         pending_feeding_ingress: count(member, "SELECT COUNT(*) FROM ingress WHERE owner=? AND state='pending' AND kind='feeding'", &policy.owner).await?,
         pending_feeds: manifest.report.pending_feeds,

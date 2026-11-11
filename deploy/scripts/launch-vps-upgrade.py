@@ -34,6 +34,8 @@ FILES = {
     'install-cyberherd-self-read-site.py',
     'prepare-cyberherd-financial-stage.py',
     'maintain-cyberherd-programs.py',
+    'activate-cyberherd-financial.py',
+    'enable-cyberherd-project-operator.py',
 }
 
 
@@ -90,7 +92,10 @@ def main():
     sys.path.insert(0, str(root))
     arguments = sys.argv[2:]
     operation = 'upgrade-vps-canary.py'
-    if arguments[:1] == ['--cyberherd-core']:
+    if arguments[:1] == ['--cyberherd-project-operator']:
+        operation = 'enable-cyberherd-project-operator.py'
+        arguments = arguments[1:]
+    elif arguments[:1] == ['--cyberherd-core']:
         operation = 'upgrade-cyberherd-core.py'
         arguments = arguments[1:]
     elif arguments[:1] == ['--cyberherd-inactive']:
@@ -143,6 +148,9 @@ def main():
         arguments = arguments[1:]
     elif arguments[:1] == ['--cyberherd-program-maintenance']:
         operation = 'maintain-cyberherd-programs.py'
+        arguments = arguments[1:]
+    elif arguments[:1] == ['--cyberherd-financial-maintenance']:
+        operation = 'activate-cyberherd-financial.py'
         arguments = arguments[1:]
     sys.argv = [str(root / operation), *arguments]
     runpy.run_path(sys.argv[0], run_name='__main__', init_globals={

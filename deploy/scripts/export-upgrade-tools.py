@@ -29,6 +29,8 @@ FILES = (
     'install-cyberherd-self-read-site.py',
     'prepare-cyberherd-financial-stage.py',
     'maintain-cyberherd-programs.py',
+    'activate-cyberherd-financial.py',
+    'enable-cyberherd-project-operator.py',
 )
 
 

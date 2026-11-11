@@ -322,12 +322,14 @@ async fn native_backlog_covers_frozen_allocations_closed_plans_lost_acks_pending
             && report.all_barriers_examined
     );
     assert_eq!(report.received_through, report.core_event_head);
+    assert_eq!(report.unreceived_payment_events, 0);
+    assert_eq!(report.unreceived_feeding_events, 0);
     // Today's settings are not the historical barriers' allocations.
     sqlx::query("UPDATE owners SET settings_json=? WHERE owner=?")
         .bind(
             serde_json::to_string(&Settings {
                 minimum_sats: 10,
-                max_members: 10,
+                max_members: 3,
                 member_percent: 0,
             })
             .unwrap(),
@@ -355,11 +357,93 @@ async fn native_backlog_covers_frozen_allocations_closed_plans_lost_acks_pending
     let after = f.review().await.unwrap();
     assert_eq!(after.stages, report.stages);
     assert_eq!(after.stored_member_percent, 0);
+    assert_eq!(after.stored_max_members, 3);
     assert_eq!(
         (after.pending_ingress, after.pending_feeding_ingress),
         (2, 1)
     );
     assert!(after.received_through < after.core_event_head);
+    assert_eq!(after.unreceived_payment_events, 0);
+    assert_eq!(after.unreceived_feeding_events, 0);
+}
+
+#[tokio::test]
+async fn financial_cursor_tail_is_distinct_from_information_and_is_consumed_at_the_exact_cursor() {
+    let f = Fixture::new().await;
+    f.core
+        .append_event("weather_status", &serde_json::json!({"synthetic": true}))
+        .await
+        .unwrap();
+    let weather = f.review().await.unwrap();
+    assert!(weather.core_event_head > weather.received_through);
+    assert_eq!(
+        (
+            weather.unreceived_payment_events,
+            weather.unreceived_feeding_events
+        ),
+        (0, 0)
+    );
+    f.core
+        .record_payment(&SettledPayment {
+            source: "strike".into(),
+            source_id: Uuid::new_v4().to_string(),
+            payment_hash: None,
+            address_user: "herd".into(),
+            credit_pool: "herd".into(),
+            amount_msat: 1_000_000,
+            settled_at: None,
+            context_json: None,
+        })
+        .await
+        .unwrap();
+    let payment = f.review().await.unwrap();
+    assert_eq!(
+        (
+            payment.unreceived_payment_events,
+            payment.unreceived_feeding_events
+        ),
+        (1, 0)
+    );
+    let id = f.core.begin_feed_attempt(1000).await.unwrap().unwrap();
+    f.core.confirm_feed_attempt(id).await.unwrap();
+    let feeding = f.review().await.unwrap();
+    assert_eq!(
+        (
+            feeding.unreceived_payment_events,
+            feeding.unreceived_feeding_events
+        ),
+        (1, 1)
+    );
+    // Synthetic cursor fixture only. No production store write or activation.
+    sqlx::query("UPDATE core_streams SET received_through=? WHERE owner=?")
+        .bind(i64::try_from(payment.core_event_head).unwrap())
+        .bind(&f.policy.owner)
+        .execute(&f.member_db)
+        .await
+        .unwrap();
+    let after_payment = f.review().await.unwrap();
+    assert_eq!(
+        (
+            after_payment.unreceived_payment_events,
+            after_payment.unreceived_feeding_events
+        ),
+        (0, 1)
+    );
+    sqlx::query("UPDATE core_streams SET received_through=? WHERE owner=?")
+        .bind(i64::try_from(feeding.core_event_head).unwrap())
+        .bind(&f.policy.owner)
+        .execute(&f.member_db)
+        .await
+        .unwrap();
+    let caught_up = f.review().await.unwrap();
+    assert_eq!(
+        (
+            caught_up.unreceived_payment_events,
+            caught_up.unreceived_feeding_events
+        ),
+        (0, 0)
+    );
+    assert!(!caught_up.activation_authorized && caught_up.external_reconciliation_required);
 }
 
 #[tokio::test]

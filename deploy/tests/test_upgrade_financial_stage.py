@@ -123,12 +123,15 @@ class FinancialBoundaries(unittest.TestCase):
     def test_projection_requires_fresh_stored_allocation_and_fixed_loopback_route(self):
         opener=MagicMock();response=opener.open.return_value.__enter__.return_value;response.status=200
         response.headers={'Content-Type':'application/json'}
-        value={'version':1,'generated_at':100,'roster':{'owner':OWNER,'member_percent':10}}
+        value={'version':1,'generated_at':100,'roster':{'owner':OWNER,'member_percent':10,'capacity':3}}
         with patch.object(F.urllib.request,'build_opener',return_value=opener),patch.object(F.time,'time',return_value=100):
             response.read.return_value=json.dumps(value).encode();self.assertEqual(F.observed_allocation(OWNER,10)['member_percent'],10)
             self.assertEqual(opener.open.call_args.args[0].full_url,'http://127.0.0.1:3340/api/v1/cyberherd')
             for changed in [dict(value,generated_at=69),dict(value,generated_at=131),dict(value,version=2),
-                    dict(value,roster={'owner':OWNER,'member_percent':0}),dict(value,roster={'owner':OWNER,'member_percent':True})]:
+                    dict(value,roster={'owner':OWNER,'member_percent':0,'capacity':3}),
+                    dict(value,roster={'owner':OWNER,'member_percent':True,'capacity':3}),
+                    dict(value,roster={'owner':OWNER,'member_percent':10,'capacity':10}),
+                    dict(value,roster={'owner':OWNER,'member_percent':10,'capacity':True})]:
                 response.read.return_value=json.dumps(changed).encode()
                 with self.assertRaises(ValueError):F.observed_allocation(OWNER,10)
 
@@ -152,7 +155,7 @@ class FinancialFiles(unittest.TestCase):
         for obj,name,value in [(F.C,'BASE',self.base),(F.C,'CONFIG',self.config),(F.Q,'ETC',self.etc),
             (F.C,'root',lambda:None),(F.C.grp,'getgrnam',lambda n:types.SimpleNamespace(gr_gid=10006)),
             (F.U.P,'baseline',lambda **kw:copy.deepcopy(self.baseline)),(F.C,'command',self.command),
-            (F,'observed_allocation',lambda owner,percent:{'owner':owner,'member_percent':percent,'generated_at':100}),
+            (F,'observed_allocation',lambda owner,percent:{'owner':owner,'member_percent':percent,'capacity':3,'generated_at':100}),
             (F,'verified_tool_identity',lambda:{'source_commit':'a'*40,'manifest_sha256':'b'*64})]:
             context=patch.object(obj,name,value);context.start();self.addCleanup(context.stop)
 

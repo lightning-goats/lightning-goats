@@ -145,6 +145,7 @@ silently skipped. At most 32 non-closed private UUID examples are retained,
 with an explicit remaining-example count; classification itself is never truncated.
 
 Pending intake/feeding inputs, the membership cursor and core event head,
+unreceived payment/feeding event counts beyond that cursor,
 unresolved physical feeds, unfinalized core reservations, unresolved provider
 submissions and retained payout holds remain visible. Empty planned-work counts
 alone cannot prove there is no earlier work left to process. A closed zero plan

@@ -5,6 +5,12 @@ Current CyberHerd checkpoint: **2026-11-11**. The full
 remains incomplete. It supersedes older CyberHerd deferrals; it does not resume
 Monero or authorize financial/physical activation.
 
+The operator selected **3 user spots** and reuse of the existing messaging
+identity for operator authentication. The [configuration and signed-settings
+adapter](deployment/cyberherd-project-operator.md) preserves the current reward
+percentage and uses the household bunker. Source preparation is separate from
+the actual signed command and public capacity readback.
+
 The existing receive service is running after the operator-approved
 [live core upgrade](testing/cyberherd-live-core-upgrade-20261110.md), preserving
 paid accounting, IDs, epoch, exact signed bytes and configuration. The
@@ -73,6 +79,15 @@ cases and the installed native/systemd transaction. Actual VPS preparation and
 independent staged/original file/process readback pass without opening journals
 or changing running applications. No actual-host maintenance, financial candidate
 application or outgoing activation has been performed.
+
+The [first financial configuration transaction](deployment/cyberherd-financial-maintenance.md)
+is now implemented separately in source. It consumes the sealed candidate and
+completed selected-program review, takes a fresh stopped-writer backup/review,
+refuses unreceived financial events or historical funded work, and separates
+configuration application from explicit four-role activation. A native review
+distinguishes payment/feeding cursor tails from ordinary overlay lag. Source,
+protected-file and disposable installed qualification are being completed; no
+actual-host financial transaction or provider execution is established.
 
 Separate NIP-46 clients now pass [actual household signing checks](testing/cyberherd-bunker-checkpoint-20261110.md):
 membership kinds 1/1311 and payout-signing kind 9734 preserve the exact project

@@ -3,7 +3,7 @@
 //! No provider, signing broker, relay, direct ledger access or feeder command.
 #![forbid(unsafe_code)]
 
-use anyhow::{Result, bail, ensure};
+use anyhow::{Context as _, Result, bail, ensure};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use bitcoin::secp256k1::{Keypair, Message, Secp256k1, SecretKey};
 use lightning_goats::{nostr::SignedNostrEvent, nostr_event::canonical_bytes};
@@ -165,15 +165,19 @@ async fn command(client: &Client, body: &Value) -> Result<Value> {
     let bytes = serde_json::to_vec(body)?;
     // A not-yet-caught-up core fence may refuse a new mutation. Every retry
     // preserves UUID/body and signs a fresh authorization; no receipt is assumed.
-    for attempt in 0..15 {
+    // The disposable member polls intake every five seconds. Three seconds did
+    // not even span one poll; allow three cycles, bounded by a monotonic deadline.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    loop {
         let header = authorization(2, "POST", COMMAND, &bytes)?;
         let response = send(client, Method::POST, COMMAND, &bytes, &header, ORIGIN).await?;
-        if response.status() != StatusCode::CONFLICT || attempt == 14 {
-            return value(response).await;
+        if response.status() != StatusCode::CONFLICT || tokio::time::Instant::now() >= deadline {
+            return value(response)
+                .await
+                .with_context(|| format!("disposable operator action {}", body["action"]["type"]));
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
-    bail!("unreachable bounded command loop")
 }
 
 async fn exercise(client: &Client) -> Result<()> {

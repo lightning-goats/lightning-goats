@@ -81,3 +81,14 @@ remainder and unresolved UUID. The fixture has no public network, real provider,
 real identity or physical destination. These new assertions await exact native CI
 and installed systemd execution; the prior qualified stages above do not prove
 them. Production operator routes and configuration remain unchanged.
+
+The first extension source `bbd4cca32bbe268c36b907b8356a3c2e9ad0aab0`
+passed native Rust and the other eight workflows but failed Deployment run
+`42966027465`, systemd job `130345440657`, when the ready-command client exhausted
+its retry loop on 409. That loop waited about three seconds while the actual
+installed intake configuration polls every five seconds. The client now permits
+three intake cycles under a monotonic 15-second deadline, retaining the exact
+UUID/body/revision and fresh authorization on each attempt. Explicit refusal
+tests still expect immediate 409, and the service's ordering fence and poll rate
+are unchanged. The fixture pins its five-second configuration; subsequent exact
+qualification remains required, rather than rerunning unchanged failed source.

@@ -514,6 +514,7 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
         # provider authority exists in this fixture.
         financial_before = w.http_json('http://127.0.0.1:8787/api/v1/status')
         assert isinstance(financial_before['unresolved_feed_attempt'], str)
+        assert operator_config['poll_seconds'] == 5  # bounded client wait covers three intake polls
         gateway_safety.update(override_enabled=False, remote_enabled=True)
         w.await_ready(lambda: w.http_json('http://127.0.0.1:8787/api/v1/status')['feeder_override_active'] is False,
                       'synthetic gateway ready before membership commands')

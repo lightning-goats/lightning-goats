@@ -24,8 +24,14 @@ These fixtures do not establish live transfers or external recovery adoption.
 The [native recipient/DNS checkpoint](testing/cyberherd-recipient-checkpoint-20261110.md)
 now passes exact CI and actual-host checks: credential-free public LNURL metadata
 validation plus exact private IPv4/IPv6 and mixed-answer refusal before HTTP.
-Only temporary units/fixture mounts were used. Global firewall/forwarding,
-all recipients and external public IPv6 remain separate.
+Only temporary units/fixture mounts were used. The subsequent
+[actual host network checks](testing/cyberherd-host-network-checkpoint-20261111.md)
+verify the running member's effective kernel filters, three credential-free
+CyberHerd identity probes, the receive UID's gateway/private-path policy and
+certificate-verified public IPv4/IPv6 TLS. Original application files/PIDs/masks
+and the full firewall ruleset stay exact; no provider API or feeder request runs.
+Functional forwarding from another peer, public inbound IPv6, all recipients and
+external recovery adoption remain separate.
 
 The separate [payout credential](deployment/cyberherd-payout-credential.md) is
 host-encrypted and passed receive-request/same-core-resource read checks after

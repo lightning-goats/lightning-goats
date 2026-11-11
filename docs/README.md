@@ -15,6 +15,11 @@ is now public on the leaderboard. [Operator controls](architecture/cyberherd-ope
 remain closed with an empty allowlist; no financial or physical activation follows
 from self-status access.
 
+[Actual host network checks](testing/cyberherd-host-network-checkpoint-20261111.md)
+now verify kernel filters, the separate receive/CyberHerd private-network policies
+and public IPv4/IPv6 TLS without credentials, API requests or application restarts.
+They preserve the existing firewall and WireGuard forwarding setup.
+
 [Explicit failed-payment cost review](architecture/cyberherd-failed-cost-recovery.md)
 now has a [485-test source checkpoint](testing/cyberherd-failed-cost-checkpoint-20261110.md).
 Provider failure alone never releases funds, and the legacy two-store restore

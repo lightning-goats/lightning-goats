@@ -152,7 +152,15 @@ API and herd LNURL discovery return 200; discovery still advertises native zaps.
 The tool has no apply/resume command. Contact, live schema and credentials remain
 unchanged; no test invoice, payment, DM, Nostr post or physical action is initiated.
 
-Still required: a protected maintenance executor
+The next native change adds explicit pre-contact snapshot and source-verification
+commands to support reproducible migration rehearsal with one qualified tool.
+They retain the ordinary four-writer/file/WAL fences, accept only the exact known
+schema-23 source and do not make that bundle eligible for ordinary restore.
+The strengthened required root fixture now takes the actual native snapshot from
+four distinct-owned synthetic journals instead of constructing its manifest.
+This subsequent change still needs exact CI qualification and is not installed.
+
+Still required: qualification of the explicit source snapshot; a protected maintenance executor
 and installed migration rehearsal; current backup and actual deployment;
 controlled provider/paid-contact acceptance and recipient-side DM observation.
 The old legacy-core upgrade helper is not this upgrade path. No production

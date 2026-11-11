@@ -174,6 +174,15 @@ impl Operator {
         })
     }
     pub async fn snapshot(&self, destination: &Path) -> Result<Manifest> {
+        self.snapshot_schema(destination, false).await
+    }
+    /// Explicit additive-upgrade boundary. Same writer/file fences as ordinary
+    /// snapshots; accepts only the compiled exact schema-23 source, never a
+    /// general older schema. Its bundle cannot enter ordinary restore staging.
+    pub async fn snapshot_before_contact(&self, destination: &Path) -> Result<Manifest> {
+        self.snapshot_schema(destination, true).await
+    }
+    async fn snapshot_schema(&self, destination: &Path, before_contact: bool) -> Result<Manifest> {
         self.control.check(&self.policy).await?;
         // Open and validate every source before creating the new output directory.
         let mut sources = Vec::new();
@@ -198,7 +207,11 @@ impl Operator {
         for (_, source) in &sources {
             source.unchanged()?;
         }
-        let report = database::inspect(destination, &self.policy).await?;
+        let report = if before_contact {
+            database::inspect_before_contact(destination, &self.policy).await?
+        } else {
+            database::inspect(destination, &self.policy).await?
+        };
         files::check_images(destination, &images, self.policy.max_component_bytes)?;
         self.control.check(&self.policy).await?;
         for (_, source) in &sources {

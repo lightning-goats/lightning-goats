@@ -263,10 +263,11 @@ async fn root_contact_upgrade_compares_private_images_and_retains_original_backu
     let (p, _keep) = seed(root.path()).await;
     let policy_path = root.path().join("policy.toml");
     files::write_new(&policy_path, toml::to_string(&p).unwrap().as_bytes()).unwrap();
-    let operator = Operator::load(&policy_path).unwrap();
+    let mut operator = Operator::load(&policy_path).unwrap();
+    let ready = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    operator.control = crate::state_maintenance::control::Control::Fixture(ready.clone());
     let before = root.path().join("before");
     let after = root.path().join("after");
-    copy_images(&p, &before);
     copy_images(&p, &after);
     let protect = |directory: &Path| {
         std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o700)).unwrap();
@@ -278,35 +279,55 @@ async fn root_contact_upgrade_compares_private_images_and_retains_original_backu
             .unwrap();
         }
     };
-    protect(&before);
     protect(&after);
-    // Reproduce the preceding native snapshot's manifest using its exact report
-    // and image contract. This is synthetic data; no source or live service is
-    // stopped and the source-schema exception is not added to ordinary snapshot.
-    let mut images = Vec::new();
-    for role in Role::ALL {
-        for suffix in ["", "-wal"] {
-            let path = before.join(format!("{}{suffix}", role.file()));
+    let mut originals = Vec::new();
+    for component in p.components.values() {
+        let parent = component.database.parent().unwrap();
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::os::unix::fs::chown(parent, Some(component.uid), Some(component.gid)).unwrap();
+        for suffix in ["", "-wal", "-shm"] {
+            let path =
+                std::path::PathBuf::from(format!("{}{suffix}", component.database.display()));
             if path.exists() {
-                images.push(files::private_image(&path, p.max_component_bytes).unwrap());
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+                std::os::unix::fs::chown(&path, Some(component.uid), Some(component.gid)).unwrap();
+                originals.push((path.clone(), std::fs::read(path).unwrap()));
             }
         }
     }
-    let manifest = Manifest {
-        version: 1,
-        id: uuid::Uuid::new_v4(),
-        created_at: crate::cyberherd::calendar::now().unwrap(),
-        policy: p.clone(),
-        source_policy_sha256: files::hash_bytes(&std::fs::read(&policy_path).unwrap()),
-        recovery_required: true,
-        report: database::inspect_before_contact(&before, &p).await.unwrap(),
-        images,
-    };
-    files::write_new(
-        &before.join("MANIFEST.json"),
-        &serde_json::to_vec(&manifest).unwrap(),
-    )
-    .unwrap();
+    assert!(operator.snapshot_before_contact(&before).await.is_err());
+    assert!(!before.exists());
+    ready.store(true, std::sync::atomic::Ordering::SeqCst);
+    // The explicit upgrade snapshot uses the same actual four-owner source
+    // files, stopped-writer observer and unchanged WAL checks as normal backup.
+    // Only its exact schema-23 inspection differs; normal restore stays closed.
+    let manifest = operator.snapshot_before_contact(&before).await.unwrap();
+    assert_eq!(
+        operator
+            .verify_contact_upgrade_source(&before)
+            .await
+            .unwrap(),
+        manifest
+    );
+    assert_eq!(manifest.report.pending_feeds, 1);
+    assert!(
+        manifest
+            .images
+            .iter()
+            .any(|i| i.name.ends_with("-wal") && i.bytes > 0)
+    );
+    for (path, bytes) in &originals {
+        assert_eq!(std::fs::read(path).unwrap(), *bytes);
+    }
+    assert!(operator.snapshot_before_contact(&before).await.is_err());
+    let refused_restore = root.path().join("refused-restore");
+    assert!(
+        operator
+            .stage_restore(&before, &refused_restore)
+            .await
+            .is_err()
+    );
+    assert!(!refused_restore.exists());
     let original_manifest = std::fs::read(before.join("MANIFEST.json")).unwrap();
     assert!(operator.verify(&before).await.is_err());
     assert!(
@@ -391,5 +412,8 @@ async fn root_contact_upgrade_compares_private_images_and_retains_original_backu
         original_manifest
     );
     files::check_images(&before, &manifest.images, p.max_component_bytes).unwrap();
+    for (path, bytes) in &originals {
+        assert_eq!(std::fs::read(path).unwrap(), *bytes);
+    }
     println!("ROOT_CONTACT_UPGRADE_FIXTURE_VERIFIED");
 }

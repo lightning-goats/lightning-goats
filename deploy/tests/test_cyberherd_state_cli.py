@@ -46,6 +46,10 @@ class StateCLI(unittest.TestCase):
         for args in [("snapshot", "--destination", destination),
                      ("snapshot", "--destination", destination, "--writers-stopped"),
                      ("verify", "--bundle", destination),
+                     ("snapshot-before-contact", "--destination", destination),
+                     ("snapshot-before-contact", "--destination", destination, "--writers-stopped"),
+                     ("verify-contact-upgrade-source", "--bundle", destination),
+                     ("compare-contact-upgrade", "--bundle", destination, "--candidate-copy", destination),
                      ("stage-restore", "--bundle", destination, "--destination", destination),
                      ("stage-restore", "--bundle", destination, "--destination", destination, "--writers-stopped")]:
             self.assertNotEqual(self.invoke(self.text, *args).returncode, 0)

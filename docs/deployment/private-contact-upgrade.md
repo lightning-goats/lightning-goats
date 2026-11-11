@@ -35,7 +35,8 @@ missing maintenance coordinator.
 
 Before an actual upgrade, a separately qualified maintenance coordinator must
 quiesce and fence all four writers, take and verify a **current** native schema-23
-four-journal backup using the old installed tool, migrate separate copies as the
+four-journal backup using the old installed tool or the separately qualified
+`snapshot-before-contact`/`verify-contact-upgrade-source` native boundary, migrate separate copies as the
 original runtime identity, and pass the new native `compare-contact-upgrade`.
 The comparison preserves all original rows, row IDs, signed bytes, schema and
 migration-history prefix while permitting only the exact additive DDL and empty

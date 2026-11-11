@@ -29,6 +29,19 @@ enum Command {
         #[arg(long)]
         bundle: PathBuf,
     },
+    /// Copy only the exact compiled schema-23 source for the contact upgrade.
+    /// Same four stopped/masked writers and file guards; never restore or resume.
+    SnapshotBeforeContact {
+        #[arg(long)]
+        destination: PathBuf,
+        #[arg(long, required = true)]
+        writers_stopped: bool,
+    },
+    /// Verify an exact schema-23 contact-upgrade source; never ordinary restore.
+    VerifyContactUpgradeSource {
+        #[arg(long)]
+        bundle: PathBuf,
+    },
     /// Compare a known schema-23 backup with an already migrated schema-24 copy.
     /// Never migrates, restores, clears markers or starts a service.
     CompareContactUpgrade {
@@ -63,6 +76,17 @@ async fn main() -> Result<()> {
             writers_stopped: true,
         } => ("snapshot", operator.snapshot(&destination).await?),
         Command::Verify { bundle } => ("verify", operator.verify(&bundle).await?),
+        Command::SnapshotBeforeContact {
+            destination,
+            writers_stopped: true,
+        } => (
+            "contact_upgrade_snapshot",
+            operator.snapshot_before_contact(&destination).await?,
+        ),
+        Command::VerifyContactUpgradeSource { bundle } => (
+            "contact_upgrade_source_verify",
+            operator.verify_contact_upgrade_source(&bundle).await?,
+        ),
         Command::CompareContactUpgrade {
             bundle,
             candidate_copy,

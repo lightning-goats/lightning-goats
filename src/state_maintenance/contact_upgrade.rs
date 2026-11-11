@@ -156,21 +156,14 @@ pub(super) async fn compare_images(before: &Path, after: &Path, policy: &Policy)
 }
 
 impl Operator {
-    /// Accept only a source-pinned schema-23 backup and a separate, already
-    /// migrated four-journal copy. Normal verify/restore still require schema 24.
-    pub async fn compare_contact_upgrade(
-        &self,
-        bundle: &Path,
-        candidate: &Path,
-    ) -> Result<Manifest> {
+    /// Reverify only an exact schema-23 upgrade source. Does not make that bundle
+    /// eligible for ordinary current-schema verification or restore staging.
+    pub async fn verify_contact_upgrade_source(&self, bundle: &Path) -> Result<Manifest> {
         files::private_bundle(bundle)?;
-        files::private_bundle(candidate)?;
-        for directory in [bundle, candidate] {
-            match std::fs::symlink_metadata(directory.join("INCOMPLETE")) {
-                Ok(_) => bail!("contact upgrade input is incomplete"),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => return Err(e.into()),
-            }
+        match std::fs::symlink_metadata(bundle.join("INCOMPLETE")) {
+            Ok(_) => bail!("contact upgrade input is incomplete"),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
         }
         let raw = files::read_private(&bundle.join("MANIFEST.json"), 65536)?;
         let manifest: Manifest = serde_json::from_slice(&raw)
@@ -187,6 +180,24 @@ impl Operator {
         files::check_images(bundle, &manifest.images, self.policy.max_component_bytes)?;
         if database::inspect_before_contact(bundle, &self.policy).await? != manifest.report {
             bail!("contact upgrade source report changed");
+        }
+        files::check_images(bundle, &manifest.images, self.policy.max_component_bytes)?;
+        Ok(manifest)
+    }
+
+    /// Accept only a source-pinned schema-23 backup and a separate, already
+    /// migrated four-journal copy. Normal verify/restore still require schema 24.
+    pub async fn compare_contact_upgrade(
+        &self,
+        bundle: &Path,
+        candidate: &Path,
+    ) -> Result<Manifest> {
+        let manifest = self.verify_contact_upgrade_source(bundle).await?;
+        files::private_bundle(candidate)?;
+        match std::fs::symlink_metadata(candidate.join("INCOMPLETE")) {
+            Ok(_) => bail!("contact upgrade input is incomplete"),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
         }
         let mut images = Vec::new();
         for role in Role::ALL {

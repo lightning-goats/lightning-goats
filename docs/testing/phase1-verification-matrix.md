@@ -343,3 +343,10 @@ Exercise enabled HTTP admission through authoritative mocked settlement while
 proving malformed input never calls the provider and accepted private fees add
 zero feed credit or public presentation work. Mocks do not qualify a real fee or
 recipient-side DM observation.
+
+The explicit pre-contact snapshot/source-verification commands accept only the
+compiled known schema-23 prefix, never general old schemas. Run their separate
+root fixture with actual distinct-owned sources, committed WAL, writer-fence
+refusal before output creation, unchanged main/WAL/SHM bytes, source revalidation
+and ordinary restore refusal. The tool must still refuse current-schema input,
+dirty/unknown checksums and preexisting contact objects at this upgrade boundary.

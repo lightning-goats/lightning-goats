@@ -149,6 +149,19 @@ affected work stopped. Retain originals and partial/staged sets.
 
 ## Additive private-contact comparison
 
+The explicit `snapshot-before-contact --destination NEW_PRIVATE_BUNDLE --writers-stopped`
+and `verify-contact-upgrade-source --bundle PRIVATE_SCHEMA_23_BUNDLE` operations
+support only the exact compiled schema-23 upgrade source. Snapshot uses the same
+four stopped/masked writer, distinct file-owner, bounded copy, committed WAL and
+unchanged-source checks as ordinary snapshot. Verification requires exact native
+schema checksums, four-journal scope and all private image hashes. They neither
+migrate nor relax the ordinary current-schema snapshot/verify/restore paths.
+The exception is deliberately pinned to code with exactly 24 core migrations;
+it refuses a current source, unknown/dirty prefix or preexisting contact schema.
+Its backup can be compared for this additive upgrade but cannot enter ordinary
+restore staging. This also allows a reproducible installed upgrade rehearsal
+without executing a historical build merely to obtain a schema-23 snapshot.
+
 `compare-contact-upgrade --bundle ORIGINAL_SCHEMA_23_BACKUP --candidate-copy MIGRATED_FOUR_JOURNAL_COPY`
 is a separate native comparison, not a migration or recovery operation. It requires
 the protected maintenance policy and a complete private source backup whose exact

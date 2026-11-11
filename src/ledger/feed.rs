@@ -51,7 +51,10 @@ impl LedgerStore {
             bail!("feeder threshold must be greater than zero");
         }
         let threshold_i64 = to_i64(threshold_sats, "threshold_sats")?;
-        let mut transaction = self.pool.begin().await?;
+        // This read/check/write sequence must acquire its writer position before
+        // observing credit or pending work. A deferred snapshot cannot safely
+        // upgrade after a concurrent funding/settlement transaction writes.
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
 
         if let Some(row) = sqlx::query(
             "SELECT id, status FROM feed_attempts WHERE status IN ('intent_committed', 'unknown') LIMIT 1",
@@ -385,6 +388,86 @@ mod tests {
             SettlementOutcome::Credited { .. }
         ));
         (directory, store)
+    }
+
+    #[tokio::test]
+    async fn intent_waits_for_an_existing_writer_without_losing_credit_or_reusing_a_feed() {
+        use std::time::Duration;
+
+        let (_directory, store) = credited_store(1000).await;
+        // Warm all five connections so opening a new connection cannot stand
+        // in for waiting at the actual financial transaction boundary.
+        let mut connections = Vec::new();
+        for _ in 0..5 {
+            connections.push(store.pool.acquire().await.unwrap());
+        }
+        drop(connections);
+        let mut writer = store.pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
+        // Force a different WAL page while keeping the cooldown expired.
+        sqlx::query("UPDATE feeder_cooldown SET resume_after=1 WHERE singleton=1")
+            .execute(&mut *writer)
+            .await
+            .unwrap();
+
+        // Positive control: the old read-then-upgrade pattern really is busy,
+        // rather than a missing row, invalid UUID or synthetic mocked failure.
+        let mut deferred = store.pool.begin().await.unwrap();
+        let _: i64 =
+            sqlx::query_scalar("SELECT resume_after FROM feeder_cooldown WHERE singleton=1")
+                .fetch_one(&mut *deferred)
+                .await
+                .unwrap();
+        let error = sqlx::query(
+            "INSERT INTO feed_attempts(id,status,threshold_sats) VALUES(?,'intent_committed',1000)",
+        )
+        .bind(Uuid::new_v4().to_string())
+        .execute(&mut *deferred)
+        .await
+        .unwrap_err();
+        let sqlx::Error::Database(error) = error else {
+            panic!("expected native SQLite writer contention");
+        };
+        assert!(matches!(error.code().as_deref(), Some("5" | "517")));
+        deferred.rollback().await.unwrap();
+
+        let mut pending = Box::pin(store.begin_feed_attempt(1000));
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), pending.as_mut())
+                .await
+                .is_err(),
+            "intent should wait for the existing writer, not fail a snapshot upgrade"
+        );
+        writer.commit().await.unwrap();
+        let id = tokio::time::timeout(Duration::from_secs(5), pending)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(store.feed_credit_sats().await.unwrap(), 1000);
+        assert_eq!(
+            store.unresolved_feed_attempt().await.unwrap().unwrap().id,
+            id
+        );
+        assert!(store.begin_feed_attempt(1000).await.is_err());
+        store.confirm_feed_attempt(id).await.unwrap();
+        assert!(store.confirm_feed_attempt(id).await.is_err());
+        assert_eq!(store.feed_credit_sats().await.unwrap(), 0);
+        let debits: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM ledger_entries WHERE entry_type='FEED_DEBIT'")
+                .fetch_one(&store.pool)
+                .await
+                .unwrap();
+        assert_eq!(debits, 1);
+        assert_eq!(
+            store
+                .events_after(0, 100)
+                .await
+                .unwrap()
+                .iter()
+                .filter(|event| event.event_type == "feeder_confirmed")
+                .count(),
+            1
+        );
     }
 
     #[tokio::test]

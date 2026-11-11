@@ -1,7 +1,13 @@
 # Installed operator HTTP qualification — candidate, 2026-11-11
 
 The disposable installed systemd rehearsal now includes an optional operator
-API stage. This is source awaiting exact CI qualification; it has not run on
+API stage. The actual installed exercise passes on source
+`1240974d798e74503cd20cca6d65dc9e1998875f` in Deployment run `42958315166`.
+Its retained artifact `13828397449` has ZIP SHA256
+`591fe4c890c3846934e46dd2dfb6d2b2033f9d47549b7dbcb65c4c62a53eae7d`;
+all six internal checksum entries and the exact named operator proof flags pass.
+Full source CI independently exposed a [feed-intent contention failure](feed-intent-contention-20261111.md),
+so complete qualification remains pending. This fixture has not run on
 the production VPS and does not enable actual operator routes or public flags.
 The [operator contract](../architecture/cyberherd-operator-interface.md) and
 [full twelve-part plan](../planning/cyberherd-implementation-plan.md) are unchanged.

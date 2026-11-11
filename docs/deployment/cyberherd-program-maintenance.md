@@ -49,7 +49,9 @@ presentation settings remain exact. The three selected worker programs each load
 their retained native configuration under their own original UID/GID, with no
 supplementary groups/capabilities, NoNewPrivileges and an isolated network namespace.
 Their exact positive `--check` output is required; no worker/runtime or credential
-is opened. Preparation creates only private review data and a reversible six-file
+is opened. Disposable native-parser execution copies are removed on success or
+failure; exact selected binaries and original configurations remain in the
+protected review. Preparation creates only private review data and a reversible six-file
 transaction. An independent review pins the complete `PREPARED.json` digest before
 any service operation.
 
@@ -118,7 +120,9 @@ disposable installed rehearsal using synthetic journals, real worker parsers,
 native snapshot/review and actual core/member resumption. That phase uses the same
 program build on both sides; it does not claim different-build live acceptance.
 Provider operations, public networking and gateway POSTs remain zero in the fixture.
-No actual-host maintenance has been performed for this new transaction.
+The subsequent operator-approved
+[live upgrade](../testing/cyberherd-program-upgrade-live-20261111.md) completed
+against a fresh current baseline. Financial activation remains separate.
 The [qualified checkpoint](../testing/cyberherd-program-maintenance-checkpoint-20261111.md)
 records the exact passing source/artifacts and actual configuration-only VPS
 preparation with independent unchanged-file/process readback.

@@ -83,6 +83,10 @@ or changing running applications. No actual-host maintenance, financial candidat
 application or outgoing activation has been performed.
 That earlier preparation is now stale after the approved three-seat/operator
 configuration change and requires a fresh baseline before application.
+The subsequent [freshly approved live upgrade](testing/cyberherd-program-upgrade-live-20261111.md)
+has now completed against that current baseline, including native backup/review
+and independent running-program/public-health verification. Original configuration,
+three-user capacity and masked outgoing roles are retained.
 
 The [first financial configuration transaction](deployment/cyberherd-financial-maintenance.md)
 is now implemented separately in source. It consumes the sealed candidate and

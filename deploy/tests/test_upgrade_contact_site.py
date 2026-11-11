@@ -92,6 +92,7 @@ class ContactSiteFiles(unittest.TestCase):
         self.fail_new_config = False
         for obj, name, value in [(E, 'WWW', self.www), (E, 'SITE', self.site), (E, 'SNIPPET', self.snippet),
                 (E.C, 'BASE', self.base), (E.C, 'root', lambda: None),
+                (E.M, 'C', E.C),
                 (E, 'verified_tool_identity', lambda: self.identity),
                 (E, 'contact_ready', lambda: {'fixed': 'original private core configuration'}),
                 (E.C, 'command', self.command)]:

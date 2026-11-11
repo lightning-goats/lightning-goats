@@ -567,6 +567,7 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
             'manual_score_lifetime_zero': True}
         w.await_ready(lambda: w.http_json('http://127.0.0.1:3340/api/v1/cyberherd')['roster']['total_members'] == 0,
                       'actual empty public roster after manual reset')
+        operator_edge = installed_operator_edge(root / 'core-payload', guard, client)
         financial_after = w.http_json('http://127.0.0.1:8787/api/v1/status')
         for key in ('feed_credit_sats', 'threshold_sats', 'feeds_due', 'remainder_sats', 'unresolved_feed_attempt'):
             assert financial_after[key] == financial_before[key]
@@ -599,6 +600,7 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
                     'actual_public_score_and_zero_share': True, 'final_public_roster_empty': True,
                     'core_credit_and_original_unknown_uuid_unchanged': True, 'gateway_post_count': counts['post'],
                     'provider_operations': 0, 'public_network_used': False, 'live_host_qualified': False},
+                'installed_operator_tls_edge': operator_edge,
                 'all_application_networking_loopback_isolated': True, 'live_host_qualified': False}
     except Exception:
         # Disposable synthetic fixture only. Never use this diagnostic or the
@@ -632,8 +634,115 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
         # auth nonce or command record to regain acceptance after a restart.
         if (guard / 'operator-client').exists():
             (guard / 'operator-client').rename(root / 'operator-client-evidence')
+        if (guard / 'edge-nginx').exists():
+            (guard / 'edge-nginx').rename(root / 'operator-edge-evidence')
+        if (guard / 'edge.crt').exists():
+            (guard / 'edge.crt').rename(root / 'operator-edge-evidence/cert.pem')
         (guard / 'ALLOW').unlink(); guard.rmdir()
         gateway.shutdown(); gateway.server_close(); thread.join(timeout=2)
+
+
+def installed_operator_edge(payload, guard, client):
+    """Actual TLS/nginx/native path, only in the attested disposable namespace."""
+    if (os.geteuid() != 0 or os.environ.get('GITHUB_ACTIONS') != 'true'
+            or not os.environ.get('GITHUB_RUN_ID', '').isdigit()
+            or os.readlink('/proc/self/ns/net') == os.readlink('/proc/1/ns/net')
+            or {v['ifname'] for v in json.loads(run('/usr/sbin/ip', '-j', 'link', 'show'))} != {'lo'}
+            or (guard / 'ALLOW').read_text() != 'LIGHTNING_GOATS_DISPOSABLE_CONTACT_UPGRADE_CI_v1\n'
+                + os.readlink('/proc/self/ns/net') + '\n'):
+        raise ValueError('TLS operator rehearsal requires the attested isolated disposable host')
+    directory = guard / 'edge-nginx'
+    directory.mkdir(mode=0o755)
+    certificate, key = guard / 'edge.crt', directory / 'key.pem'
+    server_certificate, ca_key = directory / 'server.crt', directory / 'ca-key.pem'
+    assert not certificate.exists() and not certificate.is_symlink()
+    run('/usr/bin/openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1',
+        '-subj', '/CN=Disposable Lightning Goats operator fixture CA',
+        '-addext', 'basicConstraints=critical,CA:TRUE',
+        '-keyout', str(ca_key), '-out', str(certificate))
+    ca_key.chmod(0o600)
+    run('/usr/bin/openssl', 'req', '-new', '-newkey', 'rsa:2048', '-nodes',
+        '-subj', '/CN=example.com', '-keyout', str(key), '-out', str(directory / 'server.csr'))
+    extensions = directory / 'server.ext'
+    extensions.write_text('subjectAltName=DNS:example.com\nbasicConstraints=critical,CA:FALSE\n'
+                          'keyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\n')
+    run('/usr/bin/openssl', 'x509', '-req', '-days', '1', '-in', str(directory / 'server.csr'),
+        '-CA', str(certificate), '-CAkey', str(ca_key), '-set_serial', '1',
+        '-extfile', str(extensions), '-out', str(server_certificate))
+    key.chmod(0o600)
+    certificate.chmod(0o644)
+    worker = pwd.getpwnam('www-data')
+    for name in ('body', 'proxy', 'fastcgi', 'uwsgi', 'scgi'):
+        path = directory / name
+        path.mkdir(mode=0o700)
+        os.chown(path, worker.pw_uid, worker.pw_gid)
+    # Assemble the exact shipped HTTP rate limits and optional locations. No
+    # backend mock or weakened signature, Origin or command fence is substituted.
+    common = (payload / 'deploy/nginx/lightning-goats-http.conf.example').read_text()
+    routes = (payload / 'deploy/cyberherd/authenticated-nginx.conf.example').read_text()
+    config = directory / 'nginx.conf'
+    config.write_text(f'''daemon off;
+user www-data www-data;
+worker_processes 1;
+pid {directory}/nginx.pid;
+error_log {directory}/error.log crit;
+events {{ worker_connections 128; }}
+http {{
+    access_log off;
+    client_body_temp_path {directory}/body;
+    proxy_temp_path {directory}/proxy;
+    fastcgi_temp_path {directory}/fastcgi;
+    uwsgi_temp_path {directory}/uwsgi;
+    scgi_temp_path {directory}/scgi;
+    {common}
+    server {{
+        listen 127.0.0.1:443 ssl;
+        server_name example.com;
+        ssl_certificate {server_certificate};
+        ssl_certificate_key {key};
+        {routes}
+        location = /edge-ready {{ return 200 'ready'; }}
+        location / {{ return 404; }}
+    }}
+}}
+''')
+    run('/usr/sbin/nginx', '-t', '-p', str(directory), '-c', str(config))
+    process = subprocess.Popen(['/usr/sbin/nginx', '-p', str(directory), '-c', str(config)],
+        env={'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LC_ALL': 'C'},
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        import http.client
+        import socket
+        import ssl
+        import time
+        context = ssl.create_default_context(cafile=str(certificate))
+        for _ in range(100):
+            assert process.poll() is None, 'disposable TLS nginx exited'
+            try:
+                with socket.create_connection(('127.0.0.1', 443), timeout=1) as raw:
+                    with context.wrap_socket(raw, server_hostname='example.com') as stream:
+                        stream.sendall(b'GET /edge-ready HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n')
+                        response = http.client.HTTPResponse(stream)
+                        response.begin()
+                        assert response.status == 200 and response.read() == b'ready'
+                break
+            except OSError:
+                time.sleep(0.05)
+        else:
+            raise ValueError('disposable TLS nginx did not become ready')
+        result = json.loads(run(*client, 'edge'))
+        assert result == {'edge_accepted': True, 'verified_synthetic_tls': True,
+            'real_native_http_through_nginx': True, 'canonical_signed_query_and_body': True,
+            'guest_origin_body_and_nonce_refusals': True, 'settings_and_original_receipt_retained': True,
+            'member_percent_zero': True, 'provider_operations': 0, 'publications': 0}
+    finally:
+        process.terminate()
+        process.wait(timeout=10)
+    for path in directory.glob('*.log'):
+        text = path.read_text(errors='replace')
+        assert 'Nostr ' not in text and 'minimum_sats' not in text
+    return dict(result, private_headers_and_body_absent_from_logs=True,
+                public_network_used=False, production_operator_routes_enabled=False)
 
 
 def main():

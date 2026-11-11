@@ -169,3 +169,27 @@ exact command/header transport, private logging and continuing CRS enforcement.
 Only an unprivileged ephemeral loopback nginx with mocks was used. The actual
 production nginx was neither changed nor reloaded, and these transport fixtures
 do not claim production routing or native authorization accepted a request.
+
+## Integrated native TLS edge — candidate
+
+The guarded disposable systemd rehearsal now additionally assembles the shipped
+HTTP limits and four optional operator locations in a separate loopback nginx.
+An ephemeral CA signs its `example.com` server certificate. The test-only native
+client trusts only the extra fixture CA alongside its normal roots, verifies the
+server name, disables proxies/redirects and resolves that fixed name only to the
+attested namespace's `127.0.0.1:443`; no public DNS or network is used.
+
+Actual signed requests must traverse TLS/nginx and the native service together:
+guest self-read, nonce replay and guest/operator/Origin/body refusals, an exact
+signed template query, settings mutation with zero allocation, original receipt
+retry and exact revision/settings readback. Requests respect the shipped rate
+limits. Private authorization/body fields must stay out of nginx logs. The
+existing native status comparison still verifies unchanged core credit, due count
+and original unresolved UUID, with no gateway POST. Evidence remains private.
+
+Local guard tests pass refusal of an ordinary user, the initial host namespace
+even with CI labels, and a namespace with an external interface. Exact native CI
+and installed execution of this integrated phase remain pending. Earlier separate
+TLS mocks and direct native HTTP checks do not establish its result. Production
+operator routes/configuration, actual user credentials and financial activation
+remain unchanged. The integrated phase does not yet exercise a browser or WAF.

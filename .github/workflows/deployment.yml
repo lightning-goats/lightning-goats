@@ -138,6 +138,8 @@ jobs:
     needs: package
     steps:
       - uses: actions/checkout@v4
+      - name: Install disposable operator TLS edge dependencies
+        run: sudo apt-get update && sudo apt-get install -y nginx openssl
       - uses: actions/download-artifact@v4
         with:
           name: staging-package-${{ github.sha }}

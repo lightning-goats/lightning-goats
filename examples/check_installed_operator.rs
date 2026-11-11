@@ -21,6 +21,7 @@ const GUARD: &str = "/run/lightning-goats-contact-fixture/ALLOW";
 const STATE: &str = "/run/lightning-goats-contact-fixture/operator-client/state.json";
 const READY_STATE: &str = "/run/lightning-goats-contact-fixture/operator-client/ready.json";
 const CONTROLS_STATE: &str = "/run/lightning-goats-contact-fixture/operator-client/controls.json";
+const EDGE_CERTIFICATE: &str = "/run/lightning-goats-contact-fixture/edge.crt";
 const ORIGIN: &str = "https://example.com";
 const ME: &str = "/api/v1/cyberherd/me";
 const OVERVIEW: &str = "/api/v1/cyberherd/operator/state";
@@ -701,6 +702,208 @@ async fn diagnose_stream() -> Result<()> {
     Ok(())
 }
 
+async fn edge_send(
+    client: &Client,
+    method: Method,
+    path: &str,
+    body: &[u8],
+    header: &str,
+    origin: &str,
+) -> Result<Response> {
+    // Retain the shipped read admission rate, including across exact locations.
+    tokio::time::sleep(Duration::from_millis(2100)).await;
+    let response = client
+        .request(method, format!("{ORIGIN}{path}"))
+        .header("Authorization", header)
+        .header("Origin", origin)
+        .header("X-Forwarded-Host", "untrusted.example")
+        .header("Content-Type", "application/json")
+        .body(body.to_vec())
+        .send()
+        .await?;
+    ensure!(
+        response
+            .headers()
+            .get("cache-control")
+            .and_then(|v| v.to_str().ok())
+            == Some("no-store"),
+        "TLS edge omitted no-store"
+    );
+    Ok(response)
+}
+
+async fn edge_get(client: &Client, secret: u8, path: &str) -> Result<Value> {
+    value(
+        edge_send(
+            client,
+            Method::GET,
+            path,
+            &[],
+            &authorization(secret, "GET", path, &[])?,
+            ORIGIN,
+        )
+        .await?,
+    )
+    .await
+}
+
+async fn edge_command(client: &Client, body: &Value) -> Result<Value> {
+    let bytes = serde_json::to_vec(body)?;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    loop {
+        let response = edge_send(
+            client,
+            Method::POST,
+            COMMAND,
+            &bytes,
+            &authorization(2, "POST", COMMAND, &bytes)?,
+            ORIGIN,
+        )
+        .await?;
+        if response.status() != StatusCode::CONFLICT || tokio::time::Instant::now() >= deadline {
+            return value(response).await.context("disposable TLS edge command");
+        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+}
+
+async fn edge() -> Result<()> {
+    let certificate = std::fs::symlink_metadata(EDGE_CERTIFICATE)?;
+    ensure!(
+        certificate.is_file()
+            && certificate.nlink() == 1
+            && certificate.uid() == 0
+            && certificate.gid() == 0
+            && certificate.mode() & 0o022 == 0
+            && certificate.len() <= 8192,
+        "protected synthetic TLS certificate required"
+    );
+    let client = Client::builder()
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(Duration::from_secs(5))
+        .add_root_certificate(reqwest::Certificate::from_pem(&std::fs::read(
+            EDGE_CERTIFICATE,
+        )?)?)
+        // No DNS or public destination: the fixed canonical HTTPS name is bound
+        // to this attested namespace's loopback TLS listener. Verify its cert.
+        .resolve("example.com", "127.0.0.1:443".parse()?)
+        .build()?;
+    let saved = authorization(3, "GET", ME, &[])?;
+    let guest = value(edge_send(&client, Method::GET, ME, &[], &saved, ORIGIN).await?).await?;
+    ensure!(
+        guest["operator"] == false && guest["member"]["active"] == false,
+        "TLS edge granted guest authority"
+    );
+    ensure!(
+        edge_send(&client, Method::GET, ME, &[], &saved, ORIGIN)
+            .await?
+            .status()
+            == StatusCode::UNAUTHORIZED,
+        "TLS edge admitted replayed authorization"
+    );
+    ensure!(
+        edge_send(
+            &client,
+            Method::GET,
+            OVERVIEW,
+            &[],
+            &authorization(3, "GET", OVERVIEW, &[])?,
+            ORIGIN
+        )
+        .await?
+        .status()
+            == StatusCode::UNAUTHORIZED,
+        "TLS edge granted guest operator access"
+    );
+    ensure!(
+        edge_send(
+            &client,
+            Method::GET,
+            ME,
+            &[],
+            &authorization(2, "GET", ME, &[])?,
+            "https://wrong.example"
+        )
+        .await?
+        .status()
+            == StatusCode::UNAUTHORIZED,
+        "TLS edge accepted wrong Origin"
+    );
+    let before = edge_get(&client, 2, OVERVIEW).await?;
+    ensure!(
+        before["total_members"] == 0 && before["settings"]["member_percent"] == 0,
+        "TLS edge fixture scope changed"
+    );
+    ensure!(
+        edge_get(&client, 2, TEMPLATES).await?["enabled"] == false,
+        "TLS edge changed the signed template query or retained opt-out"
+    );
+    let minimum = before["settings"]["minimum_sats"]
+        .as_str()
+        .unwrap()
+        .parse::<u64>()?
+        + 1;
+    let body = json!({"id":uuid::Uuid::new_v4(),"expected_revision":before["revision"],
+        "action":{"type":"settings","minimum_sats":minimum.to_string(),
+        "max_members":before["settings"]["max_members"],"member_percent":0}});
+    let bytes = serde_json::to_vec(&body)?;
+    ensure!(
+        edge_send(
+            &client,
+            Method::POST,
+            COMMAND,
+            b"{}",
+            &authorization(2, "POST", COMMAND, &bytes)?,
+            ORIGIN
+        )
+        .await?
+        .status()
+            == StatusCode::UNAUTHORIZED,
+        "TLS edge accepted changed signed body"
+    );
+    ensure!(
+        edge_send(
+            &client,
+            Method::POST,
+            COMMAND,
+            &bytes,
+            &authorization(3, "POST", COMMAND, &bytes)?,
+            ORIGIN
+        )
+        .await?
+        .status()
+            == StatusCode::UNAUTHORIZED,
+        "TLS edge accepted guest mutation"
+    );
+    let receipt = edge_command(&client, &body).await?;
+    ensure!(
+        receipt["changed"] == true,
+        "TLS edge settings command not applied"
+    );
+    ensure!(
+        edge_command(&client, &body).await? == receipt,
+        "TLS edge retry changed the original receipt"
+    );
+    let after = edge_get(&client, 2, OVERVIEW).await?;
+    ensure!(
+        after["revision"] == receipt["revision"]
+            && after["cycle"] == before["cycle"]
+            && after["settings"]["minimum_sats"] == minimum.to_string()
+            && after["settings"]["member_percent"] == 0
+            && after["total_members"] == 0,
+        "TLS edge command readback differs"
+    );
+    println!(
+        "{}",
+        json!({"edge_accepted":true,"verified_synthetic_tls":true,
+        "real_native_http_through_nginx":true,"canonical_signed_query_and_body":true,
+        "guest_origin_body_and_nonce_refusals":true,"settings_and_original_receipt_retained":true,
+        "member_percent_zero":true,"provider_operations":0,"publications":0})
+    );
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     isolated_fixture()?;
@@ -717,6 +920,7 @@ async fn main() -> Result<()> {
         Some("paused-controls") => paused_controls(&client).await,
         Some("after-controls-restart") => after_controls_restart(&client).await,
         Some("diagnose-stream") => diagnose_stream().await,
+        Some("edge") => edge().await,
         _ => bail!("explicit disposable operator exercise required"),
     }
 }

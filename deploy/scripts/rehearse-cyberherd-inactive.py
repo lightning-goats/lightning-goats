@@ -522,8 +522,13 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
         assert ready_commands == {'ready_commands_accepted': True, 'activation_and_score_applied': True,
             'stale_revision_refused': True, 'explicit_unban_required': True,
             'manual_score_lifetime_zero': True, 'member_percent_zero': True}
-        w.await_ready(lambda: w.http_json('http://127.0.0.1:3340/api/v1/cyberherd')['roster']['total_members'] == 1,
-                      'actual public roster after operator activation')
+        def score_is_visible():
+            roster = w.http_json('http://127.0.0.1:3340/api/v1/cyberherd')['roster']
+            return (roster['total_members'] == 1 and len(roster['members']) == 1
+                    and roster['members'][0]['amount_sats'] == '21'
+                    and roster['members'][0]['points'] == '210'
+                    and roster['members'][0]['share_micro_percent'] == 0 and roster['member_percent'] == 0)
+        w.await_ready(score_is_visible, 'actual public roster with the committed operator score')
         roster = w.http_json('http://127.0.0.1:3340/api/v1/cyberherd')['roster']
         assert roster['members'][0]['amount_sats'] == '21' and roster['members'][0]['points'] == '210'
         assert roster['members'][0]['share_micro_percent'] == 0 and roster['member_percent'] == 0

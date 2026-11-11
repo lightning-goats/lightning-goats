@@ -193,7 +193,8 @@ impl Server {
         let clients = Arc::new(Semaphore::new(8));
         // At most one bridge database operation competes for the financial pool,
         // including the explicitly enabled bounded reservation write.
-        // Other clients get a bounded rejection, never an unbounded waiter queue.
+        // The eight admitted connections bound all waiters. A short FIFO wait
+        // lets synchronized intake/view calls take turns; expiry still rejects.
         let resources = Arc::new(Resources {
             reads: Arc::new(Semaphore::new(1)),
             verification: Arc::new(Semaphore::new(1)),
@@ -278,7 +279,12 @@ async fn serve_one(
         };
         return write_frame(&mut stream, &response).await;
     }
-    let response = if let Ok(_permit) = Arc::clone(&resources.reads).try_acquire_owned() {
+    let response = if let Ok(Ok(_permit)) = timeout(
+        Duration::from_millis(100),
+        Arc::clone(&resources.reads).acquire_owned(),
+    )
+    .await
+    {
         match request {
             Request::FeedingOverlay { message } => {
                 if reward_policy.is_some_and(|policy| policy.owner == message.broadcast.proof.owner)
@@ -998,6 +1004,131 @@ mod tests {
             .await
             .unwrap();
         (root, config, ledger)
+    }
+
+    #[tokio::test]
+    async fn admitted_event_read_waits_for_a_competing_turn_instead_of_losing_it() {
+        use std::future::{Future as _, poll_fn};
+        use std::task::Poll;
+        let (_root, _config, ledger) = fixture(0).await;
+        let resources = Resources {
+            reads: Arc::new(Semaphore::new(1)),
+            verification: Arc::new(Semaphore::new(1)),
+            reader: None,
+            account: None,
+        };
+        let held = Arc::clone(&resources.reads).acquire_owned().await.unwrap();
+        let (mut client, server) = UnixStream::pair().unwrap();
+        write_frame(
+            &mut client,
+            &Request::Events {
+                expected_epoch: None,
+                after: 0,
+                limit: 16,
+            },
+        )
+        .await
+        .unwrap();
+        // Establish actual socket readiness before polling the protocol once.
+        // No sleep or scheduler timing can substitute for waiting on the turn.
+        server.readable().await.unwrap();
+        let mut serving = Box::pin(serve_one(
+            server,
+            &ledger,
+            RuntimeMode::Active,
+            &resources,
+            None,
+            Role::Intake,
+            false,
+        ));
+        // A cooperative-budget yield must not masquerade as waiting for the
+        // occupied DB turn. This one readable-frame poll is otherwise bounded.
+        let mut first_poll = Box::pin(tokio::task::unconstrained(serving.as_mut()));
+        poll_fn(|cx| {
+            assert!(
+                first_poll.as_mut().poll(cx).is_pending(),
+                "an admitted request must wait briefly instead of rejecting immediately"
+            );
+            Poll::Ready(())
+        })
+        .await;
+        drop(first_poll);
+        drop(held);
+        timeout(Duration::from_secs(1), serving)
+            .await
+            .unwrap()
+            .unwrap();
+        let Response::Events { batch } = read_frame::<Response>(&mut client).await.unwrap() else {
+            panic!("a released read turn must produce the original event batch");
+        };
+        assert_eq!(batch.through, 1);
+        assert!(matches!(batch.events[0].body, EventBody::Payment(_)));
+        assert_eq!(ledger.feed_credit_sats().await.unwrap(), 1000);
+        assert_eq!(ledger.latest_event_seq().await.unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn occupied_read_turn_expires_and_does_not_strand_a_later_request() {
+        let (_root, _config, ledger) = fixture(0).await;
+        let resources = Resources {
+            reads: Arc::new(Semaphore::new(1)),
+            verification: Arc::new(Semaphore::new(1)),
+            reader: None,
+            account: None,
+        };
+        let held = Arc::clone(&resources.reads).acquire_owned().await.unwrap();
+        let request = Request::Events {
+            expected_epoch: None,
+            after: 0,
+            limit: 16,
+        };
+        let (mut client, server) = UnixStream::pair().unwrap();
+        write_frame(&mut client, &request).await.unwrap();
+        timeout(
+            Duration::from_secs(1),
+            serve_one(
+                server,
+                &ledger,
+                RuntimeMode::Active,
+                &resources,
+                None,
+                Role::Intake,
+                false,
+            ),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(matches!(
+            read_frame::<Response>(&mut client).await.unwrap(),
+            Response::Rejected
+        ));
+        drop(held);
+        assert_eq!(resources.reads.available_permits(), 1);
+        let (mut client, server) = UnixStream::pair().unwrap();
+        write_frame(&mut client, &request).await.unwrap();
+        timeout(
+            Duration::from_secs(1),
+            serve_one(
+                server,
+                &ledger,
+                RuntimeMode::Active,
+                &resources,
+                None,
+                Role::Intake,
+                false,
+            ),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(matches!(
+            read_frame::<Response>(&mut client).await.unwrap(),
+            Response::Events { .. }
+        ));
+        assert_eq!(resources.reads.available_permits(), 1);
+        assert_eq!(ledger.feed_credit_sats().await.unwrap(), 1000);
+        assert_eq!(ledger.latest_event_seq().await.unwrap(), 1);
     }
 
     #[tokio::test]

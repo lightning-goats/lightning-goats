@@ -32,8 +32,11 @@ schemas reject unknown fields. Frame size, clients, database reads, page count,
 page bytes and time are bounded. At most one bridge read transaction competes
 for the core connection pool. Admission allows two requests per second with a
 four-request burst, before reading/parsing frames or verifying invoice data.
-Busy readers are rejected rather than queued
-without limit. Error responses contain no raw payment/configuration data.
+Within the existing eight-connection admission cap, a reader may wait up to
+100 milliseconds for the single database-operation permit. FIFO admission lets
+synchronized view/intake calls take turns; timeout still rejects. There is no
+unbounded waiter queue or increase to the two-per-second/four-burst rate limit.
+Error responses contain no raw payment/configuration data.
 
 ## Financial and feeding proof
 

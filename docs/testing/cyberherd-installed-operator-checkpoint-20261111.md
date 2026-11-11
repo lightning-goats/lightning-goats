@@ -115,6 +115,25 @@ existing epoch, uses the exact current schema and applies no migration. These
 diagnostics cannot execute without the existing protected disposable namespace
 attestation and original file owners. Neither diagnostic is a production command.
 
+Diagnostic source `db75a59ab59821b9d15e0d41bd003e7918cfc8c3` failed the public
+score check in Deployment `42970946315`, job `130361180081`, after completing the
+ready commands. Its native diagnostic accepted all eight core events through
+sequence 8; the member cursor was 7. The data/export was valid. The public check
+had waited only for one member, which could observe the earlier zero-score roster;
+it now waits for the actual committed 21-sat/210-point/zero-share projection.
+
+The bridge also rejected any admitted concurrent DB operation immediately. A
+100-ms FIFO wait now allows synchronized intake/view/operator requests to take
+turns, still within the existing eight-connection cap, two-per-second admission
+budget and one DB-operation permit. Expiry still rejects; provider verification,
+peer/role authority, source validation and financial fences are unchanged. Native
+real-frame regressions hold the turn, prove an admitted request stays pending and
+then returns its original batch after release, and prove timeout rejection leaves
+no stranded permit and permits a later request. The positive test polls an already
+readable frame without sleeps or cooperative-yield interference. Exact native CI
+and installed acceptance of this runtime correction remain pending; it is not
+installed on production.
+
 ## Optional authenticated edge transport — isolated checks
 
 Three new assembled TLS/nginx tests pass locally with harmless backends: the

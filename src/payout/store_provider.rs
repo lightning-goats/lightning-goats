@@ -99,6 +99,17 @@ impl Store {
             observation.0.total_sats,
         )
         .map_err(anyhow::Error::msg)?;
+        if probe_round.is_some() {
+            let original_id: Option<String> = sqlx::query_scalar(
+                "SELECT provider_quote_id FROM payout_fee_probe_duplicates WHERE quote_id=?",
+            )
+            .bind(doc.id.to_string())
+            .fetch_optional(&mut *tx)
+            .await?;
+            if original_id.is_some_and(|id| id != observation.quote_id().to_string()) {
+                bail!("fee observation contradicts the original duplicate quote identity");
+            }
+        }
         let json = serde_json::to_string(observation)?;
         let old: Option<(String, i64)> = sqlx::query_as(
             "SELECT document_json,round FROM payout_fee_observations WHERE provider_quote_id=?",

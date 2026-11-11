@@ -1473,6 +1473,22 @@ async fn inclusive_fee_probe_invoices_resume_exactly_and_never_enter_execution_i
         observed_at: now,
     });
     assert!(observed.executable_quote().is_err());
+    let duplicate = crate::payout::provider::DuplicateQuote {
+        request: initial.0.clone(),
+        quote_id: observed.quote_id(),
+    };
+    store
+        .record_fee_probe_duplicate(&duplicate, now)
+        .await
+        .unwrap();
+    let mut changed = observed.clone();
+    changed.0.quote_id = Uuid::new_v4();
+    assert!(
+        store
+            .record_fee_observation(&changed, 0, now)
+            .await
+            .is_err()
+    );
     assert_eq!(
         store
             .record_fee_observation(&observed, 0, now)
@@ -1490,6 +1506,16 @@ async fn inclusive_fee_probe_invoices_resume_exactly_and_never_enter_execution_i
     assert!(
         store
             .record_fee_observation(&observed, 1, now)
+            .await
+            .is_err()
+    );
+    let changed = crate::payout::provider::DuplicateQuote {
+        request: initial.0.clone(),
+        quote_id: Uuid::new_v4(),
+    };
+    assert!(
+        store
+            .record_fee_probe_duplicate(&changed, now)
             .await
             .is_err()
     );

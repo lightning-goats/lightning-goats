@@ -604,6 +604,11 @@ impl Store {
         {
             bail!("duplicate fee quote differs from original request");
         }
+        let observed_id: Option<String> = sqlx::query_scalar("SELECT o.provider_quote_id FROM payout_fee_observations o JOIN payout_fee_probe_intents i ON i.grant_id=o.grant_id AND i.member=o.member AND i.round=o.round WHERE i.id=?")
+            .bind(doc.invoice_id.to_string()).fetch_optional(&mut *tx).await?;
+        if observed_id.is_some_and(|id| id != duplicate.quote_id.to_string()) {
+            bail!("duplicate fee quote contradicts its saved observation identity");
+        }
         let old: Option<String> = sqlx::query_scalar(
             "SELECT provider_quote_id FROM payout_fee_probe_duplicates WHERE quote_id=?",
         )

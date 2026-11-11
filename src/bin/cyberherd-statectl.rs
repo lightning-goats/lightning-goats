@@ -29,6 +29,14 @@ enum Command {
         #[arg(long)]
         bundle: PathBuf,
     },
+    /// Compare a known schema-23 backup with an already migrated schema-24 copy.
+    /// Never migrates, restores, clears markers or starts a service.
+    CompareContactUpgrade {
+        #[arg(long)]
+        bundle: PathBuf,
+        #[arg(long)]
+        candidate_copy: PathBuf,
+    },
     /// Stage all four journals in new directories with mandatory startup markers.
     StageRestore {
         #[arg(long)]
@@ -55,6 +63,15 @@ async fn main() -> Result<()> {
             writers_stopped: true,
         } => ("snapshot", operator.snapshot(&destination).await?),
         Command::Verify { bundle } => ("verify", operator.verify(&bundle).await?),
+        Command::CompareContactUpgrade {
+            bundle,
+            candidate_copy,
+        } => (
+            "contact_upgrade_compare",
+            operator
+                .compare_contact_upgrade(&bundle, &candidate_copy)
+                .await?,
+        ),
         Command::StageRestore {
             bundle,
             destination,

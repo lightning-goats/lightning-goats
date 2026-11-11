@@ -70,11 +70,27 @@ contact without another invoice or wallet submission. Relay acceptance is distin
 from reading. Four isolated contact browser cases pass locally (229.227 seconds),
 including native encryption, free identity/retry, anonymous paid status/reload and
 wrong-amount refusal before wallet submission. These use mocked financial status,
-not an actual Strike fee or recipient-side observation. Final combined CI remains
-separate from the earlier backend pin above. The source flag stays false.
+not an actual Strike fee or recipient-side observation. The combined browser/backend
+source `d6f2e79e71295ef2ec4b9edbfba550da307a6a3e` now passes all ten workflows,
+including [CI](https://github.com/lightning-goats/lightning-goats/actions/runs/42931655849),
+[Deployment](https://github.com/lightning-goats/lightning-goats/actions/runs/42931655609)
+and [Security](https://github.com/lightning-goats/lightning-goats/actions/runs/42931655873).
+The source flag stays false.
 
-Still required: complete enabled HTTP admission tests; native four-journal private-state correlation
-checks; a native schema-23-to-24 migration comparison/protected maintenance
+The next source change adds an enabled real-HTTP fixture through native invoice
+validation and authoritative mock settlement, private-state correlation in ordinary
+native four-journal verification, and a separate `compare-contact-upgrade` command.
+The comparison accepts only the exact compiled schema-23 prefix and separate
+schema-24 four-journal images. It compares every original table/column/typed row,
+row ID, signed byte and migration-history prefix; the only allowed additions are
+the exact compiled private DDL and three empty tables. It does not migrate,
+restore, clear recovery state or authorize resumption. Ordinary verification and
+restore continue to require the current schema. Synthetic tests exercise paid
+state, pending feeds and signed outboxes plus altered rows, extra triggers,
+unknown checksums and prepopulated private tables. This new change still needs
+exact native CI qualification; local formatting alone is not acceptance.
+
+Still required: native qualification of these additions; a protected maintenance
 transaction and installed rehearsal; current backup and actual deployment;
 controlled provider/paid-contact acceptance and recipient-side DM observation.
 The old legacy-core upgrade helper is not this upgrade path. No production

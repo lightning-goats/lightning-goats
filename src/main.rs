@@ -1050,3 +1050,6 @@ mod tests {
         server.abort();
     }
 }
+
+#[cfg(test)]
+mod contact_http_tests;

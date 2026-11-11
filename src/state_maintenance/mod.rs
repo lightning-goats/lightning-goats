@@ -7,6 +7,7 @@ use std::{
 };
 use uuid::Uuid;
 
+mod contact_upgrade;
 mod control;
 mod database;
 mod files;

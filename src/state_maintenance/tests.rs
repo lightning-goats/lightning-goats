@@ -1,7 +1,7 @@
 use super::*;
 use std::os::unix::fs::PermissionsExt as _;
 
-fn policy(root: &Path) -> Policy {
+pub(super) fn policy(root: &Path) -> Policy {
     Policy {
         version: 1,
         owner: crate::nostr_event::test_event(1, 0, 100, "", vec![]).pubkey,
@@ -29,7 +29,7 @@ fn policy(root: &Path) -> Policy {
             .collect(),
     }
 }
-fn payout_policy(p: &Policy) -> crate::payout::store::Policy {
+pub(super) fn payout_policy(p: &Policy) -> crate::payout::store::Policy {
     crate::payout::store::Policy {
         scope: crate::payout::store::Scope {
             core_uid: p.components[&Role::Core].uid,
@@ -47,7 +47,7 @@ fn payout_policy(p: &Policy) -> crate::payout::store::Policy {
         execution_enabled: false,
     }
 }
-fn signer_policy(p: &Policy) -> crate::payout::signer::Policy {
+pub(super) fn signer_policy(p: &Policy) -> crate::payout::signer::Policy {
     crate::payout::signer::Policy {
         owner: p.owner.clone(),
         client_pubkey: crate::nostr_event::test_event(2, 0, 100, "", vec![]).pubkey,

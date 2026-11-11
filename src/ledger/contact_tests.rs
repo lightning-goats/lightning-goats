@@ -357,3 +357,45 @@ async fn existing_ordinary_settlement_cannot_be_reclassified_as_a_contact_fee() 
     assert_eq!(ledger.feed_credit_sats().await.unwrap(), 100);
     assert_eq!(count(&ledger, "private_contact_fees").await, 0);
 }
+
+#[tokio::test]
+async fn native_retention_verifier_refuses_changed_private_commitment_or_missing_delivery() {
+    let (_dir, _url, ledger) = store().await;
+    let (intent, request) = prepared(&ledger).await;
+    ledger
+        .accept_contact_fee(
+            intent.id,
+            request.receive_request_id,
+            Uuid::new_v4(),
+            FEE_MSAT,
+            &request.payment_hash,
+        )
+        .await
+        .unwrap();
+    crate::contact_state::verify(&ledger.pool).await.unwrap();
+    sqlx::query("DROP TRIGGER private_contact_intent_immutable")
+        .execute(&ledger.pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE private_contact_intents SET reply_email_hash=?")
+        .bind("ff".repeat(32))
+        .execute(&ledger.pool)
+        .await
+        .unwrap();
+    assert!(crate::contact_state::verify(&ledger.pool).await.is_err());
+    sqlx::query("UPDATE private_contact_intents SET reply_email_hash=?")
+        .bind(&intent.reply_email_hash)
+        .execute(&ledger.pool)
+        .await
+        .unwrap();
+    crate::contact_state::verify(&ledger.pool).await.unwrap();
+    sqlx::query("DROP TRIGGER private_contact_delivery_retained")
+        .execute(&ledger.pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM private_contact_delivery")
+        .execute(&ledger.pool)
+        .await
+        .unwrap();
+    assert!(crate::contact_state::verify(&ledger.pool).await.is_err());
+}

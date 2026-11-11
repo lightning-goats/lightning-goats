@@ -11,16 +11,25 @@ use std::{collections::BTreeMap, path::Path, time::Duration};
 static CORE: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
 async fn open(directory: &Path) -> Result<SqlitePool> {
+    open_named(directory, "core.db").await
+}
+pub(in crate::state_maintenance) async fn open_named(
+    directory: &Path,
+    file: &str,
+) -> Result<SqlitePool> {
+    if !["core.db", "membership.db", "payout.db", "signer.db"].contains(&file) {
+        bail!("unsupported journal role");
+    }
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
         .connect_with(
             SqliteConnectOptions::new()
-                .filename(directory.join("core.db"))
+                .filename(directory.join(file))
                 .read_only(true)
                 // Immutable mode must only cover a complete main-only image:
                 // it ignores committed WAL pages. Copied WAL images retain the
                 // normal read-only reader and its permitted private read index.
-                .immutable(!directory.join("core.db-wal").try_exists()?)
+                .immutable(!directory.join(format!("{file}-wal")).try_exists()?)
                 .create_if_missing(false)
                 .foreign_keys(true)
                 .pragma("query_only", "ON")
@@ -91,7 +100,7 @@ fn identifier(value: &str) -> Result<()> {
     }
     Ok(())
 }
-async fn names(pool: &SqlitePool) -> Result<Vec<String>> {
+pub(in crate::state_maintenance) async fn names(pool: &SqlitePool) -> Result<Vec<String>> {
     let names:Vec<String>=sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type='table' AND (name NOT LIKE 'sqlite_%' OR name='sqlite_sequence') AND name<>'_sqlx_migrations' ORDER BY name LIMIT 257").fetch_all(pool).await?;
     if names.len() > 256 {
         bail!("too many journal tables");
@@ -101,7 +110,10 @@ async fn names(pool: &SqlitePool) -> Result<Vec<String>> {
     }
     Ok(names)
 }
-async fn columns(pool: &SqlitePool, table: &str) -> Result<Vec<String>> {
+pub(in crate::state_maintenance) async fn columns(
+    pool: &SqlitePool,
+    table: &str,
+) -> Result<Vec<String>> {
     identifier(table)?;
     let metadata = sqlx::query(&format!("PRAGMA table_xinfo(\"{table}\")"))
         .fetch_all(pool)
@@ -120,7 +132,25 @@ async fn columns(pool: &SqlitePool, table: &str) -> Result<Vec<String>> {
     }
     Ok(columns)
 }
-async fn digest(pool: &SqlitePool, table: &str, columns: &[String]) -> Result<Table> {
+pub(in crate::state_maintenance) async fn digest(
+    pool: &SqlitePool,
+    table: &str,
+    columns: &[String],
+) -> Result<Table> {
+    digest_selected(pool, table, columns, false).await
+}
+pub(in crate::state_maintenance) async fn migration_prefix_digest(
+    pool: &SqlitePool,
+) -> Result<Table> {
+    let columns = columns(pool, "_sqlx_migrations").await?;
+    digest_selected(pool, "_sqlx_migrations", &columns, true).await
+}
+async fn digest_selected(
+    pool: &SqlitePool,
+    table: &str,
+    columns: &[String],
+    before_contact: bool,
+) -> Result<Table> {
     identifier(table)?;
     if columns.is_empty() || columns.len() > 256 {
         bail!("invalid comparison column count");
@@ -130,8 +160,16 @@ async fn digest(pool: &SqlitePool, table: &str, columns: &[String]) -> Result<Ta
         identifier(column)?;
         selected.push(format!("typeof(\"{column}\"),\"{column}\""));
     }
+    let predicate = if before_contact {
+        if table != "_sqlx_migrations" {
+            bail!("unsupported migration-prefix digest");
+        }
+        " WHERE version<=23"
+    } else {
+        ""
+    };
     let query = format!(
-        "SELECT {} FROM \"{table}\" ORDER BY rowid",
+        "SELECT {} FROM \"{table}\"{predicate} ORDER BY rowid",
         selected.join(",")
     );
     let mut rows = sqlx::query(&query).fetch(pool);

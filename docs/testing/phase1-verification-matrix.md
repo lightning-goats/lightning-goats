@@ -330,3 +330,16 @@ namespace, separately from ordinary unprivileged rejection tests. Record the rea
 root fixture and pure systemctl parser boundaries; do not claim a mocked unit
 observer qualifies actual service quiescence. External Strike/home-owner
 reconciliation and explicit adoption remain required before restored work resumes.
+
+For private-contact schema 24, qualify the separate schema-23-to-24 comparison
+with all four native journals, a pending feed UUID and retained signed bytes.
+Refuse changed rows, migration checksums/history, old or added schema definitions,
+nonempty new private tables and unexpected files. Ordinary backup/restore must
+continue to refuse the preceding schema; the comparison grants no resumption or
+recovery-marker authority. Native retained-contact inspection must recompute
+encrypted-envelope identity, fixed fee purpose and signed invoice commitments,
+require private delivery state, and refuse any private/public credit collision.
+Exercise enabled HTTP admission through authoritative mocked settlement while
+proving malformed input never calls the provider and accepted private fees add
+zero feed credit or public presentation work. Mocks do not qualify a real fee or
+recipient-side DM observation.

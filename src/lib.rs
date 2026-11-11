@@ -12,6 +12,7 @@ pub mod state_maintenance;
 pub mod config;
 pub mod contact;
 pub mod contact_delivery;
+mod contact_state;
 pub mod core_bridge;
 pub mod cyberherd;
 pub mod domain;

@@ -147,6 +147,25 @@ immutable evidence where needed, and eventually clear markers/unmask units.
 No automatic clearance command is provided. Missing/disputed evidence leaves
 affected work stopped. Retain originals and partial/staged sets.
 
+## Additive private-contact comparison
+
+`compare-contact-upgrade --bundle ORIGINAL_SCHEMA_23_BACKUP --candidate-copy MIGRATED_FOUR_JOURNAL_COPY`
+is a separate native comparison, not a migration or recovery operation. It requires
+the protected maintenance policy and a complete private source backup whose exact
+schema-23 checksums, images, scope and report remain valid. The candidate must
+already be a separate schema-24 copy with all four journals. Every original table,
+column, row ID, typed value, signed byte and migration-history prefix must match.
+Only the compiled contact DDL and three empty private tables may be added; other
+roles' schemas and data remain exact. Image hashes are checked again afterward.
+
+The command never changes live journals, installs files, calls a provider, signs,
+restores, removes recovery markers or authorizes service resumption. It does not
+make a schema-23 backup eligible for ordinary current-schema restore. A qualified
+protected maintenance transaction and installed rehearsal are still required
+before using this comparison for an actual upgrade. Ordinary current-schema
+verification also validates retained private fee/envelope/invoice/delivery
+correlations and refuses overlap with public feed/payment accounting.
+
 ## Verification boundary
 
 Tests use real schemas/native SQLite, committed WAL, private ownership, pending

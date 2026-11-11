@@ -612,6 +612,7 @@ async fn treat_messages_wait_for_real_joining_ack_and_reply_to_the_saved_stream_
         conversation: Some(conversation.clone()),
         score_basis: Some(10),
         zap_content: Some("Frozen zap text".into()),
+        zap_wording: None,
     };
     let payload = serde_json::json!({"result":crate::payout::results::Row{member:key(2),gross_sats:10,verified_at:calendar::now().unwrap(),result:crate::payout::results::Status::Completed{net_sats:9,fee_sats:1}},"breakdown":row});
     sqlx::query("INSERT INTO domain_events(owner,cycle,source_id,event_type,snapshot_json) VALUES(?,1,'payout:synthetic-confirmed-result','payout_result',?)")
@@ -1574,6 +1575,7 @@ async fn no_treat(f: &Fixture, start: u64, frozen_repost: bool) -> i64 {
         conversation: None,
         score_basis: Some(10),
         zap_content: None,
+        zap_wording: None,
     };
     let db = SqlitePool::connect(&f.url).await.unwrap();
     sqlx::query("INSERT INTO domain_events(owner,cycle,source_id,event_type,snapshot_json) VALUES(?,?,?,'payout_skipped',?)")

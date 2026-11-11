@@ -117,7 +117,7 @@ impl Store {
             net_sats: net,
             created_at: now,
             relays: invoice::receipt_relays(&self.policy.receipt_relays)?,
-            content: planned.zap_content.clone().unwrap_or_default(),
+            content: planned.render_zap(net)?,
             joining: joining.cloned(),
         })?;
         touch_clock(&mut tx, now).await?;

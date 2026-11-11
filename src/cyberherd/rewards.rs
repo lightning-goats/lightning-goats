@@ -118,6 +118,46 @@ pub struct Row {
     pub score_basis: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub zap_content: Option<String>,
+    /// Preserve selected custom wording so fee-adjusted invoices can render the
+    /// actual recipient amount without consulting later template edits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zap_wording: Option<ZapWording>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ZapWording {
+    pub template: String,
+    pub name: String,
+}
+impl ZapWording {
+    pub fn render(&self, net: u64) -> Result<String> {
+        if net == 0 || net > i64::MAX as u64 / 1000 || self.name.len() > 2048 {
+            bail!("invalid frozen zap wording amount/name");
+        }
+        let text = super::templates::substitute(
+            &self.template,
+            &BTreeMap::from([
+                ("name".into(), self.name.clone()),
+                ("new_amount".into(), net.to_string()),
+            ]),
+        )?;
+        if text.len() > 2048 {
+            bail!("outgoing zap wording exceeds invoice intent bound");
+        }
+        Ok(text)
+    }
+}
+impl Row {
+    pub(crate) fn render_zap(&self, net: u64) -> Result<String> {
+        match &self.zap_wording {
+            Some(wording) => wording.render(net),
+            None if self.zap_content.is_none() || net == self.net_sats => {
+                Ok(self.zap_content.clone().unwrap_or_default())
+            }
+            None => bail!("legacy frozen zap wording cannot describe an adjusted payment"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -269,6 +309,7 @@ pub(super) fn build(
             conversation: barrier.conversations.get(key).cloned(),
             score_basis: Some(snapshot.settings.minimum_sats.max(1)),
             zap_content: None,
+            zap_wording: None,
         };
         match &read.profile {
             None => row.skip = Some(Skip::MissingProfile),

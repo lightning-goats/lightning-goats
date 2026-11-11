@@ -124,6 +124,12 @@ impl Catalog {
         interaction_id: &str,
         values: &BTreeMap<String, String>,
     ) -> Result<Option<String>> {
+        self.select(category, interaction_id)?
+            .map(|template| substitute(template, values))
+            .transpose()
+    }
+
+    pub fn select(&self, category: &str, interaction_id: &str) -> Result<Option<&str>> {
         let Some(variants) = self.category(category) else {
             return Ok(None);
         };
@@ -140,7 +146,7 @@ impl Catalog {
             .values()
             .nth(index)
             .context("missing template variant")?;
-        Ok(Some(substitute(template, values)?))
+        Ok(Some(template.as_str()))
     }
 }
 

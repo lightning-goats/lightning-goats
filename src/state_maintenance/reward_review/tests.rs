@@ -250,6 +250,7 @@ impl Fixture {
                     conversation: None,
                     score_basis: None,
                     zap_content: None,
+                    zap_wording: None,
                 }]
             },
         };

@@ -231,21 +231,21 @@ impl Store {
                 conversation.validate(owner)?;
             }
             if row.skip.is_none() {
-                let values = std::collections::BTreeMap::from([
-                    (
-                        "name".into(),
-                        row.profile
+                row.zap_wording = catalog
+                    .select("cyber_herd_zap_request", &format!("{}:{}", id, row.pubkey))?
+                    .map(|template| super::rewards::ZapWording {
+                        template: template.to_owned(),
+                        name: row
+                            .profile
                             .as_ref()
                             .map_or("Anon", |p| p.name.as_str())
                             .to_owned(),
-                    ),
-                    ("new_amount".into(), row.net_sats.to_string()),
-                ]);
-                row.zap_content = catalog.render(
-                    "cyber_herd_zap_request",
-                    &format!("{}:{}", id, row.pubkey),
-                    &values,
-                )?;
+                    });
+                row.zap_content = row
+                    .zap_wording
+                    .as_ref()
+                    .map(|wording| wording.render(row.net_sats))
+                    .transpose()?;
                 if row
                     .zap_content
                     .as_ref()

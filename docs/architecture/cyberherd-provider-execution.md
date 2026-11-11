@@ -132,6 +132,13 @@ execution-chain tables. A native restart fixture exercises a two-round reduction
 and refusal to execute a fitting probe without explicit promotion; its new source
 requires CI qualification.
 
+New reward plans also retain the chosen custom zap template and frozen member
+name, allowing each adjusted invoice to render its own exact net amount. Existing
+plans without this optional field retain their original serialization and hashes;
+a legacy rendered message cannot be reused for a different amount. Later template
+edits do not change a frozen request. This is presentation evidence, never payment
+authority.
+
 The worker, final-invoice promotion, accounting/result handoff and root
 configuration still require integration and verification. None
 of these source changes has been installed on the live payout journal. Payouts

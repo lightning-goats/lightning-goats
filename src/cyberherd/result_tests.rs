@@ -95,6 +95,21 @@ async fn feeding_freezes_original_member_conversations_and_editable_zap_wording_
             .unwrap()
             .contains("frozen at feeding")
     );
+    let adjusted = row.render_zap(98).unwrap();
+    assert!(adjusted.contains("98 sats, frozen at feeding."));
+    assert!(!adjusted.contains("Different words"));
+    let mut legacy = row.clone();
+    legacy.zap_wording = None;
+    let raw = serde_json::to_string(&legacy).unwrap();
+    assert!(!raw.contains("zap_wording"));
+    let restored: crate::cyberherd::rewards::Row = serde_json::from_str(&raw).unwrap();
+    assert_eq!(
+        restored.render_zap(restored.net_sats).unwrap(),
+        restored.zap_content.as_ref().unwrap().as_str()
+    );
+    assert!(restored.render_zap(restored.net_sats + 1).is_err());
+    assert_eq!(serde_json::to_string(&restored).unwrap(), raw);
+    assert!(row.render_zap(0).is_err());
     f.store
         .edit_template(
             &f.owner,

@@ -1289,17 +1289,53 @@ async fn inclusive_fee_observations_survive_reopen_without_mutating_grants() {
         async move {
             sqlx::query("INSERT INTO payout_fee_observations(grant_id,member,round,provider_quote_id,gross_sats,invoice_net_sats,fee_sats,total_sats,observed_at,document_json) VALUES(?,?,?,?,?,?,?,?,?,?)")
                 .bind(id).bind(member).bind(round).bind(Uuid::new_v4().to_string())
-                .bind(gross).bind(net).bind(fee).bind(net + fee).bind(100_i64).bind("{}")
+                .bind(gross).bind(net).bind(fee).bind(net + fee).bind(grant.admitted_at).bind("{}")
                 .execute(db).await
         }
     };
+    let probe = |round: i64, net: i64, previous: Option<String>| {
+        let (db, id, member, created) =
+            (&db, grant.id.to_string(), member.clone(), grant.admitted_at);
+        async move {
+            sqlx::query("INSERT INTO payout_fee_probe_intents(id,grant_id,member,round,previous_quote_id,net_sats,document_json,created_at) VALUES(?,?,?,?,?,?,?,?)")
+                .bind(Uuid::new_v4().to_string()).bind(id).bind(member).bind(round)
+                .bind(previous).bind(net).bind("{}").bind(created).execute(db).await
+        }
+    };
+    probe(0, 2, None).await.unwrap();
+    assert!(probe(0, 2, None).await.is_err());
     // The fixture's actual admitted gross is two sats. Discovery of a one-sat
     // fee requires a new one-sat invoice; the first quote cannot execute.
     assert!(insert(0, 2, 1, 3).await.is_err());
     insert(0, 2, 1, 2).await.unwrap();
+    let prior: String =
+        sqlx::query_scalar("SELECT provider_quote_id FROM payout_fee_observations WHERE round=0")
+            .fetch_one(&db)
+            .await
+            .unwrap();
+    assert!(probe(1, 2, Some(prior.clone())).await.is_err());
+    probe(1, 1, Some(prior)).await.unwrap();
     assert!(insert(2, 1, 1, 2).await.is_err());
     assert!(insert(1, 2, 1, 2).await.is_err());
     insert(1, 1, 1, 2).await.unwrap();
+    let fitted: String =
+        sqlx::query_scalar("SELECT provider_quote_id FROM payout_fee_observations WHERE round=1")
+            .fetch_one(&db)
+            .await
+            .unwrap();
+    assert!(probe(2, 1, Some(fitted)).await.is_err());
+    assert!(
+        sqlx::query("UPDATE payout_fee_probe_intents SET net_sats=1")
+            .execute(&db)
+            .await
+            .is_err()
+    );
+    assert!(
+        sqlx::query("DELETE FROM payout_fee_probe_intents")
+            .execute(&db)
+            .await
+            .is_err()
+    );
     assert!(insert(2, 1, 0, 2).await.is_err());
     assert!(
         sqlx::query("UPDATE payout_fee_observations SET fee_sats=0")

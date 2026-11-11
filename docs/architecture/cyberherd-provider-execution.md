@@ -99,3 +99,33 @@ production account or authorize a financial activation.
 The isolated payout runtime, signing broker and completed-payout/member-thread
 announcements remain required for the full port. Core outcome source is not live
 payout-worker acceptance or permission to publish a treat notice.
+
+
+## Operator-selected inclusive fees — implementation in progress
+
+The operator selected fees deducted from members' gross shares, supplied by the
+Strike API. The 100-sat feeding and 1,000-sat rolling-day spending limits include
+fees; the maximum delivered payment is 100 sats. There is no independent fixed
+fee cap. A share of 100 sats with a quoted fee of 2 sats permits 98 sats delivered,
+with 100 sats spent. Fees consuming the share or leaving less than the recipient's
+minimum make that share unaffordable. Unused amounts remain with operations.
+
+[Strike's quote API](https://docs.strike.me/api/create-lightning-payment-quote/)
+returns receiver amount, total fee and total amount. Its `amount` override and
+`INCLUSIVE` fee policy are documented for zero-amount invoices only. Existing
+LNURL/NIP-57 invoices bind an exact amount and description hash, so adjusting a
+payout requires a separately frozen invoice and, where supported, signed zap
+request. Never change signed amounts or silently drop NIP-57 support.
+
+The source includes bounded fee arithmetic, typed non-executable observations,
+and append-only discovery records. Migration 0010 adds a separate chain for
+pre-execution probe invoices. Each next amount must be strictly smaller and
+follow the previous oversized provider quote; the original grant remains fixed.
+A fitting quote ends adjustment. Discovery records alone cannot execute a payment.
+The single executable invoice identity per grant/member remains unchanged.
+
+The worker, probe persistence adapter, final-invoice promotion, accounting/result
+handoff and root configuration still require integration and verification. None
+of these source changes has been installed on the live payout journal. Payouts
+remain disabled; the existing execution protocol above still uses its legacy
+fixed allowance until the inclusive path is fully qualified.

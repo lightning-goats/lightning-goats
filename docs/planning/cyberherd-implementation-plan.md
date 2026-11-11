@@ -31,6 +31,14 @@ Operator instructions take precedence where the reference differs:
   Do not port the legacy three-feed/four-distribution batch rule or introduce
   debits for food that was not delivered. Existing feed credit, queue and local
   caps remain under the current daemon/gateway/owner authority.
+- **Payout settings selected on 2026-11-11:** allocate 10%, with at most
+  100 sats spent per confirmed feeding and 1,000 sats per rolling 24 hours,
+  including fees; deliver at most 100 sats per payment and allow at most 100 new
+  payout/signing requests per hour. Strike's actual quoted fee is deducted from
+  each member's gross share, with no separate fixed fee ceiling. A 100-sat share
+  with a 2-sat fee delivers 98 sats and consumes 100 sats. Skip an unaffordable
+  share; unused allocation remains with operations. These settings do not
+  authorize live payouts. The inclusive-fee integration remains unfinished.
 - Preserve the existing 10-sat payment-announcement floor; smaller legitimate
   settled zaps can update an active member's score without a payment announcement.
   Social notifications are separate from payment announcements.

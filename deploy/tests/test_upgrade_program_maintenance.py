@@ -68,7 +68,10 @@ class ProgramFiles(unittest.TestCase):
     # test directories, without inheriting or rerunning its unrelated tests.
     status = support.ContactMaintenanceFiles.status
     write = staticmethod(support.ContactMaintenanceFiles.write)
-    cleanup_carriers = support.ContactMaintenanceFiles.cleanup_carriers
+    def cleanup_carriers(self):
+        for path in self.carriers:
+            if path.exists():
+                shutil.rmtree(path)
 
     def setUp(self):
         support.ContactMaintenanceFiles.setUp(self)
@@ -174,6 +177,7 @@ class ProgramFiles(unittest.TestCase):
         self.assertEqual(self.starts, [])
         self.assert_programs('new')
         self.assert_live_images_preserved()
+
         result = P.resume(self.destination, self.sha, True)
         self.assertFalse(result['payouts_enabled'])
         self.assertEqual(self.starts, [P.C.UNIT_NAME, 'cyberherd.service'])
@@ -189,6 +193,40 @@ class ProgramFiles(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'already began'):
             P.rollback(self.destination, self.sha, True)
 
+    def test_native_check_scratch_is_removed_after_success_and_parser_refusal(self):
+        record = P.C.read_json(self.destination / 'PREPARED.json')
+        created = []
+        original = P.tempfile.mkdtemp
+        def temporary(*args, **kwargs):
+            result = original(*args, **kwargs)
+            created.append(Path(result))
+            return result
+        with patch.object(P.tempfile, 'mkdtemp', side_effect=temporary):
+            P.native_configuration_checks(self.destination, record)
+            self.worker_refusal = True
+            with self.assertRaisesRegex(ValueError, 'positively accept'):
+                P.native_configuration_checks(self.destination, record)
+        self.assertEqual(len(created), 2)
+        self.assertTrue(all(not path.exists() for path in created))
+
+    def test_native_check_partial_copy_failure_does_not_retain_scratch(self):
+        record = P.C.read_json(self.destination / 'PREPARED.json')
+        created = []
+        original_temp, original_copy = P.tempfile.mkdtemp, P.TX.copy_durable
+        def temporary(*args, **kwargs):
+            result = original_temp(*args, **kwargs)
+            created.append(Path(result))
+            return result
+        def copying(source, destination, fingerprint):
+            if destination.parent in created:
+                destination.write_bytes(b'partial native executable')
+                raise OSError(28, 'synthetic scratch exhaustion')
+            return original_copy(source, destination, fingerprint)
+        with patch.object(P.tempfile, 'mkdtemp', side_effect=temporary), patch.object(P.TX, 'copy_durable', side_effect=copying):
+            with self.assertRaises(OSError):
+                P.native_configuration_checks(self.destination, record)
+        self.assertEqual(len(created), 1)
+        self.assertFalse(created[0].exists())
     def test_current_schema_refusal_retains_all_programs_masks_and_live_images(self):
         self.selected_refusal = True
         with self.assertRaisesRegex(ValueError, 'not positively accepted'):

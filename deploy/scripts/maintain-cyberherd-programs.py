@@ -23,6 +23,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import tarfile
 import tempfile
 import tomllib
@@ -76,8 +77,10 @@ def native_configuration_checks(directory, record):
                     or config.read_bytes() != source.read_bytes()):
                 raise ValueError('native worker or checked configuration changed')
     finally:
-        carrier.chmod(0o700)
-        TX.sync_directory(carrier)
+        # The exact selected programs/configurations remain in the protected
+        # review. These UID-readable execution copies are disposable, including
+        # after parser or partial-copy failure; retaining them exhausts /run.
+        shutil.rmtree(carrier)
     return {'accepted': True, 'original_worker_uids': True, 'isolated_network': True,
             'configurations_checked': 3, 'journals_opened': False, 'credentials_loaded': False}
 

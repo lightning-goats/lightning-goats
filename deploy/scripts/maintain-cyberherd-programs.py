@@ -105,12 +105,15 @@ def prepare(archive, review_archive, source, archive_sha, review_sha, directory)
     remaining = set(PROGRAMS) - {'lightning-goatsd', 'lightning-goatsctl'}
     with tarfile.open(review, 'r:gz') as reader:
         for member in reader:
-            if member.name not in remaining:
+            # The accepted package permits conventional ./ prefixes. Use the
+            # same canonical member spelling as its verifier before selection.
+            name = str(Path(member.name))
+            if name not in remaining:
                 continue
-            if not member.isfile() or (payload / member.name).exists():
+            if not member.isfile() or (payload / name).exists():
                 raise ValueError('selected native archives overlap or contain a non-program')
-            Q.I.publish(payload / member.name, reader.extractfile(member).read(), 0o755)
-            remaining.remove(member.name)
+            Q.I.publish(payload / name, reader.extractfile(member).read(), 0o755)
+            remaining.remove(name)
     if remaining:
         raise ValueError('complete four-role native program set required')
     hashes = {}

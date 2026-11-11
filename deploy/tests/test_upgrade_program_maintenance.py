@@ -82,7 +82,8 @@ class ProgramFiles(unittest.TestCase):
         with tarfile.open(self.review_archive, 'w:gz') as writer:
             for name in P.PROGRAMS[2:]:
                 data = ('new program: ' + name).encode()
-                member = tarfile.TarInfo(name)
+                # Match the real qualified package's conventional ./ spelling.
+                member = tarfile.TarInfo('./' + name)
                 member.size = len(data)
                 writer.addfile(member, io.BytesIO(data))
         self.selected_refusal = False

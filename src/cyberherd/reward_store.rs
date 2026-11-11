@@ -233,7 +233,7 @@ impl Store {
             if row.skip.is_none() {
                 row.zap_wording = catalog
                     .select("cyber_herd_zap_request", &format!("{}:{}", id, row.pubkey))?
-                    .map(|template| super::rewards::ZapWording {
+                    .map(|template| rewards::ZapWording {
                         template: template.to_owned(),
                         name: row
                             .profile

@@ -65,13 +65,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo build --release --locked --example prepare_cyberherd_install_fixture --example check_cyberherd_recipient --example check_household_zap_receipt --example check_cyberherd_overlay_stage --example contact_upgrade_fixture --example check_private_contact_stage --example check_installed_operator
+          cargo build --release --locked --example prepare_cyberherd_install_fixture --example check_cyberherd_recipient --example check_household_zap_receipt --example check_cyberherd_overlay_stage --example contact_upgrade_fixture --example check_private_contact_stage --example check_installed_operator --example check_cyberherd_financial_stage
           cargo test --locked --example check_cyberherd_recipient
           cargo test --locked --example check_household_zap_receipt
           cargo test --locked --example check_cyberherd_overlay_stage
           cargo test --locked --example contact_upgrade_fixture
           cargo test --locked --example check_private_contact_stage
           cargo test --locked --example check_installed_operator
+          cargo test --locked --example check_cyberherd_financial_stage
           mkdir "$RUNNER_TEMP/cyberherd-test-only"
           install -m 0755 target/release/examples/prepare_cyberherd_install_fixture "$RUNNER_TEMP/cyberherd-test-only/TEST-ONLY-prepare-legacy-core"
           install -m 0755 target/release/examples/check_cyberherd_recipient "$RUNNER_TEMP/cyberherd-test-only/READ-ONLY-check-recipient"
@@ -80,9 +81,10 @@ jobs:
           install -m 0755 target/release/examples/contact_upgrade_fixture "$RUNNER_TEMP/cyberherd-test-only/TEST-ONLY-contact-upgrade-fixture"
           install -m 0755 target/release/examples/check_private_contact_stage "$RUNNER_TEMP/cyberherd-test-only/CHECK-ONLY-private-contact-stage"
           install -m 0755 target/release/examples/check_installed_operator "$RUNNER_TEMP/cyberherd-test-only/TEST-ONLY-installed-operator-client"
+          install -m 0755 target/release/examples/check_cyberherd_financial_stage "$RUNNER_TEMP/cyberherd-test-only/CHECK-ONLY-financial-stage"
           python3 -I -S -B deploy/scripts/export-upgrade-tools.py "$GITHUB_WORKSPACE" "$GITHUB_SHA" "$RUNNER_TEMP/cyberherd-test-only/tool-bundle" > "$RUNNER_TEMP/cyberherd-test-only/TOOL-EXPORT.json"
           python3 -I -S -B deploy/scripts/export-self-read-site.py "$GITHUB_WORKSPACE" "$GITHUB_SHA" "$RUNNER_TEMP/cyberherd-self-read-site" > "$RUNNER_TEMP/cyberherd-test-only/SELF-READ-SITE-EXPORT.json"
-          (cd "$RUNNER_TEMP/cyberherd-test-only" && sha256sum TEST-ONLY-prepare-legacy-core READ-ONLY-check-recipient SIGNING-ONLY-check-zap-receipt CHECK-ONLY-overlay-stage TEST-ONLY-contact-upgrade-fixture CHECK-ONLY-private-contact-stage TEST-ONLY-installed-operator-client TOOL-EXPORT.json > SHA256SUMS)
+          (cd "$RUNNER_TEMP/cyberherd-test-only" && sha256sum TEST-ONLY-prepare-legacy-core READ-ONLY-check-recipient SIGNING-ONLY-check-zap-receipt CHECK-ONLY-overlay-stage TEST-ONLY-contact-upgrade-fixture CHECK-ONLY-private-contact-stage TEST-ONLY-installed-operator-client CHECK-ONLY-financial-stage TOOL-EXPORT.json > SHA256SUMS)
       - name: Retain test-only installation fixture
         uses: actions/upload-artifact@v4
         with:

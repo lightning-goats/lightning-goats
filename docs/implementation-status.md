@@ -38,6 +38,13 @@ host-encrypted and passed receive-request/same-core-resource read checks after
 the operator corrected an omitted scope. Payment-read, quote/execute and controlled
 payment qualification remain unfinished; no payout was sent.
 
+The next [four-role financial candidate preparer](deployment/cyberherd-financial-stage.md)
+binds explicit operator limits, an already selected stored allocation and all four
+native configurations. It preserves running services and creates no activation
+authority. Local boundary cases pass; separate protected-root and installed native
+qualification are pending. Requested operator limits remain unanswered, and no
+actual-host financial candidate or activation has been performed.
+
 Separate NIP-46 clients now pass [actual household signing checks](testing/cyberherd-bunker-checkpoint-20261110.md):
 membership kinds 1/1311 and payout-signing kind 9734 preserve the exact project
 author, frozen unsigned bytes, canonical hashes and valid signatures. The operator

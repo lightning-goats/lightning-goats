@@ -595,6 +595,32 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
                       'actual empty public roster after manual reset')
         operator_edge = installed_operator_edge(root / 'core-payload', guard, client)
         self_edge = installed_operator_edge(root / 'core-payload', guard, client, self_read=True)
+        # Choose a nonzero stored allocation using the real guarded native HTTP
+        # client. All installed financial ceilings stay zero; only private
+        # candidate files are prepared and checked below, never applied.
+        allocation = json.loads(run(*client, 'financial-preview-allocation'))
+        assert allocation == {'preview_allocation_selected': True, 'actual_native_operator_request': True,
+            'roster_still_empty': True, 'provider_operations': 0, 'publications': 0}
+        w.await_ready(lambda: w.http_json('http://127.0.0.1:3340/api/v1/cyberherd')['roster']['member_percent'] == 10,
+                      'actual stored preview allocation')
+        financial_checker = root / 'CHECK-ONLY-financial-stage'
+        shutil.copyfile(fixture_directory / financial_checker.name, financial_checker)
+        financial_checker.chmod(0o755)
+        financial_review = base / 'ci-financial-candidate-review'
+        financial_prepared = json.loads(run(*launcher, '--cyberherd-financial-stage', str(financial_review),
+            '--validator', str(financial_checker), '--validator-sha256', hashlib.sha256(financial_checker.read_bytes()).hexdigest(),
+            '--member-percent', '10', '--max-sats-per-feed', '100', '--max-sats-per-24h', '1000',
+            '--max-fee-sats', '2', '--max-net-sats', '98', '--max-new-per-hour', '10'))
+        assert financial_prepared == {'prepared': True, 'financial_candidate_only': True, 'activation_authorized': False,
+            'services_changed': False, 'journals_opened': False, 'backlog_review_required': True}
+        financial_record = json.loads((financial_review / 'PREPARED.json').read_text())
+        assert financial_record['native_validation'] == {'accepted': True, 'configuration_only': True,
+            'candidate_limits_valid': True, 'journals_opened': False, 'credentials_loaded': False,
+            'provider_operations': 0, 'services_changed': False}
+        for row in financial_record['configurations']:
+            destination = Path(row['destination'])
+            assert hashlib.sha256(destination.read_bytes()).hexdigest() == row['original']['sha256']
+        assert len(financial_record['configurations']) == 4
         financial_after = w.http_json('http://127.0.0.1:8787/api/v1/status')
         for key in ('feed_credit_sats', 'threshold_sats', 'feeds_due', 'remainder_sats', 'unresolved_feed_attempt'):
             assert financial_after[key] == financial_before[key]
@@ -629,6 +655,13 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
                     'provider_operations': 0, 'public_network_used': False, 'live_host_qualified': False},
                 'installed_operator_tls_edge': operator_edge,
                 'installed_self_read_tls_edge': self_edge,
+                'installed_financial_candidate_preparation': {'accepted': True,
+                    'actual_stored_allocation_selected': allocation,
+                    'four_native_candidate_configurations_validated': True,
+                    'original_core_uid_isolated_checker': True, 'original_configurations_unchanged': True,
+                    'candidate_limits_only_not_installed': True, 'backlog_review_still_required': True,
+                    'services_changed': False, 'journals_opened': False, 'provider_operations': 0,
+                    'gateway_post_count': counts['post'], 'public_network_used': False, 'live_host_qualified': False},
                 'installed_signed_self_read_activation': {'accepted': True,
                     'native_original_uid_configuration_check': True, 'actual_current_four_journal_backup': True,
                     'financial_images_unchanged_during_apply': True, 'only_member_auth_configuration_added': True,

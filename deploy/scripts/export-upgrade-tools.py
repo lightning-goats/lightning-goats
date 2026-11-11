@@ -27,6 +27,7 @@ FILES = (
     'install-private-contact-site.py',
     'activate-cyberherd-self-read.py',
     'install-cyberherd-self-read-site.py',
+    'prepare-cyberherd-financial-stage.py',
 )
 
 

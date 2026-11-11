@@ -38,8 +38,20 @@ New native tests cover domain/fee/recipient validation, concurrent issuance clai
 immutable purpose, ordinary/private collision refusal, atomic queue failure,
 duplicate settlement, authoritative provider amount/state checks, uncertain create
 recovery, stale delivery leases, exact ciphertext retry and positive/negative relay
-ACKs. They use generated/synthetic fixtures. Exact locked Rust/clippy/audit results
-remain pending CI; no local native pass is claimed.
+ACKs. They use generated/synthetic fixtures. All ten workflows now pass on
+`822190bab56ad3f2b710162e21114a3f15eeb3d0`; tested merge
+`b35b1e7e759ca57722922b0c7c7b7eccc126b298` has zero file differences.
+[CI](https://github.com/lightning-goats/lightning-goats/actions/runs/42929632214)
+passes locked format/clippy and 511 regular native tests, plus the separately
+required root-owned/bootstrap/legacy fixtures. The real-NIP46 fixture runs in its
+[separate workflow](https://github.com/lightning-goats/lightning-goats/actions/runs/42929632094).
+[Deployment](https://github.com/lightning-goats/lightning-goats/actions/runs/42929632122)
+passes website/nginx/package/installed systemd and
+[Security](https://github.com/lightning-goats/lightning-goats/actions/runs/42929632126)
+passes. The first Rust attempt passed the new fee tests but hit `Address already
+in use` in an existing gateway startup fixture. That failed run is retained; the
+failed job alone was retried using the authenticated CLI after the GitHub app
+refused rerun permission. The retry passes the unchanged source.
 
 All nine isolated nginx/contact regressions pass (3.173 seconds), preserving the
 existing TLS/LNURL/webhook/WebSocket and burst checks. The actual installed
@@ -50,8 +62,18 @@ zero tests; early contact cases exhausted their shared synthetic IP's quota.
 Separate loopback client keys isolate the assertions without increasing limits or
 weakening WAF rules. Only disposable loopback nginx/mock processes were started.
 
-Still required: paid-contact browser integration and restart/status recovery;
-complete enabled HTTP admission tests; native four-journal private-state correlation
+The subsequent browser implementation now connects the anonymous form to these
+separate POST endpoints. It requires email, freezes ciphertext/status capability
+before creation, stores no plaintext email/message/key, checks the fixed 100-sat
+invoice and waits for server status after WebLN. A reload checks the retained
+contact without another invoice or wallet submission. Relay acceptance is distinct
+from reading. Four isolated contact browser cases pass locally (229.227 seconds),
+including native encryption, free identity/retry, anonymous paid status/reload and
+wrong-amount refusal before wallet submission. These use mocked financial status,
+not an actual Strike fee or recipient-side observation. Final combined CI remains
+separate from the earlier backend pin above. The source flag stays false.
+
+Still required: complete enabled HTTP admission tests; native four-journal private-state correlation
 checks; a native schema-23-to-24 migration comparison/protected maintenance
 transaction and installed rehearsal; current backup and actual deployment;
 controlled provider/paid-contact acceptance and recipient-side DM observation.

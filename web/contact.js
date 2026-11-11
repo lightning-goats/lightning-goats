@@ -99,26 +99,31 @@
         if (saved && /^[0-9a-f]{64}$/.test(saved.sender || "") && validEnvelope(saved.event)) pending = saved;
     } catch (_) { /* Storage availability cannot substitute for a valid envelope. */ }
 
+    const fee = window.LightningGoatsContactFee.create({anonymousEnvelope,validEnvelope,
+        status: text => {byId("contactStatus").textContent = text;}, changed: () => update()});
+
     function update() {
         const pubkey = window.LightningGoatsIdentity?.getPublicKey() || "";
-        byId("contactIdentity").textContent = pubkey ? `From your Nostr account (${pubkey.slice(0, 8)}…) · free` : "Connect Nostr to send for free, or use email with a 100-sat contact fee.";
-        byId("contactEmailRow").hidden = Boolean(pubkey);
-        byId("contactEmail").required = !pubkey;
-        byId("contactSend").textContent = pending ? "Retry encrypted message" : pubkey ? "Send private message" : "Pay 100 sats and send";
-        byId("contactSend").disabled = busy || !pubkey;
-        byId("contactMessage").disabled = busy || Boolean(pending);
-        byId("contactReset").hidden = !pending;
-        if (!pubkey) byId("contactStatus").textContent = "Paid email contact is being prepared. Nostr contact is available for free.";
+        const paidPending = fee.hasPending();
+        byId("contactIdentity").textContent = paidPending ? "Saved email contact · separate 100-sat fee" : pubkey ? `From your Nostr account (${pubkey.slice(0, 8)}…) · free` : "Connect Nostr to send for free, or use email with a 100-sat contact fee.";
+        byId("contactEmailRow").hidden = Boolean(pubkey) && !paidPending;
+        byId("contactEmail").required = !pubkey && !paidPending;
+        byId("contactSend").textContent = pending ? "Retry encrypted message" : paidPending ? fee.caption() : pubkey ? "Send private message" : "Pay 100 sats and send";
+        byId("contactSend").disabled = busy || (Boolean(pending) && !pubkey) || (!pubkey && !fee.enabled() && !paidPending);
+        byId("contactMessage").disabled = busy || Boolean(pending) || paidPending;
+        byId("contactEmail").disabled = busy;
+        byId("contactReset").hidden = !pending && !paidPending;
+        if (!pubkey && !paidPending && !fee.enabled() && !byId("contactStatus").textContent) byId("contactStatus").textContent = "Paid email contact is being prepared. Nostr contact is available for free.";
     }
     byId("contactConnect").addEventListener("click", async () => {
-        try { await window.LightningGoatsIdentity?.connect(); update(); }
+        try { await window.LightningGoatsIdentity?.connect(); byId("contactStatus").textContent = ""; update(); }
         catch (_) { byId("contactStatus").textContent = "Connect a Nostr signer to send as yourself."; }
     });
     byId("contactReset").addEventListener("click", () => {
         if (busy) return;
-        pending = null;
-        localStorage.removeItem(PENDING);
-        byId("contactStatus").textContent = "The local pending copy was cleared. It does not retract a message already accepted by a relay.";
+        try {localStorage.removeItem(PENDING);fee.reset();pending = null;}
+        catch (_) {byId("contactStatus").textContent = "The browser could not clear the saved contact.";return;}
+        byId("contactStatus").textContent = "The local pending copy was cleared. It does not retract a submitted contact or undo a payment.";
         update();
     });
     form.addEventListener("submit", async (event) => {
@@ -126,7 +131,15 @@
         if (busy) return;
         const identity = window.LightningGoatsIdentity;
         const pubkey = identity?.getPublicKey();
-        if (!pubkey) { update(); return; } // Paid backend is a separate, gated path.
+        if (fee.hasPending() || !pubkey) {
+            if (pending) {byId("contactStatus").textContent = "Reconnect the Nostr account that owns your saved message.";return;}
+            if (!fee.enabled() && !fee.hasPending()) {update();return;}
+            busy = true;update();
+            try {await fee.send(byId("contactMessage").value,byId("contactEmail").value);}
+            catch (error) {byId("contactStatus").textContent = error.message || "The saved private contact can be checked again.";}
+            finally {busy = false;update();}
+            return;
+        }
         busy = true;
         update();
         byId("contactStatus").textContent = "Encrypting your private message…";

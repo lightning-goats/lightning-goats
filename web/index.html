@@ -681,7 +681,14 @@
                         <textarea id="contactMessage" class="form-control" rows="5" maxlength="3000" required></textarea>
                         <p class="small mt-2">Nostr users send for free. Email contact costs 100 sats and does not add feeder credit.</p>
                         <button id="contactSend" class="btn btn-warning mt-2" type="submit">Send private message</button>
+                        <button id="contactCheck" class="btn btn-outline-light mt-2" type="button" hidden>Check payment status</button>
                         <button id="contactReset" class="btn btn-outline-light mt-2" type="button" hidden>Clear pending copy</button>
+                        <div id="contactInvoiceWrap" class="zap-invoice-wrap" hidden>
+                            <canvas id="contactQr" class="zap-qr" aria-label="100-sat contact invoice QR code"></canvas>
+                            <textarea id="contactInvoice" class="zap-invoice" readonly aria-label="Contact fee invoice"></textarea>
+                            <button id="contactCopy" class="btn btn-outline-light mt-2" type="button">Copy contact invoice</button>
+                            <a id="contactWallet" class="btn btn-outline-warning mt-2" hidden>Open wallet</a>
+                        </div>
                         <p id="contactStatus" class="small mt-2" role="status"></p>
                     </form>
                 </div>
@@ -1842,6 +1849,7 @@
         });
     })();
     </script>
+    <script src="/contact-fee.js"></script>
     <script src="/contact.js"></script>
 </body>
 </html>

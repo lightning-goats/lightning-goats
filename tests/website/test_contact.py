@@ -11,6 +11,7 @@ from playwright.sync_api import sync_playwright
 ROOT = Path(__file__).resolve().parents[2] / "web"
 ORIGIN = "https://lightning-goats.com"
 PROJECT = "669ebbcccf409ee0467a33660ae88fd17e5379e646e41d7c236ff4963f3c36b6"
+CONTACT_INVOICE = "lnbc1u1" + "q" * 120  # UI fixture only, not a signed payment invoice.
 FIXTURE = """
 window.NativeNostrTools=NostrTools;
 window.recipientKey=window.fixtureReuseRecipient?new Uint8Array(fixtureReuseRecipient):NostrTools.generateSecretKey();
@@ -57,6 +58,10 @@ class ContactBrowserTests(unittest.TestCase):
         self.page = self.context.new_page()
         self.errors = []
         self.provider_requests = []
+        self.paid_enabled = False
+        self.contact_creates = []
+        self.contact_state = "issued"
+        self.contact_invoice = CONTACT_INVOICE
         self.page.on("pageerror", lambda error: self.errors.append(str(error)))
 
     def route(self, route):
@@ -66,7 +71,7 @@ class ContactBrowserTests(unittest.TestCase):
             return
         path = parsed.path
         if path == "/site-config.js":
-            route.fulfill(content_type="text/javascript", body="window.LightningGoatsSite={contactPaymentsEnabled:false}")
+            route.fulfill(content_type="text/javascript", body="window.LightningGoatsSite=" + json.dumps({"contactPaymentsEnabled": self.paid_enabled}))
         elif path == "/vendor/nostr.bundle.js":
             route.fulfill(content_type="text/javascript", body=(ROOT / path.lstrip("/")).read_text() + FIXTURE)
         elif path == "/vendor/nostr-login.js":
@@ -81,6 +86,21 @@ class ContactBrowserTests(unittest.TestCase):
         elif path.startswith("/api/") or path.startswith("/.well-known/") or path.startswith("/lnurlp/"):
             if "contact" in path or "lnurlp" in path:
                 self.provider_requests.append(route.request.url)
+            if self.paid_enabled and path in ("/api/v1/contact", "/api/v1/contact/status"):
+                self.assertEqual(route.request.method, "POST")
+                self.assertEqual(parsed.query, "")
+                request = json.loads(route.request.post_data)
+                if path == "/api/v1/contact":
+                    self.contact_creates.append(request)
+                if not self.contact_creates:
+                    route.fulfill(status=404, content_type="application/json", body="{}")
+                    return
+                intent = self.contact_creates[0]
+                self.assertEqual(request["id"], intent["id"])
+                self.assertEqual(request["capability"], intent["capability"])
+                route.fulfill(content_type="application/json", body=json.dumps({"id": intent["id"],
+                    "state": self.contact_state, "fee_sats": 100, "invoice": self.contact_invoice}))
+                return
             route.fulfill(status=503, content_type="application/json", body="{}")
         else:
             file = ROOT / ("index.html" if path == "/" else path.lstrip("/"))
@@ -152,6 +172,65 @@ class ContactBrowserTests(unittest.TestCase):
         self.assertEqual(self.page.evaluate("signCalls"), [])
         self.assertIsNone(self.page.evaluate("localStorage.getItem('lightning-goats-contact-pending-v1')"))
         self.assertEqual(self.provider_requests, [])
+        self.assertEqual(self.errors, [])
+
+    def test_paid_contact_waits_for_server_confirmation_and_reload_never_repays(self):
+        self.paid_enabled = True
+        self.context.add_init_script("""
+          window.walletCalls=[];
+          window.webln={async enable(){walletCalls.push('enable')},async sendPayment(invoice){walletCalls.push(invoice);return {preimage:'fixture-only'}}};
+        """)
+        self.open()
+        self.page.locator("#contactLink").click()
+        self.page.locator("#contactModal").wait_for(state="visible")
+        self.page.locator("#contactEmail").fill("visitor@example.org")
+        self.page.locator("#contactMessage").fill("Private paid contact fixture")
+        self.page.locator("#contactSend").click()
+        self.page.wait_for_function("document.getElementById('contactStatus').textContent.includes('Waiting for Strike')")
+        self.assertEqual(len(self.contact_creates), 1)
+        self.assertEqual(self.page.evaluate("walletCalls"), ["enable", CONTACT_INVOICE])
+        self.assertEqual(self.page.evaluate("published.length"), 0)
+        stored = self.page.evaluate("localStorage.getItem('lightning-goats-contact-fee-v1')")
+        self.assertNotIn("visitor@example.org", stored)
+        self.assertNotIn("Private paid contact fixture", stored)
+        decrypted = self.page.evaluate("NativeNostrTools.nip59.unwrapEvent(JSON.parse(localStorage.getItem('lightning-goats-contact-fee-v1')).envelope,recipientKey).content")
+        self.assertIn("Reply email: visitor@example.org", decrypted)
+        self.assertNotIn("fee_sats", self.contact_creates[0])
+        self.assertTrue(all("/.well-known/lnurlp/" not in url and "/lnurlp/herd/" not in url for url in self.provider_requests))
+
+        keys = self.page.evaluate("({sender:Array.from(senderKey),recipient:Array.from(recipientKey)})")
+        self.context.add_init_script("window.fixtureReuseSender=" + json.dumps(keys["sender"]) + ";window.fixtureReuseRecipient=" + json.dumps(keys["recipient"]))
+        self.page.reload(wait_until="domcontentloaded")
+        self.page.locator("#contactLink").click()
+        self.page.locator("#contactModal").wait_for(state="visible")
+        self.assertEqual(self.page.evaluate("walletCalls"), [])
+        self.assertEqual(len(self.contact_creates), 1)
+        self.assertEqual(self.page.locator("#contactInvoice").input_value(), CONTACT_INVOICE)
+        self.contact_state = "paid"
+        self.page.locator("#contactCheck").click()
+        self.page.wait_for_function("document.getElementById('contactStatus').textContent.includes('Payment confirmed')")
+        self.assertEqual(self.page.evaluate("walletCalls"), [])
+        self.assertEqual(self.page.evaluate("published.length"), 0)
+        self.contact_state = "delivered"
+        self.page.locator("#contactCheck").click()
+        self.page.wait_for_function("document.getElementById('contactStatus').textContent.includes('accepted your encrypted message')")
+        self.assertIsNone(self.page.evaluate("localStorage.getItem('lightning-goats-contact-fee-v1')"))
+        self.assertEqual(len(self.contact_creates), 1)
+        self.assertEqual(self.errors, [])
+
+    def test_paid_contact_refuses_wrong_amount_before_wallet_submission(self):
+        self.paid_enabled = True
+        self.contact_invoice = "lnbc10u1" + "q" * 120
+        self.context.add_init_script("window.walletCalls=[];window.webln={async enable(){walletCalls.push('enable')},async sendPayment(){walletCalls.push('must-not-pay')}}")
+        self.open()
+        self.page.locator("#contactLink").click()
+        self.page.locator("#contactModal").wait_for(state="visible")
+        self.page.locator("#contactEmail").fill("visitor@example.org")
+        self.page.locator("#contactMessage").fill("Bound 100-sat contact fixture")
+        self.page.locator("#contactSend").click()
+        self.page.wait_for_function("document.getElementById('contactStatus').textContent.includes('exactly 100 sats')")
+        self.assertEqual(self.page.evaluate("walletCalls"), ["enable"])
+        self.assertEqual(self.page.evaluate("published.length"), 0)
         self.assertEqual(self.errors, [])
 
 

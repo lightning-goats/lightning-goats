@@ -323,6 +323,7 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
     thread = threading.Thread(target=gateway.serve_forever, daemon=True)
     thread.start()
     finished = False
+    synthetic_signing_artifacts = []
     try:
         stripped = json.loads(run('/usr/bin/setpriv', '--reuid=' + str(runtime.pw_uid), '--regid=' + str(runtime.pw_gid),
                                   '--clear-groups', '--inh-caps=-all', '--ambient-caps=-all', '--bounding-set=-all', '--no-new-privs',
@@ -698,11 +699,15 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
         signer_key = Path('/etc/credstore.encrypted/cyberherd-signer-client')
         assert not signer_key.exists() and not signer_key.is_symlink()
         w.encrypt(signer_key, 'nostr-client-key', ('0' * 63 + '2').encode())
+        synthetic_signing_artifacts.append((signer_key, hashlib.sha256(signer_key.read_bytes()).hexdigest(),
+                                           root / 'synthetic-signer-client.cred'))
         signer_trap = Path('/usr/local/bin/nak')
         assert not signer_trap.exists() and not signer_trap.is_symlink()
         signer_trap.write_text('#!/usr/bin/python3\nfrom pathlib import Path\n'
             'Path("/var/lib/cyberherd-signer/UNEXPECTED-TEST-SIGNING").write_text("unexpected")\nraise SystemExit(97)\n')
         signer_trap.chmod(0o755)
+        synthetic_signing_artifacts.append((signer_trap, hashlib.sha256(signer_trap.read_bytes()).hexdigest(),
+                                           root / 'UNUSED-synthetic-nak-trap'))
         activation_candidate = base / 'ci-financial-activation-candidate'
         run(*launcher, '--cyberherd-financial-stage', str(activation_candidate),
             '--validator', str(financial_checker), '--validator-sha256', hashlib.sha256(financial_checker.read_bytes()).hexdigest(),
@@ -863,6 +868,14 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
         run('/usr/bin/systemctl', 'stop', 'cyberherd.service', 'lightning-goats-receive.service')
         if not member_mask.exists() and not member_mask.is_symlink(): member_mask.symlink_to('/dev/null')
         assert member_mask.is_symlink() and os.readlink(member_mask) == '/dev/null'
+        # Retain only our exact synthetic credential/trap privately. The next
+        # independent boundary rehearsal must create its own credentials and
+        # must continue refusing any pre-existing installed signing credential.
+        for artifact, expected_sha, evidence in synthetic_signing_artifacts:
+            assert artifact.is_file() and not artifact.is_symlink()
+            assert hashlib.sha256(artifact.read_bytes()).hexdigest() == expected_sha
+            assert not evidence.exists() and not evidence.is_symlink()
+            artifact.rename(evidence)
         if finished:
             # Configuration-only fixture cleanup. Never roll back database bytes
             # or the compatible new native programs after schema migration.

@@ -81,6 +81,8 @@ cases and the installed native/systemd transaction. Actual VPS preparation and
 independent staged/original file/process readback pass without opening journals
 or changing running applications. No actual-host maintenance, financial candidate
 application or outgoing activation has been performed.
+That earlier preparation is now stale after the approved three-seat/operator
+configuration change and requires a fresh baseline before application.
 
 The [first financial configuration transaction](deployment/cyberherd-financial-maintenance.md)
 is now implemented separately in source. It consumes the sealed candidate and

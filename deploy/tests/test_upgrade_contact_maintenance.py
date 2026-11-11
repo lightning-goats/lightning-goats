@@ -68,6 +68,22 @@ class ContactMaintenanceBoundaries(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     U.native({'review': '/protected'}, 'verify-contact-upgrade-source')
 
+    def test_feeder_cap_native_selector_uses_only_its_explicit_source_boundary(self):
+        value = {'operation': 'feeder_cap_upgrade_source_verify', 'id': str(uuid.uuid4()),
+                 'accepted': True, 'resume_authorized': False}
+        with patch.object(U, 'UPGRADE_KIND', 'feeder-cap'), patch.object(U.C, 'protected'), patch.object(U.C, 'command', return_value=json.dumps(value)) as command:
+            self.assertEqual(U.native({'review': '/protected'}, 'verify-contact-upgrade-source'), value)
+            self.assertIn('verify-feeder-cap-upgrade-source', command.call_args.args)
+            with self.assertRaises(ValueError):
+                U.patch_mode({'core_upgrade':'contact'}, False)
+        with patch.object(U, 'load', side_effect=AssertionError('host accessed')):
+            with self.assertRaisesRegex(ValueError, 'explicit feeder-cap'):
+                U.repair_backlog(Path('/missing'), 'stable-repair', 1, 24101)
+        with patch.object(U, 'UPGRADE_KIND', 'feeder-cap'), patch.object(U, 'load', side_effect=AssertionError('host accessed')):
+            for values in [('', 1, 24101), ('id', 0, 24101), ('id', 1, 0), ('id', True, 24101)]:
+                with self.assertRaisesRegex(ValueError, 'stable repair ID'):
+                    U.repair_backlog(Path('/missing'), *values)
+
 
 @unittest.skipUnless(os.geteuid() == 0, 'actual protected file transactions require root')
 class ContactMaintenanceFiles(unittest.TestCase):

@@ -83,6 +83,7 @@ impl LedgerStore {
             SELECT event_id, signed_event_json, source_event_seq, attempts
             FROM message_outbox
             WHERE status IN ('pending', 'failed')
+              AND NOT EXISTS(SELECT 1 FROM message_outbox_suppressions s WHERE s.event_id=message_outbox.event_id)
             ORDER BY source_event_seq ASC, created_at ASC
             LIMIT 1
             "#,

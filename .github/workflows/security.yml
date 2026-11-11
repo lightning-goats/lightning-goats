@@ -2,7 +2,7 @@ name: Security
 
 on:
   push:
-    branches: [main]
+    branches: [main, fix/feeder-payment-cap-20261111]
   pull_request:
   workflow_call:
   schedule:

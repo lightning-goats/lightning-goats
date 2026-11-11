@@ -20,6 +20,8 @@ mod cyberherd_overlay;
 mod events;
 mod failed_costs;
 mod feed;
+mod feed_cap;
+pub use feed_cap::CreditRetirementResult;
 mod feeding_notices;
 mod feeding_presentation;
 mod operator_credit;
@@ -222,7 +224,8 @@ impl LedgerStore {
         .await?
         .last_insert_rowid();
 
-        let feed_credit_sats = feed_credit_in_transaction(&mut transaction).await?;
+        let feed_credit_sats =
+            feed_cap::cap_new_credit(&mut transaction, ledger_id, credited_sats).await?;
         let event_seq = append_event_in_transaction(
             &mut transaction,
             "payment_received",
@@ -240,6 +243,7 @@ impl LedgerStore {
 
         credit::record_native_btc(&mut transaction, settlement_id, ledger_id, event_seq).await?;
         zap::stage_receipt(&mut transaction, payment, settlement_id, event_seq).await?;
+        reward_funding::prepare(&mut transaction).await?;
         transaction.commit().await?;
 
         Ok(SettlementOutcome::Credited {

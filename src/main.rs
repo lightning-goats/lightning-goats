@@ -94,6 +94,9 @@ async fn main() -> Result<()> {
     let config = Arc::new(AppConfig::load(&args.config)?);
     let ledger = LedgerStore::connect(&config.database.url).await?;
     ledger
+        .configure_feeder_credit_cap(config.feeder.threshold_sats)
+        .await?;
+    ledger
         .configure_feeding_notices(
             config
                 .core_bridge

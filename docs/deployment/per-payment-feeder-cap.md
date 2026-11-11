@@ -72,3 +72,35 @@ Policy and retirement tables must still be empty at this comparison boundary.
 The older contact source remains exact schema 23; its current qualified target
 includes both additive migrations 24 and 25, with the same retained-row checks.
 Neither comparison authorizes service activation or erases the backlog.
+
+## Production repair verified (2026-11-11)
+
+The cap and announcement fix was deployed from qualified source
+`be6ad767829b7d2693b4f1030aa3952f8b7d2555`. The current-schema offline
+retirement CLI was corrected and separately qualified at
+`66c817b0cf93bfac30e5755adf416322345457a8`; all ten workflows passed,
+including six mandatory actual-root native fixtures. Its installed executable
+preserves the original ownership, permissions and security attributes.
+
+The first rollback-only retirement preview refused the root/runtime ownership
+mismatch before opening the journal. The corrected root-only adapter validates
+existing runtime-owned files, never creates or migrates the main journal, closes
+SQLite on success and failure, and returns any retained private WAL sidecars to
+the original runtime owner. Ordinary runtime recovery still rejects root. The
+CLI also refuses retirement while the core is running.
+
+After the independently verified four-journal backup and additive migration,
+exactly 24,101 sats of the offending donation's unused credit were retired through
+one audited non-feeding adjustment. The original donation and all ten actual
+confirmed feedings remain in history; no additional feeding, payment, refund or
+reward was created. The verified post-repair backup and original transaction
+records are retained privately on the host. Completing a migrated transaction
+must never rerun the older source-schema migration against current paid state.
+
+The original active/contact configuration and payment/overlay service were
+restored. Public status and both primary/alias herd LNURL metadata were checked;
+the overlay reconnected with zero credit and zero queued feedings. Retained event
+replay confirmed the original ten feeding events plus one retirement. The local
+operator override remained on throughout. CyberHerd payout and signer services
+remain masked with their existing zero financial ceilings. Verification created
+no real Lightning payment or physical feeding.

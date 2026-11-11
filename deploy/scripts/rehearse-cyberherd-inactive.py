@@ -306,10 +306,11 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
     fixture.chmod(0o755)
     runtime = pwd.getpwnam('lightning-goats')
     counts = {'post': 0}
+    gateway_safety = {'override_enabled': True, 'remote_enabled': False}
     class Gateway(http.server.BaseHTTPRequestHandler):
         def log_message(self, *args): pass
         def do_GET(self):
-            value = {'override_enabled': True, 'remote_enabled': False} if self.path == '/v1/feeder/override' else {}
+            value = dict(gateway_safety) if self.path == '/v1/feeder/override' else {}
             data = json.dumps(value).encode()
             self.send_response(200 if self.path in ('/v1/feeder/override', '/healthz') else 404)
             self.send_header('Content-Type', 'application/json'); self.send_header('Content-Length', str(len(data)))
@@ -507,6 +508,54 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
         for name in ('cyberherd-payout.service', 'cyberherd-signer.service'):
             assert os.readlink('/etc/systemd/system/' + name) == '/dev/null'
             assert run('/usr/bin/systemctl', 'show', name, '-p', 'MainPID', '--value').strip() == '0'
+        # Only this namespace's harmless gateway changes state. The retained
+        # unknown synthetic feeder UUID must keep the real core GET-only even
+        # when operator membership safety reads become ready. No physical or
+        # provider authority exists in this fixture.
+        financial_before = w.http_json('http://127.0.0.1:8787/api/v1/status')
+        assert isinstance(financial_before['unresolved_feed_attempt'], str)
+        gateway_safety.update(override_enabled=False, remote_enabled=True)
+        w.await_ready(lambda: w.http_json('http://127.0.0.1:8787/api/v1/status')['feeder_override_active'] is False,
+                      'synthetic gateway ready before membership commands')
+        ready_commands = json.loads(run(*client, 'ready'))
+        assert ready_commands == {'ready_commands_accepted': True, 'activation_and_score_applied': True,
+            'stale_revision_refused': True, 'explicit_unban_required': True,
+            'manual_score_lifetime_zero': True, 'member_percent_zero': True}
+        w.await_ready(lambda: w.http_json('http://127.0.0.1:3340/api/v1/cyberherd')['roster']['total_members'] == 1,
+                      'actual public roster after operator activation')
+        roster = w.http_json('http://127.0.0.1:3340/api/v1/cyberherd')['roster']
+        assert roster['members'][0]['amount_sats'] == '21' and roster['members'][0]['points'] == '210'
+        assert roster['members'][0]['share_micro_percent'] == 0 and roster['member_percent'] == 0
+        before_ready_restart = run('/usr/bin/systemctl', 'show', 'cyberherd.service', '-p', 'MainPID', '--value').strip()
+        run('/usr/bin/systemctl', 'stop', 'cyberherd.service')
+        run('/usr/bin/systemctl', 'start', 'cyberherd.service')
+        w.await_ready(lambda: w.http_json('http://127.0.0.1:3340/api/v1/cyberherd'), 'restarted active synthetic member')
+        assert run('/usr/bin/systemctl', 'show', 'cyberherd.service', '-p', 'MainPID', '--value').strip() != before_ready_restart
+        ready_restarted = json.loads(run(*client, 'after-ready-restart'))
+        assert ready_restarted == {'ready_restart_accepted': True, 'active_score_and_cycle_retained': True,
+            'original_command_receipt_retained': True, 'manual_score_lifetime_zero': True}
+        gateway_safety.update(override_enabled=True, remote_enabled=False)
+        w.await_ready(lambda: w.http_json('http://127.0.0.1:8787/api/v1/status')['feeder_override_active'] is True,
+                      'synthetic gateway paused before controls and reset')
+        paused_commands = json.loads(run(*client, 'paused-controls'))
+        assert paused_commands == {'paused_controls_accepted': True, 'new_score_refused_while_paused': True,
+            'original_score_receipt_retrievable': True, 'remove_ban_unban_work_while_paused': True,
+            'manual_reset_preserves_ban': True, 'settings_and_template_retained': True}
+        before_controls_restart = run('/usr/bin/systemctl', 'show', 'cyberherd.service', '-p', 'MainPID', '--value').strip()
+        run('/usr/bin/systemctl', 'stop', 'cyberherd.service')
+        run('/usr/bin/systemctl', 'start', 'cyberherd.service')
+        w.await_ready(lambda: w.http_json('http://127.0.0.1:3340/api/v1/cyberherd'), 'restarted reset synthetic member')
+        assert run('/usr/bin/systemctl', 'show', 'cyberherd.service', '-p', 'MainPID', '--value').strip() != before_controls_restart
+        controls_restarted = json.loads(run(*client, 'after-controls-restart'))
+        assert controls_restarted == {'controls_restart_accepted': True, 'reset_and_revision_retained': True,
+            'cross_cycle_receipts_retained_without_mutation': True, 'final_member_inactive': True,
+            'manual_score_lifetime_zero': True}
+        w.await_ready(lambda: w.http_json('http://127.0.0.1:3340/api/v1/cyberherd')['roster']['total_members'] == 0,
+                      'actual empty public roster after manual reset')
+        financial_after = w.http_json('http://127.0.0.1:8787/api/v1/status')
+        for key in ('feed_credit_sats', 'threshold_sats', 'feeds_due', 'remainder_sats', 'unresolved_feed_attempt'):
+            assert financial_after[key] == financial_before[key]
+        assert counts['post'] == 0
         finished = True
         return {'accepted': True, 'old_core_was_harmless_elf_standin': True,
                 'actual_native_schema_23_backup': True, 'actual_runtime_uid_clone_migration': True,
@@ -529,6 +578,12 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
                     'actual_core_and_member_resumed': True, 'contact_configuration_retained': True,
                     'outgoing_roles_masked': True, 'gateway_post_count': counts['post'],
                     'different_program_builds_used': False, 'live_host_qualified': False},
+                'installed_operator_membership_controls': {'accepted': True, 'ready': ready_commands,
+                    'after_ready_member_restart': ready_restarted, 'paused': paused_commands,
+                    'after_reset_member_restart': controls_restarted,
+                    'actual_public_score_and_zero_share': True, 'final_public_roster_empty': True,
+                    'core_credit_and_original_unknown_uuid_unchanged': True, 'gateway_post_count': counts['post'],
+                    'provider_operations': 0, 'public_network_used': False, 'live_host_qualified': False},
                 'all_application_networking_loopback_isolated': True, 'live_host_qualified': False}
     except Exception:
         # Disposable synthetic fixture only. Never use this diagnostic or the

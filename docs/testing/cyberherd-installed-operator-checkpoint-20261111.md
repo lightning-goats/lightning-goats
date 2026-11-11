@@ -57,3 +57,27 @@ nginx/WAF operator ingress. Browser contract tests remain separate. It does not
 qualify an unpaused activation/score mutation, provider payout, actual recipient
 delivery or recovery adoption. Production operator/auth/publication/payout gates
 remain closed until their separate qualified activation.
+
+## Membership-control extension — qualification pending
+
+The same guarded test-only client now exercises actual HTTP activation and manual
+score assignment when its synthetic gateway reports ready, stale-revision refusal,
+ban/refused reactivation/explicit unban, and exact 21-sat score retention across a
+real member restart. Manual scores must leave lifetime paid sats zero and the
+configured zero member allocation unchanged. The actual public roster must show
+210 points and a zero share for the synthetic member.
+
+After only the isolated gateway is paused again, a new score mutation must fail
+while a committed score's original receipt remains retrievable. Removal, ban,
+unban and manual reset must work while paused; reset advances the cycle once and
+retains the ban until explicit unban. Another actual member restart must retain
+the final inactive member/cycle/revision, and retries of both the previous-cycle
+score and reset must return original receipts without restoring score or resetting
+again. Existing template opt-out remains retained. The public roster ends empty.
+
+The fixture retains its original unknown physical UUID throughout. The real core
+must make no gateway POST and retain its original credit, threshold, due count,
+remainder and unresolved UUID. The fixture has no public network, real provider,
+real identity or physical destination. These new assertions await exact native CI
+and installed systemd execution; the prior qualified stages above do not prove
+them. Production operator routes and configuration remain unchanged.

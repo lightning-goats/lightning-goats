@@ -1,6 +1,6 @@
 //! TEST ONLY: signed HTTP commands against the disposable installed member.
 //! Fixed loopback destination, synthetic keys, protected CI/netns attestation.
-//! No provider, signing broker, relay, core ledger or feeder request is used.
+//! No provider, signing broker, relay, direct ledger access or feeder command.
 #![forbid(unsafe_code)]
 
 use anyhow::{Result, bail, ensure};
@@ -19,6 +19,8 @@ use std::{
 
 const GUARD: &str = "/run/lightning-goats-contact-fixture/ALLOW";
 const STATE: &str = "/run/lightning-goats-contact-fixture/operator-client/state.json";
+const READY_STATE: &str = "/run/lightning-goats-contact-fixture/operator-client/ready.json";
+const CONTROLS_STATE: &str = "/run/lightning-goats-contact-fixture/operator-client/controls.json";
 const ORIGIN: &str = "https://example.com";
 const ME: &str = "/api/v1/cyberherd/me";
 const OVERVIEW: &str = "/api/v1/cyberherd/operator/state";
@@ -136,7 +138,8 @@ async fn send(
 async fn value(response: Response) -> Result<Value> {
     ensure!(
         response.status() == StatusCode::OK,
-        "native HTTP request failed"
+        "native HTTP request failed: {}",
+        response.status()
     );
     let bytes = response.bytes().await?;
     ensure!(bytes.len() <= 98304, "native response exceeds bound");
@@ -396,6 +399,256 @@ async fn after_restart(client: &Client) -> Result<()> {
     Ok(())
 }
 
+fn save_fixture(path: &str, saved: &Value) -> Result<()> {
+    let mut file = std::fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .mode(0o600)
+        .open(path)?;
+    file.write_all(&serde_json::to_vec(saved)?)?;
+    file.sync_all()?;
+    Ok(())
+}
+
+fn read_fixture(path: &str) -> Result<Value> {
+    let info = std::fs::symlink_metadata(path)?;
+    ensure!(
+        info.is_file()
+            && info.nlink() == 1
+            && info.len() < 32768
+            && info.uid() == std::fs::metadata("/proc/self")?.uid()
+            && info.mode() & 0o077 == 0,
+        "private synthetic command evidence required"
+    );
+    Ok(serde_json::from_slice(&std::fs::read(path)?)?)
+}
+
+async fn action(client: &Client, action: Value) -> Result<(Value, Value)> {
+    let state = get(client, 2, OVERVIEW).await?;
+    let body =
+        json!({"id":uuid::Uuid::new_v4(),"expected_revision":state["revision"],"action":action});
+    let receipt = command(client, &body).await?;
+    Ok((body, receipt))
+}
+
+async fn refused(client: &Client, body: &Value) -> Result<()> {
+    let bytes = serde_json::to_vec(body)?;
+    ensure!(
+        send(
+            client,
+            Method::POST,
+            COMMAND,
+            &bytes,
+            &authorization(2, "POST", COMMAND, &bytes)?,
+            ORIGIN
+        )
+        .await?
+        .status()
+            == StatusCode::CONFLICT,
+        "conflicting membership mutation was accepted"
+    );
+    Ok(())
+}
+
+async fn ready(client: &Client) -> Result<()> {
+    let guest = get(client, 3, ME).await?;
+    ensure!(
+        guest["member"]["active"] == false,
+        "guest must start inactive"
+    );
+    let before = get(client, 2, OVERVIEW).await?;
+    let activate = json!({"type":"activate","pubkey":guest["pubkey"],
+        "profile":{"name":"Synthetic ready member","picture":null,"lud16":"fixture@example.com"}});
+    let (_, activated) = action(client, activate.clone()).await?;
+    ensure!(
+        activated["changed"] == true,
+        "ready activation did not commit"
+    );
+    let member = get(client, 3, ME).await?;
+    ensure!(
+        member["member"]["active"] == true && member["member"]["amount_sats"] == "0",
+        "activation fabricated an initial score"
+    );
+    action(
+        client,
+        json!({"type":"amount","pubkey":guest["pubkey"],"amount_sats":"21"}),
+    )
+    .await?;
+    let revision = get(client, 2, OVERVIEW).await?["revision"].clone();
+    refused(
+        client,
+        &json!({"id":uuid::Uuid::new_v4(),"expected_revision":before["revision"],
+        "action":{"type":"amount","pubkey":guest["pubkey"],"amount_sats":"22"}}),
+    )
+    .await?;
+    ensure!(
+        get(client, 2, OVERVIEW).await?["revision"] == revision,
+        "stale revision changed state"
+    );
+    action(client, json!({"type":"ban","pubkey":guest["pubkey"]})).await?;
+    let banned = get(client, 3, ME).await?;
+    ensure!(
+        banned["member"]["banned"] == true
+            && banned["member"]["active"] == false
+            && banned["member"]["amount_sats"] == "0"
+            && banned["member"]["lifetime_sats"] == "0",
+        "ban did not clear only the current manual score"
+    );
+    let revision = get(client, 2, OVERVIEW).await?["revision"].clone();
+    refused(
+        client,
+        &json!({"id":uuid::Uuid::new_v4(),"expected_revision":revision,"action":activate}),
+    )
+    .await?;
+    action(client, json!({"type":"unban","pubkey":guest["pubkey"]})).await?;
+    ensure!(
+        get(client, 3, ME).await?["member"]["active"] == false,
+        "unban implicitly reactivated a member"
+    );
+    let (_, activated) = action(client, activate).await?;
+    ensure!(
+        activated["changed"] == true,
+        "explicit unbanned activation failed"
+    );
+    let (score, receipt) = action(
+        client,
+        json!({"type":"amount","pubkey":guest["pubkey"],"amount_sats":"21"}),
+    )
+    .await?;
+    let current = get(client, 2, OVERVIEW).await?;
+    let member = get(client, 3, ME).await?;
+    ensure!(
+        member["member"]["active"] == true
+            && member["member"]["banned"] == false
+            && member["member"]["amount_sats"] == "21"
+            && member["member"]["lifetime_sats"] == "0"
+            && current["settings"]["member_percent"] == 0,
+        "manual score changed paid history or zero allocation"
+    );
+    save_fixture(
+        READY_STATE,
+        &json!({"score":score,"receipt":receipt,"revision":current["revision"],
+        "cycle":current["cycle"],"pubkey":guest["pubkey"]}),
+    )?;
+    println!(
+        "{}",
+        json!({"ready_commands_accepted":true,"activation_and_score_applied":true,
+        "stale_revision_refused":true,"explicit_unban_required":true,"manual_score_lifetime_zero":true,
+        "member_percent_zero":true})
+    );
+    Ok(())
+}
+
+async fn after_ready_restart(client: &Client) -> Result<()> {
+    let saved = read_fixture(READY_STATE)?;
+    let current = get(client, 2, OVERVIEW).await?;
+    let member = get(client, 3, ME).await?;
+    ensure!(
+        current["revision"] == saved["revision"]
+            && current["cycle"] == saved["cycle"]
+            && member["member"]["active"] == true
+            && member["member"]["amount_sats"] == "21"
+            && member["member"]["lifetime_sats"] == "0",
+        "restart changed actual manual member state"
+    );
+    ensure!(
+        command(client, &saved["score"]).await? == saved["receipt"]
+            && get(client, 2, OVERVIEW).await?["revision"] == saved["revision"],
+        "restart replayed a manual score mutation"
+    );
+    println!(
+        "{}",
+        json!({"ready_restart_accepted":true,"active_score_and_cycle_retained":true,
+        "original_command_receipt_retained":true,"manual_score_lifetime_zero":true})
+    );
+    Ok(())
+}
+
+async fn paused_controls(client: &Client) -> Result<()> {
+    let saved = read_fixture(READY_STATE)?;
+    let before = get(client, 2, OVERVIEW).await?;
+    refused(
+        client,
+        &json!({"id":uuid::Uuid::new_v4(),"expected_revision":before["revision"],
+        "action":{"type":"amount","pubkey":saved["pubkey"],"amount_sats":"22"}}),
+    )
+    .await?;
+    ensure!(
+        command(client, &saved["score"]).await? == saved["receipt"]
+            && get(client, 2, OVERVIEW).await?["revision"] == before["revision"],
+        "paused committed retry mutated its original score"
+    );
+    action(client, json!({"type":"remove","pubkey":saved["pubkey"]})).await?;
+    let member = get(client, 3, ME).await?;
+    ensure!(
+        member["member"]["active"] == false && member["member"]["amount_sats"] == "0",
+        "paused removal did not clear active score"
+    );
+    action(client, json!({"type":"ban","pubkey":saved["pubkey"]})).await?;
+    let (reset, reset_receipt) = action(client, json!({"type":"reset"})).await?;
+    let after = get(client, 2, OVERVIEW).await?;
+    ensure!(
+        after["cycle"].as_i64() == saved["cycle"].as_i64().map(|v| v + 1)
+            && get(client, 3, ME).await?["member"]["banned"] == true,
+        "manual reset lost the ban or failed to start a new cycle"
+    );
+    action(client, json!({"type":"unban","pubkey":saved["pubkey"]})).await?;
+    let final_state = get(client, 2, OVERVIEW).await?;
+    let member = get(client, 3, ME).await?;
+    ensure!(
+        member["member"]["active"] == false
+            && member["member"]["banned"] == false
+            && member["member"]["amount_sats"] == "0"
+            && member["member"]["lifetime_sats"] == "0"
+            && final_state["settings"]["member_percent"] == 0
+            && get(client, 2, TEMPLATES).await?["enabled"] == false,
+        "paused control changed retained settings, template or paid history"
+    );
+    save_fixture(
+        CONTROLS_STATE,
+        &json!({"reset":reset,"reset_receipt":reset_receipt,
+        "cycle":final_state["cycle"],"revision":final_state["revision"]}),
+    )?;
+    println!(
+        "{}",
+        json!({"paused_controls_accepted":true,"new_score_refused_while_paused":true,
+        "original_score_receipt_retrievable":true,"remove_ban_unban_work_while_paused":true,
+        "manual_reset_preserves_ban":true,"settings_and_template_retained":true})
+    );
+    Ok(())
+}
+
+async fn after_controls_restart(client: &Client) -> Result<()> {
+    let saved = read_fixture(CONTROLS_STATE)?;
+    let ready = read_fixture(READY_STATE)?;
+    let state = get(client, 2, OVERVIEW).await?;
+    ensure!(
+        state["cycle"] == saved["cycle"] && state["revision"] == saved["revision"],
+        "restart lost the reset or final revision"
+    );
+    ensure!(
+        command(client, &saved["reset"]).await? == saved["reset_receipt"]
+            && command(client, &ready["score"]).await? == ready["receipt"],
+        "cross-cycle command retry lost its original receipt"
+    );
+    let member = get(client, 3, ME).await?;
+    ensure!(
+        member["member"]["active"] == false
+            && member["member"]["banned"] == false
+            && member["member"]["amount_sats"] == "0"
+            && member["member"]["lifetime_sats"] == "0"
+            && get(client, 2, OVERVIEW).await?["revision"] == saved["revision"],
+        "cross-cycle retry reset again or restored the old score"
+    );
+    println!(
+        "{}",
+        json!({"controls_restart_accepted":true,"reset_and_revision_retained":true,
+        "cross_cycle_receipts_retained_without_mutation":true,"final_member_inactive":true,
+        "manual_score_lifetime_zero":true})
+    );
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     isolated_fixture()?;
@@ -407,7 +660,11 @@ async fn main() -> Result<()> {
     match std::env::args().nth(1).as_deref() {
         Some("exercise") => exercise(&client).await,
         Some("after-restart") => after_restart(&client).await,
-        _ => bail!("explicit disposable exercise or restart verification required"),
+        Some("ready") => ready(&client).await,
+        Some("after-ready-restart") => after_ready_restart(&client).await,
+        Some("paused-controls") => paused_controls(&client).await,
+        Some("after-controls-restart") => after_controls_restart(&client).await,
+        _ => bail!("explicit disposable operator exercise required"),
     }
 }
 

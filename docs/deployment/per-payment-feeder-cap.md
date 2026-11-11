@@ -59,3 +59,16 @@ Restore the full protected original active/contact configuration only after the
 verified fix and exact backlog retirement are applied. Retain any local override
 selected by the operator. Verify public status, receipt preservation, the corrected
 queue, unchanged actual feeding count and absence of repeated announcements.
+
+## Qualified additive upgrade
+
+The explicit `--feeder-cap` preparation and maintenance selectors require the
+contained shadow configuration without contact and seal a distinct transaction
+kind. They accept only the compiled exact schema-24 source; the native comparison
+allows migration 25's four new tables and its exact derived first-announcement
+and suppression rows. All original row IDs, signed bytes, schema objects, and
+migration-history prefixes must remain identical across all four journals.
+Policy and retirement tables must still be empty at this comparison boundary.
+The older contact source remains exact schema 23; its current qualified target
+includes both additive migrations 24 and 25, with the same retained-row checks.
+Neither comparison authorizes service activation or erases the backlog.

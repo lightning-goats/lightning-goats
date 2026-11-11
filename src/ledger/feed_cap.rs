@@ -130,7 +130,16 @@ pub(super) async fn consume_retirement(
 ) -> Result<bool> {
     let row=sqlx::query("SELECT r.credit_ledger_id,r.retired_sats,l.delta_sats,l.entry_type,l.source_key,r.id FROM feed_credit_retirements r JOIN ledger_entries l ON l.id=r.debit_ledger_id WHERE r.debit_ledger_id=?")
         .bind(debit).fetch_optional(&mut **tx).await?;
-    let Some(row) = row else { return Ok(false) };
+    let Some(row) = row else {
+        let kind: String = sqlx::query_scalar("SELECT entry_type FROM ledger_entries WHERE id=?")
+            .bind(debit)
+            .fetch_one(&mut **tx)
+            .await?;
+        if kind == "FEED_CREDIT_RETIRED" {
+            bail!("credit retirement is missing its retained provenance");
+        }
+        return Ok(false);
+    };
     let sats: i64 = row.try_get("retired_sats")?;
     if sats <= 0
         || row.try_get::<i64, _>("delta_sats")? != -sats

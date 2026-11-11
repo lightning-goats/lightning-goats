@@ -38,6 +38,7 @@ def helper(name, filename):
 S = helper('contact_upgrade_stage_support', 'stage-cyberherd-overlay.py')
 Q, C, TX = S.Q, S.C, S.C.TX
 C.verified_tool_identity = lambda: verified_tool_identity()
+UPGRADE_KIND = 'contact'
 TARGET_NAMES = ('lightning-goatsd', 'lightning-goatsctl', 'cyberherd-statectl')
 ROLE_NAMES = {'core': 'lightning-goats-receive', 'membership': 'cyberherd',
               'payout': 'cyberherd-payout', 'signer': 'cyberherd-signer'}
@@ -45,6 +46,9 @@ ROLE_NAMES = {'core': 'lightning-goats-receive', 'membership': 'cyberherd',
 
 def configuration_boundary(core, member, payout, signer, policy, *, current_schema=False):
     """Preserve the existing overlay stage, zero budgets and public identities."""
+    if UPGRADE_KIND == 'feeder-cap' and (current_schema or core.get('service', {}).get('mode') != 'shadow'
+            or core.get('contact') is not None):
+        raise ValueError('feeder-cap upgrade requires the explicitly contained shadow service without contact')
     bridge = core.get('core_bridge', {})
     reward = bridge.get('reward_policy', {})
     messages = member.get('messaging', {})
@@ -229,6 +233,7 @@ def prepare(archive, review_archive, source, digest, review_digest, directory, *
     unchanged()
     C.write_json(directory / 'PREPARED.json', {
         'version': 1, 'tool': verified_tool_identity(), 'release': release,
+        'core_upgrade': UPGRADE_KIND,
         'review_archive_sha256': review_digest, 'selected_program_sha256': selected_hashes,
         'baseline': original, 'original_order': list(original['files']),
         'program_manifest_sha256': TX.fingerprint(directory / 'programs/TRANSACTION.json')['sha256'],
@@ -244,11 +249,16 @@ def prepare(archive, review_archive, source, digest, review_digest, directory, *
 
 
 def main():
+    global UPGRADE_KIND
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--feeder-cap', action='store_true', help='exact contained schema-24 to 25 feeder-cap upgrade')
     parser.add_argument('--current-schema', action='store_true', help='program-only patch; preserve current schema and configuration')
     for name in ('archive', 'review_archive', 'source', 'sha256', 'review_sha256', 'directory'):
         parser.add_argument(name, type=Path if name in ('archive', 'review_archive', 'directory') else str)
     args = parser.parse_args()
+    if args.feeder_cap:
+        if args.current_schema: raise ValueError('upgrade kinds cannot be combined')
+        UPGRADE_KIND = 'feeder-cap'
     result = prepare(args.archive, args.review_archive, args.source, args.sha256, args.review_sha256,
                      args.directory, current_schema=args.current_schema)
     print(__import__('json').dumps(result, sort_keys=True))

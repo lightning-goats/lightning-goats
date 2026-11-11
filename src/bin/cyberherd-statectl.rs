@@ -49,9 +49,28 @@ enum Command {
         #[arg(long)]
         bundle: PathBuf,
     },
-    /// Compare a known schema-23 backup with an already migrated schema-24 copy.
+    /// Compare a known schema-23 backup with an already migrated schema-25 copy.
     /// Never migrates, restores, clears markers or starts a service.
     CompareContactUpgrade {
+        #[arg(long)]
+        bundle: PathBuf,
+        #[arg(long)]
+        candidate_copy: PathBuf,
+    },
+    /// Snapshot only the exact schema-24 source with all four writers stopped.
+    SnapshotBeforeFeederCap {
+        #[arg(long)]
+        destination: PathBuf,
+        #[arg(long, required = true)]
+        writers_stopped: bool,
+    },
+    /// Verify the exact schema-24 source; never restore or resume it.
+    VerifyFeederCapUpgradeSource {
+        #[arg(long)]
+        bundle: PathBuf,
+    },
+    /// Compare retained schema-24 state with its additive schema-25 migration.
+    CompareFeederCapUpgrade {
         #[arg(long)]
         bundle: PathBuf,
         #[arg(long)]
@@ -114,6 +133,26 @@ async fn main() -> Result<()> {
             "contact_upgrade_compare",
             operator
                 .compare_contact_upgrade(&bundle, &candidate_copy)
+                .await?,
+        ),
+        Command::SnapshotBeforeFeederCap {
+            destination,
+            writers_stopped: true,
+        } => (
+            "feeder_cap_upgrade_snapshot",
+            operator.snapshot_before_feeder_cap(&destination).await?,
+        ),
+        Command::VerifyFeederCapUpgradeSource { bundle } => (
+            "feeder_cap_upgrade_source_verify",
+            operator.verify_feeder_cap_upgrade_source(&bundle).await?,
+        ),
+        Command::CompareFeederCapUpgrade {
+            bundle,
+            candidate_copy,
+        } => (
+            "feeder_cap_upgrade_compare",
+            operator
+                .compare_feeder_cap_upgrade(&bundle, &candidate_copy)
                 .await?,
         ),
         Command::StageRestore {

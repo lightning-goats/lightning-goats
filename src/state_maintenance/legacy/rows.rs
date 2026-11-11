@@ -137,19 +137,25 @@ pub(in crate::state_maintenance) async fn digest(
     table: &str,
     columns: &[String],
 ) -> Result<Table> {
-    digest_selected(pool, table, columns, false).await
+    digest_selected(pool, table, columns, None).await
 }
 pub(in crate::state_maintenance) async fn migration_prefix_digest(
     pool: &SqlitePool,
 ) -> Result<Table> {
     let columns = columns(pool, "_sqlx_migrations").await?;
-    digest_selected(pool, "_sqlx_migrations", &columns, true).await
+    digest_selected(pool, "_sqlx_migrations", &columns, Some(23)).await
+}
+pub(in crate::state_maintenance) async fn feeder_cap_prefix_digest(
+    pool: &SqlitePool,
+) -> Result<Table> {
+    let columns = columns(pool, "_sqlx_migrations").await?;
+    digest_selected(pool, "_sqlx_migrations", &columns, Some(24)).await
 }
 async fn digest_selected(
     pool: &SqlitePool,
     table: &str,
     columns: &[String],
-    before_contact: bool,
+    prefix: Option<i64>,
 ) -> Result<Table> {
     identifier(table)?;
     if columns.is_empty() || columns.len() > 256 {
@@ -160,13 +166,16 @@ async fn digest_selected(
         identifier(column)?;
         selected.push(format!("typeof(\"{column}\"),\"{column}\""));
     }
-    let predicate = if before_contact {
+    let predicate = if let Some(version) = prefix {
         if table != "_sqlx_migrations" {
             bail!("unsupported migration-prefix digest");
         }
-        " WHERE version<=23"
+        if !matches!(version, 23 | 24) {
+            bail!("unsupported migration prefix");
+        }
+        format!(" WHERE version<={version}")
     } else {
-        ""
+        String::new()
     };
     let query = format!(
         "SELECT {} FROM \"{table}\"{predicate} ORDER BY rowid",

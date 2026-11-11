@@ -1,4 +1,4 @@
-//! Strict schema-23 -> 24 additive comparison of separate four-journal images.
+//! Strict schema-23 -> 25 (contact plus qualified feeder-cap schema) additive comparison of separate four-journal images.
 //! It does not migrate a journal, restore state or authorize service resumption.
 use std::{collections::BTreeMap, path::Path};
 
@@ -15,11 +15,11 @@ const PRIVATE_TABLES: [&str; 3] = [
     "private_contact_delivery",
 ];
 #[derive(Debug, PartialEq, Eq)]
-struct Definition {
-    table: String,
-    sha256: String,
+pub(super) struct Definition {
+    pub(super) table: String,
+    pub(super) sha256: String,
 }
-async fn catalog(pool: &SqlitePool) -> Result<BTreeMap<String, Definition>> {
+pub(super) async fn catalog(pool: &SqlitePool) -> Result<BTreeMap<String, Definition>> {
     let mut result = BTreeMap::new();
     let mut stream = sqlx::query(
         "SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name LIMIT 2049",
@@ -85,15 +85,25 @@ pub(super) async fn compare_images(before: &Path, after: &Path, policy: &Policy)
             bail!("contact upgrade must add empty private tables only");
         }
     }
-    let expected_private = private_catalog().await?;
+    let mut expected_private = private_catalog().await?;
+    expected_private.extend(super::feeder_cap_upgrade::private_catalog().await?);
+    for table in ["feeder_credit_policy", "feed_credit_retirements"] {
+        if migrated.rows[&Role::Core].get(table) != Some(&0) {
+            bail!("contact upgrade must not activate feeder policy or retire credit");
+        }
+    }
     for role in Role::ALL {
         let old = rows::open_named(before, &role.file()).await?;
         let new = rows::open_named(after, &role.file()).await?;
         let result: Result<()> = async {
+            if role == Role::Core {
+                super::feeder_cap_upgrade::verify_backfills(&old, &new).await?;
+            }
             let old_names = rows::names(&old).await?;
             let mut expected_names = old_names.clone();
             if role == Role::Core {
                 expected_names.extend(PRIVATE_TABLES.map(str::to_owned));
+                expected_names.extend(super::feeder_cap_upgrade::CAP_TABLES.map(str::to_owned));
                 expected_names.sort();
             }
             if rows::names(&new).await? != expected_names {
@@ -186,7 +196,7 @@ impl Operator {
     }
 
     /// Accept only a source-pinned schema-23 backup and a separate, already
-    /// migrated four-journal copy. Normal verify/restore still require schema 24.
+    /// migrated four-journal copy. Normal verify/restore still require schema 25.
     pub async fn compare_contact_upgrade(
         &self,
         bundle: &Path,
@@ -223,4 +233,4 @@ impl Operator {
 
 #[cfg(test)]
 #[path = "contact_upgrade_tests.rs"]
-mod tests;
+pub(super) mod tests;

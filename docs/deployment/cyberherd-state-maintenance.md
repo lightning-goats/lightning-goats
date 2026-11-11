@@ -147,6 +147,42 @@ immutable evidence where needed, and eventually clear markers/unmask units.
 No automatic clearance command is provided. Missing/disputed evidence leaves
 affected work stopped. Retain originals and partial/staged sets.
 
+### Provider evidence checked against current documentation
+
+The 2026-11-11 API review confirms that
+[`GET payments/{id}`](https://docs.strike.me/api/get-payment-by-id/)
+requires `partner.payment.read` and returns one known payment's state, amounts
+and fees. This supports reconciliation of retained original payment IDs; it
+cannot by itself discover an execution whose entire local identity was lost
+after the backup. Do not invent a payment-list endpoint, treat a guessed ID's
+404 as evidence of no payment, or interpret a wallet balance as complete history.
+
+Strike's documented
+[event history](https://docs.strike.me/api/get-events/)
+requires `partner.webhooks.manage`, supports created/event-type filtering and
+pagination, and can report an unknown total count. The existing four-scope payout
+key must not gain that administrative permission for routine execution. Separate
+operator-controlled provider history/exports may assist recovery; pagination,
+coverage and retention still need verification before claiming the complete
+backup-to-quiescence interval. An empty page or absence of a locally known ID
+does not authorize clearing recovery markers or releasing holds.
+
+[`PATCH payment-quotes/{id}/execute`](https://docs.strike.me/api/execute-payment-quote/)
+is an execution operation, not a read-only status probe. It must not be called
+from snapshot verification or an operator's evidence-collection preview. The
+runtime's separately fenced original-quote recovery retains its original
+execution claim and financial authorization; this does not turn a restored
+journal or a new quote into authority. The
+[quote-creation contract](https://docs.strike.me/api/create-lightning-payment-quote/)
+returns the original quote ID for duplicate idempotency keys, which is useful
+only while the exact original intent/idempotency identity remains available.
+
+These findings narrow the required evidence, not the full recovery obligation.
+No provider API request, credential change, marker clearance or adoption was
+performed for this documentation review. The concrete adoption implementation
+and installed rehearsal remain unfinished; ordinary backup/blocked staging
+commands above continue to grant no resumption authority.
+
 ## Additive private-contact comparison
 
 The explicit `snapshot-before-contact --destination NEW_PRIVATE_BUNDLE --writers-stopped`

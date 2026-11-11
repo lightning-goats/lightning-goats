@@ -1,5 +1,8 @@
 # Private contact — actual live deployment, 2026-11-11
 
+Subsequent [boot wiring](cyberherd-boot-persistence-20261111.md) enables the existing
+overlay-only member at boot without restarting it or changing these feature gates.
+
 The public index now serves the private contact form. Nostr users can send a free
 identity-bound NIP-17 DM through their selected signer. Visitors without login
 must supply email and pay the separate 100-sat contact fee. That fee has its own

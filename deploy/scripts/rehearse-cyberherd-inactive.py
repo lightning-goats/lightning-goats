@@ -428,6 +428,45 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
         for name in ('cyberherd-payout.service', 'cyberherd-signer.service'):
             assert os.readlink('/etc/systemd/system/' + name) == '/dev/null'
             assert run('/usr/bin/systemctl', 'show', name, '-p', 'MainPID', '--value').strip() == '0'
+        # Actual native signed operator HTTP and replay across a member restart.
+        # This remains disposable synthetic state in the attested loopback netns.
+        # No production configuration, real operator key or financial gate opens.
+        run('/usr/bin/systemctl', 'stop', 'cyberherd.service')
+        operator_config = tomllib.loads(member.read_text())
+        assert 'auth' not in operator_config['view']
+        operator_config['view']['auth'] = {'public_origin': 'https://example.com',
+            'operators': ['c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5']}
+        member.write_text(w.toml_text(operator_config))
+        operator = root / 'TEST-ONLY-installed-operator-client'
+        shutil.copyfile(fixture_directory / operator.name, operator)
+        operator.chmod(0o755)
+        member_user = pwd.getpwnam('cyberherd')
+        client_state = guard / 'operator-client'
+        client_state.mkdir(mode=0o700)
+        os.chown(client_state, member_user.pw_uid, member_user.pw_gid)
+        client = ['/usr/bin/setpriv', '--reuid=' + str(member_user.pw_uid), '--regid=' + str(member_user.pw_gid),
+                  '--clear-groups', '--inh-caps=-all', '--ambient-caps=-all', '--bounding-set=-all',
+                  '--no-new-privs', str(operator)]
+        run('/usr/bin/systemctl', 'start', 'cyberherd.service')
+        w.await_ready(lambda: w.http_json('http://127.0.0.1:3340/api/v1/cyberherd'), 'operator-enabled native member')
+        w.await_ready(lambda: w.http_json('http://127.0.0.1:8787/api/v1/status')['feeder_override_active'] is True,
+                      'confirmed synthetic override before operator tests')
+        original_operator_pid = run('/usr/bin/systemctl', 'show', 'cyberherd.service', '-p', 'MainPID', '--value').strip()
+        exercised_operator = json.loads(run(*client, 'exercise'))
+        assert exercised_operator == {'exercise_accepted': True, 'real_native_http': True, 'synthetic_keys_only': True,
+            'settings_and_template_applied': True, 'guest_origin_body_and_pause_refusals': True,
+            'same_command_receipt_retained': True}
+        run('/usr/bin/systemctl', 'stop', 'cyberherd.service')
+        run('/usr/bin/systemctl', 'start', 'cyberherd.service')
+        w.await_ready(lambda: w.http_json('http://127.0.0.1:3340/api/v1/cyberherd'), 'restarted operator-enabled native member')
+        restarted_operator_pid = run('/usr/bin/systemctl', 'show', 'cyberherd.service', '-p', 'MainPID', '--value').strip()
+        assert original_operator_pid != restarted_operator_pid
+        replayed_operator = json.loads(run(*client, 'after-restart'))
+        assert replayed_operator == {'restart_accepted': True, 'actual_unexpired_nonce_replay_refused': True,
+            'settings_and_template_retained': True, 'same_command_receipt_retained': True,
+            'changed_command_conflict_refused': True, 'roster_empty': True, 'member_percent_zero': True,
+            'provider_operations': 0, 'publications': 0}
+        assert counts['post'] == 0
         finished = True
         return {'accepted': True, 'old_core_was_harmless_elf_standin': True,
                 'actual_native_schema_23_backup': True, 'actual_runtime_uid_clone_migration': True,
@@ -440,6 +479,10 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
                     'only_contact_configuration_added': True, 'actual_active_core_and_membership_resumed': True,
                     'invalid_contact_refused_before_provider': True, 'outgoing_roles_masked': True,
                     'gateway_post_count': counts['post'], 'signing_qualified': False, 'paid_delivery_qualified': False},
+                'installed_operator_http': {'accepted': True, 'exercise': exercised_operator,
+                    'after_actual_member_restart': replayed_operator, 'member_pid_changed': True,
+                    'operator_identity_was_synthetic': True, 'public_network_used': False,
+                    'gateway_post_count': counts['post'], 'production_operator_routes_enabled': False},
                 'all_application_networking_loopback_isolated': True, 'live_host_qualified': False}
     except Exception:
         # Disposable synthetic fixture only. Never use this diagnostic or the
@@ -459,6 +502,10 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
             # or the compatible new native programs after schema migration.
             for name, data in original.items(): Path(name).write_bytes(data)
         run('/usr/bin/systemctl', 'daemon-reload')
+        # Synthetic client evidence is retained privately; never remove a live
+        # auth nonce or command record to regain acceptance after a restart.
+        if (guard / 'operator-client').exists():
+            (guard / 'operator-client').rename(root / 'operator-client-evidence')
         (guard / 'ALLOW').unlink(); guard.rmdir()
         gateway.shutdown(); gateway.server_close(); thread.join(timeout=2)
 

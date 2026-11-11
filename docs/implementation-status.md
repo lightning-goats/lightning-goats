@@ -80,8 +80,10 @@ The operator-requested [website payment/zap display](testing/website-payment-cha
 
 The separate [private contact fee implementation](testing/website-contact-fee-checkpoint-20261111.md) has default-off native purpose/settlement/outbox and exact ingress source. Combined browser/backend, enabled HTTP admission, native private-state correlation and strict additive four-journal comparison pass all ten workflows and 516 regular native tests plus the required separate root fixture. The [maintenance executor](deployment/private-contact-upgrade.md) passes root and actual installed migration rehearsal, then [actual VPS upgrade/resumption](testing/private-contact-schema-live-20261111.md) with a current backup and original-UID clone/live comparisons. The subsequent [actual contact deployment](testing/private-contact-live-20261111.md) enables only contact configuration, exact private ingress and the browser form after a fresh native four-journal backup. The 28-sat paused-feeder state, all existing programs/flags and OBS/artwork are preserved. Corrected serving-label handling passes exact CI and actual desktop/mobile public acceptance; real paid-contact and recipient-side DM observation remain open.
 
+The current overlay stage now has verified [boot wiring](testing/cyberherd-boot-persistence-20261111.md) with the existing reviewed membership unit enabled and unchanged live PIDs/configuration. No host reboot or new feature activation was performed. A separate [installed operator HTTP candidate](testing/cyberherd-installed-operator-checkpoint-20261111.md) adds native signed requests, real member restart and durable nonce/command retry checks on synthetic isolated CI state; exact qualification remains pending.
+
 Other remaining work includes observed zap admission and incoming settlement/
-receipt delivery, boot persistence, operator interfaces, global network qualification, concrete externally reconciled recovery adoption, operator-selected
+receipt delivery, operator interfaces, global network qualification, concrete externally reconciled recovery adoption, operator-selected
 nonzero financial ceilings and explicit activation. Native protected
 [four-journal maintenance](deployment/cyberherd-state-maintenance.md) preserves
 replay/signed history and blocks staged restore startup pending reconciliation.

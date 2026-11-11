@@ -28,6 +28,7 @@ FILES = {
     'maintain-cyberherd-overlay.py',
     'prepare-contact-upgrade.py',
     'maintain-contact-upgrade.py',
+    'activate-private-contact.py',
 }
 
 
@@ -113,6 +114,9 @@ def main():
         arguments = arguments[1:]
     elif arguments[:1] == ['--contact-upgrade-maintenance']:
         operation = 'maintain-contact-upgrade.py'
+        arguments = arguments[1:]
+    elif arguments[:1] == ['--private-contact-activation']:
+        operation = 'activate-private-contact.py'
         arguments = arguments[1:]
     sys.argv = [str(root / operation), *arguments]
     runpy.run_path(sys.argv[0], run_name='__main__', init_globals={

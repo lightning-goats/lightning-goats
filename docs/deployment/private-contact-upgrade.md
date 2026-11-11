@@ -6,10 +6,13 @@ disabled. Preparation alone does not authorize or perform a migration, service
 interruption, private-message delivery, payment, feeding or public publication.
 
 Use only independently source-verified build artifacts and a separately
-authenticated, root-owned tool closure. The source candidate now has nineteen
-files, including `prepare-contact-upgrade.py` and `maintain-contact-upgrade.py`.
-The already installed preparation-only generation has eighteen files and provides
-no maintenance entry point. Do not invoke a writable checkout as root or reuse an
+authenticated, root-owned tool closure. The installed schema-maintenance generation
+has nineteen files, including `prepare-contact-upgrade.py` and
+`maintain-contact-upgrade.py`. Older preparation-only generations have eighteen
+files and no maintenance entry point. The subsequent
+[configuration-only activation candidate](private-contact-activation.md) has
+twenty files; its separate entry point does not redo the schema upgrade.
+Do not invoke a writable checkout as root or reuse an
 older manifest for the new closure. Independent archive SHA256s
 must cover both the core release and CyberHerd review archive at the same full
 source commit. The core archive supplies the daemon/CLI; the review archive

@@ -374,6 +374,60 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
             pid = run('/usr/bin/systemctl', 'show', name, '-p', 'MainPID', '--value').strip()
             assert os.readlink('/proc/' + pid + '/ns/net') == os.readlink('/proc/self/ns/net')
         assert counts['post'] == 0 and 'contact' not in tomllib.loads(config.read_text())
+        # Separate contact-only activation, still on this guarded disposable VM.
+        # Active mode is established as synthetic fixture setup, BEFORE freezing
+        # the activation review. No production mode/signing authority is inferred.
+        run('/usr/bin/systemctl', 'stop', 'cyberherd.service', 'lightning-goats-receive.service')
+        active = tomllib.loads(config.read_text())
+        active['service']['mode'] = 'active'
+        # This path deliberately does not exist: the contact activation check
+        # must not need a signing subprocess, bunker or public Nostr operation.
+        active['nostr']['nak_path'] = '/usr/local/bin/TEST-ONLY-no-contact-signer'
+        assert not Path(active['nostr']['nak_path']).exists()
+        config.write_text(w.toml_text(active))
+        credential = root / 'nostr-client-key.contact-synthetic.cred'
+        w.encrypt(credential, 'nostr-client-key', b'SYNTHETIC-CONTACT-NO-BUNKER')
+        with unit.open('a') as output:
+            output.write('LoadCredentialEncrypted=nostr-client-key:' + str(credential) + '\n')
+        run('/usr/bin/systemctl', 'daemon-reload')
+        run('/usr/bin/systemctl', 'start', 'lightning-goats-receive.service', 'cyberherd.service')
+        w.await_ready(lambda: w.http_json('http://127.0.0.1:8787/healthz'), 'synthetic active core before contact activation')
+        w.await_ready(lambda: w.http_json('http://127.0.0.1:3340/api/v1/cyberherd'), 'membership before contact activation')
+        before_config = tomllib.loads(config.read_text())
+        validator = root / 'CHECK-ONLY-private-contact-stage'
+        shutil.copyfile(fixture_directory / validator.name, validator)
+        validator.chmod(0o755)
+        activation = base / 'ci-private-contact-activation'
+        prepared_contact = json.loads(run(*launcher, '--private-contact-activation', 'prepare', str(activation),
+                                           '--validator', str(validator), '--validator-sha256', hashlib.sha256(validator.read_bytes()).hexdigest(),
+                                           '--inbox-relay', 'wss://relay.damus.io/'))
+        assert prepared_contact == {'prepared': True, 'services_changed': False, 'journals_opened': False, 'contact_enabled': False}
+        activation_sha = hashlib.sha256((activation / 'PREPARED.json').read_bytes()).hexdigest()
+        applied_contact = json.loads(run(*launcher, '--private-contact-activation', 'apply', str(activation),
+                                          '--review-sha256', activation_sha, '--exclusive-maintenance'))
+        assert applied_contact == {'configured': True, 'current_four_journal_backup_verified': True,
+                                   'financial_images_unchanged': True, 'services_started': False}
+        activated_contact = json.loads(run(*launcher, '--private-contact-activation', 'resume', str(activation), '--approve-resumption'))
+        assert activated_contact == {'core_running': True, 'membership_running': True, 'contact_enabled': True, 'payouts_enabled': False}
+        import urllib.error
+        import urllib.request
+        request = urllib.request.Request('http://127.0.0.1:8787/api/v1/contact', data=b'{}', method='POST',
+                                         headers={'Content-Type': 'application/json', 'Origin': active['lnurl']['public_base_url'].rstrip('/')})
+        try:
+            urllib.request.urlopen(request, timeout=10)
+            raise AssertionError('invalid contact must never request an invoice')
+        except urllib.error.HTTPError as error:
+            assert error.code == 400
+            assert json.loads(error.read()) == {'error': 'invalid private contact'}
+        after_config = tomllib.loads(config.read_text())
+        assert after_config.pop('contact') == {'recipient': before_policy['owner'], 'inbox_relays': ['wss://relay.damus.io/']}
+        assert after_config == before_config and counts['post'] == 0
+        for name in ('lightning-goats-receive.service', 'cyberherd.service'):
+            pid = run('/usr/bin/systemctl', 'show', name, '-p', 'MainPID', '--value').strip()
+            assert os.readlink('/proc/' + pid + '/ns/net') == os.readlink('/proc/self/ns/net')
+        for name in ('cyberherd-payout.service', 'cyberherd-signer.service'):
+            assert os.readlink('/etc/systemd/system/' + name) == '/dev/null'
+            assert run('/usr/bin/systemctl', 'show', name, '-p', 'MainPID', '--value').strip() == '0'
         finished = True
         return {'accepted': True, 'old_core_was_harmless_elf_standin': True,
                 'actual_native_schema_23_backup': True, 'actual_runtime_uid_clone_migration': True,
@@ -381,6 +435,11 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
                 'actual_new_native_core_and_membership_resumed': True, 'all_original_paid_and_signed_rows_preserved': True,
                 'epoch_and_financial_policy_preserved': True, 'gateway_post_count': counts['post'],
                 'contact_enabled': False, 'synthetic_credentials_only': True,
+                'installed_private_contact_activation': {'accepted': True, 'actual_native_config_checker': True,
+                    'actual_current_four_journal_backup_verified': True, 'financial_images_unchanged_during_apply': True,
+                    'only_contact_configuration_added': True, 'actual_active_core_and_membership_resumed': True,
+                    'invalid_contact_refused_before_provider': True, 'outgoing_roles_masked': True,
+                    'gateway_post_count': counts['post'], 'signing_qualified': False, 'paid_delivery_qualified': False},
                 'all_application_networking_loopback_isolated': True, 'live_host_qualified': False}
     except Exception:
         # Disposable synthetic fixture only. Never use this diagnostic or the

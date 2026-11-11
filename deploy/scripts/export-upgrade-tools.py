@@ -23,6 +23,7 @@ FILES = (
     'maintain-cyberherd-overlay.py',
     'prepare-contact-upgrade.py',
     'maintain-contact-upgrade.py',
+    'activate-private-contact.py',
 )
 
 

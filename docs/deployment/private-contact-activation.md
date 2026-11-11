@@ -1,0 +1,50 @@
+# Private contact configuration activation
+
+This is a configuration-only step after the [actual schema-24 upgrade](../testing/private-contact-schema-live-20261111.md).
+It neither migrates nor restores a database and does not change financial limits,
+physical policy, programs, credentials, nginx or browser flags. CyberHerd public
+messaging, lifecycle, rewards, operator routes and both outgoing roles stay off.
+
+The candidate twenty-file authenticated tool generation adds
+`--private-contact-activation`. Independently verify the full source closure and
+the launcher before interpreting protected installed Python with `-I -S -B`.
+Older tool generations and completed upgrade transactions remain untouched.
+
+`prepare DIRECTORY --validator PATH --validator-sha256 SHA --inbox-relay WSS`
+freezes the active core/overlay-member installation, preserves original files,
+and prepares a transaction for exactly one destination: the core configuration.
+The separately pinned native `CHECK-ONLY-private-contact-stage` accepts only an
+added `[contact]` table with the existing project recipient and bounded public
+inbox relays. Every other parsed configuration value must match. Its positive
+report must explicitly assert no journal, credential, provider or service work.
+Use the recipient's signature-verified public kind-10050 inbox list. Preparation
+opens no journal, stops no service and does not enable the feature.
+
+After independent preparation-digest readback,
+`apply DIRECTORY --review-sha256 SHA --exclusive-maintenance` freezes the same
+four writers, masks/quiesces them and verifies a current native schema-24
+four-journal snapshot. It fingerprints original main/WAL/SHM images, replaces
+only the reviewed configuration and verifies both native configuration semantics
+and unchanged live images. Services remain stopped. No stale database rollback
+or automatic reapply exists; retain evidence and inspect any partial failure.
+
+`resume DIRECTORY --approve-resumption` re-verifies the accepted backup manifest,
+native report, current images, original programs/units/configuration, runtime
+identities and masks before restoring the exact original core unit and member
+mask state. Only the two existing services start; payout and signer stay masked.
+Each phase retains private immutable receipts and shares the existing host
+maintenance lock. Administrative exclusivity is still required.
+
+The required protected-file fixtures mock native/systemd operations and explicitly
+cover backup refusal, validator/review drift, unknown replacement destinations,
+changed paid state, altered backup manifests and ambiguous retry refusal. Separate
+native tests enforce configuration semantics. The disposable-systemd rehearsal
+uses the actual checker, current native backup/verifier, transaction and resumed
+active core with synthetic credentials in an isolated loopback namespace. Its
+signing executable intentionally does not exist; malformed contact requests must
+fail before any provider operation. It proves no real signing or paid delivery.
+
+Next install the exact optional contact nginx ingress and minimal static form
+release, preserving actual site flags, existing OBS artwork and WAF/privacy rules.
+Actual fee settlement and recipient observation remain distinct acceptance work;
+neither simulated settlement nor relay ACK establishes a recipient read receipt.

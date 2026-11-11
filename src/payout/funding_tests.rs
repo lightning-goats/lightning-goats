@@ -1374,3 +1374,208 @@ async fn inclusive_fee_observations_survive_reopen_without_mutating_grants() {
     );
     assert_eq!(reopened.held_sats().await.unwrap(), 2);
 }
+
+#[tokio::test]
+async fn inclusive_fee_probe_invoices_resume_exactly_and_never_enter_execution_implicitly() {
+    use crate::payout::{
+        inclusive_fees::Decision,
+        provider::{FeeObservation, FeeObservationRecord},
+        store::Store,
+    };
+    let f = Fixture::new().await;
+    let q = qualified(&f).await;
+    let url = format!(
+        "sqlite://{}",
+        f.root.path().join("fee-probe-workflow.db").display()
+    );
+    let policy = journal_policy(&q);
+    let store = Store::connect(&url, policy.clone()).await.unwrap();
+    let grant = store
+        .admit(&f.plan, &q, f.reservation.created_at + 10)
+        .await
+        .unwrap();
+    let member = &f.plan.rows[0].pubkey;
+    let now = grant.admitted_at;
+    let first = store
+        .prepare_fee_probe(grant.id, member, 0, now, None)
+        .await
+        .unwrap();
+    assert_eq!(first.0.net_sats, 2);
+    assert_eq!(
+        store
+            .prepare_fee_probe(grant.id, member, 0, now, None)
+            .await
+            .unwrap()
+            .id(),
+        first.id()
+    );
+    assert!(
+        store
+            .prepare_fee_probe(grant.id, member, 1, now, None)
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .freeze_fee_probe_request(first.id(), Some("untrusted zap"), now)
+            .await
+            .is_err()
+    );
+    let request = store
+        .freeze_fee_probe_request(first.id(), None, now)
+        .await
+        .unwrap();
+    let encoded = crate::test_invoices::invoice_at(
+        2000,
+        request.description_hash(),
+        std::time::Duration::from_secs(now.try_into().unwrap()),
+    );
+    let invoice = request.validate_invoice(&encoded, now).unwrap();
+    store.freeze_fee_probe_invoice(&invoice, now).await.unwrap();
+    store.freeze_fee_probe_invoice(&invoice, now).await.unwrap();
+    assert_eq!(
+        store
+            .fee_probe_request(first.id())
+            .await
+            .unwrap()
+            .description_hash(),
+        request.description_hash()
+    );
+    let initial = store
+        .prepare_fee_probe_quote(first.id(), now)
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .prepare_fee_probe_quote(first.id(), now)
+            .await
+            .unwrap()
+            .id(),
+        initial.id()
+    );
+    let observed = FeeObservation(FeeObservationRecord {
+        request: initial.0.clone(),
+        quote_id: Uuid::new_v4(),
+        fee_sats: 1,
+        total_sats: 3,
+        provider_valid_until: None,
+        usable_until: now + 30,
+        observed_at: now,
+    });
+    assert!(observed.executable_quote().is_err());
+    assert_eq!(
+        store
+            .record_fee_observation(&observed, 0, now)
+            .await
+            .unwrap(),
+        Decision::ReduceInvoice { net: 1 }
+    );
+    assert_eq!(
+        store
+            .record_fee_observation(&observed, 0, now)
+            .await
+            .unwrap(),
+        Decision::ReduceInvoice { net: 1 }
+    );
+    assert!(
+        store
+            .record_fee_observation(&observed, 1, now)
+            .await
+            .is_err()
+    );
+    drop(store);
+    let store = Store::connect(&url, policy).await.unwrap();
+    let recovered = store
+        .saved_fee_observation(grant.id, member)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(recovered.0, 0);
+    assert_eq!(recovered.1.quote_id(), observed.quote_id());
+    let reduced = store
+        .prepare_fee_probe(grant.id, member, 1, now, None)
+        .await
+        .unwrap();
+    assert_ne!(first.id(), reduced.id());
+    assert_eq!(reduced.0.net_sats, 1);
+    let request = store
+        .freeze_fee_probe_request(reduced.id(), None, now)
+        .await
+        .unwrap();
+    let encoded = crate::test_invoices::invoice_with_payment_hash(
+        1000,
+        request.description_hash(),
+        std::time::Duration::from_secs(now.try_into().unwrap()),
+        [0x23; 32],
+    );
+    let invoice = request.validate_invoice(&encoded, now).unwrap();
+    store.freeze_fee_probe_invoice(&invoice, now).await.unwrap();
+    let quote = store
+        .prepare_fee_probe_quote(reduced.id(), now)
+        .await
+        .unwrap();
+    let fitted = FeeObservation(FeeObservationRecord {
+        request: quote.0,
+        quote_id: Uuid::new_v4(),
+        fee_sats: 1,
+        total_sats: 2,
+        provider_valid_until: None,
+        usable_until: now + 30,
+        observed_at: now,
+    });
+    assert_eq!(
+        store.record_fee_observation(&fitted, 1, now).await.unwrap(),
+        Decision::Fits {
+            net: 1,
+            fee: 1,
+            total: 2
+        }
+    );
+    // Full monetary validation alone cannot bypass the distinct execution-chain
+    // identity. Promotion will need its own atomic, independently checked step.
+    assert!(
+        store
+            .freeze_quote(&fitted.executable_quote().unwrap(), now)
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .prepare_fee_probe(grant.id, member, 2, now, None)
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        store
+            .saved_fee_observation(grant.id, member)
+            .await
+            .unwrap()
+            .unwrap()
+            .1
+            .quote_id(),
+        fitted.quote_id()
+    );
+    assert!(
+        store
+            .saved_invoice_intent(grant.id, member)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(store.held_sats().await.unwrap(), 2);
+    let db = sqlx::SqlitePool::connect(&url).await.unwrap();
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM payout_execute_intents")
+            .fetch_one(&db)
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM payout_fee_probe_intents")
+            .fetch_one(&db)
+            .await
+            .unwrap(),
+        2
+    );
+}

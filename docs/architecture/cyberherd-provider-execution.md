@@ -124,8 +124,16 @@ follow the previous oversized provider quote; the original grant remains fixed.
 A fitting quote ends adjustment. Discovery records alone cannot execute a payment.
 The single executable invoice identity per grant/member remains unchanged.
 
-The worker, probe persistence adapter, final-invoice promotion, accounting/result
-handoff and root configuration still require integration and verification. None
+The probe persistence adapter now freezes and restores each exact invoice intent,
+callback/zap, validated BOLT11 and provider request. Historical reads reverify the
+saved invoice against its original signed request. Observation loading can read
+these separate identities; executable quote loading still requires the existing
+execution-chain tables. A native restart fixture exercises a two-round reduction
+and refusal to execute a fitting probe without explicit promotion; its new source
+requires CI qualification.
+
+The worker, final-invoice promotion, accounting/result handoff and root
+configuration still require integration and verification. None
 of these source changes has been installed on the live payout journal. Payouts
 remain disabled; the existing execution protocol above still uses its legacy
 fixed allowance until the inclusive path is fully qualified.

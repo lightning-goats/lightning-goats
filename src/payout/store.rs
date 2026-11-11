@@ -17,6 +17,8 @@ static MIGRATOR: Migrator = sqlx::migrate!("./payout-migrations");
 
 #[path = "store_failed_costs.rs"]
 mod failed_costs;
+#[path = "store_fee_probes.rs"]
+mod fee_probes;
 #[path = "store_invoices.rs"]
 mod invoices;
 #[path = "store_outcomes.rs"]

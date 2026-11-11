@@ -31,15 +31,14 @@ impl Store {
         };
         let observation =
             restore_fee_observation(row.try_get::<String, _>("document_json")?.as_bytes())?;
-        let doc = load_doc(&mut tx, observation.0.request.id, false).await?;
-        let binding = sqlx::query("SELECT grant_id,member FROM payout_invoice_intents WHERE id=?")
-            .bind(doc.invoice_id.to_string())
-            .fetch_one(&mut *tx)
-            .await?;
+        let (doc, bound_grant, bound_member, probe_round) =
+            load_fee_doc(&mut tx, observation.0.request.id, &self.policy.scope.owner).await?;
+        let saved_round = row.try_get::<i64, _>("round")?;
         if doc != observation.0.request
             || doc.scope != self.policy.scope.provider
-            || binding.try_get::<String, _>("grant_id")? != grant.to_string()
-            || binding.try_get::<String, _>("member")? != member
+            || bound_grant != grant
+            || bound_member != member
+            || probe_round.is_some_and(|r| i64::from(r) != saved_round)
             || row.try_get::<String, _>("provider_quote_id")? != observation.0.quote_id.to_string()
             || u64::try_from(row.try_get::<i64, _>("gross_sats")?)? != doc.gross_sats
             || u64::try_from(row.try_get::<i64, _>("invoice_net_sats")?)? != doc.amount_sats
@@ -69,16 +68,26 @@ impl Store {
         observation.0.validate()?;
         let mut tx = self.pool.begin().await?;
         write_lock(&mut tx).await?;
-        let doc = load_doc(&mut tx, observation.0.request.id, false).await?;
-        if doc != observation.0.request || doc.scope != self.policy.scope.provider {
+        let (doc, grant, member, probe_round) =
+            load_fee_doc(&mut tx, observation.0.request.id, &self.policy.scope.owner).await?;
+        if doc != observation.0.request
+            || doc.scope != self.policy.scope.provider
+            || probe_round.is_some_and(|r| r != round)
+        {
             bail!("fee observation differs from its committed provider request");
         }
-        let row = sqlx::query("SELECT r.gross_sats,i.grant_id,i.member FROM payout_rows r JOIN payout_invoice_intents i ON i.grant_id=r.grant_id AND i.member=r.member WHERE i.id=?")
-            .bind(doc.invoice_id.to_string()).fetch_one(&mut *tx).await?;
+        let row = sqlx::query("SELECT gross_sats,address,recipient_json FROM payout_rows WHERE grant_id=? AND member=?")
+            .bind(grant.to_string())
+            .bind(&member)
+            .fetch_one(&mut *tx)
+            .await?;
         let gross: u64 = row.try_get::<i64, _>("gross_sats")?.try_into()?;
+        let recipient: crate::payout::recipient::Recipient =
+            serde_json::from_str(&row.try_get::<String, _>("recipient_json")?)?;
+        recipient.validate(&row.try_get::<String, _>("address")?)?;
         let decision = crate::payout::inclusive_fees::evaluate(
             gross,
-            1,
+            recipient.min_msat.div_ceil(1000).max(1),
             self.policy.max_net_sats,
             doc.amount_sats,
             observation.0.fee_sats,
@@ -102,18 +111,34 @@ impl Store {
         if now < observation.0.observed_at || now >= observation.0.usable_until {
             bail!("fee observation is expired or from the future");
         }
-        load_doc(&mut tx, doc.id, true).await?;
+        super::outcomes::ensure_open(&mut tx, grant, &member).await?;
+        if probe_round.is_none() {
+            load_doc(&mut tx, doc.id, true).await?;
+        } else {
+            let promoted: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM payout_invoice_intents WHERE grant_id=? AND member=?)",
+            )
+            .bind(grant.to_string())
+            .bind(&member)
+            .fetch_one(&mut *tx)
+            .await?;
+            if promoted {
+                bail!("fee discovery is closed after executable invoice promotion");
+            }
+        }
         touch_clock(&mut tx, now).await?;
         sqlx::query("INSERT INTO payout_fee_observations(grant_id,member,round,provider_quote_id,gross_sats,invoice_net_sats,fee_sats,total_sats,observed_at,document_json) VALUES(?,?,?,?,?,?,?,?,?,?)")
-            .bind(row.try_get::<String,_>("grant_id")?).bind(row.try_get::<String,_>("member")?)
+            .bind(grant.to_string()).bind(&member)
             .bind(i64::from(round)).bind(observation.0.quote_id.to_string()).bind(i64::try_from(gross)?)
             .bind(i64::try_from(doc.amount_sats)?).bind(i64::try_from(observation.0.fee_sats)?)
             .bind(i64::try_from(observation.0.total_sats)?).bind(observation.0.observed_at).bind(json)
             .execute(&mut *tx).await?;
-        if !matches!(
-            &decision,
-            crate::payout::inclusive_fees::Decision::Fits { .. }
-        ) {
+        if probe_round.is_none()
+            && !matches!(
+                &decision,
+                crate::payout::inclusive_fees::Decision::Fits { .. }
+            )
+        {
             sqlx::query(
                 "UPDATE payout_quote_intents SET retired_at=? WHERE id=? AND retired_at IS NULL",
             )
@@ -591,6 +616,29 @@ impl Store {
             Status::QuoteUnknown
         })
     }
+}
+
+/// Discovery may refer to a separate probe. Never use this loader to restore
+/// an executable quote; that path must retain the legacy execution-chain FKs.
+async fn load_fee_doc(
+    tx: &mut Transaction<'_, Sqlite>,
+    id: Uuid,
+    owner: &str,
+) -> Result<(QuoteDocument, Uuid, String, Option<u8>)> {
+    let probe: Option<(String, String, i64)> = sqlx::query_as(
+        "SELECT i.grant_id,i.member,i.round FROM payout_fee_probe_quotes q JOIN payout_fee_probe_intents i ON i.id=q.invoice_id WHERE q.id=?")
+        .bind(id.to_string()).fetch_optional(&mut **tx).await?;
+    if let Some((grant, member, round)) = probe {
+        let doc = super::fee_probes::load_quote(tx, id, owner).await?;
+        return Ok((doc, grant.parse()?, member, Some(round.try_into()?)));
+    }
+    let doc = load_doc(tx, id, false).await?;
+    let binding: (String, String) =
+        sqlx::query_as("SELECT grant_id,member FROM payout_invoice_intents WHERE id=?")
+            .bind(doc.invoice_id.to_string())
+            .fetch_one(&mut **tx)
+            .await?;
+    Ok((doc, binding.0.parse()?, binding.1, None))
 }
 
 async fn load_doc(

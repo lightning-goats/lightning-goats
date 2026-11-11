@@ -152,15 +152,24 @@ API and herd LNURL discovery return 200; discovery still advertises native zaps.
 The tool has no apply/resume command. Contact, live schema and credentials remain
 unchanged; no test invoice, payment, DM, Nostr post or physical action is initiated.
 
-The next native change adds explicit pre-contact snapshot and source-verification
+The subsequent native change adds explicit pre-contact snapshot and source-verification
 commands to support reproducible migration rehearsal with one qualified tool.
 They retain the ordinary four-writer/file/WAL fences, accept only the exact known
 schema-23 source and do not make that bundle eligible for ordinary restore.
 The strengthened required root fixture now takes the actual native snapshot from
 four distinct-owned synthetic journals instead of constructing its manifest.
-This subsequent change still needs exact CI qualification and is not installed.
+All ten workflows pass on `e5317a4734733b40643970819e56a54ecf7dc3e9`, including
+[CI](https://github.com/lightning-goats/lightning-goats/actions/runs/42940848504),
+[Deployment](https://github.com/lightning-goats/lightning-goats/actions/runs/42940848584),
+[Security](https://github.com/lightning-goats/lightning-goats/actions/runs/42940848513)
+and [real NIP-46](https://github.com/lightning-goats/lightning-goats/actions/runs/42940848518).
+Tested merge `f2f48b3830f646af5f9754e16d9b88f209e60b63` has zero file differences.
+The strengthened root fixture actually runs and emits its required positive
+marker after checking distinct-owned original main/WAL/SHM preservation and
+ordinary restore refusal. This newer native binary is not installed on the VPS;
+the earlier sealed preparation remains unchanged.
 
-Still required: qualification of the explicit source snapshot; a protected maintenance executor
+Still required: a protected maintenance executor
 and installed migration rehearsal; current backup and actual deployment;
 controlled provider/paid-contact acceptance and recipient-side DM observation.
 The old legacy-core upgrade helper is not this upgrade path. No production

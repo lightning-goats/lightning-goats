@@ -78,6 +78,10 @@ class ToolLaunchTests(unittest.TestCase):
             self.assertIn('prepare', run(ok=True).stdout)
             command[6:] = ['--private-contact-site', '--help']
             self.assertIn('prepare', run(ok=True).stdout)
+            command[6:] = ['--cyberherd-self-read', '--help']
+            self.assertIn('prepare', run(ok=True).stdout)
+            command[6:] = ['--cyberherd-self-read', 'prepare', '--help']
+            self.assertIn('--public-origin', run(ok=True).stdout)
             command[6:] = ['--help']
             for name in LAUNCH.FILES - {'launch-vps-upgrade.py'}:
                 target = bundle / name

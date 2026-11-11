@@ -322,6 +322,65 @@ async fn exercise(client: &Client) -> Result<()> {
     Ok(())
 }
 
+async fn self_only(client: &Client) -> Result<()> {
+    let guest = get(client, 3, ME).await?;
+    let other = get(client, 2, ME).await?;
+    ensure!(
+        guest["operator"] == false
+            && other["operator"] == false
+            && guest["pubkey"] != other["pubkey"]
+            && guest["member"]["active"] == false
+            && other["member"]["active"] == false,
+        "empty allowlist must grant only each signer's own read"
+    );
+    for path in [OVERVIEW, TEMPLATES] {
+        ensure!(
+            send(
+                client,
+                Method::GET,
+                path,
+                &[],
+                &authorization(2, "GET", path, &[])?,
+                ORIGIN,
+            )
+            .await?
+            .status()
+                == StatusCode::UNAUTHORIZED,
+            "empty allowlist admitted an operator read"
+        );
+    }
+    let body = serde_json::to_vec(&json!({"id":uuid::Uuid::new_v4(),
+        "expected_revision":guest["revision"],"action":{"type":"reset"}}))?;
+    ensure!(
+        send(
+            client,
+            Method::POST,
+            COMMAND,
+            &body,
+            &authorization(2, "POST", COMMAND, &body)?,
+            ORIGIN,
+        )
+        .await?
+        .status()
+            == StatusCode::UNAUTHORIZED,
+        "empty allowlist admitted a membership mutation"
+    );
+    let after = get(client, 3, ME).await?;
+    ensure!(
+        after["revision"] == guest["revision"]
+            && after["cycle"] == guest["cycle"]
+            && after["member"] == guest["member"],
+        "self-read or refused command changed membership"
+    );
+    println!(
+        "{}",
+        json!({"self_reads_accepted":true,"empty_operator_allowlist":true,
+            "signed_self_reads":true,"operator_reads_and_mutations_refused":true,
+            "membership_revision_and_cycle_unchanged":true,"provider_operations":0,"publications":0})
+    );
+    Ok(())
+}
+
 async fn after_restart(client: &Client) -> Result<()> {
     let info = std::fs::symlink_metadata(STATE)?;
     ensure!(
@@ -924,6 +983,7 @@ async fn main() -> Result<()> {
         .build()?;
     match std::env::args().nth(1).as_deref() {
         Some("exercise") => exercise(&client).await,
+        Some("self-only") => self_only(&client).await,
         Some("after-restart") => after_restart(&client).await,
         Some("ready") => ready(&client).await,
         Some("after-ready-restart") => after_ready_restart(&client).await,

@@ -248,3 +248,23 @@ candidate is not installed, and neither nginx nor the site auth flag changed.
 It does not establish public self-read acceptance or authorize operator access.
 Actual operator keys are still awaiting the operator's public-key allowlist;
 never infer one from project identity, social activity or previous client keys.
+
+## Self-read activation transaction — candidate
+
+A separate [authenticated configuration transaction](../deployment/cyberherd-self-read-activation.md)
+now freezes and validates only the original member's new auth section with an
+empty operator allowlist. It reuses the existing four-writer fences, current
+native snapshot/verification and exact paid-image comparisons; only the member
+configuration can change. The existing core/private contact, programs, budgets
+and units remain bound, and both outgoing roles stay masked during resume.
+The original-UID native checker runs without credentials or networking. Its
+22-file tool generation is separate from the older installed 21-file generation.
+
+Three unprivileged scope/entrypoint/flag tests pass; eight real protected-file
+cases require separate root CI. The installed disposable rehearsal now includes
+the actual native transaction, then signed self reads by two distinct synthetic
+identities and refusal of operator reads/templates/reset. Membership revision/
+cycle and original core credit/unknown UUID must stay unchanged, with zero
+gateway POSTs. These new transaction/native assertions await exact CI. Neither
+this source addition nor the earlier configuration-only check installs auth on
+the production host or exposes a public route.

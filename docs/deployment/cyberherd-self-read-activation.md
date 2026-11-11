@@ -1,0 +1,64 @@
+# CyberHerd signed self-read configuration
+
+The authenticated `--cyberherd-self-read` tool adds only `[view.auth]` to the
+existing enabled member/view configuration. It binds one canonical HTTPS origin
+and an **empty** operator allowlist. The API can verify a signer's own status;
+no signer can read operator state/templates or perform an operator command.
+It cannot configure an administrator, public proxy, site flag or payout policy.
+
+The closure now contains 22 files. Export the exact qualified commit as data,
+independently authenticate its files and install a new root-owned generation.
+Externally verify the launcher SHA256 before interpretation, then verify the full
+manifest using isolated `/usr/bin/python3 -I -S -B`. Existing generations and
+completed transactions remain retained. Never execute checkout code as root.
+
+The launcher argument shapes are:
+
+```text
+--cyberherd-self-read prepare NEW_DIRECTORY --public-origin https://lightning-goats.com
+--cyberherd-self-read apply DIRECTORY --review-sha256 PREPARED_SHA --exclusive-maintenance
+--cyberherd-self-read resume DIRECTORY --approve-resumption
+```
+
+These are shapes for the authenticated launcher, not standalone shell commands.
+Choose a fresh direct child of the protected upgrade base. The earlier private
+`cyberherd-self-auth-review-124809f` configuration-check record is not an activation
+transaction and cannot be reused or imported as one.
+
+Preparation freezes the complete original installation and actual process/unit
+identities. It refuses any existing auth table and constructs the candidate with
+only the new origin/empty allowlist; all other parsed fields must match exactly.
+The installed member program validates it under the original membership UID/GID
+with groups/capabilities removed and an isolated network namespace. Only `--check`
+runs: no journal, credentials, service or network client opens. Exactly one fixed
+configuration replacement is sealed, retaining its original metadata/attributes.
+
+Apply requires the independently reviewed preparation digest and unchanged
+installation. The shared exclusive lock fences all four writers. The retained
+native state tool snapshots and verifies a **current** four-journal backup before
+the single member configuration changes. Every stopped live main/WAL/SHM image
+must remain byte-identical. The exact installed configuration is checked again
+using the original member UID. Core configuration/private contact, every program,
+unit, identity, financial ceiling and outgoing mask remain unchanged.
+
+Resume separately rechecks the backup, paid images, configuration/program/unit
+bindings and native validation. It restores the original core unit and removes
+only its own member mask, then starts the existing core and member once with
+health/executable checks. Outgoing roles stay masked. It does not migrate, restore,
+replace financial state, clear an unknown feeder UUID or retry a partial phase.
+Any failed/ambiguous transaction remains stopped for inspection.
+
+Public self-read ingress and the browser auth flag are separate changes. A public
+deployment should expose only the exact `/api/v1/cyberherd/me` GET path with its
+method/body/header/rate/no-store/private-log controls. It must preserve existing
+payment/contact flags and all OBS/artwork. Operator ingress remains closed until
+the actual operator's public-key allowlist is selected and qualified separately.
+
+Protected-file fixtures verify scope/identity refusal, exact replacement and
+native-check-before-maintenance, backup refusal, wrong-target refusal and stopped
+financial/backup drift before restart. Native/systemd qualification must also
+execute the actual backup/apply/resume and genuinely signed self reads with zero
+operator authority, unchanged core credit/unknown UUID and zero gateway POSTs.
+Mocked file tests alone do not establish this installed result. Source and actual
+deployment acceptance are recorded in the
+[operator checkpoint](../testing/cyberherd-installed-operator-checkpoint-20261111.md).

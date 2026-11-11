@@ -429,15 +429,6 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
         for name in ('cyberherd-payout.service', 'cyberherd-signer.service'):
             assert os.readlink('/etc/systemd/system/' + name) == '/dev/null'
             assert run('/usr/bin/systemctl', 'show', name, '-p', 'MainPID', '--value').strip() == '0'
-        # Actual native signed operator HTTP and replay across a member restart.
-        # This remains disposable synthetic state in the attested loopback netns.
-        # No production configuration, real operator key or financial gate opens.
-        run('/usr/bin/systemctl', 'stop', 'cyberherd.service')
-        operator_config = tomllib.loads(member.read_text())
-        assert 'auth' not in operator_config['view']
-        operator_config['view']['auth'] = {'public_origin': 'https://example.com',
-            'operators': ['c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5']}
-        member.write_text(w.toml_text(operator_config))
         operator = root / 'TEST-ONLY-installed-operator-client'
         shutil.copyfile(fixture_directory / operator.name, operator)
         operator.chmod(0o755)
@@ -448,6 +439,41 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
         client = ['/usr/bin/setpriv', '--reuid=' + str(member_user.pw_uid), '--regid=' + str(member_user.pw_gid),
                   '--clear-groups', '--inh-caps=-all', '--ambient-caps=-all', '--bounding-set=-all',
                   '--no-new-privs', str(operator)]
+        # Actual configuration-only self-read transaction: all four native
+        # journals backed up, one member config replaced and both services
+        # resumed. No operator is allowed; contact and every financial gate stay.
+        self_read = base / 'ci-signed-self-read'
+        original_member = tomllib.loads(member.read_text())
+        self_credit = w.http_json('http://127.0.0.1:8787/api/v1/status')
+        prepared_self = json.loads(run(*launcher, '--cyberherd-self-read', 'prepare', str(self_read),
+            '--public-origin', 'https://example.com'))
+        assert prepared_self == {'prepared': True, 'self_read_auth_only': True, 'operator_access_enabled': False,
+            'services_changed': False, 'journals_opened': False, 'public_ingress_changed': False}
+        self_sha = hashlib.sha256((self_read / 'PREPARED.json').read_bytes()).hexdigest()
+        applied_self = json.loads(run(*launcher, '--cyberherd-self-read', 'apply', str(self_read),
+            '--review-sha256', self_sha, '--exclusive-maintenance'))
+        assert applied_self == {'self_reads_configured': True, 'operator_access_enabled': False,
+            'current_four_journal_backup_verified': True, 'financial_images_unchanged': True, 'services_started': False}
+        resumed_self = json.loads(run(*launcher, '--cyberherd-self-read', 'resume', str(self_read), '--approve-resumption'))
+        assert resumed_self == {'core_running': True, 'membership_running': True, 'self_reads_configured': True,
+            'operator_access_enabled': False, 'payouts_enabled': False}
+        self_member = tomllib.loads(member.read_text())
+        assert self_member['view'].pop('auth') == {'public_origin': 'https://example.com', 'operators': []}
+        assert self_member == original_member and counts['post'] == 0
+        signed_self = json.loads(run(*client, 'self-only'))
+        assert signed_self == {'self_reads_accepted': True, 'empty_operator_allowlist': True,
+            'signed_self_reads': True, 'operator_reads_and_mutations_refused': True,
+            'membership_revision_and_cycle_unchanged': True, 'provider_operations': 0, 'publications': 0}
+        self_after = w.http_json('http://127.0.0.1:8787/api/v1/status')
+        for key in ('feed_credit_sats', 'threshold_sats', 'feeds_due', 'remainder_sats', 'unresolved_feed_attempt'):
+            assert self_after[key] == self_credit[key]
+        # The following separate operator exercise deliberately authorizes only
+        # its synthetic fixture key. This is not the self-read activation policy.
+        run('/usr/bin/systemctl', 'stop', 'cyberherd.service')
+        operator_config = tomllib.loads(member.read_text())
+        assert operator_config['view']['auth'] == {'public_origin': 'https://example.com', 'operators': []}
+        operator_config['view']['auth']['operators'] = ['c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5']
+        member.write_text(w.toml_text(operator_config))
         run('/usr/bin/systemctl', 'start', 'cyberherd.service')
         w.await_ready(lambda: w.http_json('http://127.0.0.1:3340/api/v1/cyberherd'), 'operator-enabled native member')
         w.await_ready(lambda: w.http_json('http://127.0.0.1:8787/api/v1/status')['feeder_override_active'] is True,
@@ -601,6 +627,12 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
                     'core_credit_and_original_unknown_uuid_unchanged': True, 'gateway_post_count': counts['post'],
                     'provider_operations': 0, 'public_network_used': False, 'live_host_qualified': False},
                 'installed_operator_tls_edge': operator_edge,
+                'installed_signed_self_read_activation': {'accepted': True,
+                    'native_original_uid_configuration_check': True, 'actual_current_four_journal_backup': True,
+                    'financial_images_unchanged_during_apply': True, 'only_member_auth_configuration_added': True,
+                    'actual_core_and_member_resumed': True, 'signed_self_read': signed_self,
+                    'core_credit_and_original_unknown_uuid_unchanged': True, 'operator_access_enabled': False,
+                    'public_ingress_changed': False, 'gateway_post_count': counts['post'], 'live_host_qualified': False},
                 'all_application_networking_loopback_isolated': True, 'live_host_qualified': False}
     except Exception:
         # Disposable synthetic fixture only. Never use this diagnostic or the

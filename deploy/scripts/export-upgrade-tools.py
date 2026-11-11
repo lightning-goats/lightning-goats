@@ -25,6 +25,7 @@ FILES = (
     'maintain-contact-upgrade.py',
     'activate-private-contact.py',
     'install-private-contact-site.py',
+    'activate-cyberherd-self-read.py',
 )
 
 

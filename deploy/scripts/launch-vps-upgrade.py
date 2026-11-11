@@ -30,6 +30,7 @@ FILES = {
     'maintain-contact-upgrade.py',
     'activate-private-contact.py',
     'install-private-contact-site.py',
+    'activate-cyberherd-self-read.py',
 }
 
 
@@ -127,6 +128,9 @@ def main():
         arguments = arguments[1:]
     elif arguments[:1] == ['--private-contact-site']:
         operation = 'install-private-contact-site.py'
+        arguments = arguments[1:]
+    elif arguments[:1] == ['--cyberherd-self-read']:
+        operation = 'activate-cyberherd-self-read.py'
         arguments = arguments[1:]
     sys.argv = [str(root / operation), *arguments]
     runpy.run_path(sys.argv[0], run_name='__main__', init_globals={

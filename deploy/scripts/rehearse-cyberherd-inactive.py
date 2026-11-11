@@ -875,7 +875,18 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
             assert artifact.is_file() and not artifact.is_symlink()
             assert hashlib.sha256(artifact.read_bytes()).hexdigest() == expected_sha
             assert not evidence.exists() and not evidence.is_symlink()
-            artifact.rename(evidence)
+            # /run is a separate tmpfs on hosted runners. Preserve the exact
+            # bytes privately before removing our stopped fixture's original.
+            raw = artifact.read_bytes()
+            assert hashlib.sha256(raw).hexdigest() == expected_sha
+            with evidence.open('xb') as stream:
+                os.fchmod(stream.fileno(), 0o600)
+                stream.write(raw)
+                stream.flush()
+                os.fsync(stream.fileno())
+            assert hashlib.sha256(evidence.read_bytes()).hexdigest() == expected_sha
+            assert hashlib.sha256(artifact.read_bytes()).hexdigest() == expected_sha
+            artifact.unlink()
         if finished:
             # Configuration-only fixture cleanup. Never roll back database bytes
             # or the compatible new native programs after schema migration.

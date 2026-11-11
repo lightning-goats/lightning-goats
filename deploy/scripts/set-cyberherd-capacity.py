@@ -33,6 +33,10 @@ class Retryable(Exception):
     pass
 
 
+class Refusal(ValueError):
+    """Only fixed labels and already sanitized signer diagnostics may be shown."""
+
+
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *args, **kwargs):
         return None
@@ -127,7 +131,9 @@ def main(client):
     clean = {'NO_COLOR': '1'}
     if C.run([*nak, 'key', 'public'], key + b'\n', clean).decode().strip() != client:
         raise ValueError('existing public client binding differs')
-    bunker = 'bunker://' + AUTHOR + '?' + urlencode([('relay', relay) for relay in C.RELAYS])
+    # The household signer uses Primal for its transport. Publication relay
+    # selection belongs to the existing messaging services, not this HTTP proof.
+    bunker = 'bunker://' + AUTHOR + '?' + urlencode([('relay', C.RELAYS[0])])
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
 
     def call(method, uri, body):
@@ -138,8 +144,12 @@ def main(client):
             tags.append(['payload', hashlib.sha256(body).hexdigest()])
         tags.append(['nonce', uuid.uuid4().hex])
         unsigned = {'kind': 27235, 'created_at': int(time.time()), 'content': '', 'tags': tags}
-        raw = C.run([*nak, 'event'], json.dumps(unsigned).encode() + b'\n',
-                    {**clean, 'NOSTR_SECRET_KEY': bunker, 'NOSTR_CLIENT_KEY': key.decode()})
+        try:
+            raw = C.run([*nak, '--verbose', 'event'], json.dumps(unsigned).encode() + b'\n',
+                        {**clean, 'NOSTR_SECRET_KEY': bunker, 'NOSTR_CLIENT_KEY': key.decode()},
+                        expected_client_key=key)
+        except C.Refusal as error:
+            raise Refusal('household signing for ' + method + ' refused: ' + str(error)) from None
         C.verify_bytes(raw, unsigned)
         C.run([*nak, 'verify'], raw + b'\n', clean)
         headers = {'Authorization': 'Nostr ' + base64.b64encode(raw.strip()).decode(),
@@ -171,5 +181,6 @@ if __name__ == '__main__':
     args = parser.parse_args()
     try:
         print(json.dumps(main(args.client_public_key), sort_keys=True))
-    except Exception:
-        raise SystemExit('Capacity update refused; private signing/authentication output withheld.') from None
+    except Exception as error:
+        detail = str(error) if isinstance(error, Refusal) else 'private signing/authentication output withheld'
+        raise SystemExit('Capacity update refused: ' + detail) from None

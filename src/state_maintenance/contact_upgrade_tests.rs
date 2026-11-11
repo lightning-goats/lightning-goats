@@ -8,7 +8,7 @@ type Keep = (
     crate::payout::signer::Store,
 );
 
-async fn seed(root: &Path) -> (Policy, Keep) {
+pub(super) async fn seed(root: &Path) -> (Policy, Keep) {
     let mut p = policy(root);
     for component in p.components.values() {
         std::fs::create_dir_all(component.database.parent().unwrap()).unwrap();
@@ -84,6 +84,23 @@ async fn seed(root: &Path) -> (Policy, Keep) {
     )
     .await
     .unwrap();
+    let pool = crate::sqlite::connect_durable(&core_url, 1).await.unwrap();
+    for table in [
+        "message_outbox_suppressions",
+        "feeding_announcement_sources",
+        "feed_credit_retirements",
+        "feeder_credit_policy",
+    ] {
+        sqlx::query(&format!("DROP TABLE {table}"))
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    sqlx::query("DELETE FROM _sqlx_migrations WHERE version=25")
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
     // Test-only construction of the preceding schema. Migration 24 is additive;
     // remove ONLY its empty definitions/history row after native paid-state seed.
     // No runtime or maintenance command offers this fixture-only transformation.
@@ -113,7 +130,7 @@ async fn seed(root: &Path) -> (Policy, Keep) {
     (p, (core, membership, payout, signer))
 }
 
-fn copy_images(p: &Policy, destination: &Path) {
+pub(super) fn copy_images(p: &Policy, destination: &Path) {
     std::fs::create_dir(destination).unwrap();
     for role in Role::ALL {
         for suffix in ["", "-wal"] {

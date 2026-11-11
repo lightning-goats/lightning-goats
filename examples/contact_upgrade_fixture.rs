@@ -84,11 +84,11 @@ async fn strip_empty_contact_schema(uid: u32) -> Result<()> {
     }
     let migrations = sqlx::migrate!("./migrations");
     let rows = sqlx::query(
-        "SELECT version,success,checksum FROM _sqlx_migrations ORDER BY version LIMIT 25",
+        "SELECT version,success,checksum FROM _sqlx_migrations ORDER BY version LIMIT 26",
     )
     .fetch_all(&pool)
     .await?;
-    if rows.len() != 24 || migrations.iter().count() != 24 {
+    if rows.len() != 25 || migrations.iter().count() != 25 {
         bail!("exact current disposable schema required");
     }
     for (row, migration) in rows.iter().zip(migrations.iter()) {
@@ -119,6 +119,32 @@ async fn strip_empty_contact_schema(uid: u32) -> Result<()> {
         bail!("not the synthetic signed fixture");
     }
     let mut transaction = pool.begin().await?;
+    for table in [
+        "message_outbox_suppressions",
+        "feeding_announcement_sources",
+        "feed_credit_retirements",
+    ] {
+        let count: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
+            .fetch_one(&mut *transaction)
+            .await?;
+        if count != 0 {
+            bail!("synthetic feeder-cap audit must be empty");
+        }
+        sqlx::query(&format!("DROP TABLE {table}"))
+            .execute(&mut *transaction)
+            .await?;
+    }
+    sqlx::query("DROP TABLE feeder_credit_policy")
+        .execute(&mut *transaction)
+        .await?;
+    if sqlx::query("DELETE FROM _sqlx_migrations WHERE version=25")
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected()
+        != 1
+    {
+        bail!("synthetic feeder-cap migration missing");
+    }
     for table in [
         "private_contact_delivery",
         "private_contact_fees",

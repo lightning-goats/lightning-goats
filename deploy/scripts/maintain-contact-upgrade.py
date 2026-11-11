@@ -42,6 +42,7 @@ M = helper('contact_maintenance_support', 'maintain-cyberherd-overlay.py')
 C, Q, S, TX = P.C, P.Q, P.S, P.TX
 C.verified_tool_identity = lambda: verified_tool_identity()
 M.C.verified_tool_identity = lambda: verified_tool_identity()
+UPGRADE_KIND = 'contact'
 MASKS = Path('/etc/systemd/system')
 OVERRIDE_ROOTS = (MASKS, Path('/run/systemd/system'), Q.UNITS, Path('/usr/lib/systemd/system'))
 
@@ -61,6 +62,8 @@ def original(review, r, path):
 
 
 def patch_mode(record, current_schema):
+    if record.get('core_upgrade', 'contact') != UPGRADE_KIND:
+        raise ValueError('contact and feeder-cap upgrade transactions cannot be interchanged')
     if (record.get('current_schema_patch', False) is not current_schema
             or (current_schema and record.get('schema_upgrade_authorized') is not False)):
         raise ValueError('current-schema and migration transactions cannot be interchanged')
@@ -140,7 +143,8 @@ def plan(review, expected, directory, *, current_schema=False):
                         r['baseline']['files'][str(path)])
     fresh()
     C.write_json(directory / 'EXECUTION.json', {
-        'version': 1, 'tool': verified_tool_identity(), 'review': str(review), 'review_sha256': expected,
+        'version': 1, 'tool': verified_tool_identity(), 'review': str(review),
+        'core_upgrade': UPGRADE_KIND, 'review_sha256': expected,
         'programs': rows, 'program_manifest_sha256': digest(directory / 'programs/TRANSACTION.json'),
         **({'current_schema_patch': True, 'schema_upgrade_authorized': False} if current_schema else {}),
     })
@@ -263,10 +267,17 @@ def quiesce(m, r):
 
 
 def native(m, operation, *arguments):
+    if UPGRADE_KIND == 'feeder-cap':
+        operation = {'snapshot-before-contact':'snapshot-before-feeder-cap',
+                     'verify-contact-upgrade-source':'verify-feeder-cap-upgrade-source',
+                     'compare-contact-upgrade':'compare-feeder-cap-upgrade'}.get(operation, operation)
     program = Path(m['review']) / 'payload/cyberherd-statectl'
     C.protected(program)
     result = json.loads(C.command(str(program), '--config', str(S.MAINTENANCE), operation, *map(str, arguments), timeout=300))
-    names = {'snapshot-before-contact': 'contact_upgrade_snapshot',
+    names = {'snapshot-before-feeder-cap':'feeder_cap_upgrade_snapshot',
+             'verify-feeder-cap-upgrade-source':'feeder_cap_upgrade_source_verify',
+             'compare-feeder-cap-upgrade':'feeder_cap_upgrade_compare',
+             'snapshot-before-contact': 'contact_upgrade_snapshot',
              'verify-contact-upgrade-source': 'contact_upgrade_source_verify',
              'compare-contact-upgrade': 'contact_upgrade_compare', 'snapshot': 'snapshot', 'verify': 'verify'}
     if (operation not in names or set(result) != {'operation', 'id', 'accepted', 'resume_authorized'}
@@ -460,6 +471,7 @@ def apply(directory, approved, *, current_schema=False):
         after = state_files(r)
         sources_match(m, r, after, installed=True)
         M.note(directory, 'COMPARISON.json', {'verified': verified, 'compared': compared, 'live_images': after,
+                'core_upgrade': UPGRADE_KIND,
                 'migrated_manifest_sha256': digest(directory / 'migrated/MANIFEST.json')})
     return {'upgraded': True, 'four_journal_backup_verified': True, 'clone_compared': True,
             'live_migration_compared': True, 'services_started': False, 'contact_enabled': False}
@@ -518,7 +530,9 @@ def resume(directory, approved, *, current_schema=False):
 
 
 def main():
+    global UPGRADE_KIND
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--feeder-cap', action='store_true', help='exact contained schema-24 to 25 feeder-cap upgrade')
     parser.add_argument('--current-schema', action='store_true', help='program-only patch; never migrate live state')
     commands = parser.add_subparsers(dest='operation', required=True)
     planning = commands.add_parser('plan')
@@ -532,6 +546,9 @@ def main():
     resuming.add_argument('directory', type=Path)
     resuming.add_argument('--approve-resumption', required=True, action='store_true')
     args = parser.parse_args()
+    if args.feeder_cap:
+        if args.current_schema: raise ValueError('upgrade kinds cannot be combined')
+        UPGRADE_KIND = P.UPGRADE_KIND = 'feeder-cap'
     if args.operation == 'plan':
         result = plan(args.review, args.review_sha256, args.directory, current_schema=args.current_schema)
     elif args.operation == 'apply':

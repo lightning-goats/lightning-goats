@@ -27,16 +27,15 @@ static PAYOUT: sqlx::migrate::Migrator = sqlx::migrate!("./payout-migrations");
 static SIGNER: sqlx::migrate::Migrator = sqlx::migrate!("./signer-migrations");
 
 pub(super) async fn inspect(directory: &Path, policy: &Policy) -> Result<Report> {
-    inspect_version(directory, policy, false).await
+    inspect_version(directory, policy, 25).await
 }
 pub(super) async fn inspect_before_contact(directory: &Path, policy: &Policy) -> Result<Report> {
-    inspect_version(directory, policy, true).await
+    inspect_version(directory, policy, 23).await
 }
-async fn inspect_version(
-    directory: &Path,
-    policy: &Policy,
-    before_contact: bool,
-) -> Result<Report> {
+pub(super) async fn inspect_before_feeder_cap(directory: &Path, policy: &Policy) -> Result<Report> {
+    inspect_version(directory, policy, 24).await
+}
+async fn inspect_version(directory: &Path, policy: &Policy, core_version: i64) -> Result<Report> {
     let mut pools = BTreeMap::new();
     let mut rows = BTreeMap::new();
     for role in Role::ALL {
@@ -78,8 +77,8 @@ async fn inspect_version(
         {
             bail!("journal integrity or foreign keys failed");
         }
-        if before_contact && role == Role::Core {
-            require_before_contact(&pool).await?;
+        if core_version != 25 && role == Role::Core {
+            require_core_prefix(&pool, core_version).await?;
         } else {
             crate::sqlite::require_current_schema(
                 &pool,
@@ -114,7 +113,7 @@ async fn inspect_version(
         rows.insert(role, counts);
         pools.insert(role, pool);
     }
-    let report = report(&pools, policy, rows, before_contact).await;
+    let report = report(&pools, policy, rows, core_version).await;
     for pool in pools.into_values() {
         pool.close().await;
     }
@@ -125,11 +124,11 @@ async fn report(
     pools: &BTreeMap<Role, SqlitePool>,
     policy: &Policy,
     rows: BTreeMap<Role, BTreeMap<String, u64>>,
-    before_contact: bool,
+    core_version: i64,
 ) -> Result<Report> {
     cross_check(pools, policy).await?;
     let core = &pools[&Role::Core];
-    if !before_contact {
+    if core_version >= 24 {
         crate::contact_state::verify(core).await?;
     }
     let payout = &pools[&Role::Payout];
@@ -146,34 +145,39 @@ async fn report(
 }
 // This explicit additive-upgrade boundary never changes ordinary backup or
 // restore verification: only the separate contact comparison can select it.
-async fn require_before_contact(pool: &SqlitePool) -> Result<()> {
+async fn require_core_prefix(pool: &SqlitePool, version: i64) -> Result<()> {
     let migrations: Vec<_> = CORE.iter().collect();
-    if migrations.len() != 24 || migrations.last().map(|m| m.version) != Some(24) {
-        bail!("contact upgrade requires separately qualified schema 23 to 24");
+    if !matches!(version, 23 | 24)
+        || migrations.len() != 25
+        || migrations.last().map(|m| m.version) != Some(25)
+    {
+        bail!("additive upgrade requires the separately qualified schema prefix");
     }
     let rows = sqlx::query(
-        "SELECT version,success,checksum FROM _sqlx_migrations ORDER BY version LIMIT 25",
+        "SELECT version,success,checksum FROM _sqlx_migrations ORDER BY version LIMIT 26",
     )
     .fetch_all(pool)
     .await?;
-    if rows.len() != 23 {
-        bail!("contact upgrade source must be exactly schema 23");
+    if rows.len() != usize::try_from(version)? {
+        bail!("additive upgrade source has the wrong schema version");
     }
     for (row, migration) in rows.iter().zip(migrations) {
         if row.try_get::<i64, _>("version")? != migration.version
             || !row.try_get::<bool, _>("success")?
             || row.try_get::<Vec<u8>, _>("checksum")?.as_slice() != migration.checksum.as_ref()
         {
-            bail!("contact upgrade source has unknown, dirty or changed migrations");
+            bail!("additive upgrade source has unknown, dirty or changed migrations");
         }
     }
-    let private: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name LIKE 'private_contact_%')",
-    )
-    .fetch_one(pool)
-    .await?;
-    if private {
-        bail!("contact upgrade source already contains private-contact schema");
+    if version == 23 {
+        let private: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name LIKE 'private_contact_%')",
+        )
+        .fetch_one(pool)
+        .await?;
+        if private {
+            bail!("contact upgrade source already contains private-contact schema");
+        }
     }
     Ok(())
 }

@@ -1054,10 +1054,8 @@ async fn feeding_batch_deduplicates_presentation_but_retains_every_confirmed_rew
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(
-        a.feeding.presentation.as_ref().unwrap().identity,
-        b.feeding.presentation.as_ref().unwrap().identity
-    );
+    assert!(a.feeding.presentation.is_some());
+    assert!(b.feeding.presentation.is_none());
     assert_eq!(
         a.feeding
             .presentation
@@ -1087,7 +1085,7 @@ async fn feeding_batch_deduplicates_presentation_but_retains_every_confirmed_rew
         .fetch_one(&db)
         .await
         .unwrap();
-    assert_eq!((receipts, messages, barriers), (2, 1, 2));
+    assert_eq!((receipts, messages, barriers), (1, 1, 2));
     assert_eq!(f.core.feed_credit_sats().await.unwrap(), 345);
     assert!(
         sqlx::query("DELETE FROM feeding_announcements")

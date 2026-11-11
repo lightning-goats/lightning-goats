@@ -68,6 +68,18 @@ migration. Native operations, kernel UID execution and systemd are mocked in
 those Python fixtures. Exact root CI and a separate installed native/systemd
 schema-23-to-24 rehearsal remain required before this candidate is used on a host.
 
+The installed rehearsal uses only a guarded disposable CI VM, synthetic paid
+state/credentials, an isolated network and a gateway mock that refuses POSTs.
+Its harmless old-core ELF accepts the real future unit argv but opens no journal
+or credential. A separate test-only operation removes only empty schema-24
+contact definitions from the known synthetic fixture, after exact migration,
+receipt and native signature checks. It cannot transform arbitrary state. The
+root harness attests the isolated namespace in a protected marker; the helper
+compares its own namespace without reading PID 1, which the hardened unit hides.
+The native backup, clone/live migration, comparisons and resumed new services
+must all actually pass. The stand-in is not evidence about an old production
+daemon, and no fixture helper is included in production archives.
+
 Before an actual upgrade, a separately qualified maintenance coordinator must
 quiesce and fence all four writers, take and verify a **current** native schema-23
 four-journal backup using the old installed tool or the separately qualified

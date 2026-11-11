@@ -169,7 +169,7 @@ marker after checking distinct-owned original main/WAL/SHM preservation and
 ordinary restore refusal. This newer native binary is not installed on the VPS;
 the earlier sealed preparation remains unchanged.
 
-The next source candidate implements the protected maintenance executor's
+The source candidate implements the protected maintenance executor's
 plan/apply/resume operations. It first verifies a current native four-journal
 backup and a separately migrated copy, then replaces only three programs and
 compares actual live migration before allowing resumption. It preserves all
@@ -178,7 +178,27 @@ fixtures cover native refusal before replacement, changed staged programs,
 changed financial state before restart and ambiguous migration without old-binary
 rollback. The Python native/systemd boundaries are mocks; root-file CI and an
 actual installed migration rehearsal remain required. This candidate is not
-installed, and the earlier sealed VPS preparation is untouched.
+installed, and the earlier sealed VPS preparation is untouched. All ten workflows
+pass on `cef504185f51c1d99bcc6deab6fd80475ff93f4a`, including
+[CI](https://github.com/lightning-goats/lightning-goats/actions/runs/42943120009),
+[Deployment](https://github.com/lightning-goats/lightning-goats/actions/runs/42943119997),
+[Security](https://github.com/lightning-goats/lightning-goats/actions/runs/42943119998)
+and [real NIP-46](https://github.com/lightning-goats/lightning-goats/actions/runs/42943120055).
+The separate root job actually passes all seven new file/failure fixtures within
+64 root cases. Its installed job still covers the preceding preparation stage,
+not the new executor's native schema transformation.
+
+The subsequent rehearsal source adds an actual schema-23-to-24 executor exercise
+to the guarded disposable systemd VM. A test-only compiled ELF stands in for the
+old core without opening configuration, state or credentials. A separate explicit
+mode transforms only the known synthetic paid fixture by removing empty contact
+DDL/history, after native checksum, receipt and signed-message validation.
+Protected root attestation binds its network namespace without weakening the
+unit's existing hidden-process policy. Both clone/live migrations, native
+four-journal backup/comparisons and resumed new core/membership are actual native
+programs under actual runtime identities. The helper is absent from production
+archives and refuses ordinary invocation. This combined rehearsal source still
+needs exact Rust/root/installed CI qualification; no live migration is implied.
 
 Still required: exact executor qualification
 and installed migration rehearsal; current backup and actual deployment;

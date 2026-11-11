@@ -269,6 +269,141 @@ def overlay_maintenance(launcher, root, fixture_directory, installation, core_ar
         gateway.shutdown(); gateway.server_close(); thread.join(timeout=2)
 
 
+def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive, review_archive, source_commit):
+    """Actual 23->24 executor on disposable synthetic state, never a live host.
+
+    The old core is a separately compiled harmless ELF stand-in. Both migration
+    rounds, native backup/comparison, UID execution and the resumed new core are
+    actual installed programs. All service networking stays in this fresh netns.
+    """
+    import http.server
+    import threading
+    if (os.geteuid() != 0 or os.environ.get('GITHUB_ACTIONS') != 'true'
+            or not os.environ.get('GITHUB_RUN_ID', '').isdigit()
+            or os.readlink('/proc/self/ns/net') == os.readlink('/proc/1/ns/net')
+            or {v['ifname'] for v in json.loads(run('/usr/sbin/ip', '-j', 'link', 'show'))} != {'lo'}):
+        raise ValueError('contact rehearsal requires the guarded disposable isolated CI host')
+    tools = root / 'tools'
+    spec = importlib.util.spec_from_file_location('ci_contact_worker_support', tools / 'qualify-cyberherd-workers.py')
+    w = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(w)
+    base = Path('/var/lib/lightning-goats-upgrades')
+    overlay = base / 'ci-overlay-review'
+    config = Path('/etc/lightning-goats/config.receive.toml')
+    member = Path('/etc/cyberherd/config.toml')
+    unit = Path('/etc/systemd/system/lightning-goats-receive.service')
+    member_mask = Path('/etc/systemd/system/cyberherd.service')
+    program = Path('/usr/local/bin/lightning-goatsd')
+    original = {str(path): path.read_bytes() for path in (config, member, unit)}
+    for name in ('lightning-goats-receive', 'cyberherd', 'cyberherd-payout', 'cyberherd-signer'):
+        assert run('/usr/bin/systemctl', 'show', name + '.service', '-p', 'MainPID', '--value').strip() == '0'
+    guard = Path('/run/lightning-goats-contact-fixture')
+    guard.mkdir(mode=0o755)
+    (guard / 'ALLOW').write_text('LIGHTNING_GOATS_DISPOSABLE_CONTACT_UPGRADE_CI_v1\n' + os.readlink('/proc/self/ns/net') + '\n')
+    (guard / 'ALLOW').chmod(0o444)
+    fixture = root / 'TEST-ONLY-contact-upgrade-fixture'
+    shutil.copyfile(fixture_directory / fixture.name, fixture)
+    fixture.chmod(0o755)
+    runtime = pwd.getpwnam('lightning-goats')
+    counts = {'post': 0}
+    class Gateway(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *args): pass
+        def do_GET(self):
+            value = {'override_enabled': True, 'remote_enabled': False} if self.path == '/v1/feeder/override' else {}
+            data = json.dumps(value).encode()
+            self.send_response(200 if self.path in ('/v1/feeder/override', '/healthz') else 404)
+            self.send_header('Content-Type', 'application/json'); self.send_header('Content-Length', str(len(data)))
+            self.end_headers(); self.wfile.write(data)
+        def do_POST(self):
+            counts['post'] += 1
+            self.send_response(405); self.end_headers()
+    gateway = http.server.ThreadingHTTPServer(('127.0.0.1', 18789), Gateway)
+    thread = threading.Thread(target=gateway.serve_forever, daemon=True)
+    thread.start()
+    finished = False
+    try:
+        stripped = json.loads(run('/usr/bin/setpriv', '--reuid=' + str(runtime.pw_uid), '--regid=' + str(runtime.pw_gid),
+                                  '--clear-groups', '--inh-caps=-all', '--ambient-caps=-all', '--bounding-set=-all', '--no-new-privs',
+                                  str(fixture), '--strip-empty-contact-schema'))
+        assert stripped == {'synthetic': True, 'schema': 23, 'payments': 1, 'signed_messages': 1, 'production_supported': False}
+        config.write_bytes((overlay / 'core.toml').read_bytes())
+        member.write_bytes((overlay / 'membership.toml').read_bytes())
+        unit.write_bytes((overlay / unit.name).read_bytes())
+        shutil.copyfile(fixture, program)
+        program.chmod(0o755)
+        assert member_mask.is_symlink() and os.readlink(member_mask) == '/dev/null'
+        member_mask.unlink()
+        run('/usr/bin/systemctl', 'daemon-reload')
+        run('/usr/bin/systemctl', 'start', 'lightning-goats-receive.service', 'cyberherd.service')
+        old_digest = hashlib.sha256(program.read_bytes()).hexdigest()
+        def old_core_ready():
+            pid = run('/usr/bin/systemctl', 'show', 'lightning-goats-receive.service', '-p', 'MainPID', '--value').strip()
+            if not pid.isdecimal() or int(pid) < 2: return False
+            return hashlib.sha256(Path('/proc', pid, 'exe').read_bytes()).hexdigest() == old_digest
+        w.await_ready(old_core_ready, 'harmless old-core ELF stand-in')
+        w.await_ready(lambda: w.http_json('http://127.0.0.1:3340/api/v1/cyberherd'), 'native pre-upgrade membership view')
+        review, execution = base / 'ci-contact-maintenance-review', base / 'ci-contact-maintenance-execution'
+        prepared = json.loads(run(*launcher, '--contact-upgrade-prepare', str(core_archive), str(review_archive),
+                                  source_commit, hashlib.sha256(core_archive.read_bytes()).hexdigest(),
+                                  hashlib.sha256(review_archive.read_bytes()).hexdigest(), str(review)))
+        assert prepared['services_changed'] is False and prepared['journals_opened'] is False
+        frozen = json.loads((review / 'PREPARED.json').read_text())
+        before_policy = frozen['baseline']['policy']
+        review_sha = hashlib.sha256((review / 'PREPARED.json').read_bytes()).hexdigest()
+        planned = json.loads(run(*launcher, '--contact-upgrade-maintenance', 'plan', str(review), str(execution),
+                                 '--review-sha256', review_sha))
+        assert planned == {'planned': True, 'services_changed': False, 'journals_opened': False}
+        upgraded = json.loads(run(*launcher, '--contact-upgrade-maintenance', 'apply', str(execution), '--exclusive-maintenance'))
+        assert upgraded == {'upgraded': True, 'four_journal_backup_verified': True, 'clone_compared': True,
+                            'live_migration_compared': True, 'services_started': False, 'contact_enabled': False}
+        before = json.loads((execution / 'backup/MANIFEST.json').read_text())
+        after = json.loads((execution / 'migrated/MANIFEST.json').read_text())
+        assert before['policy'] == after['policy'] == before_policy
+        assert before['report']['pending_feeds'] == after['report']['pending_feeds'] == 1
+        for table in ('settled_payments', 'ledger_entries', 'feed_attempts', 'message_outbox'):
+            assert before['report']['rows']['core'][table] == after['report']['rows']['core'][table]
+        for table in ('private_contact_intents', 'private_contact_fees', 'private_contact_delivery'):
+            assert table not in before['report']['rows']['core'] and after['report']['rows']['core'][table] == 0
+        assert hashlib.sha256(program.read_bytes()).hexdigest() != old_digest
+        resumed = json.loads(run(*launcher, '--contact-upgrade-maintenance', 'resume', str(execution), '--approve-resumption'))
+        assert resumed == {'core_running': True, 'membership_running': True, 'contact_enabled': False, 'payouts_enabled': False}
+        assert w.http_json('http://127.0.0.1:8787/healthz')['status'] == 'ok'
+        page = w.http_json('http://127.0.0.1:3340/api/v1/cyberherd')
+        assert page['roster']['owner'] == before_policy['owner']
+        for name in ('lightning-goats-receive.service', 'cyberherd.service'):
+            pid = run('/usr/bin/systemctl', 'show', name, '-p', 'MainPID', '--value').strip()
+            assert os.readlink('/proc/' + pid + '/ns/net') == os.readlink('/proc/self/ns/net')
+        assert counts['post'] == 0 and 'contact' not in tomllib.loads(config.read_text())
+        finished = True
+        return {'accepted': True, 'old_core_was_harmless_elf_standin': True,
+                'actual_native_schema_23_backup': True, 'actual_runtime_uid_clone_migration': True,
+                'actual_native_four_journal_comparisons': True, 'actual_live_schema_24_migration': True,
+                'actual_new_native_core_and_membership_resumed': True, 'all_original_paid_and_signed_rows_preserved': True,
+                'epoch_and_financial_policy_preserved': True, 'gateway_post_count': counts['post'],
+                'contact_enabled': False, 'synthetic_credentials_only': True,
+                'all_application_networking_loopback_isolated': True, 'live_host_qualified': False}
+    except Exception:
+        # Disposable synthetic fixture only. Never use this diagnostic or the
+        # fixture's schema transform against a production host or journal.
+        import sys
+        for name in ('lightning-goats-receive.service', 'cyberherd.service'):
+            result = subprocess.run(['/usr/bin/journalctl', '--no-pager', '-u', name, '-n', '25', '-o', 'cat'],
+                                    capture_output=True, text=True, timeout=10)
+            print('DISPOSABLE CONTACT FIXTURE ' + name + '\n' + result.stdout[-8000:], file=sys.stderr)
+        raise
+    finally:
+        run('/usr/bin/systemctl', 'stop', 'cyberherd.service', 'lightning-goats-receive.service')
+        if not member_mask.exists() and not member_mask.is_symlink(): member_mask.symlink_to('/dev/null')
+        assert member_mask.is_symlink() and os.readlink(member_mask) == '/dev/null'
+        if finished:
+            # Configuration-only fixture cleanup. Never roll back database bytes
+            # or the compatible new native programs after schema migration.
+            for name, data in original.items(): Path(name).write_bytes(data)
+        run('/usr/bin/systemctl', 'daemon-reload')
+        (guard / 'ALLOW').unlink(); guard.rmdir()
+        gateway.shutdown(); gateway.server_close(); thread.join(timeout=2)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('review', type=Path)
@@ -415,12 +550,15 @@ def main():
     assert workers['production_workers_started'] is False and workers['real_credentials_loaded'] is False
     maintenance = overlay_maintenance(launcher, root, args.fixture_directory, destination,
                                       args.core_archive, args.review, args.source)
+    contact = contact_upgrade_maintenance(launcher, root, args.fixture_directory,
+                                          args.core_archive, args.review, args.source)
     print(json.dumps({'synthetic': True, 'source_commit': args.source, 'native_engine': prepared['engine'],
                       'actual_nss_identities': 3, 'actual_native_initializers': 3, 'actual_masked_units': 3,
                       'synthetic_payout_ciphertext_created': True,
                       'installed_role_qualification': qualification,
                       'installed_worker_qualification': workers,
                       'installed_overlay_maintenance': maintenance,
+                      'installed_contact_upgrade_maintenance': contact,
                       'actual_core_upgrade_transaction': True, 'harmless_core_fixture_started': True,
                       'payment_daemon_started': True, 'cyberherd_units_started': True,
                       'runtime_credentials_loaded': 'synthetic_only', 'provider_qualified': False,

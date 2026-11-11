@@ -51,6 +51,23 @@ class ContactPreparationBoundaries(unittest.TestCase):
             self.assertIn('externally verified root-owned tool launcher', result.stderr)
             self.assertNotIn('INJECTED', result.stderr)
 
+    def test_feeder_cap_preparation_requires_containment_and_keeps_zero_financial_limits(self):
+        values = fixture()
+        values[0]['service'] = {'mode':'shadow'}
+        with patch.object(PREPARE, 'UPGRADE_KIND', 'feeder-cap'):
+            PREPARE.configuration_boundary(*values)
+            for mode in ('active','canary'):
+                changed = copy.deepcopy(values)
+                changed[0]['service']['mode'] = mode
+                with self.assertRaisesRegex(ValueError, 'contained shadow'):
+                    PREPARE.configuration_boundary(*changed)
+            with self.assertRaisesRegex(ValueError, 'contained shadow'):
+                PREPARE.configuration_boundary(*values, current_schema=True)
+            changed = copy.deepcopy(values)
+            changed[0]['contact'] = {}
+            with self.assertRaisesRegex(ValueError, 'contained shadow'):
+                PREPARE.configuration_boundary(*changed)
+
     def test_only_existing_zero_budget_overlay_stage_is_accepted(self):
         values = fixture()
         before = copy.deepcopy(values)

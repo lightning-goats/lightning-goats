@@ -8,7 +8,7 @@ type Keep = (
     crate::payout::signer::Store,
 );
 
-pub(super) async fn seed(root: &Path) -> (Policy, Keep) {
+pub(in crate::state_maintenance) async fn seed(root: &Path) -> (Policy, Keep) {
     let mut p = policy(root);
     for component in p.components.values() {
         std::fs::create_dir_all(component.database.parent().unwrap()).unwrap();
@@ -130,7 +130,7 @@ pub(super) async fn seed(root: &Path) -> (Policy, Keep) {
     (p, (core, membership, payout, signer))
 }
 
-pub(super) fn copy_images(p: &Policy, destination: &Path) {
+pub(in crate::state_maintenance) fn copy_images(p: &Policy, destination: &Path) {
     std::fs::create_dir(destination).unwrap();
     for role in Role::ALL {
         for suffix in ["", "-wal"] {

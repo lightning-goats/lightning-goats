@@ -477,6 +477,60 @@ def apply(directory, approved, *, current_schema=False):
             'live_migration_compared': True, 'services_started': False, 'contact_enabled': False}
 
 
+def repair_backlog(directory, repair_id, credit_entry_id, expected_sats):
+    """Retire one reviewed original funding lot after verified cap migration.
+
+    Writers remain masked throughout. No service, refund, gateway, provider or
+    publication operation is available here. A started repair is never retried
+    automatically; preserve the original migration and repair evidence.
+    """
+    if UPGRADE_KIND != 'feeder-cap':
+        raise ValueError('explicit feeder-cap selector required for backlog repair')
+    if (not isinstance(repair_id, str) or re.fullmatch('[A-Za-z0-9_:-]{1,256}', repair_id) is None
+            or type(credit_entry_id) is not int or credit_entry_id < 1
+            or type(expected_sats) is not int or not 1 <= expected_sats <= 2**63-1):
+        raise ValueError('stable repair ID and exact positive source credit/amount required')
+    m, r = load(directory)
+    with M.exclusive(directory):
+        if any((directory / name).exists() for name in ('REPAIR-STARTED.json', 'RESUME-REQUESTED.json')):
+            raise ValueError('repair/resumption already started; preserve evidence and inspect')
+        accepted = C.read_json(directory / 'COMPARISON.json')
+        patch_mode(accepted, False)
+        sources_match(m, r, accepted['live_images'], installed=True)
+        if (native(m, 'verify', '--bundle', directory / 'migrated') != accepted['verified']
+                or native(m, 'compare-contact-upgrade', '--bundle', directory / 'backup',
+                          '--candidate-copy', directory / 'migrated') != accepted['compared']
+                or digest(directory / 'migrated/MANIFEST.json') != accepted['migrated_manifest_sha256']):
+            raise ValueError('verified pre-repair migration comparison changed')
+        args = (str(Q.BIN / 'lightning-goatsctl'), '--config', str(C.CONFIG), 'retire-feed-credit',
+                '--id', repair_id, '--credit-entry-id', str(credit_entry_id),
+                '--expected-sats', str(expected_sats), '--writers-stopped')
+        preview = json.loads(C.command(*args, timeout=300))
+        if (set(preview) != {'applied', 'duplicate', 'retired_sats', 'feed_credit_sats'}
+                or preview['applied'] is not False or preview['duplicate'] is not False
+                or preview['retired_sats'] != expected_sats
+                or type(preview['feed_credit_sats']) is not int or preview['feed_credit_sats'] < 0):
+            raise ValueError('exact native retirement preview refused or changed')
+        # Rollback-only preview may checkpoint WAL; accept only runtime-owned
+        # native state with all writers still masked, never a caller file list.
+        stopped(m, r, installed=True)
+        M.note(directory, 'REPAIR-STARTED.json', {'id': repair_id, 'credit_entry_id': credit_entry_id,
+                'expected_sats': expected_sats, 'preview': preview, 'non_feeding_adjustment': True})
+        applied = json.loads(C.command(*args, '--apply', timeout=300))
+        if applied != dict(preview, applied=True):
+            raise ValueError('exact native repair was not positively confirmed; inspect retained evidence')
+        stopped(m, r, installed=True)
+        native(m, 'snapshot', '--destination', directory / 'repaired', '--writers-stopped')
+        verified = native(m, 'verify', '--bundle', directory / 'repaired')
+        after = state_files(r)
+        sources_match(m, r, after, installed=True)
+        M.note(directory, 'REPAIR-ACCEPTED.json', {'core_upgrade': UPGRADE_KIND,
+                'result': applied, 'verified': verified, 'live_images': after,
+                'repaired_manifest_sha256': digest(directory / 'repaired/MANIFEST.json')})
+    return {'credit_retired': True, 'services_started': False, 'physical_feedings_created': False,
+            'retired_sats': expected_sats, 'feed_credit_sats': applied['feed_credit_sats']}
+
+
 def resume(directory, approved, *, current_schema=False):
     if not approved:
         raise ValueError('explicit service resumption approval required')
@@ -486,7 +540,14 @@ def resume(directory, approved, *, current_schema=False):
             raise ValueError('resumption already began; inspect instead of restarting')
         accepted = C.read_json(directory / 'COMPARISON.json')
         patch_mode(accepted, current_schema)
-        sources_match(m, r, accepted['live_images'], installed=True)
+        repair = None
+        if UPGRADE_KIND == 'feeder-cap':
+            repair = C.read_json(directory / 'REPAIR-ACCEPTED.json')
+            if (repair.get('core_upgrade') != UPGRADE_KIND
+                    or native(m, 'verify', '--bundle', directory / 'repaired') != repair['verified']
+                    or digest(directory / 'repaired/MANIFEST.json') != repair['repaired_manifest_sha256']):
+                raise ValueError('verified exact backlog repair is required before cap resumption')
+        sources_match(m, r, (repair or accepted)['live_images'], installed=True)
         if current_schema:
             if (accepted.get('live_migration_performed') is not False
                     or native(m, 'verify', '--bundle', directory / 'backup') != accepted['verified']
@@ -542,6 +603,11 @@ def main():
     applying = commands.add_parser('apply')
     applying.add_argument('directory', type=Path)
     applying.add_argument('--exclusive-maintenance', required=True, action='store_true')
+    repairing = commands.add_parser('repair-backlog')
+    repairing.add_argument('directory', type=Path)
+    repairing.add_argument('--id', required=True)
+    repairing.add_argument('--credit-entry-id', required=True, type=int)
+    repairing.add_argument('--expected-sats', required=True, type=int)
     resuming = commands.add_parser('resume')
     resuming.add_argument('directory', type=Path)
     resuming.add_argument('--approve-resumption', required=True, action='store_true')
@@ -553,6 +619,8 @@ def main():
         result = plan(args.review, args.review_sha256, args.directory, current_schema=args.current_schema)
     elif args.operation == 'apply':
         result = apply(args.directory, args.exclusive_maintenance, current_schema=args.current_schema)
+    elif args.operation == 'repair-backlog':
+        result = repair_backlog(args.directory, args.id, args.credit_entry_id, args.expected_sats)
     else:
         result = resume(args.directory, args.approve_resumption, current_schema=args.current_schema)
     print(json.dumps(result, sort_keys=True))

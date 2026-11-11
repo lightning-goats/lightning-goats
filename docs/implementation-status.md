@@ -51,6 +51,13 @@ all 17 original files/PIDs and zero spending limits remain exact. Requested
 operator limits remain unanswered, and no actual-host financial candidate or
 activation has been performed.
 
+The new native `review-rewards` command reviews only accepted four-journal backup
+images, preserving the original manifest format. It reports frozen feeding
+allocations, unplanned/closed/reserved work, pending intake and cursor lag without
+creating plans or granting activation authority. Source tests and an installed-CLI
+rehearsal are added; their exact qualification remains pending. See
+[the backlog review contract](deployment/cyberherd-state-maintenance.md#review-retained-reward-backlog).
+
 Separate NIP-46 clients now pass [actual household signing checks](testing/cyberherd-bunker-checkpoint-20261110.md):
 membership kinds 1/1311 and payout-signing kind 9734 preserve the exact project
 author, frozen unsigned bytes, canonical hashes and valid signatures. The operator

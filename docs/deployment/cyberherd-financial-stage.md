@@ -105,7 +105,8 @@ it; a current native configuration checker does not qualify an older program's
 execution behavior. Any later maintenance executor must qualify the selected
 programs and retained native state together before applying these candidates.
 
-The backlog review must use a current verified native snapshot, not the running
+The [native backlog review](cyberherd-state-maintenance.md#review-retained-reward-backlog)
+must use a current verified native snapshot, not the running
 membership journal or a Python SQLite reader. `reward_worker::Worker::tick`
 selects the oldest unfinished barrier. Its immutable snapshot supplies the
 allocation; changing today's stored percentage cannot change an earlier
@@ -115,3 +116,7 @@ stays closed. Review unplanned positive-allocation barriers, awaiting
 reservations and existing reservations explicitly. A zero current configuration
 alone does not prove that every historical barrier has a zero allocation, and a
 configuration-only candidate cannot establish the contents of those journals.
+The separate report records frozen allocations, unplanned/closed/reserved work,
+pending intake and cursor lag. It creates no plan/reservation and grants no
+activation authority; qualification of this newly added command is separate from
+the earlier configuration-only checkpoint.

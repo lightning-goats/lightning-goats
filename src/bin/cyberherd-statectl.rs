@@ -29,6 +29,13 @@ enum Command {
         #[arg(long)]
         bundle: PathBuf,
     },
+    /// Review retained reward backlog in an accepted backup; never live journals.
+    ReviewRewards {
+        #[arg(long)]
+        bundle: PathBuf,
+        #[arg(long)]
+        destination: PathBuf,
+    },
     /// Copy only the exact compiled schema-23 source for the contact upgrade.
     /// Same four stopped/masked writers and file guards; never restore or resume.
     SnapshotBeforeContact {
@@ -76,6 +83,19 @@ async fn main() -> Result<()> {
             writers_stopped: true,
         } => ("snapshot", operator.snapshot(&destination).await?),
         Command::Verify { bundle } => ("verify", operator.verify(&bundle).await?),
+        Command::ReviewRewards {
+            bundle,
+            destination,
+        } => {
+            let review = operator.review_rewards(&bundle, &destination).await?;
+            // Counts, UUIDs and financial scope stay in the private report.
+            println!(
+                "{}",
+                serde_json::json!({"operation":"review_rewards","id":review.id,
+                "accepted":true,"activation_authorized":false})
+            );
+            return Ok(());
+        }
         Command::SnapshotBeforeContact {
             destination,
             writers_stopped: true,

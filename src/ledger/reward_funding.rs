@@ -528,7 +528,7 @@ async fn audit_balance(tx: &mut Transaction<'_, Sqlite>) -> Result<()> {
     Ok(())
 }
 
-pub(super) async fn confirmed_funding(
+pub(crate) async fn confirmed_funding(
     tx: &mut Transaction<'_, Sqlite>,
     id: Uuid,
 ) -> Result<Option<Funding>> {
@@ -594,7 +594,7 @@ pub(super) async fn confirmed_funding(
     Ok(Some(funding))
 }
 
-pub(super) fn decode_reservation(row: &sqlx::sqlite::SqliteRow) -> Result<Reservation> {
+pub(crate) fn decode_reservation(row: &sqlx::sqlite::SqliteRow) -> Result<Reservation> {
     let r = Reservation {
         id: row.try_get::<String, _>("id")?.parse()?,
         request_id: row.try_get::<String, _>("request_id")?.parse()?,

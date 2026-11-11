@@ -310,6 +310,55 @@ async fn root_four_journal_snapshot_preserves_wal_paid_pending_and_signed_state_
     );
     assert!(!manifest.report.resume_authorized);
     assert_eq!(operator.verify(&bundle).await.unwrap(), manifest);
+    // A verified offline copy can be reviewed even when the stopped-writer
+    // condition no longer holds. No live source or service access is needed.
+    let manifest_bytes = std::fs::read(bundle.join("MANIFEST.json")).unwrap();
+    ready.store(false, std::sync::atomic::Ordering::SeqCst);
+    let review_path = root.path().join("reward-review");
+    let review = operator
+        .review_rewards(&bundle, &review_path)
+        .await
+        .unwrap();
+    assert_eq!(review.bundle_id, manifest.id);
+    assert_eq!(review.pending_feeds, 1);
+    assert_eq!(review.stored_member_percent, 10);
+    assert!(review.stages.is_empty() && review.all_barriers_examined);
+    assert!(!review.activation_authorized && review.external_reconciliation_required);
+    assert!(review_path.join("REVIEW.json").exists() && !review_path.join("INCOMPLETE").exists());
+    assert_eq!(
+        std::fs::metadata(&review_path)
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o700
+    );
+    assert_eq!(
+        std::fs::metadata(review_path.join("REVIEW.json"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
+    );
+    assert_eq!(
+        std::fs::read(bundle.join("MANIFEST.json")).unwrap(),
+        manifest_bytes
+    );
+    assert!(
+        operator
+            .review_rewards(&bundle, &review_path)
+            .await
+            .is_err()
+    );
+    assert!(
+        operator
+            .review_rewards(&bundle, &bundle.join("nested-review"))
+            .await
+            .is_err()
+    );
+    assert!(!bundle.join("nested-review").exists());
+    ready.store(true, std::sync::atomic::Ordering::SeqCst);
     // The same accepted data must also inspect cleanly after a normal last-
     // connection checkpoint removes every WAL. Work only on additional copies;
     // neither original sources nor the accepted bundle may be checkpointed.

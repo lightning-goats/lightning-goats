@@ -107,6 +107,56 @@ Verification rechecks all private images, schema, scope and report without live
 source access. It does not authorize service resumption. Normal resumption after
 **backup only** is a separate maintenance action; do not adopt copied journals.
 
+## Review retained reward backlog
+
+The native `review-rewards` command reads only an accepted four-journal backup
+and creates a separate, new private report directory. It verifies the complete
+backup first and again after reading it, binds the report to the exact manifest
+hash/ID, and rechecks all image bytes before acceptance. Existing backup manifests
+and schema remain unchanged. A copied committed WAL is read normally; a complete
+main-only image uses immutable mode. No live store opener, credential, provider,
+network, planning/reservation or service-control operation is available.
+
+After installing the qualified native tool, choose a separate unused destination:
+
+```sh
+sudo /usr/local/bin/cyberherd-statectl \
+  --config /etc/cyberherd/state-maintenance.toml \
+  review-rewards --bundle /var/lib/cyberherd-backups/ACCEPTED_BACKUP_ID \
+  --destination /var/lib/cyberherd-reviews/NEW_REVIEW_ID
+```
+
+The destination's parent must already be protected and root-owned. The report
+cannot be created inside the accepted backup. `REVIEW.json` and its directory
+are private; stdout contains only operation/review ID/acceptance and
+`activation_authorized=false`. A partial write retains `INCOMPLETE`. This reads
+the accepted copies and does not require stopping the current services. Creating
+a **new current backup** still requires the normal explicit stopped-writer window.
+
+The report examines every retained feeding barrier for the selected owner. It
+separately counts unplanned zero-allocation, unplanned unfunded and unplanned
+funded positive-allocation barriers, closed `no_payout` plans, plans awaiting
+reservation (including a lost acknowledgment) and attached reservations. Saved
+allocation/cycle/revision comes from each immutable barrier, not today's settings.
+It checks the original completed intake, actual confirmed core debit and consumed
+funding manifest, and any retained plan hash, budget/row sums and reservation
+correlation. Contradictory or oversized records refuse the report; none is
+silently skipped. At most 32 non-closed private UUID examples are retained,
+with an explicit remaining-example count; classification itself is never truncated.
+
+Pending intake/feeding inputs, the membership cursor and core event head,
+unresolved physical feeds, unfinalized core reservations, unresolved provider
+submissions and retained payout holds remain visible. Empty planned-work counts
+alone cannot prove there is no earlier work left to process. A closed zero plan
+is not reopened, and this command neither closes an unplanned plan nor reserves it.
+
+This is evidence **as of the selected backup**, not a live balance, current
+recipient qualification, complete external payment history or activation grant.
+`external_reconciliation_required` stays true even for an empty backlog. A future
+financial maintenance transaction must bind its review to the exact current
+stopped-writer backup, preserve unresolved work and obtain the separately required
+operator/provider authority. Do not edit an old report to make a later backup pass.
+
 ## Restore staging and external reconciliation
 
 A matching backup can predate an external payment or physical feed. Rolling back

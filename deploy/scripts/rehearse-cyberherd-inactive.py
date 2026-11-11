@@ -523,6 +523,25 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
         assert current_backup['policy'] == before_policy
         assert current_backup['report']['pending_feeds'] == 1
         assert current_backup['report']['rows']['core']['private_contact_intents'] == 0
+        # Review accepted native copies only. This leaves the stable backup
+        # manifest and every copied financial image byte-identical.
+        review_destination = root / 'current-reward-backlog-review'
+        reviewed_images = {item['name']: hashlib.sha256((current_execution / 'backup' / item['name']).read_bytes()).hexdigest()
+                           for item in current_backup['images']}
+        reviewed_manifest = hashlib.sha256((current_execution / 'backup/MANIFEST.json').read_bytes()).hexdigest()
+        review_result = json.loads(run('/usr/local/bin/cyberherd-statectl', '--config', '/etc/cyberherd/state-maintenance.toml',
+            'review-rewards', '--bundle', str(current_execution / 'backup'), '--destination', str(review_destination)))
+        assert review_result['operation'] == 'review_rewards' and review_result['accepted'] is True
+        assert review_result['activation_authorized'] is False
+        backlog_review = json.loads((review_destination / 'REVIEW.json').read_text())
+        assert backlog_review['bundle_id'] == current_backup['id'] and backlog_review['bundle_manifest_sha256'] == reviewed_manifest
+        assert backlog_review['all_barriers_examined'] is True and backlog_review['stages'] == {}
+        assert backlog_review['pending_feeds'] == 1 and backlog_review['unfinalized_core_reservations'] == 0
+        assert backlog_review['activation_authorized'] is False and backlog_review['external_reconciliation_required'] is True
+        assert not (review_destination / 'INCOMPLETE').exists()
+        assert reviewed_manifest == hashlib.sha256((current_execution / 'backup/MANIFEST.json').read_bytes()).hexdigest()
+        assert reviewed_images == {name: hashlib.sha256((current_execution / 'backup' / name).read_bytes()).hexdigest()
+                                   for name in reviewed_images}
         current_resumed = json.loads(run(*launcher, '--current-core-maintenance', 'resume', str(current_execution),
             '--approve-resumption'))
         assert current_resumed == {'core_running': True, 'membership_running': True,
@@ -647,6 +666,12 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
                     'actual_core_and_member_resumed': True, 'contact_configuration_retained': True,
                     'outgoing_roles_masked': True, 'gateway_post_count': counts['post'],
                     'different_program_builds_used': False, 'live_host_qualified': False},
+                'installed_reward_backlog_review': {'accepted': True, 'actual_native_cli_used': True,
+                    'accepted_backup_manifest_and_images_unchanged': True, 'all_barriers_examined': True,
+                    'pending_physical_feed_retained': True, 'report_private': True,
+                    'live_journals_opened': False, 'activation_authorized': False,
+                    'external_reconciliation_required': True, 'provider_operations': 0,
+                    'gateway_post_count': counts['post'], 'live_host_qualified': False},
                 'installed_operator_membership_controls': {'accepted': True, 'ready': ready_commands,
                     'after_ready_member_restart': ready_restarted, 'paused': paused_commands,
                     'after_reset_member_restart': controls_restarted,

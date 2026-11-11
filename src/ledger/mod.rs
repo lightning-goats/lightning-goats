@@ -29,6 +29,10 @@ mod reward_funding;
 mod reward_outcomes;
 mod reward_results;
 pub use operator_credit::{OperatorCreditGrant, OperatorCreditResult, OperatorCreditStatus};
+pub(crate) use reward_funding::{
+    confirmed_funding as inspect_confirmed_reward_funding,
+    decode_reservation as inspect_reward_reservation,
+};
 mod overlay;
 mod roster_overlay;
 mod strike;

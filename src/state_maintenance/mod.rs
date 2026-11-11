@@ -12,8 +12,10 @@ mod control;
 mod database;
 mod files;
 pub mod legacy;
+mod reward_review;
 
 pub use database::Report;
+pub use reward_review::{Example as RewardReviewExample, RewardReview, Stage as RewardReviewStage};
 
 #[cfg(test)]
 pub(crate) async fn inspect_fixture(directory: &Path, policy: &Policy) -> Result<Report> {

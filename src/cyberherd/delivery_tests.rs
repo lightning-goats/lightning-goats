@@ -1084,7 +1084,8 @@ async fn feeding_batch_deduplicates_presentation_but_retains_every_confirmed_rew
         .fetch_one(&db)
         .await
         .unwrap();
-    assert_eq!((receipts, messages, barriers), (1, 1, 2));
+    // Both physical-confirmation receipts remain; only one public message exists.
+    assert_eq!((receipts, messages, barriers), (2, 1, 2));
     assert_eq!(f.core.feed_credit_sats().await.unwrap(), 345);
     assert!(
         sqlx::query("DELETE FROM feeding_announcements")

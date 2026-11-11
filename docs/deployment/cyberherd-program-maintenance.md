@@ -21,6 +21,9 @@ Python interprets it; do not run a writable checkout as root. Independently sele
 the exact source and SHA256 of both the normal release and CyberHerd review archive.
 Archive verification precedes program execution. No gateway, archive example,
 website, systemd unit or configuration from either archive is installed.
+Archive-copy/extraction scratch stays on the protected review filesystem instead
+of filling a small memory-backed `/tmp`; its process-local temporary-directory
+setting is restored even on verification failure.
 
 The launcher selector and argument shapes are:
 

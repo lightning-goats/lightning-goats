@@ -95,7 +95,16 @@ def prepare(archive, review_archive, source, archive_sha, review_sha, directory)
     C.write_json(directory / 'INCOMPLETE', {'services_changed': False})
     release = directory / 'release.tar.gz'
     U.P.stage_archive(archive, release, archive_sha)
-    accepted = C.PREFLIGHT.preflight(release, source, archive_sha)
+    # Preflight makes an archive copy and extracts the complete payload. Keep
+    # that bounded, private scratch space on the review filesystem: /tmp may be
+    # a small memory-backed mount on the actual VPS. This synchronous launcher
+    # has no concurrent worker; restore the process-local setting on all exits.
+    previous_tempdir = tempfile.tempdir
+    try:
+        tempfile.tempdir = str(directory)
+        accepted = C.PREFLIGHT.preflight(release, source, archive_sha)
+    finally:
+        tempfile.tempdir = previous_tempdir
     payload = directory / 'payload'
     payload.mkdir(mode=0o700)
     C.PREFLIGHT.RELEASE.verify_archive(release, source, payload)

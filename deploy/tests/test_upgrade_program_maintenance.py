@@ -254,6 +254,23 @@ class ProgramFiles(unittest.TestCase):
         self.assertFalse((self.destination / 'MAINTENANCE-STARTED.json').exists())
         self.assert_programs('old')
 
+    def test_archive_preflight_scratch_stays_on_private_review_disk_and_restores_setting_on_failure(self):
+        destination = self.base / 'failed-preflight'
+        before = P.tempfile.tempdir
+        def refused(*args):
+            self.assertEqual(P.tempfile.tempdir, str(destination))
+            self.assertEqual(destination.stat().st_mode & 0o777, 0o700)
+            raise ValueError('synthetic archive verification refusal')
+        with patch.object(P.C.PREFLIGHT, 'preflight', refused):
+            with self.assertRaisesRegex(ValueError, 'archive verification refusal'):
+                P.prepare(self.archive, self.review_archive, 'a' * 40,
+                    P.U.digest(self.archive), P.U.digest(self.review_archive), destination)
+        self.assertEqual(P.tempfile.tempdir, before)
+        self.assertTrue((destination / 'INCOMPLETE').exists())
+        self.assertFalse((destination / 'PREPARED.json').exists())
+        self.assert_programs('old')
+        self.assert_live_images_preserved()
+
     def test_backup_and_report_substitution_block_resumption(self):
         P.apply(self.destination, self.sha, True)
         path = self.destination / 'reward-review/REVIEW.json'

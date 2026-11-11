@@ -90,8 +90,13 @@ native backup, exact unchanged paid images and resumed core/member services.
 The fixture verifies the committed normalized public projection, paused controls,
 manual reset and original receipts across actual restarts with zero gateway POSTs.
 Optional authenticated TLS/nginx transport and eleven isolated actual-stack WAF
-cases also pass. Actual operator ingress remains disabled pending the selected
-public-key allowlist; see the retained failures and final acceptance in the
+cases also pass. Subsequent source `124809fc0b410f4e9d25cc26d24f5b11998bead7`
+passes all ten workflows and a combined verified-TLS/nginx/native operator
+rehearsal, including exact signed query/body transport, refusals and command retry.
+A private empty-operator self-read configuration also passes the installed member's
+original-UID configuration checker; it is not installed. Actual operator ingress
+remains disabled pending the selected public-key allowlist; see the retained
+failures, final artifact acceptance and preparation evidence in the
 [operator checkpoint](testing/cyberherd-installed-operator-checkpoint-20261111.md).
 
 Other remaining work includes observed zap admission and incoming settlement/

@@ -170,7 +170,7 @@ Only an unprivileged ephemeral loopback nginx with mocks was used. The actual
 production nginx was neither changed nor reloaded, and these transport fixtures
 do not claim production routing or native authorization accepted a request.
 
-## Integrated native TLS edge — candidate
+## Integrated native TLS edge — qualified
 
 The guarded disposable systemd rehearsal now additionally assembles the shipped
 HTTP limits and four optional operator locations in a separate loopback nginx.
@@ -189,8 +189,9 @@ and original unresolved UUID, with no gateway POST. Evidence remains private.
 
 Local guard tests pass refusal of an ordinary user, the initial host namespace
 even with CI labels, and a namespace with an external interface. Exact native CI
-and installed execution of this integrated phase remain pending. Earlier separate
-TLS mocks and direct native HTTP checks do not establish its result. Production
+and installed execution are now accepted on the corrected source below. Earlier
+separate TLS mocks and direct native HTTP checks alone did not establish this
+integrated result. Production
 operator routes/configuration, actual user credentials and financial activation
 remain unchanged. The integrated phase does not yet exercise a browser or WAF.
 
@@ -209,4 +210,41 @@ its member count to be zero after reset. The operator API intentionally includes
 retained inactive/banned members, unlike the public active roster. The check now
 requires the exact one retained inactive, unbanned, zero-score/lifetime guest and
 unchanged member records after settings mutation. It does not delete retained
-history or change the API. This correction still requires installed acceptance.
+history or change the API. Acceptance of the corrected source is recorded below.
+
+Final source `124809fc0b410f4e9d25cc26d24f5b11998bead7` passes all ten
+workflows, including [CI](https://github.com/lightning-goats/lightning-goats/actions/runs/42980193736),
+[Deployment](https://github.com/lightning-goats/lightning-goats/actions/runs/42980193765),
+[Security](https://github.com/lightning-goats/lightning-goats/actions/runs/42980193796)
+and [real NIP-46](https://github.com/lightning-goats/lightning-goats/actions/runs/42980193835).
+Installed job `130389986908` passes the new integrated phase and every prior
+maintenance/operator phase. Formatting, strict locked Clippy, the complete native
+suite, required separate root fixtures, browser, nginx and packaging pass.
+
+Retained systemd artifact `13837547056`, ZIP SHA256
+`2a510d9750ead79ef34602f45e678da70756e6643530f2d7a8582bf0af20e54f`,
+has six verified internal checksum entries. Its exact named TLS/native assertions
+all pass, including private log checks, zero provider operations/publications and
+unchanged original core credit/unknown UUID with zero gateway POSTs. Artifact
+source `3bb6635f8b30326d0abf803f10ede4b23d69062c` independently compares
+with zero file differences. The two failed sources above remain retained.
+This qualification changed no production program, service, ingress, flag or
+credential; production remains on the previously deployed bridge correction.
+
+## Actual self-read configuration preparation
+
+A private candidate under `cyberherd-self-auth-review-124809f` adds only
+`[view.auth]` with canonical origin `https://lightning-goats.com` and an empty
+operator allowlist. The already installed, independently hashed member program
+accepts it using `--check` under its original UID, with all capabilities/groups
+removed and a fresh network namespace. No runtime/database or credential opens.
+Independent readback verifies all three protected files, original/candidate hashes,
+the exact one-section delta and unchanged installed configuration/program.
+Preparation record SHA256:
+`929a844a2bf38c6af38dfecc7f9f6f9f023135fdad28da40f30a65895dcdf6b5`.
+
+This prepares signed self-status reads without selecting an administrator. The
+candidate is not installed, and neither nginx nor the site auth flag changed.
+It does not establish public self-read acceptance or authorize operator access.
+Actual operator keys are still awaiting the operator's public-key allowlist;
+never infer one from project identity, social activity or previous client keys.

@@ -165,6 +165,76 @@ pub struct CreditRetirementResult {
     pub feed_credit_sats: u64,
 }
 impl LedgerStore {
+    /// Root-only offline entry point. Validate the existing non-admin owner's
+    /// files separately; ordinary runtime recovery continues to reject root.
+    /// Never creates a journal or migrates schema. Always close SQLite before
+    /// returning, including failed previews, so runtime-owned files stay usable.
+    #[cfg(unix)]
+    pub async fn retire_credit_offline(
+        database_url: &str,
+        id: &str,
+        credit_id: i64,
+        expected: u64,
+        dry_run: bool,
+    ) -> Result<CreditRetirementResult> {
+        use std::os::unix::fs::MetadataExt as _;
+        if crate::private_ipc::uid()? != 0 {
+            bail!("offline credit retirement requires root");
+        }
+        let options = crate::sqlite::durable_options(database_url)?;
+        let path = options.get_filename();
+        let parent = path.parent().context("missing retirement journal parent")?;
+        let owner = std::fs::symlink_metadata(parent)?;
+        if !path.is_absolute()
+            || path.canonicalize()? != path
+            || !owner.is_dir()
+            || owner.uid() == 0
+            || owner.gid() == 0
+            || owner.mode() & 0o077 != 0
+        {
+            bail!("retirement requires the existing private non-admin journal owner");
+        }
+        for ancestor in parent.ancestors().skip(1) {
+            let meta = std::fs::symlink_metadata(ancestor)?;
+            if !meta.is_dir() || meta.uid() != 0 || meta.mode() & 0o022 != 0 {
+                bail!("retirement journal ancestors must remain protected");
+            }
+        }
+        let check = || -> Result<()> {
+            for suffix in ["", "-wal", "-shm"] {
+                let file = std::path::PathBuf::from(format!("{}{suffix}", path.display()));
+                let meta = match std::fs::symlink_metadata(&file) {
+                    Ok(meta) => meta,
+                    Err(e) if !suffix.is_empty() && e.kind() == std::io::ErrorKind::NotFound => {
+                        continue;
+                    }
+                    Err(e) => return Err(e.into()),
+                };
+                if !meta.is_file()
+                    || meta.nlink() != 1
+                    || meta.uid() != owner.uid()
+                    || meta.gid() != owner.gid()
+                    || meta.mode() & 0o077 != 0
+                {
+                    bail!("retirement journal file ownership/type changed");
+                }
+            }
+            Ok(())
+        };
+        check()?;
+        let pool = crate::sqlite::connect_existing_durable(database_url, 1).await?;
+        let store = Self { pool };
+        let result = async {
+            crate::sqlite::require_current_schema(&store.pool, &super::MIGRATOR).await?;
+            store
+                .retire_existing_feed_credit(id, credit_id, expected, dry_run)
+                .await
+        }
+        .await;
+        store.pool.close().await;
+        check()?;
+        result
+    }
     /// Offline/operator-only correction. Retire one exact original lot, never
     /// another donor's credit and never historical confirmed food.
     pub async fn retire_existing_feed_credit(
@@ -286,6 +356,63 @@ mod tests {
         };
         store.confirm_feed_attempt(id).await.unwrap();
         true
+    }
+    #[tokio::test]
+    #[ignore = "required isolated root credit-retirement fixture"]
+    async fn root_retirement_preserves_runtime_owner_and_exact_paid_history() {
+        use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
+        assert_eq!(crate::private_ipc::uid().unwrap(), 0);
+        let root = tempfile::Builder::new()
+            .prefix("lg-retirement-")
+            .tempdir_in("/run")
+            .unwrap();
+        std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        let directory = root.path().join("runtime");
+        std::fs::create_dir(&directory).unwrap();
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let path = directory.join("core.db");
+        let url = format!("sqlite://{}", path.display());
+        let store = LedgerStore::connect(&url).await.unwrap();
+        store.initialize_reward_funding().await.unwrap();
+        grant(&store, "saved", 70).await;
+        grant(&store, "original-donation", 34031).await;
+        for _ in 0..10 {
+            assert!(feed(&store).await);
+        }
+        let credit: i64 = sqlx::query_scalar(
+            "SELECT id FROM ledger_entries WHERE source_key='operator-credit:original-donation'",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        store.pool.close().await;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        std::os::unix::fs::chown(&path, Some(50119), Some(50119)).unwrap();
+        std::os::unix::fs::chown(&directory, Some(50119), Some(50119)).unwrap();
+        assert!(LedgerStore::connect_existing_recovery(&url).await.is_err());
+        let preview = LedgerStore::retire_credit_offline(&url, "reviewed", credit, 24101, true)
+            .await
+            .unwrap();
+        assert!(!preview.applied);
+        assert_eq!(preview.feed_credit_sats, 0);
+        let applied = LedgerStore::retire_credit_offline(&url, "reviewed", credit, 24101, false)
+            .await
+            .unwrap();
+        assert!(applied.applied);
+        assert_eq!(applied.feed_credit_sats, 0);
+        let retry = LedgerStore::retire_credit_offline(&url, "reviewed", credit, 24101, false)
+            .await
+            .unwrap();
+        assert!(retry.duplicate);
+        assert_eq!(std::fs::metadata(&path).unwrap().uid(), 50119);
+        assert_eq!(std::fs::metadata(&path).unwrap().gid(), 50119);
+        let pool = crate::sqlite::connect_existing_durable(&url, 1)
+            .await
+            .unwrap();
+        let counts:(i64,i64,i64)=sqlx::query_as("SELECT (SELECT COUNT(*) FROM feed_attempts WHERE status='confirmed'),(SELECT COUNT(*) FROM feed_credit_retirements),(SELECT SUM(delta_sats) FROM ledger_entries WHERE delta_sats>0)").fetch_one(&pool).await.unwrap();
+        pool.close().await;
+        assert_eq!(counts, (10, 1, 34101));
+        println!("ROOT_CREDIT_RETIREMENT_FIXTURE_VERIFIED");
     }
     #[tokio::test]
     async fn donation_34031_with_saved_70_queues_three_and_emits_one_feeding_notice() {

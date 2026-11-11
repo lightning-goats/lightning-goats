@@ -173,9 +173,7 @@ async fn main() -> Result<()> {
     #[cfg(unix)]
     if matches!(
         args.command,
-        Command::ReconcileFailedCost { .. }
-            | Command::FailedCostTemplate { .. }
-            | Command::RetireFeedCredit { .. }
+        Command::ReconcileFailedCost { .. } | Command::FailedCostTemplate { .. }
     ) {
         lightning_goats::payout::cost_recovery::require_protected_configuration(&args.config)?;
     }
@@ -207,11 +205,31 @@ async fn main() -> Result<()> {
         }
     }
     let config = AppConfig::load(&args.config)?;
+    if let Command::RetireFeedCredit {
+        id,
+        credit_entry_id,
+        expected_sats,
+        apply,
+        ..
+    } = &args.command
+    {
+        #[cfg(unix)]
+        {
+            let result = LedgerStore::retire_credit_offline(
+                &config.database.url,
+                id,
+                *credit_entry_id,
+                *expected_sats,
+                !apply,
+            )
+            .await?;
+            println!("{}", serde_json::to_string(&result)?);
+            return Ok(());
+        }
+    }
     let ledger = if matches!(
         args.command,
-        Command::ReconcileFailedCost { .. }
-            | Command::FailedCostTemplate { .. }
-            | Command::RetireFeedCredit { .. }
+        Command::ReconcileFailedCost { .. } | Command::FailedCostTemplate { .. }
     ) {
         #[cfg(unix)]
         {

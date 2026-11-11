@@ -169,7 +169,18 @@ marker after checking distinct-owned original main/WAL/SHM preservation and
 ordinary restore refusal. This newer native binary is not installed on the VPS;
 the earlier sealed preparation remains unchanged.
 
-Still required: a protected maintenance executor
+The next source candidate implements the protected maintenance executor's
+plan/apply/resume operations. It first verifies a current native four-journal
+backup and a separately migrated copy, then replaces only three programs and
+compares actual live migration before allowing resumption. It preserves all
+configuration, limits and outgoing masks and keeps contact disabled. Failure
+fixtures cover native refusal before replacement, changed staged programs,
+changed financial state before restart and ambiguous migration without old-binary
+rollback. The Python native/systemd boundaries are mocks; root-file CI and an
+actual installed migration rehearsal remain required. This candidate is not
+installed, and the earlier sealed VPS preparation is untouched.
+
+Still required: exact executor qualification
 and installed migration rehearsal; current backup and actual deployment;
 controlled provider/paid-contact acceptance and recipient-side DM observation.
 The old legacy-core upgrade helper is not this upgrade path. No production

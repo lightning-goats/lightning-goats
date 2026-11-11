@@ -5,9 +5,11 @@ disabled. This preparation does not authorize or perform a migration, service
 interruption, private-message delivery, payment, feeding or public publication.
 
 Use only independently source-verified build artifacts and a separately
-authenticated, root-owned tool closure. The eighteen-file closure now includes
-`prepare-contact-upgrade.py`; do not invoke a writable checkout as root or reuse
-an older seventeen-file manifest for the new tool. Independent archive SHA256s
+authenticated, root-owned tool closure. The source candidate now has nineteen
+files, including `prepare-contact-upgrade.py` and `maintain-contact-upgrade.py`.
+The already installed preparation-only generation has eighteen files and provides
+no maintenance entry point. Do not invoke a writable checkout as root or reuse an
+older manifest for the new closure. Independent archive SHA256s
 must cover both the core release and CyberHerd review archive at the same full
 source commit. The core archive supplies the daemon/CLI; the review archive
 supplies the native four-journal tool. No Python from either archive executes.
@@ -31,7 +33,40 @@ and retains a private `PREPARED.json`. It opens no journal, reads no credential
 and changes no installed program, configuration, unit or service. Reused paths,
 changed baselines and incomplete output refuse. It provides no apply/resume
 command. Do not execute its generic file transaction as a substitute for the
-missing maintenance coordinator.
+still-unqualified maintenance coordinator.
+
+## Maintenance executor candidate — not qualified or installed
+
+The source candidate selects `--contact-upgrade-maintenance`. Its operations are:
+
+- `plan REVIEW EXECUTION --review-sha256 INDEPENDENT_PREPARED_SHA256` freezes a
+  separate three-program transaction without opening journals or changing services.
+- `apply EXECUTION --exclusive-maintenance` fences all four writers, takes and
+  verifies a current exact-schema-23 native backup, migrates a separate copy under
+  the original UID in an isolated network namespace, and compares every retained
+  row/schema/signature before program replacement. It then migrates the original
+  core under the original UID, snapshots all four current journals and compares
+  the actual result. All writers remain masked and stopped afterward.
+- `resume EXECUTION --approve-resumption` independently rechecks the accepted
+  images, comparisons, program/configuration identities and effective units. It
+  restores the exact original core unit and membership mask state, starts only
+  core plus membership, and verifies their process identities and health.
+
+Contact configuration, nginx, static flags, boot enablement, membership signing
+and financial limits do not change. The shared host maintenance lock excludes
+these coordinators, while explicit administrative/database exclusivity remains
+an operator responsibility. Changed/unknown artifacts, native refusal, unexpected
+writers or interrupted execution retain evidence and stop further work. There is
+no automatic reapply, old-binary rollback or database-restore command. After a
+migration starts, even an ambiguous result must retain the new programs and all
+journal bytes for inspection.
+
+Pure tests and disposable protected-file fixtures exercise command admission,
+private native receipts, mixed old/new program replacement states, backup and
+clone rejection, changed financial state before restart and ambiguous live
+migration. Native operations, kernel UID execution and systemd are mocked in
+those Python fixtures. Exact root CI and a separate installed native/systemd
+schema-23-to-24 rehearsal remain required before this candidate is used on a host.
 
 Before an actual upgrade, a separately qualified maintenance coordinator must
 quiesce and fence all four writers, take and verify a **current** native schema-23

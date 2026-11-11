@@ -22,6 +22,7 @@ FILES = (
     'stage-cyberherd-overlay.py',
     'maintain-cyberherd-overlay.py',
     'prepare-contact-upgrade.py',
+    'maintain-contact-upgrade.py',
 )
 
 

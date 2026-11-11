@@ -72,6 +72,8 @@ class ToolLaunchTests(unittest.TestCase):
             self.assertIn('resume-core', run(ok=True).stdout)
             command[6:] = ['--contact-upgrade-prepare', '--help']
             self.assertIn('review_archive', run(ok=True).stdout)
+            command[6:] = ['--contact-upgrade-maintenance', '--help']
+            self.assertIn('resume', run(ok=True).stdout)
             command[6:] = ['--help']
             for name in LAUNCH.FILES - {'launch-vps-upgrade.py'}:
                 target = bundle / name

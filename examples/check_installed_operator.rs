@@ -832,7 +832,16 @@ async fn edge() -> Result<()> {
     );
     let before = edge_get(&client, 2, OVERVIEW).await?;
     ensure!(
-        before["total_members"] == 0 && before["settings"]["member_percent"] == 0,
+        before["total_members"] == 1
+            && before["members"]
+                .as_array()
+                .is_some_and(|members| members.len() == 1)
+            && before["members"][0]["pubkey"] == guest["pubkey"]
+            && before["members"][0]["active"] == false
+            && before["members"][0]["banned"] == false
+            && before["members"][0]["amount_sats"] == "0"
+            && before["members"][0]["lifetime_sats"] == "0"
+            && before["settings"]["member_percent"] == 0,
         "TLS edge fixture scope changed"
     );
     ensure!(
@@ -891,7 +900,8 @@ async fn edge() -> Result<()> {
             && after["cycle"] == before["cycle"]
             && after["settings"]["minimum_sats"] == body["action"]["minimum_sats"]
             && after["settings"]["member_percent"] == 0
-            && after["total_members"] == 0,
+            && after["total_members"] == before["total_members"]
+            && after["members"] == before["members"],
         "TLS edge command readback differs"
     );
     println!(

@@ -200,3 +200,13 @@ the test client's settings readback. The assertion now compares directly with
 the saved command's exact JSON value; it does not adopt the numeric-comparison
 suggestion for a string-valued API field or weaken Clippy. Corrected source still
 requires its own complete native and installed qualification.
+
+Corrected source `11bf4e9e93a5a35033287595c8ed7a226de99a49` passed full
+Rust, Security and the other seven workflows but failed Deployment `42979196044`,
+systemd job `130386916557`. Actual TLS/native guest, nonce, operator-denial and
+Origin checks reached the operator overview; the fixture incorrectly expected
+its member count to be zero after reset. The operator API intentionally includes
+retained inactive/banned members, unlike the public active roster. The check now
+requires the exact one retained inactive, unbanned, zero-score/lifetime guest and
+unchanged member records after settings mutation. It does not delete retained
+history or change the API. This correction still requires installed acceptance.

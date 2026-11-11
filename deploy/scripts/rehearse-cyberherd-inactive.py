@@ -522,15 +522,24 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
         assert ready_commands == {'ready_commands_accepted': True, 'activation_and_score_applied': True,
             'stale_revision_refused': True, 'explicit_unban_required': True,
             'manual_score_lifetime_zero': True, 'member_percent_zero': True}
+        from decimal import Decimal, ROUND_DOWN
+        ready_state = json.loads((client_state / 'ready.json').read_text())
+        minimum = int(json.loads((client_state / 'state.json').read_text())['minimum'])
+        # Public points normalize the exact 210 weight units by the minimum,
+        # truncating only display precision to six places; they are not raw units.
+        expected_points = format((Decimal(210) / Decimal(max(1, minimum))).quantize(
+            Decimal('0.000001'), rounding=ROUND_DOWN).normalize(), 'f')
         def score_is_visible():
             roster = w.http_json('http://127.0.0.1:3340/api/v1/cyberherd')['roster']
             return (roster['total_members'] == 1 and len(roster['members']) == 1
+                    and roster['revision'] == ready_state['revision'] and roster['cycle'] == ready_state['cycle']
+                    and roster['members'][0]['pubkey'] == ready_state['pubkey']
                     and roster['members'][0]['amount_sats'] == '21'
-                    and roster['members'][0]['points'] == '210'
+                    and roster['minimum_sats'] == str(minimum) and roster['members'][0]['points'] == expected_points
                     and roster['members'][0]['share_micro_percent'] == 0 and roster['member_percent'] == 0)
         w.await_ready(score_is_visible, 'actual public roster with the committed operator score')
         roster = w.http_json('http://127.0.0.1:3340/api/v1/cyberherd')['roster']
-        assert roster['members'][0]['amount_sats'] == '21' and roster['members'][0]['points'] == '210'
+        assert roster['members'][0]['amount_sats'] == '21' and roster['members'][0]['points'] == expected_points
         assert roster['members'][0]['share_micro_percent'] == 0 and roster['member_percent'] == 0
         before_ready_restart = run('/usr/bin/systemctl', 'show', 'cyberherd.service', '-p', 'MainPID', '--value').strip()
         run('/usr/bin/systemctl', 'stop', 'cyberherd.service')

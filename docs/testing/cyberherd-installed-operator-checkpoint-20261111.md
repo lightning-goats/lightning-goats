@@ -65,7 +65,8 @@ score assignment when its synthetic gateway reports ready, stale-revision refusa
 ban/refused reactivation/explicit unban, and exact 21-sat score retention across a
 real member restart. Manual scores must leave lifetime paid sats zero and the
 configured zero member allocation unchanged. The actual public roster must show
-210 points and a zero share for the synthetic member.
+points normalized from 210 weight units by the configured joining minimum, and
+a zero share for the synthetic member.
 
 After only the isolated gateway is paused again, a new score mutation must fail
 while a committed score's original receipt remains retrievable. Removal, ban,
@@ -119,8 +120,10 @@ Diagnostic source `db75a59ab59821b9d15e0d41bd003e7918cfc8c3` failed the public
 score check in Deployment `42970946315`, job `130361180081`, after completing the
 ready commands. Its native diagnostic accepted all eight core events through
 sequence 8; the member cursor was 7. The data/export was valid. The public check
-had waited only for one member, which could observe the earlier zero-score roster;
-it now waits for the actual committed 21-sat/210-point/zero-share projection.
+had waited only for one member and incorrectly expected 210 raw weight units as
+displayed points. The public API normalizes points by the joining minimum. The
+check now uses exact decimal normalization and the recorded final revision/cycle/
+member/21-sat/zero-share projection, rather than a stale member count or raw units.
 
 The bridge also rejected any admitted concurrent DB operation immediately. A
 100-ms FIFO wait now allows synchronized intake/view/operator requests to take

@@ -358,6 +358,10 @@ pub(super) async fn prepare(tx: &mut Transaction<'_, Sqlite>) -> Result<bool> {
                 sqlx::query("INSERT INTO reward_funding_lots(ledger_id,kind,original_sats,remaining_sats,proof_hash) VALUES(?,?,?,?,?)")
                     .bind(id).bind(kind).bind(delta).bind(delta).bind(proof).execute(&mut **tx).await?;
             } else if delta < 0 {
+                if super::feed_cap::consume_retirement(tx, id).await? {
+                    cursor = id;
+                    continue;
+                }
                 if id > bootstrap {
                     bail!("untracked post-activation debit; funding recovery required");
                 }

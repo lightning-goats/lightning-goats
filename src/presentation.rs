@@ -171,6 +171,14 @@ impl MessageRenderer {
         payload: &serde_json::Map<String, Value>,
         threshold_sats: u64,
     ) -> Result<RenderedPresentation> {
+        if payload.get("announce_feeding").and_then(Value::as_bool) == Some(false) {
+            return Ok(RenderedPresentation {
+                nostr_content: None,
+                overlay_type: None,
+                overlay_message: None,
+                overlay_goats: vec![],
+            });
+        }
         if payload.get("presentation_owner").is_some() {
             return Ok(RenderedPresentation {
                 nostr_content: None,

@@ -3,7 +3,7 @@ name: WireGuard peer authentication
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, fix/feeder-payment-cap-20261111]
 
 permissions:
   contents: read

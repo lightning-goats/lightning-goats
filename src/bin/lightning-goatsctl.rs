@@ -91,6 +91,19 @@ enum Command {
         #[arg(long)]
         apply: bool,
     },
+    /// Preview/apply an exact, audited credit retirement during stopped-writer maintenance.
+    RetireFeedCredit {
+        #[arg(long)]
+        id: String,
+        #[arg(long)]
+        credit_entry_id: i64,
+        #[arg(long)]
+        expected_sats: u64,
+        #[arg(long, required = true)]
+        writers_stopped: bool,
+        #[arg(long)]
+        apply: bool,
+    },
     /// Print the current durable feed-credit accounting state.
     Status,
 }
@@ -127,7 +140,7 @@ async fn main() -> Result<()> {
             destination,
             writers_stopped,
         } => {
-            if !writers_stopped {
+            if !*writers_stopped {
                 bail!("explicit stopped-writer attestation required");
             }
             let operator = lightning_goats::state_maintenance::legacy::Operator::load(policy)?;
@@ -160,14 +173,45 @@ async fn main() -> Result<()> {
     #[cfg(unix)]
     if matches!(
         args.command,
-        Command::ReconcileFailedCost { .. } | Command::FailedCostTemplate { .. }
+        Command::ReconcileFailedCost { .. }
+            | Command::FailedCostTemplate { .. }
+            | Command::RetireFeedCredit { .. }
     ) {
         lightning_goats::payout::cost_recovery::require_protected_configuration(&args.config)?;
+    }
+    if let Command::RetireFeedCredit {
+        writers_stopped, ..
+    } = &args.command
+    {
+        #[cfg(unix)]
+        {
+            if !*writers_stopped || lightning_goats::core_bridge::unix::self_credentials()?.0 != 0 {
+                bail!("credit retirement requires root and explicit stopped-writer maintenance");
+            }
+            let state = std::process::Command::new("systemctl")
+                .args([
+                    "show",
+                    "lightning-goats-receive.service",
+                    "-p",
+                    "MainPID",
+                    "--value",
+                ])
+                .output()?;
+            if !state.status.success() || state.stdout != b"0\n" {
+                bail!("core must be stopped before credit retirement");
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            bail!("credit retirement requires Unix protected-file authority");
+        }
     }
     let config = AppConfig::load(&args.config)?;
     let ledger = if matches!(
         args.command,
-        Command::ReconcileFailedCost { .. } | Command::FailedCostTemplate { .. }
+        Command::ReconcileFailedCost { .. }
+            | Command::FailedCostTemplate { .. }
+            | Command::RetireFeedCredit { .. }
     ) {
         #[cfg(unix)]
         {
@@ -243,6 +287,18 @@ async fn main() -> Result<()> {
                 bail!("failed-cost recovery requires Unix");
             }
         }
+        Command::RetireFeedCredit {
+            id,
+            credit_entry_id,
+            expected_sats,
+            writers_stopped: _,
+            apply,
+        } => {
+            let result = ledger
+                .retire_existing_feed_credit(&id, credit_entry_id, expected_sats, !apply)
+                .await?;
+            println!("{}", serde_json::to_string(&result)?);
+        }
         Command::AddCredit {
             id,
             sats,
@@ -256,6 +312,11 @@ async fn main() -> Result<()> {
                 .any(|entry| entry.user == address && entry.credit_pool == "herd")
             {
                 bail!("address must be a configured herd-pool Lightning Address username");
+            }
+            if !dry_run {
+                ledger
+                    .configure_feeder_credit_cap(config.feeder.threshold_sats)
+                    .await?;
             }
             let result = ledger
                 .grant_operator_credit(

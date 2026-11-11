@@ -85,6 +85,9 @@ pub(super) async fn export_proof(
     debit: i64,
     value: &Value,
 ) -> Result<Option<Proof>> {
+    if value.get("announce_feeding").and_then(Value::as_bool) == Some(false) {
+        return Ok(None);
+    }
     let Some(owner) = value.get("presentation_owner").and_then(Value::as_str) else {
         return Ok(None);
     };

@@ -1,5 +1,7 @@
 name: Home staging filter
 on:
+  push:
+    branches: [fix/feeder-payment-cap-20261111]
   pull_request:
   workflow_dispatch:
 permissions:

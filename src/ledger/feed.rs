@@ -288,6 +288,11 @@ impl LedgerStore {
             "threshold_sats": threshold_sats,
             "feed_credit_sats": feed_credit_sats
         });
+        if let Some((credit_id, _)) = triggering_credit {
+            let first: bool = sqlx::query_scalar("SELECT NOT EXISTS(SELECT 1 FROM feeding_announcement_sources WHERE credit_ledger_id=?)")
+                .bind(credit_id).fetch_one(&mut *transaction).await?;
+            payload["announce_feeding"] = first.into();
+        }
         if let Some((credit_id, amount)) = triggering_credit {
             payload["triggering_credit_id"] = credit_id.into();
             payload["triggering_payment_amount_sats"] = amount.into();
@@ -304,6 +309,10 @@ impl LedgerStore {
         let event_seq =
             append_event_in_transaction(&mut transaction, "feeder_confirmed", &payload).await?;
 
+        if let Some((credit_id, _)) = triggering_credit {
+            sqlx::query("INSERT INTO feeding_announcement_sources(credit_ledger_id,first_event_seq) VALUES(?,?) ON CONFLICT(credit_ledger_id) DO NOTHING")
+                .bind(credit_id).bind(to_i64(event_seq,"first feeding announcement")?).execute(&mut *transaction).await?;
+        }
         sqlx::query("INSERT INTO feed_event_sources(feed_attempt_id,event_seq) VALUES(?,?)")
             .bind(id.to_string())
             .bind(to_i64(event_seq, "feed event sequence")?)

@@ -39,6 +39,11 @@ Operator instructions take precedence where the reference differs:
   with a 2-sat fee delivers 98 sats and consumes 100 sats. Skip an unaffordable
   share; unused allocation remains with operations. These settings do not
   authorize live payouts. The inclusive-fee integration remains unfinished.
+- **Operator correction, 2026-11-11:** at most three physical feedings per payment,
+  then clear the capped batch's excess feeder credit through an auditable
+  non-feeding retirement. One feeding announcement per payment, across all
+  confirmations/retries. Preserve the full receipt, actual confirmed feeds and
+  other donors' credit. See [the repair contract](../deployment/per-payment-feeder-cap.md).
 - Preserve the existing 10-sat payment-announcement floor; smaller legitimate
   settled zaps can update an active member's score without a payment announcement.
   Social notifications are separate from payment announcements.

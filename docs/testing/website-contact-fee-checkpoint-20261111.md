@@ -1,7 +1,10 @@
 # Separate contact fee — implementation checkpoint, 2026-11-11
 
-**Source work, not deployed or enabled.** The active core still uses schema 23;
-the active website remains the independently verified `9abcd88` static release.
+**Native backend/schema installed; contact remains disabled.** The
+[actual schema upgrade](private-contact-schema-live-20261111.md) preserves paid
+state and resumes the existing services on schema 24. The active website remains
+the independently verified `9abcd88` static release; contact configuration,
+nginx ingress and the browser form remain uninstalled.
 The earlier free-contact source `ae9ec9f` passes all ten workflows, including
 [Deployment](https://github.com/lightning-goats/lightning-goats/actions/runs/42926781822),
 [CI](https://github.com/lightning-goats/lightning-goats/actions/runs/42926781694)
@@ -222,8 +225,12 @@ permits only the added contact table and preserves every existing payment/feeder
 value. Both are subsequent source work pending exact qualification; the actual
 VPS still uses the earlier unchanged preparation-only generation.
 
-Still required: qualification of the UID-help/config-only additions; fresh
-protected artifacts and an actual execution plan; current backup and deployment;
-controlled provider/paid-contact acceptance and recipient-side DM observation.
-The old legacy-core upgrade helper is not this upgrade path. No production
-configuration, daemon, schema, credential, nginx contact route or journal changed.
+The UID-help/config-only additions subsequently pass all ten workflows on
+`9a7c0931d2ebb22b0458679c4aeb5a0c92d9e8dc`. Fresh protected artifacts, execution
+plan, current native backup, actual schema upgrade and separate resumption now
+pass on the VPS; see the [live checkpoint](private-contact-schema-live-20261111.md).
+Still required: contact configuration/edge/static activation, controlled
+provider/paid-contact acceptance and recipient-side DM observation. The old
+legacy-core upgrade helper is not this upgrade path. Credentials and existing
+configuration/nginx/static files remain unchanged; native code/schema change with
+all retained paid state preserved.

@@ -1,7 +1,8 @@
 # Private contact upgrade preparation
 
-The live core still uses schema 23. Contact source adds schema 24 and remains
-disabled. This preparation does not authorize or perform a migration, service
+The [actual upgrade checkpoint](../testing/private-contact-schema-live-20261111.md)
+now records the live core on schema 24 with paid state preserved. Contact remains
+disabled. Preparation alone does not authorize or perform a migration, service
 interruption, private-message delivery, payment, feeding or public publication.
 
 Use only independently source-verified build artifacts and a separately
@@ -39,9 +40,11 @@ changed baselines and incomplete output refuse. It provides no apply/resume
 command. Do not execute its generic file transaction as a substitute for the
 still-unqualified maintenance coordinator.
 
-## Maintenance executor candidate — not qualified or installed
+## Verified schema maintenance
 
-The source candidate selects `--contact-upgrade-maintenance`. Its operations are:
+The qualified nineteen-file tool generation selects `--contact-upgrade-maintenance`.
+Its installed rehearsal and actual VPS execution are recorded above; older
+eighteen-file preparations remain unchanged. Its operations are:
 
 - `plan REVIEW EXECUTION --review-sha256 INDEPENDENT_PREPARED_SHA256` freezes a
   separate three-program transaction without opening journals or changing services.
@@ -69,8 +72,9 @@ Pure tests and disposable protected-file fixtures exercise command admission,
 private native receipts, mixed old/new program replacement states, backup and
 clone rejection, changed financial state before restart and ambiguous live
 migration. Native operations, kernel UID execution and systemd are mocked in
-those Python fixtures. Exact root CI and a separate installed native/systemd
-schema-23-to-24 rehearsal remain required before this candidate is used on a host.
+those Python fixtures. Qualification also requires the separate installed
+native/systemd schema-23-to-24 rehearsal. Both root and installed qualification
+passed before the actual VPS execution recorded in the live checkpoint.
 
 The installed rehearsal uses only a guarded disposable CI VM, synthetic paid
 state/credentials, an isolated network and a gateway mock that refuses POSTs.

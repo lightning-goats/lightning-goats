@@ -12,8 +12,10 @@ The approved current rollout now serves the [live leaderboard](testing/cyberherd
 with operator controls, CyberHerd Nostr and payouts still disabled.
 [Nostr self-status sign-in](testing/cyberherd-self-read-public-live-20261111.md)
 is now public on the leaderboard. [Operator controls](architecture/cyberherd-operator-interface.md)
-remain closed with an empty allowlist; no financial or physical activation follows
-from self-status access.
+now authorize the existing project messaging identity. The operator-requested
+[three-user capacity](testing/cyberherd-three-user-capacity-live-20261111.md)
+is verified through the signed API and public leaderboard. No financial or
+physical activation follows from operator authentication or self-status access.
 
 [Actual host network checks](testing/cyberherd-host-network-checkpoint-20261111.md)
 now verify kernel filters, the separate receive/CyberHerd private-network policies

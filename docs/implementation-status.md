@@ -8,8 +8,10 @@ Monero or authorize financial/physical activation.
 The operator selected **3 user spots** and reuse of the existing messaging
 identity for operator authentication. The [configuration and signed-settings
 adapter](deployment/cyberherd-project-operator.md) preserves the current reward
-percentage and uses the household bunker. Source preparation is separate from
-the actual signed command and public capacity readback.
+percentage and uses the household bunker. The [live signed command and public
+capacity readback](testing/cyberherd-three-user-capacity-live-20261111.md) now pass:
+capacity 3, zero active members and unchanged 10% allocation. Only membership was
+restarted; core payments/feeding and outgoing roles retained their original state.
 
 The existing receive service is running after the operator-approved
 [live core upgrade](testing/cyberherd-live-core-upgrade-20261110.md), preserving

@@ -77,7 +77,7 @@ including [CI](https://github.com/lightning-goats/lightning-goats/actions/runs/4
 and [Security](https://github.com/lightning-goats/lightning-goats/actions/runs/42931655873).
 The source flag stays false.
 
-The next source change adds an enabled real-HTTP fixture through native invoice
+The native source adds an enabled real-HTTP fixture through native invoice
 validation and authoritative mock settlement, private-state correlation in ordinary
 native four-journal verification, and a separate `compare-contact-upgrade` command.
 The comparison accepts only the exact compiled schema-23 prefix and separate
@@ -87,8 +87,7 @@ the exact compiled private DDL and three empty tables. It does not migrate,
 restore, clear recovery state or authorize resumption. Ordinary verification and
 restore continue to require the current schema. Synthetic tests exercise paid
 state, pending feeds and signed outboxes plus altered rows, extra triggers,
-unknown checksums and prepopulated private tables. This new change still needs
-exact native CI qualification; local formatting alone is not acceptance.
+unknown checksums and prepopulated private tables.
 
 The follow-up adds a required isolated root fixture for the public comparison
 entry point, selected and checked for its positive marker by the existing native
@@ -98,8 +97,24 @@ refuses candidate aliases, hard links, unexpected files, incomplete markers and
 publicly readable database files. It does not qualify live unit quiescence or
 replace the still-required installed maintenance rehearsal.
 
-Still required: native qualification of these additions; a protected maintenance
-transaction and installed rehearsal; current backup and actual deployment;
+These additions pass all ten workflows on
+`46257c5e09e4a102346f588c2d1e376a60fddac7`, including
+[CI](https://github.com/lightning-goats/lightning-goats/actions/runs/42936833963),
+[Deployment](https://github.com/lightning-goats/lightning-goats/actions/runs/42936833946),
+[Security](https://github.com/lightning-goats/lightning-goats/actions/runs/42936833993)
+and [real NIP-46](https://github.com/lightning-goats/lightning-goats/actions/runs/42936834102).
+Locked native tests pass 516 regular cases. The new ignored root fixture actually
+runs separately and emits `ROOT_CONTACT_UPGRADE_FIXTURE_VERIFIED`; it is not
+counted as accepted merely because the ordinary run skips it.
+
+The subsequent [protected preparation tool](../deployment/private-contact-upgrade.md)
+freezes the current overlay-only installation and both release archives without
+opening journals or stopping services. Its new root-owned file fixture and
+actual systemd preparation rehearsal still require exact CI qualification. The
+tool has no apply or resume command, and is not installed on the VPS.
+
+Still required: preparation-tool qualification; a protected maintenance executor
+and installed migration rehearsal; current backup and actual deployment;
 controlled provider/paid-contact acceptance and recipient-side DM observation.
 The old legacy-core upgrade helper is not this upgrade path. No production
 configuration, daemon, schema, credential, nginx contact route or journal changed.

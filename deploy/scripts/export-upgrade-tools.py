@@ -21,6 +21,7 @@ FILES = (
     'qualify-cyberherd-workers.py',
     'stage-cyberherd-overlay.py',
     'maintain-cyberherd-overlay.py',
+    'prepare-contact-upgrade.py',
 )
 
 

@@ -26,6 +26,7 @@ FILES = {
     'qualify-cyberherd-workers.py',
     'stage-cyberherd-overlay.py',
     'maintain-cyberherd-overlay.py',
+    'prepare-contact-upgrade.py',
 }
 
 
@@ -105,6 +106,9 @@ def main():
         arguments = arguments[1:]
     elif arguments[:1] == ['--cyberherd-overlay-maintenance']:
         operation = 'maintain-cyberherd-overlay.py'
+        arguments = arguments[1:]
+    elif arguments[:1] == ['--contact-upgrade-prepare']:
+        operation = 'prepare-contact-upgrade.py'
         arguments = arguments[1:]
     sys.argv = [str(root / operation), *arguments]
     runpy.run_path(sys.argv[0], run_name='__main__', init_globals={

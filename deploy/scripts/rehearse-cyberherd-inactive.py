@@ -102,7 +102,7 @@ def core_upgrade(launcher, root, source, runtime, archive, commit):
     return transaction / 'policy.toml', transaction / 'legacy'
 
 
-def overlay_maintenance(launcher, root, fixture_directory, installation):
+def overlay_maintenance(launcher, root, fixture_directory, installation, core_archive, review_archive, source_commit):
     """Actual executor/systemd/native backup, ONLY inside main's disposable VM.
 
     Both actual application services join this loopback-only namespace. Existing
@@ -219,6 +219,18 @@ def overlay_maintenance(launcher, root, fixture_directory, installation):
         for name in ('lightning-goats-receive.service', 'cyberherd.service'):
             pid = run('/usr/bin/systemctl', 'show', name, '-p', 'MainPID', '--value').strip()
             assert os.readlink('/proc/' + pid + '/ns/net') == os.readlink(namespace)
+        process_before = {name: run('/usr/bin/systemctl', 'show', name, '-p', 'MainPID', '--value').strip()
+                          for name in ('lightning-goats-receive.service', 'cyberherd.service')}
+        # Preparation only, using actual protected binaries/configurations and
+        # both authenticated build archives. It must preserve both live PIDs.
+        contact = json.loads(run(*launcher, '--contact-upgrade-prepare', str(core_archive), str(review_archive),
+                                 source_commit, hashlib.sha256(core_archive.read_bytes()).hexdigest(),
+                                 hashlib.sha256(review_archive.read_bytes()).hexdigest(), str(base / 'ci-contact-upgrade-prepare')))
+        assert contact == {'prepared': True, 'activation_supported': False, 'services_changed': False,
+                           'journals_opened': False, 'credentials_loaded': False, 'contact_enabled': False}
+        for name, pid in process_before.items():
+            assert run('/usr/bin/systemctl', 'show', name, '-p', 'MainPID', '--value').strip() == pid
+        assert w.http_json('http://127.0.0.1:8787/healthz')['status'] == 'ok'
         rolled = json.loads(run(*launcher, '--cyberherd-overlay-maintenance', 'rollback', str(execution), '--exclusive-maintenance'))
         assert rolled['database_restored'] is False and rolled['writers_masked'] is True
         assert config_path.read_bytes() == config_bytes and drop.read_text().endswith(str(namespace) + '\n')
@@ -236,6 +248,7 @@ def overlay_maintenance(launcher, root, fixture_directory, installation):
         assert counts['post'] == 0
         return {'accepted': True, 'actual_systemd_apply_resume_rollback': True, 'actual_native_backup_verified': True,
                 'native_core_and_membership_started': True, 'same_epoch_and_paid_pending_signed_counts': True,
+                'contact_upgrade_preparation_preserved_running_processes': True,
                 'all_application_networking_loopback_isolated': True, 'gateway_post_count': 0,
                 'synthetic_credentials_only': True, 'provider_qualified': False, 'live_host_qualified': False}
     except Exception:
@@ -400,7 +413,8 @@ def main():
         raise
     assert workers['accepted'] is True and workers['actual_installed_rust_workers'] == 4
     assert workers['production_workers_started'] is False and workers['real_credentials_loaded'] is False
-    maintenance = overlay_maintenance(launcher, root, args.fixture_directory, destination)
+    maintenance = overlay_maintenance(launcher, root, args.fixture_directory, destination,
+                                      args.core_archive, args.review, args.source)
     print(json.dumps({'synthetic': True, 'source_commit': args.source, 'native_engine': prepared['engine'],
                       'actual_nss_identities': 3, 'actual_native_initializers': 3, 'actual_masked_units': 3,
                       'synthetic_payout_ciphertext_created': True,

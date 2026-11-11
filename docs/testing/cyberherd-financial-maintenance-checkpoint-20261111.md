@@ -64,6 +64,9 @@ No failed test or signature check was waived.
 This checkpoint does not install programs, apply financial configuration or start
 outgoing roles on the live service. The earlier program-upgrade preparation is
 stale after the approved operator/three-seat change. Fresh source-pinned preparation
-and a separately approved maintenance window remain required. Explicit financial
-limits, controlled provider/recipient acceptance and external recovery adoption
-are still required before the corresponding live financial transition.
+and a separately approved maintenance window remain required. The operator has since selected the [financial settings](../planning/cyberherd-implementation-plan.md):
+10%, 100 sats per feeding and 1,000 sats per rolling day including fees,
+100 sats maximum net per payment, 100 new requests per hour, and variable Strike
+fees deducted from each member share. These inputs are complete. Inclusive-fee
+worker/configuration integration, controlled provider/recipient acceptance and
+external recovery adoption remain required before live financial activation.

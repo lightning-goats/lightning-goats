@@ -62,6 +62,8 @@ pub struct Policy {
     pub max_sats_per_feed: u64,
     pub max_sats_per_24h: u64,
     pub max_fee_sats: u64,
+    #[serde(default, skip_serializing_if = "super::inclusive_fees::Mode::is_fixed")]
+    pub fee_mode: super::inclusive_fees::Mode,
     /// Bounds both ordinary Lightning and NIP-57 independently of signing.
     #[serde(default)]
     pub max_net_sats: u64,
@@ -75,7 +77,8 @@ pub struct Policy {
 impl Policy {
     pub fn validate(&self) -> Result<()> {
         self.scope.validate()?;
-        if self.member_percent_ceiling > 100
+        if (!self.fee_mode.is_fixed() && self.max_fee_sats != 0)
+            || self.member_percent_ceiling > 100
             || self.max_sats_per_feed > i64::MAX as u64
             || self.max_sats_per_24h > i64::MAX as u64
             || self.max_fee_sats > i64::MAX as u64
@@ -141,6 +144,8 @@ impl Store {
             "payout_fee_probe_callbacks",
             "payout_fee_probe_invoices",
             "payout_fee_probe_quotes",
+            "payout_fee_promotions",
+            "payout_fee_probe_duplicates",
             "payout_quote_records",
             "payout_quote_duplicates",
             "payout_execute_intents",
@@ -355,6 +360,9 @@ fn validate_admission(plan: &Plan, q: &QualifiedFunding, policy: &Policy, now: i
         bail!("plan differs from authenticated funding/root scope");
     }
     plan.planning_policy.validate()?;
+    if plan.planning_policy.fee_mode != policy.fee_mode {
+        bail!("frozen plan and independent payout fee modes differ");
+    }
     crate::nostr_event::validate_hex(&plan.barrier_hash, 32)?;
     q.funding().validate(plan.threshold_sats)?;
     let ceiling =

@@ -41,6 +41,7 @@ pub(super) fn payout_policy(p: &Policy) -> crate::payout::store::Policy {
         max_sats_per_feed: 0,
         max_sats_per_24h: 0,
         max_fee_sats: 0,
+        fee_mode: crate::payout::inclusive_fees::Mode::FixedAllowance,
         max_net_sats: 0,
         max_source_parts: 1,
         operation_addresses: vec![],

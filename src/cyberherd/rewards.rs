@@ -35,6 +35,11 @@ pub struct PlanningPolicy {
     pub maximum_net_sats: u64,
     pub profile_max_age_seconds: u32,
     pub operation_addresses: Vec<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::payout::inclusive_fees::Mode::is_fixed"
+    )]
+    pub fee_mode: crate::payout::inclusive_fees::Mode,
 }
 
 fn zero(value: &u64) -> bool {
@@ -43,7 +48,9 @@ fn zero(value: &u64) -> bool {
 
 impl PlanningPolicy {
     pub fn validate(&self) -> Result<()> {
-        if self.fee_basis_points > 10000
+        if (self.fee_mode == crate::payout::inclusive_fees::Mode::DeductFromShare
+            && (self.fee_basis_points != 0 || self.minimum_fee_sats != 0))
+            || self.fee_basis_points > 10000
             || self.minimum_fee_sats > i64::MAX as u64
             || self.minimum_net_sats == 0
             || self.minimum_net_sats > i64::MAX as u64 / 1000
@@ -374,10 +381,14 @@ pub(super) fn build(
         row.gross_micro_percent_of_feed = u64::try_from(
             u128::from(row.gross_sats) * u128::from(FULL_PERCENT) / u128::from(plan.threshold_sats),
         )?;
-        let fee = u64::try_from(
-            (u128::from(row.gross_sats) * u128::from(policy.fee_basis_points)).div_ceil(10000),
-        )?
-        .max(policy.minimum_fee_sats);
+        let fee = if policy.fee_mode.is_fixed() {
+            u64::try_from(
+                (u128::from(row.gross_sats) * u128::from(policy.fee_basis_points)).div_ceil(10000),
+            )?
+            .max(policy.minimum_fee_sats)
+        } else {
+            0
+        };
         let net = row.gross_sats.saturating_sub(fee);
         row.skip = if row.gross_sats == 0 {
             Some(Skip::ZeroShare)
@@ -446,7 +457,7 @@ mod tests {
                     members:BTreeMap::from([(member.clone(),Member{profile:profile.clone(),active:true,amount_sats:amount,lifetime_sats:amount})]),..Roster::default()},cycle:1,cycle_start:0,revision:1}};
             let allowance=Allowance{epoch:binding.epoch,request_id:barrier.feeding.request_id,owner,funding,threshold_sats:1_000_000,
                 member_percent_ceiling:ceiling,max_sats_per_feed:cap,available_sats:i64::MAX as u64,policy_hash:"cd".repeat(32)};
-            let planning=PlanningPolicy{fee_basis_points:bps,minimum_fee_sats:min_fee,minimum_net_sats:1,maximum_net_sats:i64::MAX as u64 / 1000,profile_max_age_seconds:3600,operation_addresses:vec![]};
+            let planning=PlanningPolicy{fee_mode:crate::payout::inclusive_fees::Mode::FixedAllowance,fee_basis_points:bps,minimum_fee_sats:min_fee,minimum_net_sats:1,maximum_net_sats:i64::MAX as u64 / 1000,profile_max_age_seconds:3600,operation_addresses:vec![]};
             let read=ProfileRead{pubkey:member.clone(),head_id:Some("ef".repeat(32)),profile:Some(profile),observed_at:100};
             let recipient=Recipient::parse("member@example.com",br#"{"tag":"payRequest","callback":"https://pay.example.com/member","minSendable":1,"maxSendable":1000000000000,"metadata":"[[\"text/plain\",\"Treats\"]]"}"#).unwrap();
             let plan=build(&barrier,&binding,&planning,Some(&allowance),&[read],&BTreeMap::from([(member,Some(recipient))]),100).unwrap();

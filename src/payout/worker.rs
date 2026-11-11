@@ -3,7 +3,7 @@
 use super::{
     invoice::{Intent, Request, ValidatedInvoice},
     outcome::{Progress, UnsubmittedReason},
-    provider::{Client as Sender, QuoteReply},
+    provider::{Client as Sender, FeeProbeReply, QuoteReply},
     signer::Client as Signer,
     store::{PayoutStatus, Store},
 };
@@ -11,7 +11,7 @@ use crate::{
     core_bridge::{AuthenticatedFundingPage, unix::Client as Core},
     cyberherd::calendar,
 };
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Step {
@@ -21,6 +21,7 @@ pub enum Step {
     InvoiceSigned,
     InvoiceSaved,
     QuoteSaved,
+    FeeObserved,
     QuoteRetired,
     Submitted,
     Observed,
@@ -67,6 +68,13 @@ impl Worker {
         let intent = match self.store.saved_invoice_intent(work.grant, &member).await? {
             Some(intent) => intent,
             None => {
+                let mode = self.store.grant_fee_mode(work.grant).await?;
+                if mode != self.store.policy().fee_mode {
+                    return Ok(Step::Waiting);
+                }
+                if !mode.is_fixed() {
+                    return self.discover_fee(work.grant, &member, fetcher).await;
+                }
                 let nostr = self.store.row_uses_nostr(work.grant, &member).await?;
                 if self.permission(work.grant, &member, nostr).await?.is_none() {
                     return Ok(Step::Waiting);
@@ -111,7 +119,9 @@ impl Worker {
         }
         // Reconciliation above remains available after a limit reduction. New
         // callbacks, quotes, signatures and original-quote execution stay held.
-        if intent.0.net_sats > self.store.policy().max_net_sats {
+        if intent.0.net_sats > self.store.policy().max_net_sats
+            || self.store.grant_fee_mode(work.grant).await? != self.store.policy().fee_mode
+        {
             return Ok(Step::Waiting);
         }
         let Some(fresh) = self
@@ -157,6 +167,17 @@ impl Worker {
         };
         if let Some(terms) = self.store.quote_terms(quote.id()).await? {
             if calendar::now()? >= terms.usable_until {
+                if !self.store.policy().fee_mode.is_fixed() {
+                    self.store
+                        .close_unsubmitted(
+                            work.grant,
+                            &member,
+                            UnsubmittedReason::Expired,
+                            calendar::now()?,
+                        )
+                        .await?;
+                    return Ok(Step::Closed);
+                }
                 self.store
                     .retire_quote(quote.id(), calendar::now()?)
                     .await?;
@@ -183,6 +204,168 @@ impl Worker {
             }
         }
     }
+    async fn discover_fee<F: InvoiceFetcher>(
+        &self,
+        grant: uuid::Uuid,
+        member: &str,
+        fetcher: &F,
+    ) -> Result<Step> {
+        let nostr = self.store.row_uses_nostr(grant, member).await?;
+        let Some(fresh) = self.permission(grant, member, nostr).await? else {
+            return Ok(Step::Waiting);
+        };
+        if fresh.claim().is_some() {
+            bail!("execution history is missing its original promoted invoice");
+        }
+        let Some((round, intent)) = self.store.latest_fee_probe(grant, member).await? else {
+            let joining = if let Some(presentation) = &self.presentation {
+                let row = self
+                    .store
+                    .grant(grant)
+                    .await?
+                    .context("fee work lost grant")?;
+                presentation
+                    .joining(row.request_id, member)
+                    .await
+                    .unwrap_or(None)
+            } else {
+                None
+            };
+            self.store
+                .prepare_fee_probe(grant, member, 0, calendar::now()?, joining.as_ref())
+                .await?;
+            return Ok(Step::InvoiceIntent);
+        };
+        let now = calendar::now()?;
+        if intent.0.net_sats > self.store.policy().max_net_sats {
+            return Ok(Step::Waiting);
+        }
+        if let Some((observed_round, observation)) =
+            self.store.saved_fee_observation(grant, member).await?
+        {
+            if observed_round == round {
+                let minimum = intent.0.recipient.min_msat.div_ceil(1000).max(
+                    self.store
+                        .grant_planning_policy(grant)
+                        .await?
+                        .minimum_net_sats,
+                );
+                // The journal independently enforces the frozen planning minimum
+                // when persisting the observation and preparing the next round.
+                match super::inclusive_fees::evaluate(
+                    observation.0.request.gross_sats,
+                    minimum,
+                    self.store.policy().max_net_sats,
+                    intent.0.net_sats,
+                    observation.fee_sats(),
+                    observation.total_sats(),
+                )
+                .map_err(anyhow::Error::msg)?
+                {
+                    super::inclusive_fees::Decision::Fits { .. } => {
+                        if now >= observation.0.usable_until {
+                            self.store
+                                .close_unsubmitted(grant, member, UnsubmittedReason::Expired, now)
+                                .await?;
+                            return Ok(Step::Closed);
+                        }
+                        self.store.promote_fee_probe(grant, member, now).await?;
+                        return Ok(Step::QuoteSaved);
+                    }
+                    super::inclusive_fees::Decision::ReduceInvoice { .. } if round < 7 => {
+                        self.store
+                            .prepare_fee_probe(
+                                grant,
+                                member,
+                                round + 1,
+                                now,
+                                intent.0.joining.as_ref(),
+                            )
+                            .await?;
+                        return Ok(Step::InvoiceIntent);
+                    }
+                    _ => {
+                        self.store
+                            .close_unsubmitted(grant, member, UnsubmittedReason::Unavailable, now)
+                            .await?;
+                        return Ok(Step::Closed);
+                    }
+                }
+            }
+            if observed_round.checked_add(1) != Some(round) {
+                bail!("fee discovery round lost its predecessor");
+            }
+        }
+        let invoice = self.store.saved_fee_probe_invoice(intent.id()).await?;
+        if invoice
+            .as_ref()
+            .is_some_and(|i| u64::try_from(now).is_ok_and(|n| n >= i.expires_at()))
+            || (invoice.is_none() && now.saturating_sub(intent.0.created_at) > 3600)
+        {
+            self.store
+                .close_unsubmitted(grant, member, UnsubmittedReason::Expired, now)
+                .await?;
+            return Ok(Step::Closed);
+        }
+        if invoice.is_none() {
+            let Some(callback) = self.store.fee_probe_callback(intent.id()).await? else {
+                let raw = if intent.uses_nostr() {
+                    Some(self.signer.sign(&intent).await?)
+                } else {
+                    None
+                };
+                self.store
+                    .freeze_fee_probe_request(intent.id(), raw.as_deref(), calendar::now()?)
+                    .await?;
+                return Ok(Step::InvoiceSigned);
+            };
+            let invoice = fetcher.fetch(&callback).await?;
+            self.store
+                .freeze_fee_probe_invoice(&invoice, calendar::now()?)
+                .await?;
+            return Ok(Step::InvoiceSaved);
+        }
+        let quote = self
+            .store
+            .prepare_fee_probe_quote(intent.id(), calendar::now()?)
+            .await?;
+        if calendar::now()?
+            >= quote
+                .0
+                .created_at
+                .saturating_add(super::provider::QUOTE_LIFETIME)
+        {
+            self.store
+                .close_unsubmitted(grant, member, UnsubmittedReason::Expired, calendar::now()?)
+                .await?;
+            return Ok(Step::Closed);
+        }
+        match self.sender.probe_fee(&quote).await? {
+            FeeProbeReply::Observed(observation) => {
+                self.store
+                    .record_fee_observation(&observation, round, calendar::now()?)
+                    .await?;
+                Ok(Step::FeeObserved)
+            }
+            FeeProbeReply::Duplicate(duplicate) => {
+                // An id-only duplicate provides no fee evidence. No execute was
+                // submitted: retain its identity and release this unused share.
+                self.store
+                    .record_fee_probe_duplicate(&duplicate, calendar::now()?)
+                    .await?;
+                self.store
+                    .close_unsubmitted(
+                        grant,
+                        member,
+                        UnsubmittedReason::Unavailable,
+                        calendar::now()?,
+                    )
+                    .await?;
+                Ok(Step::Closed)
+            }
+        }
+    }
+
     async fn permission(
         &self,
         grant: uuid::Uuid,

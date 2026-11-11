@@ -3,6 +3,21 @@
 //! must durably retire an unexecuted quote before requesting a reduced invoice,
 //! verify its exact signature/amount/hash, and preserve ambiguous submissions.
 
+/// Legacy plans retain their serialized representation. New plans explicitly
+/// opt into provider-fee deduction; changing policy never rewrites an old plan.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Mode {
+    #[default]
+    FixedAllowance,
+    DeductFromShare,
+}
+impl Mode {
+    pub fn is_fixed(&self) -> bool {
+        *self == Self::FixedAllowance
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum Decision {
     /// The caller still needs the durable reservation and execution checks.

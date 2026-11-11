@@ -129,7 +129,10 @@ async fn feeding_freezes_original_member_conversations_and_editable_zap_wording_
 }
 
 async fn plan(f: &Fixture) -> StoredPlan {
-    let frozen = f.freeze(&policy()).await.unwrap();
+    plan_using(f, &policy()).await
+}
+async fn plan_using(f: &Fixture, policy: &PlanningPolicy) -> StoredPlan {
+    let frozen = f.freeze(policy).await.unwrap();
     let reservation = f
         .core
         .reserve_reward(
@@ -374,4 +377,45 @@ async fn result_worker_waits_without_inventing_delivery_then_saves_real_authenti
         worker.tick().await.unwrap(),
         crate::cyberherd::result_worker::Step::Idle
     );
+}
+
+#[tokio::test]
+async fn inclusive_verified_results_retain_actual_net_fee_and_frozen_minimum() {
+    let f = Fixture::new(0).await;
+    let mut policy = policy();
+    policy.fee_mode = crate::payout::inclusive_fees::Mode::DeductFromShare;
+    policy.minimum_fee_sats = 0;
+    policy.minimum_net_sats = 2;
+    let frozen = plan_using(&f, &policy).await;
+    let mut actual = page(&frozen);
+    let gross = actual.rows[0].gross_sats;
+    assert!(gross > 2);
+    let mut invalid = actual.clone();
+    invalid.rows[0].result = Status::Completed {
+        net_sats: 1,
+        fee_sats: 1,
+    };
+    assert!(
+        f.store
+            .record_reward_results(&authenticated_result(invalid).await)
+            .await
+            .is_err()
+    );
+    actual.rows[0].result = Status::Completed {
+        net_sats: gross - 1,
+        fee_sats: 1,
+    };
+    f.store
+        .record_reward_results(&authenticated_result(actual.clone()).await)
+        .await
+        .unwrap();
+    let events = f.store.events_after(&f.owner, 0, 100).await.unwrap();
+    let event=events.iter().find(|e| e.event_type=="payout_result" &&
+        serde_json::from_str::<serde_json::Value>(&e.snapshot_json).unwrap()["result"]["member"]==actual.rows[0].member).unwrap();
+    let payload: serde_json::Value = serde_json::from_str(&event.snapshot_json).unwrap();
+    assert_eq!(
+        payload["result"],
+        serde_json::to_value(&actual.rows[0]).unwrap()
+    );
+    assert_eq!(payload["breakdown"]["net_sats"], gross);
 }

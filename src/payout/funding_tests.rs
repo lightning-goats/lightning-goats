@@ -48,7 +48,7 @@ fn sample_plan(
         barrier_hash:"11".repeat(32),cycle:1,roster_revision:1,funding_hash:Some(a.funding.proof_hash.clone()),
         real_sats:20,threshold_sats:23,member_percent:10,budget_sats:2,reserved_sats:2,operations_sats:21,
         root_policy_hash:Some(a.policy_hash.clone()),created_at:crate::cyberherd::calendar::now().unwrap(),
-        planning_policy:PlanningPolicy{fee_basis_points:0,minimum_fee_sats:1,minimum_net_sats:1,maximum_net_sats:100,profile_max_age_seconds:300,operation_addresses:vec![]},
+        planning_policy:PlanningPolicy{fee_mode: crate::payout::inclusive_fees::Mode::FixedAllowance, fee_basis_points:0,minimum_fee_sats:1,minimum_net_sats:1,maximum_net_sats:100,profile_max_age_seconds:300,operation_addresses:vec![]},
         rows:vec![Row{pubkey:key,profile_event_id:Some("55".repeat(32)),profile:Some(Profile{name:"Member".into(),picture:None,lud16:Some(address.into())}),
             amount_sats:1,awards:SocialAwards::default(),point_units:"10".into(),share_micro_percent:10_000_000,
             gross_sats:2,fee_limit_sats:1,net_sats:1,gross_micro_percent_of_feed:8_695_652,
@@ -86,6 +86,7 @@ fn journal_policy(q: &QualifiedFunding) -> crate::payout::store::Policy {
         max_sats_per_feed: 100,
         max_sats_per_24h: 1000,
         max_fee_sats: 1,
+        fee_mode: crate::payout::inclusive_fees::Mode::FixedAllowance,
         max_net_sats: 100,
         max_source_parts: 100,
         operation_addresses: vec![],
@@ -744,6 +745,9 @@ impl Fixture {
         Self::new_with_nostr(false).await
     }
     async fn new_with_nostr(nostr: bool) -> Self {
+        Self::new_with_options(nostr, false).await
+    }
+    async fn new_with_options(nostr: bool, inclusive: bool) -> Self {
         let root = TempDir::new().unwrap();
         std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o750)).unwrap();
         let database = format!("sqlite://{}", root.path().join("core.db").display());
@@ -794,6 +798,12 @@ impl Fixture {
         };
         let allowance = ledger.reward_allowance(&policy, epoch, feed).await.unwrap();
         let mut plan = sample_plan(epoch, feed, &allowance);
+        if inclusive {
+            plan.planning_policy.fee_mode = crate::payout::inclusive_fees::Mode::DeductFromShare;
+            plan.planning_policy.minimum_fee_sats = 0;
+            plan.rows[0].fee_limit_sats = 0;
+            plan.rows[0].net_sats = plan.rows[0].gross_sats;
+        }
         if nostr {
             plan.rows[0].recipient.as_mut().unwrap().receipt_pubkey =
                 Some(crate::nostr_event::test_event(3, 1, 100, "", vec![]).pubkey);
@@ -1577,5 +1587,137 @@ async fn inclusive_fee_probe_invoices_resume_exactly_and_never_enter_execution_i
             .await
             .unwrap(),
         2
+    );
+}
+
+#[tokio::test]
+async fn inclusive_promotion_is_atomic_and_never_replaces_probe_payment_identities() {
+    use crate::payout::{
+        inclusive_fees::Mode,
+        provider::{FeeObservation, FeeObservationRecord},
+        store::Store,
+    };
+    let f = Fixture::new_with_options(false, true).await;
+    let q = qualified(&f).await;
+    let mut policy = journal_policy(&q);
+    policy.fee_mode = Mode::DeductFromShare;
+    policy.max_fee_sats = 0;
+    let url = format!("sqlite://{}", f.root.path().join("promotion.db").display());
+    let store = Store::connect(&url, policy.clone()).await.unwrap();
+    let grant = store
+        .admit(&f.plan, &q, f.reservation.created_at + 10)
+        .await
+        .unwrap();
+    let member = &f.plan.rows[0].pubkey;
+    let now = grant.admitted_at;
+    assert!(store.prepare_invoice(grant.id, member, now).await.is_err());
+    let intent = store
+        .prepare_fee_probe(grant.id, member, 0, now, None)
+        .await
+        .unwrap();
+    let request = store
+        .freeze_fee_probe_request(intent.id(), None, now)
+        .await
+        .unwrap();
+    let encoded = crate::test_invoices::invoice_at(
+        2000,
+        request.description_hash(),
+        std::time::Duration::from_secs(now.try_into().unwrap()),
+    );
+    let invoice = request.validate_invoice(&encoded, now).unwrap();
+    store.freeze_fee_probe_invoice(&invoice, now).await.unwrap();
+    let original = store
+        .prepare_fee_probe_quote(intent.id(), now)
+        .await
+        .unwrap();
+    let observation = FeeObservation(FeeObservationRecord {
+        request: original.0.clone(),
+        quote_id: Uuid::new_v4(),
+        fee_sats: 0,
+        total_sats: 2,
+        provider_valid_until: None,
+        usable_until: now + 30,
+        observed_at: now,
+    });
+    store
+        .record_fee_observation(&observation, 0, now)
+        .await
+        .unwrap();
+    let db = sqlx::SqlitePool::connect(&url).await.unwrap();
+    sqlx::query("CREATE TRIGGER fail_promotion BEFORE INSERT ON payout_quote_records BEGIN SELECT RAISE(ABORT,'synthetic interrupted promotion'); END")
+        .execute(&db).await.unwrap();
+    assert!(
+        store
+            .promote_fee_probe(grant.id, member, now)
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .saved_invoice_intent(grant.id, member)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(store.held_sats().await.unwrap(), 2);
+    sqlx::query("DROP TRIGGER fail_promotion")
+        .execute(&db)
+        .await
+        .unwrap();
+    let promoted = store
+        .promote_fee_probe(grant.id, member, now)
+        .await
+        .unwrap();
+    assert_eq!(promoted.id(), original.id());
+    assert_eq!(promoted.invoice_id(), intent.id());
+    assert_eq!(
+        store
+            .promote_fee_probe(grant.id, member, now)
+            .await
+            .unwrap()
+            .id(),
+        original.id()
+    );
+    let reopened = Store::connect(&url, policy.clone()).await.unwrap();
+    assert_eq!(
+        reopened
+            .promote_fee_probe(grant.id, member, now)
+            .await
+            .unwrap()
+            .id(),
+        original.id()
+    );
+    assert_eq!(
+        reopened.saved_invoice(intent.id()).await.unwrap().unwrap(),
+        invoice
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM payout_quote_records")
+            .fetch_one(&db)
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM payout_fee_promotions")
+            .fetch_one(&db)
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM payout_execute_intents")
+            .fetch_one(&db)
+            .await
+            .unwrap(),
+        0
+    );
+    policy.fee_mode = Mode::FixedAllowance;
+    let fixed = Store::connect(&url, policy).await.unwrap();
+    assert!(
+        fixed
+            .promote_fee_probe(grant.id, member, now)
+            .await
+            .is_err()
     );
 }

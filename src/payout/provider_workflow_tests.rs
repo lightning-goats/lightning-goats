@@ -22,6 +22,7 @@ fn now() -> i64 {
 }
 struct Mock {
     invoice: String,
+    adaptive_fee: bool,
     quotes: BTreeMap<Uuid, Uuid>,
     payments: BTreeMap<Uuid, Uuid>,
     post_keys: Vec<Uuid>,
@@ -38,6 +39,7 @@ impl Mock {
     fn new(invoice: String) -> Self {
         Self {
             invoice,
+            adaptive_fee: false,
             quotes: BTreeMap::new(),
             payments: BTreeMap::new(),
             post_keys: vec![],
@@ -101,6 +103,13 @@ async fn quote_http(
     let mut value = payment(id, PaymentState::Pending);
     value.as_object_mut().unwrap().remove("paymentId");
     value["paymentQuoteId"] = json!(id);
+    if s.adaptive_fee {
+        let invoice: lightning_invoice::Bolt11Invoice = s.invoice.parse().unwrap();
+        let net = invoice.amount_milli_satoshis().unwrap() / 1000;
+        value["amount"] = json!({"amount":format!("0.{net:08}"),"currency":"BTC"});
+        value["totalAmount"] = json!({"amount":format!("0.{:08}", net+1),"currency":"BTC"});
+        value["totalFee"] = json!({"amount":"0.00000001","currency":"BTC"});
+    }
     if let Some(money) = &s.bad_money {
         for (key, value2) in money.as_object().unwrap() {
             value[key] = value2.clone();

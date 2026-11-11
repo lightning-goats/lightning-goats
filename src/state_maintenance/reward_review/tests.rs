@@ -223,6 +223,7 @@ impl Fixture {
             root_policy_hash: Some(allowance.policy_hash),
             created_at: barrier.feeding.confirmed_at,
             planning_policy: PlanningPolicy {
+                fee_mode: crate::payout::inclusive_fees::Mode::FixedAllowance,
                 fee_basis_points: 0,
                 minimum_fee_sats: 1,
                 minimum_net_sats: 1,

@@ -55,6 +55,7 @@ fn profile(n: u8, at: i64, address: Option<&str>) -> AuthenticatedProfile {
 }
 fn policy() -> PlanningPolicy {
     PlanningPolicy {
+        fee_mode: crate::payout::inclusive_fees::Mode::FixedAllowance,
         fee_basis_points: 0,
         minimum_fee_sats: 1,
         minimum_net_sats: 1,
@@ -875,6 +876,7 @@ async fn bounded_worker_reserves_saved_plan_before_testing_available_budget() {
 #[test]
 fn fees_round_up_without_overspending_and_zero_settings_remain_zero() {
     let p = PlanningPolicy {
+        fee_mode: crate::payout::inclusive_fees::Mode::FixedAllowance,
         fee_basis_points: 10001,
         ..policy()
     };
@@ -934,3 +936,29 @@ async fn payment_limit_skips_oversized_shares_without_reallocation_and_zero_clos
 }
 #[path = "result_tests.rs"]
 mod result_tests;
+
+#[tokio::test]
+async fn inclusive_planning_freezes_gross_shares_without_assuming_a_fixed_provider_fee() {
+    let f = Fixture::new(0).await;
+    let mut p = policy();
+    p.fee_mode = crate::payout::inclusive_fees::Mode::DeductFromShare;
+    assert!(p.validate().is_err());
+    p.minimum_fee_sats = 0;
+    p.validate().unwrap();
+    let frozen = f.freeze(&p).await.unwrap();
+    assert!(frozen.plan.rows.iter().any(|r| r.skip.is_none()));
+    for row in frozen.plan.rows.iter().filter(|r| r.skip.is_none()) {
+        assert_eq!(row.net_sats, row.gross_sats);
+        assert_eq!(row.fee_limit_sats, 0);
+    }
+    let raw = serde_json::to_string(&frozen.plan).unwrap();
+    assert!(raw.contains("\"fee_mode\":\"deduct_from_share\""));
+    let restored: Plan = serde_json::from_str(&raw).unwrap();
+    assert_eq!(restored.hash().unwrap(), frozen.hash);
+    let old = policy();
+    let raw = serde_json::to_string(&old).unwrap();
+    assert!(!raw.contains("fee_mode"));
+    let restored: PlanningPolicy = serde_json::from_str(&raw).unwrap();
+    assert!(restored.fee_mode.is_fixed());
+    assert_eq!(serde_json::to_string(&restored).unwrap(), raw);
+}

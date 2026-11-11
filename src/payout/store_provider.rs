@@ -400,6 +400,19 @@ impl Store {
             serde_json::from_value(evidence["reservation"].clone())?;
         let funding: crate::reward_funding::Funding =
             serde_json::from_value(evidence["funding"].clone())?;
+        let plan: Plan = serde_json::from_str(&row.try_get::<String, _>("plan_json")?)?;
+        if plan.planning_policy.fee_mode != self.policy.fee_mode {
+            bail!("current payout fee mode differs from frozen plan");
+        }
+        if !self.policy.fee_mode.is_fixed() {
+            let promoted: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM payout_fee_promotions WHERE grant_id=? AND member=? AND invoice_id=? AND quote_id=? AND provider_quote_id=?)")
+                .bind(reservation.id.to_string()).bind(row.try_get::<String, _>("payout_member")?)
+                .bind(quote.request.invoice_id.to_string()).bind(quote.request.id.to_string()).bind(quote.quote_id.to_string())
+                .fetch_one(&mut *tx).await?;
+            if !promoted {
+                bail!("inclusive execution lacks exact fee promotion");
+            }
+        }
         let held = super::outcomes::usage(&mut tx, now).await?;
         let ceiling = u64::try_from(
             u128::from(funding.strike_sats) * u128::from(self.policy.member_percent_ceiling) / 100,
@@ -414,7 +427,8 @@ impl Store {
             || reservation.epoch != self.policy.scope.epoch
             || reservation.owner != self.policy.scope.owner
             || quote.request.scope != self.policy.scope.provider
-            || quote.request.fee_limit_sats > self.policy.max_fee_sats
+            || (self.policy.fee_mode.is_fixed()
+                && quote.request.fee_limit_sats > self.policy.max_fee_sats)
             || quote.request.amount_sats > self.policy.max_net_sats
             || reservation.reserved_sats > ceiling
             || held > self.policy.max_sats_per_24h

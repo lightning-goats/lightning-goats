@@ -105,6 +105,29 @@ class InclusiveFeeSchemaTests(unittest.TestCase):
         with self.assertRaises(sqlite3.IntegrityError):
             self.db.execute("INSERT INTO payout_execute_intents VALUES('probe-quote','{}',100)")
 
+    def test_promotion_requires_the_final_fitting_identity_and_is_retained(self):
+        self.probe(0, 100)
+        self.observe(0, 100, 2)
+        self.probe(1, 98, "quote-0")
+        self.observe(1, 98, 2)
+        self.db.execute("INSERT INTO payout_fee_probe_callbacks VALUES('probe-1',NULL,100)")
+        self.db.execute("INSERT INTO payout_fee_probe_invoices VALUES('probe-1','hash','{}',100)")
+        self.db.execute("INSERT INTO payout_fee_probe_quotes VALUES('final-quote','probe-1','{}')")
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute("INSERT INTO payout_fee_promotions VALUES('grant','member','probe-1','final-quote','quote-1',100)")
+        self.db.execute("INSERT INTO payout_invoice_intents VALUES('probe-1','grant','member','{}')")
+        self.db.execute("INSERT INTO payout_callback_requests VALUES('probe-1','ordinary',NULL,100)")
+        self.db.execute("INSERT INTO payout_invoices VALUES('probe-1','hash','encoded','{}',100)")
+        self.db.execute("INSERT INTO payout_quote_intents VALUES('final-quote','probe-1','{}',NULL)")
+        self.db.execute("INSERT INTO payout_quote_records VALUES('final-quote','quote-1','{}')")
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute("INSERT INTO payout_fee_promotions VALUES('grant','member','probe-1','final-quote','quote-0',100)")
+        self.db.execute("INSERT INTO payout_fee_promotions VALUES('grant','member','probe-1','final-quote','quote-1',100)")
+        for sql in ("UPDATE payout_fee_promotions SET provider_quote_id='quote-0'",
+                    "DELETE FROM payout_fee_promotions"):
+            with self.assertRaises(sqlite3.IntegrityError):
+                self.db.execute(sql)
+
     def test_backup_preserves_discovery_identity_and_constraints(self):
         self.probe(0, 100)
         self.observe(0, 100, 2)

@@ -166,6 +166,9 @@ impl Request {
     pub fn intent_id(&self) -> Uuid {
         self.intent.id()
     }
+    pub fn amount_sats(&self) -> u64 {
+        self.intent.0.net_sats
+    }
     pub fn raw_zap(&self) -> Option<&str> {
         self.raw_zap.as_deref()
     }

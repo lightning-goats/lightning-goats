@@ -45,6 +45,9 @@ impl Store {
         }
         let plan: crate::cyberherd::rewards::Plan =
             serde_json::from_str(&row.try_get::<String, _>("plan_json")?)?;
+        if !plan.planning_policy.fee_mode.is_fixed() || !self.policy.fee_mode.is_fixed() {
+            bail!("inclusive payouts require their separate probe and promotion path");
+        }
         let planned = plan
             .rows
             .iter()

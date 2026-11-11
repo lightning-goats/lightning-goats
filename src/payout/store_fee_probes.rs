@@ -373,3 +373,253 @@ pub(super) async fn load_quote(
     }
     Ok(doc)
 }
+
+impl Store {
+    pub async fn grant_planning_policy(
+        &self,
+        grant: Uuid,
+    ) -> Result<crate::cyberherd::rewards::PlanningPolicy> {
+        let raw: String = sqlx::query_scalar("SELECT plan_json FROM payout_grants WHERE id=?")
+            .bind(grant.to_string())
+            .fetch_one(&self.pool)
+            .await?;
+        let plan: Plan = serde_json::from_str(&raw)?;
+        plan.planning_policy.validate()?;
+        Ok(plan.planning_policy)
+    }
+    pub async fn grant_fee_mode(&self, grant: Uuid) -> Result<crate::payout::inclusive_fees::Mode> {
+        Ok(self.grant_planning_policy(grant).await?.fee_mode)
+    }
+    pub async fn latest_fee_probe(
+        &self,
+        grant: Uuid,
+        member: &str,
+    ) -> Result<Option<(u8, Intent)>> {
+        let mut tx = self.pool.begin().await?;
+        let row: Option<(String,i64)> = sqlx::query_as("SELECT id,round FROM payout_fee_probe_intents WHERE grant_id=? AND member=? ORDER BY round DESC LIMIT 1")
+            .bind(grant.to_string()).bind(member).fetch_optional(&mut *tx).await?;
+        let result = match row {
+            Some((id, round)) => Some((
+                round.try_into()?,
+                load_intent(&mut tx, id.parse()?, &self.policy.scope.owner).await?,
+            )),
+            None => None,
+        };
+        tx.commit().await?;
+        Ok(result)
+    }
+    pub async fn fee_probe_callback(&self, id: Uuid) -> Result<Option<Request>> {
+        let exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM payout_fee_probe_callbacks WHERE intent_id=?)",
+        )
+        .bind(id.to_string())
+        .fetch_one(&self.pool)
+        .await?;
+        if exists {
+            Ok(Some(self.fee_probe_request(id).await?))
+        } else {
+            Ok(None)
+        }
+    }
+    pub async fn saved_fee_probe_invoice(&self, id: Uuid) -> Result<Option<ValidatedInvoice>> {
+        let mut tx = self.pool.begin().await?;
+        let invoice = load_invoice(&mut tx, id, &self.policy.scope.owner).await?;
+        tx.commit().await?;
+        Ok(invoice)
+    }
+
+    /// Copy the exact final probe into the existing single execution chain in
+    /// one transaction. This creates no provider request or payment authority.
+    pub async fn promote_fee_probe(
+        &self,
+        grant: Uuid,
+        member: &str,
+        now: i64,
+    ) -> Result<QuoteIntent> {
+        if self.policy.fee_mode.is_fixed() {
+            bail!("inclusive fee promotion is not selected");
+        }
+        let mut tx = self.pool.begin().await?;
+        write_lock(&mut tx).await?;
+        super::outcomes::ensure_open(&mut tx, grant, member).await?;
+        let row = sqlx::query("SELECT o.*,g.plan_json FROM payout_fee_observations o JOIN payout_grants g ON g.id=o.grant_id WHERE o.grant_id=? AND o.member=? ORDER BY o.round DESC LIMIT 1")
+            .bind(grant.to_string()).bind(member).fetch_one(&mut *tx).await?;
+        let observation =
+            restore_fee_observation(row.try_get::<String, _>("document_json")?.as_bytes())?;
+        let doc = load_quote(&mut tx, observation.0.request.id, &self.policy.scope.owner).await?;
+        let intent = load_intent(&mut tx, doc.invoice_id, &self.policy.scope.owner).await?;
+        let plan: Plan = serde_json::from_str(&row.try_get::<String, _>("plan_json")?)?;
+        plan.planning_policy.validate()?;
+        let probe_round: i64 =
+            sqlx::query_scalar("SELECT round FROM payout_fee_probe_intents WHERE id=?")
+                .bind(intent.id().to_string())
+                .fetch_one(&mut *tx)
+                .await?;
+        let planned = plan
+            .rows
+            .iter()
+            .find(|r| r.pubkey == member)
+            .context("promotion lost frozen member")?;
+        let recipient = planned
+            .recipient
+            .as_ref()
+            .context("promotion lost recipient")?;
+        if plan.planning_policy.fee_mode != self.policy.fee_mode
+            || intent.grant_id() != grant
+            || intent.member() != member
+            || doc != observation.0.request
+            || doc.scope != self.policy.scope.provider
+            || probe_round != row.try_get::<i64, _>("round")?
+            || observation.0.quote_id.to_string()
+                != row.try_get::<String, _>("provider_quote_id")?
+            || doc.gross_sats != planned.gross_sats
+            || doc.amount_sats != intent.0.net_sats
+            || doc.gross_sats != u64::try_from(row.try_get::<i64, _>("gross_sats")?)?
+            || doc.amount_sats != u64::try_from(row.try_get::<i64, _>("invoice_net_sats")?)?
+            || observation.0.fee_sats != u64::try_from(row.try_get::<i64, _>("fee_sats")?)?
+            || observation.0.total_sats != u64::try_from(row.try_get::<i64, _>("total_sats")?)?
+            || observation.0.observed_at != row.try_get::<i64, _>("observed_at")?
+        {
+            bail!("fee promotion differs from original plan and discovery evidence");
+        }
+        let decision = crate::payout::inclusive_fees::evaluate(
+            doc.gross_sats,
+            recipient
+                .min_msat
+                .div_ceil(1000)
+                .max(plan.planning_policy.minimum_net_sats),
+            self.policy.max_net_sats,
+            doc.amount_sats,
+            observation.0.fee_sats,
+            observation.0.total_sats,
+        )
+        .map_err(anyhow::Error::msg)?;
+        if !matches!(
+            decision,
+            crate::payout::inclusive_fees::Decision::Fits { .. }
+        ) {
+            bail!("oversized/unaffordable fee probe cannot be promoted");
+        }
+        let quote = observation.executable_quote()?;
+        if let Some(old) =
+            sqlx::query("SELECT * FROM payout_fee_promotions WHERE grant_id=? AND member=?")
+                .bind(grant.to_string())
+                .bind(member)
+                .fetch_optional(&mut *tx)
+                .await?
+        {
+            if old.try_get::<String, _>("invoice_id")? != intent.id().to_string()
+                || old.try_get::<String, _>("quote_id")? != doc.id.to_string()
+                || old.try_get::<String, _>("provider_quote_id")? != quote.quote_id().to_string()
+            {
+                bail!("fee promotion retry changed identities");
+            }
+            tx.commit().await?;
+            return Ok(QuoteIntent(doc));
+        }
+        if now < observation.0.observed_at
+            || now >= observation.0.usable_until
+            || doc.gross_sats > self.policy.max_sats_per_feed
+        {
+            bail!("fee promotion expired or exceeds current budget");
+        }
+        let invoice = load_invoice(&mut tx, intent.id(), &self.policy.scope.owner)
+            .await?
+            .context("promotion lost invoice")?;
+        let callback = sqlx::query(
+            "SELECT raw_zap,created_at FROM payout_fee_probe_callbacks WHERE intent_id=?",
+        )
+        .bind(intent.id().to_string())
+        .fetch_one(&mut *tx)
+        .await?;
+        let raw_zap: Option<String> = callback.try_get("raw_zap")?;
+        let validated_at: i64 = sqlx::query_scalar(
+            "SELECT validated_at FROM payout_fee_probe_invoices WHERE intent_id=?",
+        )
+        .bind(intent.id().to_string())
+        .fetch_one(&mut *tx)
+        .await?;
+        touch_clock(&mut tx, now).await?;
+        sqlx::query(
+            "INSERT INTO payout_invoice_intents(id,grant_id,member,document_json) VALUES(?,?,?,?)",
+        )
+        .bind(intent.id().to_string())
+        .bind(grant.to_string())
+        .bind(member)
+        .bind(serde_json::to_string(&intent.0)?)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query("INSERT INTO payout_callback_requests(intent_id,protocol,raw_zap,created_at) VALUES(?,?,?,?)")
+            .bind(intent.id().to_string()).bind(if raw_zap.is_some(){"nip57"}else{"ordinary"}).bind(raw_zap)
+            .bind(callback.try_get::<i64,_>("created_at")?).execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO payout_invoices(intent_id,payment_hash,encoded,document_json,validated_at) VALUES(?,?,?,?,?)")
+            .bind(intent.id().to_string()).bind(invoice.payment_hash()).bind(invoice.encoded())
+            .bind(serde_json::to_string(&invoice)?).bind(validated_at).execute(&mut *tx).await?;
+        for stage in ["intent", "callback", "invoice"] {
+            sqlx::query(
+                "INSERT INTO payout_invoice_journal(intent_id,stage,created_at) VALUES(?,?,?)",
+            )
+            .bind(intent.id().to_string())
+            .bind(stage)
+            .bind(now)
+            .execute(&mut *tx)
+            .await?;
+        }
+        sqlx::query("INSERT INTO payout_quote_intents(id,invoice_id,document_json) VALUES(?,?,?)")
+            .bind(doc.id.to_string())
+            .bind(intent.id().to_string())
+            .bind(serde_json::to_string(&doc)?)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("INSERT INTO payout_quote_records(intent_id,provider_quote_id,document_json) VALUES(?,?,?)")
+            .bind(doc.id.to_string()).bind(quote.quote_id().to_string()).bind(serde_json::to_string(&quote.0)?).execute(&mut *tx).await?;
+        for stage in ["quote_intent", "quote_frozen"] {
+            sqlx::query(
+                "INSERT INTO payout_provider_journal(intent_id,stage,created_at) VALUES(?,?,?)",
+            )
+            .bind(doc.id.to_string())
+            .bind(stage)
+            .bind(now)
+            .execute(&mut *tx)
+            .await?;
+        }
+        sqlx::query("INSERT INTO payout_fee_promotions(grant_id,member,invoice_id,quote_id,provider_quote_id,created_at) VALUES(?,?,?,?,?,?)")
+            .bind(grant.to_string()).bind(member).bind(intent.id().to_string()).bind(doc.id.to_string()).bind(quote.quote_id().to_string()).bind(now).execute(&mut *tx).await?;
+        tx.commit().await?;
+        Ok(QuoteIntent(doc))
+    }
+
+    pub async fn record_fee_probe_duplicate(
+        &self,
+        duplicate: &crate::payout::provider::DuplicateQuote,
+        now: i64,
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        write_lock(&mut tx).await?;
+        let doc = load_quote(&mut tx, duplicate.request.id, &self.policy.scope.owner).await?;
+        if doc != duplicate.request
+            || doc.scope != self.policy.scope.provider
+            || duplicate.quote_id.is_nil()
+            || now < doc.created_at
+        {
+            bail!("duplicate fee quote differs from original request");
+        }
+        let old: Option<String> = sqlx::query_scalar(
+            "SELECT provider_quote_id FROM payout_fee_probe_duplicates WHERE quote_id=?",
+        )
+        .bind(doc.id.to_string())
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some(old) = old {
+            if old != duplicate.quote_id.to_string() {
+                bail!("duplicate fee quote changed original identity");
+            }
+        } else {
+            touch_clock(&mut tx, now).await?;
+            sqlx::query("INSERT INTO payout_fee_probe_duplicates(quote_id,provider_quote_id,created_at) VALUES(?,?,?)")
+                .bind(doc.id.to_string()).bind(duplicate.quote_id.to_string()).bind(now).execute(&mut *tx).await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+}

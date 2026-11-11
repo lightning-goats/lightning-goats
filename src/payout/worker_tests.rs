@@ -231,14 +231,22 @@ async fn disabled_execution_still_recovers_known_payments_and_final_core_outcome
 }
 
 async fn unstarted(nostr: bool) -> Workflow {
-    let f = Fixture::new_with_nostr(nostr).await;
+    unstarted_with_options(nostr, false).await
+}
+async fn unstarted_with_options(nostr: bool, inclusive: bool) -> Workflow {
+    let f = Fixture::new_with_options(nostr, inclusive).await;
     let q = qualified(&f).await;
     let mut policy = journal_policy(&q);
     policy.execution_enabled = true;
+    if inclusive {
+        policy.fee_mode = crate::payout::inclusive_fees::Mode::DeductFromShare;
+        policy.max_fee_sats = 0;
+    }
     let url = format!("sqlite://{}", f.root.path().join("engine.db").display());
     let store = Store::connect(&url, policy.clone()).await.unwrap();
     store.admit(&f.plan, &q, now()).await.unwrap();
     let mock = Arc::new(Mutex::new(Mock::new(String::new())));
+    mock.lock().unwrap().adaptive_fee = inclusive;
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let origin = format!("http://{}/", listener.local_addr().unwrap());
     let app = Router::new()
@@ -345,4 +353,177 @@ async fn worker_signs_exact_nip57_callback_only_with_public_authority_and_never_
     broker.abort();
     canary_task.abort();
     active_task.abort();
+}
+
+struct FeeInvoices {
+    mock: Arc<Mutex<Mock>>,
+    calls: AtomicUsize,
+    nostr: bool,
+}
+impl InvoiceFetcher for FeeInvoices {
+    async fn fetch(
+        &self,
+        request: &crate::payout::invoice::Request,
+    ) -> anyhow::Result<crate::payout::invoice::ValidatedInvoice> {
+        let n = self.calls.fetch_add(1, Ordering::SeqCst);
+        assert_eq!(request.raw_zap().is_some(), self.nostr);
+        let encoded = crate::test_invoices::invoice_with_payment_hash(
+            request.amount_sats() * 1000,
+            request.description_hash(),
+            std::time::Duration::from_secs(now().try_into().unwrap()),
+            [u8::try_from(n + 20).unwrap(); 32],
+        );
+        self.mock.lock().unwrap().invoice = encoded.clone();
+        request.validate_invoice(&encoded, now())
+    }
+}
+
+#[tokio::test]
+async fn inclusive_worker_deducts_actual_fee_promotes_once_and_recovers_original_execution() {
+    for nostr in [false, true] {
+        let w = unstarted_with_options(nostr, true).await;
+        let (client, active) = core(&w, RuntimeMode::Active).await;
+        let mut engine = worker(&w, client, w.store.clone());
+        let count = Arc::new(AtomicUsize::new(0));
+        let broker = if nostr {
+            let (uid, gid) = self_credentials().unwrap();
+            let socket = w.f.root.path().join("inclusive-signer.sock");
+            let policy = signer::Policy {
+                owner: owner(),
+                client_pubkey: crate::nostr_event::test_event(4, 0, 100, "", vec![]).pubkey,
+                peer_uid: uid,
+                relays: w.policy.receipt_relays.clone(),
+                max_net_sats: 100,
+                max_new_per_hour: 4,
+            };
+            let journal = signer::Store::connect(
+                &format!(
+                    "sqlite://{}",
+                    w.f.root.path().join("inclusive-signer.db").display()
+                ),
+                policy,
+            )
+            .await
+            .unwrap();
+            let task = tokio::spawn(
+                signer::Server::bind(&socket, gid, uid)
+                    .await
+                    .unwrap()
+                    .run_with(
+                        journal,
+                        signer::tests::Fake {
+                            calls: Arc::clone(&count),
+                            fail: false,
+                            wrong: false,
+                        },
+                    ),
+            );
+            engine.signer = signer::Client::new(socket, uid).unwrap();
+            Some(task)
+        } else {
+            None
+        };
+        let invoices = FeeInvoices {
+            mock: Arc::clone(&w.mock),
+            calls: AtomicUsize::new(0),
+            nostr,
+        };
+        assert_eq!(tick(&engine).await, Step::InvoiceIntent);
+        assert_eq!(tick(&engine).await, Step::InvoiceSigned);
+        assert_eq!(
+            engine.tick_with(&invoices).await.unwrap(),
+            Step::InvoiceSaved
+        );
+        assert_eq!(tick(&engine).await, Step::FeeObserved);
+        assert!(w.mock.lock().unwrap().patch_ids.is_empty());
+        assert_eq!(tick(&engine).await, Step::InvoiceIntent);
+        engine.store = Store::connect(&w.url, w.policy.clone()).await.unwrap();
+        assert_eq!(tick(&engine).await, Step::InvoiceSigned);
+        assert_eq!(
+            engine.tick_with(&invoices).await.unwrap(),
+            Step::InvoiceSaved
+        );
+        assert_eq!(tick(&engine).await, Step::FeeObserved);
+        let member = &w.f.plan.rows[0].pubkey;
+        assert!(
+            engine
+                .store
+                .saved_invoice_intent(w.f.reservation.id, member)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        let (_, last) = engine
+            .store
+            .latest_fee_probe(w.f.reservation.id, member)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(last.0.net_sats, 1);
+        assert_eq!(tick(&engine).await, Step::QuoteSaved);
+        assert_eq!(
+            engine
+                .store
+                .saved_invoice_intent(w.f.reservation.id, member)
+                .await
+                .unwrap()
+                .unwrap()
+                .id(),
+            last.id()
+        );
+        let promoted = engine
+            .store
+            .promote_fee_probe(w.f.reservation.id, member, now())
+            .await
+            .unwrap();
+        let original = engine
+            .store
+            .current_quote(last.id())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(promoted.id(), original.id());
+        w.mock.lock().unwrap().lose_execute = true;
+        assert!(engine.tick().await.is_err());
+        engine.store = Store::connect(&w.url, w.policy.clone()).await.unwrap();
+        assert_eq!(tick(&engine).await, Step::Submitted);
+        w.mock.lock().unwrap().state = PaymentState::Completed;
+        assert_eq!(tick(&engine).await, Step::Observed);
+        let Step::Outcome(done) = tick(&engine).await else {
+            panic!("missing authoritative outcome")
+        };
+        assert!(done.finalized);
+        assert_eq!(done.spent_sats, 2);
+        assert_eq!(engine.store.held_sats().await.unwrap(), 0);
+        assert_eq!(tick(&engine).await, Step::Idle);
+        assert_eq!(invoices.calls.load(Ordering::SeqCst), 2);
+        assert_eq!(count.load(Ordering::SeqCst), if nostr { 2 } else { 0 });
+        {
+            let mock = w.mock.lock().unwrap();
+            assert_eq!(mock.quotes.len(), 2);
+            assert_eq!(mock.payments.len(), 1);
+            assert_eq!(mock.patch_ids.len(), 2);
+            assert_eq!(mock.patch_ids[0], mock.patch_ids[1]);
+        }
+        assert_eq!(w.f.ledger.feed_credit_sats().await.unwrap(), 0);
+        let db = sqlx::SqlitePool::connect(&w.url).await.unwrap();
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM payout_fee_promotions")
+                .fetch_one(&db)
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM payout_execute_intents")
+                .fetch_one(&db)
+                .await
+                .unwrap(),
+            1
+        );
+        active.abort();
+        if let Some(broker) = broker {
+            broker.abort();
+        }
+    }
 }

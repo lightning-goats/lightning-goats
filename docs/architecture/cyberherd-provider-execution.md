@@ -139,8 +139,29 @@ a legacy rendered message cannot be reused for a different amount. Later templat
 edits do not change a frozen request. This is presentation evidence, never payment
 authority.
 
-The worker, final-invoice promotion, accounting/result handoff and root
-configuration still require integration and verification. None
-of these source changes has been installed on the live payout journal. Payouts
-remain disabled; the existing execution protocol above still uses its legacy
-fixed allowance until the inclusive path is fully qualified.
+The source now adds the explicit `deduct_from_share` mode to frozen planning
+and the independent payout policy. Historical `fixed_allowance` is the default
+and is omitted on serialization, retaining original plan hashes. Inclusive mode
+requires zero fixed basis points/minimum fee and zero independent fixed fee cap;
+the original gross allocation and feeding/day limits still bound all spending.
+Modes must agree before new execution. Known-payment reads remain available after
+a mode or limit change.
+
+The worker freezes each round before signing/callback/provider work. A fitting
+observation is atomically promoted using the same final invoice ID, exact zap and
+BOLT11 bytes, provider request ID and provider quote ID. A separate immutable
+promotion receipt is required for inclusive execution. Interrupted promotion rolls
+back the entire execution chain. Only the existing core execution claim and
+provider protocol can subsequently authorize spending. A lost execution response
+recovers the original quote/payment identity. An expired unexecuted final quote
+closes unused rather than creating a different invoice. An id-only duplicate fee
+quote supplies no price evidence: retain its original ID and close the unused
+share without claiming a payout.
+
+Verified result intake accepts the actual reduced net plus fee only within the
+original member gross and frozen recipient/planning minima. Historical fixed
+plans retain their exact net/fee checks. The new worker, atomicity and result
+fixtures require full CI qualification. Root financial-candidate rendering and
+its independent deployment checks still require the explicit inclusive mode.
+None of these source changes has been installed on the live payout journal.
+Outgoing roles remain disabled; no partial configuration or activation is implied.

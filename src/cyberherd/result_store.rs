@@ -84,7 +84,21 @@ impl Store {
                 bail!("verified result changed frozen member allocation");
             }
             if let Status::Completed { net_sats, fee_sats } = result.result {
-                if net_sats != planned.net_sats || fee_sats > planned.fee_limit_sats {
+                let valid = if plan.plan.planning_policy.fee_mode.is_fixed() {
+                    net_sats == planned.net_sats && fee_sats <= planned.fee_limit_sats
+                } else {
+                    net_sats >= plan.plan.planning_policy.minimum_net_sats
+                        && net_sats <= planned.net_sats
+                        && net_sats
+                            .checked_add(fee_sats)
+                            .is_some_and(|total| total <= planned.gross_sats)
+                        && planned.recipient.as_ref().is_some_and(|r| {
+                            net_sats
+                                .checked_mul(1000)
+                                .is_some_and(|msat| msat >= r.min_msat && msat <= r.max_msat)
+                        })
+                };
+                if !valid {
                     bail!("verified payment changed planned amount/fee ceiling");
                 }
             }

@@ -16,6 +16,19 @@ from test_nginx import NginxAssemblyTests
 
 
 class WafAcceptance(NginxAssemblyTests):
+    CONTACT_ENABLED = True
+
+    def test_private_contact_body_and_status_are_not_logged(self):
+        sentinel = "LG_PRIVATE_CONTACT_66d8af"
+        body = json.dumps({"capability": sentinel, "reply_email": sentinel + "@example.org",
+                           "envelope": {"content": "Ag" + "a" * 180}}).encode()
+        status, _, _ = self.request("production", "/api/v1/contact", "POST", body,
+                                    {"Content-Type": "application/json", "Origin": "https://lightning-goats.com"})
+        self.assertEqual(status, 200)
+        self.assertEqual(self.backends["production"].bodies[-1], body)
+        for file in self.root.rglob("*.log"):
+            self.assertNotIn(sentinel, file.read_text(errors="replace"), str(file))
+
     def test_exact_signed_body_and_headers(self):
         body = b'{ "id": "synthetic-private-body", "eventType": "receive-request.receive-completed" }\n'
         signature = hmac.new(b"synthetic-test-secret", body, hashlib.sha256).hexdigest()

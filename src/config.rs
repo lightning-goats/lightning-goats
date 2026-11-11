@@ -29,6 +29,8 @@ pub struct AppConfig {
     pub nostr: NostrConfig,
     #[serde(default)]
     pub core_bridge: Option<crate::core_bridge::BridgeConfig>,
+    #[serde(default)]
+    pub contact: Option<crate::contact::Config>,
 }
 
 impl AppConfig {
@@ -69,6 +71,12 @@ impl AppConfig {
         validate_gateway_origin(&self.gateway.url)?;
         self.validate_informational()?;
         self.validate_nostr()?;
+        if let Some(contact) = &self.contact {
+            contact.validate(&self.nostr.bunker_pubkey)?;
+            if !self.service.mode.nostr_enabled() {
+                bail!("private contact delivery requires active mode");
+            }
+        }
         if let Some(bridge) = &self.core_bridge {
             bridge.validate()?;
         }
@@ -435,12 +443,29 @@ mod tests {
                 bunker_relays: None,
             },
             core_bridge: None,
+            contact: None,
         }
     }
 
     #[test]
     fn accepts_valid_config() {
         valid_config().validate().unwrap();
+    }
+
+    #[test]
+    fn private_contact_is_optional_and_requires_active_project_inbox_policy() {
+        let mut config = valid_config();
+        let project = crate::nostr_event::test_event(3, 1, 100, "", vec![]).pubkey;
+        config.nostr.bunker_pubkey = project.clone();
+        config.contact = Some(crate::contact::Config {
+            recipient: project,
+            inbox_relays: vec!["wss://relay.example.org".into()],
+        });
+        assert!(config.validate().is_err());
+        config.service.mode = RuntimeMode::Active;
+        config.validate().unwrap();
+        config.contact.as_mut().unwrap().inbox_relays = vec!["wss://10.8.0.6/".into()];
+        assert!(config.validate().is_err());
     }
 
     #[test]

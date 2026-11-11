@@ -51,6 +51,7 @@ struct AppState {
     renderer: MessageRenderer,
     status_slots: Arc<tokio::sync::Semaphore>,
     overlay_slots: Arc<tokio::sync::Semaphore>,
+    contact_slots: Arc<tokio::sync::Semaphore>,
 }
 
 #[derive(Debug, Serialize)]
@@ -141,6 +142,7 @@ async fn main() -> Result<()> {
         renderer: renderer.clone(),
         status_slots: Arc::new(tokio::sync::Semaphore::new(4)),
         overlay_slots: Arc::new(tokio::sync::Semaphore::new(32)),
+        contact_slots: Arc::new(tokio::sync::Semaphore::new(4)),
     };
     let app = app(state);
 
@@ -241,6 +243,18 @@ async fn main() -> Result<()> {
         }
     });
 
+    let mut contact_delivery = tokio::spawn({
+        let enabled = config.contact.is_some();
+        let ledger = ledger.clone();
+        async move {
+            if enabled {
+                lightning_goats::contact_delivery::run(ledger).await
+            } else {
+                pending::<Result<()>>().await
+            }
+        }
+    });
+
     let result = tokio::select! {
         _ = shutdown_signal() => {
             info!("shutdown signal received");
@@ -255,6 +269,7 @@ async fn main() -> Result<()> {
         result = &mut message_processor => task_exit("Nostr message processor", result),
         result = &mut publisher => task_exit("Nostr outbox publisher", result),
         result = &mut zap_receipts => task_exit("zap receipt publisher", result),
+        result = &mut contact_delivery => task_exit("private contact delivery", result),
     };
 
     server.abort();
@@ -266,6 +281,7 @@ async fn main() -> Result<()> {
     message_processor.abort();
     publisher.abort();
     zap_receipts.abort();
+    contact_delivery.abort();
     #[cfg(unix)]
     if let Some(bridge) = core_bridge {
         bridge.abort();
@@ -285,6 +301,16 @@ fn app(state: AppState) -> Router {
         .route(
             "/lnurlp/{user}/callback",
             get(lnurl_callback).head(|| async { StatusCode::METHOD_NOT_ALLOWED }),
+        )
+        .route(
+            "/api/v1/contact",
+            post(contact_create).layer(DefaultBodyLimit::max(
+                lightning_goats::contact::MAX_REQUEST_BYTES,
+            )),
+        )
+        .route(
+            "/api/v1/contact/status",
+            post(contact_status).layer(DefaultBodyLimit::max(1024)),
         )
         .route("/ws/overlay", get(overlay_ws))
         .with_state(state)
@@ -500,6 +526,143 @@ async fn strike_webhook(
     }
 }
 
+fn private_response(status: StatusCode, value: serde_json::Value) -> Response {
+    (
+        status,
+        [
+            ("cache-control", "no-store"),
+            ("referrer-policy", "no-referrer"),
+        ],
+        Json(value),
+    )
+        .into_response()
+}
+fn contact_ingress(
+    config: &AppConfig,
+    headers: &HeaderMap,
+    query: Option<&str>,
+) -> Result<(), StatusCode> {
+    if config.contact.is_none() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    if query.is_some() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let origin = config.lnurl.public_base_url.trim_end_matches('/');
+    if headers.get("origin").and_then(|v| v.to_str().ok()) != Some(origin) {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    if !headers
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| {
+            v.split(';')
+                .next()
+                .unwrap_or("")
+                .trim()
+                .eq_ignore_ascii_case("application/json")
+        })
+    {
+        return Err(StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    }
+    Ok(())
+}
+async fn contact_create(
+    State(state): State<AppState>,
+    uri: axum::extract::OriginalUri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    if let Err(code) = contact_ingress(&state.config, &headers, uri.query()) {
+        return private_response(code, serde_json::json!({"error":"contact request refused"}));
+    }
+    let Ok(_permit) = state.contact_slots.clone().try_acquire_owned() else {
+        return private_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            serde_json::json!({"error":"contact service busy"}),
+        );
+    };
+    let Some(config) = &state.config.contact else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let Ok(request) = serde_json::from_slice::<lightning_goats::contact::Request>(&body) else {
+        return private_response(
+            StatusCode::BAD_REQUEST,
+            serde_json::json!({"error":"invalid private contact"}),
+        );
+    };
+    let capability = request.capability.clone();
+    let intent = lightning_goats::cyberherd::calendar::now()
+        .ok()
+        .and_then(|now| {
+            lightning_goats::contact::Intent::validate(
+                request,
+                &config.recipient,
+                &config.inbox_relays,
+                now,
+            )
+            .ok()
+        });
+    let Some(intent) = intent else {
+        return private_response(
+            StatusCode::BAD_REQUEST,
+            serde_json::json!({"error":"invalid private contact"}),
+        );
+    };
+    // No raw body, deserializer, capability or provider error enters diagnostics.
+    match state
+        .strike
+        .create_contact_invoice(&state.ledger, &intent, &capability)
+        .await
+    {
+        Ok(status) => private_response(
+            StatusCode::OK,
+            serde_json::to_value(status).unwrap_or_default(),
+        ),
+        Err(_) => private_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            serde_json::json!({"error":"contact invoice unavailable; check the saved contact status before retrying"}),
+        ),
+    }
+}
+async fn contact_status(
+    State(state): State<AppState>,
+    uri: axum::extract::OriginalUri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    if let Err(code) = contact_ingress(&state.config, &headers, uri.query()) {
+        return private_response(code, serde_json::json!({"error":"contact status refused"}));
+    }
+    let Ok(_permit) = state.contact_slots.clone().try_acquire_owned() else {
+        return private_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            serde_json::json!({"error":"contact service busy"}),
+        );
+    };
+    let Ok(request) = serde_json::from_slice::<lightning_goats::contact::StatusRequest>(&body)
+    else {
+        return private_response(
+            StatusCode::BAD_REQUEST,
+            serde_json::json!({"error":"invalid contact status request"}),
+        );
+    };
+    match state
+        .ledger
+        .contact_status(request.id, &request.capability)
+        .await
+    {
+        Ok(Some(status)) => private_response(
+            StatusCode::OK,
+            serde_json::to_value(status).unwrap_or_default(),
+        ),
+        Ok(None) | Err(_) => private_response(
+            StatusCode::NOT_FOUND,
+            serde_json::json!({"error":"contact status unavailable"}),
+        ),
+    }
+}
+
 async fn overlay_ws(
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
@@ -538,6 +701,55 @@ async fn shutdown_signal() {
 mod tests {
     use super::*;
     use hmac::{Hmac, Mac};
+
+    #[test]
+    fn private_contact_ingress_is_default_off_and_refuses_capabilities_in_urls() {
+        let mut config: AppConfig =
+            toml::from_str(include_str!("../deploy/config.canary.toml.example")).unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "origin",
+            config
+                .lnurl
+                .public_base_url
+                .trim_end_matches('/')
+                .parse()
+                .unwrap(),
+        );
+        headers.insert("content-type", "application/json".parse().unwrap());
+        assert_eq!(
+            contact_ingress(&config, &headers, None),
+            Err(StatusCode::NOT_FOUND)
+        );
+        config.contact = Some(lightning_goats::contact::Config {
+            recipient: config.nostr.bunker_pubkey.clone(),
+            inbox_relays: vec!["wss://relay.example.org".into()],
+        });
+        assert!(contact_ingress(&config, &headers, None).is_ok());
+        assert_eq!(
+            contact_ingress(&config, &headers, Some("capability=private")),
+            Err(StatusCode::BAD_REQUEST)
+        );
+        headers.insert("origin", "https://unrelated.example".parse().unwrap());
+        assert_eq!(
+            contact_ingress(&config, &headers, None),
+            Err(StatusCode::FORBIDDEN)
+        );
+        headers.insert(
+            "origin",
+            config
+                .lnurl
+                .public_base_url
+                .trim_end_matches('/')
+                .parse()
+                .unwrap(),
+        );
+        headers.insert("content-type", "text/plain".parse().unwrap());
+        assert_eq!(
+            contact_ingress(&config, &headers, None),
+            Err(StatusCode::UNSUPPORTED_MEDIA_TYPE)
+        );
+    }
     use lightning_goats::strike::{StrikeClient, StrikeWebhookVerifier};
     use sha2::Sha256;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -586,6 +798,7 @@ mod tests {
             renderer: MessageRenderer::embedded().unwrap(),
             status_slots: Arc::new(tokio::sync::Semaphore::new(4)),
             overlay_slots: Arc::new(tokio::sync::Semaphore::new(32)),
+            contact_slots: Arc::new(tokio::sync::Semaphore::new(4)),
         });
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();

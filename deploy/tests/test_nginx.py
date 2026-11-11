@@ -103,6 +103,8 @@ class NginxAssemblyTests(unittest.TestCase):
                           else EXAMPLES / f"lightning-goats-{mode}-site.conf.example")
                 data = source.read_text()
                 if suffix == "conf":
+                    if mode == "production" and getattr(cls, "CONTACT_ENABLED", False):
+                        data += "\n" + (EXAMPLES / "lightning-goats-contact.conf.example").read_text()
                     (cls.root / "snippets" / f"lightning-goats-{mode}.conf").write_text(data)
                     continue
                 tls_port, http_port = free_port(), free_port()

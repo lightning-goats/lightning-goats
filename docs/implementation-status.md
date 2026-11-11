@@ -78,6 +78,8 @@ label preserved application PIDs, payment settings and OBS/artwork.
 
 The operator-requested [website payment/zap display](testing/website-payment-chat-checkpoint-20261110.md) is now deployed after all ten workflows and actual public browser/HTTPS acceptance. The leaderboard header, invisible responsive QR target and one-action WebLN flow preserve the running core and OBS. Live paid-zap acceptance remains separate. The [private contact source](testing/website-contact-checkpoint-20261110.md) now implements free identity-bound NIP-17 delivery with ciphertext-only retry; its separate 100-sat fee backend and production form remain unfinished.
 
+The separate [private contact fee implementation](testing/website-contact-fee-checkpoint-20261111.md) now has default-off native purpose/settlement/outbox and exact ingress source. Rust CI, paid browser integration and a native schema-23-to-24 maintenance transaction remain required; it is not installed.
+
 Other remaining work includes observed zap admission and incoming settlement/
 receipt delivery, boot persistence, operator interfaces, global network qualification, concrete externally reconciled recovery adoption, operator-selected
 nonzero financial ceilings and explicit activation. Native protected

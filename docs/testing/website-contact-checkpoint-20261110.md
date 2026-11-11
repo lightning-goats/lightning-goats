@@ -73,3 +73,5 @@ prepare a concrete protected installation before production maintenance.
 References: [NIP-17](https://github.com/nostr-protocol/nips/blob/master/17.md),
 [NIP-59](https://github.com/nostr-protocol/nips/blob/master/59.md),
 [Strike receive creation](https://docs.strike.me/api/create-a-receive-request/).
+
+The subsequent [separate-fee implementation checkpoint](website-contact-fee-checkpoint-20261111.md) adds default-off native backend/ingress source. It does not enable the browser fee action or authorize a schema upgrade.

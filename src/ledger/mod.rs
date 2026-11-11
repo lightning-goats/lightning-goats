@@ -13,6 +13,8 @@ use sqlx::{Row, SqlitePool};
 
 use crate::domain::payment::SettledPayment;
 
+mod contact;
+pub use contact::ContactDelivery;
 mod core_bridge;
 mod cyberherd_overlay;
 mod events;
@@ -48,6 +50,7 @@ pub struct LedgerStore {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SettlementOutcome {
+    ContactFeeAccepted,
     Credited {
         sats: u64,
         address_user: String,
@@ -108,6 +111,16 @@ impl LedgerStore {
         let credited_sats = payment.amount_msat / 1_000;
         let credited_sats_i64 = to_i64(credited_sats, "credited_sats")?;
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+
+        let contact_collision: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM private_contact_intents i JOIN strike_receive_requests r ON r.receive_request_id=i.receive_request_id WHERE r.payment_hash=lower(?)) OR EXISTS(SELECT 1 FROM private_contact_fees WHERE ?='strike' AND receive_id=?)",
+        ).bind(payment.payment_hash.as_deref()).bind(&payment.source).bind(&payment.source_id).fetch_one(&mut *transaction).await?;
+        if contact_collision
+            || payment.address_user == "contact"
+            || payment.credit_pool == "contact"
+        {
+            bail!("private contact fees cannot enter feed-credit settlement");
+        }
 
         let existing = sqlx::query(
             r#"

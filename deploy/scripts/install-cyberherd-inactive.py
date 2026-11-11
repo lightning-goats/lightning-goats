@@ -150,6 +150,8 @@ def configs(source, runtime, evidence):
     intake, payout, signer = (values[role] for role in ROLES)
     scope = payout['policy']['scope']
     policy = payout['policy']
+    if type(policy.get('max_net_sats', 0)) is not int or policy.get('max_net_sats', 0) != 0:
+        raise ValueError('initial per-payment limit must remain zero')
     if (policy['execution_enabled'] is not False or any(policy[name] != 0 for name in
             ('member_percent_ceiling', 'max_sats_per_feed', 'max_sats_per_24h', 'max_fee_sats'))
             or signer['policy']['max_net_sats'] != 0 or signer['policy']['max_new_per_hour'] != 0):

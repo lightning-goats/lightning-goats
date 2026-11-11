@@ -38,9 +38,10 @@ impl Store {
         let row=sqlx::query("SELECT r.*,g.admitted_at,g.plan_json FROM payout_rows r JOIN payout_grants g ON g.id=r.grant_id WHERE r.grant_id=? AND r.member=?")
             .bind(grant_id.to_string()).bind(member).fetch_one(&mut *tx).await?;
         if now < row.try_get::<i64, _>("admitted_at")?
+            || u64::try_from(row.try_get::<i64, _>("net_sats")?)? > self.policy.max_net_sats
             || u64::try_from(row.try_get::<i64, _>("fee_limit_sats")?)? > self.policy.max_fee_sats
         {
-            bail!("invoice preparation precedes funding or exceeds current fee policy");
+            bail!("invoice preparation precedes funding or exceeds current amount/fee policy");
         }
         let plan: crate::cyberherd::rewards::Plan =
             serde_json::from_str(&row.try_get::<String, _>("plan_json")?)?;

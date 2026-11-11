@@ -200,6 +200,8 @@ class InactiveFiles(unittest.TestCase):
     def test_nonzero_or_foreign_scope_configuration_refuses_before_installation(self):
         path = self.configs / 'cyberherd-payout.toml'
         for old, new in [('max_sats_per_feed=0', 'max_sats_per_feed=1000'),
+                         ('max_fee_sats=0', 'max_fee_sats=0\nmax_net_sats=1'),
+                         ('max_fee_sats=0', 'max_fee_sats=0\nmax_net_sats=false'),
                          ('intake_uid=50011', 'intake_uid=50010'),
                          (self.epoch, '00000000-0000-0000-0000-000000000001'),
                          ('22' * 32, '0' * 64)]:

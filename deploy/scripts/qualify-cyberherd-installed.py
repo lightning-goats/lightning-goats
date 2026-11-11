@@ -109,6 +109,8 @@ def disabled(values):
     if intake.get('messaging', {}).get('enabled', False) or intake.get('view', {}).get('enabled', False):
         raise ValueError('installed membership publication and view must be disabled')
     policy = payout.get('policy', {})
+    if type(policy.get('max_net_sats', 0)) is not int or policy.get('max_net_sats', 0) != 0:
+        raise ValueError('installed per-payment limit must remain zero')
     if policy.get('execution_enabled') is not False:
         raise ValueError('installed payout execution must be disabled')
     limits = [(policy, n) for n in ('member_percent_ceiling', 'max_sats_per_feed', 'max_sats_per_24h', 'max_fee_sats')]

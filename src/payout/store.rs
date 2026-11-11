@@ -60,6 +60,9 @@ pub struct Policy {
     pub max_sats_per_feed: u64,
     pub max_sats_per_24h: u64,
     pub max_fee_sats: u64,
+    /// Bounds both ordinary Lightning and NIP-57 independently of signing.
+    #[serde(default)]
+    pub max_net_sats: u64,
     pub max_source_parts: u16,
     pub operation_addresses: Vec<String>,
     pub receipt_relays: Vec<String>,
@@ -74,6 +77,7 @@ impl Policy {
             || self.max_sats_per_feed > i64::MAX as u64
             || self.max_sats_per_24h > i64::MAX as u64
             || self.max_fee_sats > i64::MAX as u64
+            || self.max_net_sats > i64::MAX as u64 / 1000
             || !(1..=8192).contains(&self.max_source_parts)
             || self.operation_addresses.len() > 128
         {
@@ -396,6 +400,7 @@ fn validate_admission(plan: &Plan, q: &QualifiedFunding, policy: &Policy, now: i
             || !addresses.insert(identity)
             || !callbacks.insert(recipient.callback_identity()?)
             || row.net_sats == 0
+            || row.net_sats > policy.max_net_sats
             || amount > i64::MAX as u64
             || amount < recipient.min_msat
             || amount > recipient.max_msat

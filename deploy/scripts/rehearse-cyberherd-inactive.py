@@ -600,7 +600,7 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
         # candidate files are prepared and checked below, never applied.
         allocation = json.loads(run(*client, 'financial-preview-allocation'))
         assert allocation == {'preview_allocation_selected': True, 'actual_native_operator_request': True,
-            'roster_still_empty': True, 'provider_operations': 0, 'publications': 0}
+            'roster_membership_unchanged': True, 'provider_operations': 0, 'publications': 0}
         w.await_ready(lambda: w.http_json('http://127.0.0.1:3340/api/v1/cyberherd')['roster']['member_percent'] == 10,
                       'actual stored preview allocation')
         financial_checker = root / 'CHECK-ONLY-financial-stage'

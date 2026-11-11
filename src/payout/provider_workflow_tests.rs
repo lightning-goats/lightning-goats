@@ -484,6 +484,61 @@ async fn independent_holds_stale_core_policy_shrink_and_canary_receipts_block_ex
 }
 
 #[tokio::test]
+async fn ordinary_and_nip57_payment_limits_hold_new_work_but_preserve_known_payment_reads() {
+    for nostr in [false, true] {
+        let w = Workflow::new(nostr).await;
+        let q = qualified(&w.f).await;
+        let mut policy = w.policy.clone();
+        policy.max_net_sats = 0;
+        let held = Store::connect(&w.url, policy.clone()).await.unwrap();
+        let fresh_url = format!("sqlite://{}", w.f.root.path().join("limited.db").display());
+        let empty = Store::connect(&fresh_url, policy.clone()).await.unwrap();
+        assert!(empty.admit(&w.f.plan, &q, now()).await.is_err());
+        assert_eq!(empty.held_sats().await.unwrap(), 0);
+        // A grant admitted before the cap reduction cannot create a new intent.
+        let admitted = Store::connect(&fresh_url, w.policy.clone()).await.unwrap();
+        let grant = admitted.admit(&w.f.plan, &q, now()).await.unwrap();
+        assert!(
+            empty
+                .prepare_invoice(grant.id, &w.f.plan.rows[0].pubkey, now())
+                .await
+                .is_err()
+        );
+        assert!(held.prepare_quote(w.invoice_id, now()).await.is_err());
+        let quote = w.quote().await;
+        assert!(held.prepare_quote(w.invoice_id, now()).await.is_err());
+        assert!(
+            held.prepare_execute(quote.id(), &w.fresh(true, nostr).await, now())
+                .await
+                .is_err()
+        );
+        assert!(w.mock.lock().unwrap().patch_ids.is_empty());
+        // Exact-boundary acceptance uses the same original one-sat intent.
+        policy.max_net_sats = 1;
+        let allowed = Store::connect(&w.url, policy).await.unwrap();
+        let intent = allowed
+            .prepare_execute(quote.id(), &w.fresh(true, nostr).await, now())
+            .await
+            .unwrap();
+        let observation = w.execute(&intent).await.unwrap();
+        let bound = held.bind_payment(&observation, now()).await.unwrap();
+        w.mock.lock().unwrap().state = PaymentState::Completed;
+        let done = w.sender.read_payment(&bound).await.unwrap();
+        held.observe_payment(&done, now()).await.unwrap();
+        assert_eq!(
+            held.payout_status(w.invoice_id).await.unwrap(),
+            Status::Completed
+        );
+        assert_eq!(w.mock.lock().unwrap().payments.len(), 1);
+        // Missing old configuration fields also default to no new payments.
+        let mut legacy = serde_json::to_value(w.policy.clone()).unwrap();
+        legacy.as_object_mut().unwrap().remove("max_net_sats");
+        let parsed: crate::payout::store::Policy = serde_json::from_value(legacy).unwrap();
+        assert_eq!(parsed.max_net_sats, 0);
+    }
+}
+
+#[tokio::test]
 async fn wrong_currency_amount_fees_expiry_and_identity_never_create_execution_authority() {
     let w = Workflow::new(false).await;
     for bad in [

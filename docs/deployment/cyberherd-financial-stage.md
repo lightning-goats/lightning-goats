@@ -48,7 +48,15 @@ the candidate seed after matching the actual stored allocation.
 
 Planning reserves the chosen maximum fee in each member's gross share, uses
 whole sats with a one-sat minimum net amount and a 3,600-second profile freshness
-bound. All six native receive addresses and every configured
+bound. The selected net limit binds the planner's `maximum_net_sats`, the payout
+worker's `max_net_sats` and the signer's `max_net_sats`. The planner leaves an
+oversized share with operations instead of reserving it. Payout admission,
+invoice preparation, quote preparation and execution independently check the
+limit for both ordinary Lightning and NIP-57. Existing known-payment reads remain
+available after reducing the limit; unknown executions stay held under their
+original identity. An omitted limit defaults to zero for new work. Old frozen
+plans retain their exact serialized hash when that field was absent.
+All six native receive addresses and every configured
 alias are excluded as operational destinations, together with existing extra
 exclusions. The same exclusion list and receipt-relay list bind the planner,
 payout worker and signing broker. Unspent amounts remain subject to the existing
@@ -88,3 +96,20 @@ only a qualified maintenance transaction. Enabling limits must not reinterpret
 old zero allocations or erase unknown work. This preparation does not supply that
 executor, prove external recovery adoption, or authorize spending/publication.
 The full twelve-part port remains incomplete.
+
+The per-payment fields require the newly qualified membership/payout programs.
+An older installed payout program rejects the added field rather than enforcing
+it; a current native configuration checker does not qualify an older program's
+execution behavior. Any later maintenance executor must qualify the selected
+programs and retained native state together before applying these candidates.
+
+The backlog review must use a current verified native snapshot, not the running
+membership journal or a Python SQLite reader. `reward_worker::Worker::tick`
+selects the oldest unfinished barrier. Its immutable snapshot supplies the
+allocation; changing today's stored percentage cannot change an earlier
+barrier's percentage. `rewards::build` also requires real funding and a fresh
+core allowance for a positive allocation, while an existing `no_payout` plan
+stays closed. Review unplanned positive-allocation barriers, awaiting
+reservations and existing reservations explicitly. A zero current configuration
+alone does not prove that every historical barrier has a zero allocation, and a
+configuration-only candidate cannot establish the contents of those journals.

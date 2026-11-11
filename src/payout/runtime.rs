@@ -44,6 +44,7 @@ impl Config {
             || self.policy.max_sats_per_feed != 0
             || self.policy.max_sats_per_24h != 0
             || self.policy.max_fee_sats != 0
+            || self.policy.max_net_sats != 0
             || *self != Config::load(path)?
             || [self.intake_uid, self.signer_uid, self.policy.scope.core_uid].contains(&ipc::uid()?)
         {

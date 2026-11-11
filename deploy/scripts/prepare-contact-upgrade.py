@@ -60,6 +60,7 @@ def configuration_boundary(core, member, payout, signer, policy, *, current_sche
         raise ValueError('requires the unchanged overlay-only stage with contact and payouts disabled')
     limits = [(reward, name) for name in ('member_percent_ceiling', 'max_sats_per_feed', 'max_sats_per_24h')]
     limits += [(payout['policy'], name) for name in ('member_percent_ceiling', 'max_sats_per_feed', 'max_sats_per_24h', 'max_fee_sats')]
+    limits += [({'max_net_sats': payout['policy'].get('max_net_sats', 0)}, 'max_net_sats')]
     limits += [(signer['policy'], name) for name in ('max_net_sats', 'max_new_per_hour')]
     if any(type(section.get(name)) is not int or section[name] != 0 for section, name in limits):
         raise ValueError('all existing financial and signing ceilings must remain zero')

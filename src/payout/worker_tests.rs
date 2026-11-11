@@ -110,6 +110,30 @@ async fn older_payout_snapshot_without_original_quote_cannot_create_replacement_
 }
 
 #[tokio::test]
+async fn reduced_payment_limit_blocks_scheduler_quote_but_keeps_known_payment_reconciliation() {
+    let w = Workflow::new(false).await;
+    let (client, task) = core(&w, RuntimeMode::Active).await;
+    let mut policy = w.policy.clone();
+    policy.max_net_sats = 0;
+    let held = Store::connect(&w.url, policy).await.unwrap();
+    let mut runner = worker(&w, client, held.clone());
+    assert_eq!(tick(&runner).await, Step::Waiting);
+    assert!(w.mock.lock().unwrap().post_keys.is_empty());
+    runner.store = w.store.clone();
+    assert_eq!(tick(&runner).await, Step::QuoteSaved);
+    runner.store = held.clone();
+    assert_eq!(tick(&runner).await, Step::Waiting);
+    assert!(w.mock.lock().unwrap().patch_ids.is_empty());
+    runner.store = w.store.clone();
+    assert_eq!(tick(&runner).await, Step::Submitted);
+    w.mock.lock().unwrap().state = PaymentState::Completed;
+    runner.store = held;
+    assert_eq!(tick(&runner).await, Step::Observed);
+    assert_eq!(w.mock.lock().unwrap().payments.len(), 1);
+    task.abort();
+}
+
+#[tokio::test]
 async fn older_payout_snapshot_with_original_quote_recovers_same_payment_even_after_quote_expiry() {
     let w = Workflow::new(false).await;
     let (client, task) = core(&w, RuntimeMode::Active).await;

@@ -89,6 +89,9 @@ class FinancialBoundaries(unittest.TestCase):
         self.assertEqual(set(new['payout']['policy']['operation_addresses']),expected)
         self.assertEqual(new['membership']['rewards']['operation_addresses'],new['payout']['policy']['operation_addresses'])
         self.assertEqual(new['membership']['rewards']['minimum_fee_sats'],2)
+        self.assertEqual(new['membership']['rewards']['maximum_net_sats'],98)
+        self.assertEqual(new['payout']['policy']['max_net_sats'],98)
+        self.assertEqual(new['signer']['policy']['max_net_sats'],98)
         for role in ['payout','signer']:self.assertTrue(new[role]['enabled'])
         self.assertEqual(new['core']['core_bridge']['reward_policy']['max_sats_per_feed'],100)
 

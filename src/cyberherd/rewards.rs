@@ -30,8 +30,15 @@ pub struct PlanningPolicy {
     pub fee_basis_points: u16,
     pub minimum_fee_sats: u64,
     pub minimum_net_sats: u64,
+    // Omitted zero must keep historical frozen-plan serialization/hash exact.
+    #[serde(default, skip_serializing_if = "zero")]
+    pub maximum_net_sats: u64,
     pub profile_max_age_seconds: u32,
     pub operation_addresses: Vec<String>,
+}
+
+fn zero(value: &u64) -> bool {
+    *value == 0
 }
 
 impl PlanningPolicy {
@@ -40,6 +47,7 @@ impl PlanningPolicy {
             || self.minimum_fee_sats > i64::MAX as u64
             || self.minimum_net_sats == 0
             || self.minimum_net_sats > i64::MAX as u64 / 1000
+            || self.maximum_net_sats > i64::MAX as u64 / 1000
             || !(60..=86400).contains(&self.profile_max_age_seconds)
             || self.operation_addresses.len() > 128
         {
@@ -84,6 +92,7 @@ pub enum Skip {
     RecipientUnavailable,
     RecipientMinimum,
     RecipientMaximum,
+    PolicyMaximum,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -336,6 +345,8 @@ pub(super) fn build(
             || net > i64::MAX as u64 / 1000
         {
             Some(Skip::BelowMinimum)
+        } else if net > policy.maximum_net_sats {
+            Some(Skip::PolicyMaximum)
         } else {
             match &row.recipient {
                 None => Some(Skip::RecipientUnavailable),
@@ -394,7 +405,7 @@ mod tests {
                     members:BTreeMap::from([(member.clone(),Member{profile:profile.clone(),active:true,amount_sats:amount,lifetime_sats:amount})]),..Roster::default()},cycle:1,cycle_start:0,revision:1}};
             let allowance=Allowance{epoch:binding.epoch,request_id:barrier.feeding.request_id,owner,funding,threshold_sats:1_000_000,
                 member_percent_ceiling:ceiling,max_sats_per_feed:cap,available_sats:i64::MAX as u64,policy_hash:"cd".repeat(32)};
-            let planning=PlanningPolicy{fee_basis_points:bps,minimum_fee_sats:min_fee,minimum_net_sats:1,profile_max_age_seconds:3600,operation_addresses:vec![]};
+            let planning=PlanningPolicy{fee_basis_points:bps,minimum_fee_sats:min_fee,minimum_net_sats:1,maximum_net_sats:i64::MAX as u64 / 1000,profile_max_age_seconds:3600,operation_addresses:vec![]};
             let read=ProfileRead{pubkey:member.clone(),head_id:Some("ef".repeat(32)),profile:Some(profile),observed_at:100};
             let recipient=Recipient::parse("member@example.com",br#"{"tag":"payRequest","callback":"https://pay.example.com/member","minSendable":1,"maxSendable":1000000000000,"metadata":"[[\"text/plain\",\"Treats\"]]"}"#).unwrap();
             let plan=build(&barrier,&binding,&planning,Some(&allowance),&[read],&BTreeMap::from([(member,Some(recipient))]),100).unwrap();

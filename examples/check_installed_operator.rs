@@ -1052,8 +1052,8 @@ async fn self_edge() -> Result<()> {
 async fn financial_preview_allocation(client: &Client) -> Result<()> {
     let before = get(client, 2, OVERVIEW).await?;
     ensure!(
-        before["total_members"] == 0,
-        "financial preview requires the empty disposable roster"
+        before["total_members"].is_u64() && before["members"].is_array(),
+        "financial preview requires the complete disposable operator roster"
     );
     let intent = json!({"id":uuid::Uuid::new_v4(),"expected_revision":before["revision"],
         "action":{"type":"settings","minimum_sats":before["settings"]["minimum_sats"],
@@ -1061,13 +1061,16 @@ async fn financial_preview_allocation(client: &Client) -> Result<()> {
     command(client, &intent).await?;
     let after = get(client, 2, OVERVIEW).await?;
     ensure!(
-        after["settings"]["member_percent"] == 10 && after["total_members"] == 0,
+        after["settings"]["member_percent"] == 10
+            && after["total_members"] == before["total_members"]
+            && after["members"] == before["members"]
+            && after["cycle"] == before["cycle"],
         "disposable preview allocation differs"
     );
     println!(
         "{}",
         json!({"preview_allocation_selected":true,"actual_native_operator_request":true,
-        "roster_still_empty":true,"provider_operations":0,"publications":0})
+        "roster_membership_unchanged":true,"provider_operations":0,"publications":0})
     );
     Ok(())
 }

@@ -130,6 +130,7 @@ fn validate_stage(
             && reward.max_sats_per_24h == p.max_sats_per_24h
             && p.max_sats_per_feed <= p.max_sats_per_24h
             && p.max_fee_sats <= p.max_sats_per_feed
+            && s.max_net_sats == p.max_net_sats
             && s.max_net_sats <= p.max_sats_per_feed,
         "candidate monetary ceilings differ"
     );
@@ -149,6 +150,7 @@ fn validate_stage(
         planner.fee_basis_points == 0
             && planner.minimum_fee_sats == p.max_fee_sats
             && planner.minimum_net_sats == 1
+            && planner.maximum_net_sats == p.max_net_sats
             && planner.profile_max_age_seconds == 3600
             && planner.operation_addresses == p.operation_addresses
             && p.receipt_relays == s.relays,
@@ -269,7 +271,7 @@ mod tests {
         member.as_table_mut().unwrap().insert(
             "rewards".into(),
             toml::Value::try_from(json!({"fee_basis_points":0,"minimum_fee_sats":2,
-            "minimum_net_sats":1,"profile_max_age_seconds":3600,"operation_addresses":operations}))
+            "minimum_net_sats":1,"maximum_net_sats":98,"profile_max_age_seconds":3600,"operation_addresses":operations}))
             .unwrap(),
         );
         member.as_table_mut().unwrap().insert(
@@ -291,6 +293,7 @@ mod tests {
             ("max_sats_per_feed", 100),
             ("max_sats_per_24h", 1000),
             ("max_fee_sats", 2),
+            ("max_net_sats", 98),
         ] {
             payout["policy"][name] = value.into();
         }
@@ -337,6 +340,12 @@ mod tests {
                 toml::Value::Integer(101),
             ),
             (3, vec!["policy", "max_net_sats"], toml::Value::Integer(101)),
+            (2, vec!["policy", "max_net_sats"], toml::Value::Integer(97)),
+            (
+                1,
+                vec!["rewards", "maximum_net_sats"],
+                toml::Value::Integer(97),
+            ),
             (
                 3,
                 vec!["policy", "max_new_per_hour"],
@@ -372,11 +381,13 @@ mod tests {
         values[0]["core_bridge"]["reward_policy"]["max_sats_per_24h"] = 0.into();
         values[1]["settings"]["member_percent"] = 0.into();
         values[1]["rewards"]["minimum_fee_sats"] = 0.into();
+        values[1]["rewards"]["maximum_net_sats"] = 0.into();
         for name in [
             "member_percent_ceiling",
             "max_sats_per_feed",
             "max_sats_per_24h",
             "max_fee_sats",
+            "max_net_sats",
         ] {
             values[2]["policy"][name] = 0.into();
         }

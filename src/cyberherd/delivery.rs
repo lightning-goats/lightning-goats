@@ -309,7 +309,9 @@ fn payout(event: &StoredEvent, catalog: &Catalog) -> Result<Option<Rendered>> {
                 | super::rewards::Skip::RecipientMinimum,
             ) => "cyber_herd_no_treats",
             Some(
-                super::rewards::Skip::RecipientMaximum | super::rewards::Skip::RecipientUnavailable,
+                super::rewards::Skip::RecipientMaximum
+                | super::rewards::Skip::RecipientUnavailable
+                | super::rewards::Skip::PolicyMaximum,
             ) => "cyber_herd_unsubmitted",
             _ => return Ok(None),
         }

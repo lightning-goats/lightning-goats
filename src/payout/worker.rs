@@ -109,6 +109,11 @@ impl Worker {
                 return Ok(Step::Observed);
             }
         }
+        // Reconciliation above remains available after a limit reduction. New
+        // callbacks, quotes, signatures and original-quote execution stay held.
+        if intent.0.net_sats > self.store.policy().max_net_sats {
+            return Ok(Step::Waiting);
+        }
         let Some(fresh) = self
             .permission(work.grant, &member, intent.uses_nostr())
             .await?

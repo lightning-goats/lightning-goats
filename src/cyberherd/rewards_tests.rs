@@ -20,7 +20,7 @@ use crate::{
         ingress::CoreBinding,
         membership::{Action, FeederAvailability, Settings, Target},
         relay::{Filter, Query, ReadBatch},
-        rewards::{PlanningPolicy, ProfileRead, Skip, State},
+        rewards::{Plan, PlanningPolicy, ProfileRead, Skip, State},
         store::{Interaction, Store},
         targets::{AuthenticatedProfile, TargetPolicy, Targets},
         worker::{self, Environment},
@@ -58,6 +58,7 @@ fn policy() -> PlanningPolicy {
         fee_basis_points: 0,
         minimum_fee_sats: 1,
         minimum_net_sats: 1,
+        maximum_net_sats: 100000,
         profile_max_age_seconds: 3600,
         operation_addresses: vec!["herd@lightning-goats.com".into()],
     }
@@ -888,6 +889,48 @@ fn fees_round_up_without_overspending_and_zero_settings_remain_zero() {
         ..policy()
     };
     assert!(p.validate().is_err());
+}
+
+#[tokio::test]
+async fn payment_limit_skips_oversized_shares_without_reallocation_and_zero_closes_all() {
+    for maximum in [0, 4, 10] {
+        let f = Fixture::new(300).await;
+        let p = PlanningPolicy {
+            maximum_net_sats: maximum,
+            ..policy()
+        };
+        let frozen = f.freeze(&p).await.unwrap();
+        // Original net shares are 48, 13 and 4. Only the original 4-sat share
+        // fits: the others stay with operations rather than enlarging it.
+        assert_eq!(frozen.plan.reserved_sats, if maximum == 0 { 0 } else { 5 });
+        assert_eq!(
+            frozen.plan.operations_sats,
+            if maximum == 0 { 1000 } else { 995 }
+        );
+        for row in &frozen.plan.rows {
+            if maximum == 0 || row.pubkey != key(4) {
+                assert_eq!(row.skip, Some(Skip::PolicyMaximum));
+                assert_eq!((row.net_sats, row.fee_limit_sats), (0, 0));
+            } else {
+                assert_eq!((row.net_sats, row.fee_limit_sats), (4, 1));
+            }
+        }
+        let legacy = PlanningPolicy {
+            maximum_net_sats: 0,
+            ..policy()
+        };
+        let raw = serde_json::to_string(&legacy).unwrap();
+        assert_eq!(
+            raw,
+            r#"{"fee_basis_points":0,"minimum_fee_sats":1,"minimum_net_sats":1,"profile_max_age_seconds":3600,"operation_addresses":["herd@lightning-goats.com"]}"#
+        );
+        let restored: PlanningPolicy = serde_json::from_str(&raw).unwrap();
+        assert_eq!(restored.maximum_net_sats, 0);
+        assert_eq!(serde_json::to_string(&restored).unwrap(), raw);
+        let encoded = serde_json::to_string(&frozen.plan).unwrap();
+        let restored: Plan = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(restored.hash().unwrap(), frozen.hash);
+    }
 }
 #[path = "result_tests.rs"]
 mod result_tests;

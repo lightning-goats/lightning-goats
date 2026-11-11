@@ -61,6 +61,7 @@ class ContactPreparationBoundaries(unittest.TestCase):
                    (1, ('messaging', 'signer'), {}), (1, ('messaging', 'lifecycle'), True),
                    (1, ('rewards',), {}), (1, ('core', 'epoch'), 'changed'),
                    (2, ('policy', 'execution_enabled'), True), (2, ('policy', 'max_fee_sats'), True),
+                   (2, ('policy', 'max_net_sats'), 1), (2, ('policy', 'max_net_sats'), False),
                    (3, ('policy', 'max_new_per_hour'), 1)]
         for index, keys, value in changes:
             changed = copy.deepcopy(values)

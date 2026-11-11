@@ -271,6 +271,7 @@ impl Store {
                         | rewards::Skip::BelowMinimum
                         | rewards::Skip::RecipientMinimum
                         | rewards::Skip::RecipientMaximum
+                        | rewards::Skip::PolicyMaximum
                         | rewards::Skip::RecipientUnavailable
                 )
             ) {

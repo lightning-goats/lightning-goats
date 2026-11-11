@@ -23,12 +23,16 @@ class InstalledQualificationTests(unittest.TestCase):
     def values(self):
         return {'cyberherd': {'enabled': False},
                 'cyberherd-payout': {'enabled': False, 'policy': {'execution_enabled': False,
-                    'member_percent_ceiling': 0, 'max_sats_per_feed': 0, 'max_sats_per_24h': 0, 'max_fee_sats': 0}},
+                    'member_percent_ceiling': 0, 'max_sats_per_feed': 0, 'max_sats_per_24h': 0, 'max_fee_sats': 0,
+                    'max_net_sats': 0}},
                 'cyberherd-signer': {'enabled': False, 'policy': {'max_net_sats': 0, 'max_new_per_hour': 0}}}
 
     def test_active_process_publication_or_nonzero_limits_refuse(self):
         original = self.values()
         q.disabled(original)
+        legacy = copy.deepcopy(original)
+        del legacy['cyberherd-payout']['policy']['max_net_sats']
+        q.disabled(legacy)
         for role in q.ROLES:
             value = copy.deepcopy(original)
             value[role]['enabled'] = True

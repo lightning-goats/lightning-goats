@@ -108,13 +108,15 @@ def render(original, identities, plans_gid, limits):
     # setting. It is never a command to modify the running membership journal.
     member['settings']['member_percent'] = limits['member_percent']
     member['rewards'] = {'fee_basis_points': 0, 'minimum_fee_sats': limits['max_fee_sats'],
-        'minimum_net_sats': 1, 'profile_max_age_seconds': 3600, 'operation_addresses': sorted(operations)}
+        'minimum_net_sats': 1, 'maximum_net_sats': limits['max_net_sats'],
+        'profile_max_age_seconds': 3600, 'operation_addresses': sorted(operations)}
     member['payout_bridge'] = {'socket': payout['intake_socket'], 'peer_uid': identities['payout']['uid'],
                               'group_gid': plans_gid}
     payout['enabled'] = True
     payout['policy'].update(execution_enabled=True, member_percent_ceiling=limits['member_percent'],
         max_sats_per_feed=limits['max_sats_per_feed'], max_sats_per_24h=limits['max_sats_per_24h'],
-        max_fee_sats=limits['max_fee_sats'], operation_addresses=sorted(operations))
+        max_fee_sats=limits['max_fee_sats'], max_net_sats=limits['max_net_sats'],
+        operation_addresses=sorted(operations))
     signer['enabled'] = True
     signer['policy'].update(max_net_sats=limits['max_net_sats'], max_new_per_hour=limits['max_new_per_hour'])
     return candidate

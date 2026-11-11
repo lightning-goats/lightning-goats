@@ -80,7 +80,9 @@ impl Store {
         if let Some(row)=sqlx::query("SELECT document_json FROM payout_quote_intents WHERE invoice_id=? AND retired_at IS NULL")
             .bind(invoice_id.to_string()).fetch_optional(&mut *tx).await? {
             let doc:QuoteDocument=serde_json::from_str(&row.try_get::<String,_>("document_json")?)?;
-            doc.validate()?;tx.commit().await?;return Ok(QuoteIntent(doc));
+            doc.validate()?;
+            if doc.amount_sats > self.policy.max_net_sats { bail!("saved quote exceeds current payment limit"); }
+            tx.commit().await?;return Ok(QuoteIntent(doc));
         }
         let invoice = load_invoice(&mut tx, invoice_id, &self.policy.scope.owner)
             .await?
@@ -92,8 +94,11 @@ impl Store {
                 .bind(invoice_id.to_string())
                 .fetch_one(&mut *tx)
                 .await?;
-        if now < 0 || u64::try_from(now)? >= invoice.expires_at() {
-            bail!("saved invoice expired before quote creation");
+        if now < 0
+            || u64::try_from(now)? >= invoice.expires_at()
+            || invoice.amount_sats() > self.policy.max_net_sats
+        {
+            bail!("saved invoice expired or exceeds current payment limit");
         }
         let doc = QuoteDocument {
             id: Uuid::new_v4(),
@@ -270,6 +275,7 @@ impl Store {
             || reservation.owner != self.policy.scope.owner
             || quote.request.scope != self.policy.scope.provider
             || quote.request.fee_limit_sats > self.policy.max_fee_sats
+            || quote.request.amount_sats > self.policy.max_net_sats
             || reservation.reserved_sats > ceiling
             || held > self.policy.max_sats_per_24h
             || (quote.request.nip57 && !page.nostr_enabled)

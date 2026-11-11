@@ -221,7 +221,7 @@ impl LedgerStore {
             }
             Ok(())
         };
-        check()?;
+        check().context("before offline retirement")?;
         let pool = crate::sqlite::connect_existing_durable(database_url, 1).await?;
         let store = Self { pool };
         let result = async {
@@ -232,7 +232,25 @@ impl LedgerStore {
         }
         .await;
         store.pool.close().await;
-        check()?;
+        // SQLite may retain/recreate WAL/shared-memory sidecars even after the
+        // last connection closes. Root maintenance must return these private,
+        // single-link files to the original runtime owner before resumption.
+        // The original main journal is never chowned or replaced here.
+        for suffix in ["-wal", "-shm"] {
+            let file = std::path::PathBuf::from(format!("{}{suffix}", path.display()));
+            let meta = match std::fs::symlink_metadata(&file) {
+                Ok(meta) => meta,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(e) => return Err(e.into()),
+            };
+            if meta.uid() == 0 {
+                if !meta.is_file() || meta.nlink() != 1 || meta.mode() & 0o077 != 0 {
+                    bail!("root retirement sidecar identity changed");
+                }
+                std::os::unix::fs::chown(&file, Some(owner.uid()), Some(owner.gid()))?;
+            }
+        }
+        check().context("after offline retirement")?;
         result
     }
     /// Offline/operator-only correction. Retire one exact original lot, never
@@ -387,7 +405,13 @@ mod tests {
         .unwrap();
         store.pool.close().await;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
-        std::os::unix::fs::chown(&path, Some(50119), Some(50119)).unwrap();
+        for suffix in ["", "-wal", "-shm"] {
+            let file = std::path::PathBuf::from(format!("{}{suffix}", path.display()));
+            if file.exists() {
+                std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+                std::os::unix::fs::chown(&file, Some(50119), Some(50119)).unwrap();
+            }
+        }
         std::os::unix::fs::chown(&directory, Some(50119), Some(50119)).unwrap();
         assert!(LedgerStore::connect_existing_recovery(&url).await.is_err());
         let preview = LedgerStore::retire_credit_offline(&url, "reviewed", credit, 24101, true)

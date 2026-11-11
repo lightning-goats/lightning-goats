@@ -16,7 +16,9 @@ The full twelve-part port remains incomplete.
 ## Authenticated preparation
 
 Use only a separately qualified root-owned tool generation. The explicit tool
-closure now has **25 files**. Authenticate its launcher externally before isolated
+closure had **25 files** at the original qualified checkpoint. The current
+financial/operator generation has **27 files**; use its exact independently
+verified manifest and matching launcher. Authenticate the launcher before isolated
 Python interprets it; do not run a writable checkout as root. Independently select
 the exact source and SHA256 of both the normal release and CyberHerd review archive.
 Archive verification precedes program execution. No gateway, archive example,

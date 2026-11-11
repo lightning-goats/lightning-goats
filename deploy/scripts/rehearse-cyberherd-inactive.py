@@ -644,6 +644,44 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
         for key in ('feed_credit_sats', 'threshold_sats', 'feeds_due', 'remainder_sats', 'unresolved_feed_attempt'):
             assert financial_after[key] == financial_before[key]
         assert counts['post'] == 0
+        # The separately reviewed program transaction upgrades ALL six native
+        # executables while retaining every existing zero financial limit. The
+        # current backup/reward report belongs to this maintenance window. Same
+        # build bytes here exercise real native/systemd behavior; protected-file
+        # tests separately exercise different-byte replacement/interruption.
+        program_review = base / 'ci-six-program-review'
+        program_originals = {path: hashlib.sha256(path.read_bytes()).hexdigest()
+                             for path in [config, member, unit,
+                                 Path('/etc/cyberherd-payout/config.toml'), Path('/etc/cyberherd-signer/config.toml')]}
+        programs_prepared = json.loads(run(*launcher, '--cyberherd-program-maintenance', 'prepare',
+            str(core_archive), str(review_archive), source_commit,
+            hashlib.sha256(core_archive.read_bytes()).hexdigest(),
+            hashlib.sha256(review_archive.read_bytes()).hexdigest(), str(program_review)))
+        assert programs_prepared == {'prepared': True, 'programs': 6, 'configurations_changed': False,
+            'activation_authorized': False, 'services_changed': False, 'journals_opened': False}
+        program_sha = hashlib.sha256((program_review / 'PREPARED.json').read_bytes()).hexdigest()
+        program_applied = json.loads(run(*launcher, '--cyberherd-program-maintenance', 'apply',
+            str(program_review), '--review-sha256', program_sha, '--exclusive-maintenance'))
+        assert program_applied == {'upgraded': True, 'programs': 6, 'current_four_journal_backup_verified': True,
+            'reward_backlog_reviewed': True, 'financial_images_unchanged': True,
+            'configurations_changed': False, 'services_started': False, 'activation_authorized': False}
+        program_backup = json.loads((program_review / 'backup/MANIFEST.json').read_text())
+        program_backlog = json.loads((program_review / 'reward-review/REVIEW.json').read_text())
+        assert program_backup['policy'] == before_policy and program_backup['report']['pending_feeds'] == 1
+        assert program_backlog['bundle_id'] == program_backup['id'] and program_backlog['all_barriers_examined'] is True
+        assert program_backlog['bundle_manifest_sha256'] == hashlib.sha256((program_review / 'backup/MANIFEST.json').read_bytes()).hexdigest()
+        assert program_backlog['activation_authorized'] is False and program_backlog['external_reconciliation_required'] is True
+        assert {path: sha for path, sha in program_originals.items() if path != unit} == {
+            path: hashlib.sha256(path.read_bytes()).hexdigest() for path in program_originals if path != unit}
+        program_resumed = json.loads(run(*launcher, '--cyberherd-program-maintenance', 'resume',
+            str(program_review), '--review-sha256', program_sha, '--approve-resumption'))
+        assert program_resumed == {'core_running': True, 'membership_running': True, 'original_programs': False,
+            'payouts_enabled': False, 'configurations_changed': False}
+        assert program_originals == {path: hashlib.sha256(path.read_bytes()).hexdigest() for path in program_originals}
+        after_programs = w.http_json('http://127.0.0.1:8787/api/v1/status')
+        for key in ('feed_credit_sats', 'threshold_sats', 'feeds_due', 'remainder_sats', 'unresolved_feed_attempt'):
+            assert after_programs[key] == financial_before[key]
+        assert counts['post'] == 0
         finished = True
         return {'accepted': True, 'old_core_was_harmless_elf_standin': True,
                 'actual_native_schema_23_backup': True, 'actual_runtime_uid_clone_migration': True,
@@ -686,6 +724,14 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
                     'original_core_uid_isolated_checker': True, 'original_configurations_unchanged': True,
                     'candidate_limits_only_not_installed': True, 'backlog_review_still_required': True,
                     'services_changed': False, 'journals_opened': False, 'provider_operations': 0,
+                    'gateway_post_count': counts['post'], 'public_network_used': False, 'live_host_qualified': False},
+                'installed_six_program_maintenance': {'accepted': True, 'actual_six_native_programs_checked': True,
+                    'original_worker_uid_configuration_checks': True, 'actual_fresh_four_journal_backup': True,
+                    'both_compiled_schema_verifiers_accepted': True, 'actual_uid_copy_status_compared': True,
+                    'fresh_reward_backlog_review_bound': True, 'live_database_images_unchanged': True,
+                    'all_original_configuration_restored': True, 'actual_core_and_member_resumed': True,
+                    'outgoing_roles_masked': True, 'payouts_enabled': False, 'live_migration_performed': False,
+                    'different_program_builds_used': False, 'provider_operations': 0,
                     'gateway_post_count': counts['post'], 'public_network_used': False, 'live_host_qualified': False},
                 'installed_signed_self_read_activation': {'accepted': True,
                     'native_original_uid_configuration_check': True, 'actual_current_four_journal_backup': True,

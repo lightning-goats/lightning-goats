@@ -62,6 +62,14 @@ accepts a historical backup without changing its images or live applications;
 the private findings do not establish current activation readiness. See
 [the backlog review contract](deployment/cyberherd-state-maintenance.md#review-retained-reward-backlog).
 
+A separate [six-program maintenance transaction](deployment/cyberherd-program-maintenance.md)
+now prepares original/selected programs, verifies a fresh native four-journal
+backup with both verifiers, reviews its backlog and upgrades only executable bytes.
+It retains zero financial limits and masked outgoing roles, with explicit separate
+resumption and pre-resumption program rollback. Source and disposable installed
+qualification are being completed; no actual-host maintenance or financial
+candidate application is established by this addition.
+
 Separate NIP-46 clients now pass [actual household signing checks](testing/cyberherd-bunker-checkpoint-20261110.md):
 membership kinds 1/1311 and payout-signing kind 9734 preserve the exact project
 author, frozen unsigned bytes, canonical hashes and valid signatures. The operator

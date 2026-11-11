@@ -105,6 +105,13 @@ it; a current native configuration checker does not qualify an older program's
 execution behavior. Any later maintenance executor must qualify the selected
 programs and retained native state together before applying these candidates.
 
+The separate [six-program maintenance transaction](cyberherd-program-maintenance.md)
+implements the program-upgrade portion while retaining all existing zero limits.
+It verifies a fresh four-journal backup and private backlog report before replacing
+the six programs, with separate resumption and pre-resumption program rollback.
+It does not apply this financial candidate or activate outgoing roles; that later
+configuration/activation executor and actual qualification remain required.
+
 The [native backlog review](cyberherd-state-maintenance.md#review-retained-reward-backlog)
 must use a current verified native snapshot, not the running
 membership journal or a Python SQLite reader. `reward_worker::Worker::tick`

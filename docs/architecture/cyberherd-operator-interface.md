@@ -4,7 +4,9 @@ The optional `[view.auth]` section adds NIP-98 requests to the isolated loopback
 view listener. It pins one canonical public HTTPS origin and an explicit list of
 operator public keys. An empty allowlist permits only signed self reads. This
 configuration is absent by default; `cyberherdAuthEnabled` also defaults false.
-The optional nginx snippet is an inactive example, not an installed route.
+The full operator nginx snippet is an inactive example. The separate exact
+[public self-read route](../testing/cyberherd-self-read-public-live-20261111.md)
+is deployed with an empty operator allowlist; operator routes stay closed.
 
 ## Request authority
 
@@ -107,10 +109,11 @@ remove active authorization; controls require the server's operator decision.
 ## Verification and activation boundary
 
 Native signature, temporary-store, loopback/private-IPC and mocked-browser tests
-cover the contract. They do not qualify an installed household signer, public
-origin/WAF, new UIDs, provider spending or physical feeding. The API proxy and
-feature flags stay uninstalled/default-off until separate qualification. The full
-CyberHerd port also requires restore/retention and actual
+cover the contract. Those isolated checks do not qualify an installed household
+signer, actual operator browser, provider spending or physical feeding. Public
+operator ingress remains closed until separate qualification. Source flags
+default off; the separately qualified current public stage enables only
+self-status login. The full CyberHerd port also requires restore/retention and actual
 installed identity/network/provider/engine/NIP-46 checks and explicit activation.
 
 Protocol references: [NIP-98](https://github.com/nostr-protocol/nips/blob/master/98.md)

@@ -1,5 +1,9 @@
 # Signed self-read backend — deployed, 2026-11-11
 
+The later [public self-status release](cyberherd-self-read-public-live-20261111.md)
+now exposes self reads and browser login. This record describes the earlier
+backend-only transaction; its public-off observations remain historical.
+
 The member now accepts authenticated self-status reads on its existing loopback
 listener, with canonical origin `https://lightning-goats.com` and an **empty**
 operator allowlist. Public self-read ingress and the browser auth flag remain

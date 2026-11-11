@@ -98,15 +98,20 @@ passes source `548276f0f68674073ec583ee7fcffc0237a4c2dc`, all ten workflows,
 eight new protected-root cases and actual installed native qualification. Its
 actual-host backup/apply/resume is complete: only member auth configuration changes,
 paid images/programs/core configuration stay exact, and signed loopback self reads
-plus nonce/operator refusals pass. Public self ingress and the browser auth flag
-remain off; actual operator ingress remains disabled pending the selected
+plus nonce/operator refusals pass. Actual operator ingress remains disabled pending the selected
 public-key allowlist. See the retained
 failures, final artifact acceptance and preparation evidence in the
 [operator checkpoint](testing/cyberherd-installed-operator-checkpoint-20261111.md).
-The next source extension adds a self-only public website publisher, five passing
-local roster browser cases, three assembled nginx cases and thirteen WAF cases.
-Protected file/native installed qualification is pending; this does not yet
-change the live auth flag or public ingress.
+The subsequent [public self-status release](testing/cyberherd-self-read-public-live-20261111.md)
+passes all ten workflows on `e6110f1b0b902b0bdbea54987835f70388092160`, including
+41 browser cases, 110 protected-root cases and actual signed TLS/nginx/native
+self-read with closed operator ingress. Three assembled nginx and thirteen WAF
+cases also pass. Its actual nginx-only deployment preserves all 17 application
+files/PIDs and the 30-file public release's metadata/artwork, changing only the
+auth client and auth-enabled flag. Actual public desktop/mobile synthetic-signer
+self reads, nonce replay refusal, operator 404s and overlay WebSocket pass.
+The empty operator allowlist, zero financial limits and masked outgoing roles
+remain; no application restart, payment, command or feeding occurred.
 
 Other remaining work includes observed zap admission and incoming settlement/
 receipt delivery, operator interfaces, global network qualification, concrete externally reconciled recovery adoption, operator-selected

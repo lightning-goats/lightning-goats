@@ -1,5 +1,11 @@
 # Installed operator HTTP qualification — candidate, 2026-11-11
 
+The subsequent [public self-read deployment](cyberherd-self-read-public-live-20261111.md)
+passes exact source `e6110f1`, all ten workflows, the installed native self-only
+TLS phase and actual public desktop/mobile acceptance. Operator ingress and the
+operator allowlist remain closed. Earlier source-only statements below describe
+their recorded checkpoints.
+
 ## Public self-status source extension
 
 The next source change exposes only signed self-status GETs and the existing

@@ -10,9 +10,10 @@ The optional [read-only CyberHerd roster and OBS state](architecture/cyberherd-p
 are disabled by default and add no financial or operator mutation capability.
 The approved current rollout now serves the [live leaderboard](testing/cyberherd-live-readonly-site-20261110.md),
 with operator controls, CyberHerd Nostr and payouts still disabled.
-Optional [Nostr sign-in and operator controls](architecture/cyberherd-operator-interface.md)
-remain separately gated and uninstalled; their [source checkpoint](testing/cyberherd-operator-checkpoint-20261110.md)
-grants no live financial or physical activation.
+[Nostr self-status sign-in](testing/cyberherd-self-read-public-live-20261111.md)
+is now public on the leaderboard. [Operator controls](architecture/cyberherd-operator-interface.md)
+remain closed with an empty allowlist; no financial or physical activation follows
+from self-status access.
 
 [Explicit failed-payment cost review](architecture/cyberherd-failed-cost-recovery.md)
 now has a [485-test source checkpoint](testing/cyberherd-failed-cost-checkpoint-20261110.md).

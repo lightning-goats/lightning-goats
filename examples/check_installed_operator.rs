@@ -231,7 +231,7 @@ async fn exercise(client: &Client) -> Result<()> {
     ensure!(receipt["changed"] == true, "settings were not applied");
     let edited = get(client, 2, OVERVIEW).await?;
     ensure!(
-        edited["settings"]["minimum_sats"] == minimum.to_string()
+        edited["settings"]["minimum_sats"] == settings["action"]["minimum_sats"]
             && edited["settings"]["member_percent"] == 0,
         "settings readback differs"
     );

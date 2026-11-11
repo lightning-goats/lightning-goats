@@ -35,6 +35,8 @@ ignored in the ordinary pass; required privileged fixtures also passed.
 The proposed merge `dd7c4a28ce799a1e9da797843eae16b5165a2017` has an identical
 tree to the branch head, independently checked through GitHub comparison.
 
-Separately reviewed current-schema deployment remains pending. Production has
-not been changed by this source patch; the operator's paused feeder and current
-paid state remain preserved. The earlier failing run is retained above.
+The subsequent [current-schema program update](current-schema-core-patch-20261111.md)
+passes exact native/systemd qualification and actual protected VPS apply/resume.
+The corrected core is now running. The operator's paused feeder, current paid
+state and contact configuration remain preserved, with no real feeding/payment
+used for acceptance. The earlier failing run is retained above.

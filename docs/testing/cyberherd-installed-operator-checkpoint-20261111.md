@@ -58,7 +58,7 @@ qualify an unpaused activation/score mutation, provider payout, actual recipient
 delivery or recovery adoption. Production operator/auth/publication/payout gates
 remain closed until their separate qualified activation.
 
-## Membership-control extension — qualification pending
+## Membership-control extension — qualification history
 
 The same guarded test-only client now exercises actual HTTP activation and manual
 score assignment when its synthetic gateway reports ready, stale-revision refusal,
@@ -80,8 +80,8 @@ The fixture retains its original unknown physical UUID throughout. The real core
 must make no gateway POST and retain its original credit, threshold, due count,
 remainder and unresolved UUID. The fixture has no public network, real provider,
 real identity or physical destination. These new assertions await exact native CI
-and installed systemd execution; the prior qualified stages above do not prove
-them. Production operator routes and configuration remain unchanged.
+and installed systemd execution at the initial checkpoint; final qualification
+is recorded below. Production operator routes and configuration remain unchanged.
 
 The first extension source `bbd4cca32bbe268c36b907b8356a3c2e9ad0aab0`
 passed native Rust and the other eight workflows but failed Deployment run
@@ -134,8 +134,26 @@ real-frame regressions hold the turn, prove an admitted request stays pending an
 then returns its original batch after release, and prove timeout rejection leaves
 no stranded permit and permits a later request. The positive test polls an already
 readable frame without sleeps or cooperative-yield interference. Exact native CI
-and installed acceptance of this runtime correction remain pending; it is not
-installed on production.
+and installed acceptance were still pending at that corrective checkpoint.
+
+## Final membership-control acceptance
+
+Source `886e6438b83497f0ef4db9931620a21941c676a9` passes all ten workflows.
+Deployment `42973865835`, installed systemd job `130370388400`, passes every
+ready/paused/restart control above, exact normalized public score and zero share,
+final empty roster, unchanged core credit/unknown UUID and zero gateway POSTs or
+provider operations. Retained artifact `13834618387` has ZIP SHA256
+`0060225aaad28da8f13acd16cc4784265af91dc80d3a4009a6f1badc9e0d5080`;
+all six internal checksums and the exact named phase assertions were checked.
+Artifact source `6830038b2dd2a650c84bf712a9959e59885733cc` independently
+compares with zero file differences. Strict native CI also passes both real-frame
+bridge regressions. This retains, rather than dismisses, the earlier failed runs.
+
+The bounded core correction is subsequently
+[deployed with unchanged paid images](cyberherd-bridge-turn-live-20261111.md).
+Production operator auth/routes remain disabled pending the operator-selected
+public-key allowlist. The synthetic fixture does not qualify an actual operator
+browser, public production ingress, financial execution or recipient delivery.
 
 ## Optional authenticated edge transport — isolated checks
 

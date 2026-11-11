@@ -8,9 +8,11 @@ The original schema-23-to-24 contact procedure remains separate and rejects thes
 records. Never reuse a completed transaction or run checkout code as root.
 
 After qualifying exact source and independently pinned core/review archives,
-install a fresh root-owned tool closure using the documented authenticated
-launcher. Verify the launcher hash externally before loading it, then verify its
-full closure. The launcher selectors are:
+use an independently authenticated root-owned tool closure. An existing generation
+may be retained only when every closure file still matches the qualified source;
+otherwise install a fresh generation using the documented authenticated launcher.
+Verify the launcher hash externally before loading it, then verify its full
+closure. Always prepare new review/execution directories. The launcher selectors are:
 
 ```text
 --current-core-prepare ARCHIVE REVIEW_ARCHIVE SOURCE ARCHIVE_SHA REVIEW_SHA REVIEW_DIR

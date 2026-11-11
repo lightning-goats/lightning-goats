@@ -1,5 +1,9 @@
 # Current-schema core update — actual deployment, 2026-11-11
 
+The subsequent [bounded bridge update](cyberherd-bridge-turn-live-20261111.md)
+supersedes the program hashes and PIDs below. This document retains the earlier
+feed-intent deployment evidence.
+
 The [feed-intent correction](feed-intent-contention-20261111.md) passed all ten
 workflows on source `55ed77b8a3f0c7cb50b031536cb53161de6d5e89`. Production
 now runs the corrected core, retaining schema 24 and private contact. The older

@@ -82,13 +82,16 @@ The separate [private contact fee implementation](testing/website-contact-fee-ch
 
 The current overlay stage now has verified [boot wiring](testing/cyberherd-boot-persistence-20261111.md) with the existing reviewed membership unit enabled and unchanged live PIDs/configuration at that step. No host reboot or new feature activation was performed. A separate [installed operator HTTP exercise](testing/cyberherd-installed-operator-checkpoint-20261111.md) passes native signed requests, real member restart and durable nonce/command retry checks on synthetic isolated CI state. The full native suite exposed a [feed-intent contention failure](testing/feed-intent-contention-20261111.md); its immediate-write correction and native WAL regression pass all ten workflows. The subsequent [current-schema update](testing/current-schema-core-patch-20261111.md) passes source `640331c178bfe1214a2911e708a21ad5c607b006`, actual native/systemd rehearsal and protected VPS apply/resume. The corrected core is running with exact live database images preserved during replacement, unchanged contact/configuration, 28-sat credit and paused feeding. Core/member remain enabled; payout/signer remain masked and all CyberHerd monetary/publication gates remain off.
 
-The subsequent installed activation/score/ban/reset extension remains unqualified.
-Its diagnostics confirm valid core export with a lagging intake cursor; a bounded
-100-ms bridge read-turn wait and real-frame wait/timeout regressions await exact
-native/systemd checks. The public score assertion now waits for its committed
-projection rather than only member count. Optional authenticated TLS/nginx transport
-and eleven isolated actual-stack WAF cases pass. None of these subsequent changes
-is installed or enables production operator access; see the
+The subsequent installed activation/score/ban/reset extension passes exact native
+CI and installed systemd checks on source `886e6438b83497f0ef4db9931620a21941c676a9`.
+Its bounded 100-ms bridge read-turn correction is now
+[deployed](testing/cyberherd-bridge-turn-live-20261111.md) with a fresh verified
+native backup, exact unchanged paid images and resumed core/member services.
+The fixture verifies the committed normalized public projection, paused controls,
+manual reset and original receipts across actual restarts with zero gateway POSTs.
+Optional authenticated TLS/nginx transport and eleven isolated actual-stack WAF
+cases also pass. Actual operator ingress remains disabled pending the selected
+public-key allowlist; see the retained failures and final acceptance in the
 [operator checkpoint](testing/cyberherd-installed-operator-checkpoint-20261111.md).
 
 Other remaining work includes observed zap admission and incoming settlement/

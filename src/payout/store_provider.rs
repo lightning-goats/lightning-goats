@@ -76,7 +76,7 @@ impl Store {
         {
             bail!("fee observation differs from its committed provider request");
         }
-        let row = sqlx::query("SELECT gross_sats,address,recipient_json FROM payout_rows WHERE grant_id=? AND member=?")
+        let row = sqlx::query("SELECT r.gross_sats,r.address,r.recipient_json,g.plan_json FROM payout_rows r JOIN payout_grants g ON g.id=r.grant_id WHERE r.grant_id=? AND r.member=?")
             .bind(grant.to_string())
             .bind(&member)
             .fetch_one(&mut *tx)
@@ -85,9 +85,14 @@ impl Store {
         let recipient: crate::payout::recipient::Recipient =
             serde_json::from_str(&row.try_get::<String, _>("recipient_json")?)?;
         recipient.validate(&row.try_get::<String, _>("address")?)?;
+        let plan: Plan = serde_json::from_str(&row.try_get::<String, _>("plan_json")?)?;
+        plan.planning_policy.validate()?;
         let decision = crate::payout::inclusive_fees::evaluate(
             gross,
-            recipient.min_msat.div_ceil(1000).max(1),
+            recipient
+                .min_msat
+                .div_ceil(1000)
+                .max(plan.planning_policy.minimum_net_sats),
             self.policy.max_net_sats,
             doc.amount_sats,
             observation.0.fee_sats,

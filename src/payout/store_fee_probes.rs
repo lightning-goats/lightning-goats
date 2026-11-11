@@ -49,7 +49,12 @@ impl Store {
         }
         let recipient: super::super::recipient::Recipient =
             serde_json::from_str(&row.try_get::<String, _>("recipient_json")?)?;
-        let minimum = recipient.min_msat.div_ceil(1000).max(1);
+        let plan: Plan = serde_json::from_str(&row.try_get::<String, _>("plan_json")?)?;
+        plan.planning_policy.validate()?;
+        let minimum = recipient
+            .min_msat
+            .div_ceil(1000)
+            .max(plan.planning_policy.minimum_net_sats);
         let (net, previous) = if round == 0 {
             (gross, None)
         } else {
@@ -94,10 +99,9 @@ impl Store {
                 _ => bail!("fee discovery cannot continue after fitting or unaffordable quote"),
             }
         };
-        if net > self.policy.max_net_sats {
-            bail!("fee probe exceeds current delivered payment limit");
+        if net < minimum || net > self.policy.max_net_sats {
+            bail!("fee probe violates delivered payment bounds");
         }
-        let plan: Plan = serde_json::from_str(&row.try_get::<String, _>("plan_json")?)?;
         let planned = plan
             .rows
             .iter()

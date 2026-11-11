@@ -90,6 +90,14 @@ state, pending feeds and signed outboxes plus altered rows, extra triggers,
 unknown checksums and prepopulated private tables. This new change still needs
 exact native CI qualification; local formatting alone is not acceptance.
 
+The follow-up adds a required isolated root fixture for the public comparison
+entry point, selected and checked for its positive marker by the existing native
+CI launcher. It constructs a synthetic preceding-schema manifest, migrates only
+a separate copy, verifies preservation of the original manifest/images, and
+refuses candidate aliases, hard links, unexpected files, incomplete markers and
+publicly readable database files. It does not qualify live unit quiescence or
+replace the still-required installed maintenance rehearsal.
+
 Still required: native qualification of these additions; a protected maintenance
 transaction and installed rehearsal; current backup and actual deployment;
 controlled provider/paid-contact acceptance and recipient-side DM observation.

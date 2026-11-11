@@ -27,6 +27,7 @@ fixtures = {
     "state_maintenance::tests::root_four_journal_snapshot_preserves_wal_paid_pending_and_signed_state_and_blocks_restore_startup": "ROOT_FOUR_JOURNAL_FIXTURE_VERIFIED",
     "state_bootstrap::tests::root_offline_bootstrap_qualifies_three_actual_runtime_uids_and_refuses_replacing_journals": "ROOT_OFFLINE_BOOTSTRAP_FIXTURE_VERIFIED",
     "state_maintenance::legacy::tests::root_legacy_core_upgrade_preserves_wal_pending_receipts_epoch_signed_bytes_and_compares_migrated_copies": "ROOT_LEGACY_CORE_UPGRADE_FIXTURE_VERIFIED",
+    "state_maintenance::contact_upgrade::tests::root_contact_upgrade_compares_private_images_and_retains_original_backup": "ROOT_CONTACT_UPGRADE_FIXTURE_VERIFIED",
 }
 binary = str(binaries.pop())
 listed = subprocess.run([binary, "--list"], capture_output=True, text=True, check=True)

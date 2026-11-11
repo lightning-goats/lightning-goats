@@ -631,7 +631,8 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
         financial_prepared = json.loads(run(*launcher, '--cyberherd-financial-stage', str(financial_review),
             '--validator', str(financial_checker), '--validator-sha256', hashlib.sha256(financial_checker.read_bytes()).hexdigest(),
             '--member-percent', '10', '--max-sats-per-feed', '100', '--max-sats-per-24h', '1000',
-            '--max-fee-sats', '2', '--max-net-sats', '98', '--max-new-per-hour', '10'))
+            '--max-fee-sats', '0', '--max-net-sats', '100', '--max-new-per-hour', '100',
+            '--fee-mode', 'deduct_from_share'))
         assert financial_prepared == {'prepared': True, 'financial_candidate_only': True, 'activation_authorized': False,
             'services_changed': False, 'journals_opened': False, 'backlog_review_required': True}
         financial_record = json.loads((financial_review / 'PREPARED.json').read_text())
@@ -712,7 +713,8 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
         run(*launcher, '--cyberherd-financial-stage', str(activation_candidate),
             '--validator', str(financial_checker), '--validator-sha256', hashlib.sha256(financial_checker.read_bytes()).hexdigest(),
             '--member-percent', '10', '--max-sats-per-feed', '100', '--max-sats-per-24h', '1000',
-            '--max-fee-sats', '2', '--max-net-sats', '98', '--max-new-per-hour', '10')
+            '--max-fee-sats', '0', '--max-net-sats', '100', '--max-new-per-hour', '100',
+            '--fee-mode', 'deduct_from_share')
         activation_candidate_sha = hashlib.sha256((activation_candidate / 'PREPARED.json').read_bytes()).hexdigest()
         activation = base / 'ci-financial-activation'
         planned_financial = json.loads(run(*launcher, '--cyberherd-financial-maintenance', 'plan',

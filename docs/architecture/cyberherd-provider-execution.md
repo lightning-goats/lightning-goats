@@ -162,6 +162,8 @@ Verified result intake accepts the actual reduced net plus fee only within the
 original member gross and frozen recipient/planning minima. Historical fixed
 plans retain their exact net/fee checks. The new worker, atomicity and result
 fixtures require full CI qualification. Root financial-candidate rendering and
-its independent deployment checks still require the explicit inclusive mode.
+its independent native checker now carry matching explicit modes; the disposable
+installed rehearsal selects the operator's inclusive settings. Their new source
+requires qualification as well.
 None of these source changes has been installed on the live payout journal.
 Outgoing roles remain disabled; no partial configuration or activation is implied.

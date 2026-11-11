@@ -430,6 +430,7 @@ async fn inclusive_worker_deducts_actual_fee_promotes_once_and_recovers_original
         };
         assert_eq!(tick(&engine).await, Step::InvoiceIntent);
         assert_eq!(tick(&engine).await, Step::InvoiceSigned);
+        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
         assert_eq!(
             engine.tick_with(&invoices).await.unwrap(),
             Step::InvoiceSaved
@@ -439,6 +440,7 @@ async fn inclusive_worker_deducts_actual_fee_promotes_once_and_recovers_original
         assert_eq!(tick(&engine).await, Step::InvoiceIntent);
         engine.store = Store::connect(&w.url, w.policy.clone()).await.unwrap();
         assert_eq!(tick(&engine).await, Step::InvoiceSigned);
+        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
         assert_eq!(
             engine.tick_with(&invoices).await.unwrap(),
             Step::InvoiceSaved
@@ -484,7 +486,11 @@ async fn inclusive_worker_deducts_actual_fee_promotes_once_and_recovers_original
             .unwrap();
         assert_eq!(promoted.id(), original.id());
         w.mock.lock().unwrap().lose_execute = true;
+        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
         assert!(engine.tick().await.is_err());
+        // Prove the simulated lost reply followed actual provider submission,
+        // rather than treating an unrelated IPC/rate failure as that evidence.
+        assert_eq!(w.mock.lock().unwrap().patch_ids.len(), 1);
         engine.store = Store::connect(&w.url, w.policy.clone()).await.unwrap();
         assert_eq!(tick(&engine).await, Step::Submitted);
         w.mock.lock().unwrap().state = PaymentState::Completed;

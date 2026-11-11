@@ -78,7 +78,12 @@ result accounting. New ordinary/NIP-57 HTTP tests cover invoice reduction,
 restart, unchanged final identities and recovery after a lost execute response;
 a transaction-failure fixture checks rollback of a partially copied execution
 chain. These additions require full CI qualification. Root financial-candidate
-configuration and independent deployment checks still require integration. Provider/recipient
+configuration and independent deployment checks now accept the explicit mode,
+requiring zero independent fixed fee cap and matching membership/payout modes.
+The disposable installed rehearsal selects the operator's inclusive settings.
+Its updated native checker and full worker execution still require CI qualification.
+Seven local schema tests pass; ten focused protected financial-preparation tests
+pass with actual disposable root-owned files and mocked native/service operations. Provider/recipient
 acceptance and external recovery adoption remain separate. No new schema or fee
 code from this checkpoint is installed on the live payout journal. Outgoing roles
 remain disabled. Do not substitute the old fixed fee allowance for this policy or

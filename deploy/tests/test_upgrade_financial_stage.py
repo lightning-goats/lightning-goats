@@ -74,6 +74,25 @@ class FinancialBoundaries(unittest.TestCase):
         for value in invalid:
             with self.subTest(value=value),self.assertRaises(ValueError):F.validate_limits(value)
 
+    def test_inclusive_fee_policy_matches_operator_limits_without_a_fixed_fee_floor(self):
+        selected = dict(LIMITS, max_fee_sats=0, max_net_sats=100, max_new_per_hour=100,
+                        fee_mode='deduct_from_share')
+        F.validate_limits(selected)
+        original=fixture();saved=copy.deepcopy(original)
+        candidate=F.render(original,IDENTITIES,10006,selected)
+        self.assertEqual(original,saved)
+        self.assertEqual(candidate['membership']['rewards']['fee_mode'],'deduct_from_share')
+        self.assertEqual(candidate['membership']['rewards']['minimum_fee_sats'],0)
+        self.assertEqual(candidate['payout']['policy']['fee_mode'],'deduct_from_share')
+        self.assertEqual(candidate['payout']['policy']['max_fee_sats'],0)
+        self.assertEqual(candidate['payout']['policy']['max_sats_per_feed'],100)
+        self.assertEqual(candidate['payout']['policy']['max_sats_per_24h'],1000)
+        self.assertEqual(candidate['signer']['policy']['max_new_per_hour'],100)
+        for bad in [dict(selected,max_fee_sats=1),dict(selected,fee_mode='unknown'),
+                    dict(selected,fee_mode=True),dict(selected,fee_mode=[]),dict(selected,max_net_sats=101)]:
+            with self.subTest(bad=bad),self.assertRaises(ValueError):F.validate_limits(bad)
+        F.validate_limits(dict({n:0 for n in F.LIMITS},fee_mode='deduct_from_share'))
+
     def test_four_role_changes_retain_all_other_configuration_and_exclude_every_receive_alias(self):
         original=fixture();saved=copy.deepcopy(original);new=F.render(original,IDENTITIES,10006,LIMITS)
         self.assertEqual(original,saved)

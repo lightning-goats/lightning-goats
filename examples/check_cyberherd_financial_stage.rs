@@ -148,7 +148,8 @@ fn validate_stage(
         "candidate limits are only partially selected"
     );
     ensure!(
-        planner.fee_basis_points == 0
+        planner.fee_mode == p.fee_mode
+            && planner.fee_basis_points == 0
             && planner.minimum_fee_sats == p.max_fee_sats
             && planner.minimum_net_sats == 1
             && planner.maximum_net_sats == p.max_net_sats
@@ -373,6 +374,28 @@ mod tests {
             *target = value;
             assert!(accepts(values).is_err());
         }
+    }
+
+    #[test]
+    fn inclusive_fees_require_matching_modes_and_no_fixed_fee_floor_or_cap() {
+        let mut values = fixture();
+        for (index, section) in [(1, "rewards"), (2, "policy")] {
+            values[index][section]
+                .as_table_mut()
+                .unwrap()
+                .insert("fee_mode".into(), "deduct_from_share".into());
+        }
+        values[1]["rewards"]["minimum_fee_sats"] = 0.into();
+        values[2]["policy"]["max_fee_sats"] = 0.into();
+        accepts(values.clone()).unwrap();
+        let mut wrong = values.clone();
+        wrong[2]["policy"]["fee_mode"] = "fixed_allowance".into();
+        assert!(accepts(wrong).is_err());
+        let mut wrong = values.clone();
+        wrong[2]["policy"]["max_fee_sats"] = 1.into();
+        assert!(accepts(wrong).is_err());
+        values[1]["rewards"]["minimum_fee_sats"] = 1.into();
+        assert!(accepts(values).is_err());
     }
 
     #[test]

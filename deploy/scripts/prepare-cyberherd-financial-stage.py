@@ -45,8 +45,14 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def validate_limits(limits):
-    if set(limits) != LIMITS or any(type(v) is not int or v < 0 for v in limits.values()):
-        raise ValueError('all six explicit integer financial limits required')
+    if (set(limits) not in (LIMITS, LIMITS | {'fee_mode'})
+            or any(type(limits[n]) is not int or limits[n] < 0 for n in LIMITS)):
+        raise ValueError('all six explicit integer financial limits and an optional fee mode required')
+    mode = limits.get('fee_mode', 'fixed_allowance')
+    if type(mode) is not str or mode not in {'fixed_allowance', 'deduct_from_share'}:
+        raise ValueError('unknown financial fee mode')
+    if mode == 'deduct_from_share' and limits['max_fee_sats'] != 0:
+        raise ValueError('deduct-from-share has no independent fixed fee cap')
     if (limits['member_percent'] > 100 or limits['max_new_per_hour'] > 3600
             or limits['max_sats_per_24h'] > 2**63 - 1
             or limits['max_net_sats'] > (2**63 - 1) // 1000
@@ -54,7 +60,7 @@ def validate_limits(limits):
             or limits['max_fee_sats'] > limits['max_sats_per_feed']
             or limits['max_net_sats'] > limits['max_sats_per_feed']):
         raise ValueError('financial limits exceed their bounded scope')
-    if any(limits.values()) and any(limits[name] == 0 for name in LIMITS - {'max_fee_sats'}):
+    if any(limits[n] for n in LIMITS) and any(limits[name] == 0 for name in LIMITS - {'max_fee_sats'}):
         raise ValueError('use all-zero limits or a complete positive allocation and admission policy')
 
 
@@ -120,6 +126,14 @@ def render(original, identities, plans_gid, limits):
         max_sats_per_feed=limits['max_sats_per_feed'], max_sats_per_24h=limits['max_sats_per_24h'],
         max_fee_sats=limits['max_fee_sats'], max_net_sats=limits['max_net_sats'],
         operation_addresses=sorted(operations))
+    mode = limits.get('fee_mode', 'fixed_allowance')
+    if mode == 'deduct_from_share':
+        member['rewards']['fee_mode'] = mode
+        payout['policy']['fee_mode'] = mode
+    else:
+        # Preserve the historical candidate representation and do not inherit a
+        # different mode from a previously disabled configuration.
+        payout['policy'].pop('fee_mode', None)
     signer['enabled'] = True
     signer['policy'].update(max_net_sats=limits['max_net_sats'], max_new_per_hour=limits['max_new_per_hour'])
     return candidate
@@ -245,8 +259,11 @@ def main():
     parser.add_argument('--validator-sha256', required=True)
     for name in sorted(LIMITS):
         parser.add_argument('--' + name.replace('_', '-'), required=True, type=int)
+    parser.add_argument('--fee-mode', choices=['fixed_allowance', 'deduct_from_share'])
     args = parser.parse_args()
     limits = {name: getattr(args, name) for name in LIMITS}
+    if args.fee_mode is not None:
+        limits['fee_mode'] = args.fee_mode
     print(json.dumps(prepare(args.directory, args.validator, args.validator_sha256, limits), sort_keys=True))
 
 

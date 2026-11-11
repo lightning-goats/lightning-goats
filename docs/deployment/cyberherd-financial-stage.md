@@ -1,9 +1,8 @@
 # Four-role CyberHerd financial candidate
 
 `prepare-cyberherd-financial-stage.py` prepares a complete candidate for review;
-it installs nothing. It adds one selector to the authenticated root tool closure,
-bringing the closure to **24 files**. Use only an independently
-qualified, root-owned generation and authenticate the launcher externally before
+it installs nothing. It uses the authenticated root tool closure and its exported
+exact file/digest manifest. Use only an independently qualified, root-owned generation and authenticate the launcher externally before
 isolated Python interprets it. Never execute a writable checkout as root.
 
 The command requires the current running receive/member installation, existing
@@ -13,8 +12,12 @@ epoch, account/fingerprint, four identities, private sockets, payees and install
 files/PIDs. It does not read a credential, open a journal or contact a provider.
 
 All six limits are explicit operator input: member percentage, per-feeding and
-per-24-hour sats, per-payment fee ceiling, maximum net payout and new signatures
-per hour. Nothing defaults to a nonzero spending value. All-zero review is
+per-24-hour sats, the fixed fee field, maximum net payout and new signatures
+per hour. `--fee-mode deduct_from_share` explicitly selects variable Strike fees
+deducted from each member's gross share. In this mode the fixed fee field must be
+zero; it is not a fee ceiling, and the per-feeding/day gross limits still include
+all fees. The historical default `fixed_allowance` preserves its original fixed
+fee semantics. Nothing defaults to a nonzero spending value. All-zero review is
 supported; otherwise the allocation/admission limits must form a complete bounded
 positive policy. Zero fee ceilings remain valid. Native validation enforces the
 same limits and exact cross-role references.
@@ -32,6 +35,7 @@ The authenticated launcher argument shape is:
   --validator ROOT_OWNED_CHECKER --validator-sha256 INDEPENDENT_SHA256
   --member-percent PERCENT --max-sats-per-feed SATS --max-sats-per-24h SATS
   --max-fee-sats SATS --max-net-sats SATS --max-new-per-hour COUNT
+  [--fee-mode fixed_allowance|deduct_from_share]
 ```
 
 This is an argument shape, not a standalone shell command. The output must be a
@@ -90,7 +94,13 @@ records all ten passing workflows, verified artifacts and the actual VPS's
 stored-allocation refusal before candidate creation. The new tools/checker are
 installed separately; no actual-host candidate has been validated or activated.
 
-The actual-host candidate awaits the requested operator limits. Before any
+The operator selected 10%, 100 sats per feeding and 1,000 sats per rolling day
+including fees, 100 sats maximum net, 100 new signatures per hour, and variable
+Strike fees deducted from member shares. Preparation must pass
+`--fee-mode deduct_from_share --max-fee-sats 0` alongside those explicit limits.
+The native checker requires matching membership/payout modes. The installed
+rehearsal now exercises this mode on disposable state. Updated source/artifacts,
+actual-host qualification and schema maintenance remain required. Before any
 separately approved activation, review retained confirmed-feeding barriers and
 funding/reservations, qualify the real provider and intended recipients, take a
 current verified native four-journal backup with all writers quiesced, and apply

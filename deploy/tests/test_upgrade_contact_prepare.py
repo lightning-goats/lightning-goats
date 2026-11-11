@@ -107,7 +107,8 @@ class ContactPreparationFiles(unittest.TestCase):
                 path.write_text('old program: ' + name)
                 path.chmod(0o755)
                 old[str(path)] = TX.fingerprint(path)
-            baseline = {'files': old, 'states': {'core': {'MainPID': '123'}, 'membership': {'MainPID': '456'}}}
+            baseline = {'files': old, 'states': {'core': {'MainPID': '123'}, 'membership': {'MainPID': '456'}},
+                        'identities': {'core': {'uid': 50001, 'gid': 50001}}}
             archive, review = root / 'core.tar.gz', root / 'review.tar.gz'
             archive.write_bytes(b'fixture archive, verified by test substitute')
             with tarfile.open(review, 'w:gz') as output:
@@ -129,7 +130,7 @@ class ContactPreparationFiles(unittest.TestCase):
                     patch.object(PREPARE.C.PREFLIGHT, 'preflight', return_value={'source_commit': 'a' * 40}), \
                     patch.object(PREPARE.C.PREFLIGHT.RELEASE, 'verify_archive', side_effect=extract), \
                     patch.object(PREPARE.Q.I.PACKAGE, 'verify') as review_check, \
-                    patch.object(PREPARE.C, 'command', side_effect=lambda *args: commands.append(args)):
+                    patch.object(PREPARE.C, 'command', side_effect=lambda *args, **kwargs: commands.append(args)):
                 result = PREPARE.prepare(archive, review, 'a' * 40,
                                          hashlib.sha256(archive.read_bytes()).hexdigest(),
                                          hashlib.sha256(review.read_bytes()).hexdigest(), base / 'prepared')
@@ -137,9 +138,12 @@ class ContactPreparationFiles(unittest.TestCase):
                 self.assertFalse(result['activation_supported'])
                 self.assertFalse(result['journals_opened'])
                 self.assertEqual(review_check.call_count, 1)
-                self.assertEqual(len(commands), 4)
+                self.assertEqual(len(commands), 5)
                 self.assertEqual([c[1:] for c in commands[:3]], [('--help',)] * 3)
-                self.assertEqual(commands[-1][1:], ('--config', str(PREPARE.S.MAINTENANCE), 'check'))
+                self.assertEqual(commands[3][1:], ('--config', str(PREPARE.S.MAINTENANCE), 'check'))
+                self.assertEqual(commands[-1][:4], ('/usr/bin/unshare', '--net', '--', '/usr/bin/setpriv'))
+                self.assertEqual(commands[-1][-1], '--help')
+                self.addCleanup(shutil.rmtree, Path(commands[-1][-2]).parent)
                 self.assertFalse((base / 'prepared/INCOMPLETE').exists())
                 self.assertTrue((base / 'prepared/PREPARED.json').exists())
                 for path, fingerprint in old.items():

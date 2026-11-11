@@ -22,6 +22,7 @@ import os
 from pathlib import Path
 import re
 import tarfile
+import tempfile
 import tomllib
 
 
@@ -150,6 +151,24 @@ def stage_archive(archive, staged, digest):
         raise ValueError('independent archive digest differs')
 
 
+def runtime_help(program, component):
+    """Prove actual UID/netns execution before any maintenance or journal open."""
+    C.protected(Path('/run'), directory=True)
+    carrier = Path(tempfile.mkdtemp(prefix='lg-contact-help-', dir='/run'))
+    carrier.chmod(0o711)
+    try:
+        target = carrier / 'lightning-goatsctl'
+        TX.copy_durable(program, target, TX.fingerprint(program))
+        C.command('/usr/bin/unshare', '--net', '--', '/usr/bin/setpriv',
+                  '--reuid=' + str(component['uid']), '--regid=' + str(component['gid']),
+                  '--clear-groups', '--inh-caps=-all', '--ambient-caps=-all', '--bounding-set=-all',
+                  '--no-new-privs', str(target), '--help', timeout=30)
+        return str(carrier)
+    finally:
+        carrier.chmod(0o700)
+        TX.sync_directory(carrier)
+
+
 def prepare(archive, review_archive, source, digest, review_digest, directory):
     C.root()
     C.protected(C.BASE, directory=True, private=True)
@@ -182,6 +201,7 @@ def prepare(archive, review_archive, source, digest, review_digest, directory):
     for name in TARGET_NAMES:
         C.command(str(payload / name), '--help')
     C.command(str(payload / 'cyberherd-statectl'), '--config', str(S.MAINTENANCE), 'check')
+    carrier = runtime_help(payload / 'lightning-goatsctl', original['identities']['core'])
 
     def unchanged():
         if baseline() != original:
@@ -201,6 +221,7 @@ def prepare(archive, review_archive, source, digest, review_digest, directory):
         'program_manifest_sha256': TX.fingerprint(directory / 'programs/TRANSACTION.json')['sha256'],
         'activation_supported': False, 'services_changed': False, 'journals_opened': False,
         'credentials_loaded': False, 'contact_enabled': False,
+        'native_runtime_help_verified': True, 'native_runtime_help_carrier': carrier,
     })
     (directory / 'INCOMPLETE').unlink()
     TX.sync_directory(directory)

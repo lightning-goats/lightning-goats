@@ -29,7 +29,11 @@ matching protected four-journal policy, original non-admin identities, zero
 financial ceilings, absent membership signer and masked/stopped payout roles.
 It freezes configuration, unit/drop-in, process and program identities; verifies
 both archives; stages the three native programs and original file fingerprints;
-and retains a private `PREPARED.json`. It opens no journal, reads no credential
+and retains a private `PREPARED.json`. The current candidate additionally runs the
+pinned CLI's `--help` under the actual core UID with all capabilities removed and
+a new isolated network namespace, before any maintenance. This detects execution,
+permission or namespace failures while the existing services still run. It opens
+no journal, reads no credential
 and changes no installed program, configuration, unit or service. Reused paths,
 changed baselines and incomplete output refuse. It provides no apply/resume
 command. Do not execute its generic file transaction as a substitute for the
@@ -79,6 +83,14 @@ compares its own namespace without reading PID 1, which the hardened unit hides.
 The native backup, clone/live migration, comparisons and resumed new services
 must all actually pass. The stand-in is not evidence about an old production
 daemon, and no fixture helper is included in production archives.
+
+The configuration-only `check_private_contact_stage` native helper prepares the
+later feature activation boundary. It loads no state or credential and requires
+all original TOML values to match exactly after removing the single new contact
+table. Native configuration validation also requires active mode, the existing
+project recipient and bounded public inbox relays; unknown contact fields refuse.
+This helper does not apply configuration or change the migration executor's
+default-disabled contact behavior.
 
 Before an actual upgrade, a separately qualified maintenance coordinator must
 quiesce and fence all four writers, take and verify a **current** native schema-23

@@ -163,6 +163,7 @@ class ContactMaintenanceFiles(unittest.TestCase):
         self.write(self.review / 'release.tar.gz', b'qualified core fixture archive', 0o600)
         self.write(self.review / 'review.tar.gz', b'qualified review fixture archive', 0o600)
         review = {'version': 1, 'tool': U.verified_tool_identity(), 'baseline': self.baseline,
+                  'native_runtime_help_verified': True,
                   'original_order': list(self.original_files), 'selected_program_sha256': hashes,
                   'release': {'archive_sha256': U.digest(self.review / 'release.tar.gz')},
                   'review_archive_sha256': U.digest(self.review / 'review.tar.gz'),

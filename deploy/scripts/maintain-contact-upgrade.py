@@ -64,6 +64,7 @@ def review_record(review, expected):
         raise ValueError('independently reviewed preparation digest required')
     r = C.read_json(review / 'PREPARED.json')
     if (r['version'] != 1 or r['tool'] != verified_tool_identity()
+            or r.get('native_runtime_help_verified') is not True
             or any(r[key] is not False for key in ('activation_supported', 'services_changed',
                    'journals_opened', 'credentials_loaded', 'contact_enabled'))
             or (review / 'INCOMPLETE').exists()):

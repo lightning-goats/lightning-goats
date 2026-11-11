@@ -197,11 +197,33 @@ Protected root attestation binds its network namespace without weakening the
 unit's existing hidden-process policy. Both clone/live migrations, native
 four-journal backup/comparisons and resumed new core/membership are actual native
 programs under actual runtime identities. The helper is absent from production
-archives and refuses ordinary invocation. This combined rehearsal source still
-needs exact Rust/root/installed CI qualification; no live migration is implied.
+archives and refuses ordinary invocation. All ten workflows pass on
+`7c640bbed1aebffc581fdadd17d03c536163aed4`, including
+[CI](https://github.com/lightning-goats/lightning-goats/actions/runs/42944380534),
+[Deployment](https://github.com/lightning-goats/lightning-goats/actions/runs/42944380571),
+[Security](https://github.com/lightning-goats/lightning-goats/actions/runs/42944380566)
+and [real NIP-46](https://github.com/lightning-goats/lightning-goats/actions/runs/42944380500).
+Tested merge `c9917cf7b1d82159e42da046c6c2c33fd9ee5614` has zero file differences.
+Installed systemd job `130275774433` actually passes the schema-23-to-24
+maintenance exercise. Retained artifact `13821802917`, ZIP SHA256
+`b42740df6c45ece4c1cae544ce6b48c15f726895899faf0f04b982dee05821d3`,
+passes all six internal checksums. Its report positively confirms the actual
+native backup, UID clone migration, four-journal comparisons, actual migration
+and resumed new services, while preserving original paid/signed rows, epoch and
+policy. Gateway POST count is zero; contact stays disabled and the report does
+not qualify a live host. No production migration is implied by this result.
 
-Still required: exact executor qualification
-and installed migration rehearsal; current backup and actual deployment;
+The following preparation improvement also probes the selected native CLI's
+`--help` under the real core UID, cleared groups/capabilities and a new network
+namespace before any service stop or journal access. It catches host execution
+constraints before entering maintenance; a new preparation record must carry its
+positive result. The independent configuration-only native contact-stage checker
+permits only the added contact table and preserves every existing payment/feeder
+value. Both are subsequent source work pending exact qualification; the actual
+VPS still uses the earlier unchanged preparation-only generation.
+
+Still required: qualification of the UID-help/config-only additions; fresh
+protected artifacts and an actual execution plan; current backup and deployment;
 controlled provider/paid-contact acceptance and recipient-side DM observation.
 The old legacy-core upgrade helper is not this upgrade path. No production
 configuration, daemon, schema, credential, nginx contact route or journal changed.

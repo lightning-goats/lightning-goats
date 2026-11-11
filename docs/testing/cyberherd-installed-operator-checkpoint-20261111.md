@@ -249,7 +249,7 @@ It does not establish public self-read acceptance or authorize operator access.
 Actual operator keys are still awaiting the operator's public-key allowlist;
 never infer one from project identity, social activity or previous client keys.
 
-## Self-read activation transaction — candidate
+## Self-read activation transaction — qualified and deployed
 
 A separate [authenticated configuration transaction](../deployment/cyberherd-self-read-activation.md)
 now freezes and validates only the original member's new auth section with an
@@ -260,11 +260,15 @@ and units remain bound, and both outgoing roles stay masked during resume.
 The original-UID native checker runs without credentials or networking. Its
 22-file tool generation is separate from the older installed 21-file generation.
 
-Three unprivileged scope/entrypoint/flag tests pass; eight real protected-file
-cases require separate root CI. The installed disposable rehearsal now includes
+Three unprivileged scope/entrypoint/flag tests and all eight separate root file
+cases pass on source `548276f0f68674073ec583ee7fcffc0237a4c2dc`. All ten
+workflows and the installed disposable rehearsal pass, including
 the actual native transaction, then signed self reads by two distinct synthetic
 identities and refusal of operator reads/templates/reset. Membership revision/
 cycle and original core credit/unknown UUID must stay unchanged, with zero
-gateway POSTs. These new transaction/native assertions await exact CI. Neither
-this source addition nor the earlier configuration-only check installs auth on
-the production host or exposes a public route.
+gateway POSTs. The retained report and subsequent actual-host backup/apply/resume
+plus signed read/refusal checks are recorded in the
+[live backend checkpoint](cyberherd-self-read-backend-live-20261111.md).
+The member now serves self reads on loopback with an empty operator allowlist.
+Public auth ingress and the browser flag remain off. The earlier configuration-
+check-only record remains retained and was not reused as an activation plan.

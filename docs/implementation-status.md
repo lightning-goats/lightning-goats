@@ -93,9 +93,14 @@ Optional authenticated TLS/nginx transport and eleven isolated actual-stack WAF
 cases also pass. Subsequent source `124809fc0b410f4e9d25cc26d24f5b11998bead7`
 passes all ten workflows and a combined verified-TLS/nginx/native operator
 rehearsal, including exact signed query/body transport, refusals and command retry.
-A private empty-operator self-read configuration also passes the installed member's
-original-UID configuration checker; it is not installed. Actual operator ingress
-remains disabled pending the selected public-key allowlist; see the retained
+The subsequent empty-operator [self-read transaction](testing/cyberherd-self-read-backend-live-20261111.md)
+passes source `548276f0f68674073ec583ee7fcffc0237a4c2dc`, all ten workflows,
+eight new protected-root cases and actual installed native qualification. Its
+actual-host backup/apply/resume is complete: only member auth configuration changes,
+paid images/programs/core configuration stay exact, and signed loopback self reads
+plus nonce/operator refusals pass. Public self ingress and the browser auth flag
+remain off; actual operator ingress remains disabled pending the selected
+public-key allowlist. See the retained
 failures, final artifact acceptance and preparation evidence in the
 [operator checkpoint](testing/cyberherd-installed-operator-checkpoint-20261111.md).
 

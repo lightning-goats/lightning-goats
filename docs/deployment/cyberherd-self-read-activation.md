@@ -1,5 +1,10 @@
 # CyberHerd signed self-read configuration
 
+Source `548276f0f68674073ec583ee7fcffc0237a4c2dc` passes exact CI/native
+qualification and [actual backend deployment](../testing/cyberherd-self-read-backend-live-20261111.md).
+The current member is configured; do not reapply its completed transaction. Public
+ingress and the browser flag remain separate and disabled.
+
 The authenticated `--cyberherd-self-read` tool adds only `[view.auth]` to the
 existing enabled member/view configuration. It binds one canonical HTTPS origin
 and an **empty** operator allowlist. The API can verify a signer's own status;

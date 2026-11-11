@@ -66,9 +66,13 @@ A separate [six-program maintenance transaction](deployment/cyberherd-program-ma
 now prepares original/selected programs, verifies a fresh native four-journal
 backup with both verifiers, reviews its backlog and upgrades only executable bytes.
 It retains zero financial limits and masked outgoing roles, with explicit separate
-resumption and pre-resumption program rollback. Source and disposable installed
-qualification are being completed; no actual-host maintenance or financial
-candidate application is established by this addition.
+resumption and pre-resumption program rollback. Its
+[qualified checkpoint](testing/cyberherd-program-maintenance-checkpoint-20261111.md)
+passes all ten workflows, 526 ordinary native tests, 131 protected-root Python
+cases and the installed native/systemd transaction. Actual VPS preparation and
+independent staged/original file/process readback pass without opening journals
+or changing running applications. No actual-host maintenance, financial candidate
+application or outgoing activation has been performed.
 
 Separate NIP-46 clients now pass [actual household signing checks](testing/cyberherd-bunker-checkpoint-20261110.md):
 membership kinds 1/1311 and payout-signing kind 9734 preserve the exact project

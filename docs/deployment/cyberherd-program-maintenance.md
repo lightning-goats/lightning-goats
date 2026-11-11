@@ -117,6 +117,9 @@ native snapshot/review and actual core/member resumption. That phase uses the sa
 program build on both sides; it does not claim different-build live acceptance.
 Provider operations, public networking and gateway POSTs remain zero in the fixture.
 No actual-host maintenance has been performed for this new transaction.
+The [qualified checkpoint](../testing/cyberherd-program-maintenance-checkpoint-20261111.md)
+records the exact passing source/artifacts and actual configuration-only VPS
+preparation with independent unchanged-file/process readback.
 
 The [financial candidate](cyberherd-financial-stage.md) and
 [native backlog review](cyberherd-state-maintenance.md#review-retained-reward-backlog)

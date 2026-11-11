@@ -31,6 +31,12 @@ now qualifies frozen feeding/plan/reservation classification from accepted backu
 copies, including pending intake and cursor lag. Actual historical-copy
 acceptance preserves live applications and grants no financial activation.
 
+The [six-program maintenance checkpoint](testing/cyberherd-program-maintenance-checkpoint-20261111.md)
+qualifies a separate program-only transaction with fresh native backup/review,
+explicit resumption and pre-resumption program rollback. Actual VPS preparation
+passes without changing live applications. Applying financial configuration and
+activating payouts remain separate work.
+
 [Explicit failed-payment cost review](architecture/cyberherd-failed-cost-recovery.md)
 now has a [485-test source checkpoint](testing/cyberherd-failed-cost-checkpoint-20261110.md).
 Provider failure alone never releases funds, and the legacy two-store restore

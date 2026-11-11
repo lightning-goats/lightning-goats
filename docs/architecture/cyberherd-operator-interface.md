@@ -6,7 +6,14 @@ operator public keys. An empty allowlist permits only signed self reads. This
 configuration is absent by default; `cyberherdAuthEnabled` also defaults false.
 The full operator nginx snippet is an inactive example. The separate exact
 [public self-read route](../testing/cyberherd-self-read-public-live-20261111.md)
-is deployed with an empty operator allowlist; operator routes stay closed.
+was initially deployed with an empty operator allowlist. The operator subsequently
+selected the existing project messaging identity; its [live authorization and
+three-user settings change](../testing/cyberherd-three-user-capacity-live-20261111.md)
+are verified through the loopback API. Public operator routes remain closed.
+The public self-read site's installer intentionally still requires an empty
+operator allowlist and must not be reused against this changed baseline. A
+separate operator-site transaction must retain the existing project allowlist,
+three-user stored capacity, paid state, receive process and financial limits.
 
 ## Request authority
 

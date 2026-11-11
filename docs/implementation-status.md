@@ -90,8 +90,11 @@ completed selected-program review, takes a fresh stopped-writer backup/review,
 refuses unreceived financial events or historical funded work, and separates
 configuration application from explicit four-role activation. A native review
 distinguishes payment/feeding cursor tails from ordinary overlay lag. Source,
-protected-file and disposable installed qualification are being completed; no
-actual-host financial transaction or provider execution is established.
+protected-file and disposable installed qualification now pass the
+[527-test source checkpoint](testing/cyberherd-financial-maintenance-checkpoint-20261111.md),
+including all 154 protected-root upgrade cases, 41 browser cases and the exact
+positive four-role systemd report. No actual-host financial transaction or
+provider execution is established.
 
 Separate NIP-46 clients now pass [actual household signing checks](testing/cyberherd-bunker-checkpoint-20261110.md):
 membership kinds 1/1311 and payout-signing kind 9734 preserve the exact project

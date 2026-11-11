@@ -39,6 +39,11 @@ explicit resumption and pre-resumption program rollback. Actual VPS preparation
 passes without changing live applications. Applying financial configuration and
 activating payouts remain separate work.
 
+The [first financial transaction checkpoint](testing/cyberherd-financial-maintenance-checkpoint-20261111.md)
+now qualifies explicit configuration application/resumption on synthetic state,
+including native backlog gates, four systemd services and independent boundaries.
+Actual financial limits, provider/recipient acceptance and activation remain separate.
+
 [Explicit failed-payment cost review](architecture/cyberherd-failed-cost-recovery.md)
 now has a [485-test source checkpoint](testing/cyberherd-failed-cost-checkpoint-20261110.md).
 Provider failure alone never releases funds, and the legacy two-store restore

@@ -134,6 +134,7 @@ impl Store {
             "payout_invoices",
             "payout_invoice_journal",
             "payout_quote_intents",
+            "payout_fee_observations",
             "payout_quote_records",
             "payout_quote_duplicates",
             "payout_execute_intents",

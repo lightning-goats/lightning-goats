@@ -1266,3 +1266,75 @@ fn payout_identity_configuration_and_key_fingerprint_cannot_be_silently_rebound(
     assert!(SourceVerifier::new(Uuid::new_v4(), &fingerprint, format!("{KEY}\n")).is_err());
     assert!(SourceVerifier::new(Uuid::new_v4(), &fingerprint, KEY.into()).is_ok());
 }
+
+#[tokio::test]
+async fn inclusive_fee_observations_survive_reopen_without_mutating_grants() {
+    use crate::payout::store::Store;
+    let f = Fixture::new().await;
+    let q = qualified(&f).await;
+    let url = format!(
+        "sqlite://{}",
+        f.root.path().join("inclusive-fees.db").display()
+    );
+    let policy = journal_policy(&q);
+    let store = Store::connect(&url, policy.clone()).await.unwrap();
+    let grant = store
+        .admit(&f.plan, &q, f.reservation.created_at + 10)
+        .await
+        .unwrap();
+    let db = sqlx::SqlitePool::connect(&url).await.unwrap();
+    let member = f.plan.rows[0].pubkey.clone();
+    let insert = |round: i64, net: i64, fee: i64, gross: i64| {
+        let (db, id, member) = (&db, grant.id.to_string(), member.clone());
+        async move {
+            sqlx::query("INSERT INTO payout_fee_observations(grant_id,member,round,provider_quote_id,gross_sats,invoice_net_sats,fee_sats,total_sats,observed_at,document_json) VALUES(?,?,?,?,?,?,?,?,?,?)")
+                .bind(id).bind(member).bind(round).bind(Uuid::new_v4().to_string())
+                .bind(gross).bind(net).bind(fee).bind(net + fee).bind(100_i64).bind("{}")
+                .execute(db).await
+        }
+    };
+    // The fixture's actual admitted gross is two sats. Discovery of a one-sat
+    // fee requires a new one-sat invoice; the first quote cannot execute.
+    assert!(insert(0, 2, 1, 3).await.is_err());
+    insert(0, 2, 1, 2).await.unwrap();
+    assert!(insert(2, 1, 1, 2).await.is_err());
+    assert!(insert(1, 2, 1, 2).await.is_err());
+    insert(1, 1, 1, 2).await.unwrap();
+    assert!(insert(2, 1, 0, 2).await.is_err());
+    assert!(
+        sqlx::query("UPDATE payout_fee_observations SET fee_sats=0")
+            .execute(&db)
+            .await
+            .is_err()
+    );
+    assert!(
+        sqlx::query("DELETE FROM payout_fee_observations")
+            .execute(&db)
+            .await
+            .is_err()
+    );
+    drop(store);
+    let reopened = Store::connect(&url, policy).await.unwrap();
+    assert_eq!(
+        reopened
+            .admit(&f.plan, &q, f.reservation.created_at + 11)
+            .await
+            .unwrap(),
+        grant
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM payout_fee_observations")
+            .fetch_one(&db)
+            .await
+            .unwrap(),
+        2
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM payout_execute_intents")
+            .fetch_one(&db)
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(reopened.held_sats().await.unwrap(), 2);
+}

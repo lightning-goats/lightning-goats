@@ -94,6 +94,8 @@ class ToolLaunchTests(unittest.TestCase):
             self.assertIn('--acknowledge-provider-recipient-review', run(ok=True).stdout)
             command[6:] = ['--cyberherd-project-operator', 'apply', '--help']
             self.assertIn('--approve-project-operator', run(ok=True).stdout)
+            command[6:] = ['--cyberherd-operator-site-prepare', '--help']
+            self.assertIn('--source-manifest-sha256', run(ok=True).stdout)
             command[6:] = ['--help']
             for name in LAUNCH.FILES - {'launch-vps-upgrade.py'}:
                 target = bundle / name

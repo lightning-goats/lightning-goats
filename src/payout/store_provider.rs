@@ -17,6 +17,116 @@ pub enum Status {
 }
 
 impl Store {
+    pub async fn saved_fee_observation(
+        &self,
+        grant: Uuid,
+        member: &str,
+    ) -> Result<Option<(u8, FeeObservation)>> {
+        let mut tx = self.pool.begin().await?;
+        let row = sqlx::query("SELECT round,provider_quote_id,gross_sats,invoice_net_sats,fee_sats,total_sats,observed_at,document_json FROM payout_fee_observations WHERE grant_id=? AND member=? ORDER BY round DESC LIMIT 1")
+            .bind(grant.to_string()).bind(member).fetch_optional(&mut *tx).await?;
+        let Some(row) = row else {
+            tx.commit().await?;
+            return Ok(None);
+        };
+        let observation =
+            restore_fee_observation(row.try_get::<String, _>("document_json")?.as_bytes())?;
+        let doc = load_doc(&mut tx, observation.0.request.id, false).await?;
+        let binding = sqlx::query("SELECT grant_id,member FROM payout_invoice_intents WHERE id=?")
+            .bind(doc.invoice_id.to_string())
+            .fetch_one(&mut *tx)
+            .await?;
+        if doc != observation.0.request
+            || doc.scope != self.policy.scope.provider
+            || binding.try_get::<String, _>("grant_id")? != grant.to_string()
+            || binding.try_get::<String, _>("member")? != member
+            || row.try_get::<String, _>("provider_quote_id")? != observation.0.quote_id.to_string()
+            || u64::try_from(row.try_get::<i64, _>("gross_sats")?)? != doc.gross_sats
+            || u64::try_from(row.try_get::<i64, _>("invoice_net_sats")?)? != doc.amount_sats
+            || u64::try_from(row.try_get::<i64, _>("fee_sats")?)? != observation.0.fee_sats
+            || u64::try_from(row.try_get::<i64, _>("total_sats")?)? != observation.0.total_sats
+            || row.try_get::<i64, _>("observed_at")? != observation.0.observed_at
+        {
+            bail!("saved fee observation differs from its original row and request");
+        }
+        let round = u8::try_from(row.try_get::<i64, _>("round")?)?;
+        if round > 7 {
+            bail!("fee observation round exceeds bound");
+        }
+        tx.commit().await?;
+        Ok(Some((round, observation)))
+    }
+
+    /// Preserve fee discovery and retire the original, never-executed quote in
+    /// one transaction. The returned arithmetic decision is not execution
+    /// authority; reduced invoices still require their own exact signed bytes.
+    pub async fn record_fee_observation(
+        &self,
+        observation: &FeeObservation,
+        round: u8,
+        now: i64,
+    ) -> Result<crate::payout::inclusive_fees::Decision> {
+        observation.0.validate()?;
+        let mut tx = self.pool.begin().await?;
+        write_lock(&mut tx).await?;
+        let doc = load_doc(&mut tx, observation.0.request.id, false).await?;
+        if doc != observation.0.request || doc.scope != self.policy.scope.provider {
+            bail!("fee observation differs from its committed provider request");
+        }
+        let row = sqlx::query("SELECT r.gross_sats,i.grant_id,i.member FROM payout_rows r JOIN payout_invoice_intents i ON i.grant_id=r.grant_id AND i.member=r.member WHERE i.id=?")
+            .bind(doc.invoice_id.to_string()).fetch_one(&mut *tx).await?;
+        let gross: u64 = row.try_get::<i64, _>("gross_sats")?.try_into()?;
+        let decision = crate::payout::inclusive_fees::evaluate(
+            gross,
+            1,
+            self.policy.max_net_sats,
+            doc.amount_sats,
+            observation.0.fee_sats,
+            observation.0.total_sats,
+        )
+        .map_err(anyhow::Error::msg)?;
+        let json = serde_json::to_string(observation)?;
+        let old: Option<(String, i64)> = sqlx::query_as(
+            "SELECT document_json,round FROM payout_fee_observations WHERE provider_quote_id=?",
+        )
+        .bind(observation.0.quote_id.to_string())
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some((old, saved_round)) = old {
+            if old != json || saved_round != i64::from(round) {
+                bail!("fee observation retry changed frozen evidence");
+            }
+            tx.commit().await?;
+            return Ok(decision);
+        }
+        if now < observation.0.observed_at || now >= observation.0.usable_until {
+            bail!("fee observation is expired or from the future");
+        }
+        load_doc(&mut tx, doc.id, true).await?;
+        touch_clock(&mut tx, now).await?;
+        sqlx::query("INSERT INTO payout_fee_observations(grant_id,member,round,provider_quote_id,gross_sats,invoice_net_sats,fee_sats,total_sats,observed_at,document_json) VALUES(?,?,?,?,?,?,?,?,?,?)")
+            .bind(row.try_get::<String,_>("grant_id")?).bind(row.try_get::<String,_>("member")?)
+            .bind(i64::from(round)).bind(observation.0.quote_id.to_string()).bind(i64::try_from(gross)?)
+            .bind(i64::try_from(doc.amount_sats)?).bind(i64::try_from(observation.0.fee_sats)?)
+            .bind(i64::try_from(observation.0.total_sats)?).bind(observation.0.observed_at).bind(json)
+            .execute(&mut *tx).await?;
+        if !matches!(
+            &decision,
+            crate::payout::inclusive_fees::Decision::Fits { .. }
+        ) {
+            sqlx::query(
+                "UPDATE payout_quote_intents SET retired_at=? WHERE id=? AND retired_at IS NULL",
+            )
+            .bind(now)
+            .bind(doc.id.to_string())
+            .execute(&mut *tx)
+            .await?;
+            stage(&mut tx, doc.id, "retired", now).await?;
+        }
+        tx.commit().await?;
+        Ok(decision)
+    }
+
     pub async fn record_execution_claim(
         &self,
         claim: &crate::payout::execution::AuthenticatedLease,

@@ -129,6 +129,83 @@ pub enum QuoteReply {
     Duplicate(DuplicateQuote),
 }
 
+/// An authenticated fee-discovery response. This is deliberately not a Quote
+/// and cannot be supplied to execute. Conversion to a Quote requires all of
+/// the original invoice, gross-budget, fee-allowance and deadline checks.
+#[derive(Clone, Serialize)]
+pub struct FeeObservation(pub(crate) FeeObservationRecord);
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct FeeObservationRecord {
+    pub(crate) request: QuoteDocument,
+    pub(crate) quote_id: Uuid,
+    pub(crate) fee_sats: u64,
+    pub(crate) total_sats: u64,
+    pub(crate) provider_valid_until: Option<i64>,
+    pub(crate) usable_until: i64,
+    pub(crate) observed_at: i64,
+}
+
+impl FeeObservation {
+    pub fn executable_quote(&self) -> Result<Quote> {
+        let record = QuoteRecord {
+            request: self.0.request.clone(),
+            quote_id: self.0.quote_id,
+            fee_sats: self.0.fee_sats,
+            total_sats: self.0.total_sats,
+            provider_valid_until: self.0.provider_valid_until,
+            usable_until: self.0.usable_until,
+            observed_at: self.0.observed_at,
+        };
+        record.validate()?;
+        Ok(Quote(record))
+    }
+    pub fn fee_sats(&self) -> u64 {
+        self.0.fee_sats
+    }
+    pub fn total_sats(&self) -> u64 {
+        self.0.total_sats
+    }
+    pub fn quote_id(&self) -> Uuid {
+        self.0.quote_id
+    }
+}
+
+impl FeeObservationRecord {
+    pub(crate) fn validate(&self) -> Result<()> {
+        self.request.validate()?;
+        let expected = self
+            .request
+            .created_at
+            .checked_add(QUOTE_LIFETIME)
+            .context("fee observation deadline overflow")?
+            .min(self.request.invoice_expires_at.try_into()?)
+            .min(self.provider_valid_until.unwrap_or(i64::MAX));
+        if self.quote_id.is_nil()
+            || self.total_sats > i64::MAX as u64
+            || self.request.amount_sats.checked_add(self.fee_sats) != Some(self.total_sats)
+            || self.usable_until != expected
+            || self.observed_at < self.request.created_at
+            || self.observed_at >= self.usable_until
+        {
+            bail!("invalid persisted fee observation");
+        }
+        Ok(())
+    }
+}
+
+pub(crate) fn restore_fee_observation(raw: &[u8]) -> Result<FeeObservation> {
+    let record: FeeObservationRecord = decode(raw)?;
+    record.validate()?;
+    Ok(FeeObservation(record))
+}
+
+pub enum FeeProbeReply {
+    Observed(FeeObservation),
+    Duplicate(DuplicateQuote),
+}
+
 /// The journal stores execute intent first. A fresh root/core observation gives
 /// this short lifetime; recovery may only PATCH that same original quote.
 #[derive(Clone)]
@@ -269,6 +346,16 @@ impl Client {
     }
 
     pub async fn create_quote(&self, intent: &QuoteIntent) -> Result<QuoteReply> {
+        let (status, raw) = self.request_quote(intent).await?;
+        parse_quote(intent, status, &raw, crate::cyberherd::calendar::now()?)
+    }
+
+    pub async fn probe_fee(&self, intent: &QuoteIntent) -> Result<FeeProbeReply> {
+        let (status, raw) = self.request_quote(intent).await?;
+        parse_fee_probe(intent, status, &raw, crate::cyberherd::calendar::now()?)
+    }
+
+    async fn request_quote(&self, intent: &QuoteIntent) -> Result<(StatusCode, Vec<u8>)> {
         self.scope(&intent.0)?;
         let now = crate::cyberherd::calendar::now()?;
         if now < intent.0.created_at
@@ -287,7 +374,7 @@ impl Client {
                     ),
             )
             .await?;
-        parse_quote(intent, status, &raw, crate::cyberherd::calendar::now()?)
+        Ok((status, raw))
     }
 
     pub async fn execute(
@@ -444,14 +531,21 @@ struct Money {
 }
 impl Money {
     fn validate(&self, doc: &QuoteDocument, fee_cap: u64) -> Result<(u64, u64)> {
+        let (fee, total) = self.observe(doc)?;
+        if fee > fee_cap || total > doc.gross_sats {
+            bail!("provider payout amounts exceed frozen budget");
+        }
+        Ok((fee, total))
+    }
+
+    fn observe(&self, doc: &QuoteDocument) -> Result<(u64, u64)> {
         let net = self.amount.sats()?;
         let total = self.total_amount.sats()?;
         let fee = total
             .checked_sub(net)
             .context("provider payout fee is negative")?;
         if net != doc.amount_sats
-            || fee > fee_cap
-            || total > doc.gross_sats
+            || total > i64::MAX as u64
             || self
                 .total_fee
                 .as_ref()
@@ -497,6 +591,46 @@ struct QuoteWire {
     valid_until: Option<String>,
     #[serde(flatten)]
     money: Money,
+}
+
+fn parse_fee_probe(
+    intent: &QuoteIntent,
+    status: StatusCode,
+    raw: &[u8],
+    now: i64,
+) -> Result<FeeProbeReply> {
+    intent.0.validate()?;
+    if status != StatusCode::OK {
+        let quote_id = error_id(status, raw, "DUPLICATE_PAYMENT_QUOTE", "paymentQuoteId")?;
+        return Ok(FeeProbeReply::Duplicate(DuplicateQuote {
+            request: intent.0.clone(),
+            quote_id,
+        }));
+    }
+    let wire: QuoteWire = decode(raw)?;
+    let (fee_sats, total_sats) = wire.money.observe(&intent.0)?;
+    let until = wire.valid_until.as_deref().map(timestamp).transpose()?;
+    let usable_until = intent
+        .0
+        .created_at
+        .checked_add(QUOTE_LIFETIME)
+        .context("fee probe time overflow")?
+        .min(intent.0.invoice_expires_at.try_into()?)
+        .min(until.unwrap_or(i64::MAX));
+    if wire.payment_quote_id.is_nil() || now < intent.0.created_at || now >= usable_until {
+        bail!("fee discovery quote is invalid or expired");
+    }
+    let observation = FeeObservationRecord {
+        request: intent.0.clone(),
+        quote_id: wire.payment_quote_id,
+        fee_sats,
+        total_sats,
+        provider_valid_until: until,
+        usable_until,
+        observed_at: now,
+    };
+    observation.validate()?;
+    Ok(FeeProbeReply::Observed(FeeObservation(observation)))
 }
 fn parse_quote(
     intent: &QuoteIntent,
@@ -619,6 +753,63 @@ fn timestamp(value: &str) -> Result<i64> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn inclusive_fee_discovery_cannot_promote_an_oversized_quote_to_execution() {
+        let mut request = intent();
+        request.0.gross_sats = 1;
+        request.0.fee_limit_sats = 0;
+        let id = Uuid::new_v4();
+        let raw = serde_json::to_vec(&json!({"paymentQuoteId":id,
+            "amount":{"amount":"0.00000001","currency":"BTC"},
+            "totalAmount":{"amount":"0.00000002","currency":"BTC"},
+            "totalFee":{"amount":"0.00000001","currency":"BTC"}}))
+        .unwrap();
+        assert!(parse_quote(&request, StatusCode::OK, &raw, 1001).is_err());
+        let FeeProbeReply::Observed(observed) =
+            parse_fee_probe(&request, StatusCode::OK, &raw, 1001).unwrap()
+        else {
+            panic!("expected fee evidence");
+        };
+        assert_eq!(
+            (
+                observed.quote_id(),
+                observed.fee_sats(),
+                observed.total_sats()
+            ),
+            (id, 1, 2)
+        );
+        assert!(observed.executable_quote().is_err());
+        let saved = serde_json::to_vec(&observed).unwrap();
+        let restored = restore_fee_observation(&saved).unwrap();
+        assert_eq!(
+            (
+                restored.quote_id(),
+                restored.fee_sats(),
+                restored.total_sats()
+            ),
+            (id, 1, 2)
+        );
+        assert!(restored.executable_quote().is_err());
+        let mut corrupt: serde_json::Value = serde_json::from_slice(&saved).unwrap();
+        corrupt["fee_sats"] = json!(0);
+        assert!(restore_fee_observation(&serde_json::to_vec(&corrupt).unwrap()).is_err());
+        let mut extra: serde_json::Value = serde_json::from_slice(&saved).unwrap();
+        extra["unexpected"] = json!(true);
+        assert!(restore_fee_observation(&serde_json::to_vec(&extra).unwrap()).is_err());
+        assert!(parse_fee_probe(&request, StatusCode::OK, &raw, 1030).is_err());
+        let mut changed: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+        changed["amount"]["amount"] = json!("0.00000002");
+        assert!(
+            parse_fee_probe(
+                &request,
+                StatusCode::OK,
+                &serde_json::to_vec(&changed).unwrap(),
+                1001
+            )
+            .is_err()
+        );
+    }
     fn intent() -> QuoteIntent {
         QuoteIntent(QuoteDocument {
             id: Uuid::new_v4(),

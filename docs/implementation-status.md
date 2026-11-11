@@ -5,6 +5,11 @@ Current CyberHerd checkpoint: **2026-11-11**. The full
 remains incomplete. It supersedes older CyberHerd deferrals; it does not resume
 Monero or authorize financial/physical activation.
 
+The operator has now supplied the financial limits and clarified that actual
+Strike fees are deducted from member payouts. The [inclusive-fee integration](architecture/cyberherd-inclusive-fees.md)
+is in progress; those limits are no longer missing input. Source-only observation
+and operator-site preparation work must finish qualification before use.
+
 The operator selected **3 user spots** and reuse of the existing messaging
 identity for operator authentication. The [configuration and signed-settings
 adapter](deployment/cyberherd-project-operator.md) preserves the current reward

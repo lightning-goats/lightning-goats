@@ -3,6 +3,7 @@
 pub mod cost_recovery;
 pub mod execution;
 pub mod funding;
+pub mod inclusive_fees;
 pub mod invoice;
 pub mod outcome;
 pub mod provider;

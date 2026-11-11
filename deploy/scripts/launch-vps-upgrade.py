@@ -36,6 +36,7 @@ FILES = {
     'maintain-cyberherd-programs.py',
     'activate-cyberherd-financial.py',
     'enable-cyberherd-project-operator.py',
+    'prepare-cyberherd-operator-site.py',
 }
 
 
@@ -92,7 +93,10 @@ def main():
     sys.path.insert(0, str(root))
     arguments = sys.argv[2:]
     operation = 'upgrade-vps-canary.py'
-    if arguments[:1] == ['--cyberherd-project-operator']:
+    if arguments[:1] == ['--cyberherd-operator-site-prepare']:
+        operation = 'prepare-cyberherd-operator-site.py'
+        arguments = arguments[1:]
+    elif arguments[:1] == ['--cyberherd-project-operator']:
         operation = 'enable-cyberherd-project-operator.py'
         arguments = arguments[1:]
     elif arguments[:1] == ['--cyberherd-core']:

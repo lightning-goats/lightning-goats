@@ -111,6 +111,9 @@ class NginxAssemblyTests(unittest.TestCase):
                     if mode == "production" and getattr(cls, "CYBERHERD_SELF_READ_ENABLED", False):
                         auth = (EXAMPLES.parent / "cyberherd/self-read-nginx.conf.example").read_text()
                         data += "\n" + auth.replace("127.0.0.1:3340", f"127.0.0.1:{cls.backends[mode].server_port}")
+                    if mode == "production" and getattr(cls, "CYBERHERD_OPERATOR_ONLY_ENABLED", False):
+                        auth = (EXAMPLES.parent / "cyberherd/operator-only-nginx.conf.example").read_text()
+                        data += "\n" + auth.replace("127.0.0.1:3340", f"127.0.0.1:{cls.backends[mode].server_port}")
                     (cls.root / "snippets" / f"lightning-goats-{mode}.conf").write_text(data)
                     continue
                 tls_port, http_port = free_port(), free_port()

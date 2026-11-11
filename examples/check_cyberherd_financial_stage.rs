@@ -7,7 +7,46 @@ use lightning_goats::{
     cyberherd::runtime::Config as Member,
     payout::{runtime::Config as Payout, signer::Config as Signer},
 };
-use std::{collections::BTreeSet, path::Path};
+use std::{collections::BTreeSet, os::unix::fs::MetadataExt, path::Path};
+
+fn process_uid() -> Result<u32> {
+    let status = std::fs::read_to_string("/proc/self/status")?;
+    let row = status
+        .lines()
+        .find(|line| line.starts_with("Uid:"))
+        .ok_or_else(|| anyhow::anyhow!("missing process identity"))?;
+    let values = row
+        .split_whitespace()
+        .skip(1)
+        .map(str::parse::<u32>)
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    ensure!(
+        values.len() == 4 && values.iter().all(|v| *v == values[0]),
+        "stable unprivileged process identity required"
+    );
+    Ok(values[0])
+}
+
+fn protected_config(path: &Path) -> Result<()> {
+    ensure!(
+        path.is_absolute() && path.canonicalize()? == path,
+        "canonical candidate path required"
+    );
+    for (index, part) in path.ancestors().enumerate() {
+        let metadata = std::fs::symlink_metadata(part)?;
+        ensure!(
+            metadata.uid() == 0
+                && metadata.mode() & 0o022 == 0
+                && if index == 0 {
+                    metadata.is_file() && metadata.nlink() == 1
+                } else {
+                    metadata.is_dir()
+                },
+            "root-owned protected candidate and ancestors required"
+        );
+    }
+    Ok(())
+}
 
 fn validate_stage(
     core: &AppConfig,
@@ -129,7 +168,7 @@ fn validate_stage(
         "candidate must retain the six native payees"
     );
     for origin in std::iter::once(&core.lnurl.public_base_url).chain(zap.alias_origins.iter()) {
-        let url = url::Url::parse(origin)?;
+        let url = reqwest::Url::parse(origin)?;
         let host = url
             .host_str()
             .ok_or_else(|| anyhow::anyhow!("missing receive host"))?;
@@ -144,16 +183,14 @@ fn validate_stage(
 }
 
 fn check() -> Result<()> {
-    if lightning_goats::private_ipc::uid()? == 0
-        || std::env::var_os("CREDENTIALS_DIRECTORY").is_some()
-    {
+    if process_uid()? == 0 || std::env::var_os("CREDENTIALS_DIRECTORY").is_some() {
         bail!("configuration-only checker requires a non-root credential-free process");
     }
     let paths = std::env::args().skip(1).collect::<Vec<_>>();
     ensure!(paths.len() == 4, "four candidate paths required");
     for raw in &paths {
         let path = Path::new(raw);
-        lightning_goats::private_ipc::protected_config(path)?;
+        protected_config(path)?;
         ensure!(
             std::fs::symlink_metadata(path)?.len() <= 65536,
             "candidate exceeds bound"
@@ -164,7 +201,7 @@ fn check() -> Result<()> {
     let payout = Payout::load(Path::new(&paths[2]))?;
     let signer = Signer::load(Path::new(&paths[3]))?;
     ensure!(
-        lightning_goats::private_ipc::uid()? == member.core.core_uid,
+        process_uid()? == member.core.core_uid,
         "original core UID required for configuration validation"
     );
     validate_stage(&core, &member, &payout, &signer)?;

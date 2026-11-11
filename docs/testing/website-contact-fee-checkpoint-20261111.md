@@ -109,11 +109,50 @@ counted as accepted merely because the ordinary run skips it.
 
 The subsequent [protected preparation tool](../deployment/private-contact-upgrade.md)
 freezes the current overlay-only installation and both release archives without
-opening journals or stopping services. Its new root-owned file fixture and
-actual systemd preparation rehearsal still require exact CI qualification. The
-tool has no apply or resume command, and is not installed on the VPS.
+opening journals or stopping services. All ten workflows pass on
+`cec3f12f09a5cbd18b94408cd26ab031d13ffbc6`: [CI](https://github.com/lightning-goats/lightning-goats/actions/runs/42937899124),
+[Deployment](https://github.com/lightning-goats/lightning-goats/actions/runs/42937899042),
+[Security](https://github.com/lightning-goats/lightning-goats/actions/runs/42937899137)
+and [real NIP-46](https://github.com/lightning-goats/lightning-goats/actions/runs/42937899197).
+Tested merge `39a5c6f01893608dec5879cd100117472be1d083` has zero file differences.
+The real root-owned preparation/launcher fixtures pass in the required separate
+root job. The actual installed systemd rehearsal freezes both authenticated
+archives while retaining both running PIDs, then completes the existing rollback
+checks. Its retained report explicitly confirms preparation preservation, isolated
+networking and zero gateway POSTs. Artifact `13820135187`, ZIP SHA256
+`050ebb5f9b711d870e38eafbe50eedf3cb8b3354cbcb85a7e863d73098606acd`,
+passes all six internal checksum entries. This does not qualify a live migration.
 
-Still required: preparation-tool qualification; a protected maintenance executor
+All eighteen tools independently match pinned GitHub source before inactive
+root-owned installation. Manifest SHA256:
+`4830749ea5d0e0a212a0c8f1ae34f70234a687a9e608f8f484f01018582d17b0`;
+launcher SHA256:
+`95d104cb9bdb4350d74cad43e91bcbedfff14971eb92459a6703e195b62a82b5`.
+The original seventeen-file tool generation remains untouched.
+
+Actual VPS preparation succeeds against independently verified core/review
+artifacts at the tested merge. Core artifact `13819187905`, ZIP SHA256
+`dc0dd282161c89b2ae80c3fb54661766ddd607c5fa296ba7029d9bb342fcc05a`,
+passes all six inner checksums; core archive SHA256 is
+`1aa5c984103741d0887f85f735d2f5df43f0dc25affc0a8d7cd6968b75a5ba16`.
+Review artifact `13819980601`, ZIP SHA256
+`13160e8522446d942e59c1b41cbbe02c6e0f9cca361e5c7ae9e7a9a109504666`,
+passes its inner checksum and 104-file verifier; review archive SHA256 is
+`187d2e1e28d7c2859806dcb325267b47e3c804536c265a62dbc89924dd63a8c8`.
+
+Independent readback confirms all seventeen original configuration/unit/program
+files retain exact bytes and metadata; the three new programs are only staged.
+Preparation record SHA256:
+`0fea50e3d7bfeb07117debb526d510ebb43ec13dba2a19668d26c581756f5fb0`;
+program transaction SHA256:
+`00df8b265c8db55e84312004e52deed68ef5bad4992ded3af04c9a10a2a7bf4b`.
+Core/membership retain their original PIDs with zero automatic restarts; payout
+and signer remain masked with zero PIDs. Public homepage, leaderboard, roster
+API and herd LNURL discovery return 200; discovery still advertises native zaps.
+The tool has no apply/resume command. Contact, live schema and credentials remain
+unchanged; no test invoice, payment, DM, Nostr post or physical action is initiated.
+
+Still required: a protected maintenance executor
 and installed migration rehearsal; current backup and actual deployment;
 controlled provider/paid-contact acceptance and recipient-side DM observation.
 The old legacy-core upgrade helper is not this upgrade path. No production

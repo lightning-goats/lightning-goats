@@ -467,6 +467,46 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
             'changed_command_conflict_refused': True, 'roster_empty': True, 'member_percent_zero': True,
             'provider_operations': 0, 'publications': 0}
         assert counts['post'] == 0
+        # Program-only maintenance of the now-current schema, including active
+        # contact and retained native operator receipts. Both installed and
+        # selected verifiers must accept the same actual four-journal backup
+        # before old/new status commands touch only a separate UID-owned copy.
+        # Programs have the same build bytes in this CI phase; actual different
+        # program replacement is covered separately by protected-file fixtures.
+        current_review = base / 'ci-current-core-review'
+        current_execution = base / 'ci-current-core-execution'
+        preserved = {path: hashlib.sha256(path.read_bytes()).hexdigest()
+                     for path in (config, member, unit)}
+        current_prepared = json.loads(run(*launcher, '--current-core-prepare', str(core_archive), str(review_archive),
+            source_commit, hashlib.sha256(core_archive.read_bytes()).hexdigest(),
+            hashlib.sha256(review_archive.read_bytes()).hexdigest(), str(current_review)))
+        assert current_prepared == {'prepared': True, 'activation_supported': False, 'services_changed': False,
+            'journals_opened': False, 'credentials_loaded': False, 'contact_enabled': True}
+        current_sha = hashlib.sha256((current_review / 'PREPARED.json').read_bytes()).hexdigest()
+        assert json.loads(run(*launcher, '--current-core-maintenance', 'plan', str(current_review), str(current_execution),
+            '--review-sha256', current_sha)) == {'planned': True, 'services_changed': False, 'journals_opened': False}
+        current_applied = json.loads(run(*launcher, '--current-core-maintenance', 'apply', str(current_execution),
+            '--exclusive-maintenance'))
+        assert current_applied == {'upgraded': True, 'four_journal_backup_verified': True, 'clone_compared': True,
+            'live_migration_performed': False, 'financial_images_unchanged': True, 'services_started': False,
+            'contact_enabled': True}
+        assert not (current_execution / 'MIGRATION-STARTED.json').exists()
+        assert not (current_execution / 'migrated').exists()
+        current_backup = json.loads((current_execution / 'backup/MANIFEST.json').read_text())
+        assert current_backup['policy'] == before_policy
+        assert current_backup['report']['pending_feeds'] == 1
+        assert current_backup['report']['rows']['core']['private_contact_intents'] == 0
+        current_resumed = json.loads(run(*launcher, '--current-core-maintenance', 'resume', str(current_execution),
+            '--approve-resumption'))
+        assert current_resumed == {'core_running': True, 'membership_running': True,
+            'contact_enabled': True, 'payouts_enabled': False}
+        assert preserved == {path: hashlib.sha256(path.read_bytes()).hexdigest() for path in preserved}
+        assert counts['post'] == 0
+        assert w.http_json('http://127.0.0.1:8787/healthz')['status'] == 'ok'
+        assert w.http_json('http://127.0.0.1:3340/api/v1/cyberherd')['roster']['members'] == []
+        for name in ('cyberherd-payout.service', 'cyberherd-signer.service'):
+            assert os.readlink('/etc/systemd/system/' + name) == '/dev/null'
+            assert run('/usr/bin/systemctl', 'show', name, '-p', 'MainPID', '--value').strip() == '0'
         finished = True
         return {'accepted': True, 'old_core_was_harmless_elf_standin': True,
                 'actual_native_schema_23_backup': True, 'actual_runtime_uid_clone_migration': True,
@@ -483,6 +523,12 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
                     'after_actual_member_restart': replayed_operator, 'member_pid_changed': True,
                     'operator_identity_was_synthetic': True, 'public_network_used': False,
                     'gateway_post_count': counts['post'], 'production_operator_routes_enabled': False},
+                'installed_current_schema_patch': {'accepted': True, 'actual_four_journal_native_backup': True,
+                    'both_compiled_schema_verifiers_accepted': True, 'actual_uid_copy_status_compared': True,
+                    'live_database_images_unchanged': True, 'live_migration_performed': False,
+                    'actual_core_and_member_resumed': True, 'contact_configuration_retained': True,
+                    'outgoing_roles_masked': True, 'gateway_post_count': counts['post'],
+                    'different_program_builds_used': False, 'live_host_qualified': False},
                 'all_application_networking_loopback_isolated': True, 'live_host_qualified': False}
     except Exception:
         # Disposable synthetic fixture only. Never use this diagnostic or the

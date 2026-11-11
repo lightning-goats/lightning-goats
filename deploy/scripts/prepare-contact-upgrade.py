@@ -5,6 +5,8 @@ Authenticated root-owned launcher only. Preparation reads protected configuratio
 program and service identities, stages a source-pinned release and preserves the
 three original programs. It never opens a journal, loads a credential, stops a
 service, changes configuration, migrates state or enables contact payments.
+Explicit --current-schema preparation may retain existing contact configuration;
+its records cannot be consumed by the schema-upgrade maintenance path.
 """
 import sys
 sys.dont_write_bytecode = True
@@ -41,12 +43,13 @@ ROLE_NAMES = {'core': 'lightning-goats-receive', 'membership': 'cyberherd',
               'payout': 'cyberherd-payout', 'signer': 'cyberherd-signer'}
 
 
-def configuration_boundary(core, member, payout, signer, policy):
+def configuration_boundary(core, member, payout, signer, policy, *, current_schema=False):
     """Preserve the existing overlay stage, zero budgets and public identities."""
     bridge = core.get('core_bridge', {})
     reward = bridge.get('reward_policy', {})
     messages = member.get('messaging', {})
-    if (core.get('contact') is not None or core['database']['url'] != 'sqlite://' + str(C.DATABASE)
+    if ((not current_schema and core.get('contact') is not None)
+            or core['database']['url'] != 'sqlite://' + str(C.DATABASE)
             or member.get('enabled') is not True or member.get('rewards') is not None
             or member.get('payout_bridge') is not None or messages.get('signer') is not None
             or messages.get('lifecycle') is not False
@@ -69,9 +72,17 @@ def configuration_boundary(core, member, payout, signer, policy):
             or payout['policy']['scope']['owner'] != owner
             or payout['policy']['scope']['provider'] != policy['provider']):
         raise ValueError('original owner, epoch, peer or provider scope differs')
+    if current_schema and core.get('contact') is not None:
+        contact = core['contact']
+        if (not isinstance(contact, dict) or set(contact) != {'recipient', 'inbox_relays'}
+                or contact['recipient'] != owner or not isinstance(contact['inbox_relays'], list)
+                or not 1 <= len(contact['inbox_relays']) <= 8
+                or any(not isinstance(value, str) or not value.startswith('wss://')
+                       for value in contact['inbox_relays'])):
+            raise ValueError('current contact identity and bounded inbox relays required')
 
 
-def baseline():
+def baseline(*, current_schema=False):
     C.protected(S.MAINTENANCE, private=True)
     runtime = Q.I.check_identities()
     core_user = C.pwd.getpwnam('lightning-goats')
@@ -93,7 +104,7 @@ def baseline():
             raise ValueError('installed programs require protected executable permissions')
     policy = tomllib.loads(S.MAINTENANCE.read_text())
     values = {role: tomllib.loads(path.read_text()) for role, path in configs.items()}
-    configuration_boundary(*(values[role] for role in ROLE_NAMES), policy)
+    configuration_boundary(*(values[role] for role in ROLE_NAMES), policy, current_schema=current_schema)
     if set(policy['components']) != set(ROLE_NAMES):
         raise ValueError('complete four-journal policy required')
     states = {}
@@ -169,13 +180,14 @@ def runtime_help(program, component):
         TX.sync_directory(carrier)
 
 
-def prepare(archive, review_archive, source, digest, review_digest, directory):
+def prepare(archive, review_archive, source, digest, review_digest, directory, *, current_schema=False):
     C.root()
     C.protected(C.BASE, directory=True, private=True)
     if (directory.parent != C.BASE or re.fullmatch('[A-Za-z0-9_.-]{1,128}', directory.name) is None
             or re.fullmatch('[0-9a-f]{40}', source) is None):
         raise ValueError('new direct protected upgrade-base child and full source required')
-    original = baseline()
+    original = baseline(current_schema=current_schema)
+    contact_enabled = current_schema and tomllib.loads(C.CONFIG.read_text()).get('contact') is not None
     directory.mkdir(mode=0o700)
     TX.sync_directory(directory.parent)
     C.write_json(directory / 'INCOMPLETE', {'services_changed': False})
@@ -204,7 +216,7 @@ def prepare(archive, review_archive, source, digest, review_digest, directory):
     carrier = runtime_help(payload / 'lightning-goatsctl', original['identities']['core'])
 
     def unchanged():
-        if baseline() != original:
+        if baseline(current_schema=current_schema) != original:
             raise ValueError('original installation or process identity changed during preparation')
 
     for index, path in enumerate(original['files']):
@@ -220,21 +232,24 @@ def prepare(archive, review_archive, source, digest, review_digest, directory):
         'baseline': original, 'original_order': list(original['files']),
         'program_manifest_sha256': TX.fingerprint(directory / 'programs/TRANSACTION.json')['sha256'],
         'activation_supported': False, 'services_changed': False, 'journals_opened': False,
-        'credentials_loaded': False, 'contact_enabled': False,
+        'credentials_loaded': False, 'contact_enabled': contact_enabled,
+        **({'current_schema_patch': True, 'schema_upgrade_authorized': False} if current_schema else {}),
         'native_runtime_help_verified': True, 'native_runtime_help_carrier': carrier,
     })
     (directory / 'INCOMPLETE').unlink()
     TX.sync_directory(directory)
     return {'prepared': True, 'activation_supported': False, 'services_changed': False,
-            'journals_opened': False, 'credentials_loaded': False, 'contact_enabled': False}
+            'journals_opened': False, 'credentials_loaded': False, 'contact_enabled': contact_enabled}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--current-schema', action='store_true', help='program-only patch; preserve current schema and configuration')
     for name in ('archive', 'review_archive', 'source', 'sha256', 'review_sha256', 'directory'):
         parser.add_argument(name, type=Path if name in ('archive', 'review_archive', 'directory') else str)
     args = parser.parse_args()
-    result = prepare(args.archive, args.review_archive, args.source, args.sha256, args.review_sha256, args.directory)
+    result = prepare(args.archive, args.review_archive, args.source, args.sha256, args.review_sha256,
+                     args.directory, current_schema=args.current_schema)
     print(__import__('json').dumps(result, sort_keys=True))
 
 

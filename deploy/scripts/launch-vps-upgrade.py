@@ -110,6 +110,12 @@ def main():
     elif arguments[:1] == ['--cyberherd-overlay-maintenance']:
         operation = 'maintain-cyberherd-overlay.py'
         arguments = arguments[1:]
+    elif arguments[:1] == ['--current-core-prepare']:
+        operation = 'prepare-contact-upgrade.py'
+        arguments = ['--current-schema', *arguments[1:]]
+    elif arguments[:1] == ['--current-core-maintenance']:
+        operation = 'maintain-contact-upgrade.py'
+        arguments = ['--current-schema', *arguments[1:]]
     elif arguments[:1] == ['--contact-upgrade-prepare']:
         operation = 'prepare-contact-upgrade.py'
         arguments = arguments[1:]

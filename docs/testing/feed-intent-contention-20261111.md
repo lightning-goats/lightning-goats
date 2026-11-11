@@ -25,7 +25,16 @@ create one intent without consuming credit. Duplicate intent/confirmation refusa
 one confirmed debit and one event remain mandatory. Pool connections are warmed
 first so connection creation cannot substitute for the transaction boundary.
 
-Exact CI qualification and separately reviewed same-schema deployment remain
-pending. Production has not been changed by this source patch; the operator's
-paused feeder and current paid state remain preserved. Do not represent the
-earlier operator fixture or a rerun of unchanged source as resolving this failure.
+Corrected source `55ed77b8a3f0c7cb50b031536cb53161de6d5e89` passed all ten
+workflows: CI `42960188544`, Deployment `42960189058`, Security `42960188767`
+and real NIP-46 `42960188494`, plus the six network/home workflows. The Rust
+job `130324615440` passed formatting, strict Clippy and the full native suite,
+including the original failing case and the new contention control/regression.
+Its library result is 376 passed, four separately exercised root-only cases
+ignored in the ordinary pass; required privileged fixtures also passed.
+The proposed merge `dd7c4a28ce799a1e9da797843eae16b5165a2017` has an identical
+tree to the branch head, independently checked through GitHub comparison.
+
+Separately reviewed current-schema deployment remains pending. Production has
+not been changed by this source patch; the operator's paused feeder and current
+paid state remain preserved. The earlier failing run is retained above.

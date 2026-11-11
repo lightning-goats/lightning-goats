@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Explicit schema-23 to 24 maintenance; preserve all four paid journals.
+"""Explicit core maintenance; preserve all four paid journals.
 
 Authenticated launcher only. Plan opens no journal. Apply masks all writers,
 verifies a current native backup and a separately migrated copy before replacing
 three programs and migrating as the original UID. Resume is separate. Contact,
 CyberHerd publication and payouts remain disabled. No database restore exists.
+The separately tagged --current-schema path preserves existing contact config,
+verifies matching compiled schemas, and replaces programs without live migration.
 """
 import sys
 sys.dont_write_bytecode = True
@@ -58,15 +60,23 @@ def original(review, r, path):
     return review / ('original-' + str(r['original_order'].index(str(path))))
 
 
-def review_record(review, expected):
+def patch_mode(record, current_schema):
+    if (record.get('current_schema_patch', False) is not current_schema
+            or (current_schema and record.get('schema_upgrade_authorized') is not False)):
+        raise ValueError('current-schema and migration transactions cannot be interchanged')
+
+
+def review_record(review, expected, *, current_schema=False):
     private_directory(review)
     if re.fullmatch('[0-9a-f]{64}', expected) is None or digest(review / 'PREPARED.json') != expected:
         raise ValueError('independently reviewed preparation digest required')
     r = C.read_json(review / 'PREPARED.json')
+    patch_mode(r, current_schema)
     if (r['version'] != 1 or r['tool'] != verified_tool_identity()
             or r.get('native_runtime_help_verified') is not True
             or any(r[key] is not False for key in ('activation_supported', 'services_changed',
-                   'journals_opened', 'credentials_loaded', 'contact_enabled'))
+                   'journals_opened', 'credentials_loaded'))
+            or (not current_schema and r.get('contact_enabled') is not False)
             or (review / 'INCOMPLETE').exists()):
         raise ValueError('matching complete preparation-only review required')
     files, order = r['baseline']['files'], r['original_order']
@@ -90,19 +100,21 @@ def review_record(review, expected):
     core = tomllib.loads(original(review, r, C.CONFIG).read_text())
     configs = [tomllib.loads(original(review, r, Q.ETC / name / 'config.toml').read_text())
                for name in ('cyberherd', 'cyberherd-payout', 'cyberherd-signer')]
-    P.configuration_boundary(core, *configs, r['baseline']['policy'])
+    P.configuration_boundary(core, *configs, r['baseline']['policy'], current_schema=current_schema)
+    if r.get('contact_enabled') is not (core.get('contact') is not None):
+        raise ValueError('retained contact configuration differs from the review')
     return r
 
 
-def plan(review, expected, directory):
+def plan(review, expected, directory, *, current_schema=False):
     C.root()
     C.protected(C.BASE, directory=True, private=True)
-    r = review_record(review, expected)
+    r = review_record(review, expected, current_schema=current_schema)
     if directory.parent != C.BASE or re.fullmatch('[A-Za-z0-9_.-]{1,128}', directory.name) is None:
         raise ValueError('new direct private execution directory required')
 
     def fresh():
-        if P.baseline() != r['baseline']:
+        if P.baseline(current_schema=current_schema) != r['baseline']:
             raise ValueError('installation or process changed after preparation')
         member_mask = MASKS / 'cyberherd.service'
         if member_mask.exists() or member_mask.is_symlink():
@@ -117,25 +129,41 @@ def plan(review, expected, directory):
         for name in P.TARGET_NAMES
     ], fresh)
     (directory / 'LOCK').touch(mode=0o600, exist_ok=False)
+    if current_schema:
+        # Keep the original native verifier as protected data for the current
+        # backup. The selected new verifier must independently accept that same
+        # bundle against its compiled migrations before any candidate DB open.
+        payload = directory / 'payload'
+        payload.mkdir(mode=0o700)
+        path = Q.BIN / 'cyberherd-statectl'
+        TX.copy_durable(original(review, r, path), payload / path.name,
+                        r['baseline']['files'][str(path)])
     fresh()
     C.write_json(directory / 'EXECUTION.json', {
         'version': 1, 'tool': verified_tool_identity(), 'review': str(review), 'review_sha256': expected,
         'programs': rows, 'program_manifest_sha256': digest(directory / 'programs/TRANSACTION.json'),
+        **({'current_schema_patch': True, 'schema_upgrade_authorized': False} if current_schema else {}),
     })
     (directory / 'INCOMPLETE').unlink()
     TX.sync_directory(directory)
     return {'planned': True, 'services_changed': False, 'journals_opened': False}
 
 
-def load(directory):
+def load(directory, *, current_schema=False):
     C.root()
     private_directory(directory)
     if (directory / 'INCOMPLETE').exists():
         raise ValueError('incomplete execution retained')
     m = C.read_json(directory / 'EXECUTION.json')
+    patch_mode(m, current_schema)
     if m['version'] != 1 or m['tool'] != verified_tool_identity():
         raise ValueError('execution/tool identity changed')
-    r = review_record(Path(m['review']), m['review_sha256'])
+    r = review_record(Path(m['review']), m['review_sha256'], current_schema=current_schema)
+    if current_schema:
+        path = directory / 'payload/cyberherd-statectl'
+        C.protected(path)
+        if TX.fingerprint(path) != r['baseline']['files'][str(Q.BIN / path.name)]:
+            raise ValueError('retained current native verifier changed')
     if digest(directory / 'programs/TRANSACTION.json') != m['program_manifest_sha256']:
         raise ValueError('program transaction changed')
     transaction = C.read_json(directory / 'programs/TRANSACTION.json')
@@ -285,11 +313,20 @@ def sources_match(m, r, observed, installed=False):
         raise ValueError('original financial images changed during maintenance')
 
 
-def backup(directory, m, r):
+def backup(directory, m, r, *, current_schema=False):
     stopped(m, r)
     before = state_files(r)
-    native(m, 'snapshot-before-contact', '--destination', directory / 'backup', '--writers-stopped')
-    accepted = native(m, 'verify-contact-upgrade-source', '--bundle', directory / 'backup')
+    verifier = {'review': str(directory)} if current_schema else m
+    native(verifier, 'snapshot' if current_schema else 'snapshot-before-contact',
+           '--destination', directory / 'backup', '--writers-stopped')
+    accepted = native(verifier, 'verify' if current_schema else 'verify-contact-upgrade-source',
+                      '--bundle', directory / 'backup')
+    if current_schema:
+        # verify checks exact compiled schemas and migration checksums of all
+        # four stores without migrating them. A future-schema build fails here.
+        selected = native(m, 'verify', '--bundle', directory / 'backup')
+        if selected != accepted:
+            raise ValueError('selected native schema compatibility differs')
     sources_match(m, r, before)
     M.note(directory, 'BACKUP-ACCEPTED.json', {'native': accepted, 'originals': before,
             'manifest_sha256': digest(directory / 'backup/MANIFEST.json')})
@@ -297,13 +334,13 @@ def backup(directory, m, r):
 
 
 def migrate_as_runtime(program, config, component):
-    C.command('/usr/bin/unshare', '--net', '--', '/usr/bin/setpriv',
+    return C.command('/usr/bin/unshare', '--net', '--', '/usr/bin/setpriv',
               '--reuid=' + str(component['uid']), '--regid=' + str(component['gid']),
               '--clear-groups', '--inh-caps=-all', '--ambient-caps=-all', '--bounding-set=-all',
               '--no-new-privs', str(program), '--config', str(config), 'status', timeout=300)
 
 
-def clone_compare(directory, m, r, observed):
+def clone_compare(directory, m, r, observed, *, current_schema=False):
     sources_match(m, r, observed)
     review = Path(m['review'])
     candidate = directory / 'candidate'
@@ -332,7 +369,15 @@ def clone_compare(directory, m, r, observed):
         os.chown(carrier / 'config.toml', 0, component['gid'])
         program = review / 'payload/lightning-goatsctl'
         TX.copy_durable(program, carrier / 'lightning-goatsctl', TX.fingerprint(program))
-        migrate_as_runtime(carrier / 'lightning-goatsctl', carrier / 'config.toml', component)
+        if current_schema:
+            old_program = original(review, r, Q.BIN / 'lightning-goatsctl')
+            TX.copy_durable(old_program, carrier / 'original-ctl', TX.fingerprint(old_program))
+            previous = migrate_as_runtime(carrier / 'original-ctl', carrier / 'config.toml', component)
+            selected = migrate_as_runtime(carrier / 'lightning-goatsctl', carrier / 'config.toml', component)
+            if not isinstance(previous, str) or not previous.strip() or selected != previous:
+                raise ValueError('selected native config/status differs on the current-schema copy')
+        else:
+            migrate_as_runtime(carrier / 'lightning-goatsctl', carrier / 'config.toml', component)
         sources_match(m, r, observed)
         Q.no_role_processes({'core': component})
         if (child / 'core.db-journal').exists() or (child / 'core.db-journal').is_symlink():
@@ -347,6 +392,14 @@ def clone_compare(directory, m, r, observed):
                     or stat.S_IMODE(info.st_mode) != 0o600
                     or info.st_size > r['baseline']['policy']['max_component_bytes']):
                 raise ValueError('clone file identity changed')
+        if current_schema:
+            result = native(m, 'verify', '--bundle', directory / 'backup')
+            sources_match(m, r, observed)
+            M.note(directory, 'CLONE-ACCEPTED.json', {'native': result, 'carrier': str(carrier),
+                    'current_schema_patch': True, 'schema_upgrade_authorized': False,
+                    'matching_native_status_sha256': hashlib.sha256(selected.encode()).hexdigest(),
+                    'backup_manifest_sha256': digest(directory / 'backup/MANIFEST.json')})
+            return
         # Retain the original candidate core images; replace only the separate
         # candidate with the native-migrated clone, never the accepted backup.
         for suffix in ('', '-wal'):
@@ -373,21 +426,31 @@ def clone_compare(directory, m, r, observed):
         TX.sync_directory(carrier)
 
 
-def apply(directory, approved):
+def apply(directory, approved, *, current_schema=False):
     if not approved:
         raise ValueError('explicit exclusive maintenance approval required')
-    m, r = load(directory)
+    m, r = load(directory, current_schema=current_schema)
     with M.exclusive(directory):
         if any((directory / name).exists() for name in ('MAINTENANCE-STARTED.json', 'RESUME-REQUESTED.json')):
             raise ValueError('maintenance already began; preserve evidence and inspect rather than reapply')
-        if P.baseline() != r['baseline']:
+        if P.baseline(current_schema=current_schema) != r['baseline']:
             raise ValueError('reviewed installation/processes changed')
         M.note(directory, 'MAINTENANCE-STARTED.json', {'exclusive_maintenance': True, 'database_restore_authorized': False})
         quiesce(m, r)
-        observed = backup(directory, m, r)
-        clone_compare(directory, m, r, observed)
+        observed = backup(directory, m, r, current_schema=current_schema)
+        clone_compare(directory, m, r, observed, current_schema=current_schema)
         TX.execute(directory / 'programs', lambda: sources_match(m, r, observed, installed=None))
         sources_match(m, r, observed, installed=True)
+        if current_schema:
+            verified = native(m, 'verify', '--bundle', directory / 'backup')
+            sources_match(m, r, observed, installed=True)
+            M.note(directory, 'COMPARISON.json', {'verified': verified, 'live_images': observed,
+                    'backup_manifest_sha256': digest(directory / 'backup/MANIFEST.json'),
+                    'current_schema_patch': True, 'schema_upgrade_authorized': False,
+                    'live_migration_performed': False})
+            return {'upgraded': True, 'four_journal_backup_verified': True, 'clone_compared': True,
+                    'live_migration_performed': False, 'financial_images_unchanged': True,
+                    'services_started': False, 'contact_enabled': r['contact_enabled']}
         M.note(directory, 'MIGRATION-STARTED.json', {'database_restore_authorized': False, 'old_binary_rollback_authorized': False})
         migrate_as_runtime(Q.BIN / 'lightning-goatsctl', C.CONFIG, r['baseline']['policy']['components']['core'])
         stopped(m, r, installed=True)
@@ -402,21 +465,28 @@ def apply(directory, approved):
             'live_migration_compared': True, 'services_started': False, 'contact_enabled': False}
 
 
-def resume(directory, approved):
+def resume(directory, approved, *, current_schema=False):
     if not approved:
         raise ValueError('explicit service resumption approval required')
-    m, r = load(directory)
+    m, r = load(directory, current_schema=current_schema)
     with M.exclusive(directory):
         if (directory / 'RESUME-REQUESTED.json').exists():
             raise ValueError('resumption already began; inspect instead of restarting')
         accepted = C.read_json(directory / 'COMPARISON.json')
+        patch_mode(accepted, current_schema)
         sources_match(m, r, accepted['live_images'], installed=True)
-        if (native(m, 'verify', '--bundle', directory / 'migrated') != accepted['verified']
+        if current_schema:
+            if (accepted.get('live_migration_performed') is not False
+                    or native(m, 'verify', '--bundle', directory / 'backup') != accepted['verified']
+                    or native({'review': str(directory)}, 'verify', '--bundle', directory / 'backup') != accepted['verified']
+                    or digest(directory / 'backup/MANIFEST.json') != accepted['backup_manifest_sha256']):
+                raise ValueError('accepted current-schema comparison changed before resumption')
+        elif (native(m, 'verify', '--bundle', directory / 'migrated') != accepted['verified']
                 or native(m, 'compare-contact-upgrade', '--bundle', directory / 'backup',
                           '--candidate-copy', directory / 'migrated') != accepted['compared']
                 or digest(directory / 'migrated/MANIFEST.json') != accepted['migrated_manifest_sha256']):
             raise ValueError('accepted migration comparison changed before resumption')
-        M.note(directory, 'RESUME-REQUESTED.json', {'approved': True, 'contact_enabled': False, 'payouts_enabled': False})
+        M.note(directory, 'RESUME-REQUESTED.json', {'approved': True, 'contact_enabled': r['contact_enabled'], 'payouts_enabled': False})
         M.restore_unit(original(Path(m['review']), r, C.UNIT), r['baseline']['files'][str(C.UNIT)])
         member_mask = MASKS / 'cyberherd.service'
         if not M.masked(member_mask):
@@ -443,12 +513,13 @@ def resume(directory, approved):
             if not M.masked(MASKS / (role + '.service')) or C.status(role + '.service')['MainPID'] != '0':
                 raise ValueError('outgoing role changed during resumption')
         M.note(directory, 'RESUMED.json', {'core_running': True, 'membership_running': True,
-                'contact_enabled': False, 'payouts_enabled': False})
-    return {'core_running': True, 'membership_running': True, 'contact_enabled': False, 'payouts_enabled': False}
+                'contact_enabled': r['contact_enabled'], 'payouts_enabled': False})
+    return {'core_running': True, 'membership_running': True, 'contact_enabled': r['contact_enabled'], 'payouts_enabled': False}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--current-schema', action='store_true', help='program-only patch; never migrate live state')
     commands = parser.add_subparsers(dest='operation', required=True)
     planning = commands.add_parser('plan')
     planning.add_argument('review', type=Path)
@@ -462,11 +533,11 @@ def main():
     resuming.add_argument('--approve-resumption', required=True, action='store_true')
     args = parser.parse_args()
     if args.operation == 'plan':
-        result = plan(args.review, args.review_sha256, args.directory)
+        result = plan(args.review, args.review_sha256, args.directory, current_schema=args.current_schema)
     elif args.operation == 'apply':
-        result = apply(args.directory, args.exclusive_maintenance)
+        result = apply(args.directory, args.exclusive_maintenance, current_schema=args.current_schema)
     else:
-        result = resume(args.directory, args.approve_resumption)
+        result = resume(args.directory, args.approve_resumption, current_schema=args.current_schema)
     print(json.dumps(result, sort_keys=True))
 
 

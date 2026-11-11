@@ -26,6 +26,11 @@ cap for ordinary Lightning and zaps. Separately installed VPS tools refuse a
 stored-allocation mismatch before creating any candidate; payout limits remain
 zero, outgoing roles remain masked and activation is still separate.
 
+The [native backlog review](testing/cyberherd-reward-backlog-checkpoint-20261111.md)
+now qualifies frozen feeding/plan/reservation classification from accepted backup
+copies, including pending intake and cursor lag. Actual historical-copy
+acceptance preserves live applications and grants no financial activation.
+
 [Explicit failed-payment cost review](architecture/cyberherd-failed-cost-recovery.md)
 now has a [485-test source checkpoint](testing/cyberherd-failed-cost-checkpoint-20261110.md).
 Provider failure alone never releases funds, and the legacy two-store restore

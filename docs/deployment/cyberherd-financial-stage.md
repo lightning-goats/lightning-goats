@@ -118,5 +118,6 @@ alone does not prove that every historical barrier has a zero allocation, and a
 configuration-only candidate cannot establish the contents of those journals.
 The separate report records frozen allocations, unplanned/closed/reserved work,
 pending intake and cursor lag. It creates no plan/reservation and grants no
-activation authority; qualification of this newly added command is separate from
-the earlier configuration-only checkpoint.
+activation authority. Its [separate qualification](../testing/cyberherd-reward-backlog-checkpoint-20261111.md)
+includes protected-root/installed CLI checks and actual historical-copy acceptance;
+it does not replace the later maintenance transaction's fresh backup review.

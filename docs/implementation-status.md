@@ -54,8 +54,12 @@ activation has been performed.
 The new native `review-rewards` command reviews only accepted four-journal backup
 images, preserving the original manifest format. It reports frozen feeding
 allocations, unplanned/closed/reserved work, pending intake and cursor lag without
-creating plans or granting activation authority. Source tests and an installed-CLI
-rehearsal are added; their exact qualification remains pending. See
+creating plans or granting activation authority. Its
+[qualified checkpoint](testing/cyberherd-reward-backlog-checkpoint-20261111.md)
+passes all ten workflows, 526 ordinary native cases, separate protected-root
+checks and the actual installed CLI rehearsal. A separate VPS reader also
+accepts a historical backup without changing its images or live applications;
+the private findings do not establish current activation readiness. See
 [the backlog review contract](deployment/cyberherd-state-maintenance.md#review-retained-reward-backlog).
 
 Separate NIP-46 clients now pass [actual household signing checks](testing/cyberherd-bunker-checkpoint-20261110.md):

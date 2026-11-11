@@ -2,7 +2,7 @@
 
 `prepare-cyberherd-financial-stage.py` prepares a complete candidate for review;
 it installs nothing. It adds one selector to the authenticated root tool closure,
-bringing the prospective closure to **24 files**. Use only an independently
+bringing the closure to **24 files**. Use only an independently
 qualified, root-owned generation and authenticate the launcher externally before
 isolated Python interprets it. Never execute a writable checkout as root.
 
@@ -83,10 +83,12 @@ The source includes pure scope/admission checks, protected-file refusal tests an
 a separate native validator. The disposable installed rehearsal selects a
 synthetic allocation through the actual signed operator API, then prepares a
 nonzero candidate using the original runtime UID. All four installed original
-configurations and core credit/unknown UUID must remain unchanged, outgoing units
-stay masked, and provider/gateway/publication operations remain zero. Exact CI
-results must be recorded before actual-host use. Local Python checks alone do not
-establish native validation or a live financial deployment.
+configurations and core credit/unknown UUID remain unchanged, outgoing units
+stay masked, and provider/gateway/publication operations remain zero. The
+[qualified checkpoint](../testing/cyberherd-financial-candidate-checkpoint-20261111.md)
+records all ten passing workflows, verified artifacts and the actual VPS's
+stored-allocation refusal before candidate creation. The new tools/checker are
+installed separately; no actual-host candidate has been validated or activated.
 
 The actual-host candidate awaits the requested operator limits. Before any
 separately approved activation, review retained confirmed-feeding barriers and

@@ -38,12 +38,18 @@ host-encrypted and passed receive-request/same-core-resource read checks after
 the operator corrected an omitted scope. Payment-read, quote/execute and controlled
 payment qualification remain unfinished; no payout was sent.
 
-The next [four-role financial candidate preparer](deployment/cyberherd-financial-stage.md)
+The [four-role financial candidate preparer](deployment/cyberherd-financial-stage.md)
 binds explicit operator limits, an already selected stored allocation and all four
 native configurations. It preserves running services and creates no activation
-authority. Local boundary cases pass; separate protected-root and installed native
-qualification are pending. Requested operator limits remain unanswered, and no
-actual-host financial candidate or activation has been performed.
+authority. Its [qualified checkpoint](testing/cyberherd-financial-candidate-checkpoint-20261111.md)
+passes all ten workflows, 522 ordinary native tests, separate root checks and the
+installed nonzero-candidate rehearsal. The selected net limit now applies to both
+ordinary Lightning and zaps. A new authenticated 24-file tool generation and
+checker are installed separately on the VPS. The actual zero-only review safely
+refused before directory creation because the stored member allocation is 10%;
+all 17 original files/PIDs and zero spending limits remain exact. Requested
+operator limits remain unanswered, and no actual-host financial candidate or
+activation has been performed.
 
 Separate NIP-46 clients now pass [actual household signing checks](testing/cyberherd-bunker-checkpoint-20261110.md):
 membership kinds 1/1311 and payout-signing kind 9734 preserve the exact project

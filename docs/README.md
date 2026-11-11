@@ -20,6 +20,12 @@ now verify kernel filters, the separate receive/CyberHerd private-network polici
 and public IPv4/IPv6 TLS without credentials, API requests or application restarts.
 They preserve the existing firewall and WireGuard forwarding setup.
 
+The [four-role financial candidate checkpoint](testing/cyberherd-financial-candidate-checkpoint-20261111.md)
+passes exact native/root/systemd qualification, including a shared per-payment
+cap for ordinary Lightning and zaps. Separately installed VPS tools refuse a
+stored-allocation mismatch before creating any candidate; payout limits remain
+zero, outgoing roles remain masked and activation is still separate.
+
 [Explicit failed-payment cost review](architecture/cyberherd-failed-cost-recovery.md)
 now has a [485-test source checkpoint](testing/cyberherd-failed-cost-checkpoint-20261110.md).
 Provider failure alone never releases funds, and the legacy two-store restore

@@ -549,41 +549,74 @@ def resume(directory, expected, approved, original=False):
                 raise ValueError('accepted program or private backlog receipt changed')
             if native_configuration_checks(directory, r) != r['native_configuration_checks']:
                 raise ValueError('selected worker configuration acceptance changed before resumption')
-        # This durable fence precedes ALL unmask/start operations. Once written,
-        # no code rollback or automatic repeated start is permitted.
-        M.note(directory, 'RESUME-REQUESTED.json', {'approved': True, 'original_programs': original, 'payouts_enabled': False})
-        M.restore_unit(U.original(directory, r, C.UNIT), r['baseline']['files'][str(C.UNIT)])
-        mask = U.MASKS / 'cyberherd.service'
-        if not M.masked(mask):
-            raise ValueError('membership mask changed before resumption')
-        mask.unlink()
-        TX.sync_directory(mask.parent)
-        C.command('/usr/bin/systemctl', 'daemon-reload')
-        U.stable(m, r, installed=not original)
-        for role in ('core', 'membership'):
-            name = U.P.ROLE_NAMES[role] + '.service'
-            value, before = C.status(name), r['baseline']['states'][role]
-            if (value['FragmentPath'] != before['FragmentPath'] or value['DropInPaths'] != before['DropInPaths']
-                    or value['NeedDaemonReload'] != 'no'):
-                raise ValueError('effective service changed before resumption')
-            M.start_identity(value, 'lightning-goats' if role == 'core' else 'cyberherd')
-        for name, user, program, health in (
-                (C.UNIT_NAME, 'lightning-goats', 'lightning-goatsd', 'http://127.0.0.1:8787/healthz'),
-                ('cyberherd.service', 'cyberherd', 'cyberherdd', 'http://127.0.0.1:3340/api/v1/cyberherd')):
-            C.command('/usr/bin/systemctl', 'start', '--', name, timeout=120)
-            M.running(name, user, Q.BIN / program)
-            M.health(health)
-        U.stable(m, r, installed=not original)
-        for role in ('cyberherd-payout', 'cyberherd-signer'):
-            value = C.status(role + '.service')
-            if (not M.masked(U.MASKS / (role + '.service')) or value['MainPID'] != '0'
-                    or value['LoadState'] != 'masked' or value['UnitFileState'] != 'masked'
-                    or value['ActiveState'] != 'inactive' or value['SubState'] != 'dead'):
-                raise ValueError('outgoing role changed during zero-budget resumption')
-        M.note(directory, 'RESUMED.json', {'core_running': True, 'membership_running': True,
-            'original_programs': original, 'payouts_enabled': False, 'configurations_changed': False})
+        return resume_verified_services(directory, m, r, original=original)
+
+
+def resume_verified_services(directory, m, r, *, original=False):
+    """Shared start tail; caller must verify its own immutable accepted state."""
+    # This durable fence precedes ALL unmask/start operations. Once written,
+    # no code rollback or automatic repeated start is permitted.
+    M.note(directory, 'RESUME-REQUESTED.json', {'approved': True, 'original_programs': original, 'payouts_enabled': False})
+    M.restore_unit(U.original(directory, r, C.UNIT), r['baseline']['files'][str(C.UNIT)])
+    mask = U.MASKS / 'cyberherd.service'
+    if not M.masked(mask):
+        raise ValueError('membership mask changed before resumption')
+    mask.unlink()
+    TX.sync_directory(mask.parent)
+    C.command('/usr/bin/systemctl', 'daemon-reload')
+    U.stable(m, r, installed=not original)
+    for role in ('core', 'membership'):
+        name = U.P.ROLE_NAMES[role] + '.service'
+        value, before = C.status(name), r['baseline']['states'][role]
+        if (value['FragmentPath'] != before['FragmentPath'] or value['DropInPaths'] != before['DropInPaths']
+                or value['NeedDaemonReload'] != 'no'):
+            raise ValueError('effective service changed before resumption')
+        M.start_identity(value, 'lightning-goats' if role == 'core' else 'cyberherd')
+    for name, user, program, health in (
+            (C.UNIT_NAME, 'lightning-goats', 'lightning-goatsd', 'http://127.0.0.1:8787/healthz'),
+            ('cyberherd.service', 'cyberherd', 'cyberherdd', 'http://127.0.0.1:3340/api/v1/cyberherd')):
+        C.command('/usr/bin/systemctl', 'start', '--', name, timeout=120)
+        M.running(name, user, Q.BIN / program)
+        M.health(health)
+    U.stable(m, r, installed=not original)
+    for role in ('cyberherd-payout', 'cyberherd-signer'):
+        value = C.status(role + '.service')
+        if (not M.masked(U.MASKS / (role + '.service')) or value['MainPID'] != '0'
+                or value['LoadState'] != 'masked' or value['UnitFileState'] != 'masked'
+                or value['ActiveState'] != 'inactive' or value['SubState'] != 'dead'):
+            raise ValueError('outgoing role changed during zero-budget resumption')
+    M.note(directory, 'RESUMED.json', {'core_running': True, 'membership_running': True,
+        'original_programs': original, 'payouts_enabled': False, 'configurations_changed': False})
     return {'core_running': True, 'membership_running': True, 'original_programs': original,
             'payouts_enabled': False, 'configurations_changed': False}
+
+
+def resume_inclusive_fee_upgrade(directory, expected, approved):
+    if not approved:
+        raise ValueError('explicit schema service resumption approval required')
+    m, r = load(directory, expected, inclusive_fee_upgrade=True)
+    with M.exclusive(directory):
+        if any((directory / name).exists() for name in ('RESUME-REQUESTED.json', 'ROLLBACK-REQUESTED.json')):
+            raise ValueError('schema resumption or rollback already began; preserve evidence and inspect')
+        receipt = C.read_json(directory / 'APPLIED.json')
+        if (receipt.get('inclusive_fee_upgrade') is not True
+                or receipt.get('activation_authorized') is not False
+                or receipt.get('services_started') is not False
+                or receipt.get('configurations_changed') is not False
+                or receipt.get('retained_rows_unchanged') is not True):
+            raise ValueError('accepted schema migration receipt required')
+        U.sources_match(m, r, receipt['live_images'], installed=True)
+        if (U.digest(directory / 'backup/MANIFEST.json') != receipt['backup_manifest_sha256']
+                or U.digest(directory / 'migrated/MANIFEST.json') != receipt['migrated_manifest_sha256']
+                or inclusive_native(directory, 'verify', '--bundle', directory / 'migrated') != receipt['verified']
+                or inclusive_native(directory, 'compare-inclusive-fee-upgrade',
+                                    '--bundle', directory / 'backup', '--candidate-copy', directory / 'migrated') != receipt['compared']):
+            raise ValueError('accepted schema migration images or comparison changed')
+        if native_configuration_checks(directory, r) != r['native_configuration_checks']:
+            raise ValueError('selected disabled configuration acceptance changed')
+        U.sources_match(m, r, receipt['live_images'], installed=True)
+        result = resume_verified_services(directory, m, r)
+        return dict(result, inclusive_fee_upgrade=True)
 
 
 def main():

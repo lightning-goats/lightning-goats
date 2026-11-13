@@ -418,7 +418,7 @@ async fn equal_rows(local: &SqlitePool, core: &SqlitePool, rows: &str, lookup: &
     Ok(())
 }
 
-async fn require_before_inclusive_fees(pool: &SqlitePool) -> Result<()> {
+pub(super) async fn require_before_inclusive_fees(pool: &SqlitePool) -> Result<()> {
     let compiled: Vec<_> = PAYOUT.iter().collect();
     if compiled.iter().map(|m| m.version).collect::<Vec<_>>() != [1, 2, 3, 4, 5, 6, 8, 9, 10, 11] {
         bail!("inclusive-fee source requires the separately qualified payout migrations");

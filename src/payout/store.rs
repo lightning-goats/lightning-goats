@@ -115,6 +115,46 @@ impl Store {
     pub(crate) async fn close_after_initialization(self) {
         self.pool.close().await;
     }
+    /// Existing, disabled schema-8 journal only. This opens no worker, signer,
+    /// provider or core connection and never creates a scope/intake binding.
+    #[cfg(unix)]
+    pub(crate) async fn migrate_fee_schema_offline(
+        database_url: &str,
+        policy: &Policy,
+        intake_uid: u32,
+    ) -> Result<()> {
+        policy.validate()?;
+        if policy.execution_enabled
+            || policy.member_percent_ceiling != 0
+            || policy.max_sats_per_feed != 0
+            || policy.max_sats_per_24h != 0
+            || policy.max_fee_sats != 0
+            || policy.max_net_sats != 0
+        {
+            bail!("offline fee migration requires zero financial authority");
+        }
+        super::cost_recovery::existing_private_database(database_url)?;
+        let pool = crate::sqlite::connect_existing_durable(database_url, 1).await?;
+        let result = async {
+            crate::state_maintenance::require_payout_fee_upgrade_source(&pool).await?;
+            let saved: String =
+                sqlx::query_scalar("SELECT scope_json FROM payout_binding WHERE singleton=1")
+                    .fetch_one(&pool)
+                    .await?;
+            let peer: i64 =
+                sqlx::query_scalar("SELECT peer_uid FROM payout_intake_binding WHERE singleton=1")
+                    .fetch_one(&pool)
+                    .await?;
+            if saved != serde_json::to_string(&policy.scope)? || peer != i64::from(intake_uid) {
+                bail!("offline fee migration scope or intake identity changed");
+            }
+            MIGRATOR.run(&pool).await?;
+            crate::sqlite::require_current_schema(&pool, &MIGRATOR).await
+        }
+        .await;
+        pool.close().await;
+        result
+    }
     pub async fn connect(database_url: &str, policy: Policy) -> Result<Self> {
         policy.validate()?;
         let pool = crate::sqlite::connect_durable(database_url, 5).await?;

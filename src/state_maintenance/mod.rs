@@ -25,6 +25,9 @@ pub(crate) async fn inspect_fixture(directory: &Path, policy: &Policy) -> Result
     database::inspect(directory, policy).await
 }
 
+pub(crate) async fn require_payout_fee_upgrade_source(pool: &sqlx::SqlitePool) -> Result<()> {
+    database::require_before_inclusive_fees(pool).await
+}
 pub const RECOVERY_MARKER: &str = "CYBERHERD_RECOVERY_REQUIRED";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]

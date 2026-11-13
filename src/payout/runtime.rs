@@ -66,6 +66,41 @@ impl Config {
         fresh.publish().await
     }
 
+    /// Root orchestration must hold all four writers; this child additionally
+    /// locks its own runtime identity and requires unchanged disabled policy.
+    pub async fn migrate_inclusive_fees_offline(
+        &self,
+        path: &Path,
+        writers_stopped: bool,
+    ) -> Result<()> {
+        self.validate()?;
+        ipc::protected_config(path)?;
+        ipc::private_state(&self.state_dir)?;
+        if !writers_stopped
+            || self.enabled
+            || *self != Config::load(path)?
+            || [self.intake_uid, self.signer_uid, self.policy.scope.core_uid].contains(&ipc::uid()?)
+        {
+            bail!(
+                "offline fee migration requires stopped writers and unchanged disabled payout identity"
+            );
+        }
+        let _singleton = ipc::singleton("cyberherd-payout", &self.state_dir)?;
+        let database = self.state_dir.join("payout.db");
+        Store::migrate_fee_schema_offline(
+            &format!(
+                "sqlite://{}",
+                database.to_str().context("state path must be UTF-8")?
+            ),
+            &self.policy,
+            self.intake_uid,
+        )
+        .await?;
+        if *self != Config::load(path)? {
+            bail!("offline migration configuration changed");
+        }
+        Ok(())
+    }
     pub fn load(path: &Path) -> Result<Self> {
         let raw = std::fs::read_to_string(path)?;
         if raw.len() > 65536 {

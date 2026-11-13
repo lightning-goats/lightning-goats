@@ -59,3 +59,16 @@ stop services, migrate journals, stage a restore, or enable an outgoing role.
 Ordinary snapshots and restore still require the current schema. These additions
 need combined native/root qualification before any actual-host use. Comparison
 of migrated copies and the reviewed offline migration executor remain unfinished.
+
+The development payout daemon now has an explicit
+`--migrate-inclusive-fees --writers-stopped` child operation. It requires its own
+non-root runtime UID, existing private journal, singleton lock, protected unchanged
+disabled configuration, zero financial authority, exact old schema and matching
+stored provider/intake bindings before applying the compiled migrations. It closes
+SQLite on failure as well as success. It creates no grant/scope/intake binding and
+never constructs the worker, loads the spending credential or opens a transport.
+The stopped-writer flag is an attestation; the reviewed root coordinator must
+independently check and hold all four services. This source-only child still needs
+actual-UID execution tests and the backup/compare/apply/resume coordinator before
+production use. Partial migration failure stays held for inspection, without an
+automatic fresh migration or stale financial-state restore.

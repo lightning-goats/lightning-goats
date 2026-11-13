@@ -12,6 +12,11 @@ struct Args {
     /// Initialize only a fresh disabled zero-budget journal; no sender credential.
     #[arg(long)]
     initialize_state: bool,
+    /// Migrate only an existing disabled payout journal; never start a worker.
+    #[arg(long, requires="writers_stopped", conflicts_with_all=["check","initialize_state","sync_failed_cost"])]
+    migrate_inclusive_fees: bool,
+    #[arg(long, requires = "migrate_inclusive_fees")]
+    writers_stopped: bool,
     /// Read one original failed-cost receipt from core and acknowledge it locally.
     /// Requires the payout UID; does not load a spending credential or send money.
     #[arg(long,requires_all=["grant","member"],conflicts_with_all=["check","initialize_state"])]
@@ -38,6 +43,13 @@ async fn main() -> Result<()> {
     if args.initialize_state {
         config.initialize_state(&args.config).await?;
         println!("New payout journal initialized; no runtime started");
+        return Ok(());
+    }
+    if args.migrate_inclusive_fees {
+        config
+            .migrate_inclusive_fees_offline(&args.config, args.writers_stopped)
+            .await?;
+        println!("Existing payout journal migrated; no runtime, credential or transport started");
         return Ok(());
     }
     if args.sync_failed_cost {

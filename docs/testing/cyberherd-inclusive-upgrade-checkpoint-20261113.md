@@ -160,3 +160,22 @@ production hosts files are untouched. Focused tests reject hostname record
 injection and refuse a shared mount namespace before any mount/file operation.
 The full installed path still requires a new CI result; these focused tests alone
 do not prove the bind mount or installed upgrade passed.
+
+## Hostname correction qualified
+
+Source `67a9488` passed all ten workflows, including
+[Rust](https://github.com/lightning-goats/lightning-goats/actions/runs/43525617380),
+[Security](https://github.com/lightning-goats/lightning-goats/actions/runs/43525617481),
+[NIP-46](https://github.com/lightning-goats/lightning-goats/actions/runs/43525617401)
+and the complete [installed deployment run](https://github.com/lightning-goats/lightning-goats/actions/runs/43525617374).
+The installed scenario passed the unchanged account-authority guard and completed
+its migration/financial fixtures with the private hostname mapping.
+
+The retained evidence identifies tested merge
+`61b8251d3a20ad4eb32e46747a5261c0595764d5`. All six summary checksums were verified.
+Its dedicated inclusive-fee result confirms runtime-UID migration, seven-to-ten
+history records, four-journal comparison, unchanged configuration and core/member
+resumption. Payouts remain false, gateway POSTs zero, and live-host/provider/recovery
+qualification false. No production installation or maintenance is implied by this
+new CI result. The previously approved staging and sealed `ae10df6` review remain
+unchanged, awaiting separate maintenance approval.

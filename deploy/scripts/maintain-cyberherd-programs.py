@@ -459,8 +459,8 @@ def apply(directory, expected, approved):
 def apply_inclusive_fee_upgrade(directory, expected, approved):
     """Separate schema transaction; no ordinary rollback/resume is applicable.
 
-    Source implementation only until its dedicated resumption and installed
-    qualification are complete. Not exposed by the command parser yet.
+    Requires dedicated resumption and installed qualification before production
+    use; ordinary program-only rollback/resume must never handle this review.
     """
     if not approved:
         raise ValueError('explicit exclusive schema maintenance approval required')
@@ -626,7 +626,8 @@ def main():
     preparation = commands.add_parser('prepare')
     for name in ('archive', 'review_archive', 'source', 'archive_sha256', 'review_sha256', 'directory'):
         preparation.add_argument(name, type=Path if name in ('archive', 'review_archive', 'directory') else str)
-    for operation, approval in (('apply', '--exclusive-maintenance'), ('rollback', '--approve-program-rollback'),
+    for operation, approval in (('apply', '--exclusive-maintenance'), ('apply-inclusive-fees', '--exclusive-maintenance'),
+                                ('resume-inclusive-fees', '--approve-resumption'), ('rollback', '--approve-program-rollback'),
                                 ('resume', '--approve-resumption'), ('resume-original', '--approve-resumption')):
         command = commands.add_parser(operation)
         command.add_argument('directory', type=Path)
@@ -637,6 +638,10 @@ def main():
         raise ValueError('inclusive-fee upgrade application requires its separate reviewed coordinator')
     if args.operation == 'prepare':
         result = prepare(args.archive, args.review_archive, args.source, args.archive_sha256, args.review_sha256, args.directory, inclusive_fee_upgrade=args.inclusive_fee_upgrade)
+    elif args.operation == 'apply-inclusive-fees':
+        result = apply_inclusive_fee_upgrade(args.directory, args.review_sha256, args.exclusive_maintenance)
+    elif args.operation == 'resume-inclusive-fees':
+        result = resume_inclusive_fee_upgrade(args.directory, args.review_sha256, args.approve_resumption)
     elif args.operation == 'apply':
         result = apply(args.directory, args.review_sha256, args.exclusive_maintenance)
     elif args.operation == 'rollback':

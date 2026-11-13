@@ -379,3 +379,77 @@ class ProgramFiles(unittest.TestCase):
             P.resume(self.destination, self.sha, True)
         self.assertEqual(self.starts, [])
         self.assertTrue(P.M.masked(self.unit))
+
+
+class InclusiveUpgradeFlow(unittest.TestCase):
+    """Control-flow contracts only; native parsing and systemd are mocked."""
+    def exercise(self, failure=None):
+        from contextlib import ExitStack, nullcontext
+        with tempfile.TemporaryDirectory() as temporary, ExitStack() as stack:
+            directory=Path(temporary)
+            events=[]
+            backup={'manifest_sha256':'digest','selected_source':{'id':'source'}}
+            clone={'inclusive_fee_upgrade':True,'backup_manifest_sha256':'digest','native':{'id':'source'}}
+            records={'BACKUP-ACCEPTED.json':backup,'CLONE-ACCEPTED.json':clone}
+            r={'baseline':{'policy':{'components':{'payout':{'uid':10003,'gid':10003}}}},'native_configuration_checks':{'checked':True}}
+            m={}
+            def install(obj,name,value):
+                return stack.enter_context(patch.object(obj,name,value))
+            def event(name,result=None):
+                def call(*args,**kwargs):
+                    events.append(name)
+                    if failure==name:raise ValueError('injected '+name)
+                    return result
+                return call
+            install(P,'load',lambda *a,**k:(m,r))
+            install(P.M,'exclusive',lambda *a:nullcontext())
+            install(P,'fresh',lambda *a:None)
+            install(P,'native_configuration_checks',lambda *a:{'checked':True})
+            install(P.M,'note',lambda path,name,value:records.__setitem__(name,value))
+            install(P.C,'read_json',lambda path:records[path.name])
+            install(P.U,'quiesce',event('quiesce'))
+            install(P,'inclusive_backup',event('backup',{'before':'image'}))
+            install(P,'inclusive_clone_compare',event('clone'))
+            install(P.U,'sources_match',lambda *a,**k:None)
+            install(P.U,'stopped',lambda *a,**k:None)
+            install(P.U,'state_files',lambda *a:{'after':'image'})
+            install(P.U,'digest',lambda *a:'digest')
+            install(P.TX,'execute',event('replace'))
+            install(P,'offline_fee_migration_child',event('migrate'))
+            def native(path,operation,*arguments):
+                name={'verify-inclusive-fee-upgrade-source':'source','compare-inclusive-fee-upgrade':'compare'}.get(operation,operation)
+                events.append(name)
+                if failure==name and 'migrate' in events:raise ValueError('injected '+name)
+                return {'id':'source'} if name in ('source','compare') else {'id':'migrated'}
+            install(P,'inclusive_native',native)
+            install(P,'resume_verified_services',event('resume',{'payouts_enabled':False}))
+            if failure:
+                with self.assertRaisesRegex(ValueError,'injected'):
+                    P.apply_inclusive_fee_upgrade(directory,'digest',True)
+                self.assertNotIn('resume',events)
+                if failure=='clone':
+                    self.assertNotIn('replace',events);self.assertNotIn('migrate',events)
+                else:
+                    self.assertIn('MIGRATION-STARTED.json',records)
+                    self.assertNotIn('APPLIED.json',records)
+                self.assertNotIn('RESUME-REQUESTED.json',records)
+                return
+            applied=P.apply_inclusive_fee_upgrade(directory,'digest',True)
+            self.assertFalse(applied['services_started'])
+            self.assertLess(events.index('clone'),events.index('replace'))
+            self.assertLess(events.index('replace'),events.index('migrate'))
+            self.assertLess(events.index('migrate'),events.index('snapshot'))
+            self.assertNotIn('resume',events)
+            resumed=P.resume_inclusive_fee_upgrade(directory,'digest',True)
+            self.assertTrue(resumed['inclusive_fee_upgrade'])
+            self.assertFalse(resumed['payouts_enabled'])
+            self.assertEqual(events[-1],'resume')
+
+    def test_apply_requires_rehearsal_and_resume_requires_post_migration_proof(self):
+        self.exercise()
+
+    def test_clone_failure_cannot_replace_programs_or_start_migration(self):
+        self.exercise('clone')
+
+    def test_post_migration_comparison_failure_cannot_start_services(self):
+        self.exercise('compare')

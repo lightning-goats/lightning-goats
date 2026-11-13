@@ -80,3 +80,25 @@ preparation semantics. Ordinary apply, rollback and resume reject that review,
 even with its correct digest. The selector itself refuses all operations except
 preparation until the separate coordinator is implemented. A digest must never
 turn a schema-upgrade review into an implicit program-only deployment.
+
+## Source coordinator commands (not production-qualified yet)
+
+The authenticated tool now exposes separate `apply-inclusive-fees` and
+`resume-inclusive-fees` commands with the reviewed preparation digest and their
+explicit maintenance/resumption flags. Preparation uses `--inclusive-fee-upgrade
+prepare`; application and resumption use their dedicated command names, without
+that preparation selector. Program-only apply/rollback/resume continue rejecting
+the schema-upgrade record.
+
+The apply path accepts both native source verifiers, rehearses a payout copy under
+its runtime UID, verifies all four journals, replaces the reviewed programs, then
+records migration start before touching the live payout journal. A fresh native
+snapshot and strict comparison must succeed before an applied receipt exists.
+Resumption rechecks those exact snapshots, hashes, configuration and stopped
+live images before restoring only core and membership. Outgoing roles stay masked.
+No automatic database restore or old-program rollback follows migration failure.
+
+Control-flow tests cover successful ordering, rehearsal failure before replacement,
+and post-migration comparison failure with no service start. These mock native
+parsers and systemd; actual-root files, real native migration and installed-systemd
+qualification remain separate required evidence before any live invocation.

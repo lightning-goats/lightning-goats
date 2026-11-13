@@ -1113,7 +1113,20 @@ def main():
     launcher = ['/usr/bin/python3', '-I', '-S', '-B', str(tools / 'launch-vps-upgrade.py'), tool_export['manifest_sha256']]
     # The CI fixture is authenticated by the pinned exported tool closure, not
     # by executing a helper from the review archive.
-    sysusers = json.loads(run(*launcher, '--cyberherd-inactive', 'identities', '--create-identities'))
+    try:
+        sysusers = json.loads(run(*launcher, '--cyberherd-inactive', 'identities', '--create-identities'))
+    except Exception:
+        # Disposable CI accounts only. Expose the exact bounded policy-query
+        # failure without changing the installer's fail-closed sudo guard.
+        import sys
+        for role in ('cyberherd', 'cyberherd-payout', 'cyberherd-signer'):
+            result = subprocess.run(['/usr/bin/sudo', '-n', '-l', '-U', role],
+                env={'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LC_ALL': 'C'},
+                capture_output=True, text=True, timeout=15)
+            print('DISPOSABLE IDENTITY POLICY ' + json.dumps({'role': role,
+                'returncode': result.returncode, 'stdout': result.stdout[-2048:],
+                'stderr': result.stderr[-2048:]}), file=sys.stderr)
+        raise
     assert sysusers['services_started'] is False
     runtime = sysusers['runtime']
     source = root / 'source'

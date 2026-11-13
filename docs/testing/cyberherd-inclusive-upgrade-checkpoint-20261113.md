@@ -135,3 +135,13 @@ execution, NoNewPrivileges, zero effective capabilities, no note publication and
 corrupt-credential refusal before exec with status 243. This is isolated sandbox
 acceptance, not a new household authorization or public/live signing test. The
 production maintenance review remains pinned to the original qualified artifacts.
+
+The subsequent [deployment run](https://github.com/lightning-goats/lightning-goats/actions/runs/43523155329)
+passed packaging but its installed scenario stopped before migration while checking
+that fresh runtime users lacked sudo authority. The exact denial/error output was
+not retained, so this checkpoint does not infer a policy grant, DNS failure or
+successful installed qualification. The disposable-only orchestrator now records
+bounded policy-query diagnostics for its three fixed synthetic accounts on that
+failure. The production installer's strict sudo-denial guard is unchanged. The
+previous fully qualified `ae10df6` review remains sealed and maintenance remains
+unapproved.

@@ -74,3 +74,38 @@ fixture gateway POSTs. Synthetic/live-host/provider/recovery limits remain expli
 This closes a reporting gap; it does not retroactively add an artifact to the
 qualified run above. The revised retained summary requires its own installed CI
 execution before being cited as observed evidence.
+
+## Approved staging completed
+
+The operator subsequently approved isolated tool installation and preparation.
+The root-owned installed launcher and manifest match the exact digests above.
+The authenticated `--inclusive-fee-upgrade prepare` command succeeded against the
+qualified merge artifacts and a fresh live installation baseline.
+
+Sealed review: `/var/lib/lightning-goats-upgrades/inclusive-fee-ae10df6-review`.
+`PREPARED.json` SHA256:
+`41a7c373e1dbc43754a1a3b30715383c47d0a0fd33a2d2308b1aebbf86bbb3c9`.
+
+Independent readback confirms the dedicated schema transaction type, six selected
+program hashes, and three accepted native configuration checks under the original
+runtime UIDs in isolated networks. Journals opened, credentials loaded,
+configurations changed, services changed and activation authority are all false.
+Core and membership remain active; payout and signer remain masked.
+
+The next requested maintenance scope is:
+
+1. Recheck this sealed baseline and hold all four writers during a brief outage.
+2. Take and verify a fresh native four-journal backup with both appropriate verifiers.
+3. Migrate a separate payout copy under its existing UID with no network, verify
+   all four journals, and preserve the original backup and paid/signed bytes.
+4. Replace the six qualified programs, run the same offline migration on the
+   existing payout journal, and require a fresh snapshot and strict comparison.
+5. Resume only the existing core and membership services after the separate
+   resumption fences pass. Keep original configuration, zero financial/signing
+   budgets, payout/signer masks and household override unchanged.
+
+This is a schema upgrade, not a program-only replacement. Failure after migration
+stays held for inspection; no automatic stale-state restore or old-binary rollback
+is authorized. The staging approval does not approve these maintenance steps.
+Live provider execution, financial activation and external recovery adoption remain
+outside this proposed window.

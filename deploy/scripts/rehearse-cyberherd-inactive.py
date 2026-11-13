@@ -685,6 +685,48 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
         for key in ('feed_credit_sats', 'threshold_sats', 'feeds_due', 'remainder_sats', 'unresolved_feed_attempt'):
             assert after_programs[key] == financial_before[key]
         assert counts['post'] == 0
+        # Genuine old payout prefix plus a separately compiled schema-8 native
+        # verifier. Neither the empty-prefix fixture nor the legacy executable
+        # is included in production release archives.
+        legacy = fixture_directory / 'inclusive-fee-legacy'
+        assert (legacy / 'SOURCE-COMMIT').read_text().strip() == 'be6ad767829b7d2693b4f1030aa3952f8b7d2555'
+        expected_legacy = {}
+        for line in (legacy / 'SHA256SUMS').read_text().splitlines():
+            digest, filename = line.split(None, 1)
+            assert filename in ('TEST-ONLY-schema8-statectl', 'SOURCE-COMMIT')
+            assert hashlib.sha256((legacy / filename).read_bytes()).hexdigest() == digest
+            expected_legacy[filename] = digest
+        assert set(expected_legacy) == {'TEST-ONLY-schema8-statectl', 'SOURCE-COMMIT'}
+        payout_user = pwd.getpwnam('cyberherd-payout')
+        stripped_fee = json.loads(run('/usr/bin/setpriv', '--reuid=' + str(payout_user.pw_uid),
+            '--regid=' + str(payout_user.pw_gid), '--clear-groups', '--inh-caps=-all',
+            '--ambient-caps=-all', '--bounding-set=-all', '--no-new-privs',
+            str(fixture), '--strip-empty-inclusive-fee-schema'))
+        assert stripped_fee == {'synthetic': True, 'payout_schema': 8, 'grants': 0, 'production_supported': False}
+        statectl = Path('/usr/local/bin/cyberherd-statectl')
+        shutil.copyfile(legacy / 'TEST-ONLY-schema8-statectl', statectl)
+        statectl.chmod(0o755)
+        fee_review = base / 'ci-inclusive-fee-review'
+        fee_prepared = json.loads(run(*launcher, '--cyberherd-program-maintenance', '--inclusive-fee-upgrade', 'prepare',
+            str(core_archive), str(review_archive), source_commit,
+            hashlib.sha256(core_archive.read_bytes()).hexdigest(), hashlib.sha256(review_archive.read_bytes()).hexdigest(), str(fee_review)))
+        assert fee_prepared['prepared'] is True and fee_prepared['journals_opened'] is False
+        fee_sha = hashlib.sha256((fee_review / 'PREPARED.json').read_bytes()).hexdigest()
+        fee_applied = json.loads(run(*launcher, '--cyberherd-program-maintenance', 'apply-inclusive-fees',
+            str(fee_review), '--review-sha256', fee_sha, '--exclusive-maintenance'))
+        assert fee_applied['live_migration_compared'] is True and fee_applied['services_started'] is False
+        fee_before = json.loads((fee_review / 'backup/MANIFEST.json').read_text())
+        fee_after = json.loads((fee_review / 'migrated/MANIFEST.json').read_text())
+        assert fee_before['report']['rows']['payout']['_sqlx_migrations'] == 7
+        assert fee_after['report']['rows']['payout']['_sqlx_migrations'] == 10
+        fee_resumed = json.loads(run(*launcher, '--cyberherd-program-maintenance', 'resume-inclusive-fees',
+            str(fee_review), '--review-sha256', fee_sha, '--approve-resumption'))
+        assert fee_resumed['core_running'] is True and fee_resumed['membership_running'] is True
+        assert fee_resumed['payouts_enabled'] is False
+        assert program_originals == {path: hashlib.sha256(path.read_bytes()).hexdigest() for path in program_originals}
+        assert counts['post'] == 0
+        (root / 'INCLUSIVE-FEE-UPGRADE.json').write_text(json.dumps({'source_prefix_verified': True,
+            'runtime_uid_migration': True, 'four_journal_comparison': True, 'payouts_enabled': False}, sort_keys=True))
         # FIRST financial activation on this disposable VM only. Its synthetic
         # journals have no funded historical barriers or provider submissions.
         # Every daemon joins the loopback-only fixture namespace. The signer

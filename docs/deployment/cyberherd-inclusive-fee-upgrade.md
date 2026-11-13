@@ -47,3 +47,15 @@ unchanged signed requests and acknowledgments, the version-7 gap, dirty/unknown/
 changed checksums, changed old rows/DDL, nonempty new tables, and actual distinct
 runtime ownership. Failure after live migration must retain evidence and keep
 writers held; do not restore stale paid snapshots or retry a fresh payment.
+
+## Source-only backup entry points
+
+`cyberherd-statectl snapshot-before-inclusive-fees --destination NEW_PRIVATE_PATH
+--writers-stopped` and `verify-inclusive-fee-upgrade-source --bundle PRIVATE_BUNDLE`
+are implemented in the development source. Both require protected root policy and
+retain the existing four-owner file and native validation rules. The snapshot
+selector changes only which exact compiled payout prefix is accepted; it does not
+stop services, migrate journals, stage a restore, or enable an outgoing role.
+Ordinary snapshots and restore still require the current schema. These additions
+need combined native/root qualification before any actual-host use. Comparison
+of migrated copies and the reviewed offline migration executor remain unfinished.

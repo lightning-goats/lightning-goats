@@ -76,6 +76,13 @@ enum Command {
         #[arg(long)]
         candidate_copy: PathBuf,
     },
+    /// Snapshot the exact payout-schema-8 source with all four writers masked.
+    SnapshotBeforeInclusiveFees {
+        #[arg(long)]
+        destination: PathBuf,
+        #[arg(long, required = true)]
+        writers_stopped: bool,
+    },
     /// Verify only the exact payout-schema-8 source of an inclusive-fee upgrade.
     VerifyInclusiveFeeUpgradeSource {
         #[arg(long)]
@@ -158,6 +165,15 @@ async fn main() -> Result<()> {
             "feeder_cap_upgrade_compare",
             operator
                 .compare_feeder_cap_upgrade(&bundle, &candidate_copy)
+                .await?,
+        ),
+        Command::SnapshotBeforeInclusiveFees {
+            destination,
+            writers_stopped: true,
+        } => (
+            "inclusive_fee_upgrade_snapshot",
+            operator
+                .snapshot_before_inclusive_fees(&destination)
                 .await?,
         ),
         Command::VerifyInclusiveFeeUpgradeSource { bundle } => (

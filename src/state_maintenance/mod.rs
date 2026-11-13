@@ -166,6 +166,13 @@ pub struct Operator {
     policy_hash: String,
     control: control::Control,
 }
+#[derive(Clone, Copy)]
+enum SnapshotSchema {
+    Current,
+    BeforeContact,
+    BeforeFeederCap,
+    BeforeInclusiveFees,
+}
 impl Operator {
     pub fn load(path: &Path) -> Result<Self> {
         files::require_root()?;
@@ -178,19 +185,31 @@ impl Operator {
         })
     }
     pub async fn snapshot(&self, destination: &Path) -> Result<Manifest> {
-        self.snapshot_schema(destination, 25).await
+        self.snapshot_schema(destination, SnapshotSchema::Current)
+            .await
     }
     /// Explicit additive-upgrade boundary. Same writer/file fences as ordinary
     /// snapshots; accepts only the compiled exact schema-23 source, never a
     /// general older schema. Its bundle cannot enter ordinary restore staging.
     pub async fn snapshot_before_contact(&self, destination: &Path) -> Result<Manifest> {
-        self.snapshot_schema(destination, 23).await
+        self.snapshot_schema(destination, SnapshotSchema::BeforeContact)
+            .await
     }
     /// Exact schema-24 source only; ordinary restore remains current-schema only.
     pub async fn snapshot_before_feeder_cap(&self, destination: &Path) -> Result<Manifest> {
-        self.snapshot_schema(destination, 24).await
+        self.snapshot_schema(destination, SnapshotSchema::BeforeFeederCap)
+            .await
     }
-    async fn snapshot_schema(&self, destination: &Path, core_version: i64) -> Result<Manifest> {
+    /// Snapshot only the exact old payout prefix; no migration or restore grant.
+    pub async fn snapshot_before_inclusive_fees(&self, destination: &Path) -> Result<Manifest> {
+        self.snapshot_schema(destination, SnapshotSchema::BeforeInclusiveFees)
+            .await
+    }
+    async fn snapshot_schema(
+        &self,
+        destination: &Path,
+        schema: SnapshotSchema,
+    ) -> Result<Manifest> {
         self.control.check(&self.policy).await?;
         // Open and validate every source before creating the new output directory.
         let mut sources = Vec::new();
@@ -215,12 +234,17 @@ impl Operator {
         for (_, source) in &sources {
             source.unchanged()?;
         }
-        let report = if core_version == 23 {
-            database::inspect_before_contact(destination, &self.policy).await?
-        } else if core_version == 24 {
-            database::inspect_before_feeder_cap(destination, &self.policy).await?
-        } else {
-            database::inspect(destination, &self.policy).await?
+        let report = match schema {
+            SnapshotSchema::BeforeContact => {
+                database::inspect_before_contact(destination, &self.policy).await?
+            }
+            SnapshotSchema::BeforeFeederCap => {
+                database::inspect_before_feeder_cap(destination, &self.policy).await?
+            }
+            SnapshotSchema::BeforeInclusiveFees => {
+                database::inspect_before_inclusive_fees(destination, &self.policy).await?
+            }
+            SnapshotSchema::Current => database::inspect(destination, &self.policy).await?,
         };
         files::check_images(destination, &images, self.policy.max_component_bytes)?;
         self.control.check(&self.policy).await?;

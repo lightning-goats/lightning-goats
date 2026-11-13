@@ -207,7 +207,8 @@ The list is the full port contract, not a completion claim for an initial slice.
   truthful inactive/live acceptance. Never claim a passing plan or domain test
   proves external transfers or the full port is finished.
 
-Track evidence for every numbered requirement and explicit operator override.
+Track evidence for every numbered requirement and explicit operator override in
+the [full-port acceptance inventory](../testing/cyberherd-acceptance-matrix.md).
 The active thread goal stays open until the requested implementation is complete
 and verified; partial engines/models or a plan alone do not satisfy it.
 

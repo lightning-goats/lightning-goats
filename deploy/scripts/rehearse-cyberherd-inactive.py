@@ -725,8 +725,17 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
         assert fee_resumed['payouts_enabled'] is False
         assert program_originals == {path: hashlib.sha256(path.read_bytes()).hexdigest() for path in program_originals}
         assert counts['post'] == 0
-        (root / 'INCLUSIVE-FEE-UPGRADE.json').write_text(json.dumps({'source_prefix_verified': True,
-            'runtime_uid_migration': True, 'four_journal_comparison': True, 'payouts_enabled': False}, sort_keys=True))
+        fee_evidence = {'accepted': True, 'synthetic': True,
+            'legacy_verifier_source': (legacy / 'SOURCE-COMMIT').read_text().strip(),
+            'source_prefix_verified': True, 'runtime_uid_migration': True,
+            'source_migration_records': fee_before['report']['rows']['payout']['_sqlx_migrations'],
+            'target_migration_records': fee_after['report']['rows']['payout']['_sqlx_migrations'],
+            'four_journal_comparison': fee_applied['live_migration_compared'],
+            'original_configurations_retained': True, 'core_and_membership_resumed': True,
+            'payouts_enabled': fee_resumed['payouts_enabled'], 'gateway_post_count': counts['post'],
+            'provider_execution_qualified': False, 'external_recovery_adopted': False,
+            'live_host_qualified': False}
+        (root / 'INCLUSIVE-FEE-UPGRADE.json').write_text(json.dumps(fee_evidence, sort_keys=True))
         # FIRST financial activation on this disposable VM only. Its synthetic
         # journals have no funded historical barriers or provider submissions.
         # Every daemon joins the loopback-only fixture namespace. The signer
@@ -850,6 +859,7 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
                     'candidate_limits_only_not_installed': True, 'backlog_review_still_required': True,
                     'services_changed': False, 'journals_opened': False, 'provider_operations': 0,
                     'gateway_post_count': counts['post'], 'public_network_used': False, 'live_host_qualified': False},
+                'installed_inclusive_fee_upgrade': fee_evidence,
                 'installed_six_program_maintenance': {'accepted': True, 'actual_six_native_programs_checked': True,
                     'original_worker_uid_configuration_checks': True, 'actual_fresh_four_journal_backup': True,
                     'both_compiled_schema_verifiers_accepted': True, 'actual_uid_copy_status_compared': True,

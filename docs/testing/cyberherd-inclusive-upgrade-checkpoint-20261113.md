@@ -63,3 +63,14 @@ prepare the review using these exact artifacts. It does not authorize apply,
 resumption, provider execution, publication or physical feeding. Existing
 production programs/configuration remain the baseline until a later approved
 maintenance transaction.
+
+## Retained-summary follow-up
+
+The follow-up source now places the dedicated `installed_inclusive_fee_upgrade`
+result in `CYBERHERD-INACTIVE-SYSTEMD.json`, in addition to its fixture-local file.
+It records observed migration-history counts, the pinned legacy verifier source,
+native comparison/resumption acknowledgment, unchanged configurations and zero
+fixture gateway POSTs. Synthetic/live-host/provider/recovery limits remain explicit.
+This closes a reporting gap; it does not retroactively add an artifact to the
+qualified run above. The revised retained summary requires its own installed CI
+execution before being cited as observed evidence.

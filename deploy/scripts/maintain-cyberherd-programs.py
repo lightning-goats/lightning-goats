@@ -24,6 +24,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import stat
 import tarfile
 import tempfile
 import tomllib
@@ -299,6 +300,90 @@ def inclusive_backup(directory, m, r):
             'originals': observed, 'manifest_sha256': U.digest(directory / 'backup/MANIFEST.json'),
             'inclusive_fee_upgrade': True, 'migration_started': False})
     return observed
+
+
+def inclusive_clone_compare(directory, m, r, observed):
+    """Migrate only a separate payout copy; originals stay byte-fenced."""
+    U.sources_match(m, r, observed)
+    accepted = C.read_json(directory / 'BACKUP-ACCEPTED.json')
+    if (accepted.get('inclusive_fee_upgrade') is not True
+            or accepted['manifest_sha256'] != U.digest(directory / 'backup/MANIFEST.json')
+            or inclusive_native(directory, 'verify-inclusive-fee-upgrade-source',
+                                '--bundle', directory / 'backup') != accepted['selected_source']):
+        raise ValueError('accepted inclusive-fee backup changed before rehearsal')
+    manifest = C.read_json(directory / 'backup/MANIFEST.json')
+    candidate = directory / 'candidate'
+    candidate.mkdir(mode=0o700)
+    for image in manifest['images']:
+        source = directory / 'backup' / image['name']
+        C.copy_raw_image(source, candidate / image['name'], TX.fingerprint(source))
+    # Protected disk-backed parent, with only a random scratch carrier granting
+    # traversal to its private runtime-owned child. Never relax the audit base.
+    C.protected(Path('/var/lib'), directory=True)
+    carrier = Path(tempfile.mkdtemp(prefix='lg-fee-clone-', dir='/var/lib'))
+    carrier.chmod(0o711)
+    component = r['baseline']['policy']['components']['payout']
+    child = carrier / 'payout'
+    child.mkdir(mode=0o700)
+    os.chown(child, component['uid'], component['gid'])
+    complete = False
+    try:
+        for suffix in ('', '-wal'):
+            source = candidate / ('payout.db' + suffix)
+            if source.exists():
+                target = child / source.name
+                C.copy_raw_image(source, target, TX.fingerprint(source))
+                os.chown(target, component['uid'], component['gid'])
+        config = tomllib.loads(U.original(directory, r, Q.ETC / 'cyberherd-payout/config.toml').read_text())
+        config['state_dir'] = str(child)
+        Q.I.publish(carrier / 'config.toml', S.W.toml_text(config).encode(), 0o440)
+        os.chown(carrier / 'config.toml', 0, component['gid'])
+        source = directory / 'payload/cyberherd-payoutd'
+        TX.copy_durable(source, carrier / source.name, TX.fingerprint(source))
+        offline_fee_migration_child(carrier / source.name, carrier / 'config.toml', component)
+        Q.no_role_processes({'payout': component})
+        U.sources_match(m, r, observed)
+        if (child / 'payout.db-journal').exists() or (child / 'payout.db-journal').is_symlink():
+            raise ValueError('clone rollback journal requires inspection')
+        for suffix in ('', '-wal', '-shm'):
+            path = child / ('payout.db' + suffix)
+            if not path.exists() and not path.is_symlink():
+                if not suffix:
+                    raise ValueError('missing migrated payout copy')
+                continue
+            info = path.lstat()
+            if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                    or info.st_uid != component['uid'] or info.st_gid != component['gid']
+                    or stat.S_IMODE(info.st_mode) != 0o600
+                    or info.st_size > r['baseline']['policy']['max_component_bytes']):
+                raise ValueError('migrated payout copy identity changed')
+        retained = directory / 'candidate-original-payout'
+        retained.mkdir(mode=0o700)
+        for suffix in ('', '-wal'):
+            original = candidate / ('payout.db' + suffix)
+            if original.exists():
+                original.rename(retained / original.name)
+            migrated = child / ('payout.db' + suffix)
+            if migrated.exists():
+                C.copy_raw_image(migrated, original, TX.fingerprint(migrated))
+        TX.sync_directory(retained)
+        TX.sync_directory(candidate)
+        compared = inclusive_native(directory, 'compare-inclusive-fee-upgrade',
+                                    '--bundle', directory / 'backup', '--candidate-copy', candidate)
+        U.sources_match(m, r, observed)
+        M.note(directory, 'CLONE-ACCEPTED.json', {'native': compared,
+                'inclusive_fee_upgrade': True, 'backup_manifest_sha256': accepted['manifest_sha256'],
+                'originals_unchanged': True, 'live_migration_performed': False})
+        complete = True
+    finally:
+        carrier.chmod(0o700)
+        if complete:
+            shutil.rmtree(carrier)
+        else:
+            # Preserve a possibly partial migration privately for diagnosis.
+            # All real writers remain held by the outer coordinator.
+            M.note(directory, 'CLONE-HELD.json', {'carrier': str(carrier),
+                    'inclusive_fee_upgrade': True, 'services_started': False})
 
 
 def review_backup(directory, m, r, observed):

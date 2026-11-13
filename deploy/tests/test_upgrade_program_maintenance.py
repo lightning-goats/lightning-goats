@@ -85,6 +85,15 @@ class ProgramBoundaries(unittest.TestCase):
                 P.inclusive_backup(Path('/missing'),{}, {'program_upgrade_only':True})
             stopped.assert_not_called()
 
+    def test_fee_clone_refuses_changed_backup_before_creating_runtime_scratch(self):
+        accepted={'inclusive_fee_upgrade':True,'manifest_sha256':'expected','selected_source':{'id':'original'}}
+        cases=[dict(accepted,inclusive_fee_upgrade=False),dict(accepted,manifest_sha256='changed'),accepted]
+        for value in cases:
+            with patch.object(P.U,'sources_match'),patch.object(P.C,'read_json',return_value=value),patch.object(P.U,'digest',return_value='expected'),patch.object(P,'inclusive_native',return_value={'id':'different'}),patch.object(P.C,'copy_raw_image') as copy,patch.object(P.tempfile,'mkdtemp') as scratch:
+                with self.assertRaisesRegex(ValueError,'backup changed before rehearsal'):
+                    P.inclusive_clone_compare(Path('/missing'),{}, {},{})
+                copy.assert_not_called();scratch.assert_not_called()
+
     def test_native_original_snapshot_receipt_rejects_aliases_and_activation(self):
         good = {'operation': 'snapshot', 'id': str(uuid.uuid4()), 'accepted': True, 'resume_authorized': False}
         for value in [good, dict(good, accepted=1), dict(good, resume_authorized=0),

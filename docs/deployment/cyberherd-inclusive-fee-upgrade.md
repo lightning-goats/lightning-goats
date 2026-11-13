@@ -56,9 +56,9 @@ are implemented in the development source. Both require protected root policy an
 retain the existing four-owner file and native validation rules. The snapshot
 selector changes only which exact compiled payout prefix is accepted; it does not
 stop services, migrate journals, stage a restore, or enable an outgoing role.
-Ordinary snapshots and restore still require the current schema. These additions
-need combined native/root qualification before any actual-host use. Comparison
-of migrated copies and the reviewed offline migration executor remain unfinished.
+Ordinary snapshots and restore still require the current schema. The snapshot, comparison and offline migration executor are implemented.
+Production use still requires successful qualification of the complete installed
+transaction against its exact immutable source, followed by operator review.
 
 The development payout daemon now has an explicit
 `--migrate-inclusive-fees --writers-stopped` child operation. It requires its own
@@ -66,19 +66,20 @@ non-root runtime UID, existing private journal, singleton lock, protected unchan
 disabled configuration, zero financial authority, exact old schema and matching
 stored provider/intake bindings before applying the compiled migrations. It closes
 SQLite on failure as well as success. It creates no grant/scope/intake binding and
-never constructs the worker, loads the spending credential or opens a transport.
+never constructs the worker, loads the spending credential or opens a provider,
+core or signer transport. Its local singleton lock is not a payment interface.
 The stopped-writer flag is an attestation; the reviewed root coordinator must
-independently check and hold all four services. This source-only child still needs
-actual-UID execution tests and the backup/compare/apply/resume coordinator before
-production use. Partial migration failure stays held for inspection, without an
+independently check and hold all four services. Ordinary native tests exercise store migration under a non-root test UID. The
+real service UID and complete installed transaction still require systemd
+qualification before production use. Partial migration failure stays held for inspection, without an
 automatic fresh migration or stale financial-state restore.
 
 The six-program preparer now accepts an explicit `--inclusive-fee-upgrade`
 selector for preparation only. It seals a different transaction kind while
 retaining unchanged disabled configuration and no-activation/no-migration
 preparation semantics. Ordinary apply, rollback and resume reject that review,
-even with its correct digest. The selector itself refuses all operations except
-preparation until the separate coordinator is implemented. A digest must never
+even with its correct digest. The preparation selector refuses other operations; apply and resume use the
+dedicated schema command names described below. A digest must never
 turn a schema-upgrade review into an implicit program-only deployment.
 
 ## Source coordinator commands (not production-qualified yet)
@@ -102,3 +103,21 @@ Control-flow tests cover successful ordering, rehearsal failure before replaceme
 and post-migration comparison failure with no service start. These mock native
 parsers and systemd; actual-root files, real native migration and installed-systemd
 qualification remain separate required evidence before any live invocation.
+
+## Qualification status — November 13
+
+Combined source `836b3db6dce32278ed8fea2b11b9251c35cb51cd` passed its full
+[Rust and mandatory-root checks](https://github.com/lightning-goats/lightning-goats/actions/runs/43515662473)
+and [dependency audit](https://github.com/lightning-goats/lightning-goats/actions/runs/43515662955).
+Its package build, including the genuine pinned older verifier, passed. The
+[installed-systemd run](https://github.com/lightning-goats/lightning-goats/actions/runs/43515663196)
+failed before the CyberHerd scenario when systemd refused execution of the gateway
+from the `/run` rehearsal directory. This is failed installed acceptance, not a
+passing upgrade or permission to skip that gate.
+
+Source `5df6fd581ca0cf8e9cdb9dc62cb2f84812d5d811` moves executable scratch
+carriers to protected disk-backed storage and adds mount diagnostics. It preserves
+all shipped sandbox directives. Its
+[installed validation](https://github.com/lightning-goats/lightning-goats/actions/runs/43517864086)
+is pending. No actual-host journal migration, spending-policy change or financial
+activation follows from these source/disposable-host results.

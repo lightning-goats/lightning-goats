@@ -223,6 +223,22 @@ def load(directory, expected, *, inclusive_fee_upgrade=False):
     return {'programs': expected_rows, 'review': str(directory)}, r
 
 
+def protected_runtime_config(path, gid):
+    """Accept the installed public config or a private runtime-group copy."""
+    path = Path(path)
+    if not path.is_absolute() or path.resolve(strict=True) != path:
+        raise ValueError('canonical protected runtime configuration required')
+    C.protected(path.parent, directory=True)
+    info = path.lstat()
+    layout = (info.st_gid, stat.S_IMODE(info.st_mode))
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0
+            or layout not in ((0, 0o644), (gid, 0o440)) or info.st_nlink != 1):
+        raise ValueError('unprotected runtime configuration')
+    if any(name.startswith('system.posix_acl') or name == 'security.capability'
+           for name in os.listxattr(path)):
+        raise ValueError('unreviewed runtime configuration ACL/capability')
+
+
 def offline_fee_migration_child(program, config, component):
     """Child primitive for the future stopped-writer coordinator, not a CLI mode.
 
@@ -235,7 +251,7 @@ def offline_fee_migration_child(program, config, component):
            for name in ('uid', 'gid')):
         raise ValueError('separate non-root payout UID/GID required')
     C.protected(program)
-    C.protected(config)
+    protected_runtime_config(config, component['gid'])
     output = C.command('/usr/bin/unshare', '--net', '--', '/usr/bin/setpriv',
         '--reuid=' + str(component['uid']), '--regid=' + str(component['gid']),
         '--clear-groups', '--inh-caps=-all', '--ambient-caps=-all', '--bounding-set=-all',

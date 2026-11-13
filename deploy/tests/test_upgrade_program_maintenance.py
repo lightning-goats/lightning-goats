@@ -52,8 +52,9 @@ class ProgramBoundaries(unittest.TestCase):
 
     def test_fee_migration_child_uses_own_uid_no_capabilities_and_no_network(self):
         message='Existing payout journal migrated; no runtime, credential or transport started'
-        with patch.object(P.C,'root'), patch.object(P.C,'protected'), patch.object(P.C,'command',return_value=message) as command:
+        with patch.object(P.C,'root'), patch.object(P.C,'protected'), patch.object(P,'protected_runtime_config') as config_check, patch.object(P.C,'command',return_value=message) as command:
             result=P.offline_fee_migration_child(Path('/protected/payout'),Path('/protected/config'),{'uid':10003,'gid':10004})
+            config_check.assert_called_once_with(Path('/protected/config'),10004)
             self.assertFalse(result['worker_started'])
             self.assertFalse(result['credential_loaded'])
             args=command.call_args.args
@@ -66,7 +67,7 @@ class ProgramBoundaries(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     P.offline_fee_migration_child(Path('/missing'),Path('/missing'),component)
                 protected.assert_not_called();command.assert_not_called()
-        with patch.object(P.C,'root'), patch.object(P.C,'protected'), patch.object(P.C,'command',return_value='not confirmed'):
+        with patch.object(P.C,'root'), patch.object(P.C,'protected'), patch.object(P,'protected_runtime_config'), patch.object(P.C,'command',return_value='not confirmed'):
             with self.assertRaisesRegex(ValueError,'preserve stopped state'):
                 P.offline_fee_migration_child(Path('/protected/payout'),Path('/protected/config'),{'uid':1,'gid':2})
 
@@ -144,6 +145,29 @@ class ProgramFiles(unittest.TestCase):
         self.prepared = P.prepare(self.archive, self.review_archive, 'a' * 40,
             P.U.digest(self.archive), P.U.digest(self.review_archive), self.destination)
         self.sha = P.U.digest(self.destination / 'PREPARED.json')
+
+    def test_offline_config_retains_root_owner_and_exact_runtime_group(self):
+        config = self.root / 'runtime-config.toml'
+        self.write(config, b'execution_enabled = false\n', 0o440)
+        os.chown(config, 0, 10004)
+        P.protected_runtime_config(config, 10004)
+        os.chown(config,0,0); config.chmod(0o644)
+        P.protected_runtime_config(config,10004)
+        for uid, gid, mode in ((10003,10004,0o440),(0,10005,0o440),
+                               (0,10004,0o640),(0,10004,0o444)):
+            with self.subTest(uid=uid,gid=gid,mode=mode):
+                os.chown(config, uid, gid); config.chmod(mode)
+                with self.assertRaisesRegex(ValueError,'unprotected runtime configuration'):
+                    P.protected_runtime_config(config,10004)
+        os.chown(config,0,10004); config.chmod(0o440)
+        link = self.root / 'config-link.toml'
+        link.symlink_to(config)
+        with self.assertRaisesRegex(ValueError,'canonical'):
+            P.protected_runtime_config(link,10004)
+        hardlink = self.root / 'config-hardlink.toml'
+        os.link(config,hardlink)
+        with self.assertRaisesRegex(ValueError,'unprotected runtime configuration'):
+            P.protected_runtime_config(config,10004)
 
     def extract(self, archive, source, payload):
         for name in ('lightning-goatsd', 'lightning-goatsctl'):

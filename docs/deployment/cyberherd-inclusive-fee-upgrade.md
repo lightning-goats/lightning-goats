@@ -119,5 +119,15 @@ Source `5df6fd581ca0cf8e9cdb9dc62cb2f84812d5d811` moves executable scratch
 carriers to protected disk-backed storage and adds mount diagnostics. It preserves
 all shipped sandbox directives. Its
 [installed validation](https://github.com/lightning-goats/lightning-goats/actions/runs/43517864086)
-is pending. No actual-host journal migration, spending-policy change or financial
-activation follows from these source/disposable-host results.
+passed package assembly and the general systemd sandbox but failed in the
+inclusive-fee clone rehearsal: the coordinator applied the root-group-only
+administrative-file guard to a correctly root-owned, payout-group-readable
+configuration. A separate configuration guard now accepts only the installed
+root:root `0644` layout or a root:payout-group `0440` copy, rejecting writable,
+wrong-owner/group, linked or ACL-bearing files. Executable/admin-file guards are
+unchanged. Actual-root regression cases and a fresh installed run must qualify
+this correction. The separate nginx rollback fixture also needs its saved
+executable-directory correction qualified.
+
+No actual-host journal migration, spending-policy change or financial activation
+follows from these source/disposable-host results.

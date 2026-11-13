@@ -169,8 +169,8 @@ def stage_archive(archive, staged, digest):
 
 def runtime_help(program, component):
     """Prove actual UID/netns execution before any maintenance or journal open."""
-    C.protected(Path('/run'), directory=True)
-    carrier = Path(tempfile.mkdtemp(prefix='lg-contact-help-', dir='/run'))
+    C.protected(Path('/var/lib'), directory=True)
+    carrier = Path(tempfile.mkdtemp(prefix='lg-contact-help-', dir='/var/lib'))
     carrier.chmod(0o711)
     try:
         target = carrier / 'lightning-goatsctl'

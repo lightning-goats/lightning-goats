@@ -53,8 +53,8 @@ def fresh(baseline):
 
 def native_configuration_checks(directory, record):
     """Execute each selected worker's actual parser as its original UID, offline."""
-    C.protected(Path('/run'), directory=True)
-    carrier = Path(tempfile.mkdtemp(prefix='lg-program-check-', dir='/run'))
+    C.protected(Path('/var/lib'), directory=True)
+    carrier = Path(tempfile.mkdtemp(prefix='lg-program-check-', dir='/var/lib'))
     carrier.chmod(0o711)
     try:
         for role, (name, positive) in WORKERS.items():

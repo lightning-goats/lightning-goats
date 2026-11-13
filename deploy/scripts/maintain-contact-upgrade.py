@@ -360,8 +360,8 @@ def clone_compare(directory, m, r, observed, *, current_schema=False):
     for image in manifest['images']:
         source = directory / 'backup' / image['name']
         C.copy_raw_image(source, candidate / image['name'], TX.fingerprint(source))
-    C.protected(Path('/run'), directory=True)
-    carrier = Path(tempfile.mkdtemp(prefix='lg-contact-clone-', dir='/run'))
+    C.protected(Path('/var/lib'), directory=True)
+    carrier = Path(tempfile.mkdtemp(prefix='lg-contact-clone-', dir='/var/lib'))
     carrier.chmod(0o711)
     component = r['baseline']['policy']['components']['core']
     child = carrier / 'core'

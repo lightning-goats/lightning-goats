@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Upgrade six native programs while retaining the zero-budget overlay stage.
+"""Maintain six native programs with distinct program-only and schema reviews.
 
-Authenticated root-owned launcher only. Prepare never opens a journal. Explicit
-maintenance stops/masks four writers, accepts a current native backup with both
-verifiers, compares original/selected core status on a separate copy, and reviews
-copied reward history before replacing programs. Configuration, credentials and
-live database bytes never change. Resumption and pre-resumption rollback are
-separate explicit operations. This is not financial activation or recovery.
+Authenticated root-owned launcher only. Preparation never opens a journal.
+Program-only maintenance preserves live database bytes and supports its separate
+pre-resumption rollback. Inclusive-fee maintenance requires a distinct review,
+four stopped writers, a retained native backup, runtime-UID clone migration and
+strict four-journal comparisons before and after the explicit live migration.
+It has no automatic database restore or old-program rollback. Both paths retain
+configuration, credentials and zero budgets; resumption is separately approved.
+Neither operation authorizes financial activation or recovery adoption.
 """
 import sys
 sys.dont_write_bytecode = True
@@ -240,7 +242,7 @@ def protected_runtime_config(path, gid):
 
 
 def offline_fee_migration_child(program, config, component):
-    """Child primitive for the future stopped-writer coordinator, not a CLI mode.
+    """Offline child for the stopped-writer coordinator, not a CLI mode.
 
     Caller must seal the selected hashes, hold all four writers, retain a native
     backup and record migration start before calling. Never use worker startup

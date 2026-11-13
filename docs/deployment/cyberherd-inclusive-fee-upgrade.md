@@ -131,3 +131,11 @@ executable-directory correction qualified.
 
 No actual-host journal migration, spending-policy change or financial activation
 follows from these source/disposable-host results.
+
+Source `a6d6a8bd650cf5a89ca632bd60716d9390663609` passed the
+[nginx and root-file job](https://github.com/lightning-goats/lightning-goats/actions/runs/43519507711).
+Its log explicitly confirms both the configuration ownership regression and the
+restored-program rollback fixture ran successfully under root, rather than being
+skipped. All 167 tests in that isolated root invocation passed. This covers file
+permission and coordinator boundaries; the independent package/systemd scenario
+was still running at this checkpoint and is not implied to have passed.

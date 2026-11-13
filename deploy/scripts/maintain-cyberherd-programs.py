@@ -322,12 +322,12 @@ def inclusive_clone_compare(directory, m, r, observed):
     C.protected(Path('/var/lib'), directory=True)
     carrier = Path(tempfile.mkdtemp(prefix='lg-fee-clone-', dir='/var/lib'))
     carrier.chmod(0o711)
-    component = r['baseline']['policy']['components']['payout']
-    child = carrier / 'payout'
-    child.mkdir(mode=0o700)
-    os.chown(child, component['uid'], component['gid'])
     complete = False
     try:
+        component = r['baseline']['policy']['components']['payout']
+        child = carrier / 'payout'
+        child.mkdir(mode=0o700)
+        os.chown(child, component['uid'], component['gid'])
         for suffix in ('', '-wal'):
             source = candidate / ('payout.db' + suffix)
             if source.exists():

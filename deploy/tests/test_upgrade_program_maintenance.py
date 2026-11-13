@@ -44,7 +44,7 @@ class ProgramBoundaries(unittest.TestCase):
             self.assertNotIn('INJECTED', result.stderr)
 
     def test_every_mutation_requires_its_explicit_approval_before_loading_files(self):
-        for operation in (P.apply, P.rollback, P.resume):
+        for operation in (P.apply, P.rollback, P.resume, P.apply_inclusive_fee_upgrade):
             with self.subTest(operation=operation.__name__), patch.object(P, 'load') as load:
                 with self.assertRaisesRegex(ValueError, 'explicit'):
                     operation(Path('/missing'), '0' * 64, False)

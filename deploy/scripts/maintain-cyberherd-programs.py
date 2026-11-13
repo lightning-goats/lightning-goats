@@ -456,6 +456,65 @@ def apply(directory, expected, approved):
             'configurations_changed': False, 'services_started': False, 'activation_authorized': False}
 
 
+def apply_inclusive_fee_upgrade(directory, expected, approved):
+    """Separate schema transaction; no ordinary rollback/resume is applicable.
+
+    Source implementation only until its dedicated resumption and installed
+    qualification are complete. Not exposed by the command parser yet.
+    """
+    if not approved:
+        raise ValueError('explicit exclusive schema maintenance approval required')
+    m, r = load(directory, expected, inclusive_fee_upgrade=True)
+    with M.exclusive(directory):
+        if any((directory / name).exists() for name in
+               ('MAINTENANCE-STARTED.json', 'RESUME-REQUESTED.json', 'ROLLBACK-REQUESTED.json')):
+            raise ValueError('schema maintenance already began; preserve evidence and inspect')
+        fresh(r['baseline'])
+        if native_configuration_checks(directory, r) != r['native_configuration_checks']:
+            raise ValueError('selected disabled configuration acceptance changed')
+        M.note(directory, 'MAINTENANCE-STARTED.json', {'exclusive_maintenance': True,
+                'inclusive_fee_upgrade': True, 'activation_authorized': False,
+                'database_restore_authorized': False})
+        U.quiesce(m, r)
+        observed = inclusive_backup(directory, m, r)
+        inclusive_clone_compare(directory, m, r, observed)
+        backup = C.read_json(directory / 'BACKUP-ACCEPTED.json')
+        clone = C.read_json(directory / 'CLONE-ACCEPTED.json')
+        if (clone.get('inclusive_fee_upgrade') is not True
+                or clone['backup_manifest_sha256'] != backup['manifest_sha256']
+                or inclusive_native(directory, 'verify-inclusive-fee-upgrade-source',
+                                    '--bundle', directory / 'backup') != backup['selected_source']
+                or inclusive_native(directory, 'compare-inclusive-fee-upgrade',
+                                    '--bundle', directory / 'backup',
+                                    '--candidate-copy', directory / 'candidate') != clone['native']):
+            raise ValueError('accepted source backup or migrated rehearsal changed')
+        U.sources_match(m, r, observed)
+        TX.execute(directory / 'programs', lambda: U.sources_match(m, r, observed, installed=None))
+        U.sources_match(m, r, observed, installed=True)
+        if native_configuration_checks(directory, r) != r['native_configuration_checks']:
+            raise ValueError('selected worker/configuration changed before migration')
+        M.note(directory, 'MIGRATION-STARTED.json', {'inclusive_fee_upgrade': True,
+                'database_restore_authorized': False, 'old_binary_rollback_authorized': False})
+        offline_fee_migration_child(Q.BIN / 'cyberherd-payoutd', Q.ETC / 'cyberherd-payout/config.toml',
+                                    r['baseline']['policy']['components']['payout'])
+        U.stopped(m, r, installed=True)
+        after = U.state_files(r)
+        inclusive_native(directory, 'snapshot', '--destination', directory / 'migrated', '--writers-stopped')
+        verified = inclusive_native(directory, 'verify', '--bundle', directory / 'migrated')
+        compared = inclusive_native(directory, 'compare-inclusive-fee-upgrade',
+                                    '--bundle', directory / 'backup', '--candidate-copy', directory / 'migrated')
+        U.sources_match(m, r, after, installed=True)
+        M.note(directory, 'APPLIED.json', {'inclusive_fee_upgrade': True,
+                'live_images': after, 'verified': verified, 'compared': compared,
+                'backup_manifest_sha256': backup['manifest_sha256'],
+                'migrated_manifest_sha256': U.digest(directory / 'migrated/MANIFEST.json'),
+                'retained_rows_unchanged': True, 'configurations_changed': False,
+                'activation_authorized': False, 'services_started': False})
+    return {'upgraded': True, 'inclusive_fee_upgrade': True, 'four_journal_backup_verified': True,
+            'clone_compared': True, 'live_migration_compared': True,
+            'configurations_changed': False, 'services_started': False, 'activation_authorized': False}
+
+
 def rollback(directory, expected, approved):
     if not approved:
         raise ValueError('explicit pre-resumption program rollback approval required')

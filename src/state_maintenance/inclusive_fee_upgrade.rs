@@ -266,6 +266,42 @@ mod tests {
         )
         .await
         .unwrap();
+        // Whitespace preserves parsed Nostr content/signature, but the frozen
+        // serialized outbox bytes must still be retained exactly.
+        let signed: String =
+            sqlx::query_scalar("SELECT signed_event_json FROM message_outbox LIMIT 1")
+                .fetch_one(&core)
+                .await
+                .unwrap();
+        sqlx::query("UPDATE message_outbox SET signed_event_json=signed_event_json||' '")
+            .execute(&core)
+            .await
+            .unwrap();
+        assert!(compare_images(&before, &after, &policy).await.is_err());
+        sqlx::query("UPDATE message_outbox SET signed_event_json=?")
+            .bind(&signed)
+            .execute(&core)
+            .await
+            .unwrap();
+        compare_images(&before, &after, &policy).await.unwrap();
+        let description: String =
+            sqlx::query_scalar("SELECT description FROM _sqlx_migrations WHERE version=8")
+                .fetch_one(&migrated)
+                .await
+                .unwrap();
+        sqlx::query(
+            "UPDATE _sqlx_migrations SET description=description||' changed' WHERE version=8",
+        )
+        .execute(&migrated)
+        .await
+        .unwrap();
+        assert!(compare_images(&before, &after, &policy).await.is_err());
+        sqlx::query("UPDATE _sqlx_migrations SET description=? WHERE version=8")
+            .bind(&description)
+            .execute(&migrated)
+            .await
+            .unwrap();
+        compare_images(&before, &after, &policy).await.unwrap();
         sqlx::query("UPDATE ledger_entries SET delta_sats=delta_sats+1 WHERE id=1")
             .execute(&core)
             .await

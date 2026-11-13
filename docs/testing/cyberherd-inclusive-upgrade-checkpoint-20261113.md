@@ -109,3 +109,21 @@ stays held for inspection; no automatic stale-state restore or old-binary rollba
 is authorized. The staging approval does not approve these maintenance steps.
 Live provider execution, financial activation and external recovery adoption remain
 outside this proposed window.
+
+The reporting follow-up's [deployment run](https://github.com/lightning-goats/lightning-goats/actions/runs/43521563669)
+passed. Its retained systemd summary identifies tested merge
+`d56a3bd5fd304b28dd30705da49eb57c6d8beac6`. All six evidence checksums were verified,
+and `installed_inclusive_fee_upgrade` explicitly records seven source migration
+records, ten target records, successful native four-journal comparison and
+runtime-UID migration, retained configuration, core/member resumption and zero
+gateway POSTs. Payouts, live-host qualification, provider execution qualification
+and external recovery adoption are false. This independently verifies the retained
+result rather than inferring it from a successful job alone.
+
+Nine workflows passed for this reporting source. Its separate
+[NIP-46 run](https://github.com/lightning-goats/lightning-goats/actions/runs/43521563773)
+failed before signing, when the kernel refused execution of the fixture's `nak`
+copy under `/run`. The follow-up moves that disposable executable directory to
+`/var/lib`, retaining the shipped sandbox and encrypted synthetic credentials.
+It does not alter the household bunker or the already sealed `ae10df6` production
+review; that review remains pinned to its own fully qualified artifacts.

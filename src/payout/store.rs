@@ -492,3 +492,148 @@ fn validate_admission(plan: &Plan, q: &QualifiedFunding, policy: &Policy, now: i
     }
     Ok(())
 }
+
+#[cfg(all(test, unix))]
+mod offline_fee_migration_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt as _;
+    fn policy() -> Policy {
+        Policy {
+            scope: Scope {
+                core_uid: 10001,
+                epoch: Uuid::new_v4(),
+                owner: crate::nostr_event::test_event(1, 0, 100, "", vec![]).pubkey,
+                provider: ProviderScope {
+                    environment: "strike-production".into(),
+                    account_id: Uuid::new_v4(),
+                    credential_fingerprint: "aa".repeat(32),
+                },
+            },
+            member_percent_ceiling: 0,
+            max_sats_per_feed: 0,
+            max_sats_per_24h: 0,
+            max_fee_sats: 0,
+            fee_mode: super::super::inclusive_fees::Mode::FixedAllowance,
+            max_net_sats: 0,
+            max_source_parts: 1,
+            operation_addresses: vec![],
+            receipt_relays: vec!["wss://relay.damus.io/".into()],
+            execution_enabled: false,
+        }
+    }
+    #[tokio::test]
+    async fn offline_fee_migration_refuses_authority_and_never_creates_missing_journal() {
+        let root = tempfile::TempDir::new().unwrap();
+        let path = root.path().join("absent.db");
+        let url = format!("sqlite://{}", path.display());
+        for n in 0..7 {
+            let mut p = policy();
+            match n {
+                0 => p.execution_enabled = true,
+                1 => p.member_percent_ceiling = 1,
+                2 => p.max_sats_per_feed = 1,
+                3 => p.max_sats_per_24h = 1,
+                4 => p.max_fee_sats = 1,
+                5 => p.max_net_sats = 1,
+                _ => {}
+            }
+            assert!(
+                Store::migrate_fee_schema_offline(&url, &p, 10002)
+                    .await
+                    .is_err()
+            );
+            assert!(!path.exists());
+        }
+    }
+    #[tokio::test]
+    async fn offline_fee_migration_checks_scope_then_preserves_existing_bindings_under_runtime_uid()
+    {
+        assert_ne!(
+            crate::private_ipc::uid().unwrap(),
+            0,
+            "ordinary fixture requires a non-admin test UID"
+        );
+        let root = tempfile::TempDir::new().unwrap();
+        std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        let path = root.path().join("payout.db");
+        let url = format!("sqlite://{}", path.display());
+        let p = policy();
+        let pool = crate::sqlite::connect_durable(&url, 1).await.unwrap();
+        let mut old = sqlx::migrate!("./payout-migrations");
+        old.migrations = old
+            .iter()
+            .filter(|m| m.version <= 8)
+            .cloned()
+            .collect::<Vec<_>>()
+            .into();
+        old.run(&pool).await.unwrap();
+        let scope = serde_json::to_string(&p.scope).unwrap();
+        sqlx::query("INSERT INTO payout_binding(singleton,scope_json) VALUES(1,?)")
+            .bind(&scope)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO payout_intake_binding VALUES(1,10002,0)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let mut wrong = p.clone();
+        wrong.scope.provider.account_id = Uuid::new_v4();
+        assert!(
+            Store::migrate_fee_schema_offline(&url, &wrong, 10002)
+                .await
+                .is_err()
+        );
+        assert!(
+            Store::migrate_fee_schema_offline(&url, &p, 10003)
+                .await
+                .is_err()
+        );
+        let pool = crate::sqlite::connect_existing_durable(&url, 1)
+            .await
+            .unwrap();
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM _sqlx_migrations")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            7
+        );
+        pool.close().await;
+        Store::migrate_fee_schema_offline(&url, &p, 10002)
+            .await
+            .unwrap();
+        assert!(
+            Store::migrate_fee_schema_offline(&url, &p, 10002)
+                .await
+                .is_err()
+        );
+        let pool = crate::sqlite::connect_existing_durable(&url, 1)
+            .await
+            .unwrap();
+        crate::sqlite::require_current_schema(&pool, &MIGRATOR)
+            .await
+            .unwrap();
+        assert_eq!(
+            sqlx::query_scalar::<_, String>(
+                "SELECT scope_json FROM payout_binding WHERE singleton=1"
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            scope
+        );
+        assert_eq!(
+            sqlx::query_as::<_, (i64, i64)>(
+                "SELECT peer_uid,through FROM payout_intake_binding WHERE singleton=1"
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            (10002, 0)
+        );
+        pool.close().await;
+    }
+}

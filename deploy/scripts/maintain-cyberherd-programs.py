@@ -85,7 +85,7 @@ def native_configuration_checks(directory, record):
             'configurations_checked': 3, 'journals_opened': False, 'credentials_loaded': False}
 
 
-def prepare(archive, review_archive, source, archive_sha, review_sha, directory):
+def prepare(archive, review_archive, source, archive_sha, review_sha, directory, *, inclusive_fee_upgrade=False):
     C.root()
     C.protected(C.BASE, directory=True, private=True)
     if (directory.parent != C.BASE or re.fullmatch('[A-Za-z0-9_.-]{1,128}', directory.name) is None
@@ -140,7 +140,8 @@ def prepare(archive, review_archive, source, archive_sha, review_sha, directory)
         raise ValueError('selected native maintenance policy check refused')
     for index, path in enumerate(baseline['files']):
         TX.copy_durable(path, directory / f'original-{index}', baseline['files'][path])
-    record = {'version': 1, 'tool': verified_tool_identity(), 'program_upgrade_only': True,
+    record = {'version': 1, 'tool': verified_tool_identity(), 'program_upgrade_only': not inclusive_fee_upgrade,
+        **({'inclusive_fee_upgrade': True} if inclusive_fee_upgrade else {}),
         'source_commit': source, 'release': accepted, 'review_archive_sha256': review_sha,
         'baseline': baseline, 'original_order': list(baseline['files']), 'selected_program_sha256': hashes,
         'activation_authorized': False, 'schema_upgrade_authorized': False,
@@ -165,7 +166,7 @@ def prepare(archive, review_archive, source, archive_sha, review_sha, directory)
             'activation_authorized': False, 'services_changed': False, 'journals_opened': False}
 
 
-def load(directory, expected):
+def load(directory, expected, *, inclusive_fee_upgrade=False):
     C.root()
     U.private_directory(directory)
     if (re.fullmatch('[0-9a-f]{64}', expected) is None
@@ -173,7 +174,8 @@ def load(directory, expected):
         raise ValueError('independently reviewed complete preparation digest required')
     r = C.read_json(directory / 'PREPARED.json')
     if (r.get('version') != 1 or r.get('tool') != verified_tool_identity()
-            or r.get('program_upgrade_only') is not True
+            or r.get('program_upgrade_only') is not (not inclusive_fee_upgrade)
+            or r.get('inclusive_fee_upgrade', False) is not inclusive_fee_upgrade
             or any(r.get(k) is not False for k in ('activation_authorized', 'schema_upgrade_authorized',
                                                  'services_changed', 'journals_opened', 'credentials_loaded'))
             or set(r['selected_program_sha256']) != set(PROGRAMS)):
@@ -377,6 +379,7 @@ def resume(directory, expected, approved, original=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--inclusive-fee-upgrade', action='store_true', help='prepare a distinct schema-upgrade review; does not apply it')
     commands = parser.add_subparsers(dest='operation', required=True)
     preparation = commands.add_parser('prepare')
     for name in ('archive', 'review_archive', 'source', 'archive_sha256', 'review_sha256', 'directory'):
@@ -388,8 +391,10 @@ def main():
         command.add_argument('--review-sha256', required=True)
         command.add_argument(approval, required=True, action='store_true')
     args = parser.parse_args()
+    if args.inclusive_fee_upgrade and args.operation != 'prepare':
+        raise ValueError('inclusive-fee upgrade application requires its separate reviewed coordinator')
     if args.operation == 'prepare':
-        result = prepare(args.archive, args.review_archive, args.source, args.archive_sha256, args.review_sha256, args.directory)
+        result = prepare(args.archive, args.review_archive, args.source, args.archive_sha256, args.review_sha256, args.directory, inclusive_fee_upgrade=args.inclusive_fee_upgrade)
     elif args.operation == 'apply':
         result = apply(args.directory, args.review_sha256, args.exclusive_maintenance)
     elif args.operation == 'rollback':

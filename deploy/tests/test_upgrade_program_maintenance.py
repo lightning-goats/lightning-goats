@@ -165,6 +165,24 @@ class ProgramFiles(unittest.TestCase):
         for name in P.PROGRAMS:
             self.assertEqual((self.binary / name).read_bytes(), (version + ' program: ' + name).encode())
 
+    def test_schema_upgrade_review_cannot_enter_program_only_mutations(self):
+        with self.assertRaisesRegex(ValueError, 'matching program-only'):
+            P.load(self.destination,self.sha,inclusive_fee_upgrade=True)
+        path=self.destination/'PREPARED.json'
+        record=P.C.read_json(path)
+        record['program_upgrade_only']=False
+        record['inclusive_fee_upgrade']=True
+        path.write_text(json.dumps(record))
+        digest=P.U.digest(path)
+        P.load(self.destination,digest,inclusive_fee_upgrade=True)
+        for operation in (P.apply,P.rollback,P.resume):
+            with self.subTest(operation=operation.__name__):
+                with self.assertRaisesRegex(ValueError,'matching program-only'):
+                    operation(self.destination,digest,True)
+        self.assert_live_images_preserved()
+        self.assert_programs('old')
+        self.assertEqual(self.starts,[])
+
     def test_complete_six_program_apply_and_resume_keep_all_configuration_and_history(self):
         self.assertEqual(self.prepared['programs'], 6)
         self.assertFalse(self.prepared['journals_opened'])

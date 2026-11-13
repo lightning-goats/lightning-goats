@@ -72,3 +72,11 @@ independently check and hold all four services. This source-only child still nee
 actual-UID execution tests and the backup/compare/apply/resume coordinator before
 production use. Partial migration failure stays held for inspection, without an
 automatic fresh migration or stale financial-state restore.
+
+The six-program preparer now accepts an explicit `--inclusive-fee-upgrade`
+selector for preparation only. It seals a different transaction kind while
+retaining unchanged disabled configuration and no-activation/no-migration
+preparation semantics. Ordinary apply, rollback and resume reject that review,
+even with its correct digest. The selector itself refuses all operations except
+preparation until the separate coordinator is implemented. A digest must never
+turn a schema-upgrade review into an implicit program-only deployment.

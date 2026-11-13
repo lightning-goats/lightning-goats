@@ -23,6 +23,7 @@ for line in artifacts.read_text().splitlines():
 if len(binaries) != 1:
     raise ValueError("select exactly the current crate's compiled native test binary")
 fixtures = {
+    "state_maintenance::inclusive_fee_upgrade::tests::root_inclusive_fee_upgrade_compares_private_images_and_retains_original_backup": "ROOT_INCLUSIVE_FEE_UPGRADE_FIXTURE_VERIFIED",
     "ledger::feed_cap::tests::root_retirement_preserves_runtime_owner_and_exact_paid_history": "ROOT_CREDIT_RETIREMENT_FIXTURE_VERIFIED",
     "payout::cost_recovery::tests::root_owned_approval_and_evidence_checks_are_real_filesystem_authority": "ROOT_OWNERSHIP_FIXTURE_VERIFIED",
     "state_maintenance::tests::root_four_journal_snapshot_preserves_wal_paid_pending_and_signed_state_and_blocks_restore_startup": "ROOT_FOUR_JOURNAL_FIXTURE_VERIFIED",

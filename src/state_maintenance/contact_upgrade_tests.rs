@@ -1,7 +1,7 @@
 use super::*;
 use crate::state_maintenance::tests::{payout_policy, policy, signer_policy};
 
-type Keep = (
+pub(in crate::state_maintenance) type Keep = (
     crate::ledger::LedgerStore,
     crate::cyberherd::store::Store,
     crate::payout::store::Store,

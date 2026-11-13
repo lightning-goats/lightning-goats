@@ -3,7 +3,7 @@
 use std::{collections::BTreeMap, path::Path};
 
 use anyhow::{Result, bail};
-use sqlx::{SqlitePool, sqlite::SqliteConnectOptions};
+use sqlx::sqlite::SqliteConnectOptions;
 
 use super::{Manifest, Operator, Policy, Role, database, files, legacy::rows};
 
@@ -190,10 +190,14 @@ impl Operator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[tokio::test]
-    async fn fee_upgrade_retains_all_journals_and_rejects_extra_schema_or_changed_paid_rows() {
-        let root = tempfile::TempDir::new().unwrap();
-        let (policy, _keep) = super::super::contact_upgrade::tests::seed(root.path()).await;
+    use crate::state_maintenance::contact_upgrade::tests::copy_images;
+    async fn seed(
+        root: &Path,
+    ) -> (
+        Policy,
+        crate::state_maintenance::contact_upgrade::tests::Keep,
+    ) {
+        let (policy, keep) = super::super::contact_upgrade::tests::seed(root).await;
         let core = crate::ledger::LedgerStore::connect(&format!(
             "sqlite://{}",
             policy.components[&Role::Core].database.display()
@@ -234,6 +238,12 @@ mod tests {
             .await
             .unwrap();
         payout.close().await;
+        (policy, keep)
+    }
+    #[tokio::test]
+    async fn fee_upgrade_retains_all_journals_and_rejects_extra_schema_or_changed_paid_rows() {
+        let root = tempfile::TempDir::new().unwrap();
+        let (policy, _keep) = seed(root.path()).await;
         let before = root.path().join("before");
         let after = root.path().join("after");
         super::super::contact_upgrade::tests::copy_images(&policy, &before);
@@ -309,5 +319,193 @@ mod tests {
         assert!(compare_images(&before, &after, &policy).await.is_err());
         core.close().await;
         migrated.close().await;
+    }
+
+    /// Required separately in disposable CI under actual root file authority.
+    #[tokio::test]
+    #[ignore = "required isolated root inclusive-fee upgrade fixture"]
+    async fn root_inclusive_fee_upgrade_compares_private_images_and_retains_original_backup() {
+        use std::os::unix::fs::PermissionsExt as _;
+        assert_eq!(crate::private_ipc::uid().unwrap(), 0);
+        let root = tempfile::Builder::new()
+            .prefix("lg-inclusive-fee-upgrade-")
+            .tempdir_in("/run")
+            .unwrap();
+        let (p, _keep) = seed(root.path()).await;
+        let policy_path = root.path().join("policy.toml");
+        files::write_new(&policy_path, toml::to_string(&p).unwrap().as_bytes()).unwrap();
+        let mut operator = Operator::load(&policy_path).unwrap();
+        let ready = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        operator.control = crate::state_maintenance::control::Control::Fixture(ready.clone());
+        let before = root.path().join("before");
+        let after = root.path().join("after");
+        copy_images(&p, &after);
+        let protect = |directory: &Path| {
+            std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o700)).unwrap();
+            for entry in std::fs::read_dir(directory).unwrap() {
+                std::fs::set_permissions(
+                    entry.unwrap().path(),
+                    std::fs::Permissions::from_mode(0o600),
+                )
+                .unwrap();
+            }
+        };
+        protect(&after);
+        let mut originals = Vec::new();
+        for component in p.components.values() {
+            let parent = component.database.parent().unwrap();
+            std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700)).unwrap();
+            std::os::unix::fs::chown(parent, Some(component.uid), Some(component.gid)).unwrap();
+            for suffix in ["", "-wal", "-shm"] {
+                let path =
+                    std::path::PathBuf::from(format!("{}{suffix}", component.database.display()));
+                if path.exists() {
+                    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+                        .unwrap();
+                    std::os::unix::fs::chown(&path, Some(component.uid), Some(component.gid))
+                        .unwrap();
+                    originals.push((path.clone(), std::fs::read(path).unwrap()));
+                }
+            }
+        }
+        assert!(
+            operator
+                .snapshot_before_inclusive_fees(&before)
+                .await
+                .is_err()
+        );
+        assert!(!before.exists());
+        ready.store(true, std::sync::atomic::Ordering::SeqCst);
+        // The explicit upgrade snapshot uses the same actual four-owner source
+        // files, stopped-writer observer and unchanged WAL checks as normal backup.
+        // Only its exact payout-prefix inspection differs; normal restore stays closed.
+        let manifest = operator
+            .snapshot_before_inclusive_fees(&before)
+            .await
+            .unwrap();
+        assert_eq!(
+            operator
+                .verify_inclusive_fee_upgrade_source(&before)
+                .await
+                .unwrap(),
+            manifest
+        );
+        assert_eq!(manifest.report.pending_feeds, 1);
+        assert!(
+            manifest
+                .images
+                .iter()
+                .any(|i| i.name.ends_with("-wal") && i.bytes > 0)
+        );
+        for (path, bytes) in &originals {
+            assert_eq!(std::fs::read(path).unwrap(), *bytes);
+        }
+        assert!(
+            operator
+                .snapshot_before_inclusive_fees(&before)
+                .await
+                .is_err()
+        );
+        let refused_restore = root.path().join("refused-restore");
+        assert!(
+            operator
+                .stage_restore(&before, &refused_restore)
+                .await
+                .is_err()
+        );
+        assert!(!refused_restore.exists());
+        let original_manifest = std::fs::read(before.join("MANIFEST.json")).unwrap();
+        assert!(operator.verify(&before).await.is_err());
+        assert!(
+            operator
+                .compare_inclusive_fee_upgrade(&before, &after)
+                .await
+                .is_err()
+        );
+        let pool = crate::sqlite::connect_durable(
+            &format!("sqlite://{}", after.join("payout.db").display()),
+            1,
+        )
+        .await
+        .unwrap();
+        sqlx::migrate!("./payout-migrations")
+            .run(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+        protect(&after);
+        assert_eq!(
+            operator
+                .compare_inclusive_fee_upgrade(&before, &after)
+                .await
+                .unwrap(),
+            manifest
+        );
+        assert!(!manifest.report.resume_authorized);
+        let alias = root.path().join("aliased-candidate");
+        std::os::unix::fs::symlink(&after, &alias).unwrap();
+        assert!(
+            operator
+                .compare_inclusive_fee_upgrade(&before, &alias)
+                .await
+                .is_err()
+        );
+        let hardlink = root.path().join("aliased-core.db");
+        std::fs::hard_link(after.join("core.db"), &hardlink).unwrap();
+        assert!(
+            operator
+                .compare_inclusive_fee_upgrade(&before, &after)
+                .await
+                .is_err()
+        );
+        std::fs::remove_file(hardlink).unwrap();
+        files::write_new(&after.join("unlisted"), b"unqualified").unwrap();
+        assert!(
+            operator
+                .compare_inclusive_fee_upgrade(&before, &after)
+                .await
+                .is_err()
+        );
+        std::fs::remove_file(after.join("unlisted")).unwrap();
+        files::write_new(&after.join("INCOMPLETE"), b"not accepted").unwrap();
+        assert!(
+            operator
+                .compare_inclusive_fee_upgrade(&before, &after)
+                .await
+                .is_err()
+        );
+        std::fs::remove_file(after.join("INCOMPLETE")).unwrap();
+        std::fs::set_permissions(
+            after.join("core.db"),
+            std::fs::Permissions::from_mode(0o644),
+        )
+        .unwrap();
+        assert!(
+            operator
+                .compare_inclusive_fee_upgrade(&before, &after)
+                .await
+                .is_err()
+        );
+        std::fs::set_permissions(
+            after.join("core.db"),
+            std::fs::Permissions::from_mode(0o600),
+        )
+        .unwrap();
+        assert_eq!(
+            operator
+                .compare_inclusive_fee_upgrade(&before, &after)
+                .await
+                .unwrap(),
+            manifest
+        );
+        assert_eq!(
+            std::fs::read(before.join("MANIFEST.json")).unwrap(),
+            original_manifest
+        );
+        files::check_images(&before, &manifest.images, p.max_component_bytes).unwrap();
+        for (path, bytes) in &originals {
+            assert_eq!(std::fs::read(path).unwrap(), *bytes);
+        }
+        println!("ROOT_INCLUSIVE_FEE_UPGRADE_FIXTURE_VERIFIED");
     }
 }

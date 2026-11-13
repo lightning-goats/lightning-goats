@@ -145,3 +145,18 @@ bounded policy-query diagnostics for its three fixed synthetic accounts on that
 failure. The production installer's strict sudo-denial guard is unchanged. The
 previous fully qualified `ae10df6` review remains sealed and maintenance remains
 unapproved.
+
+The [diagnostic run](https://github.com/lightning-goats/lightning-goats/actions/runs/43524332998)
+identified the exact account-check failure: each fixed runtime account had the
+expected complete sudo denial, but sudo also emitted `Temporary failure in name
+resolution` for the runner's own hostname inside the loopback-only namespace.
+The fail-closed installer correctly rejected the warning; this was not a policy
+grant. No sudo/parser exception is added.
+
+The disposable installed rehearsal now also enters a private mount namespace,
+makes propagation private, and binds a read-only hosts copy containing its kernel
+hostname at loopback. Existing hosts entries are preserved. The runner host and
+production hosts files are untouched. Focused tests reject hostname record
+injection and refuse a shared mount namespace before any mount/file operation.
+The full installed path still requires a new CI result; these focused tests alone
+do not prove the bind mount or installed upgrade passed.

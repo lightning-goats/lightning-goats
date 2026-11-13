@@ -1071,6 +1071,27 @@ http {{
                 public_network_used=False, production_operator_routes_enabled=False)
 
 
+def hosts_with_local_hostname(original, hostname):
+    import re
+    if len(original.encode()) > 1024 * 1024 or re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9.-]{0,252}', hostname) is None:
+        raise ValueError('bounded hosts file and valid fixture hostname required')
+    return original + ('\n' if original and not original.endswith('\n') else '') + '127.0.1.1 ' + hostname + '\n'
+
+
+def isolate_fixture_hostname(root):
+    import socket
+    if os.geteuid() != 0 or os.readlink('/proc/self/ns/mnt') == os.readlink('/proc/1/ns/mnt'):
+        raise ValueError('private root mount namespace required for fixture hosts')
+    # A fresh mount namespace alone can inherit shared propagation. Contain the
+    # bind here before publishing any mount, leaving the runner's hosts intact.
+    run('/usr/bin/mount', '--make-rprivate', '/')
+    hosts = root / 'fixture-hosts'
+    hosts.write_text(hosts_with_local_hostname(Path('/etc/hosts').read_text(), socket.gethostname()))
+    hosts.chmod(0o644)
+    run('/usr/bin/mount', '--bind', str(hosts), '/etc/hosts')
+    run('/usr/bin/mount', '-o', 'remount,bind,ro', '/etc/hosts')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('review', type=Path)
@@ -1104,6 +1125,7 @@ def main():
     # synthetic fixture binary/configs need traversal by the non-root core UID;
     # tool, backup, key and source children retain their own private modes.
     root.chmod(0o755)
+    isolate_fixture_hostname(root)
     tools = root / 'tools'
     shutil.copytree(source_tools, tools)
     tools.chmod(0o700)

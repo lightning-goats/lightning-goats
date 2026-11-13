@@ -266,6 +266,21 @@ before using this comparison for an actual upgrade. Ordinary current-schema
 verification also validates retained private fee/envelope/invoice/delivery
 correlations and refuses overlap with public feed/payment accounting.
 
+## Inclusive-fee schema boundary
+
+The dedicated [inclusive-fee upgrade contract](cyberherd-inclusive-fee-upgrade.md)
+describes source-only snapshot and comparison operations for the exact payout
+migration prefix `1,2,3,4,5,6,8`. This prefix contains seven records. The current
+prefix adds versions 9, 10 and 11; the other three journals remain unchanged.
+
+`snapshot-before-inclusive-fees` and `verify-inclusive-fee-upgrade-source` accept
+only the compiled older prefix. `compare-inclusive-fee-upgrade` checks a separate
+migrated four-journal copy, preserving all original rows, schema definitions and
+signed bytes and allowing only the seven empty fee tables. These entry points do
+not widen ordinary current-schema verification or restore eligibility. They do
+not grant recovery adoption, service resumption or financial authority. Installed
+transaction qualification and operator-directed maintenance remain required.
+
 ## Verification boundary
 
 Tests use real schemas/native SQLite, committed WAL, private ownership, pending

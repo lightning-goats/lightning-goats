@@ -242,11 +242,114 @@ async fn diagnose_export(uid: u32) -> Result<()> {
     Ok(())
 }
 
+async fn strip_empty_inclusive_fee_schema(uid: u32) -> Result<()> {
+    if std::env::var_os("CREDENTIALS_DIRECTORY").is_some() {
+        bail!("synthetic fee fixture must not load credentials");
+    }
+    const PAYOUT: &str = "/var/lib/cyberherd-payout/payout.db";
+    let url = format!("sqlite://{PAYOUT}");
+    lightning_goats::payout::cost_recovery::existing_private_database(&url)?;
+    if std::fs::symlink_metadata(PAYOUT)?.uid() != uid {
+        bail!("fixture payout UID changed");
+    }
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(
+            SqliteConnectOptions::new()
+                .filename(PAYOUT)
+                .create_if_missing(false)
+                .journal_mode(SqliteJournalMode::Wal)
+                .synchronous(SqliteSynchronous::Full)
+                .foreign_keys(true)
+                .pragma("trusted_schema", "OFF")
+                .pragma("hard_heap_limit", "268435456")
+                .busy_timeout(Duration::from_secs(5)),
+        )
+        .await?;
+    let engine: String = sqlx::query_scalar("SELECT sqlite_version()")
+        .fetch_one(&pool)
+        .await?;
+    if engine != "3.54.1" {
+        bail!("wrong native fee fixture engine");
+    }
+    let migrations = sqlx::migrate!("./payout-migrations");
+    if migrations.iter().map(|m| m.version).collect::<Vec<_>>() != [1, 2, 3, 4, 5, 6, 8, 9, 10, 11]
+    {
+        bail!("unqualified fixture payout schema");
+    }
+    let rows = sqlx::query(
+        "SELECT version,success,checksum FROM _sqlx_migrations ORDER BY version LIMIT 12",
+    )
+    .fetch_all(&pool)
+    .await?;
+    if rows.len() != 10 {
+        bail!("exact current synthetic payout schema required");
+    }
+    for (row, migration) in rows.iter().zip(migrations.iter()) {
+        if row.try_get::<i64, _>("version")? != migration.version
+            || !row.try_get::<bool, _>("success")?
+            || row.try_get::<Vec<u8>, _>("checksum")?.as_slice() != migration.checksum.as_ref()
+        {
+            bail!("fixture payout migration identity changed");
+        }
+    }
+    if sqlx::query("PRAGMA foreign_key_check")
+        .fetch_optional(&pool)
+        .await?
+        .is_some()
+    {
+        bail!("fixture payout journal has inconsistent history");
+    }
+    let mut tx = pool.begin().await?;
+    let grants: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM payout_grants")
+        .fetch_one(&mut *tx)
+        .await?;
+    if grants != 0 {
+        bail!("only an empty synthetic payout journal may be transformed");
+    }
+    for table in [
+        "payout_fee_probe_duplicates",
+        "payout_fee_promotions",
+        "payout_fee_probe_quotes",
+        "payout_fee_probe_invoices",
+        "payout_fee_probe_callbacks",
+        "payout_fee_probe_intents",
+        "payout_fee_observations",
+    ] {
+        let count: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
+            .fetch_one(&mut *tx)
+            .await?;
+        if count != 0 {
+            bail!("fee fixture tables must be empty");
+        }
+        sqlx::query(&format!("DROP TABLE {table}"))
+            .execute(&mut *tx)
+            .await?;
+    }
+    if sqlx::query("DELETE FROM _sqlx_migrations WHERE version IN (9,10,11)")
+        .execute(&mut *tx)
+        .await?
+        .rows_affected()
+        != 3
+    {
+        bail!("fixture payout migration prefix changed");
+    }
+    tx.commit().await?;
+    pool.close().await;
+    println!(
+        "{}",
+        serde_json::json!({"synthetic":true,"payout_schema":8,"grants":0,"production_supported":false})
+    );
+    Ok(())
+}
+
 async fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let uid = isolated_fixture()?;
     if args == ["--strip-empty-contact-schema"] {
         strip_empty_contact_schema(uid).await
+    } else if args == ["--strip-empty-inclusive-fee-schema"] {
+        strip_empty_inclusive_fee_schema(uid).await
     } else if args == ["--diagnose-installed-export"] {
         diagnose_export(uid).await
     } else if args == ["--config", "/etc/lightning-goats/config.receive.toml"] {

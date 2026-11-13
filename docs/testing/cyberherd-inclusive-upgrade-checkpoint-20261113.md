@@ -127,3 +127,11 @@ copy under `/run`. The follow-up moves that disposable executable directory to
 `/var/lib`, retaining the shipped sandbox and encrypted synthetic credentials.
 It does not alter the household bunker or the already sealed `ae10df6` production
 review; that review remains pinned to its own fully qualified artifacts.
+
+The corrected bunker rehearsal passed in the
+[NIP-46 workflow](https://github.com/lightning-goats/lightning-goats/actions/runs/43523155332).
+Its emitted synthetic report confirms signing and restart signing, non-root
+execution, NoNewPrivileges, zero effective capabilities, no note publication and
+corrupt-credential refusal before exec with status 243. This is isolated sandbox
+acceptance, not a new household authorization or public/live signing test. The
+production maintenance review remains pinned to the original qualified artifacts.

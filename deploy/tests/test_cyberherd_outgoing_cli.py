@@ -81,6 +81,26 @@ class PayoutCLI(Checks, unittest.TestCase):
         # Explicit zero spending limits are valid and retain their zero meaning.
         self.assertEqual(self.invoke(self.text, "--check").returncode, 0)
 
+    def test_inclusive_fee_migration_is_explicit_and_excludes_other_operations(self):
+        modes = [
+            ("--migrate-inclusive-fees",),
+            ("--writers-stopped",),
+            ("--migrate-inclusive-fees", "--writers-stopped", "--check"),
+            ("--migrate-inclusive-fees", "--writers-stopped", "--initialize-state"),
+            ("--migrate-inclusive-fees", "--writers-stopped", "--sync-failed-cost",
+             "--grant", "11111111-1111-4111-8111-111111111111", "--member", PUBLIC),
+        ]
+        for args in modes:
+            with self.subTest(args=args):
+                result=self.invoke(self.text,*args)
+                self.assertNotEqual(result.returncode,0)
+                self.assertTrue("required arguments" in result.stderr or "cannot be used with" in result.stderr,result.stderr)
+                self.assertNotIn("no runtime started",result.stdout)
+        # Correct flags still cannot use a caller-writable policy or create a DB.
+        result=self.invoke(self.text,"--migrate-inclusive-fees","--writers-stopped")
+        self.assertNotEqual(result.returncode,0)
+        self.assertNotIn("CREDENTIALS_DIRECTORY",result.stderr)
+
     def test_cost_recovery_is_explicit_cannot_start_runtime_and_reads_no_sender_key(self):
         for args in [("--sync-failed-cost",),
                      ("--grant", "11111111-1111-4111-8111-111111111111"),

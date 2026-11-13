@@ -88,6 +88,14 @@ jobs:
           python3 -I -S -B deploy/scripts/export-upgrade-tools.py "$GITHUB_WORKSPACE" "$GITHUB_SHA" "$RUNNER_TEMP/cyberherd-test-only/tool-bundle" > "$RUNNER_TEMP/cyberherd-test-only/TOOL-EXPORT.json"
           python3 -I -S -B deploy/scripts/export-self-read-site.py "$GITHUB_WORKSPACE" "$GITHUB_SHA" "$RUNNER_TEMP/cyberherd-self-read-site" > "$RUNNER_TEMP/cyberherd-test-only/SELF-READ-SITE-EXPORT.json"
           (cd "$RUNNER_TEMP/cyberherd-test-only" && sha256sum TEST-ONLY-prepare-legacy-core READ-ONLY-check-recipient SIGNING-ONLY-check-zap-receipt CHECK-ONLY-overlay-stage TEST-ONLY-contact-upgrade-fixture CHECK-ONLY-private-contact-stage TEST-ONLY-installed-operator-client CHECK-ONLY-financial-stage TOOL-EXPORT.json > SHA256SUMS)
+      - name: Build pinned schema-8 verifier for isolated upgrade rehearsal
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash deploy/scripts/build-inclusive-fee-legacy-verifier.sh "$RUNNER_TEMP/inclusive-fee-legacy"
+          mkdir "$RUNNER_TEMP/cyberherd-test-only/inclusive-fee-legacy"
+          cp "$RUNNER_TEMP/inclusive-fee-legacy/TEST-ONLY-schema8-statectl" "$RUNNER_TEMP/inclusive-fee-legacy/SOURCE-COMMIT" "$RUNNER_TEMP/inclusive-fee-legacy/SHA256SUMS" "$RUNNER_TEMP/cyberherd-test-only/inclusive-fee-legacy/"
+          (cd "$RUNNER_TEMP/cyberherd-test-only" && sha256sum inclusive-fee-legacy/TEST-ONLY-schema8-statectl inclusive-fee-legacy/SOURCE-COMMIT inclusive-fee-legacy/SHA256SUMS >> SHA256SUMS)
       - name: Retain test-only installation fixture
         uses: actions/upload-artifact@v4
         with:

@@ -222,6 +222,29 @@ def load(directory, expected, *, inclusive_fee_upgrade=False):
     return {'programs': expected_rows, 'review': str(directory)}, r
 
 
+def offline_fee_migration_child(program, config, component):
+    """Child primitive for the future stopped-writer coordinator, not a CLI mode.
+
+    Caller must seal the selected hashes, hold all four writers, retain a native
+    backup and record migration start before calling. Never use worker startup
+    to migrate. Failure may follow a partial migration and must remain held.
+    """
+    C.root()
+    if any(type(component.get(name)) is not int or not 0 < component[name] < 2**32
+           for name in ('uid', 'gid')):
+        raise ValueError('separate non-root payout UID/GID required')
+    C.protected(program)
+    C.protected(config)
+    output = C.command('/usr/bin/unshare', '--net', '--', '/usr/bin/setpriv',
+        '--reuid=' + str(component['uid']), '--regid=' + str(component['gid']),
+        '--clear-groups', '--inh-caps=-all', '--ambient-caps=-all', '--bounding-set=-all',
+        '--no-new-privs', str(program), '--config', str(config),
+        '--migrate-inclusive-fees', '--writers-stopped', timeout=300)
+    if output.strip() != 'Existing payout journal migrated; no runtime, credential or transport started':
+        raise ValueError('offline fee migration did not positively confirm; preserve stopped state')
+    return {'migrated': True, 'worker_started': False, 'credential_loaded': False}
+
+
 def original_verify(directory, operation, *arguments):
     # U.native resolves review/payload/cyberherd-statectl. Give it an independent
     # retained namespace, never the installed program or selected new verifier.

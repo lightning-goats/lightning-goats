@@ -50,6 +50,26 @@ class ProgramBoundaries(unittest.TestCase):
                     operation(Path('/missing'), '0' * 64, False)
                 load.assert_not_called()
 
+    def test_fee_migration_child_uses_own_uid_no_capabilities_and_no_network(self):
+        message='Existing payout journal migrated; no runtime, credential or transport started'
+        with patch.object(P.C,'root'), patch.object(P.C,'protected'), patch.object(P.C,'command',return_value=message) as command:
+            result=P.offline_fee_migration_child(Path('/protected/payout'),Path('/protected/config'),{'uid':10003,'gid':10004})
+            self.assertFalse(result['worker_started'])
+            self.assertFalse(result['credential_loaded'])
+            args=command.call_args.args
+            self.assertEqual(args[:4],('/usr/bin/unshare','--net','--','/usr/bin/setpriv'))
+            for flag in ('--reuid=10003','--regid=10004','--clear-groups','--inh-caps=-all','--ambient-caps=-all','--bounding-set=-all','--no-new-privs'):
+                self.assertIn(flag,args)
+            self.assertEqual(args[-5:],('/protected/payout','--config','/protected/config','--migrate-inclusive-fees','--writers-stopped'))
+        for component in ({'uid':0,'gid':1},{'uid':1,'gid':0},{'uid':True,'gid':1},{'uid':'1','gid':1}):
+            with patch.object(P.C,'root'), patch.object(P.C,'protected') as protected, patch.object(P.C,'command') as command:
+                with self.assertRaises(ValueError):
+                    P.offline_fee_migration_child(Path('/missing'),Path('/missing'),component)
+                protected.assert_not_called();command.assert_not_called()
+        with patch.object(P.C,'root'), patch.object(P.C,'protected'), patch.object(P.C,'command',return_value='not confirmed'):
+            with self.assertRaisesRegex(ValueError,'preserve stopped state'):
+                P.offline_fee_migration_child(Path('/protected/payout'),Path('/protected/config'),{'uid':1,'gid':2})
+
     def test_native_original_snapshot_receipt_rejects_aliases_and_activation(self):
         good = {'operation': 'snapshot', 'id': str(uuid.uuid4()), 'accepted': True, 'resume_authorized': False}
         for value in [good, dict(good, accepted=1), dict(good, resume_authorized=0),

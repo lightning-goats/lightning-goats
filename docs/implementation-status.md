@@ -1,14 +1,29 @@
 # Lightning Goats implementation status
 
-Current CyberHerd checkpoint: **2026-11-11**. The full
+Current CyberHerd checkpoint: **2026-11-13**. The full
 [twelve-part implementation plan](planning/cyberherd-implementation-plan.md)
 remains incomplete. It supersedes older CyberHerd deferrals; it does not resume
 Monero or authorize financial/physical activation.
 
-The operator has now supplied the financial limits and clarified that actual
-Strike fees are deducted from member payouts. The [inclusive-fee integration](architecture/cyberherd-inclusive-fees.md)
-is in progress; those limits are no longer missing input. Source-only observation
-and operator-site preparation work must finish qualification before use.
+The operator supplied the financial limits and clarified that actual Strike fees
+are deducted from member payouts. The [inclusive-fee integration](architecture/cyberherd-inclusive-fees.md)
+is implemented, including fee probes and same-ID promotion into the guarded
+execution chain. The [November 13 qualification and staged review](testing/cyberherd-inclusive-upgrade-checkpoint-20261113.md)
+records all ten passing workflows for the selected artifacts, native/root and
+installed upgrade comparisons, and operator-approved actual-host staging.
+Staging checked all three retained worker configurations under their original
+UIDs and sealed six programs without opening journals or changing services.
+The additive payout-schema upgrade still awaits separate maintenance approval;
+outgoing roles and financial limits remain disabled. Provider/recipient execution,
+external recovery adoption and public CyberHerd rollout are not complete.
+The [full acceptance inventory](testing/cyberherd-acceptance-matrix.md) tracks all
+twelve requirements; a passing migration is not full-port acceptance.
+
+The [per-payment feeder correction](deployment/per-payment-feeder-cap.md) is
+already deployed: at most three feedings and one feeding announcement per payment.
+The original donation's erroneous remaining backlog was retired once, preserving
+its receipt and actual feeding history. Do not repeat that correction or erase
+subsequent credits as part of CyberHerd maintenance.
 
 The operator selected **3 user spots** and reuse of the existing messaging
 identity for operator authentication. The [configuration and signed-settings
@@ -60,9 +75,10 @@ installed nonzero-candidate rehearsal. The selected net limit now applies to bot
 ordinary Lightning and zaps. A new authenticated 24-file tool generation and
 checker are installed separately on the VPS. The actual zero-only review safely
 refused before directory creation because the stored member allocation is 10%;
-all 17 original files/PIDs and zero spending limits remain exact. Requested
-operator limits remain unanswered, and no actual-host financial candidate or
-activation has been performed.
+all 17 original files/PIDs and zero spending limits remained exact at that
+checkpoint. The operator later supplied the limits and inclusive-fee policy;
+those inputs are no longer missing. No financial activation is implied by the
+candidate or the subsequently prepared schema-upgrade review.
 
 The new native `review-rewards` command reviews only accepted four-journal backup
 images, preserving the original manifest format. It reports frozen feeding

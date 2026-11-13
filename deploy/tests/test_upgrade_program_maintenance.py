@@ -70,6 +70,21 @@ class ProgramBoundaries(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'preserve stopped state'):
                 P.offline_fee_migration_child(Path('/protected/payout'),Path('/protected/config'),{'uid':1,'gid':2})
 
+    def test_inclusive_native_receipt_binds_operation_identity_and_no_resumption(self):
+        good={'operation':'inclusive_fee_upgrade_source_verify','id':str(uuid.uuid4()),'accepted':True,'resume_authorized':False}
+        values=[good,dict(good,operation='verify'),dict(good,accepted=1),dict(good,resume_authorized=0),dict(good,id=str(uuid.UUID(int=0))),dict(good,extra=True)]
+        for value in values:
+            with patch.object(P.C,'protected'),patch.object(P.C,'command',return_value=json.dumps(value)):
+                if value==good and type(value['accepted']) is bool and type(value['resume_authorized']) is bool:
+                    self.assertEqual(P.inclusive_native(Path('/protected'),'verify-inclusive-fee-upgrade-source'),good)
+                else:
+                    with self.assertRaises(ValueError):
+                        P.inclusive_native(Path('/protected'),'verify-inclusive-fee-upgrade-source')
+        with patch.object(P.U,'stopped') as stopped:
+            with self.assertRaisesRegex(ValueError,'distinct inclusive-fee'):
+                P.inclusive_backup(Path('/missing'),{}, {'program_upgrade_only':True})
+            stopped.assert_not_called()
+
     def test_native_original_snapshot_receipt_rejects_aliases_and_activation(self):
         good = {'operation': 'snapshot', 'id': str(uuid.uuid4()), 'accepted': True, 'resume_authorized': False}
         for value in [good, dict(good, accepted=1), dict(good, resume_authorized=0),

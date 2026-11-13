@@ -259,6 +259,48 @@ def original_verify(directory, operation, *arguments):
     return value
 
 
+def inclusive_native(directory, operation, *arguments):
+    """Bounded native receipt interface for the separate schema coordinator."""
+    names = {
+        'snapshot-before-inclusive-fees': 'inclusive_fee_upgrade_snapshot',
+        'verify-inclusive-fee-upgrade-source': 'inclusive_fee_upgrade_source_verify',
+        'compare-inclusive-fee-upgrade': 'inclusive_fee_upgrade_compare',
+        'snapshot': 'snapshot', 'verify': 'verify',
+    }
+    if operation not in names:
+        raise ValueError('unsupported inclusive-fee native operation')
+    program = directory / 'payload/cyberherd-statectl'
+    C.protected(program)
+    value = json.loads(C.command(str(program), '--config', str(S.MAINTENANCE), operation,
+                                *map(str, arguments), timeout=300))
+    if (set(value) != {'operation', 'id', 'accepted', 'resume_authorized'}
+            or value['operation'] != names[operation] or value['accepted'] is not True
+            or value['resume_authorized'] is not False or type(value['id']) is not str):
+        raise ValueError('inclusive-fee native receipt refused')
+    identity = uuid.UUID(value['id'])
+    if identity.int == 0 or str(identity) != value['id']:
+        raise ValueError('inclusive-fee native identity refused')
+    return value
+
+
+def inclusive_backup(directory, m, r):
+    """Call only inside exclusive maintenance after all writer masks are held."""
+    if r.get('inclusive_fee_upgrade') is not True or r.get('program_upgrade_only') is not False:
+        raise ValueError('distinct inclusive-fee upgrade review required')
+    U.stopped(m, r)
+    observed = U.state_files(r)
+    original_verify(directory, 'snapshot', '--destination', directory / 'backup', '--writers-stopped')
+    original = original_verify(directory, 'verify', '--bundle', directory / 'backup')
+    selected = inclusive_native(directory, 'verify-inclusive-fee-upgrade-source', '--bundle', directory / 'backup')
+    if original['id'] != selected['id']:
+        raise ValueError('original and selected source verifiers accepted different backups')
+    U.sources_match(m, r, observed)
+    M.note(directory, 'BACKUP-ACCEPTED.json', {'native': original, 'selected_source': selected,
+            'originals': observed, 'manifest_sha256': U.digest(directory / 'backup/MANIFEST.json'),
+            'inclusive_fee_upgrade': True, 'migration_started': False})
+    return observed
+
+
 def review_backup(directory, m, r, observed):
     result = json.loads(C.command(str(directory / 'payload/cyberherd-statectl'), '--config', str(S.MAINTENANCE),
         'review-rewards', '--bundle', str(directory / 'backup'), '--destination', str(directory / 'reward-review'), timeout=300))

@@ -88,6 +88,13 @@ enum Command {
         #[arg(long)]
         bundle: PathBuf,
     },
+    /// Compare an exact old payout backup with a separately migrated copy.
+    CompareInclusiveFeeUpgrade {
+        #[arg(long)]
+        bundle: PathBuf,
+        #[arg(long)]
+        candidate_copy: PathBuf,
+    },
     /// Stage all four journals in new directories with mandatory startup markers.
     StageRestore {
         #[arg(long)]
@@ -180,6 +187,15 @@ async fn main() -> Result<()> {
             "inclusive_fee_upgrade_source_verify",
             operator
                 .verify_inclusive_fee_upgrade_source(&bundle)
+                .await?,
+        ),
+        Command::CompareInclusiveFeeUpgrade {
+            bundle,
+            candidate_copy,
+        } => (
+            "inclusive_fee_upgrade_compare",
+            operator
+                .compare_inclusive_fee_upgrade(&bundle, &candidate_copy)
                 .await?,
         ),
         Command::StageRestore {

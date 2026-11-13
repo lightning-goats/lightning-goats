@@ -151,6 +151,12 @@ pub(in crate::state_maintenance) async fn feeder_cap_prefix_digest(
     let columns = columns(pool, "_sqlx_migrations").await?;
     digest_selected(pool, "_sqlx_migrations", &columns, Some(24)).await
 }
+pub(in crate::state_maintenance) async fn inclusive_fee_prefix_digest(
+    pool: &SqlitePool,
+) -> Result<Table> {
+    let columns = columns(pool, "_sqlx_migrations").await?;
+    digest_selected(pool, "_sqlx_migrations", &columns, Some(8)).await
+}
 async fn digest_selected(
     pool: &SqlitePool,
     table: &str,
@@ -170,7 +176,7 @@ async fn digest_selected(
         if table != "_sqlx_migrations" {
             bail!("unsupported migration-prefix digest");
         }
-        if !matches!(version, 23 | 24) {
+        if !matches!(version, 8 | 23 | 24) {
             bail!("unsupported migration prefix");
         }
         format!(" WHERE version<={version}")

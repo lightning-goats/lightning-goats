@@ -12,6 +12,7 @@ mod control;
 mod database;
 mod feeder_cap_upgrade;
 mod files;
+mod inclusive_fee_upgrade;
 pub mod legacy;
 mod reward_review;
 

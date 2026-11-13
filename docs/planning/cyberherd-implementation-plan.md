@@ -38,7 +38,9 @@ Operator instructions take precedence where the reference differs:
   each member's gross share, with no separate fixed fee ceiling. A 100-sat share
   with a 2-sat fee delivers 98 sats and consumes 100 sats. Skip an unaffordable
   share; unused allocation remains with operations. These settings do not
-  authorize live payouts. The inclusive-fee integration remains unfinished.
+  authorize live payouts. The inclusive-fee worker and persistence integration
+  are implemented and source-qualified separately; combined feeder-cap validation,
+  actual-host schema maintenance and live acceptance remain required.
 - **Operator correction, 2026-11-11:** at most three physical feedings per payment,
   then clear the capped batch's excess feeder credit through an auditable
   non-feeding retirement. One feeding announcement per payment, across all

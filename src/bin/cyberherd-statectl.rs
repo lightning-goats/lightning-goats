@@ -76,6 +76,11 @@ enum Command {
         #[arg(long)]
         candidate_copy: PathBuf,
     },
+    /// Verify only the exact payout-schema-8 source of an inclusive-fee upgrade.
+    VerifyInclusiveFeeUpgradeSource {
+        #[arg(long)]
+        bundle: PathBuf,
+    },
     /// Stage all four journals in new directories with mandatory startup markers.
     StageRestore {
         #[arg(long)]
@@ -153,6 +158,12 @@ async fn main() -> Result<()> {
             "feeder_cap_upgrade_compare",
             operator
                 .compare_feeder_cap_upgrade(&bundle, &candidate_copy)
+                .await?,
+        ),
+        Command::VerifyInclusiveFeeUpgradeSource { bundle } => (
+            "inclusive_fee_upgrade_source_verify",
+            operator
+                .verify_inclusive_fee_upgrade_source(&bundle)
                 .await?,
         ),
         Command::StageRestore {

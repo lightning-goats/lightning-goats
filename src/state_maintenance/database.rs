@@ -27,15 +27,26 @@ static PAYOUT: sqlx::migrate::Migrator = sqlx::migrate!("./payout-migrations");
 static SIGNER: sqlx::migrate::Migrator = sqlx::migrate!("./signer-migrations");
 
 pub(super) async fn inspect(directory: &Path, policy: &Policy) -> Result<Report> {
-    inspect_version(directory, policy, 25).await
+    inspect_version(directory, policy, 25, false).await
 }
 pub(super) async fn inspect_before_contact(directory: &Path, policy: &Policy) -> Result<Report> {
-    inspect_version(directory, policy, 23).await
+    inspect_version(directory, policy, 23, false).await
 }
 pub(super) async fn inspect_before_feeder_cap(directory: &Path, policy: &Policy) -> Result<Report> {
-    inspect_version(directory, policy, 24).await
+    inspect_version(directory, policy, 24, false).await
 }
-async fn inspect_version(directory: &Path, policy: &Policy, core_version: i64) -> Result<Report> {
+pub(super) async fn inspect_before_inclusive_fees(
+    directory: &Path,
+    policy: &Policy,
+) -> Result<Report> {
+    inspect_version(directory, policy, 25, true).await
+}
+async fn inspect_version(
+    directory: &Path,
+    policy: &Policy,
+    core_version: i64,
+    before_fees: bool,
+) -> Result<Report> {
     let mut pools = BTreeMap::new();
     let mut rows = BTreeMap::new();
     for role in Role::ALL {
@@ -79,6 +90,8 @@ async fn inspect_version(directory: &Path, policy: &Policy, core_version: i64) -
         }
         if core_version != 25 && role == Role::Core {
             require_core_prefix(&pool, core_version).await?;
+        } else if before_fees && role == Role::Payout {
+            require_before_inclusive_fees(&pool).await?;
         } else {
             crate::sqlite::require_current_schema(
                 &pool,
@@ -403,4 +416,72 @@ async fn equal_rows(local: &SqlitePool, core: &SqlitePool, rows: &str, lookup: &
         }
     }
     Ok(())
+}
+
+async fn require_before_inclusive_fees(pool: &SqlitePool) -> Result<()> {
+    let compiled: Vec<_> = PAYOUT.iter().collect();
+    if compiled.iter().map(|m| m.version).collect::<Vec<_>>() != [1, 2, 3, 4, 5, 6, 8, 9, 10, 11] {
+        bail!("inclusive-fee source requires the separately qualified payout migrations");
+    }
+    let expected: Vec<_> = compiled.into_iter().filter(|m| m.version <= 8).collect();
+    let rows = sqlx::query(
+        "SELECT version,success,checksum FROM _sqlx_migrations ORDER BY version LIMIT 12",
+    )
+    .fetch_all(pool)
+    .await?;
+    if rows.len() != expected.len() {
+        bail!("inclusive-fee source must be exactly payout schema 8");
+    }
+    for (row, migration) in rows.iter().zip(expected) {
+        if row.try_get::<i64, _>("version")? != migration.version
+            || !row.try_get::<bool, _>("success")?
+            || row.try_get::<Vec<u8>, _>("checksum")?.as_slice() != migration.checksum.as_ref()
+        {
+            bail!("inclusive-fee source migration history changed");
+        }
+    }
+    let extra: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name LIKE 'payout_fee_%')",
+    )
+    .fetch_one(pool)
+    .await?;
+    if extra {
+        bail!("inclusive-fee source already contains fee schema objects");
+    }
+    Ok(())
+}
+#[cfg(test)]
+mod inclusive_fee_prefix_tests {
+    use super::*;
+    #[tokio::test]
+    async fn exact_payout_prefix_preserves_version_gap_and_rejects_changed_or_current_history() {
+        let root = tempfile::TempDir::new().unwrap();
+        let pool = crate::sqlite::connect_durable(
+            &format!("sqlite://{}", root.path().join("payout.db").display()),
+            1,
+        )
+        .await
+        .unwrap();
+        let mut old = sqlx::migrate!("./payout-migrations");
+        old.migrations = old
+            .iter()
+            .filter(|m| m.version <= 8)
+            .cloned()
+            .collect::<Vec<_>>()
+            .into();
+        old.run(&pool).await.unwrap();
+        require_before_inclusive_fees(&pool).await.unwrap();
+        sqlx::query("UPDATE _sqlx_migrations SET success=0 WHERE version=8")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(require_before_inclusive_fees(&pool).await.is_err());
+        sqlx::query("UPDATE _sqlx_migrations SET success=1 WHERE version=8")
+            .execute(&pool)
+            .await
+            .unwrap();
+        PAYOUT.run(&pool).await.unwrap();
+        assert!(require_before_inclusive_fees(&pool).await.is_err());
+        pool.close().await;
+    }
 }

@@ -18,6 +18,11 @@ now passes fresh native backup, clone/live comparison, exact installed hashes an
 core/member resumption. Configuration is unchanged; outgoing roles remain masked
 and financial limits remain disabled. Provider/recipient execution,
 external recovery adoption and public CyberHerd rollout are not complete.
+The separately approved [actual financial candidate](testing/cyberherd-financial-candidate-live-staging-20261114.md)
+now passes native four-role validation with those limits, without installing
+configuration or enabling payouts. The operator selected future confirmed
+feedings only. Historical reward opportunities, including deferred feeding inputs,
+need an audited cutoff before activation; that accounting change is not yet applied.
 The [full acceptance inventory](testing/cyberherd-acceptance-matrix.md) tracks all
 twelve requirements; a passing migration is not full-port acceptance.
 

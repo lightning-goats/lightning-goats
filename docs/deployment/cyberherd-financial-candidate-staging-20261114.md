@@ -50,3 +50,7 @@ review data. Approval is requested only for the staging scope above.
 The separate financial-maintenance adapter fix that consumes the completed schema
 review is [under qualification](../testing/cyberherd-completed-schema-financial-review-20261114.md).
 It does not need to be installed or executed merely to prepare this candidate.
+
+The operator subsequently approved this scope. The [completed actual-host staging](../testing/cyberherd-financial-candidate-live-staging-20261114.md) records the
+verified checker, accepted candidate and unchanged service/mask state. Historical
+reward disposition remains unapplied and financial activation remains unauthorized.

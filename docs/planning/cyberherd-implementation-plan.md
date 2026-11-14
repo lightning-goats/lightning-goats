@@ -46,6 +46,12 @@ Operator instructions take precedence where the reference differs:
   non-feeding retirement. One feeding announcement per payment, across all
   confirmations/retries. Preserve the full receipt, actual confirmed feeds and
   other donors' credit. See [the repair contract](../deployment/per-payment-feeder-cap.md).
+- **First rewards start with future confirmed feedings only** (2026-11-14).
+  The operator declined retrospective rewards. Use an audited activation cutoff
+  that also covers historical feeding inputs still deferred/unreceived; do not
+  merely skip already planned/frozen examples. Preserve feed-credit accounting,
+  original UUIDs and snapshots, and refuse existing financial-claim conflicts.
+  See the [actual candidate and historical decision](../testing/cyberherd-financial-candidate-live-staging-20261114.md).
 - Preserve the existing 10-sat payment-announcement floor; smaller legitimate
   settled zaps can update an active member's score without a payment announcement.
   Social notifications are separate from payment announcements.

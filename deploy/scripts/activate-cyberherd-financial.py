@@ -178,11 +178,125 @@ def native_checks(directory, r):
             'journals_opened': False, 'credentials_loaded': False}
 
 
-def plan(candidate, candidate_sha, programs, program_sha, directory):
+def cutoff_summary(value):
+    fields = {'decision_id', 'epoch', 'through', 'backup_manifest_sha256', 'historical_feedings', 'decision_sha256'}
+    if (not isinstance(value, dict) or set(value) != fields
+            or any(type(value.get(k)) is not int or value[k] < 0 for k in ('through', 'historical_feedings'))
+            or value['through'] > 2**63 - 1 or value['historical_feedings'] > min(16384, value['through'])
+            or any(not isinstance(value.get(k), str) or re.fullmatch('[0-9a-f]{64}', value[k]) is None
+                   for k in ('backup_manifest_sha256', 'decision_sha256'))):
+        raise ValueError('exact bounded native cutoff summary required')
+    for key in ('decision_id', 'epoch'):
+        if not isinstance(value.get(key), str) or str(uuid.UUID(value[key])) != value[key] or uuid.UUID(value[key]).int == 0:
+            raise ValueError('canonical nonnil cutoff scope required')
+    return value
+
+
+def completed_cutover_review(path, prepared_sha, applied_sha, baseline):
+    """Older reviewed receipts are data; execute only the current installed verifier."""
+    if path.name != 'reward-cutover':
+        raise ValueError('completed cutoff transaction directory required')
+    U.private_directory(path.parent)
+    C.protected(path, directory=True, private=True)
+    for name, expected in [('PREPARED.json', prepared_sha), ('APPLIED.json', applied_sha)]:
+        C.protected(path / name, private=True)
+        if not isinstance(expected, str) or re.fullmatch('[0-9a-f]{64}', expected) is None or U.digest(path / name) != expected:
+            raise ValueError('independently reviewed completed cutoff digests required')
+    if (path / 'INCOMPLETE').exists():
+        raise ValueError('cutoff preparation is incomplete')
+    p, a = (C.read_json(path / name) for name in ('PREPARED.json', 'APPLIED.json'))
+    if (p.get('version') != 1 or a.get('version') != 1 or p.get('activation_authorized') is not False
+            or a.get('cutoff_review_sha256') != prepared_sha or a.get('retained_rows_unchanged') is not True
+            or any(a.get(k) is not False for k in ('configurations_changed', 'services_started', 'activation_authorized'))):
+        raise ValueError('completed reward-only cutoff evidence required')
+    original = sealed(path.parent, p['financial_review_sha256'])
+    if (original.get('first_financial_transaction') is not True
+            or any(original.get(k) is not False for k in ('activation_authorized', 'services_changed', 'journals_opened'))
+            or original['baseline']['identities'] != baseline['identities']
+            or any(original['baseline']['policy'][k] != baseline['policy'][k] for k in ('owner', 'epoch', 'provider'))
+            or any((path.parent / n).exists() for n in ('APPLICATION-STARTED.json', 'RESUME-REQUESTED.json', 'ROLLBACK-REQUESTED.json'))
+            or U.digest(path.parent / 'CHECKPOINT.json') != p['checkpoint_sha256']
+            or U.digest(path.parent / 'reward-review/REVIEW.json') != p['reward_review_sha256']):
+        raise ValueError('original cutoff checkpoint or financial scope changed')
+    started = C.read_json(path / 'APPLICATION-STARTED.json')
+    if (started.get('cutoff_review_sha256') != prepared_sha or started.get('activation_authorized') is not False
+            or started.get('database_restore_authorized') is not False):
+        raise ValueError('original reward-only application record changed')
+    resumed = C.read_json(path / 'RESUMED.json')
+    if (any(resumed.get(k) is not True for k in ('core_running', 'membership_running'))
+            or any(resumed.get(k) is not False for k in ('configurations_changed', 'outgoing_roles_enabled', 'activation_authorized'))):
+        raise ValueError('completed original-only cutoff resumption required')
+    summary = cutoff_summary(a.get('initial_reward_cutover'))
+    if summary['epoch'] != baseline['policy']['epoch']:
+        raise ValueError('cutoff belongs to another core epoch')
+    expected_receipt = {k: summary[k] for k in ('decision_id', 'epoch', 'through', 'historical_feedings')}
+    expected_receipt['activation_authorized'] = False
+    if a.get('receipt') != expected_receipt or p.get('expected_receipt') != expected_receipt:
+        raise ValueError('immutable cutoff receipt differs')
+    before, after = path.parent / 'backup', path / 'post/backup'
+    if (U.digest(before / 'MANIFEST.json') != summary['backup_manifest_sha256']
+            or U.digest(after / 'MANIFEST.json') != a['backup_manifest_sha256']
+            or U.digest(path / 'post/reward-review/REVIEW.json') != a['reward_report_sha256']):
+        raise ValueError('retained cutoff checkpoint bytes changed')
+    program = Q.BIN / 'cyberherd-statectl'
+    C.protected(program)
+    expected_program = baseline['files'][str(program)]
+    if TX.fingerprint(program) != expected_program:
+        raise ValueError('current qualified cutoff verifier changed')
+    common = (str(program), '--config', str(S.MAINTENANCE))
+    verified = json.loads(C.command(*common, 'verify', '--bundle', str(after), timeout=300))
+    compared = json.loads(C.command(*common, 'compare-initial-reward-cutover', '--bundle', str(before),
+        '--preview', str(path / 'preview'), '--preview-sha256', p['preview_sha256'],
+        '--candidate-copy', str(after), timeout=300))
+    for value, operation in [(verified, 'verify'), (compared, 'initial_reward_cutover_compare')]:
+        fields = {'operation', 'id', 'accepted', 'resume_authorized'} | ({'decision_sha256'} if operation == 'initial_reward_cutover_compare' else set())
+        if (set(value) != fields or value.get('operation') != operation
+                or value.get('accepted') is not True or value.get('resume_authorized') is not False
+                or not isinstance(value.get('id'), str) or str(uuid.UUID(value['id'])) != value['id'] or uuid.UUID(value['id']).int == 0):
+            raise ValueError('native completed-cutoff proof refused')
+    if (verified != a['native_backup'] or compared != a['comparison']
+            or compared.get('decision_sha256') != summary['decision_sha256'] or TX.fingerprint(program) != expected_program):
+        raise ValueError('retained native cutoff comparison changed')
+    # Recompute the summary from the accepted journals; a saved summary alone
+    # cannot bind a different decision, even in otherwise valid receipts.
+    C.protected(C.BASE, directory=True, private=True)
+    with tempfile.TemporaryDirectory(prefix='lg-cutoff-proof-', dir=C.BASE) as folder:
+        target = Path(folder) / 'review'
+        ack = json.loads(C.command(*common, 'review-rewards', '--bundle', str(after),
+                                  '--destination', str(target), timeout=300))
+        if (set(ack) != {'operation', 'id', 'accepted', 'activation_authorized'}
+                or ack.get('operation') != 'review_rewards' or ack.get('accepted') is not True
+                or ack.get('activation_authorized') is not False or not isinstance(ack.get('id'), str)
+                or str(uuid.UUID(ack['id'])) != ack['id'] or uuid.UUID(ack['id']).int == 0):
+            raise ValueError('fresh native cutoff review refused')
+        fresh_report = C.read_json(target / 'REVIEW.json')
+        if (fresh_report.get('id') != ack.get('id') or fresh_report.get('initial_reward_cutover') != summary
+                or fresh_report.get('bundle_id') != verified['id']
+                or fresh_report.get('bundle_manifest_sha256') != a['backup_manifest_sha256']
+                or fresh_report.get('owner') != baseline['policy']['owner'] or fresh_report.get('epoch') != summary['epoch']
+                or fresh_report.get('all_barriers_examined') is not True or fresh_report.get('activation_authorized') is not False
+                or fresh_report.get('external_reconciliation_required') is not True):
+            raise ValueError('fresh native cutoff identity differs from reviewed receipt')
+    report = C.read_json(path / 'post/reward-review/REVIEW.json')
+    if (report.get('initial_reward_cutover') != summary or report.get('owner') != baseline['policy']['owner']
+            or report.get('epoch') != summary['epoch'] or report.get('bundle_id') != verified['id']
+            or report.get('bundle_manifest_sha256') != a['backup_manifest_sha256']
+            or report.get('all_barriers_examined') is not True or report.get('activation_authorized') is not False
+            or report.get('external_reconciliation_required') is not True):
+        raise ValueError('retained native cutoff reward report changed')
+    return {'directory': str(path), 'preparation_sha256': prepared_sha, 'applied_sha256': applied_sha, 'summary': summary}
+
+
+def plan(candidate, candidate_sha, programs, program_sha, directory,
+         cutoff=None, cutoff_prepared_sha=None, cutoff_applied_sha=None):
+    if sum(v is not None for v in (cutoff, cutoff_prepared_sha, cutoff_applied_sha)) not in (0, 3):
+        raise ValueError('cutoff directory and both reviewed digests must be supplied together')
     C.root()
     C.protected(C.BASE, directory=True, private=True)
     r = candidate_review(candidate, candidate_sha)
     program_review(programs, program_sha, r['baseline'])
+    cutoff_binding = (completed_cutover_review(cutoff, cutoff_prepared_sha, cutoff_applied_sha, r['baseline'])
+                      if cutoff is not None else None)
     if directory.parent != C.BASE or re.fullmatch('[A-Za-z0-9_.-]{1,128}', directory.name) is None:
         raise ValueError('new direct private financial execution directory required')
     fresh(r)
@@ -210,7 +324,8 @@ def plan(candidate, candidate_sha, programs, program_sha, directory):
     ], lambda: fresh(r))
     (directory / 'LOCK').touch(mode=0o600, exist_ok=False)
     fresh(r)
-    C.write_json(directory / 'PREPARED.json', {'version': 1, 'tool': verified_tool_identity(),
+    C.write_json(directory / 'PREPARED.json', {**({'initial_reward_cutover_review': cutoff_binding} if cutoff_binding else {}),
+        'version': 1, 'tool': verified_tool_identity(),
         'first_financial_transaction': True, 'candidate': str(candidate), 'candidate_sha256': candidate_sha,
         'program_review': str(programs), 'program_review_sha256': program_sha,
         'baseline': r['baseline'], 'limits': r['limits'], 'original_order': list(r['baseline']['files']),
@@ -264,6 +379,11 @@ def load(directory, expected):
         C.protected(path)
         if TX.fingerprint(path) != fp:
             raise ValueError('qualified native financial checker changed')
+    if 'initial_reward_cutover_review' in a:
+        bound = a['initial_reward_cutover_review']
+        if (not isinstance(bound, dict) or set(bound) != {'directory', 'preparation_sha256', 'applied_sha256', 'summary'}
+                or completed_cutover_review(Path(bound['directory']), bound['preparation_sha256'], bound['applied_sha256'], r['baseline']) != bound):
+            raise ValueError('reviewed initial reward cutoff binding changed')
     return a, {'programs': expected_rows, 'review': str(directory)}, r
 
 
@@ -329,23 +449,38 @@ def checked_checkpoint(directory, checkpoint_sha, review_sha, m, r, installed):
     return value, C.read_json(directory / 'reward-review/REVIEW.json')
 
 
-def first_activation_backlog(report, limits):
-    """No retrospective allocation, old reservation adoption or skipped intake."""
-    names = ('unreceived_payment_events', 'unreceived_feeding_events', 'pending_feeding_ingress',
+def first_activation_backlog(report, limits, cutoff=None):
+    """A completed native cutoff excludes history, never prior financial authority."""
+    names = ('unreceived_payment_events', 'unreceived_feeding_events',
              'unfinalized_core_reservations', 'unresolved_provider_payments', 'payout_held_sats')
     if (report.get('all_barriers_examined') is not True or report.get('activation_authorized') is not False
             or report.get('external_reconciliation_required') is not True
             or type(report.get('stored_member_percent')) is not int
             or report['stored_member_percent'] != limits['member_percent']
             or type(report.get('stored_max_members')) is not int or report['stored_max_members'] != 3
-            or any(type(report.get(name)) is not int or report[name] != 0 for name in names)):
+            or any(type(report.get(name)) is not int or report[name] != 0 for name in names)
+            or type(report.get('pending_feeding_ingress')) is not int or report['pending_feeding_ingress'] < 0):
         raise ValueError('first activation requires the selected stored allocation and classified financial intake without existing holds')
     allowed = {'unplanned_zero_allocation', 'unplanned_no_strike_funding', 'unplanned_funded_allocation',
                'no_payout', 'awaiting_reservation', 'reserved'}
+    forbidden = ('awaiting_reservation', 'reserved')
+    if cutoff is None:
+        if report.get('initial_reward_cutover') is not None or report['pending_feeding_ingress'] != 0:
+            raise ValueError('an initial reward cutoff requires its separately verified completed disposition')
+        forbidden += ('unplanned_funded_allocation',)
+    else:
+        cutoff_summary(cutoff)
+        if (report.get('initial_reward_cutover') != cutoff or report.get('epoch') != cutoff['epoch']
+                or type(report.get('core_event_head')) is not int or report['core_event_head'] < cutoff['through']
+                or type(report.get('pending_reward_eligible_feeding_ingress')) is not int
+                or report['pending_reward_eligible_feeding_ingress'] != 0):
+            raise ValueError('current native reward report must retain the verified cutoff and classify future financial work')
+        allowed.add('excluded_before_activation')
     stages = report.get('stages')
     if (not isinstance(stages, dict) or not set(stages) <= allowed
             or any(type(v) is not int or v < 0 for v in stages.values())
-            or any(stages.get(name, 0) for name in ('unplanned_funded_allocation', 'awaiting_reservation', 'reserved'))):
+            or any(stages.get(name, 0) for name in forbidden)
+            or (cutoff is not None and stages.get('excluded_before_activation', 0) > cutoff['historical_feedings'])):
         raise ValueError('existing funded reward work requires a separate explicit accounting decision')
 
 
@@ -357,7 +492,7 @@ def apply(directory, expected, checkpoint_sha, review_sha, approved):
         if any((directory / n).exists() for n in ('APPLICATION-STARTED.json', 'RESUME-REQUESTED.json', 'ROLLBACK-REQUESTED.json')):
             raise ValueError('financial application already began; inspect rather than reapply')
         checked, report = checked_checkpoint(directory, checkpoint_sha, review_sha, m, r, False)
-        first_activation_backlog(report, r['limits'])
+        first_activation_backlog(report, r['limits'], a.get('initial_reward_cutover_review', {}).get('summary'))
         if native_checks(directory, r) != a['native_checks']:
             raise ValueError('financial native acceptance changed before configuration application')
         M.note(directory, 'APPLICATION-STARTED.json', {'checkpoint_sha256': checkpoint_sha,
@@ -436,7 +571,7 @@ def resume(directory, expected, checkpoint_sha, review_sha, approved, reviewed, 
                     or applied.get('limits') != r['limits'] or applied.get('financial_images_unchanged') is not True
                     or applied.get('services_started') is not False or applied.get('configurations') != 4):
                 raise ValueError('financial application receipt changed')
-            first_activation_backlog(report, r['limits'])
+            first_activation_backlog(report, r['limits'], a.get('initial_reward_cutover_review', {}).get('summary'))
             if native_checks(directory, r) != a['native_checks']:
                 raise ValueError('financial native acceptance changed before activation')
         # An acknowledgment is operator attestation, NOT provider/payment proof.
@@ -490,6 +625,9 @@ def main():
         planning.add_argument(name, type=Path)
     planning.add_argument('--candidate-sha256', required=True)
     planning.add_argument('--program-review-sha256', required=True)
+    planning.add_argument('--initial-reward-cutover', type=Path)
+    planning.add_argument('--cutoff-preparation-sha256')
+    planning.add_argument('--cutoff-applied-sha256')
     for name in ('checkpoint', 'apply', 'rollback', 'resume', 'resume-original'):
         command = commands.add_parser(name)
         command.add_argument('directory', type=Path)
@@ -508,7 +646,8 @@ def main():
             command.add_argument('--acknowledge-provider-recipient-review', required=True, action='store_true')
     args = parser.parse_args()
     if args.operation == 'plan':
-        result = plan(args.candidate, args.candidate_sha256, args.program_review, args.program_review_sha256, args.directory)
+        result = plan(args.candidate, args.candidate_sha256, args.program_review, args.program_review_sha256, args.directory,
+                      args.initial_reward_cutover, args.cutoff_preparation_sha256, args.cutoff_applied_sha256)
     elif args.operation == 'checkpoint':
         result = checkpoint(args.directory, args.review_sha256, args.exclusive_maintenance)
     else:

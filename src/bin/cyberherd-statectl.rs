@@ -176,12 +176,18 @@ async fn main() -> Result<()> {
             preview,
             preview_sha256,
             candidate_copy,
-        } => (
-            "initial_reward_cutover_compare",
-            operator
+        } => {
+            let (manifest, summary) = operator
                 .compare_initial_reward_cutover(&bundle, &preview, &preview_sha256, &candidate_copy)
-                .await?,
-        ),
+                .await?;
+            println!(
+                "{}",
+                serde_json::json!({"operation":"initial_reward_cutover_compare",
+                "id":manifest.id,"accepted":true,"resume_authorized":false,
+                "decision_sha256":summary.decision_sha256})
+            );
+            return Ok(());
+        }
         Command::SnapshotBeforeContact {
             destination,
             writers_stopped: true,

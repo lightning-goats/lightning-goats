@@ -41,8 +41,8 @@ an incomplete delayed inventory. Formatting passes locally. Full locked Rust,
 Clippy, security and installed qualification still need exact-source CI.
 
 The store API is a trusted internal domain boundary, not a proof that its caller
-has verified a complete core inventory. There is deliberately no executable
-production cutoff command yet. The native operator adapter must still:
+has verified a complete core inventory. There is no installed production cutoff command yet. The source adapters below
+implement these gates; combined installed acceptance must still prove them:
 
 1. Pin a fresh four-journal checkpoint, core epoch and event head; derive every
    historical confirmed UUID/proof without treating deferred inputs as future.
@@ -90,9 +90,9 @@ failed before cutoff work when the runner refused a fixture executable under `/r
 The rehearsal now keeps executable copies in protected disk-backed storage while
 retaining `/run` database and attestation paths. Shipped sandbox policies are unchanged.
 
-The apply adapter, append-only post-cutover comparison, audited-exclusion native
-classification and financial-activation binding remain unfinished. Historical
-production opportunities are still retained and unapplied.
+Native apply, append-only comparison, audited-exclusion reporting and the
+financial binding are described below. Their combined installed acceptance is
+still required. Historical production opportunities remain retained and unapplied.
 
 ## Native verification of recorded dispositions — development source
 
@@ -108,15 +108,15 @@ The reward reviewer validates the same audit before classifying a barrier as
 `excluded_before_activation`. It retains the original total pending-feeding count
 and separately reports `pending_reward_eligible_feeding_ingress`. A scoped cutoff
 summary records the decision ID, epoch, boundary and source-backup hash. This is
-not activation permission. The current financial adapter continues refusing the
-new excluded stage until the dedicated cutoff/apply/activation binding is qualified.
+not activation permission. The financial adapter accepts the new excluded stage only through the explicitly
+verified completed-cutoff binding described below.
 
 New native fixtures cover excluded frozen and deferred inputs, future feedings
 remaining unplanned/eligible, unchanged original barriers, and tampered/missing
 audit or conflicting plans. The earlier preview source passed full Rust and
 installed Deployment qualification; these additional verifier/report changes still
-require their own exact-source CI. The qualified stopped-writer apply adapter and
-append-only comparison remain unfinished. No live disposition has been applied.
+require their own exact-source CI. The native apply/comparison and coordinator source are described below; combined
+installed qualification remains open. No live disposition has been applied.
 
 ## Offline membership child — development source
 
@@ -188,12 +188,12 @@ a partial start requires inspection rather than automatic retry.
 The original financial checkpoint still records pre-cutoff bytes. Do not reuse it
 for financial configuration application or restore its old journals after the
 cutoff. A subsequent financial plan/checkpoint and explicit validated-cutoff
-binding remain required. The current financial backlog gate deliberately continues
-to refuse audited exclusions until that binding is implemented and qualified.
+binding remain required. Without the explicit verified-cutoff binding below, the financial backlog gate
+continues to refuse audited exclusions.
 No cutoff application, service resumption or financial activation has occurred on
 the production host through this new source.
 
-Eight focused coordinator tests cover protected files with mocked native/service
+Focused coordinator tests cover protected files with mocked native/service
 operations, including no approval, changed original images, comparison refusal,
 post-apply failure, absent/unreviewed completion, and original-only resumption.
 The mandatory Rust fixture separately exercises actual root/member UIDs, native
@@ -201,3 +201,50 @@ journal application and comparison. Launcher routing, exact tool inventory/expor
 and existing financial activation regressions also pass locally. These are source
 and disposable-fixture results, not an installed combined systemd acceptance or a
 production approval.
+
+## Exact cutoff binding for financial planning — development source
+
+A new financial plan may take `--initial-reward-cutover CUTOVER_DIRECTORY`,
+`--cutoff-preparation-sha256 SHA` and `--cutoff-applied-sha256 SHA`. All three are
+required together. The directory is the earlier transaction's private
+`reward-cutover` directory; it is data, never an executable tool source.
+
+Planning and every subsequent load verify the completed preparation/application,
+original checkpoint and scope, original-only resumption, and retained before/after
+images. They execute only the current fingerprint-pinned installed native verifier:
+verify the post-cutoff bundle, repeat the append-only comparison, then recompute a
+fresh reward report from that accepted bundle. Saved summaries alone are not
+authority. The newly sealed financial preparation pins the full reviewed binding.
+
+The native report summary now includes `decision_sha256`, SHA256 of the complete
+typed decision serialized in native struct field order, including every historical
+UUID/proof and the decision time. A fresh financial report must retain this exact
+hash, ID, epoch, boundary, source-backup hash and inventory count. Matching IDs or
+counts do not substitute for the complete decision. Native comparison also returns
+the decision hash; preparation refuses an older acknowledgement before any live
+audit is written. This changes private report/acknowledgement shape, not a journal
+schema or the stored decision. Rust/Python fixed-vector tests pin the serialization.
+
+With that verified binding, native `excluded_before_activation` barriers and
+historical pending feeding inputs remain retained without rewards. Only later
+confirmed feedings may remain as unplanned funded opportunities. The audited
+cutoff is their eligibility boundary; enabling a worker later does not move it.
+Unreceived financial events, unclassified eligible pending feedings, existing
+reservations/awaiting plans, held money, unknown stages, changed settings, missing
+proof or a different decision still refuse first activation. Without a binding,
+the previous strict no-funded-backlog path remains and any cutoff summary refuses.
+
+Protected-file tests cover full binding revalidation, fresh native-summary drift,
+plan/load propagation, future-only gate behavior and configuration application
+without starting workers. Root coordinator and financial tests remain synthetic
+with native/service calls mocked; the mandatory Rust UID/store fixtures qualify
+actual audit persistence separately. Exact-source Rust/Clippy, security and
+installed acceptance of this new hash/binding are still required. No production
+cutoff or financial activation is performed by these source changes.
+
+Local qualification for the current binding includes 11 coordinator tests,
+17 financial-activation tests and the complete 182-test protected root upgrade
+suite in an isolated network namespace. The grouped fixture explicitly redirects
+the shared maintenance-lock helper into its disposable root; no production
+maintenance lock is needed. Rust changes are formatted locally and await the
+required exact-source CI build/tests rather than compiling on the production VPS.

@@ -34,7 +34,7 @@ class CutoffBoundaries(unittest.TestCase):
 
     def test_native_acknowledgments_are_exact_and_grant_no_activation(self):
         value = {'operation': 'initial_reward_cutover_compare', 'id': str(uuid.uuid4()),
-                 'accepted': True, 'resume_authorized': False}
+                 'accepted': True, 'resume_authorized': False, 'decision_sha256': 'ab' * 32}
         with patch.object(K.C, 'protected'), patch.object(K.C, 'command', return_value=json.dumps(value)):
             self.assertEqual(K.native(Path('/private'), 'compare-initial-reward-cutover'), value)
         for change in [{'accepted': False}, {'resume_authorized': True}, {'extra': 1},
@@ -42,6 +42,21 @@ class CutoffBoundaries(unittest.TestCase):
             with self.subTest(change=change), patch.object(K.C, 'protected'), patch.object(K.C, 'command',
                     return_value=json.dumps(dict(value, **change))), self.assertRaises((ValueError, KeyError)):
                 K.native(Path('/private'), 'compare-initial-reward-cutover')
+
+    def test_decision_digest_matches_native_struct_order_and_pins_inventory(self):
+        value = {'id': '11111111-1111-4111-8111-111111111111',
+            'epoch': '22222222-2222-4222-8222-222222222222', 'through': 2,
+            'backup_manifest_sha256': 'ab' * 32, 'decided_at': 100,
+            'historical': [{'request_id': '33333333-3333-4333-8333-333333333333',
+                            'core_seq': 2, 'proof_hash': 'cd' * 32}]}
+        expected = '325896aa1c22239c825da04a80199489a115bc1f4b982a30e2ec529abbc1927d'
+        self.assertEqual(K.decision_hash(value), expected)
+        reordered = dict(reversed(list(value.items())))
+        reordered['historical'] = [dict(reversed(list(value['historical'][0].items())))]
+        self.assertEqual(K.decision_hash(reordered), expected)
+        self.assertNotEqual(K.decision_hash(dict(value, decided_at=101)), expected)
+        with self.assertRaises(ValueError):
+            K.decision_hash(dict(value, extra=True))
 
     def test_direct_script_execution_refuses_before_loading_support(self):
         import subprocess
@@ -71,6 +86,7 @@ class CutoffFiles(unittest.TestCase):
         self.directory.mkdir(mode=0o700)
         (self.directory / 'LOCK').touch(mode=0o600)
         self.replace(K.C, 'BASE', self.root)
+        self.replace(K.M, 'C', K.C)
         self.replace(K, 'verified_tool_identity', lambda: {'fixture': 'root-private-cutoff'})
         self.replace(K.C, 'command', self.command)
         self.carriers, self.starts, self.member_calls = set(), [], []
@@ -78,7 +94,8 @@ class CutoffFiles(unittest.TestCase):
         self.stopped = True
         self.refuse_compare = False
         self.refuse_post_compare = False
-        self.policy = {'owner': 'ab' * 32, 'epoch': str(uuid.uuid4()), 'components': {}}
+        self.legacy_compare = False
+        self.policy = {'owner': 'ab' * 32, 'epoch': str(uuid.uuid4()), 'provider': {'account_id': str(uuid.uuid4())}, 'components': {}}
         self.identities = {role: {'uid': 50001 + i, 'gid': 50001 + i}
                            for i, role in enumerate(K.U.P.ROLE_NAMES)}
         runtime = self.root / 'runtime'
@@ -97,6 +114,7 @@ class CutoffFiles(unittest.TestCase):
         self.binary.mkdir(mode=0o755)
         self.replace(K.Q, 'BIN', self.binary)
         self.write(self.binary / 'cyberherdd', b'synthetic worker; never executed', 0o755)
+        self.write(self.binary / 'cyberherd-statectl', b'synthetic verifier; never executed', 0o755)
         payload = self.directory / 'payload'
         payload.mkdir(mode=0o700)
         self.write(payload / 'cyberherd-statectl', b'synthetic verifier; never executed', 0o755)
@@ -104,7 +122,7 @@ class CutoffFiles(unittest.TestCase):
         self.write(self.config, ('state_dir = "' + str(runtime / 'membership') + '"\nenabled = true\n').encode())
         self.replace(K.H, 'configurations', lambda: {'membership': self.config})
         self.r = {'baseline': {'policy': self.policy, 'identities': self.identities,
-            'files': {str(self.binary / 'cyberherdd'): K.TX.fingerprint(self.binary / 'cyberherdd')}}}
+            'files': {str(self.binary / name): K.TX.fingerprint(self.binary / name) for name in ('cyberherdd', 'cyberherd-statectl')}}}
         self.m = {'review': str(self.directory)}
         self.replace(K.H, 'load', lambda directory, expected: ({'configurations': []}, self.m, self.r))
         self.replace(K.U, 'sources_match', self.sources_match)
@@ -126,7 +144,9 @@ class CutoffFiles(unittest.TestCase):
         self.checkpoint_sha = K.U.digest(self.directory / 'CHECKPOINT.json')
         self.report_sha = K.U.digest(report / 'REVIEW.json')
         self.replace(K.H, 'checked_checkpoint', self.checked_checkpoint)
-        self.common = (self.directory, 'aa' * 32, self.checkpoint_sha, self.report_sha)
+        K.C.write_json(self.directory / 'PREPARED.json', {'first_financial_transaction': True,
+            'baseline': self.r['baseline'], 'activation_authorized': False, 'services_changed': False, 'journals_opened': False})
+        self.common = (self.directory, K.U.digest(self.directory / 'PREPARED.json'), self.checkpoint_sha, self.report_sha)
         self.original = self.images()
 
     def cleanup(self):
@@ -202,7 +222,10 @@ class CutoffFiles(unittest.TestCase):
                 original = (bundle / (role + '.db')).read_bytes()
                 expected = original + b'|canonical-cutoff-audit' if role == 'membership' else original
                 self.assertEqual((candidate / (role + '.db')).read_bytes(), expected)
-            return json.dumps(self.ack('initial_reward_cutover_compare', bundle))
+            result = self.ack('initial_reward_cutover_compare', bundle)
+            if not self.legacy_compare:
+                result['decision_sha256'] = K.decision_hash(self.preview['decision'])
+            return json.dumps(result)
         if operation == 'snapshot':
             target = Path(args[args.index('--destination') + 1])
             self.snapshot(target)
@@ -213,7 +236,7 @@ class CutoffFiles(unittest.TestCase):
             target = Path(args[args.index('--destination') + 1])
             target.mkdir(mode=0o700)
             summary = {'decision_id': self.preview['id'], 'epoch': self.policy['epoch'], 'through': 2,
-                'backup_manifest_sha256': self.checked['backup_manifest_sha256'], 'historical_feedings': 1}
+                'backup_manifest_sha256': self.checked['backup_manifest_sha256'], 'historical_feedings': 1, 'decision_sha256': K.decision_hash(self.preview['decision'])}
             ident = str(uuid.uuid4())
             K.C.write_json(target / 'REVIEW.json', {'id': ident, 'bundle_id': self.ack('verify', bundle)['id'],
                 'bundle_manifest_sha256': K.U.digest(bundle / 'MANIFEST.json'), 'initial_reward_cutover': summary,
@@ -285,3 +308,29 @@ class CutoffFiles(unittest.TestCase):
         with self.assertRaises(ValueError):
             K.resume(*self.common, self.cutoff_sha, '00' * 32, True)
         self.assertEqual(self.starts, [])
+
+    def test_completed_review_recomputes_native_scope_and_refuses_drift_before_binding_finance(self):
+        self.prepare()
+        K.apply(*self.common, self.cutoff_sha, True)
+        applied_sha = K.U.digest(self.cutoff / 'APPLIED.json')
+        K.resume(*self.common, self.cutoff_sha, applied_sha, True)
+        binding = K.H.completed_cutover_review(self.cutoff, self.cutoff_sha, applied_sha, self.r['baseline'])
+        self.assertEqual(binding['summary']['decision_id'], self.preview['id'])
+        self.assertEqual(binding['preparation_sha256'], self.cutoff_sha)
+        for prepared, applied in [('00' * 32, applied_sha), (self.cutoff_sha, '00' * 32)]:
+            with self.assertRaises(ValueError):
+                K.H.completed_cutover_review(self.cutoff, prepared, applied, self.r['baseline'])
+        self.preview['id'] = str(uuid.uuid4())
+        # Saved proofs and report hashes are unchanged; the independently fresh
+        # native report must still agree with the approved decision.
+        with self.assertRaises(ValueError):
+            K.H.completed_cutover_review(self.cutoff, self.cutoff_sha, applied_sha, self.r['baseline'])
+
+    def test_older_native_acknowledgment_refuses_during_clone_preparation_before_live_audit(self):
+        self.legacy_compare = True
+        with self.assertRaises(ValueError):
+            K.prepare(*self.common, str(uuid.uuid4()))
+        self.assertEqual(self.images(), self.original)
+        self.assertEqual(len(self.member_calls), 1)
+        self.assertEqual(self.starts, [])
+        self.assertFalse((self.directory / 'reward-cutover/PREPARED.json').exists())

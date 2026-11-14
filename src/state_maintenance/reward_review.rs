@@ -215,7 +215,10 @@ async fn inspect_pools(
         pending_ingress: count(member, "SELECT COUNT(*) FROM ingress WHERE owner=? AND state='pending'", &policy.owner).await?,
         pending_feeding_ingress: count(member, "SELECT COUNT(*) FROM ingress WHERE owner=? AND state='pending' AND kind='feeding'", &policy.owner).await?,
         pending_reward_eligible_feeding_ingress: count(member, "SELECT COUNT(*) FROM ingress i WHERE i.owner=? AND i.state='pending' AND i.kind='feeding' AND NOT EXISTS(SELECT 1 FROM operator_commands x WHERE x.owner=i.owner AND x.command_id='initial-reward-cutover-feed:'||json_extract(i.payload_json,'$.request_id'))", &policy.owner).await?,
-        initial_reward_cutover: cutover.as_ref().map(super::reward_cutover::Summary::from),
+        initial_reward_cutover: cutover
+            .as_ref()
+            .map(super::reward_cutover::Summary::try_from)
+            .transpose()?,
         pending_feeds: manifest.report.pending_feeds,
         unfinalized_core_reservations: count(core, "SELECT COUNT(*) FROM reward_reservations r WHERE r.owner=? AND NOT EXISTS(SELECT 1 FROM reward_outcome_finals f WHERE f.reservation_id=r.id)", &policy.owner).await?,
         unresolved_provider_payments: manifest.report.unresolved_provider_payments,

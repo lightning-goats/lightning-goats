@@ -231,16 +231,19 @@ pub struct Summary {
     pub through: u64,
     pub backup_manifest_sha256: String,
     pub historical_feedings: usize,
+    pub decision_sha256: String,
 }
-impl From<&Decision> for Summary {
-    fn from(value: &Decision) -> Self {
-        Self {
+impl TryFrom<&Decision> for Summary {
+    type Error = anyhow::Error;
+    fn try_from(value: &Decision) -> Result<Self> {
+        Ok(Self {
             decision_id: value.id,
             epoch: value.epoch,
             through: value.through,
             backup_manifest_sha256: value.backup_manifest_sha256.clone(),
             historical_feedings: value.historical.len(),
-        }
+            decision_sha256: hash(value)?,
+        })
     }
 }
 
@@ -333,4 +336,39 @@ pub(super) async fn validate_recorded(
         }
     }
     Ok(Some(value))
+}
+
+#[cfg(test)]
+mod summary_tests {
+    use super::*;
+
+    #[test]
+    fn summary_pins_the_complete_native_decision_with_a_cross_language_digest() {
+        let value: Decision = serde_json::from_value(serde_json::json!({
+            "id":"11111111-1111-4111-8111-111111111111",
+            "epoch":"22222222-2222-4222-8222-222222222222",
+            "through":2,"backup_manifest_sha256":"ab".repeat(32),"decided_at":100,
+            "historical":[{"request_id":"33333333-3333-4333-8333-333333333333",
+            "core_seq":2,"proof_hash":"cd".repeat(32)}]
+        }))
+        .unwrap();
+        value.validate().unwrap();
+        let summary = Summary::try_from(&value).unwrap();
+        assert_eq!(
+            summary.decision_sha256,
+            "325896aa1c22239c825da04a80199489a115bc1f4b982a30e2ec529abbc1927d"
+        );
+        let mut changed = value.clone();
+        changed.decided_at += 1;
+        assert_ne!(
+            Summary::try_from(&changed).unwrap().decision_sha256,
+            summary.decision_sha256
+        );
+        changed = value;
+        changed.historical[0].proof_hash = "ef".repeat(32);
+        assert_ne!(
+            Summary::try_from(&changed).unwrap().decision_sha256,
+            summary.decision_sha256
+        );
+    }
 }

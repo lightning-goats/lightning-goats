@@ -577,6 +577,14 @@ async fn audited_exclusions_remain_valid_after_future_feeds_and_keep_pending_inp
     let cutover = record_cutover(&f).await;
     let report = f.review().await.unwrap();
     assert_eq!(report.stages[&Stage::ExcludedBeforeActivation], 1);
+    assert_eq!(
+        report
+            .initial_reward_cutover
+            .as_ref()
+            .unwrap()
+            .decision_sha256,
+        crate::cyberherd::ingress::hash(&cutover).unwrap()
+    );
     assert_eq!(report.pending_feeding_ingress, 1);
     assert_eq!(report.pending_reward_eligible_feeding_ingress, 0);
     assert_eq!(

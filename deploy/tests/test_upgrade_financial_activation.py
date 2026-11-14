@@ -83,6 +83,39 @@ class ActivationBoundaries(unittest.TestCase):
             with self.assertRaises(ValueError):
                 H.first_activation_backlog(dict(backlog(), stored_max_members=value), candidate_support.LIMITS)
 
+    def test_completed_cutoff_allows_only_future_unplanned_work_and_retains_historical_pending_count(self):
+        summary = {'decision_id': '22222222-2222-4222-8222-222222222222',
+            'epoch': '11111111-1111-4111-8111-111111111111', 'through': 10,
+            'backup_manifest_sha256': 'ab' * 32, 'historical_feedings': 2, 'decision_sha256': 'bc' * 32}
+        report = dict(backlog(), epoch=summary['epoch'], initial_reward_cutover=summary,
+            pending_feeding_ingress=1, pending_reward_eligible_feeding_ingress=0,
+            stages={'excluded_before_activation': 1, 'unplanned_funded_allocation': 2})
+        H.first_activation_backlog(report, candidate_support.LIMITS, summary)
+        self.assertEqual(report['pending_feeding_ingress'], 1)
+        with self.assertRaises(ValueError):
+            H.first_activation_backlog(report, candidate_support.LIMITS)
+        for change in [{'initial_reward_cutover': dict(summary, through=9)},
+                       {'initial_reward_cutover': dict(summary, decision_sha256='ef' * 32)}, {'epoch': 'wrong'},
+                       {'core_event_head': 9}, {'pending_reward_eligible_feeding_ingress': 1},
+                       {'pending_reward_eligible_feeding_ingress': None}, {'pending_feeding_ingress': False},
+                       {'unfinalized_core_reservations': 1}, {'unreceived_feeding_events': 1},
+                       {'stages': {'excluded_before_activation': 3}}, {'stages': {'reserved': 1}},
+                       {'stages': {'awaiting_reservation': 1}}, {'stages': {'unknown': 1}}]:
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                H.first_activation_backlog(dict(report, **change), candidate_support.LIMITS, summary)
+        for change in [{'through': True}, {'historical_feedings': -1}, {'historical_feedings': 16385},
+                       {'backup_manifest_sha256': 'wrong'}, {'decision_id': '0' * 32}, {'extra': True}]:
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                H.cutoff_summary(dict(summary, **change))
+
+    def test_partial_cutoff_planning_arguments_refuse_before_root_or_state_access(self):
+        with patch.object(H.C, 'root') as root:
+            for values in [(Path('/not-read'), None, None), (None, 'ab' * 32, 'cd' * 32),
+                           (Path('/not-read'), 'ab' * 32, None)]:
+                with self.assertRaises(ValueError):
+                    H.plan(*([Path('/not-read'), 'ab' * 32] * 2), Path('/not-created'), *values)
+            root.assert_not_called()
+
     def test_completed_schema_review_reverifies_retained_native_images_and_refuses_drift(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -376,3 +409,31 @@ class ActivationFiles(unittest.TestCase):
         self.assertFalse(self.unit.is_symlink())
         self.assertEqual(self.starts, [])
         self.preserved()
+
+    def test_financial_plan_pins_completed_cutoff_and_revalidates_it_before_future_allocation(self):
+        summary = {'decision_id': '22222222-2222-4222-8222-222222222222',
+            'epoch': self.policy['epoch'], 'through': 10, 'backup_manifest_sha256': 'ab' * 32,
+            'historical_feedings': 2, 'decision_sha256': 'bc' * 32}
+        source = self.base / 'older-financial' / 'reward-cutover'
+        binding = {'directory': str(source), 'preparation_sha256': 'cd' * 32,
+                   'applied_sha256': 'ef' * 32, 'summary': summary}
+        with patch.object(H, 'completed_cutover_review', return_value=copy.deepcopy(binding)) as verify:
+            target = self.base / 'bound-financial'
+            H.plan(self.candidate, self.candidate_sha, self.program_review, self.program_sha, target,
+                   source, binding['preparation_sha256'], binding['applied_sha256'])
+            pin = H.U.digest(target / 'PREPARED.json')
+            record = H.C.read_json(target / 'PREPARED.json')
+            self.assertEqual(record['initial_reward_cutover_review'], binding)
+            H.load(target, pin)
+            self.assertGreaterEqual(verify.call_count, 2)
+            verify.return_value = dict(binding, summary=dict(summary, through=9))
+            with self.assertRaises(ValueError):
+                H.load(target, pin)
+            verify.return_value = copy.deepcopy(binding)
+            self.financial, self.financial_sha = target, pin
+            self.review_value.update(epoch=summary['epoch'], initial_reward_cutover=summary,
+                pending_feeding_ingress=1, pending_reward_eligible_feeding_ingress=0,
+                stages={'excluded_before_activation': 1, 'unplanned_funded_allocation': 1})
+            self.checkpoint()
+            self.assertTrue(H.apply(*self.args(), True)['financial_images_unchanged'])
+            self.assertEqual(self.starts, [])

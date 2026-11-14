@@ -15,6 +15,7 @@ if 'verified_tool_identity' not in globals():
         raise ValueError('verified tool launcher required')
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -41,9 +42,11 @@ def native(directory, operation, **arguments):
                 'compare-initial-reward-cutover': 'initial_reward_cutover_compare',
                 'review-rewards': 'review_rewards'}[operation]
     fields = ({'cutover_applied', 'activation_authorized'} if operation.startswith('preview-')
-              else {'activation_authorized'} if operation == 'review-rewards' else {'resume_authorized'})
+              else {'activation_authorized'} if operation == 'review-rewards' else {'resume_authorized', 'decision_sha256'})
     if (set(result) != {'operation', 'id', 'accepted'} | fields or result.get('operation') != expected
-            or result.get('accepted') is not True or any(result.get(k) is not False for k in fields)
+            or result.get('accepted') is not True or any(result.get(k) is not False for k in fields - {'decision_sha256'})
+            or ('decision_sha256' in fields and (not isinstance(result.get('decision_sha256'), str)
+                or re.fullmatch('[0-9a-f]{64}', result['decision_sha256']) is None))
             or str(uuid.UUID(result['id'])) != result['id']):
         raise ValueError('native reward disposition operation refused')
     return result
@@ -55,6 +58,17 @@ def preview_value(path, expected):
             or U.digest(path) != expected):
         raise ValueError('independently pinned bounded cutoff preview required')
     return json.loads(path.read_text())
+
+
+def decision_hash(decision):
+    """Same struct field order/UTF-8 integer encoding as the native Decision DTO."""
+    fields = ('id', 'epoch', 'through', 'backup_manifest_sha256', 'decided_at', 'historical')
+    item_fields = ('request_id', 'core_seq', 'proof_hash')
+    if set(decision) != set(fields) or any(set(item) != set(item_fields) for item in decision['historical']):
+        raise ValueError('unknown native cutoff decision fields')
+    value = {key: decision[key] for key in fields}
+    value['historical'] = [{key: item[key] for key in item_fields} for item in decision['historical']]
+    return hashlib.sha256(json.dumps(value, ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()
 
 
 def receipt(value):
@@ -180,6 +194,8 @@ def prepare(directory, expected, checkpoint_sha, report_sha, decision_id):
             TX.sync_directory(carrier)
         compared = native(directory, 'compare-initial-reward-cutover', bundle=directory / 'backup',
                           preview=preview, preview_sha256=pin, candidate_copy=rehearsed)
+        if compared['decision_sha256'] != decision_hash(value['decision']):
+            raise ValueError('native rehearsal did not pin the entire reviewed decision')
         U.sources_match(m, r, checked['live_images'])
         M.note(root, 'PREPARED.json', {'version': 1, 'tool': verified_tool_identity(),
             'financial_review_sha256': expected, 'checkpoint_sha256': checkpoint_sha,
@@ -211,7 +227,7 @@ def prepared(directory, expected, checkpoint_sha, report_sha, cutoff_sha):
         raise ValueError('cutoff preparation receipt changed')
     compared = native(directory, 'compare-initial-reward-cutover', bundle=directory / 'backup',
                       preview=preview, preview_sha256=value['preview_sha256'], candidate_copy=root / 'rehearsed')
-    if compared != value['rehearsal']:
+    if compared != value['rehearsal'] or compared['decision_sha256'] != decision_hash(data['decision']):
         raise ValueError('retained native cutoff rehearsal changed')
     return root, value, data
 
@@ -243,7 +259,7 @@ def apply(directory, expected, checkpoint_sha, report_sha, cutoff_sha, approved)
         report = C.read_json(post / 'reward-review/REVIEW.json')
         summary = dict(decision_id=data['decision']['id'], epoch=data['decision']['epoch'],
             through=data['decision']['through'], backup_manifest_sha256=data['decision']['backup_manifest_sha256'],
-            historical_feedings=len(data['decision']['historical']))
+            historical_feedings=len(data['decision']['historical']), decision_sha256=decision_hash(data['decision']))
         manifest = C.read_json(post / 'backup/MANIFEST.json')
         if (report.get('initial_reward_cutover') != summary or report.get('id') != review_ack['id']
                 or report.get('bundle_id') != accepted['id'] or manifest.get('id') != accepted['id']

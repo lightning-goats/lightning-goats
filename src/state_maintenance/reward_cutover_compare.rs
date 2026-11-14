@@ -233,7 +233,7 @@ impl Operator {
         preview: &Path,
         preview_sha256: &str,
         candidate: &Path,
-    ) -> Result<Manifest> {
+    ) -> Result<(Manifest, super::reward_cutover::Summary)> {
         ensure!(
             !candidate.starts_with(bundle)
                 && !bundle.starts_with(candidate)
@@ -273,7 +273,10 @@ impl Operator {
                     == raw,
             "cutoff comparison source changed"
         );
-        Ok(manifest)
+        Ok((
+            manifest,
+            super::reward_cutover::Summary::try_from(&decision.decision)?,
+        ))
     }
 }
 

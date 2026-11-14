@@ -362,3 +362,29 @@ private ingress, WAF/no-store/logging boundaries and actual public desktop/mobil
 rendering without creating a valid contact or invoice. Mock/native/browser and
 [actual deployment evidence](private-contact-live-20261111.md) remain distinct
 from a real fee settlement and recipient-side DM observation.
+
+## Initial future-only CyberHerd rewards
+
+Follow [the cutoff contract](../architecture/cyberherd-initial-reward-cutover.md)
+without changing the paid ledger or granting historical payouts.
+
+- Derive the complete frozen/deferred/unreceived historical feeding inventory from
+  an accepted stopped-writer checkpoint. Retain original proofs and signed bytes.
+- Require the native comparison's full `decision_sha256` during clone rehearsal;
+  an older four-field acknowledgement must refuse before a live audit write.
+- Bind separately reviewed completed cutoff preparation/application receipts into
+  a new financial plan. Re-verify native before/after comparison and independently
+  recompute the accepted post-cutoff report; reject missing, changed or partial
+  scope, including a different full-decision hash with matching counts/IDs.
+- Verify exact binding on financial plan load/application/resumption. Historical
+  excluded/pending inputs remain visible; future funded barriers may qualify only
+  after the audited boundary. Existing reservations, holds, unreceived financial
+  events and unclassified eligible pending feedings still refuse first activation.
+- Keep the no-binding path strict. An unbound cutoff summary or positive old
+  funded work cannot authorize configuration or outgoing worker starts.
+
+Coverage is in native `reward_cutover`/`reward_review` tests and protected-file
+`test_upgrade_reward_cutover.py`/`test_upgrade_financial_activation.py` fixtures.
+The latter mock services/native calls; root UID/native-store qualification runs
+separately. Combined installed-systemd, provider/recipient, recovery adoption and
+explicit production activation remain separate acceptance requirements.

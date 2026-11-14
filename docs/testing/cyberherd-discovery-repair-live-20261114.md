@@ -84,8 +84,8 @@ The correction selects all eligible unacknowledged frozen relays and tries them
 in order within a bounded 45-second publication attempt. It retains the original
 signed event, validates the actual acknowledging relay/event, and saves only its
 real receipt. Membership safety is refreshed before each attempt; lifecycle
-ordering remains per destination and relay. A 120-second lease covers bounded
-signing and publication. No schema, monetary accounting, frozen destination list,
+ordering remains per destination and relay. A 180-second lease covers bounded
+signing (including the shared signer wait) and publication. No schema, monetary accounting, frozen destination list,
 event timestamp or financial policy changes. Regression coverage exercises both
 note/chat fallback and lifecycle reuse after a lost first-relay acknowledgment.
 

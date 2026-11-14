@@ -517,7 +517,7 @@ async fn paused_payment_publication_freezes_queue_context_and_weather_stays_nonp
     .unwrap();
     let text = signed["content"].as_str().unwrap();
     assert!(text.contains("Feeding is paused."));
-    assert!(text.contains("2 feedings are queued"));
+    assert!(text.contains("2 feedings lined up"));
     ledger
         .update_feeding_presentation(
             1000,

@@ -126,7 +126,7 @@ mod tests {
         let rendered = renderer.render(&event, 1000).unwrap();
         let public = rendered.nostr_content.as_ref().unwrap();
         assert!(public.contains("Feeding is paused."));
-        assert!(public.contains("2 feedings are queued"));
+        assert!(public.contains("2 feedings lined up"));
         let overlay = rendered.overlay_message.as_ref().unwrap();
         assert!(!overlay.contains("Feeding is paused."));
         assert!(!overlay.contains("Feeder ready!"));
@@ -276,7 +276,7 @@ mod tests {
             assert!(rendered.nostr_content.is_none());
             let message = rendered.overlay_message.unwrap();
             assert!(!message.contains("Feeding is paused."));
-            assert!(!message.contains("2 feedings are queued"));
+            assert!(!message.contains("2 feedings lined up"));
         }
     }
 }

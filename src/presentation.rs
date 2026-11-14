@@ -99,16 +99,21 @@ impl MessageRenderer {
             .as_object()
             .context("durable event payload must be a JSON object")?;
 
+        let pause_note = feeding_pause_note(object.get("feeding"))?;
+        let payment = matches!(
+            event.event_type.as_str(),
+            "payment_received" | "operator_credit_added"
+        );
         let mut rendered = match event.event_type.as_str() {
             "payment_received" | "operator_credit_added" => {
-                self.render_payment(event, object, threshold_sats)
+                self.render_payment(event, object, threshold_sats, pause_note.as_deref())
             }
             "feeder_confirmed" => self.render_feeder(event, object, threshold_sats),
             "interface_info" => self.render_interface_info(event),
             "weather_status" => self.render_weather(object),
             _ => Ok(RenderedPresentation::empty()),
         }?;
-        if let Some(note) = feeding_pause_note(object.get("feeding"))? {
+        if let Some(note) = pause_note.filter(|_| !payment) {
             if let Some(message) = rendered.nostr_content.as_mut() {
                 *message = format!("{note} {message}");
             }
@@ -121,6 +126,7 @@ impl MessageRenderer {
         event: &DurableEvent,
         payload: &serde_json::Map<String, Value>,
         threshold_sats: u64,
+        pause_note: Option<&str>,
     ) -> Result<RenderedPresentation> {
         let amount = required_u64(payload, "amount_sats")?;
         if amount < PAYMENT_MESSAGE_MIN_SATS {
@@ -151,14 +157,36 @@ impl MessageRenderer {
             "difference".to_owned(),
             remaining_sats(credit, threshold_sats).to_string(),
         );
-        let mut nostr_values = common_values(amount, &difference_message, goat.nostr_profile);
+        let nostr_difference = if let Some(note) = pause_note {
+            if credit < threshold_sats {
+                format!(
+                    "{note} Your sats are saved, with {} more needed to fund the next feeding.",
+                    threshold_sats - credit
+                )
+            } else if credit % threshold_sats != 0 {
+                format!(
+                    "{note} Another {} sats are saved toward the next feeding.",
+                    credit % threshold_sats
+                )
+            } else {
+                note.to_owned()
+            }
+        } else {
+            difference_message
+        };
+        let mut nostr_values = common_values(amount, &nostr_difference, goat.nostr_profile);
         nostr_values.insert(
             "difference".to_owned(),
             remaining_sats(credit, threshold_sats).to_string(),
         );
 
+        let mut nostr_content = safe_substitute(template, &nostr_values)?;
+        if let Some(note) = pause_note.filter(|_| !template.contains("{difference_message}")) {
+            // Custom templates may omit progress, but still need pause context.
+            nostr_content = format!("{note} {nostr_content}");
+        }
         Ok(RenderedPresentation {
-            nostr_content: Some(safe_substitute(template, &nostr_values)?),
+            nostr_content: Some(nostr_content),
             overlay_type: Some("sats_received".to_owned()),
             overlay_message: Some(safe_substitute(template, &overlay_values)?),
             overlay_goats: vec![overlay_goat(goat)],
@@ -474,22 +502,20 @@ fn feeding_pause_note(value: Option<&Value>) -> Result<Option<String>> {
     } else {
         "Feeding is paused."
     };
-    let queue = if queued == 0 && pending {
-        "No additional feedings are queued.".to_owned()
-    } else if queued == 0 {
-        "0 feedings are queued; credit is saved toward the next feeding.".to_owned()
+    let queue = if queued == 0 {
+        String::new()
     } else {
         format!(
-            "{queued} feeding{} queued to run after unpausing.",
-            if queued == 1 { " is" } else { "s are" }
+            " We have {queued} feeding{} lined up for when feeding resumes.",
+            if queued == 1 { "" } else { "s" }
         )
     };
     let pending_note = if pending {
-        " An earlier feeding is awaiting confirmation; the queue also waits for that result."
+        " We're waiting for confirmation of an earlier feeding before the queue can continue."
     } else {
         ""
     };
-    Ok(Some(format!("{prefix} {queue}{pending_note}")))
+    Ok(Some(format!("{prefix}{queue}{pending_note}")))
 }
 
 fn remaining_sats(credit: u64, threshold: u64) -> u64 {
@@ -509,11 +535,16 @@ fn difference_message(credit: u64, threshold: u64) -> String {
     }
     let feeds_due = credit / threshold;
     let remainder = credit % threshold;
+    let feeding = if feeds_due == 1 {
+        "feeding is"
+    } else {
+        "feedings are"
+    };
     if remainder == 0 {
-        format!("{feeds_due} feeding(s) are funded and queued.")
+        format!("{feeds_due} {feeding} funded and queued.")
     } else {
         format!(
-            "{feeds_due} feeding(s) are funded and queued, with {remainder} sats already toward the following feeding."
+            "{feeds_due} {feeding} funded and queued, with {remainder} sats already toward the following feeding."
         )
     }
 }
@@ -857,13 +888,66 @@ mod tests {
             if matches!(kind, "interface_info" | "weather_status") {
                 assert!(paused.nostr_content.is_none(), "{kind}");
             } else {
-                assert!(
-                    paused
-                        .nostr_content
-                        .unwrap()
-                        .starts_with("Feeding is paused.")
-                );
+                assert!(paused.nostr_content.unwrap().contains("Feeding is paused."));
             }
+        }
+    }
+
+    #[test]
+    fn paused_payments_thank_first_and_describe_the_frozen_queue_once() {
+        let renderer = MessageRenderer {
+            catalog: Arc::new(TemplateCatalog {
+                sats_received: vec!["Thank you for {new_amount} sats! {difference_message}".into()],
+                feeder_trigger: vec![],
+                interface_info: vec![],
+            }),
+        };
+        for (amount, credit, queued, pending, expected) in [
+            (
+                2100,
+                2221,
+                2,
+                false,
+                "Thank you for 2100 sats! Feeding is paused. We have 2 feedings lined up for when feeding resumes. Another 221 sats are saved toward the next feeding.",
+            ),
+            (
+                50,
+                121,
+                0,
+                false,
+                "Thank you for 50 sats! Feeding is paused. Your sats are saved, with 879 more needed to fund the next feeding.",
+            ),
+            (
+                1000,
+                1000,
+                1,
+                false,
+                "Thank you for 1000 sats! Feeding is paused. We have 1 feeding lined up for when feeding resumes.",
+            ),
+            (
+                10,
+                1000,
+                0,
+                true,
+                "Thank you for 10 sats! Feeding is paused. We're waiting for confirmation of an earlier feeding before the queue can continue.",
+            ),
+        ] {
+            let payload = json!({"amount_sats":amount,"feed_credit_sats":credit,
+                "address_user":"herd","feeding":{"paused":true,"reason":"override",
+                "queued_feedings":queued,"awaiting_confirmation":pending}});
+            let rendered = renderer
+                .render(&event(42, "payment_received", payload), 1000)
+                .unwrap();
+            assert_eq!(rendered.nostr_content.as_deref(), Some(expected));
+            assert_eq!(
+                rendered.overlay_message,
+                Some(format!(
+                    "Thank you for {amount} sats! {}",
+                    difference_message(credit, 1000)
+                ))
+            );
+            assert!(!expected.contains("feeding(s)"));
+            assert!(!expected.contains("0 feedings"));
         }
     }
 

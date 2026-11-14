@@ -8,8 +8,9 @@ prove their recorded observations, not that today's service configuration is the
 same. Current production review and qualification are recorded in the
 [November 13 checkpoint](cyberherd-inclusive-upgrade-checkpoint-20261113.md).
 
-The current staged review is an additive payout-schema upgrade with unchanged
-configuration and disabled outgoing roles. It cannot complete the full port.
+The [approved additive payout-schema upgrade](cyberherd-inclusive-upgrade-live-20261114.md)
+is installed with unchanged configuration and disabled outgoing roles. It does
+not complete the full port.
 
 | Requirement | Source and recorded evidence | Remaining acceptance |
 | --- | --- | --- |
@@ -19,7 +20,7 @@ configuration and disabled outgoing roles. It cannot complete the full port.
 | 4. Targets and profiles | `src/cyberherd/targets.rs`, `tests/cyberherd_targets.rs`; public leaderboard checkpoint records authenticated target links. | Verify current-day note, stream versions/aliases, linked goal and stale/ended precedence on the selected runtime; retain signature/host-authority rules. |
 | 5. Ingestion and pause recovery | `src/cyberherd/worker.rs`, `ingress_tests.rs`; live social checkpoint records bounded recent/historical recovery and no duplicate awards. | Verify current installed override/defer/refresh/replay/discard behavior, including discovery unavailable and active ordinary zap eligibility. |
 | 6. Incoming NIP-57 | `tests/zap_receive.rs`; [receipt checkpoint](cyberherd-zap-receipt-checkpoint-20261110.md). | Complete externally observed zap settlement, exact description-hash binding, durable receipt and exactly-once membership consumption. Ordinary Lightning receipt is insufficient proof. |
-| 7. Confirmed-feeding rewards | `src/cyberherd/rewards_tests.rs`, `reward_store.rs`; [funding](cyberherd-payout-funding-checkpoint-20261109.md) and [inclusive fees](cyberherd-inclusive-fees-checkpoint-20261111.md). | Adopt the upgraded journal, reconcile retained backlog and qualify real funding/recipient outcomes. Only confirmed physical UUIDs earn rewards; virtual credits and threshold messages do not. |
+| 7. Confirmed-feeding rewards | `src/cyberherd/rewards_tests.rs`, `reward_store.rs`; [funding](cyberherd-payout-funding-checkpoint-20261109.md) and [inclusive fees](cyberherd-inclusive-fees-checkpoint-20261111.md). | The journal upgrade is installed; reconcile retained backlog and qualify real funding/recipient outcomes. Only confirmed physical UUIDs earn rewards; virtual credits and threshold messages do not. |
 | 8. Isolated outgoing payments | `src/payout/worker_tests.rs`, `provider_workflow_tests.rs`, `cost_recovery_tests.rs`; [recipient qualification](cyberherd-recipient-checkpoint-20261110.md). | Real provider/recipient acceptance, inclusive fee deduction, retained original-ID reconciliation and external restore adoption remain open. No real spending is authorized by synthetic tests or selected financial settings. |
 | 9. Messages and delivery | `src/cyberherd/delivery_tests.rs`, `result_tests.rs`; [member delivery](cyberherd-member-delivery-checkpoint-20261110.md). | Verify installed public membership/treat output, original frozen increments/footer, unchanged retries and template deletion/custom-edit behavior. No treat notice precedes authoritative payout settlement. |
 | 10. Conversation destinations | `src/cyberherd/delivery.rs`, `feeding_delivery.rs`; delivery and [feeding announcement](cyberherd-feeding-announcements-checkpoint-20261110.md) checkpoints. | Observe correct member-note and active-stream branches, retained original anchors and one overlay copy after explicit publishing activation. Preserve one feeding announcement per payment. |

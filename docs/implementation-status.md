@@ -1,6 +1,6 @@
 # Lightning Goats implementation status
 
-Current CyberHerd checkpoint: **2026-11-13**. The full
+Current CyberHerd checkpoint: **2026-11-14**. The full
 [twelve-part implementation plan](planning/cyberherd-implementation-plan.md)
 remains incomplete. It supersedes older CyberHerd deferrals; it does not resume
 Monero or authorize financial/physical activation.
@@ -13,8 +13,10 @@ records all ten passing workflows for the selected artifacts, native/root and
 installed upgrade comparisons, and operator-approved actual-host staging.
 Staging checked all three retained worker configurations under their original
 UIDs and sealed six programs without opening journals or changing services.
-The additive payout-schema upgrade still awaits separate maintenance approval;
-outgoing roles and financial limits remain disabled. Provider/recipient execution,
+The separately approved [live additive payout-schema upgrade](testing/cyberherd-inclusive-upgrade-live-20261114.md)
+now passes fresh native backup, clone/live comparison, exact installed hashes and
+core/member resumption. Configuration is unchanged; outgoing roles remain masked
+and financial limits remain disabled. Provider/recipient execution,
 external recovery adoption and public CyberHerd rollout are not complete.
 The [full acceptance inventory](testing/cyberherd-acceptance-matrix.md) tracks all
 twelve requirements; a passing migration is not full-port acceptance.

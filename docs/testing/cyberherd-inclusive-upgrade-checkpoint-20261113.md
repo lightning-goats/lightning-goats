@@ -179,3 +179,9 @@ resumption. Payouts remain false, gateway POSTs zero, and live-host/provider/rec
 qualification false. No production installation or maintenance is implied by this
 new CI result. The previously approved staging and sealed `ae10df6` review remain
 unchanged, awaiting separate maintenance approval.
+
+
+The operator subsequently approved maintenance. The [completed live upgrade](cyberherd-inclusive-upgrade-live-20261114.md) records verified native backup,
+clone/live comparisons, seven-to-ten migration history, exact installed program
+hashes and successful original core/member resumption with outgoing roles masked.
+Earlier pending-approval statements above describe their historical checkpoints.

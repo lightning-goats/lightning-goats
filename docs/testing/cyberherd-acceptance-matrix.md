@@ -59,6 +59,8 @@ bindings and unique completed membership inputs. Two produced one join/displacem
 event each; six were discarded. These November 11–13 settlements predate today's
 cycle and the latest messaging release. Latest-runtime zap/public-copy acceptance,
 independent invoice/provider revalidation and actual payouts remain unproven.
+Subsequent read-only relay queries independently retrieved matching historical
+receipts from Artx, nos.lol and Primal; complete eight-receipt coverage is not claimed.
 
 | Requirement | Source and recorded evidence | Remaining acceptance |
 | --- | --- | --- |

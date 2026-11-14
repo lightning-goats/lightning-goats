@@ -58,7 +58,7 @@ async fn member_cutover_child_fixture() {
 }
 
 #[tokio::test]
-async fn root_cutover_round_trip_preserves_four_journals_and_refuses_changed_writer_guard() {
+async fn root_cutover_round_trip_preserves_four_journals_and_fences_live_checkpoints() {
     if crate::private_ipc::uid().unwrap() != 0 {
         return;
     }
@@ -194,11 +194,13 @@ herd = "{}"
         .await
         .unwrap();
     ready.store(false, std::sync::atomic::Ordering::SeqCst);
-    assert!(
-        operator
-            .compare_initial_reward_cutover(&bundle, &preview_dir, &pin, &candidate)
-            .await
-            .is_err()
-    );
+    let refused = root.path().join("refused-live-checkpoint");
+    assert!(operator.snapshot(&refused).await.is_err());
+    assert!(!refused.exists());
+    // Reading already accepted isolated images does not require live units stopped.
+    operator
+        .compare_initial_reward_cutover(&bundle, &preview_dir, &pin, &candidate)
+        .await
+        .unwrap();
     println!("ROOT_INITIAL_REWARD_CUTOVER_FIXTURE_VERIFIED");
 }

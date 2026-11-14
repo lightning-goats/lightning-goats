@@ -148,6 +148,6 @@ preview, root-protected group-readable preview, member-owned existing journal,
 separate non-admin child process, exact retry and wrong-pin/attestation refusals,
 then the native append-only comparison. The child executable is disk-backed;
 network remains isolated by the harness. Root execution is refused and a changed
-mock writer guard refuses verification. This tests filesystem/UID and native
+mock writer guard refuses a new live checkpoint; isolated accepted image comparison remains read-only. This tests filesystem/UID and native
 comparison authority, not real systemd masking or production deployment. It must
 produce its explicit positive marker in exact-source CI before being qualified.

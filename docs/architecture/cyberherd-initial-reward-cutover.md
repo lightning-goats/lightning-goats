@@ -93,3 +93,27 @@ retaining `/run` database and attestation paths. Shipped sandbox policies are un
 The apply adapter, append-only post-cutover comparison, audited-exclusion native
 classification and financial-activation binding remain unfinished. Historical
 production opportunities are still retained and unapplied.
+
+## Native verification of recorded dispositions — development source
+
+Ordinary four-journal verification now validates any retained cutoff audit against
+the original core history through its recorded boundary. Later core events do not
+move that boundary. Orphan/extra/missing audit rows, changed original proofs,
+conflicting core reservations and nonterminal or malformed plans are refused.
+Per-feeding input proofs remain checked even when the input has not reached a
+membership barrier. Normal cross-journal checks still bind all payout/signing
+records to their original grant and reservation; exclusions cannot hide them.
+
+The reward reviewer validates the same audit before classifying a barrier as
+`excluded_before_activation`. It retains the original total pending-feeding count
+and separately reports `pending_reward_eligible_feeding_ingress`. A scoped cutoff
+summary records the decision ID, epoch, boundary and source-backup hash. This is
+not activation permission. The current financial adapter continues refusing the
+new excluded stage until the dedicated cutoff/apply/activation binding is qualified.
+
+New native fixtures cover excluded frozen and deferred inputs, future feedings
+remaining unplanned/eligible, unchanged original barriers, and tampered/missing
+audit or conflicting plans. The earlier preview source passed full Rust and
+installed Deployment qualification; these additional verifier/report changes still
+require their own exact-source CI. The qualified stopped-writer apply adapter and
+append-only comparison remain unfinished. No live disposition has been applied.

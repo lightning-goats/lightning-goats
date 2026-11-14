@@ -108,6 +108,15 @@ impl Fixture {
     }
 
     async fn feeding(&mut self, percent: u8, funded: bool) -> FeedingBarrier {
+        self.feeding_state(percent, funded, true).await
+    }
+
+    async fn feeding_state(
+        &mut self,
+        percent: u8,
+        funded: bool,
+        completed: bool,
+    ) -> FeedingBarrier {
         if funded {
             self.core
                 .record_payment(&SettledPayment {
@@ -170,10 +179,12 @@ impl Fixture {
         let raw = serde_json::to_string(&feeding).unwrap();
         // Explicit synthetic immutable-record fixtures, not runtime authority.
         let mut tx = self.member_db.begin().await.unwrap();
-        let seq = sqlx::query("INSERT INTO ingress(owner,source_key,kind,payload_json,state) VALUES(?,?,'feeding',?,'done')")
-            .bind(&self.policy.owner).bind(format!("feeding:{id}")).bind(&raw).execute(&mut *tx).await.unwrap().last_insert_rowid();
-        sqlx::query("INSERT INTO feeding_barriers(owner,request_id,ingress_seq,feeding_json,snapshot_json,conversations_json) VALUES(?,?,?,?,?,'{}')")
-            .bind(&self.policy.owner).bind(id.to_string()).bind(seq).bind(&raw).bind(serde_json::to_string(&snapshot).unwrap()).execute(&mut *tx).await.unwrap();
+        let seq = sqlx::query("INSERT INTO ingress(owner,source_key,kind,payload_json,state) VALUES(?,?,'feeding',?,?)")
+            .bind(&self.policy.owner).bind(format!("feeding:{id}")).bind(&raw).bind(if completed { "done" } else { "pending" }).execute(&mut *tx).await.unwrap().last_insert_rowid();
+        if completed {
+            sqlx::query("INSERT INTO feeding_barriers(owner,request_id,ingress_seq,feeding_json,snapshot_json,conversations_json) VALUES(?,?,?,?,?,'{}')")
+                .bind(&self.policy.owner).bind(id.to_string()).bind(seq).bind(&raw).bind(serde_json::to_string(&snapshot).unwrap()).execute(&mut *tx).await.unwrap();
+        }
         sqlx::query("UPDATE core_streams SET received_through=? WHERE owner=?")
             .bind(i64::try_from(self.after).unwrap())
             .bind(&self.policy.owner)
@@ -528,4 +539,124 @@ async fn contradictory_funding_oversized_snapshots_and_plan_hashes_refuse_instea
         }
         assert!(f.review().await.is_err(), "{fault}");
     }
+}
+
+async fn record_cutover(f: &Fixture) -> crate::cyberherd::reward_cutover::Decision {
+    let core = SqlitePool::connect(&format!(
+        "sqlite://{}",
+        f.root.path().join("core.db").display()
+    ))
+    .await
+    .unwrap();
+    let cursor = f.member.core_cursor(&f.policy.owner).await.unwrap();
+    let historical =
+        crate::state_maintenance::cutover_fixture_history(&core, &cursor.binding, f.after)
+            .await
+            .unwrap();
+    let value = crate::cyberherd::reward_cutover::Decision {
+        id: Uuid::new_v4(),
+        epoch: f.policy.epoch,
+        through: f.after,
+        backup_manifest_sha256: "ab".repeat(32),
+        decided_at: 100,
+        historical,
+    };
+    f.member
+        .record_initial_reward_cutover(&f.policy.owner, &value)
+        .await
+        .unwrap();
+    core.close().await;
+    value
+}
+
+#[tokio::test]
+async fn audited_exclusions_remain_valid_after_future_feeds_and_keep_pending_inputs_visible() {
+    let mut f = Fixture::new().await;
+    let old = f.feeding(10, true).await;
+    let pending = f.feeding_state(10, true, false).await;
+    let cutover = record_cutover(&f).await;
+    let report = f.review().await.unwrap();
+    assert_eq!(report.stages[&Stage::ExcludedBeforeActivation], 1);
+    assert_eq!(report.pending_feeding_ingress, 1);
+    assert_eq!(report.pending_reward_eligible_feeding_ingress, 0);
+    assert_eq!(
+        report.initial_reward_cutover.as_ref().unwrap().decision_id,
+        cutover.id
+    );
+    assert_eq!(
+        report
+            .initial_reward_cutover
+            .as_ref()
+            .unwrap()
+            .historical_feedings,
+        2
+    );
+    assert_eq!(
+        f.member
+            .feeding_barrier(&f.policy.owner, old.feeding.request_id)
+            .await
+            .unwrap()
+            .unwrap(),
+        old
+    );
+    assert!(
+        f.member
+            .feeding_barrier(&f.policy.owner, pending.feeding.request_id)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    f.feeding(10, true).await;
+    let later = f.review().await.unwrap();
+    assert_eq!(later.stages[&Stage::ExcludedBeforeActivation], 1);
+    assert_eq!(later.stages[&Stage::UnplannedFundedAllocation], 1);
+    assert_eq!(
+        later.initial_reward_cutover.as_ref().unwrap().through,
+        cutover.through
+    );
+    assert!(!later.activation_authorized);
+    assert!(later.external_reconciliation_required);
+}
+
+#[tokio::test]
+async fn native_review_rejects_missing_or_forged_cutover_audit_and_later_conflicting_plans() {
+    let mut f = Fixture::new().await;
+    let old = f.feeding(10, true).await;
+    let cutover = record_cutover(&f).await;
+    let key = format!("initial-reward-cutover-feed:{}", old.feeding.request_id);
+    let audit = sqlx::query(
+        "SELECT input_json,result_json FROM operator_commands WHERE owner=? AND command_id=?",
+    )
+    .bind(&f.policy.owner)
+    .bind(&key)
+    .fetch_one(&f.member_db)
+    .await
+    .unwrap();
+    sqlx::query("DELETE FROM operator_commands WHERE owner=? AND command_id=?")
+        .bind(&f.policy.owner)
+        .bind(&key)
+        .execute(&f.member_db)
+        .await
+        .unwrap();
+    assert!(f.review().await.is_err());
+    sqlx::query(
+        "INSERT INTO operator_commands(owner,command_id,input_json,result_json) VALUES(?,?,?,?)",
+    )
+    .bind(&f.policy.owner)
+    .bind(&key)
+    .bind(audit.get::<String, _>("input_json"))
+    .bind(audit.get::<String, _>("result_json"))
+    .execute(&f.member_db)
+    .await
+    .unwrap();
+    let mut forged = cutover.clone();
+    forged.historical[0].proof_hash = "cd".repeat(32);
+    sqlx::query("UPDATE operator_commands SET input_json=? WHERE owner=? AND command_id='initial-reward-cutover'")
+        .bind(serde_json::to_string(&forged).unwrap()).bind(&f.policy.owner).execute(&f.member_db).await.unwrap();
+    assert!(f.review().await.is_err());
+    sqlx::query("UPDATE operator_commands SET input_json=? WHERE owner=? AND command_id='initial-reward-cutover'")
+        .bind(serde_json::to_string(&cutover).unwrap()).bind(&f.policy.owner).execute(&f.member_db).await.unwrap();
+    assert!(f.review().await.is_ok());
+    f.plan(&old, Stage::AwaitingReservation, false).await;
+    assert!(f.review().await.is_err());
 }

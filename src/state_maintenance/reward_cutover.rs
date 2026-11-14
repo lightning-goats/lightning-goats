@@ -33,6 +33,15 @@ pub(crate) async fn derive_history(
     binding: &CoreBinding,
     through: u64,
 ) -> Result<Vec<HistoricalFeeding>> {
+    derive_history_interval(core, binding, through, true).await
+}
+
+async fn derive_history_interval(
+    core: &SqlitePool,
+    binding: &CoreBinding,
+    through: u64,
+    current_head: bool,
+) -> Result<Vec<HistoricalFeeding>> {
     binding.validate()?;
     ensure!(
         through >= binding.start_after && through <= i64::MAX as u64,
@@ -51,11 +60,12 @@ pub(crate) async fn derive_history(
         .fetch_one(&mut *tx)
         .await?;
     ensure!(
-        u64::try_from(head)? == through,
+        u64::try_from(head)? >= through && (!current_head || u64::try_from(head)? == through),
         "cutover must cover the accepted core head"
     );
-    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM event_log WHERE seq>?")
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM event_log WHERE seq>? AND seq<=?")
         .bind(i64::try_from(binding.start_after)?)
+        .bind(i64::try_from(through)?)
         .fetch_one(&mut *tx)
         .await?;
     ensure!(
@@ -65,8 +75,8 @@ pub(crate) async fn derive_history(
     let mut after = binding.start_after;
     let mut result = Vec::new();
     loop {
-        let page = sqlx::query("SELECT seq,created_at,CASE WHEN length(CAST(payload_json AS BLOB))<=32768 THEN payload_json END AS payload_json FROM event_log WHERE seq>? AND event_type='feeder_confirmed' ORDER BY seq LIMIT 128")
-            .bind(i64::try_from(after)?).fetch_all(&mut *tx).await?;
+        let page = sqlx::query("SELECT seq,created_at,CASE WHEN length(CAST(payload_json AS BLOB))<=32768 THEN payload_json END AS payload_json FROM event_log WHERE seq>? AND seq<=? AND event_type='feeder_confirmed' ORDER BY seq LIMIT 128")
+            .bind(i64::try_from(after)?).bind(i64::try_from(through)?).fetch_all(&mut *tx).await?;
         if page.is_empty() {
             break;
         }
@@ -211,4 +221,116 @@ impl Operator {
         files::sync_directory(destination)?;
         Ok(preview)
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct Summary {
+    pub decision_id: Uuid,
+    pub epoch: Uuid,
+    pub through: u64,
+    pub backup_manifest_sha256: String,
+    pub historical_feedings: usize,
+}
+impl From<&Decision> for Summary {
+    fn from(value: &Decision) -> Self {
+        Self {
+            decision_id: value.id,
+            epoch: value.epoch,
+            through: value.through,
+            backup_manifest_sha256: value.backup_manifest_sha256.clone(),
+            historical_feedings: value.historical.len(),
+        }
+    }
+}
+
+/// Called after ordinary four-journal links have been checked. A signer/quote
+/// cannot escape an excluded UUID check: those records require their original
+/// payout grant and core reservation in the ordinary cross-journal verifier.
+pub(super) async fn validate_recorded(
+    core: &SqlitePool,
+    member: &SqlitePool,
+    policy: &super::Policy,
+) -> Result<Option<Decision>> {
+    use crate::cyberherd::reward_cutover::{COMMAND, PREFIX};
+    let row = sqlx::query("SELECT CASE WHEN length(CAST(input_json AS BLOB))<=4194304 THEN input_json END AS input_json,result_json FROM operator_commands WHERE owner=? AND command_id=?")
+        .bind(&policy.owner).bind(COMMAND).fetch_optional(member).await?;
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM operator_commands WHERE owner=? AND command_id LIKE 'initial-reward-cutover%'")
+        .bind(&policy.owner).fetch_one(member).await?;
+    let Some(row) = row else {
+        ensure!(count == 0, "orphan initial reward cutoff audit");
+        return Ok(None);
+    };
+    let raw: String = row.try_get("input_json")?;
+    let value: Decision = serde_json::from_str(&raw)
+        .map_err(|_| anyhow::anyhow!("invalid private cutoff decision"))?;
+    value.validate()?;
+    ensure!(
+        value.epoch == policy.epoch
+            && count == i64::try_from(value.historical.len())? + 1
+            && row.try_get::<String, _>("result_json")? == serde_json::to_string(&value.receipt())?,
+        "cutoff receipt/count/scope changed"
+    );
+    let binding: String = sqlx::query_scalar("SELECT binding_json FROM core_streams WHERE owner=?")
+        .bind(&policy.owner)
+        .fetch_one(member)
+        .await?;
+    let binding: CoreBinding = serde_json::from_str(&binding)?;
+    ensure!(
+        binding.epoch == policy.epoch && binding.core_uid == policy.components[&Role::Core].uid,
+        "cutoff binding differs from protected scope"
+    );
+    ensure!(
+        derive_history_interval(core, &binding, value.through, false).await? == value.historical,
+        "cutoff inventory differs from retained core confirmations"
+    );
+    for item in &value.historical {
+        let audit = sqlx::query(
+            "SELECT input_json,result_json FROM operator_commands WHERE owner=? AND command_id=?",
+        )
+        .bind(&policy.owner)
+        .bind(format!("{PREFIX}{}", item.request_id))
+        .fetch_one(member)
+        .await?;
+        ensure!(
+            audit.try_get::<String, _>("input_json")? == serde_json::to_string(item)?
+                && audit.try_get::<String, _>("result_json")?
+                    == serde_json::to_string(&value.receipt())?,
+            "historical disposition audit differs"
+        );
+        let reserved: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM reward_reservations WHERE request_id=?)",
+        )
+        .bind(item.request_id.to_string())
+        .fetch_one(core)
+        .await?;
+        ensure!(!reserved, "excluded feeding retains core reward authority");
+        if let Some(plan) = sqlx::query("SELECT state,reservation_json,plan_hash,plan_json FROM reward_plans WHERE owner=? AND request_id=?")
+            .bind(&policy.owner).bind(item.request_id.to_string()).fetch_optional(member).await? {
+            let raw:String=plan.try_get("plan_json")?;
+            ensure!(raw.len()<=4194304,"excluded plan exceeds bound");
+            let frozen:crate::cyberherd::rewards::Plan=serde_json::from_str(&raw)?;
+            ensure!(plan.try_get::<String,_>("state")?=="no_payout"
+                && plan.try_get::<Option<String>,_>("reservation_json")?.is_none()
+                && frozen.owner==policy.owner && frozen.epoch==policy.epoch && frozen.request_id==item.request_id
+                && frozen.hash()?==plan.try_get::<String,_>("plan_hash")? && frozen.reserved_sats==0,
+                "excluded feeding retains nonterminal or conflicting plan");
+        }
+        if let Some(raw) = sqlx::query_scalar::<_, String>(
+            "SELECT payload_json FROM ingress WHERE owner=? AND source_key=? AND kind='feeding'",
+        )
+        .bind(&policy.owner)
+        .bind(format!("feeding:{}", item.request_id))
+        .fetch_optional(member)
+        .await?
+        {
+            ensure!(raw.len() <= 4194304, "excluded input exceeds bound");
+            let feeding: crate::core_bridge::Feeding = serde_json::from_str(&raw)?;
+            ensure!(
+                feeding.request_id == item.request_id && hash(&feeding)? == item.proof_hash,
+                "excluded intake contradicts original core proof"
+            );
+        }
+    }
+    Ok(Some(value))
 }

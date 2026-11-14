@@ -24,6 +24,7 @@ const JSON_BOUND: usize = 4 * 1024 * 1024;
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
 pub enum Stage {
+    ExcludedBeforeActivation,
     UnplannedZeroAllocation,
     UnplannedNoStrikeFunding,
     UnplannedFundedAllocation,
@@ -65,6 +66,9 @@ pub struct RewardReview {
     pub unreceived_feeding_events: u64,
     pub pending_ingress: u64,
     pub pending_feeding_ingress: u64,
+    pub pending_reward_eligible_feeding_ingress: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initial_reward_cutover: Option<super::reward_cutover::Summary>,
     pub pending_feeds: u64,
     pub stages: BTreeMap<Stage, u64>,
     pub unfinalized_core_reservations: u64,
@@ -198,6 +202,7 @@ async fn inspect_pools(
         )
         .map_err(anyhow::Error::from)
     };
+    let cutover = super::reward_cutover::validate_recorded(core, member, policy).await?;
     let mut report = RewardReview {
         version: 1, id: Uuid::new_v4(), bundle_id: manifest.id, bundle_created_at: manifest.created_at,
         bundle_manifest_sha256: digest, reviewed_at: crate::cyberherd::calendar::now()?,
@@ -209,6 +214,8 @@ async fn inspect_pools(
         unreceived_feeding_events: unreceived("feeder_confirmed").await?,
         pending_ingress: count(member, "SELECT COUNT(*) FROM ingress WHERE owner=? AND state='pending'", &policy.owner).await?,
         pending_feeding_ingress: count(member, "SELECT COUNT(*) FROM ingress WHERE owner=? AND state='pending' AND kind='feeding'", &policy.owner).await?,
+        pending_reward_eligible_feeding_ingress: count(member, "SELECT COUNT(*) FROM ingress i WHERE i.owner=? AND i.state='pending' AND i.kind='feeding' AND NOT EXISTS(SELECT 1 FROM operator_commands x WHERE x.owner=i.owner AND x.command_id='initial-reward-cutover-feed:'||json_extract(i.payload_json,'$.request_id'))", &policy.owner).await?,
+        initial_reward_cutover: cutover.as_ref().map(super::reward_cutover::Summary::from),
         pending_feeds: manifest.report.pending_feeds,
         unfinalized_core_reservations: count(core, "SELECT COUNT(*) FROM reward_reservations r WHERE r.owner=? AND NOT EXISTS(SELECT 1 FROM reward_outcome_finals f WHERE f.reservation_id=r.id)", &policy.owner).await?,
         unresolved_provider_payments: manifest.report.unresolved_provider_payments,
@@ -250,7 +257,19 @@ WHERE b.owner=? ORDER BY b.ingress_seq"#).bind(&policy.owner).fetch(member);
             "feeding barrier lost its completed ordered input"
         );
         previous = barrier.ingress_seq;
-        let example = classify(core, policy, &id, &barrier, &row).await?;
+        let mut example = classify(core, policy, &id, &barrier, &row).await?;
+        if cutover.as_ref().is_some_and(|c| {
+            c.historical
+                .iter()
+                .any(|item| item.request_id == example.request_id)
+        }) {
+            ensure!(
+                example.reserved_sats == 0
+                    && !matches!(example.stage, Stage::Reserved | Stage::AwaitingReservation),
+                "excluded barrier retains reward authority"
+            );
+            example.stage = Stage::ExcludedBeforeActivation;
+        }
         *report.stages.entry(example.stage).or_default() += 1;
         if example.stage != Stage::NoPayout {
             if report.examples.len() < EXAMPLES {

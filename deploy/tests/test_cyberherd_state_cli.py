@@ -47,6 +47,7 @@ class StateCLI(unittest.TestCase):
                      ("snapshot", "--destination", destination, "--writers-stopped"),
                      ("verify", "--bundle", destination),
                      ("review-rewards", "--bundle", destination, "--destination", destination),
+                     ("inventory-recovery", "--bundle", destination, "--destination", destination),
                      ("snapshot-before-contact", "--destination", destination),
                      ("snapshot-before-contact", "--destination", destination, "--writers-stopped"),
                      ("verify-contact-upgrade-source", "--bundle", destination),

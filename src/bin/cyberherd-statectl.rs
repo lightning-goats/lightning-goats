@@ -36,6 +36,14 @@ enum Command {
         #[arg(long)]
         destination: PathBuf,
     },
+    /// Export all known reconciliation identities from an accepted backup.
+    /// Never contacts a provider, clears markers or authorizes resumption.
+    InventoryRecovery {
+        #[arg(long)]
+        bundle: PathBuf,
+        #[arg(long)]
+        destination: PathBuf,
+    },
     /// Derive a private initial reward cutoff preview from an accepted backup.
     /// Never applies a cutoff, opens live journals or authorizes payouts.
     PreviewInitialRewardCutover {
@@ -153,6 +161,17 @@ async fn main() -> Result<()> {
                 "{}",
                 serde_json::json!({"operation":"review_rewards","id":review.id,
                 "accepted":true,"activation_authorized":false})
+            );
+            return Ok(());
+        }
+        Command::InventoryRecovery {
+            bundle,
+            destination,
+        } => {
+            let inventory = operator.inventory_recovery(&bundle, &destination).await?;
+            println!(
+                "{}",
+                serde_json::json!({"operation":"inventory_recovery","id":inventory.id,"accepted":true,"adoption_authorized":false,"resume_authorized":false})
             );
             return Ok(());
         }

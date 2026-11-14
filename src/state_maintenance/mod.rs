@@ -14,11 +14,13 @@ mod feeder_cap_upgrade;
 mod files;
 mod inclusive_fee_upgrade;
 pub mod legacy;
+mod recovery_inventory;
 mod reward_cutover;
 #[cfg(test)]
 mod reward_cutover_apply_tests;
 mod reward_cutover_compare;
 mod reward_review;
+pub use recovery_inventory::RecoveryInventory;
 #[cfg(test)]
 pub(crate) use reward_cutover::derive_history as cutover_fixture_history;
 pub use reward_cutover::{Preview as RewardCutoverPreview, Summary as RewardCutoverSummary};

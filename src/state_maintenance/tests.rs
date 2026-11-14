@@ -367,6 +367,61 @@ async fn root_four_journal_snapshot_preserves_wal_paid_pending_and_signed_state_
             .is_err()
     );
     assert!(!bundle.join("nested-review").exists());
+    // Inventory reads only accepted copied WAL, even with current writers live.
+    let inventory_path = root.path().join("recovery-inventory");
+    let inventory = operator
+        .inventory_recovery(&bundle, &inventory_path)
+        .await
+        .unwrap();
+    assert_eq!(inventory.bundle_id, manifest.id);
+    assert_eq!(inventory.counts["settled_payment"], 1);
+    assert_eq!(inventory.counts["feeder_request"], 1);
+    assert!(inventory.all_selected_rows_examined);
+    assert!(
+        !inventory.external_history_complete
+            && !inventory.adoption_authorized
+            && !inventory.resume_authorized
+    );
+    let identities = std::fs::read(inventory_path.join("IDENTITIES.jsonl")).unwrap();
+    assert_eq!(files::hash_bytes(&identities), inventory.records_sha256);
+    assert!(
+        std::str::from_utf8(&identities)
+            .unwrap()
+            .contains(&feed.to_string())
+    );
+    assert!(
+        !std::str::from_utf8(&identities)
+            .unwrap()
+            .contains("Preserve exact signed bytes")
+    );
+    for (output, mode) in [
+        (&inventory_path, 0o700),
+        (&inventory_path.join("IDENTITIES.jsonl"), 0o600),
+        (&inventory_path.join("INVENTORY.json"), 0o600),
+    ] {
+        assert_eq!(
+            std::fs::metadata(output).unwrap().permissions().mode() & 0o777,
+            mode
+        );
+    }
+    assert!(!inventory_path.join("INCOMPLETE").exists());
+    assert_eq!(
+        std::fs::read(bundle.join("MANIFEST.json")).unwrap(),
+        manifest_bytes
+    );
+    assert!(
+        operator
+            .inventory_recovery(&bundle, &inventory_path)
+            .await
+            .is_err()
+    );
+    assert!(
+        operator
+            .inventory_recovery(&bundle, &bundle.join("nested-inventory"))
+            .await
+            .is_err()
+    );
+    assert!(!bundle.join("nested-inventory").exists());
     ready.store(true, std::sync::atomic::Ordering::SeqCst);
     // The same accepted data must also inspect cleanly after a normal last-
     // connection checkpoint removes every WAL. Work only on additional copies;

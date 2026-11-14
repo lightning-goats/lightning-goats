@@ -72,4 +72,3 @@ configuration; this checkpoint does not invent a new production note/feeding
 transaction to prove it. Earlier successful chat publication in
 [the public rollout record](cyberherd-discovery-repair-live-20261114.md) is historical;
 future CyberHerd chat publication is now disabled.
-

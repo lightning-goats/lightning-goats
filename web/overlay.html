@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lightning Goats OBS overlay</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/overlay.css?v=6">
+  <script src="/vendor/qrcode.js" defer></script>
+  <script src="/overlay.js?v=9" defer></script>
+</head>
+<body>
+  <main id="container" aria-label="Lightning Goats stream overlay">
+    <div id="top-left-container">
+      <span id="sats_left" class="top-left-item">⚡ Connecting to the herd… ⚡</span>
+      <span id="btc-price" class="top-left-item" title="Indicative BTC/USD price; display only">BTC: --</span>
+      <span id="btc-change" class="top-left-item">(24h: --)</span>
+      <span id="credit" class="sr-only">Waiting for ledger</span>
+      <span id="due" class="sr-only"></span>
+    </div>
+    <a id="qr-code" href="lightning:herd@lightning-goats.com" aria-label="Pay herd@lightning-goats.com">
+      <div id="qr-image" role="img" aria-label="Lightning payment QR for herd@lightning-goats.com"></div>
+      <div id="qr-brand"><img src="/images/lightninggoatslogo1.png?v=artwork-20261109" alt=""></div>
+      <img id="lightning-img" src="/images/lightning.png?v=artwork-20261109" alt="" aria-hidden="true">
+    </a>
+    <div id="connection" role="status">Connecting…</div>
+    <div id="feeding-state" role="status" aria-live="polite" hidden><span id="feeding-state-label"></span><span id="feeding-queue"></span></div>
+    <div id="sats-received-overlay" aria-live="polite"></div>
+    <div id="feeder-triggered" aria-live="polite">⚡ Feeder Triggered ⚡</div>
+    <div id="accordion-container" aria-label="Featured goats and CyberHerd"></div>
+    <footer id="bottom-container">
+      <div id="time-temperature-container">
+        <time id="current-time">--:--</time>
+        <span id="current-temperature">-- °F</span>
+      </div>
+      <div id="center-container">
+        <div id="progress" role="progressbar" aria-label="Credit toward the next feeding" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <div id="progress-container">
+            <div id="progress-fill"></div>
+            <div id="progress-drainer"></div>
+            <span id="progress-percentage">0%</span>
+            <div id="scrolling-comment"><div id="message"></div></div>
+          </div>
+        </div>
+      </div>
+    </footer>
+    <p id="weather" class="sr-only"></p>
+    <div id="lightning-effect" aria-hidden="true"></div>
+  </main>
+</body>
+</html>

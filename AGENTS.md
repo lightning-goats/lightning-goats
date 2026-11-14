@@ -1,5 +1,15 @@
 # Lightning Goats Agent Guide
 
+## Current work — operator decision, 2026-11-09
+
+Proceed with CyberHerd implementation after the restored live Lightning/Nostr/OBS
+path. Read `docs/planning/cyberherd-implementation-plan.md` and its pinned upstream
+behavioral reference. Membership does not require NIP-05; rewards follow confirmed
+feedings and preserve current accounting. This overrides the older CyberHerd
+deferral below, without resuming Monero, bypassing the feeder owner, adding spend
+authority to `lightning-goatsd`, or resetting paid state. Keep production changes
+separate from isolated implementation and preserve the uploaded OBS artwork.
+
 ## Current delivery order — operator decision, 2026-09-17
 
 Read [delivery-roadmap.md](docs/planning/delivery-roadmap.md) first.

@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, fix/feeder-payment-cap-20261111]
   pull_request:
   workflow_call:
 
@@ -25,6 +25,9 @@ jobs:
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
 
+      - name: Verify published SQLite driver backport
+        run: python3 deploy/scripts/verify-sqlite-vendor.py
+
       - name: Format
         run: cargo fmt --all --check
 
@@ -33,6 +36,13 @@ jobs:
 
       - name: Test
         run: cargo test --locked --all-features
+
+      - name: Verify state and financial-review files with actual root ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked --all-features --lib --no-run --message-format=json > "$RUNNER_TEMP/native-test-artifacts.jsonl"
+          python3 deploy/scripts/test-failed-cost-approval.py "$RUNNER_TEMP/native-test-artifacts.jsonl"
 
       - name: Verify inactive cross-host preparation
         shell: bash

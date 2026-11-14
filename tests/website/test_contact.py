@@ -1,0 +1,238 @@
+"""Private contact crypto/UI against synthetic keys and isolated inbox relays."""
+import json
+import mimetypes
+import os
+from pathlib import Path
+import unittest
+from urllib.parse import urlsplit
+
+from playwright.sync_api import sync_playwright
+
+ROOT = Path(__file__).resolve().parents[2] / "web"
+ORIGIN = "https://lightning-goats.com"
+PROJECT = "669ebbcccf409ee0467a33660ae88fd17e5379e646e41d7c236ff4963f3c36b6"
+CONTACT_INVOICE = "lnbc1u1" + "q" * 120  # UI fixture only, not a signed payment invoice.
+FIXTURE = """
+window.NativeNostrTools=NostrTools;
+window.recipientKey=window.fixtureReuseRecipient?new Uint8Array(fixtureReuseRecipient):NostrTools.generateSecretKey();
+window.recipient=NostrTools.getPublicKey(recipientKey);
+window.senderKey=window.fixtureReuseSender?new Uint8Array(fixtureReuseSender):NostrTools.generateSecretKey();
+window.sender=NostrTools.getPublicKey(senderKey);
+window.published=[]; window.failRelays=true; window.signCalls=[];
+const inbox=NostrTools.finalizeEvent({kind:10050,created_at:Math.floor(Date.now()/1000),
+  tags:[['relay','wss://nos.lol'],['relay','wss://relay.damus.io']],content:''},recipientKey);
+window.NostrTools={...NostrTools,SimplePool:class{
+  subscribe(){return{close(){}};}
+  get(){return Promise.resolve(null);}
+  querySync(relays,filter){return Promise.resolve(filter.kinds[0]===10050?[inbox]:[]);}
+  publish(relays,event){published.push({relays,event});return relays.map(()=>failRelays?Promise.reject(Error('lost')):Promise.resolve());}
+  close(){}
+}};
+window.nostr={
+  async getPublicKey(){return sender;},
+  nip44:{async encrypt(pubkey,plaintext){return NativeNostrTools.nip44.encrypt(plaintext,NativeNostrTools.nip44.getConversationKey(senderKey,pubkey));}},
+  async signEvent(template){signCalls.push(template.kind);return NativeNostrTools.finalizeEvent(template,senderKey);}
+};
+"""
+
+
+class ContactBrowserTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.playwright = sync_playwright().start()
+        options = {"headless": True, "chromium_sandbox": True}
+        if os.environ.get("LG_CHROMIUM"):
+            options["executable_path"] = os.environ["LG_CHROMIUM"]
+        cls.browser = cls.playwright.chromium.launch(**options)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.browser.close()
+        cls.playwright.stop()
+
+    def setUp(self):
+        self.context = self.browser.new_context(service_workers="block")
+        self.addCleanup(self.context.close)
+        self.context.route("**/*", self.route)
+        self.context.route_web_socket("**/*", lambda socket: socket.close())
+        self.page = self.context.new_page()
+        self.errors = []
+        self.provider_requests = []
+        self.paid_enabled = False
+        self.contact_creates = []
+        self.contact_state = "issued"
+        self.contact_invoice = CONTACT_INVOICE
+        self.page.on("pageerror", lambda error: self.errors.append(str(error)))
+
+    def route(self, route):
+        parsed = urlsplit(route.request.url)
+        if parsed.netloc != "lightning-goats.com":
+            route.fulfill(body="")
+            return
+        path = parsed.path
+        if path == "/site-config.js":
+            route.fulfill(content_type="text/javascript", body="window.LightningGoatsSite=" + json.dumps({"contactPaymentsEnabled": self.paid_enabled}))
+        elif path == "/vendor/nostr.bundle.js":
+            route.fulfill(content_type="text/javascript", body=(ROOT / path.lstrip("/")).read_text() + FIXTURE)
+        elif path == "/vendor/nostr-login.js":
+            route.fulfill(content_type="text/javascript", body="")
+        elif path == "/contact.js":
+            source = (ROOT / "contact.js").read_text()
+            # Only the recipient is replaced so this isolated test can decrypt
+            # envelopes with its own generated key, never the project credential.
+            self.assertIn(f'const RECIPIENT = "{PROJECT}";', source)
+            source = source.replace(f'const RECIPIENT = "{PROJECT}";', "const RECIPIENT = window.recipient;")
+            route.fulfill(content_type="text/javascript", body=source)
+        elif path.startswith("/api/") or path.startswith("/.well-known/") or path.startswith("/lnurlp/"):
+            if "contact" in path or "lnurlp" in path:
+                self.provider_requests.append(route.request.url)
+            if self.paid_enabled and path in ("/api/v1/contact", "/api/v1/contact/status"):
+                self.assertEqual(route.request.method, "POST")
+                self.assertEqual(parsed.query, "")
+                request = json.loads(route.request.post_data)
+                if path == "/api/v1/contact":
+                    self.contact_creates.append(request)
+                if not self.contact_creates:
+                    route.fulfill(status=404, content_type="application/json", body="{}")
+                    return
+                intent = self.contact_creates[0]
+                self.assertEqual(request["id"], intent["id"])
+                self.assertEqual(request["capability"], intent["capability"])
+                route.fulfill(content_type="application/json", body=json.dumps({"id": intent["id"],
+                    "state": self.contact_state, "fee_sats": 100, "invoice": self.contact_invoice}))
+                return
+            route.fulfill(status=503, content_type="application/json", body="{}")
+        else:
+            file = ROOT / ("index.html" if path == "/" else path.lstrip("/"))
+            if file.is_file() and file.resolve().is_relative_to(ROOT):
+                route.fulfill(content_type=mimetypes.guess_type(file)[0] or "text/plain", body=file.read_bytes())
+            else:
+                route.fulfill(body="")
+
+    def open(self):
+        self.page.goto(ORIGIN + "/", wait_until="domcontentloaded", timeout=120000)
+
+    def test_identity_bound_nip17_roundtrip_and_anonymous_email_validation(self):
+        self.open()
+        result = self.page.evaluate("""async()=>{
+          const c=LightningGoatsContact;
+          const wrapped=await c.signedEnvelope(nostr,sender,'Private contact fixture');
+          const rumor=NativeNostrTools.nip59.unwrapEvent(wrapped,recipientKey);
+          const result={kind:wrapped.kind,rumorKind:rumor.kind,sender:rumor.pubkey===sender,
+            recipient:rumor.tags[0][1]===recipient,content:rumor.content,
+            noPlaintext:!JSON.stringify(wrapped).includes('Private contact fixture')};
+          try{c.anonymousEnvelope('message','');result.missingRejected=false;}catch(_){result.missingRejected=true;}
+          try{c.anonymousEnvelope('message','bad\\naddress@example.org');result.invalidRejected=false;}catch(_){result.invalidRejected=true;}
+          const anonymous=c.anonymousEnvelope('Email contact fixture','visitor@example.org');
+          const anon=NativeNostrTools.nip59.unwrapEvent(anonymous,recipientKey);
+          result.anonContent=anon.content;result.anonDifferent=anon.pubkey!==sender;
+          const changedSigner={...nostr,async signEvent(t){return NativeNostrTools.finalizeEvent({...t,kind:1},senderKey);}};
+          try{await c.signedEnvelope(changedSigner,sender,'secret');result.changedRejected=false;}catch(_){result.changedRejected=true;}
+          try{await c.signedEnvelope({...nostr,nip44:{async encrypt(){return 'plaintext'}}},sender,'secret');result.plainRejected=false;}catch(_){result.plainRejected=true;}
+          result.publications=published.length;return result;
+        }""")
+        self.assertEqual(result["kind"], 1059)
+        self.assertEqual(result["rumorKind"], 14)
+        for name in ["sender", "recipient", "noPlaintext", "missingRejected", "invalidRejected", "anonDifferent", "changedRejected", "plainRejected"]:
+            self.assertTrue(result[name], name)
+        self.assertIn("Private contact fixture", result["content"])
+        self.assertIn("Reply email: visitor@example.org", result["anonContent"])
+        self.assertEqual(result["publications"], 0)
+        self.assertEqual(self.provider_requests, [])
+        self.assertEqual(self.errors, [])
+
+    def test_free_contact_retains_ciphertext_and_retries_exact_event_after_reload(self):
+        self.open()
+        self.page.locator("#contactLink").click()
+        self.page.locator("#contactModal").wait_for(state="visible")
+        self.assertTrue(self.page.locator("#contactEmail").evaluate("e=>e.required"))
+        self.assertTrue(self.page.locator("#contactSend").is_disabled())
+        self.page.locator("#contactConnect").click()
+        self.page.wait_for_function("!document.getElementById('contactEmail').required")
+        self.page.locator("#contactMessage").fill("Confidential fixture contact")
+        self.page.locator("#contactSend").click()
+        self.page.wait_for_function("document.getElementById('contactSend').textContent==='Retry encrypted message'")
+        saved = self.page.evaluate("JSON.parse(localStorage.getItem('lightning-goats-contact-pending-v1'))")
+        self.assertNotIn("Confidential fixture contact", json.dumps(saved))
+        self.assertEqual(self.page.evaluate("signCalls"), [13])
+        self.assertEqual(self.page.evaluate("published[0].event.id"), saved["event"]["id"])
+        # Simulate reload while preserving the same visitor signer and browser
+        # storage. Production stores no private key; this fixture injects its key.
+        keys = self.page.evaluate("({sender:Array.from(senderKey),recipient:Array.from(recipientKey)})")
+        self.context.add_init_script("window.fixtureReuseSender=" + json.dumps(keys["sender"]) + ";window.fixtureReuseRecipient=" + json.dumps(keys["recipient"]))
+        self.page.reload(wait_until="domcontentloaded")
+        self.page.locator("#contactLink").click()
+        self.page.locator("#contactModal").wait_for(state="visible")
+        self.page.locator("#contactConnect").click()
+        self.page.wait_for_function("!document.getElementById('contactEmail').required")
+        self.page.evaluate("window.failRelays=false")
+        self.page.locator("#contactSend").click()
+        self.page.wait_for_function("document.getElementById('contactStatus').textContent.includes('accepted your encrypted message')")
+        self.assertEqual(self.page.evaluate("published[0].event.id"), saved["event"]["id"])
+        self.assertEqual(self.page.evaluate("signCalls"), [])
+        self.assertIsNone(self.page.evaluate("localStorage.getItem('lightning-goats-contact-pending-v1')"))
+        self.assertEqual(self.provider_requests, [])
+        self.assertEqual(self.errors, [])
+
+    def test_paid_contact_waits_for_server_confirmation_and_reload_never_repays(self):
+        self.paid_enabled = True
+        self.context.add_init_script("""
+          window.walletCalls=[];
+          window.webln={async enable(){walletCalls.push('enable')},async sendPayment(invoice){walletCalls.push(invoice);return {preimage:'fixture-only'}}};
+        """)
+        self.open()
+        self.page.locator("#contactLink").click()
+        self.page.locator("#contactModal").wait_for(state="visible")
+        self.page.locator("#contactEmail").fill("visitor@example.org")
+        self.page.locator("#contactMessage").fill("Private paid contact fixture")
+        self.page.locator("#contactSend").click()
+        self.page.wait_for_function("document.getElementById('contactStatus').textContent.includes('Waiting for Strike')")
+        self.assertEqual(len(self.contact_creates), 1)
+        self.assertEqual(self.page.evaluate("walletCalls"), ["enable", CONTACT_INVOICE])
+        self.assertEqual(self.page.evaluate("published.length"), 0)
+        stored = self.page.evaluate("localStorage.getItem('lightning-goats-contact-fee-v1')")
+        self.assertNotIn("visitor@example.org", stored)
+        self.assertNotIn("Private paid contact fixture", stored)
+        decrypted = self.page.evaluate("NativeNostrTools.nip59.unwrapEvent(JSON.parse(localStorage.getItem('lightning-goats-contact-fee-v1')).envelope,recipientKey).content")
+        self.assertIn("Reply email: visitor@example.org", decrypted)
+        self.assertNotIn("fee_sats", self.contact_creates[0])
+        self.assertTrue(all("/.well-known/lnurlp/" not in url and "/lnurlp/herd/" not in url for url in self.provider_requests))
+
+        keys = self.page.evaluate("({sender:Array.from(senderKey),recipient:Array.from(recipientKey)})")
+        self.context.add_init_script("window.fixtureReuseSender=" + json.dumps(keys["sender"]) + ";window.fixtureReuseRecipient=" + json.dumps(keys["recipient"]))
+        self.page.reload(wait_until="domcontentloaded")
+        self.page.locator("#contactLink").click()
+        self.page.locator("#contactModal").wait_for(state="visible")
+        self.assertEqual(self.page.evaluate("walletCalls"), [])
+        self.assertEqual(len(self.contact_creates), 1)
+        self.assertEqual(self.page.locator("#contactInvoice").input_value(), CONTACT_INVOICE)
+        self.contact_state = "paid"
+        self.page.locator("#contactCheck").click()
+        self.page.wait_for_function("document.getElementById('contactStatus').textContent.includes('Payment confirmed')")
+        self.assertEqual(self.page.evaluate("walletCalls"), [])
+        self.assertEqual(self.page.evaluate("published.length"), 0)
+        self.contact_state = "delivered"
+        self.page.locator("#contactCheck").click()
+        self.page.wait_for_function("document.getElementById('contactStatus').textContent.includes('accepted your encrypted message')")
+        self.assertIsNone(self.page.evaluate("localStorage.getItem('lightning-goats-contact-fee-v1')"))
+        self.assertEqual(len(self.contact_creates), 1)
+        self.assertEqual(self.errors, [])
+
+    def test_paid_contact_refuses_wrong_amount_before_wallet_submission(self):
+        self.paid_enabled = True
+        self.contact_invoice = "lnbc10u1" + "q" * 120
+        self.context.add_init_script("window.walletCalls=[];window.webln={async enable(){walletCalls.push('enable')},async sendPayment(){walletCalls.push('must-not-pay')}}")
+        self.open()
+        self.page.locator("#contactLink").click()
+        self.page.locator("#contactModal").wait_for(state="visible")
+        self.page.locator("#contactEmail").fill("visitor@example.org")
+        self.page.locator("#contactMessage").fill("Bound 100-sat contact fixture")
+        self.page.locator("#contactSend").click()
+        self.page.wait_for_function("document.getElementById('contactStatus').textContent.includes('exactly 100 sats')")
+        self.assertEqual(self.page.evaluate("walletCalls"), ["enable"])
+        self.assertEqual(self.page.evaluate("published.length"), 0)
+        self.assertEqual(self.errors, [])
+
+
+if __name__ == "__main__":
+    unittest.main()

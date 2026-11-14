@@ -13,17 +13,40 @@ use sqlx::{Row, SqlitePool};
 
 use crate::domain::payment::SettledPayment;
 
+mod contact;
+pub use contact::ContactDelivery;
+mod core_bridge;
+pub(crate) use core_bridge::export_body as inspect_core_event_body;
+mod cyberherd_overlay;
 mod events;
+mod failed_costs;
 mod feed;
+mod feed_cap;
+pub use feed_cap::CreditRetirementResult;
+mod feeding_notices;
+mod feeding_presentation;
+mod operator_credit;
 mod outbox;
+mod payout_execution;
+mod reward_funding;
+mod reward_outcomes;
+mod reward_results;
+pub use operator_credit::{OperatorCreditGrant, OperatorCreditResult, OperatorCreditStatus};
+pub(crate) use reward_funding::{
+    confirmed_funding as inspect_confirmed_reward_funding,
+    decode_reservation as inspect_reward_reservation,
+};
 mod overlay;
+mod roster_overlay;
 mod strike;
+mod zap;
 pub use events::DurableEvent;
 use events::append_event_in_transaction;
 use feed::feed_credit_in_transaction;
 pub use feed::{StoredFeedAttempt, StoredFeedAttemptStatus};
 pub use outbox::OutboxEntry;
 pub use strike::StoredStrikeReceiveRequest;
+pub use zap::ZapReceiptJob;
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
@@ -34,6 +57,7 @@ pub struct LedgerStore {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SettlementOutcome {
+    ContactFeeAccepted,
     Credited {
         sats: u64,
         address_user: String,
@@ -94,6 +118,16 @@ impl LedgerStore {
         let credited_sats = payment.amount_msat / 1_000;
         let credited_sats_i64 = to_i64(credited_sats, "credited_sats")?;
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+
+        let contact_collision: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM private_contact_intents i JOIN strike_receive_requests r ON r.receive_request_id=i.receive_request_id WHERE r.payment_hash=lower(?)) OR EXISTS(SELECT 1 FROM private_contact_fees WHERE ?='strike' AND receive_id=?)",
+        ).bind(payment.payment_hash.as_deref()).bind(&payment.source).bind(&payment.source_id).fetch_one(&mut *transaction).await?;
+        if contact_collision
+            || payment.address_user == "contact"
+            || payment.credit_pool == "contact"
+        {
+            bail!("private contact fees cannot enter feed-credit settlement");
+        }
 
         let existing = sqlx::query(
             r#"
@@ -191,7 +225,8 @@ impl LedgerStore {
         .await?
         .last_insert_rowid();
 
-        let feed_credit_sats = feed_credit_in_transaction(&mut transaction).await?;
+        let feed_credit_sats =
+            feed_cap::cap_new_credit(&mut transaction, ledger_id, credited_sats).await?;
         let event_seq = append_event_in_transaction(
             &mut transaction,
             "payment_received",
@@ -208,6 +243,8 @@ impl LedgerStore {
         .await?;
 
         credit::record_native_btc(&mut transaction, settlement_id, ledger_id, event_seq).await?;
+        zap::stage_receipt(&mut transaction, payment, settlement_id, event_seq).await?;
+        reward_funding::prepare(&mut transaction).await?;
         transaction.commit().await?;
 
         Ok(SettlementOutcome::Credited {

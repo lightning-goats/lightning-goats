@@ -1,0 +1,35 @@
+# Offline operator tool only. No credential or automatic service-start fields.
+# Resolve actual existing identities, scope and journal paths before use.
+version = 1
+owner = "REPLACE_WITH_PROJECT_PUBLIC_KEY"
+epoch = "00000000-0000-0000-0000-000000000000"
+max_component_bytes = 8589934592
+
+[provider]
+environment = "strike-production"
+account_id = "00000000-0000-0000-0000-000000000000"
+credential_fingerprint = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[components.core]
+database = "/var/lib/lightning-goats/lightning-goats.db"
+uid = 0
+gid = 0
+unit = "lightning-goats-receive.service"
+
+[components.membership]
+database = "/var/lib/cyberherd/cyberherd.db"
+uid = 0
+gid = 0
+unit = "cyberherd.service"
+
+[components.payout]
+database = "/var/lib/cyberherd-payout/payout.db"
+uid = 0
+gid = 0
+unit = "cyberherd-payout.service"
+
+[components.signer]
+database = "/var/lib/cyberherd-signer/signer.db"
+uid = 0
+gid = 0
+unit = "cyberherd-signer.service"

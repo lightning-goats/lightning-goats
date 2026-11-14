@@ -1,0 +1,13 @@
+[Unit]
+Description=Lightning Goats runtime network restrictions
+After=firewalld.service
+Before=lightning-goats-receive.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/nft -f /etc/nftables/lightning-goats-runtime.nft
+ExecReload=/usr/sbin/nft -f /etc/nftables/lightning-goats-runtime.nft
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

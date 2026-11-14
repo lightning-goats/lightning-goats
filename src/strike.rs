@@ -58,6 +58,15 @@ pub struct CreatedStrikeReceiveRequest {
     pub created_provider: Option<String>,
 }
 
+struct ReceiveIssuance<'a> {
+    address_user: &'a str,
+    credit_pool: &'a str,
+    amount_msat: u64,
+    description_hash: &'a str,
+    expiry_seconds: u64,
+    zap: Option<&'a crate::zap::ZapRequest>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StrikeCompletedReceiveEvent {
     pub event_id: Uuid,
@@ -79,6 +88,23 @@ pub struct ReconciledStrikeReceive {
 }
 
 impl StrikeClient {
+    pub(crate) async fn verify_payout_payment(
+        &self,
+        binding: &crate::payout::provider::BindingRecord,
+    ) -> Result<crate::payout::provider::PaymentRecord> {
+        let endpoint = self
+            .base_url
+            .join(&format!("v1/payments/{}", binding.payment_id))?;
+        let wire = self
+            .send_json(self.client.get(endpoint), "verify outgoing payment")
+            .await
+            .map_err(|_| anyhow::anyhow!("core could not read the original outgoing payment"))?;
+        crate::payout::provider::verify_read_record(
+            binding,
+            wire,
+            crate::cyberherd::calendar::now()?,
+        )
+    }
     pub async fn from_config(config: &StrikeConfig) -> Result<Self> {
         let api_key = read_systemd_credential("strike-api-key").await?;
         Self::new(&config.api_url, api_key)
@@ -404,6 +430,9 @@ impl StrikeWebhookVerifier {
 }
 
 impl StrikeRuntime {
+    pub fn payout_reader(&self, account_id: Uuid) -> Result<crate::payout::outcome::Reader> {
+        crate::payout::outcome::Reader::new(self.client.clone(), account_id)
+    }
     pub async fn from_config(config: &StrikeConfig) -> Result<Self> {
         Ok(Self {
             client: StrikeClient::from_config(config).await?,
@@ -512,6 +541,56 @@ impl StrikeRuntime {
         description_hash: &str,
         expiry_seconds: u64,
     ) -> Result<CreatedStrikeReceiveRequest> {
+        self.issue_receive_request(
+            ledger,
+            ReceiveIssuance {
+                address_user,
+                credit_pool,
+                amount_msat,
+                description_hash,
+                expiry_seconds,
+                zap: None,
+            },
+        )
+        .await
+    }
+
+    pub(crate) async fn create_and_record_zap_receive_request(
+        &self,
+        ledger: &LedgerStore,
+        address_user: &str,
+        credit_pool: &str,
+        zap: &crate::zap::ZapRequest,
+        expiry_seconds: u64,
+    ) -> Result<CreatedStrikeReceiveRequest> {
+        let description_hash = zap.description_hash();
+        self.issue_receive_request(
+            ledger,
+            ReceiveIssuance {
+                address_user,
+                credit_pool,
+                amount_msat: zap.amount_msat(),
+                description_hash: &description_hash,
+                expiry_seconds,
+                zap: Some(zap),
+            },
+        )
+        .await
+    }
+
+    async fn issue_receive_request(
+        &self,
+        ledger: &LedgerStore,
+        issuance: ReceiveIssuance<'_>,
+    ) -> Result<CreatedStrikeReceiveRequest> {
+        let ReceiveIssuance {
+            address_user,
+            credit_pool,
+            amount_msat,
+            description_hash,
+            expiry_seconds,
+            zap,
+        } = issuance;
         crate::domain::invoice::validate_user(address_user)?;
         crate::domain::invoice::validate_user(credit_pool)?;
         if amount_msat == 0
@@ -540,16 +619,19 @@ impl StrikeRuntime {
                 .create_bolt11_receive_request(amount_msat, description_hash, expiry_seconds)
                 .await?;
             ledger
-                .record_strike_receive_request(&StoredStrikeReceiveRequest {
-                    receive_request_id: created.receive_request_id,
-                    address_user: address_user.to_owned(),
-                    credit_pool: credit_pool.to_owned(),
-                    amount_msat,
-                    description_hash: created.description_hash.clone(),
-                    payment_hash: created.payment_hash.clone(),
-                    invoice: created.invoice.clone(),
-                    created_provider: created.created_provider.clone(),
-                })
+                .record_strike_receive_request_with_zap(
+                    &StoredStrikeReceiveRequest {
+                        receive_request_id: created.receive_request_id,
+                        address_user: address_user.to_owned(),
+                        credit_pool: credit_pool.to_owned(),
+                        amount_msat,
+                        description_hash: created.description_hash.clone(),
+                        payment_hash: created.payment_hash.clone(),
+                        invoice: created.invoice.clone(),
+                        created_provider: created.created_provider.clone(),
+                    },
+                    zap,
+                )
                 .await?;
             Ok(created)
         })
@@ -560,6 +642,87 @@ impl StrikeRuntime {
         // an unbounded waiter queue or permanently consume issuance capacity.
         if let Err(error) = ledger.finish_invoice_admission(reservation).await {
             tracing::warn!(%error,"invoice admission release will expire durably");
+        }
+        result
+    }
+
+    /// Fixed private fee issuance. An uncertain create never receives a new
+    /// provider request automatically, including across processes or restarts.
+    pub async fn create_contact_invoice(
+        &self,
+        ledger: &LedgerStore,
+        intent: &crate::contact::Intent,
+        capability: &str,
+    ) -> Result<crate::contact::Status> {
+        ledger.create_contact_intent(intent).await?;
+        let current = ledger
+            .contact_status(intent.id, capability)
+            .await?
+            .context("contact capability refused")?;
+        if current.state != "new" {
+            return Ok(current);
+        }
+        let _permit = self
+            .issuance_slots
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| InvoiceCapacityError)?;
+        let reservation = ledger
+            .reserve_invoice()
+            .await?
+            .ok_or(InvoiceCapacityError)?;
+        let result = async {
+            let Some(claim) = ledger.claim_contact_issuance(intent.id, capability).await? else {
+                return ledger
+                    .contact_status(intent.id, capability)
+                    .await?
+                    .context("contact capability refused");
+            };
+            let created = tokio::time::timeout(Duration::from_secs(20), async {
+                let created = self
+                    .client
+                    .create_bolt11_receive_request(
+                        crate::contact::FEE_MSAT,
+                        &intent.description_hash,
+                        300,
+                    )
+                    .await?;
+                ledger
+                    .record_contact_invoice(
+                        intent.id,
+                        claim,
+                        &StoredStrikeReceiveRequest {
+                            receive_request_id: created.receive_request_id,
+                            address_user: "contact".into(),
+                            credit_pool: "contact".into(),
+                            amount_msat: crate::contact::FEE_MSAT,
+                            description_hash: created.description_hash,
+                            payment_hash: created.payment_hash,
+                            invoice: created.invoice,
+                            created_provider: created.created_provider,
+                        },
+                    )
+                    .await
+            })
+            .await
+            .context("contact creation deadline exceeded")
+            .and_then(|r| r);
+            if created.is_err() {
+                // Failure to persist the uncertainty leaves the durable issuing
+                // claim, which is equally non-retryable by the public creator.
+                let _ = ledger
+                    .mark_contact_issuance_uncertain(intent.id, claim)
+                    .await;
+            }
+            created?;
+            ledger
+                .contact_status(intent.id, capability)
+                .await?
+                .context("contact capability refused")
+        }
+        .await;
+        if ledger.finish_invoice_admission(reservation).await.is_err() {
+            tracing::warn!("contact issuance admission will expire durably");
         }
         result
     }
@@ -582,6 +745,28 @@ impl StrikeRuntime {
             .client
             .reconcile_completed_receive(&stored, event.receive_id)
             .await?;
+        let contact = ledger
+            .contact_for_receive(stored.receive_request_id)
+            .await?;
+        if let Some(contact) = contact {
+            let accepted = ledger
+                .accept_contact_fee(
+                    contact,
+                    stored.receive_request_id,
+                    receive.receive_id,
+                    receive.amount_msat,
+                    &stored.payment_hash,
+                )
+                .await?;
+            return Ok(if accepted {
+                SettlementOutcome::ContactFeeAccepted
+            } else {
+                SettlementOutcome::Duplicate
+            });
+        }
+        if stored.address_user == "contact" || stored.credit_pool == "contact" {
+            bail!("private contact invoice omitted its immutable purpose binding");
+        }
         let context_json = json!({
             "receive_request_id": receive.receive_request_id,
             "receive_type": receive.receive_type,
@@ -854,7 +1039,7 @@ fn msat_to_btc_decimal(msat: u64) -> String {
     format!("{whole}.{fraction:011}")
 }
 
-fn btc_decimal_to_msat(value: &str) -> Result<u64> {
+pub(crate) fn btc_decimal_to_msat(value: &str) -> Result<u64> {
     let value = value.trim();
     if value.is_empty() || value.starts_with('-') || value.starts_with('+') {
         bail!("BTC amount must be an unsigned decimal string");
@@ -1076,6 +1261,144 @@ mod tests {
         let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).unwrap();
         mac.update(body);
         hex::encode(mac.finalize().into_bytes())
+    }
+
+    fn contact_state(intent: &crate::contact::Intent) -> MockState {
+        let mut state = state();
+        state.description_hash = intent.description_hash.clone();
+        state.amount_btc = "0.00000100000".into();
+        state.credited_amount = Some(json!({"amount":state.amount_btc,"currency":"BTC"}));
+        state.invoice =
+            crate::test_invoices::invoice(crate::contact::FEE_MSAT, &state.description_hash);
+        state
+    }
+
+    #[tokio::test]
+    async fn contact_invoice_authoritative_settlement_and_replay_never_add_feed_credit() {
+        let (_directory, ledger) = ledger().await;
+        let intent = crate::contact::tests::fixture();
+        let state = contact_state(&intent);
+        let base = spawn_mock(state.clone()).await;
+        let runtime = StrikeRuntime::new(
+            StrikeClient::new(&base, state.api_key.into()).unwrap(),
+            StrikeWebhookVerifier::new("fixture-webhook".into()).unwrap(),
+        );
+        let first = runtime
+            .create_contact_invoice(&ledger, &intent, &"ab".repeat(32))
+            .await
+            .unwrap();
+        assert_eq!(first.state, "issued");
+        assert_eq!(first.invoice, Some(state.invoice.clone()));
+        let second = runtime
+            .create_contact_invoice(&ledger, &intent, &"ab".repeat(32))
+            .await
+            .unwrap();
+        assert_eq!(second.invoice, first.invoice);
+        assert_eq!(state.api_calls.load(Ordering::SeqCst), 1);
+        assert!(
+            runtime
+                .create_contact_invoice(&ledger, &intent, &"cd".repeat(32))
+                .await
+                .is_err()
+        );
+        assert_eq!(state.api_calls.load(Ordering::SeqCst), 1);
+        let event = StrikeCompletedReceiveEvent {
+            event_id: Uuid::new_v4(),
+            receive_request_id: state.receive_request_id,
+            receive_id: state.receive_id,
+        };
+        assert_eq!(
+            runtime.reconcile_and_credit(&ledger, &event).await.unwrap(),
+            SettlementOutcome::ContactFeeAccepted
+        );
+        assert_eq!(
+            runtime.reconcile_and_credit(&ledger, &event).await.unwrap(),
+            SettlementOutcome::Duplicate
+        );
+        assert_eq!(ledger.feed_credit_sats().await.unwrap(), 0);
+        assert_eq!(
+            ledger
+                .contact_status(intent.id, &"ab".repeat(32))
+                .await
+                .unwrap()
+                .unwrap()
+                .state,
+            "paid"
+        );
+        assert!(ledger.reserve_contact_delivery().await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn contact_pending_or_wrong_authoritative_amount_never_authorizes_delivery() {
+        for pending in [false, true] {
+            let (_directory, ledger) = ledger().await;
+            let intent = crate::contact::tests::fixture();
+            let mut state = contact_state(&intent);
+            if pending {
+                state.receive_state = "PENDING";
+            } else {
+                state.received_amount = Some(json!({"amount":"0.00000101","currency":"BTC"}));
+            }
+            let base = spawn_mock(state.clone()).await;
+            let runtime = StrikeRuntime::new(
+                StrikeClient::new(&base, state.api_key.into()).unwrap(),
+                StrikeWebhookVerifier::new("fixture-webhook".into()).unwrap(),
+            );
+            runtime
+                .create_contact_invoice(&ledger, &intent, &"ab".repeat(32))
+                .await
+                .unwrap();
+            let event = StrikeCompletedReceiveEvent {
+                event_id: Uuid::new_v4(),
+                receive_request_id: state.receive_request_id,
+                receive_id: state.receive_id,
+            };
+            assert!(runtime.reconcile_and_credit(&ledger, &event).await.is_err());
+            assert!(ledger.reserve_contact_delivery().await.unwrap().is_none());
+            assert_eq!(
+                ledger
+                    .contact_status(intent.id, &"ab".repeat(32))
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .state,
+                "issued"
+            );
+            assert_eq!(ledger.feed_credit_sats().await.unwrap(), 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn uncertain_contact_creation_survives_restart_without_another_provider_request() {
+        let (directory, ledger) = ledger().await;
+        let intent = crate::contact::tests::fixture();
+        let mut state = contact_state(&intent);
+        state.invoice = "lnbc-invalid-fixture".into();
+        let base = spawn_mock(state.clone()).await;
+        let runtime = StrikeRuntime::new(
+            StrikeClient::new(&base, state.api_key.into()).unwrap(),
+            StrikeWebhookVerifier::new("fixture-webhook".into()).unwrap(),
+        );
+        assert!(
+            runtime
+                .create_contact_invoice(&ledger, &intent, &"ab".repeat(32))
+                .await
+                .is_err()
+        );
+        assert_eq!(state.api_calls.load(Ordering::SeqCst), 1);
+        let reopened = LedgerStore::connect(&format!(
+            "sqlite://{}",
+            directory.path().join("strike.db").display()
+        ))
+        .await
+        .unwrap();
+        let status = runtime
+            .create_contact_invoice(&reopened, &intent, &"ab".repeat(32))
+            .await
+            .unwrap();
+        assert_eq!(status.state, "uncertain");
+        assert!(status.invoice.is_none());
+        assert_eq!(state.api_calls.load(Ordering::SeqCst), 1);
     }
 
     fn webhook_body(state: &MockState) -> Vec<u8> {

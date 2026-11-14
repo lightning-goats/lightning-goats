@@ -1,0 +1,32 @@
+[Unit]
+Description=Explicit reviewed failed-payment cost %i (no payment execution)
+Conflicts=cyberherd-payout.service
+After=cyberherd-payout.service
+# Stops the payout unit before review and remains visible afterward. An explicit
+# start of the conflicting payout unit stops this guard; it is not a persistent
+# execution authorization fence. Never enable/install automatically.
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=lightning-goats
+Group=lightning-goats
+ExecStart=/usr/local/bin/lightning-goatsctl --config /etc/lightning-goats/config.toml reconcile-failed-cost --approval /etc/lightning-goats/cost-reviews/%i.json --evidence /etc/lightning-goats/cost-reviews/%i.evidence --apply
+LoadCredential=strike-api-key:/etc/lightning-goats/strike-api-key
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0077
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/lightning-goats
+TimeoutStartSec=30
+IPAddressDeny=10.0.0.0/8
+IPAddressDeny=172.16.0.0/12
+IPAddressDeny=192.168.0.0/16
+IPAddressDeny=169.254.0.0/16
+IPAddressDeny=fc00::/7
+IPAddressDeny=fe80::/10

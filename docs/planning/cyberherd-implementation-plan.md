@@ -1,0 +1,438 @@
+# CyberHerd implementation — operator decision, 2026-11-09
+
+This is the current implementation work, following the restored live Strike,
+feeding, Nostr and OBS path. It supersedes the older roadmap's deferral of
+CyberHerd; it does not resume Monero or change the paid ledger, physical owner,
+domain/WireGuard setup or existing receive-only daemon credential.
+
+## Authorities and explicit overrides
+
+The behavioral reference is
+[the current explanation](https://github.com/lightning-goats/cyberherd_extension/blob/main/cyberherd_explanation.md),
+pinned at file-changing commit `92ecf6c52482de17d404dbf2def3c71213408140`.
+The raw UTF-8 file has SHA256
+`e56c6793ed0687e4fcac7df54dac48a375673308dc65e988e0dcd987af46e67a`.
+Implementation and tests in that extension are behavioral references; LNbits
+framework code and credentials are not new runtime dependencies. Local ownership
+remains defined by [the Phase 2 boundary](../architecture/cyberherd-phase2-boundary.md).
+
+Operator instructions take precedence where the reference differs:
+
+- **Membership never requires NIP-05.** Signed-event identity remains mandatory;
+  a payout address must still be valid before paying. Free social entry retains
+  its Lightning-address requirement. Zap displacement provides the incentive.
+- **The operator-selected CyberHerd capacity is three users**, not ten
+  (2026-11-11). New deployment configuration uses three slots. Existing stored
+  settings require an explicit audited settings change; changing a configuration
+  seed alone does not update an existing owner or authorize implicit eviction.
+- **Rewards follow confirmed feedings.** There is one reward opportunity per
+  confirmed feeder UUID. Reaching a balance threshold, receipt/command acceptance,
+  failed/paused requests or uncertain outcomes do not authorize distribution.
+  Do not port the legacy three-feed/four-distribution batch rule or introduce
+  debits for food that was not delivered. Existing feed credit, queue and local
+  caps remain under the current daemon/gateway/owner authority.
+- **Payout settings selected on 2026-11-11:** allocate 10%, with at most
+  100 sats spent per confirmed feeding and 1,000 sats per rolling 24 hours,
+  including fees; deliver at most 100 sats per payment and allow at most 100 new
+  payout/signing requests per hour. Strike's actual quoted fee is deducted from
+  each member's gross share, with no separate fixed fee ceiling. A 100-sat share
+  with a 2-sat fee delivers 98 sats and consumes 100 sats. Skip an unaffordable
+  share; unused allocation remains with operations. These settings do not
+  authorize live payouts. The inclusive-fee worker and persistence integration
+  are implemented and source-qualified separately; combined feeder-cap validation,
+  actual-host schema maintenance and live acceptance remain required.
+- **Operator correction, 2026-11-11:** at most three physical feedings per payment,
+  then clear the capped batch's excess feeder credit through an auditable
+  non-feeding retirement. One feeding announcement per payment, across all
+  confirmations/retries. Preserve the full receipt, actual confirmed feeds and
+  other donors' credit. See [the repair contract](../deployment/per-payment-feeder-cap.md).
+- **First rewards start with future confirmed feedings only** (2026-11-14).
+  The operator declined retrospective rewards. Use an audited activation cutoff
+  that also covers historical feeding inputs still deferred/unreceived; do not
+  merely skip already planned/frozen examples. Preserve feed-credit accounting,
+  original UUIDs and snapshots, and refuse existing financial-claim conflicts.
+  See the [actual candidate and historical decision](../testing/cyberherd-financial-candidate-live-staging-20261114.md)
+  and [cutover implementation boundary](../architecture/cyberherd-initial-reward-cutover.md).
+- Preserve the existing 10-sat payment-announcement floor; smaller legitimate
+  settled zaps can update an active member's score without a payment announcement.
+  Social notifications are separate from payment announcements.
+- Weather/information remain overlay-only. Existing scrolling messages have no
+  paused prefix; the prominent paused/queued banner remains. CyberHerd adds only
+  its specifically defined public event categories.
+
+The uploaded original OBS artwork is already deployed and must be retained.
+
+The operator-supplied legacy template export is imported as
+`templates/cyberherd-legacy.json`: 50 categories, 653 variants. The original export
+SHA256 is `aeed7d7c1b6c08e577ae8635f4b55fab2b0bec6efb7f4158741f0f687be51361`.
+Only wording is imported; the two structured thank-you entries contribute their
+`content`, without importing per-template relay routing. Rendering normalizes the
+single known `{new_amount:g}` modifier to a simple placeholder with an already
+formatted numeric value. No Python expression, attribute or indexed access runs.
+The behavioral messaging reference is
+[`cyberherd_messaging`](https://github.com/lightning-goats/cyberherd_messaging).
+Payment/feed/information pools now use this export in the feature source. The
+operator explicitly retains optional goat naming: selected variants containing
+`{goat_name}` name a goat; generic variants remain generic, without an appended
+name. Selection varies across events and stays stable on retries. Payment notices
+still require 10 sats; information/weather remain overlay-only. This source change
+does not claim installation on the live service.
+
+## Runtime and money boundaries
+
+Implement a separate `cyberherdd` trust domain for identity/target ingestion,
+durable membership/interaction state, reward planning and presentation. Keep
+`lightning-goatsd` receive-only and independent of membership availability.
+Outbound Strike authority belongs only to a separately configured
+`cyberherd-payoutd`, without public ingress, an OpenHAB token or feeder commands.
+All components use root-owned installed code/config and non-admin identities.
+Nostr signing remains with the household nak/NIP-46 bunker.
+
+Core settlement and feeder records are authoritative. A social action or relay
+receipt cannot mint feed credit, forge a settlement, or reserve physical work.
+Any local event/API bridge must expose bounded authenticated roles, prohibit
+forged payment/feed events, and preserve source identities and replay protection.
+CyberHerd must not gain writable access to the core financial store or a generic
+trusted-network proxy. New source stays isolated from the running services until
+its actual installation/activation is selected.
+
+Payout plans consume actual reserved funds, not an assumed wallet balance or
+synthetic operator credit. Operator-funded reward reserves, if supported, require
+their own explicit auditable funding authority; do not fabricate provider receipts.
+Remainders and fees cannot overspend the configured member allocation. The goat
+portion stays assigned to operations; no implicit balance/sweep-policy change.
+
+## Complete behavior to implement and verify
+
+The list is the full port contract, not a completion claim for an initial slice.
+
+1. **Membership and exact arithmetic:** configurable joining minimum/capacity/member
+   pool; no NIP-05 requirement; validated identities/addresses; active-member
+   positive zap increases; zap-first displacement, strict exceed-lowest for paid
+   members, repost replacement of zero-zap members, and no reaction headbutts.
+   Eviction resets current zap score and preserves cycle social awards/lifetime
+   history. Bans require explicit unban. Zero configured allocations stay zero.
+2. **Points and shares:** weights `10*zap_sats + max(1,minimum)*(3*repost + like)`;
+   first social types once per owner/pubkey/cycle across all targets, pre-join
+   evidence promoted once after successful admission, no extra reconciliation
+   message, replay-safe rejection, and no free re-entry using an already awarded
+   type. Shares use exact six-decimal micro-percentages with stable largest
+   remainders, matching legacy `services/shares.py`; only eligible active payout
+   addresses divide the member pool. No extra per-slot reservation.
+3. **Durable cycles:** transactional membership/score/award/event updates;
+   owner isolation; immutable source identities; distinct settled invoices count
+   separately even if their signed zap request is reused. Daily local-time reset
+   uses operator-selected `America/Denver` (Mountain time, including DST), is
+   optional and catches up before work after downtime. The same calendar decides
+   which announcement is today's note. Manual
+   reset is atomic, starts a new cycle and emits no public daily-reset notice.
+   Neither reset erases the core paid ledger or enables pre-reset replay.
+   Manual edits/removals/activations are auditable and idempotent.
+4. **Authenticated targets and profiles:** discover one current-day tagged project
+   announcement, one latest live 30311 stream, and its signed linked 9041 goal;
+   prefer the announcement associated with the stream goal. Preserve older
+   versions of the same stream as aliases. Project signatures, NIP-53 host proof
+   or the fixed supported provider metadata establish host authority; an arbitrary
+   host tag/URL is insufficient. Newer ended/stale updates cannot be reverted by
+   older live events. Live streams can cross local midnight while fresh.
+5. **Nostr ingestion and pause recovery:** bounded reconnect/backfill and separate
+   OR queries for `e`/`a` references; valid kinds 6/7 and stream kind-16 reposts;
+   positive reactions only; chat text earns no points. While override is ON,
+   unknown or unavailable, defer membership changes and membership-thread posts
+   without claiming work as applied. On resumption refresh targets first, then
+   replay only still-active targets/aliases. Stale deferred work receives a
+   minimal durable discard receipt; unavailable discovery must not discard it.
+   Active ordinary member zaps retain their broader project-content eligibility.
+6. **Native incoming NIP-57:** optional authenticated zap request on LNURL callback,
+   invoice description hash bound to its exact saved bytes, source payee/amount/
+   note or stream identity validation before provider contact, immutable context,
+   authoritative Strike settlement and exact-once membership consumption. Relay
+   receipts alone never credit money or points. Financial validity does not
+   depend on profile fetch, membership admission, pause state or payout health.
+   Publish any supported incoming receipt from a dedicated durable payment-receipt
+   intent; retain ordinary Lightning compatibility and existing ingress limits.
+7. **Confirmed-feeding reward plans:** stable owner/feed UUID deduplication, frozen
+   eligible roster/points/shares/fees and real funding evidence; no distribution
+   for merely funded credit or ambiguous feeding. Payment processing preceding a
+   confirmation must be classified before freezing its reward plan. Whole-sat
+   rounding and fee/recipient minima skip unaffordable shares with no carry-forward
+   member balance; unused allocation remains for goats. Shared/ambiguous recipient
+   addresses and operator transfers do not create false member treat notices.
+8. **Isolated outgoing payments:** bounded credential and spending policy; persisted
+   intents, provider correlation/idempotency and reconciliation before retry;
+   unknown submission outcomes never get a fresh payment. Recipient LNURL fetching
+   is SSRF/redirect/body/time bounded. When NIP-57 is supported, freeze/sign 9734
+   before invoice request, use its exact description hash, exact whole-sat amount,
+   expiry and valid mainnet signature. Never publish 9734 directly to relays or
+   silently downgrade a supported recipient on failure. Record unsupported-recipient
+   ordinary-Lightning fallback. Only authoritative settled payout state authorizes
+   a treat notice; recipient 9735 receipt publication is separate evidence.
+9. **Messages and exact delivery:** editable safe templates preserving custom edits
+   and intentional deletions; frozen per-interaction contribution increments,
+   cumulative score/percentages and capacity. Changed-allocation compact roster
+   footer is part of the same message, with names and no extra mentions. Duplicate
+   and unchanged allocations do not emit another footer. Payout messages use their
+   own frozen payout breakdown. Interaction identity is owner/member/source-scoped
+   across live/recovery/type aliases and `msg:` aliases; never re-sign a retry.
+   Optional no-treat repost suggestions appear only without an already-earned
+   repost award and at most once per owner/member/membership cycle.
+10. **Conversation destinations:** regular per-user note thread plus active-stream
+    kind-1311 chat per interaction, one WebSocket copy with human display names.
+    Treats retain the original associated note/member thread; wait for real joining
+    receipts rather than inventing anchors, independently of money movement.
+    Feed announcements preserve historical templates and one active-stream copy;
+    no command-acceptance/batch/uncertainty diagnostics become public food claims.
+    Stream replies retain stable `a` root and direct joining-message `e` reply;
+    separate branches share one score and survive stream changes/restarts.
+11. **Optional lifecycle messages:** authenticated live-stream invitation at most
+    once per two hours per stream, confirmed unpaused only, with template opt-out.
+    Durable ordered pause/resume notices once per destination, quiet initial OFF,
+    initial ON announcement, and unknown readings never announcing resumption.
+    Evening wording uses sanitized gateway solar context or conservative local
+    time fallback, never operates the feeder/stream, never repeats due to changing
+    daylight, and can use an authenticated stream ended within 15 minutes.
+12. **Interfaces and operations:** readonly roster/targets/scores API and live OBS
+    cards; browser Nostr identity through the existing extension/bunker flow,
+    never raw nsec; authenticated operator settings/templates/member/reset tools;
+    separate daemon/payout units and credentials, reviewed inactive installation,
+    restart/restore/idempotency evidence and explicit live financial activation.
+    Daily CyberHerd announcement publication remains a separate process; missing
+    today's valid note does not cause the membership worker to fabricate one.
+
+## Work sequence and evidence
+
+- Domain/state: exact points, headbutts, pre-join evidence, transactional replay,
+  pause/defer/discard and reset behavior, with source-reference regression fixtures.
+- Protocol/bridge: signatures/target authentication, incoming zap-bound invoices,
+  core event export and capability-limited CyberHerd event import, cursor recovery.
+- Isolated rewards: confirmed-feed funding reservation, frozen planning, guarded
+  outgoing invoice/provider adapters and ambiguity-safe reconciliation.
+- Presentation: persisted custom templates, frozen note/chat/receipt outboxes,
+  human-name overlay roster, operator/client interfaces and lifecycle messages.
+- Operations: all required Rust checks, security gate with known findings reported,
+  relevant integration/browser/sandbox tests, clean source-pinned artifacts and
+  truthful inactive/live acceptance. Never claim a passing plan or domain test
+  proves external transfers or the full port is finished.
+
+Track evidence for every numbered requirement and explicit operator override in
+the [full-port acceptance inventory](../testing/cyberherd-acceptance-matrix.md).
+The active thread goal stays open until the requested implementation is complete
+and verified; partial engines/models or a plan alone do not satisfy it.
+
+## Current source checkpoint — incomplete port
+
+The current upstream explanation was re-read and its raw SHA256 still matches
+the pinned reference above. The
+[actual inactive installation](../testing/cyberherd-live-inactive-installation-20261110.md)
+now provisions the three separate masked roles and fresh journals on the VPS,
+after approved core maintenance. It preserves the existing receive process/config
+and leaves every new worker, financial budget and publication path disabled.
+Actual runtime/household/provider/browser/recovery qualification remains open.
+
+The later [overlay-stage preparation checkpoint](../testing/cyberherd-overlay-stage-checkpoint-20261110.md)
+records actual native-validated candidate configuration and independent host
+readback without installed configuration or service changes. The proposed stage
+omits rewards, payout execution and membership public signing. Its maintenance
+executor, activation and installed presentation/settlement checks remain open.
+
+The later [maintenance checkpoint](../testing/cyberherd-overlay-maintenance-checkpoint-20261110.md)
+qualifies the complete native/systemd executor on isolated synthetic journals and
+records the protected actual-VPS plan, operator-approved apply, pre-start refusal
+of an inherited Fedora timeout policy, and successful original-core recovery.
+The bounded correction then passed exact CI and installed rehearsal. The
+[successful live stage](../testing/cyberherd-live-overlay-stage-20261110.md)
+verified a new native backup and started core plus overlay-only membership under
+the existing approval. Public OBS roster delivery passes actual browser readback;
+reaction/zap admission, settlement/receipt and member-message acceptance remain
+open. Both outgoing roles and membership Nostr publishing remain disabled.
+
+The [live social intake](../testing/cyberherd-live-social-intake-20261110.md)
+subsequently recovered current and earlier users' reaction/repost awards, exact
+OBS messages/cards and restart idempotency. The
+[public read-only site](../testing/cyberherd-live-readonly-site-20261110.md) now
+serves the leaderboard, exact roster API and target links with actual browser/WAF
+verification. Operator routes, membership public Nostr and payouts remain disabled.
+Incoming paid zap/receipt and the other full-port acceptance steps remain open.
+
+The subsequent [installed OS checkpoint](../testing/cyberherd-installed-qualification-checkpoint-20261110.md)
+passes the exact authenticated fourteen-file tool in disposable CI and on the
+actual host, using synthetic Python probes with unchanged application journals
+and receive process. Actual Rust workers/socket, production DNS/global-firewall,
+household, provider, browser, recovery adoption and activation remain separate.
+
+The [495-test installation checkpoint](../testing/cyberherd-installation-checkpoint-20261110.md)
+records the prepared core transaction, disabled-role installer, separate
+credential/client preparation and actual native initialization/NSS/masks on a
+disposable systemd VM. It fixes main-only backup inspection while retaining real
+WAL commits. No actual live-host installation or financial activation is implied.
+The subsequent [combined core transaction checkpoint](../testing/cyberherd-core-transaction-checkpoint-20261110.md)
+verifies actual systemd masking/restoration and migration as the original UID
+on synthetic paid/pending/signed state. Live maintenance remains operator-directed.
+
+The [494-test checkpoint](../testing/cyberherd-core-upgrade-checkpoint-20261110.md)
+adds [native pre-CyberHerd core backup and migration comparison](../deployment/cyberherd-core-upgrade.md)
+before the actual paid-store upgrade. It is not the installer, migration or
+restart transaction and cannot restore or activate financial/physical work.
+Subsequent source prepares the [explicit stopped-core upgrade transaction](../deployment/cyberherd-core-upgrade.md)
+and [fresh disabled-role installer](../deployment/cyberherd-inactive-installation.md).
+Their installed acceptance remains required; no actual host mutation is implied.
+
+The [492-test checkpoint](../testing/cyberherd-bootstrap-checkpoint-20261110.md)
+adds [fresh offline journal initialization](../deployment/cyberherd-offline-initialization.md)
+for the reviewed inactive installation. It takes no credentials and cannot open
+an existing journal, start workers or authorize financial/physical activation.
+
+The [491-test checkpoint](../testing/cyberherd-state-maintenance-checkpoint-20261110.md)
+adds [native four-journal retention and recovery staging](../deployment/cyberherd-state-maintenance.md).
+It preserves original scopes and signed bytes, requires stopped/masked writers
+and blocks restored store startup pending external reconciliation. This does not
+qualify installed recovery adoption or financial resumption.
+
+The isolated `feat/cyberherd-20261109` source currently contains:
+
+- Exact points/shares, admission/headbutts, social awards and pre-join evidence,
+  replay protection, bans and Mountain-time cycle resets in a separate store.
+- Imported safe editable templates with deletion tombstones and optional goat
+  naming. Payment announcements retain the 10-sat floor; information/weather
+  remain overlay-only.
+- Optional [native incoming zaps and receipts](../architecture/native-nip57.md),
+  [authenticated targets/profiles](../architecture/cyberherd-ingress.md), and
+  [ordered intake](../architecture/cyberherd-worker.md) through the bounded
+  [private core bridge](../architecture/cyberherd-core-bridge.md). Real settlement
+  and feeder evidence remain independent of membership or relay availability.
+- [Confirmed-feeding planning](../architecture/cyberherd-reward-planning.md) and
+  [core funding reservations](../architecture/cyberherd-reward-funding.md) with
+  frozen eligible payees, fees, source evidence and allocations. Virtual credit
+  cannot authorize payouts, and no member reward balance carries forward.
+- An independent [payout journal](../architecture/cyberherd-payout-journal.md),
+  [source qualification](../architecture/cyberherd-payout-authority.md),
+  [invoice validation](../architecture/cyberherd-outgoing-invoices.md),
+  [provider execution/recovery](../architecture/cyberherd-provider-execution.md),
+  [core outcome verification](../architecture/cyberherd-payout-outcomes.md) and
+  [separate worker/signing broker](../architecture/cyberherd-payout-runtime.md).
+  Unknown execution recovers only its original quote/payment. Failed or uncertain
+  costs remain held. The receive core never loads the spend key.
+- [Core execution claims](../architecture/cyberherd-execution-claims.md) before
+  provider submission, including actual payout-only snapshot rollback fixtures.
+  Missing original history stays held; matching history recovers the same payment
+  even after quote expiry. The [425-test checkpoint](../testing/cyberherd-execution-claims-checkpoint-20261110.md)
+  records this source verification and its wider restore limits.
+- [Final verified result handoff](../architecture/cyberherd-verified-results.md)
+  to membership, with atomic exact receipts and frozen per-member payout
+  breakdowns. The [429-test checkpoint](../testing/cyberherd-results-checkpoint-20261110.md)
+  records the verified accounting-to-presentation boundary.
+- Subsequent [member conversation/delivery source](../architecture/cyberherd-member-delivery.md):
+  admission and feeding-frozen branches, editable outgoing zap text and real
+  joining-reference reads, plus optional exact note/chat/overlay outboxes.
+  Replies wait for actual joining publication receipts. Verified human-name
+  overlay notices remain independent during overlay-only staging. Public signing
+  and publishing require confirmed unpaused/public status. The
+  [439-test checkpoint](../testing/cyberherd-member-delivery-checkpoint-20261110.md)
+  records source verification, not production activation.
+
+The payment announcement deduplication and triggering-payment amount corrections
+are retained without changing the original legacy export or custom templates.
+The uploaded OBS artwork, base feed-credit accounting and feeder owner remain
+unchanged. No new CyberHerd service or financial operation is installed or enabled
+by these source checkpoints. Keep the full PR draft while required work remains.
+
+Subsequent optional [lifecycle source](../architecture/cyberherd-lifecycle.md)
+adds an actual-override observer, ordered per-relay/destination notices, bounded
+live-stream invitations and sanitized gateway solar context. The
+[449-test checkpoint](../testing/cyberherd-lifecycle-checkpoint-20261110.md)
+records verified source and inactive artifacts. It remains disabled by default
+and does not establish production installation or public relay/bunker qualification.
+
+Subsequent [confirmed-feeding announcement source](../architecture/cyberherd-feeding-announcements.md)
+adds a default-off core presentation handoff, frozen herd summary, one note/chat/
+overlay per triggering payment and a correlated typed overlay import. The
+[458-test checkpoint](../testing/cyberherd-feeding-announcements-checkpoint-20261110.md)
+records verified source and inactive artifacts. It has not been installed or activated.
+
+Subsequent [read-only roster/OBS source](../architecture/cyberherd-public-roster.md)
+adds a disabled loopback cache API, exact ranked scores/shares, paginated static
+view and typed snapshot-safe OBS cards. Optional no-treat repost hints now use
+an atomic once-per-owner/member/cycle claim and preserve template opt-out. These
+additions passed the [466-test source checkpoint](../testing/cyberherd-roster-checkpoint-20261110.md),
+including browser/CLI/inactive archive checks; no installation or activation
+is implied by their presence.
+
+Subsequent [operator-interface source](../architecture/cyberherd-operator-interface.md)
+adds optional exact-request NIP-98 sign-in, self reads, root-pinned operator
+settings/template/member/reset commands and existing-signer browser controls.
+Atomic revisions, retained command receipts and core ordering fences protect
+manual changes and frozen feeding snapshots. The [476-test source checkpoint](../testing/cyberherd-operator-checkpoint-20261110.md)
+records completed Rust/browser/CLI/inactive artifact checks. These interfaces
+remain uninstalled/default-off.
+
+Remaining implementation and qualification includes feeder announcement,
+lifecycle, roster and operator-interface installed qualification.
+Subsequent [failed-cost recovery source](../architecture/cyberherd-failed-cost-recovery.md)
+adds protected operator financial reviews, fresh original-payment verification,
+append-only budget adjustments and exact payout-role receipts. Preview and
+recovery-open cannot initialize or migrate a selected journal; sender credentials
+are not loaded for synchronization. No production financial review has been
+applied. The [485-test source checkpoint](../testing/cyberherd-failed-cost-checkpoint-20261110.md)
+now records completed Rust/root-ownership/browser/CLI/inactive artifact checks.
+The legacy pair restore helper rejects CyberHerd schema; its historical process
+regression remains covered without claiming multi-journal recovery.
+
+Also required: concrete external recovery adoption,
+remaining global-network/helper/NIP-46/provider/browser qualification and
+explicit financial activation. The twelve numbered groups above
+remain the completion contract; a library fixture or green artifact build does
+not establish live behavior.
+
+The [installed native worker fixture](../deployment/cyberherd-worker-qualification.md)
+now passes isolated mixed-UID socket/restart and native snapshot checks in both
+disposable-systemd and actual-host runs. Its
+[source-pinned checkpoint](../testing/cyberherd-worker-qualification-checkpoint-20261110.md)
+retains unchanged production journals/receive process. Production workers remain
+masked and all financial/signing limits remain zero. Actual household/provider/
+browser, DNS/global containment, recovery adoption and activation remain separate.
+
+The subsequent [native recipient/DNS checkpoint](../testing/cyberherd-recipient-checkpoint-20261110.md)
+now passes actual public LNURL discovery and exact private IPv4/IPv6/mixed-answer
+refusal under the payout identity, with no credentials, invoice or provider call.
+It does not establish global firewall/forwarding or all recipients. Subsequent
+[household signing checks](../testing/cyberherd-bunker-checkpoint-20261110.md)
+pass membership 1/1311 and payout 9734 after the operator stopped a competing
+streaming-laptop bunker. Exact author/frozen fields/hash/signature verification
+and one conflict-free connect acknowledgment pass without key regeneration,
+public project events or financial operations. The subsequent
+[native incoming receipt signing checkpoint](../testing/cyberherd-zap-receipt-checkpoint-20261110.md)
+also passes actual kind 9735 with a synthetic invoice and no ledger/provider/
+publication operation. Live incoming settlement, public CyberHerd/receipt delivery,
+provider qualification and activation remain separate.
+
+A [SQLite binding backport](../security/sqlite-binding-backport.md) now has a
+[486-test source checkpoint](../testing/cyberherd-sqlite-checkpoint-20261110.md),
+including a passing dependency audit and native engine check. It preserves Rust
+1.88 and SQLx 0.8.6, retains exact published driver
+provenance and pins the fixed native binding without a SQLite advisory waiver.
+It does not update installed binaries. Subsequent native four-journal maintenance
+now has the [491-test checkpoint](../testing/cyberherd-state-maintenance-checkpoint-20261110.md);
+external recovery adoption and installation qualification remain unfinished.
+
+Earlier source-specific evidence remains available in the
+[351-test worker](../testing/cyberherd-worker-checkpoint-20261109.md),
+[359-test funding](../testing/cyberherd-funding-checkpoint-20261109.md),
+[373-test planning](../testing/cyberherd-planning-checkpoint-20261109.md),
+[388-test payout qualification](../testing/cyberherd-payout-funding-checkpoint-20261109.md),
+[394-test invoice](../testing/cyberherd-outgoing-invoice-checkpoint-20261110.md),
+[402-test provider](../testing/cyberherd-provider-checkpoint-20261110.md),
+[410-test outcome](../testing/cyberherd-outcome-checkpoint-20261110.md) and
+[420-test runtime](../testing/cyberherd-runtime-checkpoint-20261110.md) checkpoints.
+Those are historical source/fixture records, not descriptions of unfinished
+components that subsequent source has already implemented.
+
+## Additional operator website requirements — 2026-11-10
+
+The active request also includes the [website contact and live-zap contract](website-contact-and-zaps.md):
+visible leaderboard navigation, no NIP-05 header link, free authenticated Nostr
+contact with genuine sender identity, a separate private 100-sat fee with no feed/
+reward credit and required email when not logged in, and actual index chat zap notices. These are
+additional required work, not a replacement for the full twelve-part port. They
+remain unfinished until implementation and actual qualification/deployment pass.
+
+The [payment/chat release](../testing/website-payment-chat-checkpoint-20261110.md) passes exact CI and actual public acceptance. The [contact source checkpoint](../testing/website-contact-checkpoint-20261110.md) covers free sender-bound private DMs and exact ciphertext retries. The [separate fee source](../testing/website-contact-fee-checkpoint-20261111.md) passes native/browser CI, including authoritative mocked settlement, zero feeder credit and additive state comparison. The qualified executor passes installed native/systemd rehearsal and [actual VPS schema upgrade/resumption](../testing/private-contact-schema-live-20261111.md) with paid state preserved. The subsequent [actual contact release](../testing/private-contact-live-20261111.md) enables contact configuration, exact nginx ingress and the public form with current native backup, retained serving labels and desktop/mobile acceptance. Real paid-contact and recipient-side observation remain open; wider CyberHerd financial/publication gates are unchanged.

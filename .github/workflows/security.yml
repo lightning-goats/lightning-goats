@@ -2,7 +2,7 @@ name: Security
 
 on:
   push:
-    branches: [main]
+    branches: [main, fix/feeder-payment-cap-20261111]
   pull_request:
   workflow_call:
   schedule:
@@ -21,6 +21,8 @@ jobs:
           toolchain: "1.88"
       - name: Require committed lockfile
         run: test -f Cargo.lock
+      - name: Verify published SQLite driver backport
+        run: python3 deploy/scripts/verify-sqlite-vendor.py
       - name: Assert advisory RSA crate is unreachable
         shell: bash
         run: |

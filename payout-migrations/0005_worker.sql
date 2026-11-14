@@ -1,0 +1,13 @@
+CREATE TABLE payout_intake_binding(singleton INTEGER PRIMARY KEY CHECK(singleton=1),peer_uid INTEGER NOT NULL CHECK(peer_uid>0),through INTEGER NOT NULL CHECK(through>=0));
+CREATE TABLE payout_intake_receipts(sequence INTEGER PRIMARY KEY CHECK(sequence>0),plan_hash TEXT NOT NULL,request_id TEXT NOT NULL UNIQUE,grant_id TEXT UNIQUE REFERENCES payout_grants(id));
+CREATE TABLE payout_worker_clock(singleton INTEGER PRIMARY KEY CHECK(singleton=1),sequence INTEGER NOT NULL CHECK(sequence>=0));
+INSERT INTO payout_worker_clock VALUES(1,0);
+CREATE TABLE payout_worker_attempts(work_key TEXT PRIMARY KEY,sequence INTEGER NOT NULL CHECK(sequence>0));
+CREATE TRIGGER monotone_payout_intake BEFORE UPDATE ON payout_intake_binding WHEN NEW.singleton IS NOT OLD.singleton OR NEW.peer_uid IS NOT OLD.peer_uid OR NEW.through<OLD.through BEGIN SELECT RAISE(ABORT,'intake binding is immutable; cursor is monotone'); END;
+CREATE TRIGGER retained_payout_intake BEFORE DELETE ON payout_intake_binding BEGIN SELECT RAISE(ABORT,'intake binding is retained'); END;
+CREATE TRIGGER immutable_payout_intake_receipts BEFORE UPDATE ON payout_intake_receipts BEGIN SELECT RAISE(ABORT,'intake receipt is immutable'); END;
+CREATE TRIGGER retained_payout_intake_receipts BEFORE DELETE ON payout_intake_receipts BEGIN SELECT RAISE(ABORT,'intake receipt is retained'); END;
+CREATE TRIGGER monotone_worker_clock BEFORE UPDATE ON payout_worker_clock WHEN NEW.singleton IS NOT OLD.singleton OR NEW.sequence<=OLD.sequence BEGIN SELECT RAISE(ABORT,'worker sequence must advance'); END;
+CREATE TRIGGER retained_worker_clock BEFORE DELETE ON payout_worker_clock BEGIN SELECT RAISE(ABORT,'worker sequence is retained'); END;
+CREATE TRIGGER monotone_worker_attempt BEFORE UPDATE ON payout_worker_attempts WHEN NEW.work_key IS NOT OLD.work_key OR NEW.sequence<=OLD.sequence BEGIN SELECT RAISE(ABORT,'worker attempt must advance'); END;
+CREATE TRIGGER retained_worker_attempt BEFORE DELETE ON payout_worker_attempts BEGIN SELECT RAISE(ABORT,'worker attempt is retained'); END;

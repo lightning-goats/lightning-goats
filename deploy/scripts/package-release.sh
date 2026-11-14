@@ -23,8 +23,9 @@ for binary in lightning-goatsd lightning-goatsctl lightning-goats-gateway; do
     install -m 0755 "$BIN_DIR/$binary" "$STAGE/$binary"
     install -m 0755 "$BIN_DIR/$binary" "$OUTPUT/$binary"
 done
-cp -R "$REPO/deploy" "$REPO/docs" "$REPO/web" "$STAGE/"
-cp "$REPO/AGENTS.md" "$REPO/Cargo.lock" "$STAGE/"
+cp -R "$REPO/deploy" "$REPO/docs" "$REPO/web" "$REPO/migrations" "$REPO/vendor" "$STAGE/"
+cp "$REPO/AGENTS.md" "$REPO/Cargo.lock" "$REPO/Cargo.toml" "$STAGE/"
+python3 "$REPO/deploy/scripts/verify-sqlite-vendor.py" "$STAGE"
 {
     printf 'source_commit=%s\nversion=%s\ntarget=x86_64-unknown-linux-gnu\n' "$SOURCE" "$VERSION"
     rustc --version --verbose

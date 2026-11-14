@@ -77,7 +77,28 @@ pub(crate) async fn connect_durable(
     database_url: &str,
     max_connections: u32,
 ) -> Result<SqlitePool> {
-    let options = durable_options(database_url)?;
+    connect_options(durable_options(database_url)?, max_connections).await
+}
+
+/// Recovery may open an existing store, but must not recreate one removed after
+/// its protected-path checks or while SQLx opens another connection.
+pub(crate) async fn connect_existing_durable(
+    database_url: &str,
+    max_connections: u32,
+) -> Result<SqlitePool> {
+    connect_options(
+        durable_options(database_url)?.create_if_missing(false),
+        max_connections,
+    )
+    .await
+}
+
+async fn connect_options(
+    options: SqliteConnectOptions,
+    max_connections: u32,
+) -> Result<SqlitePool> {
+    #[cfg(unix)]
+    check_recovery_marker(options.get_filename())?;
     // Fail deterministic storage errors before the pool's after_connect retry
     // loop, and before either caller creates tables or runs migrations.
     let mut preflight = SqliteConnection::connect_with(&options)
@@ -95,10 +116,82 @@ pub(crate) async fn connect_durable(
         .context("failed opening durable SQLite pool")
 }
 
+#[cfg(unix)]
+fn check_recovery_marker(database: &std::path::Path) -> Result<()> {
+    let parent = database.parent().context("database parent is missing")?;
+    match std::fs::symlink_metadata(parent.join(crate::state_maintenance::RECOVERY_MARKER)) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+        Ok(_) => bail!("restored journal requires explicit external reconciliation before startup"),
+    }
+}
+
+/// Recovery tools never initialize/upgrade a selected database. Its complete
+/// successful migration history must already match this reviewed binary.
+pub(crate) async fn require_current_schema(
+    pool: &SqlitePool,
+    migrator: &sqlx::migrate::Migrator,
+) -> Result<()> {
+    let rows =
+        sqlx::query("SELECT version,success,checksum FROM _sqlx_migrations ORDER BY version")
+            .fetch_all(pool)
+            .await?;
+    let expected: Vec<_> = migrator.iter().collect();
+    if rows.len() != expected.len() {
+        bail!(
+            "recovery requires the already-installed current schema; it cannot initialize or migrate a database"
+        );
+    }
+    for (row, migration) in rows.iter().zip(expected) {
+        if row.try_get::<i64, _>("version")? != migration.version
+            || !row.try_get::<bool, _>("success")?
+            || row.try_get::<Vec<u8>, _>("checksum")?.as_slice() != migration.checksum.as_ref()
+        {
+            bail!("recovery schema history is dirty, changed or unsupported");
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn native_engine_is_the_reviewed_sqlite_release_with_the_wal_memory_fix() {
+        let directory = TempDir::new().unwrap();
+        let url = format!("sqlite://{}/engine.db", directory.path().display());
+        let pool = connect_durable(&url, 1).await.unwrap();
+        let version: String = sqlx::query_scalar("SELECT sqlite_version()")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            version, "3.54.1",
+            "the executable must use the reviewed patched native engine, not a manifest-only or system-library substitution"
+        );
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn existing_only_open_cannot_recreate_a_database_after_path_validation() {
+        let directory = TempDir::new().unwrap();
+        let path = directory.path().join("missing.db");
+        let url = format!("sqlite://{}", path.display());
+        assert!(connect_existing_durable(&url, 1).await.is_err());
+        assert!(!path.exists());
+        let pool = connect_durable(&url, 1).await.unwrap();
+        pool.close().await;
+        connect_existing_durable(&url, 1)
+            .await
+            .unwrap()
+            .close()
+            .await;
+        std::fs::remove_file(&path).unwrap();
+        assert!(connect_existing_durable(&url, 1).await.is_err());
+        assert!(!path.exists());
+    }
 
     #[tokio::test]
     async fn every_pool_connection_enforces_effective_durability() {

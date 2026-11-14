@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import sys
 import time
+from urllib.parse import parse_qs, urlparse
 
 args = sys.argv[1:]
 assert args[0] == "--config-path"
@@ -25,6 +26,8 @@ phase = "verify" if args[0] == "verify" else ("publish" if "--sec" in args else 
 with (root / "calls.jsonl").open("a") as stream:
     stream.write(json.dumps({"phase": phase, "payload": payload,
         "has_client_key": bool(os.environ.get("NOSTR_CLIENT_KEY")),
+        "bunker_relays": parse_qs(urlparse(os.environ.get("NOSTR_SECRET_KEY", "")).query).get("relay", []),
+        "relay_args": [arg for arg in args if arg.startswith("wss://")],
         "has_signer_uri": bool(os.environ.get("NOSTR_SECRET_KEY"))}) + "\n")
 if mode == "nonzero_secret":
     sys.stderr.write(os.environ.get("NOSTR_CLIENT_KEY", "") + "\n")
@@ -43,6 +46,16 @@ if phase == "publish":
     if mode == "mutated_publish":
         payload["content"] = "different published event"
     print(json.dumps(payload))
+    sys.exit(0)
+if mode.startswith("protocol_"):
+    event = json.loads((root / "protocol-event.json").read_text())
+    if mode == "protocol_wrong_signature":
+        event["sig"] = "00" * 64
+    if mode == "protocol_mutated_created":
+        event["created_at"] += 1
+    if mode == "protocol_malformed_secret":
+        event["created_at"] = os.environ.get("NOSTR_CLIENT_KEY", "")
+    print(json.dumps(event))
     sys.exit(0)
 # Simulate a signer echoing the exact requested message; not a real signature.
 event = dict(payload)

@@ -1,0 +1,44 @@
+[Unit]
+Description=Native synthetic incoming zap receipt signing; no payment or publication
+
+[Service]
+Type=oneshot
+User=lightning-goats
+Group=lightning-goats
+ExecStart=/usr/local/libexec/lightning-goats-check-zap-receipt --synthetic-receipt-signing-only
+LoadCredentialEncrypted=nostr-client-key:/etc/credstore.encrypted/lightning-goats-nostr-client
+RuntimeDirectory=lightning-goats-zap-receipt-check
+RuntimeDirectoryMode=0700
+UMask=0077
+LimitCORE=0
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectProc=invisible
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+InaccessiblePaths=-/run/credentials/lightning-goats-receive.service -/etc/credstore.encrypted -/etc/lightning-goats -/var/lib/lightning-goats -/etc/cyberherd -/var/lib/cyberherd -/etc/cyberherd-payout -/var/lib/cyberherd-payout -/etc/cyberherd-signer -/var/lib/cyberherd-signer -/run/lightning-goats-bridge -/run/cyberherd-plans -/run/cyberherd-signer
+IPAddressDeny=10.0.0.0/8
+IPAddressDeny=172.16.0.0/12
+IPAddressDeny=192.168.0.0/16
+IPAddressDeny=169.254.0.0/16
+IPAddressDeny=fc00::/7
+IPAddressDeny=fe80::/10
+MemoryMax=256M
+MemorySwapMax=0
+TasksMax=64
+TimeoutStartSec=120
+TimeoutStopSec=10

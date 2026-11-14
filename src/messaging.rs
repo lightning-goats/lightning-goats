@@ -38,6 +38,10 @@ pub async fn process_next_message(
         return Ok(MessageProcessorStep::PublicationDisabled { seq: event.seq });
     }
 
+    if !ledger.feeding_announcement_allowed(event.seq).await? {
+        ledger.advance_message_cursor(event.seq).await?;
+        return Ok(MessageProcessorStep::NonPublicSkipped { seq: event.seq });
+    }
     let rendered = renderer.render(&event, threshold_sats)?;
     let Some(content) = rendered.nostr_content else {
         ledger.advance_message_cursor(event.seq).await?;

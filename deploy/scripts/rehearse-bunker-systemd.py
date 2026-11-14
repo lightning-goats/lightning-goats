@@ -58,7 +58,8 @@ def main(nak_path):
     checked(["ip", "link", "set", "lo", "up"])
     template = HERE.parent / "systemd/lightning-goats-nostr-bunker.service"
     properties = SANDBOX.service_properties(template)
-    with tempfile.TemporaryDirectory(prefix="lg-bunker-rehearsal-", dir="/run") as temp:
+    # Executable copies use disk-backed storage; RuntimeDirectory remains /run.
+    with tempfile.TemporaryDirectory(prefix="lg-bunker-rehearsal-", dir="/var/lib") as temp:
         root = Path(temp)
         root.chmod(0o755)
         unit = root.name + ".service"

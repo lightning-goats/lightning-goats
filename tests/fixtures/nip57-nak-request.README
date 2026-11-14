@@ -1,0 +1,15 @@
+Public synthetic NIP-57 request, signed and independently verified offline using
+the installed nak v0.20.6. Event ID:
+a749d6a0132f69e5e4d8318706909066ef3e4e45be4a5cafa1a85c05747f4c75
+
+The fixture uses publicly known repeated-byte synthetic keys 0x01 (sender) and
+0x02 (payee), identical to the Rust tests' dummy-key convention. It contains no
+production credential, real invoice or proof of payment. Signing/verification
+used an isolated temporary config directory and no publication relays.
+
+The input froze kind 9734, created_at 1700000000, the displayed content/tags.
+nak event signed those exact fields; nak verify accepted the result. The JSON
+fixture is pretty-printed but retains the original signed fields. Its Unicode,
+line break, quotes, backslash and tab exercise canonical NIP-01 interoperability
+independently of the Rust signing helper. Native ZapRequest binds an invoice to
+the exact raw fixture bytes, including whitespace and trailing newline.

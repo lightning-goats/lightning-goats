@@ -27,6 +27,10 @@ pub struct AppConfig {
     pub gateway: IntegrationGatewayConfig,
     pub informational: InformationalConfig,
     pub nostr: NostrConfig,
+    #[serde(default)]
+    pub core_bridge: Option<crate::core_bridge::BridgeConfig>,
+    #[serde(default)]
+    pub contact: Option<crate::contact::Config>,
 }
 
 impl AppConfig {
@@ -67,6 +71,15 @@ impl AppConfig {
         validate_gateway_origin(&self.gateway.url)?;
         self.validate_informational()?;
         self.validate_nostr()?;
+        if let Some(contact) = &self.contact {
+            contact.validate(&self.nostr.bunker_pubkey)?;
+            if !self.service.mode.nostr_enabled() {
+                bail!("private contact delivery requires active mode");
+            }
+        }
+        if let Some(bridge) = &self.core_bridge {
+            bridge.validate()?;
+        }
         Ok(())
     }
 
@@ -132,6 +145,32 @@ impl AppConfig {
                 bail!("Phase 1 Lightning Address registry is missing required user {required}");
             }
         }
+        if let Some(zap) = &self.lnurl.zap {
+            crate::nostr_event::validate_public_key(&zap.receipt_pubkey)?;
+            if zap.receipt_pubkey != self.nostr.bunker_pubkey {
+                bail!("LNURL receipt pubkey must match the configured remote signer");
+            }
+            if zap.payee_pubkeys.is_empty()
+                || zap.payee_pubkeys.len() > self.lightning_address.len()
+            {
+                bail!("LNURL zaps require an explicit configured-user payee registry");
+            }
+            for (user, pubkey) in &zap.payee_pubkeys {
+                if !users.contains(user.as_str()) {
+                    bail!("zap payee registry contains an unknown Lightning address user");
+                }
+                crate::nostr_event::validate_public_key(pubkey)?;
+            }
+            if zap.alias_origins.len() > 8 {
+                bail!("too many zap LNURL alias origins");
+            }
+            for raw in &zap.alias_origins {
+                let url = crate::public_network::validate_destination(raw, "https")?;
+                if url.path() != "/" || url.query().is_some() {
+                    bail!("zap alias must be a root HTTPS origin");
+                }
+            }
+        }
         Ok(())
     }
 
@@ -182,7 +221,10 @@ impl AppConfig {
         if self.nostr.relays.is_empty() {
             bail!("nostr.relays must contain at least one relay");
         }
-        for relay in &self.nostr.relays {
+        if self.nostr.bunker_relays().is_empty() {
+            bail!("nostr.bunker_relays must contain at least one relay when specified");
+        }
+        for relay in self.nostr.relays.iter().chain(self.nostr.bunker_relays()) {
             let parsed =
                 Url::parse(relay).with_context(|| format!("invalid Nostr relay URL {relay}"))?;
             if parsed.scheme() != "wss" || parsed.host_str().is_none() {
@@ -242,6 +284,16 @@ pub struct StrikeConfig {
 pub struct LnurlConfig {
     pub public_base_url: String,
     pub invoice_expiry_seconds: u64,
+    #[serde(default)]
+    pub zap: Option<ZapConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ZapConfig {
+    pub receipt_pubkey: String,
+    pub payee_pubkeys: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
+    pub alias_origins: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -274,13 +326,23 @@ pub struct InformationalConfig {
     pub weather_probability: f64,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct NostrConfig {
     pub nak_path: PathBuf,
     pub nak_config_path: PathBuf,
     pub bunker_pubkey: String,
     #[serde(default)]
     pub relays: Vec<String>,
+    /// Optional NIP-46 transport relays, independent from announcement delivery.
+    #[serde(default)]
+    pub bunker_relays: Option<Vec<String>>,
+}
+
+impl NostrConfig {
+    #[must_use]
+    pub fn bunker_relays(&self) -> &[String] {
+        self.bunker_relays.as_deref().unwrap_or(&self.relays)
+    }
 }
 
 fn validate_gateway_origin(raw: &str) -> Result<()> {
@@ -356,6 +418,7 @@ mod tests {
             lnurl: LnurlConfig {
                 public_base_url: "https://lightning-goats.com/".to_owned(),
                 invoice_expiry_seconds: 300,
+                zap: None,
             },
             lightning_address: phase1_addresses(),
             feeder: FeederConfig {
@@ -377,13 +440,32 @@ mod tests {
                 nak_config_path: PathBuf::from("/run/lightning-goats/nak"),
                 bunker_pubkey: "00".repeat(32),
                 relays: vec!["wss://relay.example".to_owned()],
+                bunker_relays: None,
             },
+            core_bridge: None,
+            contact: None,
         }
     }
 
     #[test]
     fn accepts_valid_config() {
         valid_config().validate().unwrap();
+    }
+
+    #[test]
+    fn private_contact_is_optional_and_requires_active_project_inbox_policy() {
+        let mut config = valid_config();
+        let project = crate::nostr_event::test_event(3, 1, 100, "", vec![]).pubkey;
+        config.nostr.bunker_pubkey = project.clone();
+        config.contact = Some(crate::contact::Config {
+            recipient: project,
+            inbox_relays: vec!["wss://relay.example.org".into()],
+        });
+        assert!(config.validate().is_err());
+        config.service.mode = RuntimeMode::Active;
+        config.validate().unwrap();
+        config.contact.as_mut().unwrap().inbox_relays = vec!["wss://10.8.0.6/".into()];
+        assert!(config.validate().is_err());
     }
 
     #[test]
@@ -410,6 +492,38 @@ mod tests {
     fn rejects_insecure_strike_api_url() {
         let mut config = valid_config();
         config.strike.api_url = "http://api.strike.me/".to_owned();
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn zap_registry_is_explicit_and_receipt_identity_matches_the_remote_signer() {
+        let mut config = valid_config();
+        let public = crate::nostr_event::test_event(3, 1, 100, "", vec![]).pubkey;
+        config.nostr.bunker_pubkey = public.clone();
+        config.lnurl.zap = Some(ZapConfig {
+            receipt_pubkey: public.clone(),
+            payee_pubkeys: std::collections::BTreeMap::from([("herd".into(), public)]),
+            alias_origins: vec!["https://lnb.bolverker.com/".into()],
+        });
+        config.validate().unwrap();
+        let original = config.lnurl.zap.clone();
+        config.lnurl.zap.as_mut().unwrap().receipt_pubkey =
+            crate::nostr_event::test_event(4, 1, 100, "", vec![]).pubkey;
+        assert!(config.validate().is_err());
+        config.lnurl.zap = original.clone();
+        config
+            .lnurl
+            .zap
+            .as_mut()
+            .unwrap()
+            .payee_pubkeys
+            .insert("unknown".into(), config.nostr.bunker_pubkey.clone());
+        assert!(config.validate().is_err());
+        config.lnurl.zap = original.clone();
+        config.lnurl.zap.as_mut().unwrap().alias_origins = vec!["https://10.8.0.6/".into()];
+        assert!(config.validate().is_err());
+        config.lnurl.zap = original;
+        config.lnurl.zap.as_mut().unwrap().payee_pubkeys.clear();
         assert!(config.validate().is_err());
     }
 
@@ -457,5 +571,27 @@ mod tests {
         let mut config = valid_config();
         config.nostr.relays = vec!["ws://relay.example".to_owned()];
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn validates_separate_bunker_relays() {
+        let mut config = valid_config();
+        config.nostr.bunker_relays = Some(vec!["wss://signer-relay.example".to_owned()]);
+        config.validate().unwrap();
+        for relays in [vec![], vec!["ws://signer-relay.example".to_owned()]] {
+            config.nostr.bunker_relays = Some(relays);
+            assert!(config.validate().is_err());
+        }
+    }
+
+    #[test]
+    fn legacy_nostr_config_keeps_shared_relays() {
+        let raw = format!(
+            "nak_path='/usr/local/bin/nak'\nnak_config_path='/run/nak'\nbunker_pubkey='{}'\nrelays=['wss://legacy.example']",
+            "ab".repeat(32)
+        );
+        let config: NostrConfig = toml::from_str(&raw).unwrap();
+        assert!(config.bunker_relays.is_none());
+        assert_eq!(config.bunker_relays(), config.relays);
     }
 }

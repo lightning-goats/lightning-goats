@@ -209,7 +209,11 @@ class SystemdLauncher:
             arguments.append(f"--property={key}={value}")
         result = command([*arguments, "--", *map(str,executable)], check=False)
         if result.returncode and not expected_failure:
-            raise ValueError(f"systemd unit launch failed: {(result.stdout + result.stderr)[-2048:]}")
+            # Disposable CI paths only. Report mount policy without weakening
+            # the shipped sandbox or remounting a protected filesystem.
+            mount = command(["findmnt", "--noheadings", "--output", "TARGET,OPTIONS",
+                             "--target", str(executable[0])], check=False)
+            raise ValueError(f"systemd unit launch failed: {(result.stdout + result.stderr)[-2048:]} mount: {mount.stdout[-1024:]}")
         return process
 
     def negative_credential_checks(self):

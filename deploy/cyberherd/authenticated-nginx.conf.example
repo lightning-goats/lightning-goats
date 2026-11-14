@@ -1,0 +1,40 @@
+# Optional SERVER-context additions after separate installation qualification.
+# Keep the existing readonly-nginx.conf.example for /api/v1/cyberherd.
+# Only these exact paths are exposed; no generic CyberHerd/admin proxy.
+location = /api/v1/cyberherd/me {
+    limit_except GET { deny all; }
+    limit_req zone=lightning_goats_read burst=5 nodelay;
+    proxy_pass http://127.0.0.1:3340;
+    proxy_set_header Host $host;
+    proxy_connect_timeout 1s;
+    proxy_read_timeout 7s;
+    add_header Cache-Control "no-store" always;
+}
+location = /api/v1/cyberherd/operator/state {
+    limit_except GET { deny all; }
+    limit_req zone=lightning_goats_read burst=5 nodelay;
+    proxy_pass http://127.0.0.1:3340;
+    proxy_set_header Host $host;
+    proxy_read_timeout 7s;
+    add_header Cache-Control "no-store" always;
+}
+location = /api/v1/cyberherd/operator/templates {
+    limit_except GET { deny all; }
+    limit_req zone=lightning_goats_read burst=5 nodelay;
+    proxy_pass http://127.0.0.1:3340;
+    proxy_set_header Host $host;
+    proxy_read_timeout 7s;
+    add_header Cache-Control "no-store" always;
+}
+location = /api/v1/cyberherd/operator/command {
+    limit_except POST { deny all; }
+    client_max_body_size 16k;
+    limit_req zone=lightning_goats_lnurl_invoice burst=3 nodelay;
+    proxy_pass http://127.0.0.1:3340;
+    proxy_set_header Host $host;
+    proxy_connect_timeout 1s;
+    proxy_read_timeout 7s;
+    add_header Cache-Control "no-store" always;
+}
+# Authorization headers and bodies must not be included in access/error formats.
+# The service uses its configured HTTPS origin, never forwarded host headers.

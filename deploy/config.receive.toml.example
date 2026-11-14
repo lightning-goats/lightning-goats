@@ -1,0 +1,144 @@
+# Non-secret Lightning Goats production configuration.
+# Secrets are loaded through systemd credentials, not this file.
+
+# Optional private CyberHerd event bridge (read-only without reward_policy).
+# Leave disabled until the
+# dedicated runtime users/group and protected socket directory are provisioned.
+# Replace both IDs with actual non-root values; zero is intentionally invalid.
+# Never give the CyberHerd user the core's credential-bearing primary group.
+# [core_bridge]
+# delegated_feeder_messages = false
+# Optional sole feeding presenter, after CyberHerd note/chat/overlay qualification.
+# Requires pinned reward_policy.owner, even with zero monetary ceilings.
+# See docs/architecture/cyberherd-feeding-announcements.md.
+# socket = "/run/lightning-goats-bridge/core.sock"
+# peer_uid = 0
+# group_gid = 0
+# Optional distinct payout read role. No outgoing worker is installed by this.
+# payout_peer_uid = 0
+# payout_execution_enabled = false
+# Optional core read-only verification of outgoing results. Must match payout
+# account label; core receive key needs partner.payment.read, never spend scope.
+# payout_account_id = "00000000-0000-4000-8000-000000000001"
+#
+# Optional bounded reward reservations, still with no spend key in the core.
+# This explicitly initializes remaining funding provenance and never back-pays
+# old confirmed feedings. Review owner/limits before enabling; zero limits deny.
+# [core_bridge.reward_policy]
+# owner = "0000000000000000000000000000000000000000000000000000000000000000"
+# member_percent_ceiling = 0
+# max_sats_per_feed = 0
+# max_sats_per_24h = 0
+# The matching owner also pins intake-only member overlay presentation. Its
+# limits can remain zero for overlay-only staging; no spend key is needed.
+
+[service]
+listen = "127.0.0.1:8787"
+# Use shadow during production ingress verification. Change to active only after
+# the operator-gated cutover acceptance checks pass.
+mode = "shadow"
+
+[database]
+url = "sqlite:///var/lib/lightning-goats/lightning-goats.db"
+
+# Runtime API key must have only:
+#   partner.receive-request.create
+#   partner.receive-request.read
+[strike]
+api_url = "https://api.strike.me/"
+
+[lnurl]
+public_base_url = "https://lightning-goats.com/"
+invoice_expiry_seconds = 300
+
+# Native NIP-57 is an explicit opt-in after installing its verified binary/schema
+# and qualifying the receipt worker. Public keys only; signing stays in the bunker.
+# [lnurl.zap]
+# receipt_pubkey = "669ebbcccf409ee0467a33660ae88fd17e5379e646e41d7c236ff4963f3c36b6"
+# alias_origins = ["https://lnb.bolverker.com/"]
+# [lnurl.zap.payee_pubkeys]
+# herd = "669ebbcccf409ee0467a33660ae88fd17e5379e646e41d7c236ff4963f3c36b6"
+# dexter = "ea8be2224d58ef0738613fc327811c14feb4b73a12b48fa1056c86cce6b1da39"
+# rowan = "a716a37a60a2a32112674173bc0ccba2a3914c1728a007b31d1c30c54ccdbef1"
+# cosmo = "0d4cfcf34439dee4f189e3d959cfb3571be81db744286897e33e8465052b3acf"
+# newton = "26c261209d79601d6c2377248e5d249d90f4930c72702fd100fb7c772c7ed91b"
+# nova = "3113d8f9360a19d84deef6a45a1273ebea3638df2390752ecdcd76152314f3d6"
+
+[[lightning_address]]
+user = "herd"
+display_name = "Lightning Goats"
+description = "Feed the Lightning Goats"
+credit_pool = "herd"
+min_sendable_msat = 1000
+max_sendable_msat = 1000000000
+
+[[lightning_address]]
+user = "dexter"
+display_name = "Dexter"
+description = "Feed Dexter and the Lightning Goats"
+credit_pool = "herd"
+min_sendable_msat = 1000
+max_sendable_msat = 1000000000
+
+[[lightning_address]]
+user = "rowan"
+display_name = "Rowan"
+description = "Feed Rowan and the Lightning Goats"
+credit_pool = "herd"
+min_sendable_msat = 1000
+max_sendable_msat = 1000000000
+
+[[lightning_address]]
+user = "cosmo"
+display_name = "Cosmo"
+description = "Feed Cosmo and the Lightning Goats"
+credit_pool = "herd"
+min_sendable_msat = 1000
+max_sendable_msat = 1000000000
+
+[[lightning_address]]
+user = "newton"
+display_name = "Newton"
+description = "Feed Newton and the Lightning Goats"
+credit_pool = "herd"
+min_sendable_msat = 1000
+max_sendable_msat = 1000000000
+
+[[lightning_address]]
+user = "nova"
+display_name = "Nova"
+description = "Feed Nova and the Lightning Goats"
+credit_pool = "herd"
+min_sendable_msat = 1000
+max_sendable_msat = 1000000000
+
+[feeder]
+threshold_sats = 1000
+inter_feed_delay_seconds = 30
+
+# This is the ONLY trusted-side origin available to lightning-goatsd. The VPS
+# holds no OpenHAB credential and must be firewalled from direct 10.8.0.6
+# OpenHAB/weather/SSH access.
+[gateway]
+url = "http://10.8.0.6:8789/"
+
+# Preserve current Lightning Goats extension presentation cadence: one
+# informational evaluation every 60 seconds, interface info considered first,
+# at most one message per cycle, 40% unconditional chance for each category.
+[informational]
+interval_seconds = 60
+interface_info_enabled = true
+weather_enabled = true
+interface_info_probability = 0.4
+weather_probability = 0.4
+
+[nostr]
+nak_path = "/usr/local/bin/nak"
+nak_config_path = "/run/lightning-goats/nak"
+# Operator-approved payment/feed announcement identity, 2026-09-12.
+bunker_pubkey = "669ebbcccf409ee0467a33660ae88fd17e5379e646e41d7c236ff4963f3c36b6"
+relays = [
+  "wss://relay-nwc-dev.rizful.com/v1",
+  "wss://relay.primal.net",
+  "wss://relay.damus.io",
+]

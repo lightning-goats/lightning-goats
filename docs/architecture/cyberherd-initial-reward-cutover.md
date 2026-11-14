@@ -117,3 +117,27 @@ audit or conflicting plans. The earlier preview source passed full Rust and
 installed Deployment qualification; these additional verifier/report changes still
 require their own exact-source CI. The qualified stopped-writer apply adapter and
 append-only comparison remain unfinished. No live disposition has been applied.
+
+## Offline membership child — development source
+
+`cyberherdd --record-initial-reward-cutover PROTECTED_PREVIEW_FILE
+--reward-cutover-sha256 REVIEWED_SHA256 --writers-stopped` is a dedicated offline
+source entry point, mutually exclusive with configuration checking and fresh
+initialization. It never starts runtime workers or opens sockets, credentials or
+other journals. It requires unchanged protected configuration with reward planning
+absent, its separate non-root member UID, the same state-scoped kernel singleton
+as the runtime, an existing private database with exact current migrations, and
+a private root-protected digest-pinned preview matching owner/epoch/binding.
+Recovery markers, unprotected input, missing files and schema mismatches refuse
+without initialization or migration. The bounded output is the immutable domain
+receipt and grants no activation authority.
+
+The stopped-writer switch is a parent attestation, not independent proof that
+other units are stopped. A qualified root transaction must still prove those
+unit guards, take a fresh verified four-journal checkpoint, derive/pin the preview,
+rehearse under the member UID, compare all retained rows, apply under the same
+fences and verify the final checkpoint. The child alone must never be treated as
+a production approval or four-journal recovery tool. No installed launcher invokes
+it yet. New tests exercise CLI argument fencing, private/current existing-only
+journal opening, recovery refusal and unprotected-preview rejection; actual-root
+positive child and installed transaction qualification remain required.

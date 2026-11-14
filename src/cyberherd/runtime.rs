@@ -28,6 +28,9 @@ use crate::{
     zap::ZapRequest,
 };
 
+#[path = "reward_cutover_runtime.rs"]
+mod reward_cutover;
+
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Config {

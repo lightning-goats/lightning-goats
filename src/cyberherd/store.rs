@@ -152,6 +152,17 @@ pub enum TemplateEdit {
 }
 
 impl Store {
+    /// Offline disposition must never create a database or run migrations.
+    #[cfg(unix)]
+    pub(crate) async fn open_existing_for_cutover(database_url: &str) -> Result<Self> {
+        crate::payout::cost_recovery::existing_private_database(database_url)?;
+        let pool = crate::sqlite::connect_existing_durable(database_url, 1).await?;
+        if let Err(error) = crate::sqlite::require_current_schema(&pool, &MIGRATOR).await {
+            pool.close().await;
+            return Err(error);
+        }
+        Ok(Self { pool })
+    }
     pub(crate) async fn close_after_initialization(self) {
         self.pool.close().await;
     }

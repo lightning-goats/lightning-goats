@@ -346,3 +346,16 @@ the wider CyberHerd acceptance contract.
 Exact-source CI and actual backup-only host qualification are recorded in the
 [November 14 inventory checkpoint](../testing/cyberherd-recovery-inventory-checkpoint-20261114.md).
 The candidate is retained separately; the installed operator was not replaced.
+
+### Additional publication identities — source candidate
+
+The next inventory candidate also streams retained publication/signing identities
+from all four journals: core signed notices and incoming zap receipts, member
+unsigned/signature records, lifecycle destinations (including cancellation), and
+payout signing intents/results. Original message identity, destination, event ID
+and signing intent remain distinct. Unsigned work is not reported as signed.
+No message body, signature, request document or preimage is exported. These IDs
+help match independently retained publication history; they cannot replace the
+original frozen bytes required for exact retry. External completeness and
+adoption/resume flags remain false. Exact-source and installed qualification of
+this addition are pending; the prior qualified inventory is unchanged.

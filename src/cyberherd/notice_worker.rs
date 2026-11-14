@@ -72,8 +72,8 @@ impl<T: Transport> Worker<T> {
             return Ok(None);
         }
         // A failing first relay must not starve other frozen destinations.
-        // Keep one signature and a bounded attempt within the 180-second lease.
-        tokio::time::timeout(std::time::Duration::from_secs(45), async {
+        // Keep one signature and a bounded attempt within the 300-second lease.
+        tokio::time::timeout(std::time::Duration::from_secs(180), async {
             for relay in job.remaining_relays.clone() {
                 if !self.permitted(job).await? {
                     return Ok(None);

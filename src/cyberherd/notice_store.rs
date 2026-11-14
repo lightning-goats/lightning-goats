@@ -334,7 +334,7 @@ impl Store {
             if let Some(relay) = remaining_relays.first().cloned() {
                 let lease = Uuid::new_v4();
                 sqlx::query("UPDATE notice_destinations SET lease_id=?,lease_until=?,attempted_at=? WHERE owner=? AND identity=? AND destination=?")
-                    .bind(lease.to_string()).bind(now.saturating_add(180)).bind(now).bind(owner).bind(&identity).bind(&destination).execute(&mut *tx).await?;
+                    .bind(lease.to_string()).bind(now.saturating_add(300)).bind(now).bind(owner).bind(&identity).bind(&destination).execute(&mut *tx).await?;
                 let job = Job {
                     owner: owner.into(),
                     identity,

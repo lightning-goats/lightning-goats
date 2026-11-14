@@ -81,10 +81,10 @@ Damus returned HTTP 521, Chaima returned HTTP 404, and Artx returned a matching
 The worker always chose the first missing relay and therefore never reached Artx.
 
 The correction selects all eligible unacknowledged frozen relays and tries them
-in order within a bounded 45-second publication attempt. It retains the original
+in order within a bounded 180-second publication attempt (at most eight relays, each with a bounded native transport). It retains the original
 signed event, validates the actual acknowledging relay/event, and saves only its
 real receipt. Membership safety is refreshed before each attempt; lifecycle
-ordering remains per destination and relay. A 180-second lease covers bounded
+ordering remains per destination and relay. A 300-second lease covers bounded
 signing (including the shared signer wait) and publication. No schema, monetary accounting, frozen destination list,
 event timestamp or financial policy changes. Regression coverage exercises both
 note/chat fallback and lifecycle reuse after a lost first-relay acknowledgment.

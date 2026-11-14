@@ -254,7 +254,7 @@ impl Store {
                 .bind(owner).bind(&identity).bind(&destination).fetch_optional(&mut *tx).await?;
             let lease = Uuid::new_v4();
             sqlx::query("UPDATE delivery_work SET lease_id=?,lease_until=?,attempted_at=? WHERE owner=? AND identity=? AND destination=?")
-                .bind(lease.to_string()).bind(now.saturating_add(180)).bind(now).bind(owner).bind(&identity).bind(&destination).execute(&mut *tx).await?;
+                .bind(lease.to_string()).bind(now.saturating_add(300)).bind(now).bind(owner).bind(&identity).bind(&destination).execute(&mut *tx).await?;
             tx.commit().await?;
             return Ok(Some(Job {
                 owner: owner.into(),

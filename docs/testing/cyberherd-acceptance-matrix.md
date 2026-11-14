@@ -51,7 +51,10 @@ membership resets were submitted for these observations.
 The [qualified known-identity recovery inventory](cyberherd-recovery-inventory-checkpoint-20261114.md)
 prepares original IDs from accepted copies without authorizing restore adoption.
 Exact-source CI and actual backup-only host qualification pass; independent
-history coverage and the concrete adoption path remain unfinished.
+history coverage and the concrete adoption path remain unfinished. The subsequent
+[qualified recovery primitives](cyberherd-recovery-primitives-20261114.md) add
+backup/output isolation and signing/publication IDs across all four journals,
+with actual backup-only host checks and no production operator replacement.
 
 The [historical zap observation](cyberherd-historical-zap-observation-20261114.md)
 now verifies eight retained signed request/receipt pairs, exact request-description

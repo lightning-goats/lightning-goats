@@ -1010,7 +1010,7 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
         # The production command wrapper continues to suppress subprocess output.
         if 'financial_checker' in locals():
             expected_checker = hashlib.sha256(financial_checker.read_bytes()).digest()
-            for carrier in sorted(Path('/run').glob('lg-financial-check-*'))[-4:]:
+            for carrier in sorted(Path('/var/lib').glob('lg-financial-check-*'))[-4:]:
                 checker = carrier / 'checker'
                 paths = [carrier / (role + '.toml') for role in ('core', 'membership', 'payout', 'signer')]
                 if (carrier.resolve() != carrier or carrier.lstat().st_uid != 0

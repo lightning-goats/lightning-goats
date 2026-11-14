@@ -243,6 +243,8 @@ class ActivationFiles(unittest.TestCase):
         self.starts.clear()
 
     def command(self, *arguments, **kwargs):
+        if self.financial_ready and arguments[0] == '/usr/bin/unshare' and arguments[-1] == '--check':
+            self.assertEqual(Path(arguments[-4]).parent, self.binary)
         if self.financial_ready and arguments[:2] == ('/usr/bin/systemctl', 'enable'):
             self.commands.append(arguments)
             parent = self.etc / 'multi-user.target.wants'

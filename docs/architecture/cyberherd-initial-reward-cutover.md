@@ -283,3 +283,14 @@ its fingerprint-matched synthetic checker/config carriers to retain that categor
 or an execution error. The production command wrapper still withholds subprocess
 output. A fresh successful combined installed run is required; these source
 changes do not establish it or authorize live financial activation.
+
+The follow-up installed run at `cd948da` identified the earlier failure precisely:
+`setpriv` returned 126 because it could not execute the staged checker under
+`/run`. The checker itself had not reached configuration validation. Standalone
+financial checker staging now uses a protected disk carrier under `/var/lib`;
+the same UID, capability drop, isolated network, exact hashes and private file
+permissions apply. Worker configuration checks execute the already reviewed
+installed binaries and retain only candidate data under `/run`. No mount or
+systemd sandbox policy is weakened. Ten preparation and seventeen activation
+root regressions pass with assertions for these execution locations. A fresh
+successful installed rehearsal is still required before qualification.

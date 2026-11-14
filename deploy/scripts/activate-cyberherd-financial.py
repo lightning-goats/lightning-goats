@@ -159,8 +159,9 @@ def native_checks(directory, r):
             fp = r['baseline']['files'][str(installed)]
             if TX.fingerprint(installed) != fp:
                 raise ValueError('qualified installed native worker changed')
-            program, config = carrier / name, carrier / (role + '.toml')
-            TX.copy_durable(installed, program, fp)
+            # Execute the already reviewed root-owned installation. /run holds
+            # only candidate data and need not permit executing copied programs.
+            program, config = installed, carrier / (role + '.toml')
             selected = directory / ('candidate-' + role + '.toml')
             Q.I.publish(config, selected.read_bytes(), 0o440)
             os.chown(config, 0, identity['gid'])

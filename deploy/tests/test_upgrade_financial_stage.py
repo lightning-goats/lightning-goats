@@ -187,6 +187,7 @@ class FinancialFiles(unittest.TestCase):
     def command(self,*args,**kwargs):
         self.calls.append(args);self.assertEqual(args[:3],('/usr/bin/unshare','--net','--'))
         self.assertIn('--reuid=10001',args);self.assertIn('--regid=10001',args);self.assertIn('--bounding-set=-all',args)
+        self.assertEqual(Path(args[-5]).parent.parent, Path('/var/lib'))
         for path in map(Path,args[-4:]):
             self.carriers.add(path.parent);self.assertEqual(path.stat().st_mode&0o777,0o440);self.assertEqual(path.stat().st_gid,10001)
             self.assertIn('core_bridge' if path.name=='core.toml' else 'enabled',tomllib.loads(path.read_text()))

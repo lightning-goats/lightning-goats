@@ -172,8 +172,11 @@ def native_validation(directory, baseline, validator, validator_fp):
     if TX.fingerprint(validator) != validator_fp:
         raise ValueError('source-pinned financial checker changed')
     component = baseline['identities']['core']
-    C.protected(Path('/run'), directory=True)
-    carrier = Path(tempfile.mkdtemp(prefix='lg-financial-check-', dir='/run'))
+    # The checker must be executable by the original non-root UID. Runtime
+    # mounts may refuse executing /run files; keep the same protected/private
+    # carrier contract on disk rather than weakening a mount or unit sandbox.
+    C.protected(Path('/var/lib'), directory=True)
+    carrier = Path(tempfile.mkdtemp(prefix='lg-financial-check-', dir='/var/lib'))
     carrier.chmod(0o711)
     try:
         program = carrier / 'checker'

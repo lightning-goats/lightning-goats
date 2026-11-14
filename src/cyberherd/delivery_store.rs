@@ -44,6 +44,7 @@ pub(crate) struct Job {
     pub unsigned: Unsigned,
     pub signed: Option<String>,
     pub relay: String,
+    pub remaining_relays: Vec<String>,
     pub feeding: bool,
 }
 
@@ -187,16 +188,17 @@ impl Store {
                 serde_json::from_str(&row.try_get::<String, _>("document_json")?)?;
             let relays: Vec<String> =
                 serde_json::from_str(&row.try_get::<String, _>("relays_json")?)?;
-            let mut relay = None;
+            let mut remaining_relays = Vec::new();
             for candidate in relays {
                 let done:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM delivery_receipts WHERE owner=? AND identity=? AND destination=? AND relay=?)")
                     .bind(owner).bind(&identity).bind(&destination).bind(&candidate).fetch_one(&mut *tx).await?;
                 if !done {
-                    relay = Some(candidate);
-                    break;
+                    remaining_relays.push(candidate);
                 }
             }
-            let Some(relay) = relay else { continue };
+            let Some(relay) = remaining_relays.first().cloned() else {
+                continue;
+            };
             let branch: Option<String> = row.try_get("branch")?;
             let reference = if let Some(branch) = &branch {
                 let starter: Option<String> = sqlx::query_scalar(
@@ -252,7 +254,7 @@ impl Store {
                 .bind(owner).bind(&identity).bind(&destination).fetch_optional(&mut *tx).await?;
             let lease = Uuid::new_v4();
             sqlx::query("UPDATE delivery_work SET lease_id=?,lease_until=?,attempted_at=? WHERE owner=? AND identity=? AND destination=?")
-                .bind(lease.to_string()).bind(now.saturating_add(60)).bind(now).bind(owner).bind(&identity).bind(&destination).execute(&mut *tx).await?;
+                .bind(lease.to_string()).bind(now.saturating_add(120)).bind(now).bind(owner).bind(&identity).bind(&destination).execute(&mut *tx).await?;
             tx.commit().await?;
             return Ok(Some(Job {
                 owner: owner.into(),
@@ -262,6 +264,7 @@ impl Store {
                 unsigned,
                 signed,
                 relay,
+                remaining_relays,
                 feeding: message.broadcast.is_some(),
             }));
         }

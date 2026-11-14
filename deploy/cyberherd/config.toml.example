@@ -7,7 +7,9 @@ project_pubkey = "00000000000000000000000000000000000000000000000000000000000000
 tracked_tags = ["CyberHerd"]
 timezone = "America/Denver"
 midnight_reset = true
-relays = ["wss://relay.damus.io/", "wss://nostr.chaima.info/", "wss://relay.artx.market/"]
+# Include the daily-note and engagement publishers' relays. Public-message
+# destinations are configured separately under messaging.
+relays = ["wss://relay.damus.io/", "wss://nostr.chaima.info/", "wss://relay.artx.market/", "wss://nos.lol/", "wss://relay.primal.net/"]
 # Explicit availability policy, after validating actual relay reachability.
 # Saturated queries always hold their cursor regardless of this quorum.
 required_relays = 1

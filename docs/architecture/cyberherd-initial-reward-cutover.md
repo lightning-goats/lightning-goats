@@ -1,5 +1,10 @@
 # Initial future-only reward cutover
 
+The [qualified live cutoff](../testing/cyberherd-initial-reward-cutover-live-20261114.md)
+is installed and applied as of November 14. Historical development notes below
+describe the implementation sequence, not current deployment status. Financial
+activation, provider acceptance and full recovery adoption remain separate.
+
 The operator selected future confirmed feedings only on 2026-11-14. The
 [actual staged candidate and historical review](../testing/cyberherd-financial-candidate-live-staging-20261114.md)
 record the input: historical positive allocations and additional deferred feeding

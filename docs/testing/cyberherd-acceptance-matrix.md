@@ -12,6 +12,14 @@ The [approved additive payout-schema upgrade](cyberherd-inclusive-upgrade-live-2
 is installed with unchanged configuration and disabled outgoing roles. It does
 not complete the full port.
 
+The [November 14 program upgrade and future-only cutoff](cyberherd-initial-reward-cutover-live-20261114.md)
+are also complete. All 20 historical confirmed feedings, including five deferred
+inputs, are durably excluded without payouts. The native comparison preserved all
+pre-existing rows; outgoing roles remain masked. This resolves historical reward
+disposition, not provider acceptance or financial activation. The same checkpoint
+records read-only verification of the current signed announcement/goal and current
+three-member settings; remaining zap, stream and lifecycle scopes stay open.
+
 | Requirement | Source and recorded evidence | Remaining acceptance |
 | --- | --- | --- |
 | 1. Membership and arithmetic | `src/cyberherd/store.rs`, `shares.rs`; [live social intake](cyberherd-live-social-intake-20261110.md) records reaction/repost admission and restart retention. | Revalidate three-user capacity and current settings; exercise settled zap increase/displacement and rejection rules on the selected installed stage. NIP-05 remains unnecessary. |

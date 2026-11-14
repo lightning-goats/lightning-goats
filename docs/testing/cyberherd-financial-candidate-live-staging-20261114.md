@@ -35,7 +35,9 @@ already frozen barriers would leave a retrospective reward path.
 The operator selected **future confirmed feedings only**. Historical opportunities
 must receive an audited no-payout disposition, including confirmed feedings still
 in deferred/unreceived work at the activation boundary. No such disposition has
-been applied yet. No reward may be minted retroactively by unpausing the feeder,
+been applied at this initial staging checkpoint. The later
+[live cutoff](cyberherd-initial-reward-cutover-live-20261114.md) completed that
+disposition. No reward may be minted retroactively by unpausing the feeder,
 catching up intake, changing settings or enabling the reward worker.
 
 The implementation must bind the cutoff to a fresh quiesced core epoch/event head,

@@ -222,10 +222,11 @@ pub(super) async fn insert_broadcast(
     tx: &mut Transaction<'_, Sqlite>,
     owner: &str,
     message: &Rendered,
+    stream_chat: bool,
 ) -> Result<()> {
     message.validate_broadcast(owner)?;
     let mut destinations = vec![("broadcast:note".to_owned(), "null".to_owned())];
-    if let Some(stream) = &message.context.stream {
+    if stream_chat && let Some(stream) = &message.context.stream {
         destinations.push((
             format!(
                 "stream:{}",

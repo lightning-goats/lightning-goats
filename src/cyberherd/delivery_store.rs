@@ -157,7 +157,7 @@ impl Store {
                 }
                 sqlx::query("INSERT INTO delivery_messages(owner,identity,source_seq,document_json,relays_json,created_at) VALUES(?,?,?,?,?,?)")
                     .bind(owner).bind(&message.identity).bind(event.seq).bind(serde_json::to_string(&message)?).bind(serde_json::to_string(&relays)?).bind(now).execute(&mut *tx).await?;
-                insert_destinations(&mut tx, owner, &message, None).await?;
+                insert_destinations(&mut tx, owner, &message, None, self.stream_chat).await?;
                 sqlx::query("INSERT INTO delivery_overlay(owner,identity) VALUES(?,?)")
                     .bind(owner)
                     .bind(&message.identity)
@@ -179,8 +179,8 @@ impl Store {
         }
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         // A waiting branch is rotated; it cannot starve unrelated destinations.
-        let rows=sqlx::query("SELECT w.*,m.document_json,m.relays_json,m.created_at,d.branch,d.target_json FROM delivery_work w JOIN delivery_messages m ON m.owner=w.owner AND m.identity=w.identity JOIN delivery_destinations d ON d.owner=w.owner AND d.identity=w.identity AND d.destination=w.destination WHERE w.owner=? AND w.lease_until<=? AND (SELECT COUNT(*) FROM delivery_receipts r WHERE r.owner=w.owner AND r.identity=w.identity AND r.destination=w.destination)<json_array_length(m.relays_json) ORDER BY w.attempted_at,m.source_seq,w.destination LIMIT 32")
-            .bind(owner).bind(now).fetch_all(&mut *tx).await?;
+        let rows=sqlx::query("SELECT w.*,m.document_json,m.relays_json,m.created_at,d.branch,d.target_json FROM delivery_work w JOIN delivery_messages m ON m.owner=w.owner AND m.identity=w.identity JOIN delivery_destinations d ON d.owner=w.owner AND d.identity=w.identity AND d.destination=w.destination WHERE w.owner=? AND (? OR d.destination NOT LIKE 'stream:%') AND w.lease_until<=? AND (SELECT COUNT(*) FROM delivery_receipts r WHERE r.owner=w.owner AND r.identity=w.identity AND r.destination=w.destination)<json_array_length(m.relays_json) ORDER BY w.attempted_at,m.source_seq,w.destination LIMIT 32")
+            .bind(owner).bind(self.stream_chat).bind(now).fetch_all(&mut *tx).await?;
         for row in rows {
             let identity: String = row.try_get("identity")?;
             let destination: String = row.try_get("destination")?;
@@ -326,7 +326,11 @@ impl Store {
         conversation.validate(owner)?;
         let mut tx = self.pool.begin().await?;
         // Prefer the member's original note thread, then its saved stream.
-        for target in conversation.context.targets() {
+        for target in conversation
+            .context
+            .targets()
+            .filter(|t| self.stream_chat || t.kind != 30311)
+        {
             let branch = branch_key(owner, cycle, member, &conversation.generation, target)?;
             if let Some(reference) = joining_reference(&mut tx, owner, &branch).await? {
                 tx.commit().await?;
@@ -353,6 +357,9 @@ impl Store {
                 }
                 let target: ConversationTarget =
                     serde_json::from_str(&branch.try_get::<String, _>("target_json")?)?;
+                if !self.stream_chat && target.kind == 30311 {
+                    continue;
+                }
                 let mut context = crate::cyberherd::conversation::Context::default();
                 if target.kind == 1 {
                     context.note = Some(target);
@@ -366,7 +373,14 @@ impl Store {
                 conversation.validate(owner)?;
                 sqlx::query("INSERT INTO delivery_expansions(owner,identity,conversation_json) VALUES(?,?,?)")
                     .bind(owner).bind(&message.identity).bind(serde_json::to_string(&conversation)?).execute(&mut *tx).await?;
-                insert_destinations(&mut tx, owner, &message, Some(&conversation)).await?;
+                insert_destinations(
+                    &mut tx,
+                    owner,
+                    &message,
+                    Some(&conversation),
+                    self.stream_chat,
+                )
+                .await?;
                 tx.commit().await?;
                 return Ok(true);
             }
@@ -443,17 +457,18 @@ pub(super) async fn insert_destinations(
     owner: &str,
     message: &Rendered,
     override_conversation: Option<&MemberConversation>,
+    stream_chat: bool,
 ) -> Result<()> {
     if message.broadcast.is_some() {
         if override_conversation.is_some() {
             bail!("feeding notice cannot become a member branch");
         }
-        return super::feeding_state::insert_broadcast(tx, owner, message).await;
+        return super::feeding_state::insert_broadcast(tx, owner, message, stream_chat).await;
     }
     let context = override_conversation
         .map(|c| &c.context)
         .unwrap_or(&message.context);
-    for target in context.targets() {
+    for target in context.targets().filter(|t| stream_chat || t.kind != 30311) {
         let destination = destination(target)?;
         let conversation = override_conversation.or(message.conversation.as_ref());
         let branch = if message.accepted || message.requires_joining {

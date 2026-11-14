@@ -106,3 +106,35 @@ retries, native private owner/epoch/UUID/role rejection, no extra food/debit,
 template opt-out, absence of a live stream, legacy nondelegated behavior,
 nonpublic mode and funded/uncertain outcomes. Installed provider/household-client
 qualification and the remaining full-port operational/interface work are separate.
+
+## Zap attribution
+
+Zap-specific payment and confirmed-feeding copy uses the signed sender from the
+exact invoice-bound NIP-57 request and the authoritative settled amount. Comments,
+wallet labels, nearby payments and matching amounts never identify the donor.
+Nostr copy uses the existing `nostr:npub…` profile mention and a corresponding `p`
+tag. Anonymous requests use a generic anonymous label with no sender mention or
+recipient tag. Overlay copy uses the sender's frozen roster name when available,
+otherwise a shortened public identifier. It never resolves identity from a name.
+
+The core derives this presentation context read-only from the actual settled
+credit; feeding attribution follows the actual consumed-credit boundary. The
+separate presenter correlates retained authenticated payment inputs to the
+core's epoch/owner/source-key announcement hash before the frozen feeding barrier.
+A later payment during dispatch cannot steal the original donor, even at the
+same amount. Existing proof and financial wire schemas remain unchanged.
+
+`feeder_trigger_zap` is a separately editable, deterministically selected template
+pool. The broader `feeder_trigger` opt-out also suppresses zap-feeding notices.
+Seeding retains custom edits, variant tombstones and disabled categories.
+Generic and goat-fact variants preserve optional goat naming; artwork appears
+only for a goat actually mentioned by the selected variant. The same frozen
+message/outbox retains one announcement per triggering payment and exact signed
+retry bytes. Previously frozen generic announcements are not retroactively
+rewritten or given new recipients.
+
+The independent `messaging.stream_chat` setting continues to govern every
+CyberHerd chat destination. The operator disabled it on 2026-11-14; this feature
+neither reenables it nor sends informational/weather events to Nostr. Source
+verification and deployment evidence belong in the
+[zap messaging checkpoint](../testing/zap-payment-messaging-checkpoint-20261114.md).

@@ -101,6 +101,7 @@ mod tests {
             return; // This fixture specifically exercises non-root journal ownership.
         }
         let root = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
         let path = root.path().join("cyberherd.db");
         let url = format!("sqlite://{}", path.display());
         assert!(Store::open_existing_for_cutover(&url).await.is_err());

@@ -126,6 +126,32 @@ the UTC observation time). The announcement's CyberHerd tag and goal link matche
 No active stream was exposed, so this does not prove live-stream precedence,
 zap settlement, membership displacement or payouts.
 
+## Retained public-message backlog
+
+A follow-up read-only inspection reverified the exact post-cutoff native bundle
+above, then copied its membership main image **and WAL** into a separate private
+directory. Query-only SQLite inspected only presentation tables in that copy;
+before/after hashes proved both source and copied images unchanged. No live
+journal was opened. This nonfinancial inspection does not replace native reward
+review, authorize a financial operation or establish publication acceptance.
+
+The backup retains 10 member messages created November 10–12 (America/Denver),
+across cycles 1–3: five reactions, four repost-related messages and one successful
+headbutt. There are 20 destination/work rows, zero frozen unsigned destinations,
+zero signed destinations and zero relay receipts. All ten overlay copies have
+acknowledgments. There are no lifecycle notice rows. These are retained historical
+delivery intents, not evidence that Nostr delivery occurred.
+
+The existing generator creates Nostr destinations even when the optional remote
+signer is absent. Configuring that signer can make retained work eligible under
+the ordinary current-availability gate. The delivery activation cursor is already
+initialized and immutable; simply changing `messaging.start_after` is refused.
+Public rollout must account for this backlog and preserve its original contexts,
+joining dependencies and exact signed-retry semantics. Do not clear queues or
+rewrite timestamps to make activation appear to begin with empty history.
+No public signer, lifecycle setting or delegated feeder presenter was enabled by
+this inspection; the prepared financial plan remains unchanged.
+
 Real provider/recipient acceptance, external recovery adoption, public CyberHerd
 delivery/lifecycle rollout and the other remaining scopes in the
 [acceptance inventory](cyberherd-acceptance-matrix.md) remain open.

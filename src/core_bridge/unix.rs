@@ -478,7 +478,9 @@ async fn serve_one(
     write_frame(&mut stream, &response).await
 }
 
+#[derive(Clone)]
 pub struct Client {
+    pacing: Option<(Duration, Arc<tokio::sync::Mutex<Instant>>)>,
     socket: PathBuf,
     expected_uid: u32,
 }
@@ -629,9 +631,20 @@ impl Client {
         Ok(Self {
             socket,
             expected_uid,
+            pacing: None,
         })
     }
+    /// One shared FIFO for trusted background actors; server limits stay intact.
+    pub(crate) fn with_request_spacing(mut self, interval: Duration) -> Self {
+        self.pacing = Some((interval, Arc::new(tokio::sync::Mutex::new(Instant::now()))));
+        self
+    }
     async fn request(&self, request: &Request) -> Result<Response> {
+        if let Some((interval, next)) = &self.pacing {
+            let mut next = next.lock().await;
+            tokio::time::sleep_until(*next).await;
+            *next = Instant::now() + *interval;
+        }
         timeout(
             Duration::from_secs(if matches!(request, Request::PayoutOutcome { .. }) {
                 25
@@ -1361,5 +1374,27 @@ mod tests {
             task.abort();
             let _ = task.await;
         }
+    }
+    #[tokio::test]
+    async fn shared_client_pacing_keeps_background_actors_within_server_admission() {
+        let (_root, config, ledger) = fixture(0).await;
+        let server = Server::bind(&config).await.unwrap();
+        let task = tokio::spawn(server.run(ledger, RuntimeMode::Active));
+        let client = Client::new(config.socket, self_credentials().unwrap().0)
+            .unwrap()
+            .with_request_spacing(Duration::from_millis(600));
+        let mut readers = tokio::task::JoinSet::new();
+        for _ in 0..6 {
+            let client = client.clone();
+            readers.spawn(async move { client.safety().await });
+        }
+        timeout(Duration::from_secs(10), async {
+            while let Some(result) = readers.join_next().await {
+                result.unwrap().unwrap();
+            }
+        })
+        .await
+        .unwrap();
+        task.abort();
     }
 }

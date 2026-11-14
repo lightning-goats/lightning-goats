@@ -232,6 +232,32 @@ impl Store {
         feeder: FeederAvailability,
         context: Option<&super::targets::InteractionContext>,
     ) -> Result<Receipt> {
+        self.process_guarded(owner, interaction, target, feeder, context, false)
+            .await?
+            .context("unconditional interaction unexpectedly declined")
+    }
+
+    pub(crate) async fn decline_full_like_without_profile(
+        &self,
+        owner: &str,
+        interaction: &Interaction,
+        target: Target,
+        feeder: FeederAvailability,
+        context: Option<&super::targets::InteractionContext>,
+    ) -> Result<Option<Receipt>> {
+        self.process_guarded(owner, interaction, target, feeder, context, true)
+            .await
+    }
+
+    async fn process_guarded(
+        &self,
+        owner: &str,
+        interaction: &Interaction,
+        target: Target,
+        feeder: FeederAvailability,
+        context: Option<&super::targets::InteractionContext>,
+        capacity_only: bool,
+    ) -> Result<Option<Receipt>> {
         validate_pubkey(owner)?;
         interaction.validate()?;
         let input_json = serde_json::to_string(interaction)?;
@@ -244,7 +270,7 @@ impl Store {
             let receipt: Receipt = serde_json::from_str(&row.try_get::<String,_>("result_json")?)?;
             if receipt.status != Status::Deferred {
                 tx.commit().await?;
-                return Ok(receipt);
+                return Ok(Some(receipt));
             }
             was_deferred = true;
         }
@@ -253,6 +279,21 @@ impl Store {
             .fetch_one(&mut *tx)
             .await?;
         let mut snapshot = decode_snapshot(&row)?;
+        if capacity_only
+            && (interaction.action != Action::Like
+                || interaction.profile != Profile::default()
+                || target != Target::Current
+                || feeder != FeederAvailability::Ready
+                || snapshot.roster.active_count() < usize::from(snapshot.settings.max_members)
+                || snapshot
+                    .roster
+                    .members
+                    .get(&interaction.pubkey)
+                    .is_some_and(|m| m.active))
+        {
+            return Ok(None);
+        }
+
         let previous_shares = snapshot.roster.shares(&snapshot.settings)?;
         let previous_members = snapshot.roster.members.clone();
         let stale_target = feeder == FeederAvailability::Ready
@@ -364,7 +405,7 @@ impl Store {
         sqlx::query("INSERT INTO interactions(owner,source_id,source_hash,input_json,occurred_at,status,result_json) VALUES(?,?,?,?,?,?,?) ON CONFLICT(owner,source_id) DO UPDATE SET status=excluded.status,result_json=excluded.result_json")
             .bind(owner).bind(&interaction.source_id).bind(&interaction.source_hash).bind(input_json).bind(interaction.occurred_at).bind(status).bind(serde_json::to_string(&receipt)?).execute(&mut *tx).await?;
         tx.commit().await?;
-        Ok(receipt)
+        Ok(Some(receipt))
     }
 
     pub async fn deferred(&self, owner: &str, limit: u16) -> Result<Vec<Interaction>> {

@@ -1033,3 +1033,91 @@ async fn closed_cycle_work_discards_without_profile_or_discovery_and_never_block
     assert_eq!(barrier.feeding.request_id, feed);
     assert_eq!(f.core.feed_credit_sats().await.unwrap(), 0);
 }
+
+#[tokio::test]
+async fn profileless_like_cannot_block_a_full_herd_repost_but_cannot_claim_an_open_seat() {
+    use crate::cyberherd::membership::Decision;
+    let f = Fixture::new().await;
+    for key in 2..12 {
+        let event = signed(
+            key,
+            7,
+            f.now - 20,
+            "+",
+            vec![tag(&["e", &f.note.event().id])],
+        );
+        social::stage(&f.store, &f.owner, event, f.now)
+            .await
+            .unwrap();
+        assert!(matches!(
+            f.run(Some(&f.profile(key)), FeederAvailability::Ready)
+                .await,
+            Step::Interaction(_)
+        ));
+    }
+    let event = signed(12, 7, f.now - 2, "+", vec![tag(&["e", &f.note.event().id])]);
+    social::stage(&f.store, &f.owner, event, f.now)
+        .await
+        .unwrap();
+    assert_eq!(f.run(None, FeederAvailability::Paused).await, Step::Waiting);
+    let Step::Interaction(receipt) = f.run(None, FeederAvailability::Ready).await else {
+        panic!("capacity-only rejection should drain the head")
+    };
+    assert!(matches!(
+        receipt.transition.unwrap().decision,
+        Decision::Full { .. }
+    ));
+    let repost = signed(
+        13,
+        6,
+        f.now - 1,
+        "",
+        vec![tag(&["e", &f.note.event().id]), tag(&["p", &f.owner])],
+    );
+    social::stage(&f.store, &f.owner, repost, f.now)
+        .await
+        .unwrap();
+    let Step::Interaction(receipt) = f.run(Some(&f.profile(13)), FeederAvailability::Ready).await
+    else {
+        panic!("verified repost should process")
+    };
+    assert!(matches!(
+        receipt.transition.unwrap().decision,
+        Decision::Displaced { .. }
+    ));
+    let roster = f.store.snapshot(&f.owner).await.unwrap();
+    assert_eq!(roster.roster.active_count(), 10);
+    assert!(roster.roster.members[&public(13)].active);
+    assert_eq!(f.core.feed_credit_sats().await.unwrap(), 0);
+    let event = signed(14, 6, f.now, "", vec![tag(&["e", &f.note.event().id])]);
+    social::stage(&f.store, &f.owner, event, f.now)
+        .await
+        .unwrap();
+    assert_eq!(f.run(None, FeederAvailability::Ready).await, Step::Waiting);
+
+    let empty = Fixture::new().await;
+    let event = signed(
+        12,
+        7,
+        empty.now - 1,
+        "+",
+        vec![tag(&["e", &empty.note.event().id])],
+    );
+    social::stage(&empty.store, &empty.owner, event, empty.now)
+        .await
+        .unwrap();
+    assert_eq!(
+        empty.run(None, FeederAvailability::Ready).await,
+        Step::Waiting
+    );
+    assert_eq!(
+        empty
+            .store
+            .snapshot(&empty.owner)
+            .await
+            .unwrap()
+            .roster
+            .active_count(),
+        0
+    );
+}

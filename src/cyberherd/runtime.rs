@@ -236,7 +236,8 @@ impl Runtime {
                 &super::templates::Catalog::lifecycle_defaults()?,
             )
             .await?;
-        let client = Client::new(config.core_socket.clone(), config.core.core_uid)?;
+        let client = Client::new(config.core_socket.clone(), config.core.core_uid)?
+            .with_request_spacing(Duration::from_secs(1));
         let discovery =
             Discovery::new(Reader::new(config.relays.clone())?, config.required_relays)?;
         Ok(Self {
@@ -301,22 +302,6 @@ impl Runtime {
         if !day.contains(applied_at) {
             return Ok(Step::Waiting);
         }
-        // Reproject at the actual processing time so expired streams/provider
-        // proofs cannot remain active just because earlier network work was slow.
-        let targets = self
-            .store
-            .target_projection(
-                &policy,
-                &day,
-                &ids,
-                std::collections::BTreeSet::new(),
-                applied_at,
-            )
-            .await?;
-        let feeder = self.availability().await;
-        if feeder != FeederAvailability::Ready {
-            self.store.defer_pending_payments(owner).await?;
-        }
         if let Some(messaging) = self
             .config
             .messaging
@@ -342,6 +327,26 @@ impl Runtime {
             if result.is_err() {
                 tracing::warn!("lifecycle observation held; confirmed transition retained");
             }
+        }
+        let feeder = self.availability().await;
+        let applied_at = calendar::now()?;
+        if !day.contains(applied_at) {
+            return Ok(Step::Waiting);
+        }
+        // Reproject at the actual processing time so expired streams/provider
+        // proofs cannot remain active just because earlier network work was slow.
+        let targets = self
+            .store
+            .target_projection(
+                &policy,
+                &day,
+                &ids,
+                std::collections::BTreeSet::new(),
+                applied_at,
+            )
+            .await?;
+        if feeder != FeederAvailability::Ready {
+            self.store.defer_pending_payments(owner).await?;
         }
         let step = worker::step(
             &self.store,
@@ -432,10 +437,7 @@ impl Runtime {
             .map(|policy| -> Result<_> {
                 Ok(super::reward_worker::Worker {
                     store: self.store.clone(),
-                    client: Client::new(
-                        self.config.core_socket.clone(),
-                        self.config.core.core_uid,
-                    )?,
+                    client: self.client.clone(),
                     discovery: Discovery::new(
                         Reader::new(self.config.relays.clone())?,
                         self.config.required_relays,
@@ -451,7 +453,7 @@ impl Runtime {
                 self.store.clone(),
                 self.config.policy(),
                 self.config.timezone.clone(),
-                Client::new(self.config.core_socket.clone(), self.config.core.core_uid)?,
+                self.client.clone(),
                 &mut tasks,
             )
             .await?;
@@ -462,8 +464,7 @@ impl Runtime {
                     self.store.clone(),
                     &self.config.project_pubkey,
                     &self.config.state_dir,
-                    &self.config.core_socket,
-                    self.config.core.core_uid,
+                    &self.client,
                     &mut tasks,
                 )
                 .await?;
@@ -489,7 +490,7 @@ impl Runtime {
         if let Some(worker) = reward_worker {
             let results = super::result_worker::Worker {
                 store: self.store.clone(),
-                client: Client::new(self.config.core_socket.clone(), self.config.core.core_uid)?,
+                client: self.client.clone(),
                 owner: self.config.project_pubkey.clone(),
             };
             let seconds = self.config.poll_seconds;

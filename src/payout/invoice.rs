@@ -204,9 +204,11 @@ impl Request {
         }
         let wire: Wire = serde_json::from_slice(raw)
             .map_err(|_| anyhow::anyhow!("invalid recipient invoice response"))?;
-        if wire.status.is_some() {
+        if wire.status.as_deref().is_some_and(|status| status != "OK") {
             bail!("recipient rejected invoice request");
         }
+        // Wrapper success is never payment authority: the signed invoice must
+        // still match the frozen amount, description hash, network and expiry.
         self.validate_invoice(&wire.pr, now)
     }
     pub(crate) fn validate_invoice(&self, encoded: &str, now: i64) -> Result<ValidatedInvoice> {
@@ -405,6 +407,66 @@ mod tests {
         }
         assert!(Request::restore(i, Some("{}".into())).is_err());
     }
+    #[test]
+    fn explicit_success_wrapper_still_requires_the_exact_signed_invoice() {
+        for nostr in [false, true] {
+            let intent = intent(nostr);
+            let signed = nostr.then(|| signed(&intent));
+            let request = Request::restore(intent, signed).unwrap();
+            let invoice = crate::test_invoices::invoice_at(
+                5000,
+                request.description_hash(),
+                Duration::from_secs(1000),
+            );
+            let ordinary = request
+                .validate_response(&serde_json::to_vec(&json!({"pr":invoice})).unwrap(), 1000)
+                .unwrap();
+            let explicit = request
+                .validate_response(
+                    &serde_json::to_vec(&json!({"status":"OK","pr":invoice})).unwrap(),
+                    1000,
+                )
+                .unwrap();
+            assert_eq!(explicit, ordinary);
+            for status in ["ERROR", "PENDING", "ok", "OK ", ""] {
+                assert!(
+                    request
+                        .validate_response(
+                            &serde_json::to_vec(&json!({"status":status,"pr":invoice})).unwrap(),
+                            1000
+                        )
+                        .is_err(),
+                    "{status}"
+                );
+            }
+            for (amount, description, created) in [
+                (6000, request.description_hash().to_owned(), 1000),
+                (5000, "ab".repeat(32), 1000),
+                (5000, request.description_hash().to_owned(), 1031),
+                (5000, request.description_hash().to_owned(), 500),
+            ] {
+                let wrong = crate::test_invoices::invoice_at(
+                    amount,
+                    &description,
+                    Duration::from_secs(created),
+                );
+                assert!(
+                    request
+                        .validate_response(
+                            &serde_json::to_vec(&json!({"status":"OK","pr":wrong})).unwrap(),
+                            1000
+                        )
+                        .is_err()
+                );
+            }
+            assert!(
+                request
+                    .validate_response(br#"{"status":"OK","pr":"invalid-invoice"}"#, 1000)
+                    .is_err()
+            );
+        }
+    }
+
     #[test]
     fn supported_zap_preserves_exact_signed_json_and_never_downgrades_or_changes_intent() {
         let i = intent(true);

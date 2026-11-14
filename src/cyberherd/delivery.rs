@@ -424,7 +424,7 @@ pub fn display_name(profile: &Profile) -> String {
             .replace("nprofile1", "nprofile\u{200b}1")
     }
 }
-fn mention(member: &str) -> Result<String> {
+pub(crate) fn mention(member: &str) -> Result<String> {
     crate::nostr_event::validate_public_key(member)?;
     Ok(format!(
         "nostr:{}",

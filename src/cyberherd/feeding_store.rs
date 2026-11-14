@@ -58,11 +58,19 @@ impl Store {
             event_type: "feeder_confirmed".into(),
             payload_json: "{}".into(),
         };
-        let Some(base) = crate::presentation::MessageRenderer::editable_feeding(
+        let zap = feeding_zap_attribution(&mut tx, owner, barrier.ingress_seq, proof).await?;
+        let profile = zap
+            .as_ref()
+            .and_then(|zap| zap.sender())
+            .and_then(|sender| barrier.snapshot.roster.members.get(sender))
+            .map(|member| &member.profile);
+        let Some(base) = crate::presentation::MessageRenderer::editable_feeding_with_zap(
             &catalog,
             &source,
             proof,
             barrier.feeding.threshold_sats,
+            zap.as_ref(),
+            profile,
         )?
         else {
             record(&mut tx, owner, &id, Some(&proof.identity), None).await?;
@@ -246,11 +254,22 @@ pub(super) async fn insert_broadcast(
     }
     Ok(())
 }
+#[cfg(test)]
 pub(super) fn unsigned_broadcast(
     owner: &str,
     message: &Rendered,
     destination: &str,
     now: i64,
+) -> Result<Unsigned> {
+    unsigned_broadcast_with_zap(owner, message, destination, now, None)
+}
+
+pub(super) fn unsigned_broadcast_with_zap(
+    owner: &str,
+    message: &Rendered,
+    destination: &str,
+    now: i64,
+    zap: Option<&crate::zap_presentation::ZapAttribution>,
 ) -> Result<Unsigned> {
     message.validate_broadcast(owner)?;
     // Separate equally sized payments can have identical text and timestamps.
@@ -259,6 +278,14 @@ pub(super) fn unsigned_broadcast(
         vec!["t".into(), "LightningGoats".into()],
         vec!["lightning-goats".into(), message.identity.clone()],
     ];
+    if let Some(zap) = zap {
+        // Previously frozen generic notices retain their original recipients.
+        if message.nostr.contains(&zap.nostr_name()?) {
+            if let Some(sender) = zap.sender() {
+                tags.push(vec!["p".into(), sender.into()]);
+            }
+        }
+    }
     let kind = if destination == "broadcast:note" {
         1
     } else {
@@ -345,5 +372,61 @@ mod tests {
         ))
         .unwrap();
         assert_ne!(a.event().id, b.event().id);
+    }
+}
+
+/// Match the core's immutable consumed-credit identity, never a latest payer or
+/// amount-only guess. Page history to keep memory bounded for long-lived owners.
+pub(super) async fn feeding_zap_attribution(
+    tx: &mut Transaction<'_, Sqlite>,
+    owner: &str,
+    before: i64,
+    proof: &crate::cyberherd::feeding_delivery::Proof,
+) -> Result<Option<crate::zap_presentation::ZapAttribution>> {
+    proof.validate()?;
+    if proof.owner != owner || before <= 0 {
+        bail!("feeding zap attribution scope mismatch");
+    }
+    let Some(amount) = proof.triggering_payment_amount_sats else {
+        return Ok(None);
+    };
+    let binding: String = sqlx::query_scalar("SELECT binding_json FROM core_streams WHERE owner=?")
+        .bind(owner)
+        .fetch_one(&mut **tx)
+        .await?;
+    let binding: CoreBinding = serde_json::from_str(&binding)?;
+    binding.validate()?;
+    let epoch = binding.epoch.to_string();
+    let mut upper = before;
+    loop {
+        let rows = sqlx::query("SELECT seq,payload_json FROM ingress WHERE owner=? AND kind='payment' AND seq<? ORDER BY seq DESC LIMIT 128")
+            .bind(owner).bind(upper).fetch_all(&mut **tx).await?;
+        if rows.is_empty() {
+            return Ok(None);
+        }
+        for row in rows {
+            upper = row.try_get("seq")?;
+            let raw: String = row.try_get("payload_json")?;
+            let payment: crate::core_bridge::Payment = serde_json::from_str(&raw)?;
+            if payment.zap.is_none() || payment.amount_msat / 1000 != amount {
+                continue;
+            }
+            let key = format!("payment:{}:{}", payment.source, payment.source_id);
+            let identity = super::ingress::hash(&(&epoch, owner, "feeding-announcement", key))?;
+            if identity != proof.identity {
+                continue;
+            }
+            let zap = payment
+                .zap
+                .as_ref()
+                .context("matched zap lost its request")?;
+            if binding.payees.get(&payment.address_user) != Some(&zap.payee_pubkey)
+                || binding.credit_pool != payment.credit_pool
+            {
+                bail!("feeding zap differs from authenticated core binding");
+            }
+            return crate::zap_presentation::ZapAttribution::from_payment(&payment);
+        }
+        tokio::task::yield_now().await;
     }
 }

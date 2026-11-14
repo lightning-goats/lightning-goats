@@ -40,6 +40,7 @@ mod overlay;
 mod roster_overlay;
 mod strike;
 mod zap;
+mod zap_presentation;
 pub use events::DurableEvent;
 use events::append_event_in_transaction;
 use feed::feed_credit_in_transaction;

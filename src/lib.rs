@@ -44,3 +44,5 @@ pub mod http;
 mod test_invoices;
 
 pub mod server;
+
+pub(crate) mod zap_presentation;

@@ -29,6 +29,7 @@ pub fn audience(category: &str) -> Option<Audience> {
         "sats_received"
         | "sats_received_zap"
         | "feeder_trigger"
+        | "feeder_trigger_zap"
         | "cyber_herd"
         | "cyber_herd_treats"
         | "cyber_herd_no_treats"

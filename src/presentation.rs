@@ -34,6 +34,8 @@ struct TemplateCatalog {
     sats_received: Vec<String>,
     feeder_trigger: Vec<String>,
     interface_info: Vec<String>,
+    sats_received_zap: Vec<String>,
+    feeder_trigger_zap: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -78,6 +80,9 @@ impl MessageRenderer {
             sats_received: legacy.category_templates("sats_received"),
             feeder_trigger: legacy.category_templates("feeder_trigger"),
             interface_info: legacy.category_templates("interface_info"),
+            sats_received_zap: legacy.category_templates("sats_received_zap"),
+            feeder_trigger_zap: Catalog::delivery_defaults()?
+                .category_templates("feeder_trigger_zap"),
         };
         validate_catalog(&catalog)?;
         Ok(Self {
@@ -89,6 +94,15 @@ impl MessageRenderer {
         &self,
         event: &DurableEvent,
         threshold_sats: u64,
+    ) -> Result<RenderedPresentation> {
+        self.render_with_zap(event, threshold_sats, None)
+    }
+
+    pub(crate) fn render_with_zap(
+        &self,
+        event: &DurableEvent,
+        threshold_sats: u64,
+        zap: Option<&crate::zap_presentation::ZapAttribution>,
     ) -> Result<RenderedPresentation> {
         if threshold_sats == 0 {
             bail!("feeder threshold must be greater than zero");
@@ -106,9 +120,9 @@ impl MessageRenderer {
         );
         let mut rendered = match event.event_type.as_str() {
             "payment_received" | "operator_credit_added" => {
-                self.render_payment(event, object, threshold_sats, pause_note.as_deref())
+                self.render_payment(event, object, threshold_sats, pause_note.as_deref(), zap)
             }
-            "feeder_confirmed" => self.render_feeder(event, object, threshold_sats),
+            "feeder_confirmed" => self.render_feeder(event, object, threshold_sats, zap),
             "interface_info" => self.render_interface_info(event),
             "weather_status" => self.render_weather(object),
             _ => Ok(RenderedPresentation::empty()),
@@ -127,6 +141,7 @@ impl MessageRenderer {
         payload: &serde_json::Map<String, Value>,
         threshold_sats: u64,
         pause_note: Option<&str>,
+        zap: Option<&crate::zap_presentation::ZapAttribution>,
     ) -> Result<RenderedPresentation> {
         let amount = required_u64(payload, "amount_sats")?;
         if amount < PAYMENT_MESSAGE_MIN_SATS {
@@ -150,7 +165,16 @@ impl MessageRenderer {
             .unwrap_or("herd");
         let goat = goat_for_event(event, Some(address_user));
         let difference_message = difference_message(credit, threshold_sats);
-        let template = select_template(&self.catalog.sats_received, event, "sats_received")?;
+        if zap.is_some_and(|zap| {
+            zap.amount_sats() != amount || event.event_type != "payment_received"
+        }) {
+            bail!("zap presentation does not match its credited payment");
+        }
+        let template = if zap.is_some() {
+            select_template(&self.catalog.sats_received_zap, event, "sats_received_zap")?
+        } else {
+            select_template(&self.catalog.sats_received, event, "sats_received")?
+        };
 
         let mut overlay_values = common_values(amount, &difference_message, goat.name);
         overlay_values.insert(
@@ -180,6 +204,10 @@ impl MessageRenderer {
             remaining_sats(credit, threshold_sats).to_string(),
         );
 
+        if let Some(zap) = zap {
+            overlay_values.insert("name".into(), zap.overlay_name(None)?);
+            nostr_values.insert("name".into(), zap.nostr_name()?);
+        }
         let mut nostr_content = safe_substitute(template, &nostr_values)?;
         if let Some(note) = pause_note.filter(|_| !template.contains("{difference_message}")) {
             // Custom templates may omit progress, but still need pause context.
@@ -189,7 +217,11 @@ impl MessageRenderer {
             nostr_content: Some(nostr_content),
             overlay_type: Some("sats_received".to_owned()),
             overlay_message: Some(safe_substitute(template, &overlay_values)?),
-            overlay_goats: vec![overlay_goat(goat)],
+            overlay_goats: if zap.is_none() || template.contains("{goat_name}") {
+                vec![overlay_goat(goat)]
+            } else {
+                Vec::new()
+            },
         })
     }
 
@@ -198,6 +230,7 @@ impl MessageRenderer {
         event: &DurableEvent,
         payload: &serde_json::Map<String, Value>,
         threshold_sats: u64,
+        zap: Option<&crate::zap_presentation::ZapAttribution>,
     ) -> Result<RenderedPresentation> {
         if payload.get("announce_feeding").and_then(Value::as_bool) == Some(false) {
             return Ok(RenderedPresentation {
@@ -227,32 +260,88 @@ impl MessageRenderer {
         let credit = required_u64(payload, "feed_credit_sats")?;
         let goat = goat_for_event(event, None);
         let difference_message = difference_message(credit, threshold_sats);
-        let template = if amount.is_some() {
+        let template = if zap.is_some() {
+            select_template(
+                &self.catalog.feeder_trigger_zap,
+                event,
+                "feeder_trigger_zap",
+            )?
+        } else if amount.is_some() {
             select_template(&self.catalog.feeder_trigger, event, "feeder_trigger")?
         } else {
             "⚡ The Lightning Goats have been fed! {difference_message}\n\nhttps://lightning-goats.com"
         };
 
-        let overlay_values = common_values(amount.unwrap_or(0), &difference_message, goat.name);
-        let nostr_values =
+        let mut overlay_values = common_values(amount.unwrap_or(0), &difference_message, goat.name);
+        let mut nostr_values =
             common_values(amount.unwrap_or(0), &difference_message, goat.nostr_profile);
+        if let Some(zap) = zap {
+            if amount != Some(zap.amount_sats()) {
+                bail!("feeding zap amount differs from triggering payment");
+            }
+            overlay_values.insert("name".into(), zap.overlay_name(None)?);
+            nostr_values.insert("name".into(), zap.nostr_name()?);
+        }
 
         Ok(RenderedPresentation {
             nostr_content: Some(safe_substitute(template, &nostr_values)?),
             overlay_type: Some("feeder_trigger".to_owned()),
             overlay_message: Some(safe_substitute(template, &overlay_values)?),
-            overlay_goats: vec![overlay_goat(goat)],
+            overlay_goats: if zap.is_none() || template.contains("{goat_name}") {
+                vec![overlay_goat(goat)]
+            } else {
+                Vec::new()
+            },
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn editable_feeding(
         catalog: &Catalog,
         event: &DurableEvent,
         proof: &crate::cyberherd::feeding_delivery::Proof,
         threshold: u64,
     ) -> Result<Option<RenderedPresentation>> {
+        Self::editable_feeding_with_zap(catalog, event, proof, threshold, None, None)
+    }
+
+    pub(crate) fn editable_feeding_with_zap(
+        catalog: &Catalog,
+        event: &DurableEvent,
+        proof: &crate::cyberherd::feeding_delivery::Proof,
+        threshold: u64,
+        zap: Option<&crate::zap_presentation::ZapAttribution>,
+        profile: Option<&crate::cyberherd::membership::Profile>,
+    ) -> Result<Option<RenderedPresentation>> {
         if catalog.category("feeder_trigger").is_none() {
             return Ok(None);
+        }
+        if let Some(zap) = zap {
+            if proof.triggering_payment_amount_sats != Some(zap.amount_sats()) {
+                bail!("feeding zap does not match its triggering payment");
+            }
+            let difference = difference_message(proof.feed_credit_sats, threshold);
+            let compose = |name: String| {
+                let mut values = common_values(zap.amount_sats(), &difference, "");
+                values.insert("name".into(), name);
+                catalog.render(
+                    "feeder_trigger_zap",
+                    &proof.identity,
+                    &values.into_iter().collect(),
+                )
+            };
+            let (Some(nostr), Some(overlay)) = (
+                compose(zap.nostr_name()?)?,
+                compose(zap.overlay_name(profile)?)?,
+            ) else {
+                return Ok(None);
+            };
+            return Ok(Some(RenderedPresentation {
+                nostr_content: Some(nostr),
+                overlay_type: Some("feeder_trigger".into()),
+                overlay_message: Some(overlay),
+                overlay_goats: vec![],
+            }));
         }
         let goat = goat_for_event(event, None);
         let difference = difference_message(proof.feed_credit_sats, threshold);
@@ -357,6 +446,8 @@ fn validate_catalog(catalog: &TemplateCatalog) -> Result<()> {
         ("sats_received", &catalog.sats_received),
         ("feeder_trigger", &catalog.feeder_trigger),
         ("interface_info", &catalog.interface_info),
+        ("sats_received_zap", &catalog.sats_received_zap),
+        ("feeder_trigger_zap", &catalog.feeder_trigger_zap),
     ] {
         if templates.is_empty() {
             bail!("Phase 1 template category {name} is empty");
@@ -739,9 +830,16 @@ mod tests {
             .unwrap();
             let renderer = MessageRenderer {
                 catalog: Arc::new(TemplateCatalog {
+                    feeder_trigger_zap: Catalog::delivery_defaults()
+                        .unwrap()
+                        .category_templates("feeder_trigger_zap"),
+                    sats_received_zap: Catalog::legacy()
+                        .unwrap()
+                        .category_templates("sats_received_zap"),
                     sats_received: vec![template],
                     feeder_trigger: legacy.category_templates("feeder_trigger"),
                     interface_info: legacy.category_templates("interface_info"),
+                    sats_received_zap: legacy.category_templates("sats_received_zap"),
                 }),
             };
             let rendered = renderer
@@ -792,9 +890,16 @@ mod tests {
             .unwrap();
         let renderer = MessageRenderer {
             catalog: Arc::new(TemplateCatalog {
+                feeder_trigger_zap: Catalog::delivery_defaults()
+                    .unwrap()
+                    .category_templates("feeder_trigger_zap"),
+                sats_received_zap: Catalog::legacy()
+                    .unwrap()
+                    .category_templates("sats_received_zap"),
                 sats_received: vec![named_variant],
                 feeder_trigger: legacy.category_templates("feeder_trigger"),
                 interface_info: legacy.category_templates("interface_info"),
+                sats_received_zap: legacy.category_templates("sats_received_zap"),
             }),
         };
         let rendered = renderer
@@ -897,6 +1002,12 @@ mod tests {
     fn paused_payments_thank_first_and_describe_the_frozen_queue_once() {
         let renderer = MessageRenderer {
             catalog: Arc::new(TemplateCatalog {
+                feeder_trigger_zap: Catalog::delivery_defaults()
+                    .unwrap()
+                    .category_templates("feeder_trigger_zap"),
+                sats_received_zap: Catalog::legacy()
+                    .unwrap()
+                    .category_templates("sats_received_zap"),
                 sats_received: vec!["Thank you for {new_amount} sats! {difference_message}".into()],
                 feeder_trigger: vec![],
                 interface_info: vec![],

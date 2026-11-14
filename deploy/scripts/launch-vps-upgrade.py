@@ -18,6 +18,26 @@ FILES = {
     'launch-vps-upgrade.py', 'upgrade-vps-canary.py',
     'inactive_file_transaction.py', 'preflight-release.py',
     'prepare-vps-canary.py', 'smoke-release.py',
+    'upgrade-cyberherd-core.py',
+    'install-cyberherd-inactive.py', 'verify-cyberherd-package.py', 'verify-sqlite-vendor.py',
+    'prepare-cyberherd-payout-key.py',
+    'prepare-cyberherd-nostr-clients.py', 'prepare-household-nostr-client.py',
+    'qualify-cyberherd-installed.py',
+    'qualify-cyberherd-workers.py',
+    'stage-cyberherd-overlay.py',
+    'maintain-cyberherd-overlay.py',
+    'prepare-contact-upgrade.py',
+    'maintain-contact-upgrade.py',
+    'activate-private-contact.py',
+    'install-private-contact-site.py',
+    'activate-cyberherd-self-read.py',
+    'install-cyberherd-self-read-site.py',
+    'prepare-cyberherd-financial-stage.py',
+    'maintain-cyberherd-programs.py',
+    'activate-cyberherd-financial.py',
+    'maintain-cyberherd-reward-cutover.py',
+    'enable-cyberherd-project-operator.py',
+    'prepare-cyberherd-operator-site.py',
 }
 
 
@@ -72,7 +92,75 @@ def main():
     # Only authenticated local files can now participate in imports. -I/-S
     # excluded the caller directory, PYTHONPATH, user site and site customizers.
     sys.path.insert(0, str(root))
-    sys.argv = [str(root / 'upgrade-vps-canary.py'), *sys.argv[2:]]
+    arguments = sys.argv[2:]
+    operation = 'upgrade-vps-canary.py'
+    if arguments[:1] == ['--cyberherd-operator-site-prepare']:
+        operation = 'prepare-cyberherd-operator-site.py'
+        arguments = arguments[1:]
+    elif arguments[:1] == ['--cyberherd-project-operator']:
+        operation = 'enable-cyberherd-project-operator.py'
+        arguments = arguments[1:]
+    elif arguments[:1] == ['--cyberherd-core']:
+        operation = 'upgrade-cyberherd-core.py'
+        arguments = arguments[1:]
+    elif arguments[:1] == ['--cyberherd-inactive']:
+        operation = 'install-cyberherd-inactive.py'
+        arguments = arguments[1:]
+    elif arguments[:1] == ['--cyberherd-payout-key']:
+        operation = 'prepare-cyberherd-payout-key.py'
+        arguments = arguments[1:]
+    elif arguments[:1] == ['--cyberherd-nostr-clients']:
+        operation = 'prepare-cyberherd-nostr-clients.py'
+        arguments = arguments[1:]
+    elif arguments[:1] == ['--cyberherd-qualify']:
+        operation = 'qualify-cyberherd-installed.py'
+        arguments = arguments[1:]
+    elif arguments[:1] == ['--cyberherd-workers']:
+        operation = 'qualify-cyberherd-workers.py'
+        arguments = arguments[1:]
+    elif arguments[:1] == ['--cyberherd-overlay-stage']:
+        operation = 'stage-cyberherd-overlay.py'
+        arguments = arguments[1:]
+    elif arguments[:1] == ['--cyberherd-overlay-maintenance']:
+        operation = 'maintain-cyberherd-overlay.py'
+        arguments = arguments[1:]
+    elif arguments[:1] == ['--current-core-prepare']:
+        operation = 'prepare-contact-upgrade.py'
+        arguments = ['--current-schema', *arguments[1:]]
+    elif arguments[:1] == ['--current-core-maintenance']:
+        operation = 'maintain-contact-upgrade.py'
+        arguments = ['--current-schema', *arguments[1:]]
+    elif arguments[:1] == ['--contact-upgrade-prepare']:
+        operation = 'prepare-contact-upgrade.py'
+        arguments = arguments[1:]
+    elif arguments[:1] == ['--contact-upgrade-maintenance']:
+        operation = 'maintain-contact-upgrade.py'
+        arguments = arguments[1:]
+    elif arguments[:1] == ['--private-contact-activation']:
+        operation = 'activate-private-contact.py'
+        arguments = arguments[1:]
+    elif arguments[:1] == ['--private-contact-site']:
+        operation = 'install-private-contact-site.py'
+        arguments = arguments[1:]
+    elif arguments[:1] == ['--cyberherd-self-read']:
+        operation = 'activate-cyberherd-self-read.py'
+        arguments = arguments[1:]
+    elif arguments[:1] == ['--cyberherd-self-read-site']:
+        operation = 'install-cyberherd-self-read-site.py'
+        arguments = arguments[1:]
+    elif arguments[:1] == ['--cyberherd-financial-stage']:
+        operation = 'prepare-cyberherd-financial-stage.py'
+        arguments = arguments[1:]
+    elif arguments[:1] == ['--cyberherd-program-maintenance']:
+        operation = 'maintain-cyberherd-programs.py'
+        arguments = arguments[1:]
+    elif arguments[:1] == ['--cyberherd-financial-maintenance']:
+        operation = 'activate-cyberherd-financial.py'
+        arguments = arguments[1:]
+    elif arguments[:1] == ['--cyberherd-reward-cutover-maintenance']:
+        operation = 'maintain-cyberherd-reward-cutover.py'
+        arguments = arguments[1:]
+    sys.argv = [str(root / operation), *arguments]
     runpy.run_path(sys.argv[0], run_name='__main__', init_globals={
         'verified_tool_identity': lambda: verify(root, expected),
     })

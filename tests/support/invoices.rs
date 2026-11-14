@@ -15,6 +15,15 @@ pub fn invoice(amount_msat: u64, description_hash: &str) -> String {
 }
 
 pub fn invoice_at(amount_msat: u64, description_hash: &str, created: Duration) -> String {
+    invoice_with_payment_hash(amount_msat, description_hash, created, [0x22; 32])
+}
+
+pub fn invoice_with_payment_hash(
+    amount_msat: u64,
+    description_hash: &str,
+    created: Duration,
+    payment_hash: [u8; 32],
+) -> String {
     let key = SecretKey::from_slice(&[42; 32]).unwrap();
     let secp = Secp256k1::new();
     InvoiceBuilder::new(Currency::Bitcoin)
@@ -22,7 +31,7 @@ pub fn invoice_at(amount_msat: u64, description_hash: &str, created: Duration) -
         .description_hash(
             sha256::Hash::from_slice(&hex::decode(description_hash).unwrap()).unwrap(),
         )
-        .payment_hash(sha256::Hash::from_slice(&[0x22; 32]).unwrap())
+        .payment_hash(sha256::Hash::from_slice(&payment_hash).unwrap())
         .payment_secret(PaymentSecret([0x44; 32]))
         .duration_since_epoch(created)
         .expiry_time(Duration::from_secs(300))

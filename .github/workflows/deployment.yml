@@ -2,7 +2,7 @@ name: Deployment artifacts
 
 on:
   push:
-    branches: [main]
+    branches: [main, fix/feeder-payment-cap-20261111]
   pull_request:
   workflow_call:
 
@@ -27,20 +27,25 @@ jobs:
           python-version: "3.12"
       - name: Install isolated browser test dependencies
         run: |
+          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_OS bash deploy/scripts/configure-ci-apt-mirrors.sh
           python -m pip install -r tests/website/requirements.txt
           python -m playwright install --with-deps chromium
       - name: Test website with all network traffic mocked
         run: python -m unittest discover -s tests/website -v
 
   nginx:
-    runs-on: ubuntu-22.04
+    # Root fixtures invoke the protected system Python, including -I/-S child
+    # launchers. The TOML coordinators require its stdlib tomllib (Python 3.11+).
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: Install isolated-test dependencies
-        run: sudo apt-get update && sudo apt-get install -y nginx openssl
+        run: |
+          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_OS bash deploy/scripts/configure-ci-apt-mirrors.sh
+          sudo apt-get update && sudo apt-get install -y nginx openssl
       - name: Test assembled nginx sites and release verifier
         run: python3 -m unittest discover -s deploy/tests -v
       - name: Test inactive upgrade with disposable root-owned files
@@ -50,12 +55,76 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.88"
       - uses: Swatinem/rust-cache@v2
       - name: Build all release binaries
         run: cargo build --release --locked --bins
+      - name: Prepare test-only native CyberHerd installation fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --release --locked --example prepare_cyberherd_install_fixture --example check_cyberherd_recipient --example check_household_zap_receipt --example check_cyberherd_overlay_stage --example contact_upgrade_fixture --example check_private_contact_stage --example check_installed_operator --example check_cyberherd_financial_stage
+          cargo test --locked --example check_cyberherd_recipient
+          cargo test --locked --example check_household_zap_receipt
+          cargo test --locked --example check_cyberherd_overlay_stage
+          cargo test --locked --example contact_upgrade_fixture
+          cargo test --locked --example check_private_contact_stage
+          cargo test --locked --example check_installed_operator
+          cargo test --locked --example check_cyberherd_financial_stage
+          mkdir "$RUNNER_TEMP/cyberherd-test-only"
+          install -m 0755 target/release/examples/prepare_cyberherd_install_fixture "$RUNNER_TEMP/cyberherd-test-only/TEST-ONLY-prepare-legacy-core"
+          install -m 0755 target/release/examples/check_cyberherd_recipient "$RUNNER_TEMP/cyberherd-test-only/READ-ONLY-check-recipient"
+          install -m 0755 target/release/examples/check_household_zap_receipt "$RUNNER_TEMP/cyberherd-test-only/SIGNING-ONLY-check-zap-receipt"
+          install -m 0755 target/release/examples/check_cyberherd_overlay_stage "$RUNNER_TEMP/cyberherd-test-only/CHECK-ONLY-overlay-stage"
+          install -m 0755 target/release/examples/contact_upgrade_fixture "$RUNNER_TEMP/cyberherd-test-only/TEST-ONLY-contact-upgrade-fixture"
+          install -m 0755 target/release/examples/check_private_contact_stage "$RUNNER_TEMP/cyberherd-test-only/CHECK-ONLY-private-contact-stage"
+          install -m 0755 target/release/examples/check_installed_operator "$RUNNER_TEMP/cyberherd-test-only/TEST-ONLY-installed-operator-client"
+          install -m 0755 target/release/examples/check_cyberherd_financial_stage "$RUNNER_TEMP/cyberherd-test-only/CHECK-ONLY-financial-stage"
+          python3 -I -S -B deploy/scripts/export-upgrade-tools.py "$GITHUB_WORKSPACE" "$GITHUB_SHA" "$RUNNER_TEMP/cyberherd-test-only/tool-bundle" > "$RUNNER_TEMP/cyberherd-test-only/TOOL-EXPORT.json"
+          python3 -I -S -B deploy/scripts/export-self-read-site.py "$GITHUB_WORKSPACE" "$GITHUB_SHA" "$RUNNER_TEMP/cyberherd-self-read-site" > "$RUNNER_TEMP/cyberherd-test-only/SELF-READ-SITE-EXPORT.json"
+          (cd "$RUNNER_TEMP/cyberherd-test-only" && sha256sum TEST-ONLY-prepare-legacy-core READ-ONLY-check-recipient SIGNING-ONLY-check-zap-receipt CHECK-ONLY-overlay-stage TEST-ONLY-contact-upgrade-fixture CHECK-ONLY-private-contact-stage TEST-ONLY-installed-operator-client CHECK-ONLY-financial-stage TOOL-EXPORT.json > SHA256SUMS)
+      - name: Build pinned schema-8 verifier for isolated upgrade rehearsal
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash deploy/scripts/build-inclusive-fee-legacy-verifier.sh "$RUNNER_TEMP/inclusive-fee-legacy"
+          mkdir "$RUNNER_TEMP/cyberherd-test-only/inclusive-fee-legacy"
+          cp "$RUNNER_TEMP/inclusive-fee-legacy/TEST-ONLY-schema8-statectl" "$RUNNER_TEMP/inclusive-fee-legacy/SOURCE-COMMIT" "$RUNNER_TEMP/inclusive-fee-legacy/SHA256SUMS" "$RUNNER_TEMP/cyberherd-test-only/inclusive-fee-legacy/"
+          (cd "$RUNNER_TEMP/cyberherd-test-only" && sha256sum inclusive-fee-legacy/TEST-ONLY-schema8-statectl inclusive-fee-legacy/SOURCE-COMMIT inclusive-fee-legacy/SHA256SUMS >> SHA256SUMS)
+      - name: Retain test-only installation fixture
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyberherd-test-only-${{ github.sha }}
+          path: ${{ runner.temp }}/cyberherd-test-only/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Check inactive CyberHerd CLI boundaries
+        env:
+          LG_CYBERHERDD_TEST_BINARY: ${{ github.workspace }}/target/release/cyberherdd
+          LG_CYBERHERD_SIGNER_TEST_BINARY: ${{ github.workspace }}/target/release/cyberherd-signerd
+          LG_CYBERHERD_PAYOUT_TEST_BINARY: ${{ github.workspace }}/target/release/cyberherd-payoutd
+          LG_CYBERHERD_STATE_TEST_BINARY: ${{ github.workspace }}/target/release/cyberherd-statectl
+          LG_CORE_UPGRADE_TEST_BINARY: ${{ github.workspace }}/target/release/lightning-goatsctl
+        run: python3 -m unittest discover -s deploy/tests -p 'test_cyberherd*.py' -v
+      - name: Assemble inactive CyberHerd review archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash deploy/scripts/package-cyberherd.sh target/release "$RUNNER_TEMP/cyberherd-review" review
+          (cd "$RUNNER_TEMP/cyberherd-review" && sha256sum --check SHA256SUMS)
+          python3 deploy/scripts/verify-cyberherd-package.py "$RUNNER_TEMP/cyberherd-review/cyberherd-review-x86_64-linux-gnu.tar.gz" "$GITHUB_SHA"
+      - name: Retain CyberHerd review archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyberherd-review-${{ github.sha }}
+          path: ${{ runner.temp }}/cyberherd-review/
+          if-no-files-found: error
+          retention-days: 14
       - name: Assemble and smoke-test the complete archive
         shell: bash
         run: |
@@ -83,10 +152,22 @@ jobs:
     needs: package
     steps:
       - uses: actions/checkout@v4
+      - name: Install disposable operator TLS edge dependencies
+        run: |
+          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_OS bash deploy/scripts/configure-ci-apt-mirrors.sh
+          sudo apt-get update && sudo apt-get install -y nginx openssl
       - uses: actions/download-artifact@v4
         with:
           name: staging-package-${{ github.sha }}
           path: ${{ runner.temp }}/package-systemd
+      - uses: actions/download-artifact@v4
+        with:
+          name: cyberherd-review-${{ github.sha }}
+          path: ${{ runner.temp }}/cyberherd-systemd-review
+      - uses: actions/download-artifact@v4
+        with:
+          name: cyberherd-test-only-${{ github.sha }}
+          path: ${{ runner.temp }}/cyberherd-systemd-test-only
       - name: Verify package and rehearse actual systemd credential sandbox
         shell: bash
         run: |
@@ -108,6 +189,25 @@ jobs:
           python3 -B deploy/scripts/prepare-vps-canary.py "$CANARY_ARCHIVE" "$GITHUB_SHA" "$CANARY_ARCHIVE_SHA256" > "$RUNNER_TEMP/INACTIVE-CANARY-PLAN.json"
           sudo python3 -B deploy/scripts/prepare-vps-canary.py "$CANARY_ARCHIVE" "$GITHUB_SHA" "$CANARY_ARCHIVE_SHA256" --apply > "$RUNNER_TEMP/INACTIVE-CANARY-INSTALL.json"
           (cd "$RUNNER_TEMP" && sha256sum INACTIVE-CANARY-PLAN.json INACTIVE-CANARY-INSTALL.json >> SYSTEMD-SHA256SUMS)
+      - name: Rehearse actual disabled CyberHerd identities, masks and native initialization
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd "$RUNNER_TEMP/cyberherd-systemd-review" && sha256sum --check SHA256SUMS)
+          (cd "$RUNNER_TEMP/cyberherd-systemd-test-only" && sha256sum --check SHA256SUMS)
+          # Only this disposable VM: normalize managed directory parents to the
+          # production protection contract; never change existing files recursively.
+          sudo install -d -o root -g root -m 0755 /usr/local/lib /usr/local/lib/systemd /usr/local/lib/systemd/system
+          sudo --preserve-env=GITHUB_ACTIONS,GITHUB_RUN_ID unshare --mount --propagation private --net -- python3 -B deploy/scripts/rehearse-cyberherd-inactive.py "$RUNNER_TEMP/cyberherd-systemd-review/cyberherd-review-x86_64-linux-gnu.tar.gz" "$GITHUB_SHA" "$RUNNER_TEMP/cyberherd-systemd-test-only" --core-archive "$RUNNER_TEMP/package-systemd/lightning-goats-smoke-x86_64-linux-gnu.tar.gz" --disposable-ci-host > "$RUNNER_TEMP/CYBERHERD-INACTIVE-SYSTEMD.json"
+          (cd "$RUNNER_TEMP" && sha256sum CYBERHERD-INACTIVE-SYSTEMD.json >> SYSTEMD-SHA256SUMS)
+      - name: Probe actual CyberHerd unit identity, credentials and network policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Disposable VM only. Python probes retain the shipped unit protections;
+          # no application worker, real credential or external endpoint is used.
+          sudo --preserve-env=GITHUB_ACTIONS,GITHUB_RUN_ID unshare --net -- python3 -B deploy/scripts/rehearse-cyberherd-boundaries.py --disposable-ci-host > "$RUNNER_TEMP/CYBERHERD-BOUNDARIES.json"
+          (cd "$RUNNER_TEMP" && sha256sum CYBERHERD-BOUNDARIES.json >> SYSTEMD-SHA256SUMS)
       - name: Retain systemd acceptance evidence
         uses: actions/upload-artifact@v4
         with:
@@ -117,6 +217,8 @@ jobs:
             ${{ runner.temp }}/CREDENTIAL-STORE.json
             ${{ runner.temp }}/INACTIVE-CANARY-PLAN.json
             ${{ runner.temp }}/INACTIVE-CANARY-INSTALL.json
+            ${{ runner.temp }}/CYBERHERD-INACTIVE-SYSTEMD.json
+            ${{ runner.temp }}/CYBERHERD-BOUNDARIES.json
             ${{ runner.temp }}/SYSTEMD-SHA256SUMS
           if-no-files-found: error
           retention-days: 14

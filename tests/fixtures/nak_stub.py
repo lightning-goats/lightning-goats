@@ -47,6 +47,16 @@ if phase == "publish":
         payload["content"] = "different published event"
     print(json.dumps(payload))
     sys.exit(0)
+if mode.startswith("protocol_"):
+    event = json.loads((root / "protocol-event.json").read_text())
+    if mode == "protocol_wrong_signature":
+        event["sig"] = "00" * 64
+    if mode == "protocol_mutated_created":
+        event["created_at"] += 1
+    if mode == "protocol_malformed_secret":
+        event["created_at"] = os.environ.get("NOSTR_CLIENT_KEY", "")
+    print(json.dumps(event))
+    sys.exit(0)
 # Simulate a signer echoing the exact requested message; not a real signature.
 event = dict(payload)
 event.update(pubkey="ab" * 32, created_at=1700000000, sig="02" * 64)

@@ -15,6 +15,7 @@
     let feeding = false, qrBusy = false, paymentBusy = false;
     let availability = "unknown", awaitingConfirmation = false;
     let marqueeFrame = null, lastFrame = null, cardTimer = null;
+    let goatCardNames = "";
     const messages = [], activeMessages = [], payments = [], feeds = [];
 
     function later(fn, ms) {
@@ -51,6 +52,7 @@
         animations.clear();
         if (marqueeFrame !== null) cancelAnimationFrame(marqueeFrame);
         marqueeFrame = null; lastFrame = null;
+        goatCardNames = "";
         messages.length = activeMessages.length = payments.length = feeds.length = 0;
         feeding = qrBusy = paymentBusy = false;
         el("message").replaceChildren();
@@ -58,6 +60,7 @@
         weatherTime = null;
         el("current-temperature").textContent = "-- °F";
         el("accordion-container").replaceChildren();
+        delete el("accordion-container").dataset.cards;
         for (const id of ["sats-received-overlay", "feeder-triggered", "accordion-container", "lightning-effect", "lightning-img", "progress-drainer"]) el(id).style.display = "none";
         el("qr-image").style.visibility = el("qr-brand").style.visibility = "visible";
         el("progress-drainer").style.width = "0%";
@@ -72,7 +75,10 @@
         const cleaned = cleanText(text);
         if (!cleaned) return;
         if (messages.length >= 24) messages.shift();
-        messages.push({ text: cleaned, expiresAt });
+        const mentionedGoats = [...goats.values()]
+            .map((name) => ({ name, position: cleaned.search(new RegExp(`\\b${name}\\b`, "i")) }))
+            .filter((goat) => goat.position >= 0).sort((a, b) => a.position - b.position).map((goat) => goat.name);
+        messages.push({ text: cleaned, expiresAt, mentionedGoats });
         if (marqueeFrame === null) marqueeFrame = requestAnimationFrame(scrollMessages);
     }
     function scrollMessages(now) {
@@ -81,11 +87,13 @@
         const width = el("progress-container").clientWidth;
         // Hold the ticker while the confirmed feeder effect owns the screen.
         if (!feeding) {
+            let messageChanged = false;
             for (const message of [...activeMessages]) {
                 message.x -= elapsed * 0.2;
                 if (message.x + message.width <= 0 || (message.expiresAt !== null && message.expiresAt < Date.now())) {
                     message.node.remove();
                     activeMessages.splice(activeMessages.indexOf(message), 1);
+                    messageChanged = true;
                 } else message.node.style.transform = `translateX(${message.x}px)`;
             }
             const newest = activeMessages[activeMessages.length - 1];
@@ -98,8 +106,10 @@
                     node.style.transform = `translateX(${width}px)`;
                     el("message").append(node);
                     activeMessages.push({ ...message, node, x: width, width: node.offsetWidth });
+                    messageChanged = true;
                 }
             }
+            if (messageChanged) syncGoatCards();
             el("progress-percentage").style.opacity = activeMessages.length ? "0.18" : "1";
             const natural = Math.min(1, credit / threshold) * width;
             const edge = activeMessages.reduce((left, item) => Math.min(left, Math.max(0, item.x)), natural);
@@ -108,6 +118,19 @@
         }
         if (messages.length || activeMessages.length) marqueeFrame = requestAnimationFrame(scrollMessages);
         else { marqueeFrame = null; lastFrame = null; render(); }
+    }
+    function syncGoatCards() {
+        const names = [...new Set(activeMessages.flatMap((message) => message.mentionedGoats))];
+        const key = names.join(",");
+        if (key === goatCardNames) return;
+        goatCardNames = key;
+        if (names.length) showCards(names.map((name) => ({ name })));
+        else if (el("accordion-container").dataset.cards === "goats") {
+            el("accordion-container").replaceChildren();
+            el("accordion-container").style.display = "none";
+            delete el("accordion-container").dataset.cards;
+            if (cardTimer) { clearTimeout(cardTimer); timers.delete(cardTimer); cardTimer = null; }
+        }
     }
     function picture(url) {
         if (typeof url !== "string" || url.length > 2048) return logo;
@@ -123,12 +146,17 @@
         return logo;
     }
     function showCards(items, members = false, newestKey = null) {
-        if (!Array.isArray(items) || !items.length) return;
+        if (!Array.isArray(items)) return;
         const host = el("accordion-container");
+        host.dataset.cards = members ? "members" : "goats";
+        if (!items.length) {
+            if (members) { host.replaceChildren(); host.style.display = "none"; }
+            return;
+        }
         host.replaceChildren();
         if (cardTimer) { clearTimeout(cardTimer); timers.delete(cardTimer); }
         const displayed = members
-            ? [...items].filter((item) => item && typeof item === "object").sort((a, b) => (integer(b.amount) ? b.amount : 0) - (integer(a.amount) ? a.amount : 0)).slice(0, 10)
+            ? [...items].filter((item) => item && typeof item === "object").sort((a, b) => integer(a.rank) && integer(b.rank) ? a.rank - b.rank : (integer(b.amount) ? b.amount : 0) - (integer(a.amount) ? a.amount : 0)).slice(0, 10)
             : items.slice(0, 5);
         displayed.forEach((item, index) => {
             if (!item || typeof item !== "object") return;
@@ -151,14 +179,27 @@
             image.onerror = () => { image.onerror = null; image.src = logo; };
             const title = document.createElement("span"); title.className = "user-profile-name"; title.textContent = name;
             content.append(image, title);
-            if (members && integer(item.amount) && item.amount > 0) {
+            const exact = typeof item.amount_sats === "string" && /^(0|[1-9][0-9]{0,18})$/.test(item.amount_sats) ? BigInt(item.amount_sats) : null;
+            if (members && (exact !== null || integer(item.amount) && item.amount > 0)) {
                 const amount = document.createElement("span"); amount.className = "user-profile-zap";
-                amount.textContent = `⚡ ${item.amount.toLocaleString()} sats`; content.append(amount);
+                amount.textContent = `⚡ ${(exact ?? item.amount).toLocaleString()} sats`;
+                if (typeof item.points === "string" && typeof item.share_percent === "string") amount.title = `${item.points} points · ${item.share_percent}% share`;
+                content.append(amount);
             }
             card.append(content); host.append(card);
         });
         host.style.display = host.childElementCount ? "flex" : "none";
         cardTimer = later(() => { host.style.display = "none"; }, 18000);
+    }
+    function acceptRoster(roster) {
+        if (!roster || !Array.isArray(roster.members) || roster.members.length > 10 || !integer(roster.total_members)
+            || roster.total_members > 1000 || roster.members.length !== Math.min(10, roster.total_members)
+            || !integer(roster.revision) || !/^[0-9a-f]{64}$/.test(roster.owner || "")) return false;
+        if (!roster.members.every((m, i) => m && m.rank === i + 1 && /^[0-9a-f]{64}$/.test(m.pubkey || "")
+            && typeof m.amount_sats === "string" && /^(0|[1-9][0-9]{0,18})$/.test(m.amount_sats)
+            && BigInt(m.amount_sats) <= 9223372036854775807n)) return false;
+        showCards(roster.members, true);
+        return true;
     }
     function toggleQr() {
         if (qrBusy) return;
@@ -258,6 +299,8 @@
             if (stream !== data.stream_id || data.reset_reason) clearPresentation();
             stream = data.stream_id; seq = data.seq; credit = data.feed_credit_sats; threshold = data.threshold_sats;
             awaitingConfirmation = typeof data.unresolved_feed_attempt === "string";
+            if (data.cyberherd === null) showCards([], true);
+            else if (data.cyberherd !== undefined && !acceptRoster(data.cyberherd)) return resetConnection();
             replaying = false; el("connection").dataset.state = "live"; el("connection").textContent = ""; el("connection").ariaLabel = "Connected"; render(); return;
         }
         if (!integer(data.seq) || seq === null || stream === null) return resetConnection();
@@ -277,7 +320,6 @@
             if (isPayment && (!integer(data.amount_sats) || data.amount_sats < 10)) { seq = data.seq; return; }
             if (kind === "weather_status") acceptWeather(data.data, data.message);
             else addMessage(data.message);
-            if (Array.isArray(data.goats)) showCards(data.goats);
             if (isPayment) {
                 if (payments.length >= 12) payments.shift();
                 payments.push(data.amount_sats); toggleQr(); showPayment();
@@ -286,7 +328,9 @@
                 if (feeds.length < 8) feeds.push(data.seq);
                 showFeed();
             }
-            if (kind.startsWith("cyberherd_") && Array.isArray(data.members)) showCards(data.members, true, data.newest_pubkey);
+            if (kind === "cyberherd_roster") {
+                if (!acceptRoster(data)) return resetConnection();
+            } else if (kind.startsWith("cyberherd_") && Array.isArray(data.members)) showCards(data.members, true, data.newest_pubkey);
             if (kind === "cyberherd_daily_reset") { el("accordion-container").replaceChildren(); el("accordion-container").style.display = "none"; }
         }
         seq = data.seq;
@@ -346,7 +390,7 @@
             : availability === "pending" ? "Feeding pending confirmation" : "";
         const queued = queuedFeedings();
         let note = queued ? `${queued} feeding${queued === 1 ? "" : "s"} queued to run when feeding resumes.`
-            : "0 feedings queued · credit saved toward the next feeding.";
+            : "0 feedings queued.";
         if (awaitingConfirmation) note += " An earlier feeding is awaiting confirmation.";
         el("feeding-queue").textContent = availability === "ready" ? "" : note;
     }
@@ -360,8 +404,8 @@
             const paused = data.mode === "shadow" || !data.gateway_reachable || data.remote_feeding_enabled !== true || data.feeder_override_active !== false;
             setFeedingState(paused ? "paused" : data.unresolved_feed_attempt ? "pending" : "ready");
             el("feeding-state").title = data.feeder_override_active === true
-                ? "FeederOverride is on. Feed credit is saved."
-                : paused ? "Local feeding controls are paused. Feed credit is saved." : "";
+                ? "FeederOverride is on."
+                : paused ? "Local feeding controls are paused." : "";
             // HTTP status is for availability only. Credit/progress come from the
             // ordered socket; a slower HTTP response must never regress the ledger.
         } catch { setFeedingState("unknown"); }

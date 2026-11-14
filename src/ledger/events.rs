@@ -13,11 +13,12 @@ pub struct DurableEvent {
     pub payload_json: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct OverlaySnapshotState {
     seq: u64,
     feed_credit_sats: u64,
     unresolved_feed_attempt: Option<StoredFeedAttempt>,
+    roster: Option<crate::cyberherd::view::Roster>,
 }
 
 impl LedgerStore {
@@ -72,6 +73,7 @@ impl LedgerStore {
         let snapshot = self.overlay_snapshot_state().await?;
         let message = serde_json::to_string(&json!({
             "type": "snapshot",
+            "cyberherd":snapshot.roster,
             "seq": snapshot.seq,
             "feed_credit_sats": snapshot.feed_credit_sats,
             "threshold_sats": threshold_sats,
@@ -129,11 +131,20 @@ impl LedgerStore {
             })
             .transpose()?;
 
+        let roster:Option<String>=sqlx::query_scalar("SELECT document_json FROM roster_overlay_state WHERE singleton=1 AND json_extract(document_json,'$.epoch')=(SELECT stream_id FROM overlay_identity WHERE singleton=1)").fetch_optional(&mut *transaction).await?;
+        let roster = roster
+            .map(|raw| -> Result<_> {
+                let packet: crate::cyberherd::view::Overlay = serde_json::from_str(&raw)?;
+                packet.validate()?;
+                Ok(packet.roster)
+            })
+            .transpose()?;
         transaction.commit().await?;
         Ok(OverlaySnapshotState {
             seq: to_u64(seq, "event sequence")?,
             feed_credit_sats: to_u64(credit, "feed credit")?,
             unresolved_feed_attempt,
+            roster,
         })
     }
 }

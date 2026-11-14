@@ -20,6 +20,7 @@ import tempfile
 import threading
 import time
 import unittest
+from urllib.parse import urlencode
 
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "nginx"
@@ -102,6 +103,17 @@ class NginxAssemblyTests(unittest.TestCase):
                           else EXAMPLES / f"lightning-goats-{mode}-site.conf.example")
                 data = source.read_text()
                 if suffix == "conf":
+                    if mode == "production" and getattr(cls, "CONTACT_ENABLED", False):
+                        data += "\n" + (EXAMPLES / "lightning-goats-contact.conf.example").read_text()
+                    if mode == "production" and getattr(cls, "CYBERHERD_AUTH_ENABLED", False):
+                        auth = (EXAMPLES.parent / "cyberherd/authenticated-nginx.conf.example").read_text()
+                        data += "\n" + auth.replace("127.0.0.1:3340", f"127.0.0.1:{cls.backends[mode].server_port}")
+                    if mode == "production" and getattr(cls, "CYBERHERD_SELF_READ_ENABLED", False):
+                        auth = (EXAMPLES.parent / "cyberherd/self-read-nginx.conf.example").read_text()
+                        data += "\n" + auth.replace("127.0.0.1:3340", f"127.0.0.1:{cls.backends[mode].server_port}")
+                    if mode == "production" and getattr(cls, "CYBERHERD_OPERATOR_ONLY_ENABLED", False):
+                        auth = (EXAMPLES.parent / "cyberherd/operator-only-nginx.conf.example").read_text()
+                        data += "\n" + auth.replace("127.0.0.1:3340", f"127.0.0.1:{cls.backends[mode].server_port}")
                     (cls.root / "snippets" / f"lightning-goats-{mode}.conf").write_text(data)
                     continue
                 tls_port, http_port = free_port(), free_port()
@@ -229,6 +241,27 @@ http {{
             for path in ("/unknown", "/api/v1/admin", "/invoice/forbidden", "/api/forbidden", "/lnbits/forbidden", "/v1/forbidden", "/rest/items", "/clnrest", "/cyberherd", "/ws/admin", "/.well-known/lnurlp/" + "a" * 65):
                 self.assertEqual(self.request(mode, path)[0], 404, path)
             self.assertEqual(self.request(mode, "/healthz", source="127.0.0.2")[0], 403)
+            self.assertEqual(len(self.backends[mode].calls), before)
+
+    def test_bounded_native_zap_query_is_forwarded_without_rewriting(self):
+        # Signature validation belongs to the Rust tests. This harmless fixture
+        # checks UTF-8 percent expansion, edge bounds and exact query transport.
+        event = {"id": "11" * 32, "pubkey": "22" * 32, "created_at": 1700000000,
+                 "kind": 9734, "tags": [["p", "33" * 32], ["amount", "10000"],
+                 ["relays", "wss://relay.damus.io/"]], "content": "⚡" * 2100,
+                 "sig": "44" * 64}
+        raw = json.dumps(event, ensure_ascii=False, separators=(",", ":"))
+        self.assertLess(len(raw.encode()), 8192)
+        path = "/lnurlp/herd/callback?" + urlencode({"amount": "10000", "nostr": raw})
+        self.assertGreater(len(path), 8192)
+        self.assertLess(len(path), 32768)
+        for mode in self.backends:
+            status, _, _ = self.request(mode, path, source="127.0.0.4")
+            self.assertEqual(status, 200)
+            self.assertEqual(self.backends[mode].calls[-1][1], path)
+            before = len(self.backends[mode].calls)
+            oversized = "/lnurlp/herd/callback?nostr=" + "x" * 33000
+            self.assertEqual(self.request(mode, oversized, source="127.0.0.4")[0], 414)
             self.assertEqual(len(self.backends[mode].calls), before)
 
     def test_webhook_content_type_methods_and_size(self):

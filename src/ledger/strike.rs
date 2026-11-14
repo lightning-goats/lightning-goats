@@ -21,74 +21,20 @@ impl LedgerStore {
         &self,
         request: &StoredStrikeReceiveRequest,
     ) -> Result<()> {
-        validate_hex32(&request.description_hash, "Strike description_hash")?;
-        validate_hex32(&request.payment_hash, "Strike payment_hash")?;
-        crate::domain::invoice::validate_user(&request.address_user)
-            .context("invalid Strike address_user")?;
-        crate::domain::invoice::validate_user(&request.credit_pool)
-            .context("invalid Strike credit_pool")?;
-        if request.amount_msat == 0 {
-            bail!("Strike receive request amount_msat must be greater than zero");
+        self.record_strike_receive_request_with_zap(request, None)
+            .await
+    }
+
+    pub(crate) async fn record_strike_receive_request_with_zap(
+        &self,
+        request: &StoredStrikeReceiveRequest,
+        zap: Option<&crate::zap::ZapRequest>,
+    ) -> Result<()> {
+        if request.address_user == "contact" || request.credit_pool == "contact" {
+            bail!("private contact issuance requires a separate immutable intent");
         }
-        if request.invoice.is_empty() || request.invoice.len() > 8_192 {
-            bail!("Strike BOLT11 invoice must contain 1 to 8192 characters");
-        }
-
-        let amount_msat = to_i64(request.amount_msat, "Strike amount_msat")?;
-        let id = request.receive_request_id.to_string();
-        let mut transaction = self.pool.begin().await?;
-        let existing = sqlx::query(
-            r#"
-            SELECT address_user, credit_pool, amount_msat, description_hash,
-                   payment_hash, invoice, created_provider
-            FROM strike_receive_requests
-            WHERE receive_request_id = ?
-            "#,
-        )
-        .bind(&id)
-        .fetch_optional(&mut *transaction)
-        .await?;
-
-        if let Some(row) = existing {
-            let existing_amount: i64 = row.try_get("amount_msat")?;
-            let matches = row.try_get::<String, _>("address_user")? == request.address_user
-                && row.try_get::<String, _>("credit_pool")? == request.credit_pool
-                && existing_amount == amount_msat
-                && row.try_get::<String, _>("description_hash")? == request.description_hash
-                && row.try_get::<String, _>("payment_hash")? == request.payment_hash
-                && row.try_get::<String, _>("invoice")? == request.invoice
-                && row.try_get::<Option<String>, _>("created_provider")?
-                    == request.created_provider;
-            if matches {
-                transaction.commit().await?;
-                return Ok(());
-            }
-            bail!(
-                "Strike receive_request_id {} already exists with conflicting request data",
-                request.receive_request_id
-            );
-        }
-
-        sqlx::query(
-            r#"
-            INSERT INTO strike_receive_requests
-                (receive_request_id, address_user, credit_pool, amount_msat,
-                 description_hash, payment_hash, invoice, created_provider)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            "#,
-        )
-        .bind(&id)
-        .bind(&request.address_user)
-        .bind(&request.credit_pool)
-        .bind(amount_msat)
-        .bind(request.description_hash.to_ascii_lowercase())
-        .bind(request.payment_hash.to_ascii_lowercase())
-        .bind(&request.invoice)
-        .bind(request.created_provider.as_deref())
-        .execute(&mut *transaction)
-        .await
-        .context("failed persisting Strike receive request")?;
-
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        record_in_transaction(&mut transaction, request, zap).await?;
         transaction.commit().await?;
         Ok(())
     }
@@ -124,6 +70,104 @@ impl LedgerStore {
         })
         .transpose()
     }
+}
+
+pub(super) async fn record_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    request: &StoredStrikeReceiveRequest,
+    zap: Option<&crate::zap::ZapRequest>,
+) -> Result<()> {
+    validate_hex32(&request.description_hash, "Strike description_hash")?;
+    validate_hex32(&request.payment_hash, "Strike payment_hash")?;
+    crate::domain::invoice::validate_user(&request.address_user)
+        .context("invalid Strike address_user")?;
+    crate::domain::invoice::validate_user(&request.credit_pool)
+        .context("invalid Strike credit_pool")?;
+    if request.amount_msat == 0 {
+        bail!("Strike receive request amount_msat must be greater than zero");
+    }
+    if request.invoice.is_empty() || request.invoice.len() > 8_192 {
+        bail!("Strike BOLT11 invoice must contain 1 to 8192 characters");
+    }
+
+    let amount_msat = to_i64(request.amount_msat, "Strike amount_msat")?;
+    if let Some(zap) = zap {
+        if zap.amount_msat() != request.amount_msat
+            || zap.description_hash() != request.description_hash
+        {
+            bail!("zap request differs from its issued invoice binding");
+        }
+    }
+    let id = request.receive_request_id.to_string();
+    let existing = sqlx::query(
+        r#"
+    SELECT address_user, credit_pool, amount_msat, description_hash,
+           payment_hash, invoice, created_provider
+    FROM strike_receive_requests
+    WHERE receive_request_id = ?
+    "#,
+    )
+    .bind(&id)
+    .fetch_optional(&mut **transaction)
+    .await?;
+
+    if let Some(row) = existing {
+        let existing_amount: i64 = row.try_get("amount_msat")?;
+        let matches = row.try_get::<String, _>("address_user")? == request.address_user
+            && row.try_get::<String, _>("credit_pool")? == request.credit_pool
+            && existing_amount == amount_msat
+            && row.try_get::<String, _>("description_hash")? == request.description_hash
+            && row.try_get::<String, _>("payment_hash")? == request.payment_hash
+            && row.try_get::<String, _>("invoice")? == request.invoice
+            && row.try_get::<Option<String>, _>("created_provider")? == request.created_provider;
+        if matches {
+            let previous=sqlx::query("SELECT request_json,payee_pubkey,receipt_pubkey FROM zap_receive_context WHERE receive_request_id=?").bind(&id).fetch_optional(&mut **transaction).await?;
+            let same = match (previous, zap) {
+                (None, None) => true,
+                (Some(row), Some(zap)) => {
+                    row.try_get::<String, _>("request_json")? == zap.raw_json()
+                        && row.try_get::<String, _>("payee_pubkey")? == zap.payee()
+                        && row.try_get::<String, _>("receipt_pubkey")? == zap.receipt_signer()
+                }
+                _ => false,
+            };
+            if !same {
+                bail!("receive request has conflicting immutable zap context");
+            }
+            return Ok(());
+        }
+        bail!(
+            "Strike receive_request_id {} already exists with conflicting request data",
+            request.receive_request_id
+        );
+    }
+
+    sqlx::query(
+        r#"
+    INSERT INTO strike_receive_requests
+        (receive_request_id, address_user, credit_pool, amount_msat,
+         description_hash, payment_hash, invoice, created_provider)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    "#,
+    )
+    .bind(&id)
+    .bind(&request.address_user)
+    .bind(&request.credit_pool)
+    .bind(amount_msat)
+    .bind(request.description_hash.to_ascii_lowercase())
+    .bind(request.payment_hash.to_ascii_lowercase())
+    .bind(&request.invoice)
+    .bind(request.created_provider.as_deref())
+    .execute(&mut **transaction)
+    .await
+    .context("failed persisting Strike receive request")?;
+
+    if let Some(zap) = zap {
+        sqlx::query("INSERT INTO zap_receive_context(receive_request_id,request_json,payee_pubkey,receipt_pubkey) VALUES(?,?,?,?)")
+        .bind(&id).bind(zap.raw_json()).bind(zap.payee()).bind(zap.receipt_signer()).execute(&mut **transaction).await?;
+    }
+
+    Ok(())
 }
 
 fn validate_hex32(value: &str, field: &str) -> Result<()> {

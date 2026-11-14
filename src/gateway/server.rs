@@ -165,6 +165,7 @@ impl TrustedGateway {
             .route("/healthz", get(healthz))
             .route("/v1/feeder/override", get(feeder_safety))
             .route("/v1/temperature", get(temperature))
+            .route("/v1/solar", get(solar))
             .route(
                 "/v1/feeder/request/{request_id}",
                 post(feed_request).get(feed_request_status),
@@ -189,6 +190,13 @@ async fn feeder_safety(State(state): State<GatewayState>) -> Response {
         )
             .into_response(),
         Err(error) => internal_failure("OpenHAB feeder safety unavailable", error),
+    }
+}
+
+async fn solar(State(state): State<GatewayState>) -> Response {
+    match state.openhab.solar_context().await {
+        Ok(context) => (StatusCode::OK, Json(context)).into_response(),
+        Err(error) => internal_failure("OpenHAB solar context unavailable", error),
     }
 }
 

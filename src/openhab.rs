@@ -239,6 +239,21 @@ impl OpenHabClient {
         Ok(Some(parse_temperature_f(&state)?))
     }
 
+    /// Only these fixed, read-only Astro Items are exposed through the gateway.
+    pub async fn solar_context(&self) -> Result<crate::gateway::SolarContext> {
+        let (phase, sunset, radiation) = tokio::join!(
+            self.item_state("Sun_SunPhaseName"),
+            self.item_state("Sun_Set_Start"),
+            self.item_state("Sun_DirectRadiation"),
+        );
+        Ok(crate::gateway::SolarContext::parse(
+            phase.as_deref().ok(),
+            sunset.as_deref().ok(),
+            radiation.as_deref().ok(),
+            crate::gateway::now_epoch()?,
+        ))
+    }
+
     async fn item_state(&self, item: &str) -> Result<String> {
         self.item_state_bounded(item, 4096).await
     }

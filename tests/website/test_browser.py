@@ -55,6 +55,7 @@ class WebsiteBrowserTests(unittest.TestCase):
         self.requests = []
         self.payments = []
         self.enabled = False
+        self.herd_enabled = False
         self.mode = "success"
         self.page.on("pageerror", lambda error: self.errors.append(str(error)))
         self.context.route("**/*", self.route)
@@ -91,8 +92,8 @@ class WebsiteBrowserTests(unittest.TestCase):
                 else:
                     route.fulfill(content_type="application/json", body=json.dumps({"pr": INVOICE, "routes": []}))
                 return
-            if path == "/site-config.js" and self.enabled:
-                route.fulfill(content_type="text/javascript", body="window.LightningGoatsSite = {paymentsEnabled: true};")
+            if path == "/site-config.js":
+                route.fulfill(content_type="text/javascript", body="window.LightningGoatsSite = "+json.dumps({"paymentsEnabled":self.enabled,"cyberherdEnabled":self.herd_enabled}))
                 return
             file = ROOT / ("index.html" if path == "/" else path.lstrip("/"))
             if file.is_file() and file.resolve().is_relative_to(ROOT):
@@ -144,7 +145,7 @@ class WebsiteBrowserTests(unittest.TestCase):
               const button = document.getElementById('feedLink');
               const video = document.querySelector('.iframe-container').getBoundingClientRect();
               const rect = button.getBoundingClientRect();
-              const x = video.right - 50, y = video.top + 50;
+              const x = rect.x + rect.width / 2, y = rect.y + rect.height / 2;
               return {above: button.contains(document.elementFromPoint(x, y)),
                 contained: rect.left >= video.left && rect.right <= video.right &&
                   rect.top >= video.top && rect.bottom <= video.bottom,
@@ -152,7 +153,7 @@ class WebsiteBrowserTests(unittest.TestCase):
             }""")
             self.assertTrue(result["above"], (width, result))
             self.assertTrue(result["contained"], (width, result))
-            self.assertEqual(result["opacity"], "1")
+            self.assertEqual(result["opacity"], "0")
             self.assertTrue(result["disabled"])
         self.assertEqual(self.payments, [])
 
@@ -198,6 +199,26 @@ class WebsiteBrowserTests(unittest.TestCase):
         self.assertEqual(self.page.locator("#invoiceText").input_value(), "")
         self.assertIn("No automatic retry", self.page.locator("#paymentStatus").inner_text())
 
+    def test_feed_pay_uses_webln_and_retains_invoice_after_uncertain_send(self):
+        self.context.add_init_script("""
+          window.walletCalls=[];
+          window.webln={async enable(){walletCalls.push('enable')},async sendPayment(invoice){
+            walletCalls.push(invoice); throw Error('response lost');
+          }};
+        """)
+        self.open(enabled=True)
+        self.assertEqual(self.page.locator("#createInvoice").inner_text(), "Pay")
+        self.submit()
+        self.wait_finished()
+        self.assertEqual(self.page.evaluate("walletCalls"), ["enable", INVOICE])
+        self.assertEqual(len(self.payments), 2)
+        self.assertEqual(self.page.locator("#invoiceText").input_value(), INVOICE)
+        self.assertIn("same invoice", self.page.locator("#paymentStatus").inner_text())
+        self.submit()
+        self.wait_finished()
+        self.assertEqual(len(self.payments), 2)
+        self.assertEqual(self.page.evaluate("walletCalls"), ["enable", INVOICE, "enable", INVOICE])
+
     def test_live_chat_renders_untrusted_text_without_html(self):
         self.open()
         self.page.evaluate("""() => {
@@ -211,6 +232,36 @@ class WebsiteBrowserTests(unittest.TestCase):
         }""")
         self.assertEqual(self.page.locator(".chat-content").inner_text(), "<img src=x onerror=alert(1)>")
         self.assertEqual(self.page.locator(".chat-content img").count(), 0)
+        self.assertEqual(self.errors, [])
+
+    def test_home_header_uses_live_leaderboard_without_a_nip05_link(self):
+        self.herd_enabled = True
+        self.page.route("**/vendor/nostr.bundle.js", lambda route: route.fulfill(content_type="text/javascript", body=NOSTR))
+        self.page.route("**/vendor/nostr-login.js", lambda route: route.fulfill(content_type="text/javascript", body=""))
+        self.page.goto(ORIGIN + "/", wait_until="domcontentloaded", timeout=120000)
+        link = self.page.locator("header #cyberherdLink")
+        self.assertTrue(link.is_visible())
+        self.assertEqual(link.inner_text(), "Leaderboard")
+        self.assertEqual(link.get_attribute("href"), "/leaderboard")
+        self.assertEqual(self.page.locator("header a[href='/feed.html']").count(), 0)
+        self.assertTrue(self.page.locator(".qr-code-overlay").is_visible())
+        self.assertEqual(self.page.locator(".qr-code-overlay").get_attribute("href"), "lightning:herd@lightning-goats.com")
+        layer = self.page.locator(".qr-code-overlay")
+        self.assertEqual(layer.evaluate("e=>getComputedStyle(e).opacity"), "0")
+        self.assertEqual(layer.evaluate("e=>getComputedStyle(e).borderTopWidth"), "0px")
+        layer.focus()
+        self.assertEqual(layer.evaluate("e=>getComputedStyle(e).outlineStyle"), "none")
+        self.assertTrue(layer.evaluate("e=>{const r=e.getBoundingClientRect();return document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)===e}"))
+        for width, height in ((1440, 900), (390, 844)):
+            self.page.set_viewport_size({"width": width, "height": height})
+            frame = self.page.locator("#video-container").bounding_box()
+            hit = layer.bounding_box()
+            self.assertAlmostEqual(hit["width"], frame["width"] * 180 / 1920, delta=0.5)
+            self.assertAlmostEqual(hit["height"], hit["width"], delta=0.5)
+            self.assertAlmostEqual(hit["x"] + hit["width"], frame["x"] + frame["width"] * (1 - 8 / 1920), delta=0.5)
+            self.assertAlmostEqual(hit["y"], frame["y"] + frame["height"] * 3 / 1080, delta=0.5)
+        self.assertFalse(any("nip05" in value.lower() or "nip-05" in value.lower()
+                             for value in self.page.locator("header a").all_text_contents()))
         self.assertEqual(self.errors, [])
 
 

@@ -113,6 +113,7 @@ async fn service(state: StrikeMockState) -> (TempDir, LnurlService) {
         &LnurlConfig {
             public_base_url: "https://lightning-goats.com/".to_owned(),
             invoice_expiry_seconds: 300,
+            zap: None,
         },
         &addresses(),
         strike,

@@ -31,12 +31,13 @@ UUID retry. This update does not alter actuation, debit or reconciliation rules.
   HTTP availability responses cannot overwrite credit. The top line says
   "queued" rather than claiming a paused feeder is ready to actuate.
 - Normal eligible Nostr payment/credit announcements retain their amount/goat
-  content with a leading pause/queue notice. Example: "Feeding is paused. 2 feedings are
-  queued to run after unpausing. …"
-- Overlay scrolling messages omit this prefix; the prominent paused/queued banner
+  content, then explain the pause and queue once in the progress text. Example:
+  "Thank you for 2100 sats! Feeding is paused. We have 2 feedings lined up for
+  when feeding resumes. Another 221 sats are saved toward the next feeding."
+- Overlay scrolling messages omit the pause notice; the prominent paused/queued banner
   supplies that status. Information/weather stay overlay-only while paused.
-- Zero queued feedings is stated explicitly; remaining credit is saved toward
-  the next feeding. Unknown/stale status is described as unavailable, rather
+- When no feeding is funded yet, the message explains that sats are saved and
+  gives the remaining amount, without announcing an empty queue. Unknown/stale status is described as unavailable, rather
   than promising readiness. In-flight confirmation is distinguished from queue.
 - Periodic informational and weather messages now continue while paused, using
   the same schedule and audience policy. The earlier legacy override-based

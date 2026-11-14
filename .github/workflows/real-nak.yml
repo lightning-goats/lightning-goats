@@ -3,7 +3,7 @@ name: Real NIP-46 acceptance
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, fix/feeder-payment-cap-20261111]
 
 permissions:
   contents: read
@@ -30,6 +30,14 @@ jobs:
           assert hashlib.sha256(data).hexdigest() == 'b44b36c792fbc3fb73b7ba3bbc94beda2219826271aa8d5f130f569c3817c3b9'
           path.write_bytes(data)
           path.chmod(0o700)
+          household_path = pathlib.Path(os.environ['RUNNER_TEMP']) / 'nak-household-version'
+          household_url = 'https://github.com/fiatjaf/nak/releases/download/v0.20.7/nak-v0.20.7-linux-amd64'
+          with urllib.request.urlopen(household_url, timeout=30) as response:
+              household_data = response.read(100_000_001)
+          assert len(household_data) <= 100_000_000
+          assert hashlib.sha256(household_data).hexdigest() == 'ba918fafd1b030bc50958a5b218c6386f4c3a57c1e469562d3947e858e0ba56e'
+          household_path.write_bytes(household_data)
+          household_path.chmod(0o700)
           PY
       - name: Build the actual Rust client and outbox regression
         run: cargo test --locked --all-features --test real_nak --no-run --message-format=json > "$RUNNER_TEMP/real-nak-build.jsonl"
@@ -39,6 +47,18 @@ jobs:
           set -euo pipefail
           LG_REAL_TEST_BINARY="$(python3 -c 'import json,sys; rows=[json.loads(line) for line in open(sys.argv[1])]; paths=[r["executable"] for r in rows if r.get("reason")=="compiler-artifact" and r.get("target",{}).get("name")=="real_nak" and r.get("executable")]; assert len(paths)==1; print(paths[0])' "$RUNNER_TEMP/real-nak-build.jsonl")"
           sudo unshare --net -- sh -c 'ip link set lo up; exec runuser -u "$1" -- env LG_TEST_NAK="$2" "$3" --ignored --nocapture' sh "$(id -un)" "$RUNNER_TEMP/nak" "$LG_REAL_TEST_BINARY" | tee "$RUNNER_TEMP/REAL-NAK.txt"
+      - name: Verify four repeated client flags and signing kinds in isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          LG_MULTI_HOST_NETNS="$(readlink /proc/self/ns/net)"
+          sudo unshare --net -- sh -c 'ip link set lo up; exec runuser -u "$1" -- python3 -I -B "$2" --nak "$3" --host-network-namespace "$4"' sh "$(id -un)" "$GITHUB_WORKSPACE/deploy/scripts/check-multi-client-nak.py" "$RUNNER_TEMP/nak" "$LG_MULTI_HOST_NETNS" | tee "$RUNNER_TEMP/REAL-NAK-MULTI-CLIENT.json"
+      - name: Verify actual VPS and household nak versions together
+        shell: bash
+        run: |
+          set -euo pipefail
+          LG_MULTI_HOST_NETNS="$(readlink /proc/self/ns/net)"
+          sudo unshare --net -- sh -c 'ip link set lo up; exec runuser -u "$1" -- python3 -I -B "$2" --nak "$3" --bunker-nak "$4" --host-network-namespace "$5"' sh "$(id -un)" "$GITHUB_WORKSPACE/deploy/scripts/check-multi-client-nak.py" "$RUNNER_TEMP/nak" "$RUNNER_TEMP/nak-household-version" "$LG_MULTI_HOST_NETNS" | tee "$RUNNER_TEMP/REAL-NAK-CROSS-VERSION.json"
       - name: Rehearse the shipped bunker sandbox with encrypted synthetic credentials
         shell: bash
         run: |
@@ -52,6 +72,8 @@ jobs:
           name: real-nak-${{ github.sha }}
           path: |
             ${{ runner.temp }}/REAL-NAK.txt
+            ${{ runner.temp }}/REAL-NAK-MULTI-CLIENT.json
+            ${{ runner.temp }}/REAL-NAK-CROSS-VERSION.json
             ${{ runner.temp }}/BUNKER-SYSTEMD.json
           if-no-files-found: error
           retention-days: 14

@@ -26,8 +26,8 @@ impl LedgerStore {
                 Some(_) => "ready",
             }
         };
-        sqlx::query("INSERT INTO feeding_presentation(singleton,paused,reason,threshold_sats,observed_at) VALUES(1,?,?,?,unixepoch()) ON CONFLICT(singleton) DO UPDATE SET paused=excluded.paused,reason=excluded.reason,threshold_sats=excluded.threshold_sats,observed_at=excluded.observed_at")
-            .bind(reason!="ready").bind(reason).bind(to_i64(threshold_sats,"feeding threshold")?)
+        sqlx::query("INSERT INTO feeding_presentation(singleton,paused,reason,threshold_sats,observed_at,override_enabled) VALUES(1,?,?,?,unixepoch(),?) ON CONFLICT(singleton) DO UPDATE SET paused=excluded.paused,reason=excluded.reason,threshold_sats=excluded.threshold_sats,observed_at=excluded.observed_at,override_enabled=excluded.override_enabled")
+            .bind(reason!="ready").bind(reason).bind(to_i64(threshold_sats,"feeding threshold")?).bind(safety.map(|s| s.override_enabled))
             .execute(&self.pool).await?;
         Ok(())
     }
@@ -126,7 +126,7 @@ mod tests {
         let rendered = renderer.render(&event, 1000).unwrap();
         let public = rendered.nostr_content.as_ref().unwrap();
         assert!(public.contains("Feeding is paused."));
-        assert!(public.contains("2 feedings are queued"));
+        assert!(public.contains("2 feedings lined up"));
         let overlay = rendered.overlay_message.as_ref().unwrap();
         assert!(!overlay.contains("Feeding is paused."));
         assert!(!overlay.contains("Feeder ready!"));
@@ -276,7 +276,7 @@ mod tests {
             assert!(rendered.nostr_content.is_none());
             let message = rendered.overlay_message.unwrap();
             assert!(!message.contains("Feeding is paused."));
-            assert!(!message.contains("2 feedings are queued"));
+            assert!(!message.contains("2 feedings lined up"));
         }
     }
 }

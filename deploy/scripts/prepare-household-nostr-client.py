@@ -25,14 +25,16 @@ def protected(path, directory=False):
 
 
 def run(args, *, data=None, environment=None):
-    result = subprocess.run(args, input=data, env=environment, capture_output=True)
+    if environment is None:
+        environment = {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LC_ALL': 'C', 'NO_COLOR': '1'}
+    result = subprocess.run(args, input=data, env=environment, capture_output=True, timeout=30)
     if result.returncode:
         # Subprocess diagnostics can contain credential data.
         raise ValueError('credential preparation subprocess failed; output withheld')
     return result.stdout
 
 
-def main():
+def prepare(target=TARGET):
     if os.geteuid() != 0:
         raise ValueError('run as root')
     os.umask(0o077)
@@ -43,7 +45,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='.nostr-client-', dir=STORE) as temporary:
         temporary = Path(temporary)
         clean_env = {'PATH': '/usr/bin:/bin', 'NO_COLOR': '1'}
-        created = not TARGET.exists() and not TARGET.is_symlink()
+        created = not target.exists() and not target.is_symlink()
         if created:
             key = run([str(NAK), '--config-path', str(temporary / 'cache'),
                        'key', 'generate'], environment=clean_env).strip()
@@ -58,11 +60,11 @@ def main():
             if checked != key:
                 raise ValueError('encrypted credential readback mismatch')
         else:
-            metadata = protected(TARGET)
+            metadata = protected(target)
             if stat.S_IMODE(metadata.st_mode) != 0o600:
                 raise ValueError('existing client credential must be mode 0600')
             key = run(['systemd-creds', 'decrypt', '--name=nostr-client-key',
-                       str(TARGET), '-']).strip()
+                       str(target), '-']).strip()
         if not re.fullmatch(rb'[0-9a-f]{64}', key):
             raise ValueError('client credential is not a valid hex private key')
         public = run([str(NAK), '--config-path', str(temporary / 'cache'),
@@ -72,11 +74,28 @@ def main():
             raise ValueError('invalid client public key')
         if created:
             # Exclusive installation: a concurrent existing key is never replaced.
-            os.link(encrypted, TARGET)
-            run(['restorecon', str(TARGET)])
-        print(json.dumps({'client_public_key': public, 'created': created,
-                          'credential': str(TARGET), 'services_changed': False,
-                          'events_published': 0}))
+            descriptor = os.open(encrypted, os.O_RDONLY | os.O_NOFOLLOW)
+            try:
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+            os.link(encrypted, target)
+            if Path('/sys/fs/selinux/enforce').exists():
+                run(['/usr/sbin/restorecon', str(target)])
+        result = {'client_public_key': public, 'created': created,
+                  'credential': str(target), 'services_changed': False,
+                  'events_published': 0}
+    # Sync after task-owned temporary links/cache have also been removed.
+    descriptor = os.open(STORE, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    return result
+
+
+def main():
+    print(json.dumps(prepare()))
 
 
 if __name__ == '__main__':

@@ -110,9 +110,7 @@ impl LedgerStore {
                 feed_credit_sats: before,
             });
         }
-        let after = before
-            .checked_add(grant.amount_sats)
-            .ok_or_else(|| anyhow::anyhow!("feed credit overflow"))?;
+        let after = super::feed_cap::capped_total(&mut tx, before, grant.amount_sats).await?;
         to_i64(after, "resulting feed credit")?;
         if dry_run {
             tx.commit().await?;
@@ -124,6 +122,7 @@ impl LedgerStore {
         let ledger_id = sqlx::query("INSERT INTO ledger_entries (entry_type,source_key,delta_sats,address_user,credit_pool) VALUES ('OPERATOR_CREDIT',?,?,?,'herd')")
             .bind(format!("operator-credit:{}",grant.id)).bind(amount).bind(&grant.address_user)
             .execute(&mut *tx).await?.last_insert_rowid();
+        let after = super::feed_cap::cap_new_credit(&mut tx, ledger_id, grant.amount_sats).await?;
         let seq = append_event_in_transaction(
             &mut tx,
             "operator_credit_added",
@@ -136,6 +135,7 @@ impl LedgerStore {
         sqlx::query("INSERT INTO operator_credit_grants (grant_id,amount_sats,address_user,credit_pool,reason,ledger_entry_id,event_seq) VALUES (?,?,?,'herd',?,?,?)")
             .bind(&grant.id).bind(amount).bind(&grant.address_user).bind(&grant.reason).bind(ledger_id).bind(to_i64(seq,"event sequence")?)
             .execute(&mut *tx).await?;
+        super::reward_funding::prepare(&mut tx).await?;
         tx.commit().await?;
         Ok(OperatorCreditResult {
             status: OperatorCreditStatus::Granted,

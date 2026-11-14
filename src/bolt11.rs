@@ -29,7 +29,7 @@ pub(crate) fn verify(
     match invoice.description() {
         Bolt11InvoiceDescriptionRef::Hash(hash)
             if hash.0.to_string().eq_ignore_ascii_case(description_hash) => {}
-        _ => bail!("BOLT11 must commit to the exact LNURL metadata hash"),
+        _ => bail!("BOLT11 must commit to the exact expected description hash"),
     }
     Ok(invoice)
 }

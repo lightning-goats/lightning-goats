@@ -1,0 +1,1419 @@
+#!/usr/bin/env python3
+"""TEST ONLY: fresh CyberHerd installer on a disposable systemd CI VM.
+
+Creates actual fixed service users, masks and journals on that disposable VM.
+A harmless core stand-in proves the upgrade first; subsequent isolated native
+worker qualification uses separate synthetic journals, zero budgets and a shadow
+core. No real credential, transfer, public post or physical feeder is used.
+Never use this disposable-runner orchestrator on a VPS.
+"""
+import argparse
+import hashlib
+import importlib.util
+import json
+import os
+from pathlib import Path
+import pwd
+import shutil
+import stat
+import subprocess
+import tarfile
+import tempfile
+import tomllib
+
+
+def fixture_executable(root, name):
+    allowed = {'TEST-ONLY-prepare-legacy-core', 'TEST-ONLY-contact-upgrade-fixture',
+               'CHECK-ONLY-private-contact-stage', 'TEST-ONLY-installed-operator-client',
+               'CHECK-ONLY-financial-stage'}
+    if name not in allowed or not root.name.startswith('lg-cyberherd-install-rehearsal-'):
+        raise ValueError('fixed disposable executable name and fixture root required')
+    carrier = Path('/var/lib') / (root.name + '-executables')
+    carrier.mkdir(mode=0o755, exist_ok=True)
+    info = carrier.lstat()
+    if (carrier.resolve() != carrier or not stat.S_ISDIR(info.st_mode)
+            or info.st_uid != 0 or info.st_gid != 0 or info.st_mode & 0o022):
+        raise ValueError('protected disposable executable carrier required')
+    return carrier / name
+
+
+def run(*args):
+    result = subprocess.run(args, env={'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LC_ALL': 'C'},
+                            capture_output=True, text=True, timeout=300)
+    if result.returncode:
+        # All selected inputs are synthetic. Retain the actual failure in CI.
+        raise RuntimeError(f'test-only subprocess failed: {args[0]}\n{result.stdout[-8000:]}\n{result.stderr[-8000:]}')
+    return result.stdout
+
+
+def core_upgrade(launcher, root, source, runtime, archive, commit):
+    """Actual transaction, against new synthetic state and a harmless sleep unit.
+
+    All paths are fixed by the production coordinator, so this function is ONLY
+    reached after main's disposable-VM and fresh-namespace guards. The earlier
+    canary installation must still have its original empty state directory.
+    """
+    state = Path('/var/lib/lightning-goats')
+    assert state.stat().st_uid == runtime.pw_uid and not list(state.iterdir())
+    config = Path('/etc/lightning-goats/config.receive.toml')
+    unit = Path('/etc/systemd/system/lightning-goats-receive.service')
+    assert not config.exists() and not config.is_symlink() and not unit.exists() and not unit.is_symlink()
+    # Import only already-authenticated frozen tools, never archive Python.
+    spec = importlib.util.spec_from_file_location('core_rehearsal_preflight', root / 'tools/preflight-release.py')
+    preflight = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(preflight)
+    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    preflight.preflight(archive, commit, digest)
+    payload = root / 'core-payload'
+    payload.mkdir(mode=0o700)
+    preflight.RELEASE.verify_archive(archive, commit, payload)
+    config_bytes = (payload / 'deploy/config.receive.toml.example').read_bytes()
+    with config.open('xb') as output:
+        output.write(config_bytes)
+    config.chmod(0o644)
+    with (source / 'core.db').open('rb') as incoming, (state / 'lightning-goats.db').open('xb') as output:
+        shutil.copyfileobj(incoming, output)
+        output.flush()
+        os.fchown(output.fileno(), runtime.pw_uid, runtime.pw_gid)
+        os.fchmod(output.fileno(), 0o600)
+        os.fsync(output.fileno())
+    # Stand-ins prove that both actual binary hashes change. The unit itself is
+    # a non-admin sleep process, not any payment/network/feeder program.
+    for binary in ('lightning-goatsd', 'lightning-goatsctl'):
+        target = Path('/usr/local/bin') / binary
+        target.write_text('#!/bin/sh\nexit 97\n')
+        target.chmod(0o755)
+    unit_bytes = b'[Unit]\nDescription=TEST ONLY harmless legacy core stand-in\n[Service]\nUser=lightning-goats\nGroup=lightning-goats\nNoNewPrivileges=yes\nExecStart=/usr/bin/sleep infinity\n'
+    with unit.open('xb') as output:
+        output.write(unit_bytes)
+    unit.chmod(0o644)
+    run('/usr/bin/systemctl', 'daemon-reload')
+    run('/usr/bin/systemctl', 'start', 'lightning-goats-receive.service')
+    base = Path('/var/lib/lightning-goats-upgrades')
+    base.mkdir(mode=0o700, exist_ok=False)
+    transaction = base / 'ci-core-upgrade'
+    plan = json.loads(run(*launcher, '--cyberherd-core', 'prepare', str(archive), commit, digest, str(transaction)))
+    assert plan['service_changed'] is False and plan['state_opened'] is False
+    upgraded = json.loads(run(*launcher, '--cyberherd-core', 'apply', str(transaction), '--writers-stopped'))
+    assert upgraded['upgraded'] is True and upgraded['core_masked'] is True and upgraded['core_started'] is False
+    assert os.readlink(unit) == '/dev/null'
+    for binary in ('lightning-goatsd', 'lightning-goatsctl'):
+        assert hashlib.sha256((Path('/usr/local/bin') / binary).read_bytes()).digest() == hashlib.sha256((payload / binary).read_bytes()).digest()
+    comparison = json.loads((transaction / 'COMPARISON.json').read_text())
+    assert comparison['native']['accepted'] is True and comparison['native']['candidate_compared'] is True
+    restored = json.loads(run(*launcher, '--cyberherd-core', 'finish', str(transaction), '--restore-original-unit'))
+    assert restored['original_unit_restored'] is True and restored['core_started'] is False
+    assert restored['explicit_core_restart_required'] is True
+    assert unit.read_bytes() == unit_bytes and config.read_bytes() == config_bytes
+    observed = dict(line.split('=', 1) for line in run('/usr/bin/systemctl', 'show', 'lightning-goats-receive.service',
+                                                     '-p', 'ActiveState', '-p', 'SubState', '-p', 'MainPID').splitlines())
+    assert observed == {'ActiveState': 'inactive', 'SubState': 'dead', 'MainPID': '0'}
+    info = (state / 'lightning-goats.db').stat()
+    assert info.st_uid == runtime.pw_uid and info.st_gid == runtime.pw_gid and stat.S_IMODE(info.st_mode) == 0o600
+    evidence = json.loads((transaction / 'legacy/MANIFEST.json').read_text())
+    assert evidence['report']['tables']['settled_payments']['rows'] == 1
+    assert evidence['report']['tables']['feed_attempts']['rows'] == 1
+    assert evidence['report']['tables']['message_outbox']['rows'] == 1
+    return transaction / 'policy.toml', transaction / 'legacy'
+
+
+def overlay_maintenance(launcher, root, fixture_directory, installation, core_archive, review_archive, source_commit):
+    """Actual executor/systemd/native backup, ONLY inside main's disposable VM.
+
+    Both actual application services join this loopback-only namespace. Existing
+    fixed-path journals contain only the synthetic paid/pending/signed fixture.
+    No real provider, relay, credential, gateway or production host is involved.
+    """
+    import http.server
+    import threading
+    if (os.geteuid() != 0 or os.environ.get('GITHUB_ACTIONS') != 'true'
+            or not os.environ.get('GITHUB_RUN_ID', '').isdigit()
+            or os.readlink('/proc/self/ns/net') == os.readlink('/proc/1/ns/net')
+            or {v['ifname'] for v in json.loads(run('/usr/sbin/ip', '-j', 'link', 'show'))} != {'lo'}):
+        raise ValueError('overlay rehearsal requires the guarded disposable isolated CI host')
+    tools = root / 'tools'
+    spec = importlib.util.spec_from_file_location('ci_overlay_worker_support', tools / 'qualify-cyberherd-workers.py')
+    w = importlib.util.module_from_spec(spec); spec.loader.exec_module(w)
+    run('/usr/sbin/ip', 'link', 'set', 'lo', 'up')
+    namespace = Path('/proc') / str(os.getpid()) / 'ns/net'
+    assert os.readlink(namespace) != os.readlink('/proc/1/ns/net')
+    counts = {'post': 0}
+    class Gateway(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *args): pass
+        def do_GET(self):
+            payload = {'override_enabled': True, 'remote_enabled': False} if self.path == '/v1/feeder/override' else {}
+            data = json.dumps(payload).encode()
+            self.send_response(200 if self.path in ('/v1/feeder/override', '/healthz') else 404)
+            self.send_header('Content-Type', 'application/json'); self.send_header('Content-Length', str(len(data)))
+            self.end_headers(); self.wfile.write(data)
+        def do_POST(self):
+            counts['post'] += 1; self.send_response(405); self.end_headers()
+    gateway = http.server.ThreadingHTTPServer(('127.0.0.1', 18789), Gateway)
+    thread = threading.Thread(target=gateway.serve_forever, daemon=True); thread.start()
+    config_path = Path('/etc/lightning-goats/config.receive.toml')
+    unit_path = Path('/etc/systemd/system/lightning-goats-receive.service')
+    member_config = tomllib.loads(Path('/etc/cyberherd/config.toml').read_text())
+    core = pwd.getpwnam('lightning-goats')
+    value = tomllib.loads(config_path.read_text())
+    value['service'] = {'mode': 'shadow', 'listen': '127.0.0.1:8787'}
+    value['gateway']['url'] = 'http://127.0.0.1:18789/'
+    value['informational'].update(interface_info_enabled=False, weather_enabled=False)
+    value['nostr']['bunker_pubkey'] = member_config['project_pubkey']
+    config_bytes = w.toml_text(value).encode(); config_path.write_bytes(config_bytes)
+    template = (root / 'core-payload/deploy/systemd/lightning-goats-receive.service').read_text()
+    lines = ['[Unit]', 'Description=TEST ONLY native overlay maintenance core', '[Service]',
+             'Type=simple', 'User=lightning-goats', 'Group=lightning-goats',
+             'ExecStart=/usr/local/bin/lightning-goatsd --config /etc/lightning-goats/config.receive.toml',
+             'StateDirectory=lightning-goats', 'StateDirectoryMode=0700',
+             'RuntimeDirectory=lightning-goats', 'RuntimeDirectoryMode=0700',
+             'UMask=0077', 'Restart=no', 'TimeoutStopSec=30',
+             'NetworkNamespacePath=' + str(namespace),
+             'ReadWritePaths=/var/lib/lightning-goats /run/lightning-goats']
+    lines += [name + '=' + data for name, data in w.properties(template)]
+    for name in ('strike-api-key', 'strike-webhook-secret'):
+        credential = root / (name + '.overlay-synthetic.cred')
+        w.encrypt(credential, name, b'SYNTHETIC-OVERLAY-NO-EXTERNAL-ACCOUNT')
+        lines.append('LoadCredentialEncrypted=' + name + ':' + str(credential))
+    unit_bytes = ('\n'.join(lines) + '\n').encode()
+    unit_path.write_bytes(unit_bytes); unit_path.chmod(0o644)
+    # This existing, protected override is frozen in the review, verified before
+    # start and kept unchanged by rollback. The vendor unit stays byte-identical.
+    dropdir = Path('/etc/systemd/system/cyberherd.service.d'); dropdir.mkdir(mode=0o755)
+    drop = dropdir / '90-ci-network.conf'
+    drop.write_text('[Service]\nNetworkNamespacePath=' + str(namespace) + '\n'); drop.chmod(0o644)
+    # Exercise the inherited Fedora-style policy as well as role overrides.
+    common_dir = Path('/etc/systemd/system/service.d')
+    common_created = not common_dir.exists()
+    common_dir.mkdir(mode=0o755, exist_ok=True)
+    common = common_dir / '90-ci-timeout-abort.conf'
+    common_text = '[Service]\nTimeoutStopFailureMode=abort\n'
+    with common.open('x') as out: out.write(common_text)
+    common.chmod(0o644)
+    payout = tomllib.loads(Path('/etc/cyberherd-payout/config.toml').read_text())
+    components = {'core': {'database': '/var/lib/lightning-goats/lightning-goats.db',
+                            'uid': core.pw_uid, 'gid': core.pw_gid, 'unit': 'lightning-goats-receive.service'}}
+    for role, component, filename in [('cyberherd', 'membership', 'cyberherd.db'),
+                                       ('cyberherd-payout', 'payout', 'payout.db'), ('cyberherd-signer', 'signer', 'signer.db')]:
+        identity = pwd.getpwnam(role)
+        components[component] = {'database': '/var/lib/' + role + '/' + filename,
+                                 'uid': identity.pw_uid, 'gid': identity.pw_gid, 'unit': role + '.service'}
+    policy = {'version': 1, 'owner': member_config['project_pubkey'], 'epoch': member_config['core']['epoch'],
+              'provider': payout['policy']['scope']['provider'], 'max_component_bytes': 128*1024*1024, 'components': components}
+    policy_path = Path('/etc/cyberherd/state-maintenance.toml')
+    with policy_path.open('x') as output: output.write(w.toml_text(policy))
+    policy_path.chmod(0o600)
+    run('/usr/bin/install', '-d', '-o', 'root', '-g', 'root', '-m', '0755', '/usr/local/libexec')
+    checker_dir = Path('/usr/local/libexec/lg-ci-overlay-check'); checker_dir.mkdir(mode=0o755)
+    checker = checker_dir / 'CHECK-ONLY-overlay-stage'
+    shutil.copyfile(fixture_directory / checker.name, checker); checker.chmod(0o755)
+    checker_sha = hashlib.sha256(checker.read_bytes()).hexdigest()
+    base = Path('/var/lib/lightning-goats-upgrades')
+    review, execution = base / 'ci-overlay-review', base / 'ci-overlay-execution'
+    try:
+        run('/usr/bin/systemctl', 'daemon-reload'); run('/usr/bin/systemctl', 'start', 'lightning-goats-receive.service')
+        w.await_ready(lambda: w.http_json('http://127.0.0.1:8787/healthz'), 'actual maintenance core')
+        before_epoch = member_config['core']['epoch']
+        for name in ('lightning-goats-receive.service',):
+            pid = run('/usr/bin/systemctl', 'show', name, '-p', 'MainPID', '--value').strip()
+            assert os.readlink('/proc/' + pid + '/ns/net') == os.readlink(namespace)
+        prepared = json.loads(run(*launcher, '--cyberherd-overlay-stage', 'prepare', str(installation), str(checker), str(review),
+                                  '--validator-sha256', checker_sha, '--message-start-after', '0'))
+        assert prepared['prepared'] is True and prepared['services_changed'] is False
+        review_sha = hashlib.sha256((review / 'PREPARED.json').read_bytes()).hexdigest()
+        planned = json.loads(run(*launcher, '--cyberherd-overlay-maintenance', 'plan', str(review), str(execution), '--review-sha256', review_sha))
+        assert planned['planned'] is True and planned['services_changed'] is False
+        applied = json.loads(run(*launcher, '--cyberherd-overlay-maintenance', 'apply', str(execution), '--exclusive-maintenance'))
+        assert applied['four_journal_backup_verified'] is True and applied['services_started'] is False
+        original = json.loads((execution / 'backup/MANIFEST.json').read_text())
+        assert original['policy']['epoch'] == before_epoch and original['report']['pending_feeds'] == 1
+        assert original['report']['rows']['core']['settled_payments'] == 1
+        resumed = json.loads(run(*launcher, '--cyberherd-overlay-maintenance', 'resume', str(execution), '--approve-resumption'))
+        assert resumed == {'core_running': True, 'membership_running': True, 'payouts_enabled': False}
+        page = w.http_json('http://127.0.0.1:3340/api/v1/cyberherd')
+        assert page['roster']['owner'] == policy['owner'] and page['roster']['total_members'] == 0
+        for name in ('lightning-goats-receive.service', 'cyberherd.service'):
+            pid = run('/usr/bin/systemctl', 'show', name, '-p', 'MainPID', '--value').strip()
+            assert os.readlink('/proc/' + pid + '/ns/net') == os.readlink(namespace)
+        process_before = {name: run('/usr/bin/systemctl', 'show', name, '-p', 'MainPID', '--value').strip()
+                          for name in ('lightning-goats-receive.service', 'cyberherd.service')}
+        # Preparation only, using actual protected binaries/configurations and
+        # both authenticated build archives. It must preserve both live PIDs.
+        contact = json.loads(run(*launcher, '--contact-upgrade-prepare', str(core_archive), str(review_archive),
+                                 source_commit, hashlib.sha256(core_archive.read_bytes()).hexdigest(),
+                                 hashlib.sha256(review_archive.read_bytes()).hexdigest(), str(base / 'ci-contact-upgrade-prepare')))
+        assert contact == {'prepared': True, 'activation_supported': False, 'services_changed': False,
+                           'journals_opened': False, 'credentials_loaded': False, 'contact_enabled': False}
+        for name, pid in process_before.items():
+            assert run('/usr/bin/systemctl', 'show', name, '-p', 'MainPID', '--value').strip() == pid
+        assert w.http_json('http://127.0.0.1:8787/healthz')['status'] == 'ok'
+        rolled = json.loads(run(*launcher, '--cyberherd-overlay-maintenance', 'rollback', str(execution), '--exclusive-maintenance'))
+        assert rolled['database_restored'] is False and rolled['writers_masked'] is True
+        assert config_path.read_bytes() == config_bytes and drop.read_text().endswith(str(namespace) + '\n')
+        final = base / 'ci-overlay-after-rollback'
+        run('/usr/local/bin/cyberherd-statectl', '--config', str(policy_path), 'snapshot', '--destination', str(final), '--writers-stopped')
+        run('/usr/local/bin/cyberherd-statectl', '--config', str(policy_path), 'verify', '--bundle', str(final))
+        after = json.loads((final / 'MANIFEST.json').read_text())
+        assert after['policy'] == original['policy']
+        assert after['report']['pending_feeds'] == 1
+        for table in ('settled_payments', 'ledger_entries', 'feed_attempts', 'message_outbox'):
+            assert after['report']['rows']['core'][table] == original['report']['rows']['core'][table]
+        restored = json.loads(run(*launcher, '--cyberherd-overlay-maintenance', 'resume-core', str(execution), '--approve-resumption'))
+        assert restored == {'core_running': True, 'membership_running': False, 'payouts_enabled': False}
+        assert unit_path.read_bytes() == unit_bytes and config_path.read_bytes() == config_bytes
+        assert counts['post'] == 0
+        return {'accepted': True, 'actual_systemd_apply_resume_rollback': True, 'actual_native_backup_verified': True,
+                'native_core_and_membership_started': True, 'same_epoch_and_paid_pending_signed_counts': True,
+                'contact_upgrade_preparation_preserved_running_processes': True,
+                'all_application_networking_loopback_isolated': True, 'gateway_post_count': 0,
+                'synthetic_credentials_only': True, 'provider_qualified': False, 'live_host_qualified': False}
+    except Exception:
+        # Only synthetic state/credentials exist in this guarded disposable VM.
+        # Never add this diagnostic to a production tool or read live journals.
+        import sys
+        for name in ('lightning-goats-receive.service', 'cyberherd.service'):
+            result = subprocess.run(['/usr/bin/journalctl', '--no-pager', '-u', name, '-n', '30', '-o', 'cat'],
+                                    capture_output=True, text=True, timeout=10)
+            print('DISPOSABLE SYNTHETIC UNIT ' + name + '\n' + result.stdout[-8000:], file=sys.stderr)
+        raise
+    finally:
+        run('/usr/bin/systemctl', 'stop', 'cyberherd.service', 'lightning-goats-receive.service')
+        assert common.read_text() == common_text
+        common.unlink()
+        if common_created: common_dir.rmdir()
+        run('/usr/bin/systemctl', 'daemon-reload')
+        gateway.shutdown(); gateway.server_close(); thread.join(timeout=2)
+
+
+def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive, review_archive, source_commit):
+    """Actual 23->24 executor on disposable synthetic state, never a live host.
+
+    The old core is a separately compiled harmless ELF stand-in. Both migration
+    rounds, native backup/comparison, UID execution and the resumed new core are
+    actual installed programs. All service networking stays in this fresh netns.
+    """
+    import http.server
+    import threading
+    if (os.geteuid() != 0 or os.environ.get('GITHUB_ACTIONS') != 'true'
+            or not os.environ.get('GITHUB_RUN_ID', '').isdigit()
+            or os.readlink('/proc/self/ns/net') == os.readlink('/proc/1/ns/net')
+            or {v['ifname'] for v in json.loads(run('/usr/sbin/ip', '-j', 'link', 'show'))} != {'lo'}):
+        raise ValueError('contact rehearsal requires the guarded disposable isolated CI host')
+    tools = root / 'tools'
+    spec = importlib.util.spec_from_file_location('ci_contact_worker_support', tools / 'qualify-cyberherd-workers.py')
+    w = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(w)
+    base = Path('/var/lib/lightning-goats-upgrades')
+    overlay = base / 'ci-overlay-review'
+    config = Path('/etc/lightning-goats/config.receive.toml')
+    member = Path('/etc/cyberherd/config.toml')
+    unit = Path('/etc/systemd/system/lightning-goats-receive.service')
+    member_mask = Path('/etc/systemd/system/cyberherd.service')
+    program = Path('/usr/local/bin/lightning-goatsd')
+    original = {str(path): path.read_bytes() for path in (config, member, unit,
+        Path('/etc/cyberherd-payout/config.toml'), Path('/etc/cyberherd-signer/config.toml'))}
+    for name in ('lightning-goats-receive', 'cyberherd', 'cyberherd-payout', 'cyberherd-signer'):
+        assert run('/usr/bin/systemctl', 'show', name + '.service', '-p', 'MainPID', '--value').strip() == '0'
+    guard = Path('/run/lightning-goats-contact-fixture')
+    guard.mkdir(mode=0o755)
+    (guard / 'ALLOW').write_text('LIGHTNING_GOATS_DISPOSABLE_CONTACT_UPGRADE_CI_v1\n' + os.readlink('/proc/self/ns/net') + '\n')
+    (guard / 'ALLOW').chmod(0o444)
+    fixture = fixture_executable(root, 'TEST-ONLY-contact-upgrade-fixture')
+    shutil.copyfile(fixture_directory / fixture.name, fixture)
+    fixture.chmod(0o755)
+    runtime = pwd.getpwnam('lightning-goats')
+    counts = {'post': 0}
+    gateway_safety = {'override_enabled': True, 'remote_enabled': False}
+    class Gateway(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *args): pass
+        def do_GET(self):
+            value = dict(gateway_safety) if self.path == '/v1/feeder/override' else {}
+            data = json.dumps(value).encode()
+            self.send_response(200 if self.path in ('/v1/feeder/override', '/healthz') else 404)
+            self.send_header('Content-Type', 'application/json'); self.send_header('Content-Length', str(len(data)))
+            self.end_headers(); self.wfile.write(data)
+        def do_POST(self):
+            counts['post'] += 1
+            self.send_response(405); self.end_headers()
+    gateway = http.server.ThreadingHTTPServer(('127.0.0.1', 18789), Gateway)
+    thread = threading.Thread(target=gateway.serve_forever, daemon=True)
+    thread.start()
+    finished = False
+    synthetic_signing_artifacts = []
+    try:
+        stripped = json.loads(run('/usr/bin/setpriv', '--reuid=' + str(runtime.pw_uid), '--regid=' + str(runtime.pw_gid),
+                                  '--clear-groups', '--inh-caps=-all', '--ambient-caps=-all', '--bounding-set=-all', '--no-new-privs',
+                                  str(fixture), '--strip-empty-contact-schema'))
+        assert stripped == {'synthetic': True, 'schema': 23, 'payments': 1, 'signed_messages': 1, 'production_supported': False}
+        config.write_bytes((overlay / 'core.toml').read_bytes())
+        member.write_bytes((overlay / 'membership.toml').read_bytes())
+        unit.write_bytes((overlay / unit.name).read_bytes())
+        shutil.copyfile(fixture, program)
+        program.chmod(0o755)
+        assert member_mask.is_symlink() and os.readlink(member_mask) == '/dev/null'
+        member_mask.unlink()
+        run('/usr/bin/systemctl', 'daemon-reload')
+        run('/usr/bin/systemctl', 'start', 'lightning-goats-receive.service', 'cyberherd.service')
+        old_digest = hashlib.sha256(program.read_bytes()).hexdigest()
+        def old_core_ready():
+            pid = run('/usr/bin/systemctl', 'show', 'lightning-goats-receive.service', '-p', 'MainPID', '--value').strip()
+            if not pid.isdecimal() or int(pid) < 2: return False
+            return hashlib.sha256(Path('/proc', pid, 'exe').read_bytes()).hexdigest() == old_digest
+        w.await_ready(old_core_ready, 'harmless old-core ELF stand-in')
+        w.await_ready(lambda: w.http_json('http://127.0.0.1:3340/api/v1/cyberherd'), 'native pre-upgrade membership view')
+        review, execution = base / 'ci-contact-maintenance-review', base / 'ci-contact-maintenance-execution'
+        prepared = json.loads(run(*launcher, '--contact-upgrade-prepare', str(core_archive), str(review_archive),
+                                  source_commit, hashlib.sha256(core_archive.read_bytes()).hexdigest(),
+                                  hashlib.sha256(review_archive.read_bytes()).hexdigest(), str(review)))
+        assert prepared['services_changed'] is False and prepared['journals_opened'] is False
+        frozen = json.loads((review / 'PREPARED.json').read_text())
+        before_policy = frozen['baseline']['policy']
+        review_sha = hashlib.sha256((review / 'PREPARED.json').read_bytes()).hexdigest()
+        planned = json.loads(run(*launcher, '--contact-upgrade-maintenance', 'plan', str(review), str(execution),
+                                 '--review-sha256', review_sha))
+        assert planned == {'planned': True, 'services_changed': False, 'journals_opened': False}
+        upgraded = json.loads(run(*launcher, '--contact-upgrade-maintenance', 'apply', str(execution), '--exclusive-maintenance'))
+        assert upgraded == {'upgraded': True, 'four_journal_backup_verified': True, 'clone_compared': True,
+                            'live_migration_compared': True, 'services_started': False, 'contact_enabled': False}
+        before = json.loads((execution / 'backup/MANIFEST.json').read_text())
+        after = json.loads((execution / 'migrated/MANIFEST.json').read_text())
+        assert before['policy'] == after['policy'] == before_policy
+        assert before['report']['pending_feeds'] == after['report']['pending_feeds'] == 1
+        for table in ('settled_payments', 'ledger_entries', 'feed_attempts', 'message_outbox'):
+            assert before['report']['rows']['core'][table] == after['report']['rows']['core'][table]
+        for table in ('private_contact_intents', 'private_contact_fees', 'private_contact_delivery'):
+            assert table not in before['report']['rows']['core'] and after['report']['rows']['core'][table] == 0
+        assert hashlib.sha256(program.read_bytes()).hexdigest() != old_digest
+        resumed = json.loads(run(*launcher, '--contact-upgrade-maintenance', 'resume', str(execution), '--approve-resumption'))
+        assert resumed == {'core_running': True, 'membership_running': True, 'contact_enabled': False, 'payouts_enabled': False}
+        assert w.http_json('http://127.0.0.1:8787/healthz')['status'] == 'ok'
+        page = w.http_json('http://127.0.0.1:3340/api/v1/cyberherd')
+        assert page['roster']['owner'] == before_policy['owner']
+        for name in ('lightning-goats-receive.service', 'cyberherd.service'):
+            pid = run('/usr/bin/systemctl', 'show', name, '-p', 'MainPID', '--value').strip()
+            assert os.readlink('/proc/' + pid + '/ns/net') == os.readlink('/proc/self/ns/net')
+        assert counts['post'] == 0 and 'contact' not in tomllib.loads(config.read_text())
+        # Separate contact-only activation, still on this guarded disposable VM.
+        # Active mode is established as synthetic fixture setup, BEFORE freezing
+        # the activation review. No production mode/signing authority is inferred.
+        run('/usr/bin/systemctl', 'stop', 'cyberherd.service', 'lightning-goats-receive.service')
+        active = tomllib.loads(config.read_text())
+        active['service']['mode'] = 'active'
+        # This path deliberately does not exist: the contact activation check
+        # must not need a signing subprocess, bunker or public Nostr operation.
+        active['nostr']['nak_path'] = '/usr/local/bin/TEST-ONLY-no-contact-signer'
+        assert not Path(active['nostr']['nak_path']).exists()
+        config.write_text(w.toml_text(active))
+        credential = root / 'nostr-client-key.contact-synthetic.cred'
+        w.encrypt(credential, 'nostr-client-key', b'SYNTHETIC-CONTACT-NO-BUNKER')
+        with unit.open('a') as output:
+            output.write('LoadCredentialEncrypted=nostr-client-key:' + str(credential) + '\n')
+        run('/usr/bin/systemctl', 'daemon-reload')
+        run('/usr/bin/systemctl', 'start', 'lightning-goats-receive.service', 'cyberherd.service')
+        w.await_ready(lambda: w.http_json('http://127.0.0.1:8787/healthz'), 'synthetic active core before contact activation')
+        w.await_ready(lambda: w.http_json('http://127.0.0.1:3340/api/v1/cyberherd'), 'membership before contact activation')
+        before_config = tomllib.loads(config.read_text())
+        validator = fixture_executable(root, 'CHECK-ONLY-private-contact-stage')
+        shutil.copyfile(fixture_directory / validator.name, validator)
+        validator.chmod(0o755)
+        activation = base / 'ci-private-contact-activation'
+        prepared_contact = json.loads(run(*launcher, '--private-contact-activation', 'prepare', str(activation),
+                                           '--validator', str(validator), '--validator-sha256', hashlib.sha256(validator.read_bytes()).hexdigest(),
+                                           '--inbox-relay', 'wss://relay.damus.io/'))
+        assert prepared_contact == {'prepared': True, 'services_changed': False, 'journals_opened': False, 'contact_enabled': False}
+        activation_sha = hashlib.sha256((activation / 'PREPARED.json').read_bytes()).hexdigest()
+        applied_contact = json.loads(run(*launcher, '--private-contact-activation', 'apply', str(activation),
+                                          '--review-sha256', activation_sha, '--exclusive-maintenance'))
+        assert applied_contact == {'configured': True, 'current_four_journal_backup_verified': True,
+                                   'financial_images_unchanged': True, 'services_started': False}
+        activated_contact = json.loads(run(*launcher, '--private-contact-activation', 'resume', str(activation), '--approve-resumption'))
+        assert activated_contact == {'core_running': True, 'membership_running': True, 'contact_enabled': True, 'payouts_enabled': False}
+        import urllib.error
+        import urllib.request
+        request = urllib.request.Request('http://127.0.0.1:8787/api/v1/contact', data=b'{}', method='POST',
+                                         headers={'Content-Type': 'application/json', 'Origin': active['lnurl']['public_base_url'].rstrip('/')})
+        try:
+            urllib.request.urlopen(request, timeout=10)
+            raise AssertionError('invalid contact must never request an invoice')
+        except urllib.error.HTTPError as error:
+            assert error.code == 400
+            assert json.loads(error.read()) == {'error': 'invalid private contact'}
+        after_config = tomllib.loads(config.read_text())
+        assert after_config.pop('contact') == {'recipient': before_policy['owner'], 'inbox_relays': ['wss://relay.damus.io/']}
+        assert after_config == before_config and counts['post'] == 0
+        for name in ('lightning-goats-receive.service', 'cyberherd.service'):
+            pid = run('/usr/bin/systemctl', 'show', name, '-p', 'MainPID', '--value').strip()
+            assert os.readlink('/proc/' + pid + '/ns/net') == os.readlink('/proc/self/ns/net')
+        for name in ('cyberherd-payout.service', 'cyberherd-signer.service'):
+            assert os.readlink('/etc/systemd/system/' + name) == '/dev/null'
+            assert run('/usr/bin/systemctl', 'show', name, '-p', 'MainPID', '--value').strip() == '0'
+        operator = fixture_executable(root, 'TEST-ONLY-installed-operator-client')
+        shutil.copyfile(fixture_directory / operator.name, operator)
+        operator.chmod(0o755)
+        member_user = pwd.getpwnam('cyberherd')
+        client_state = guard / 'operator-client'
+        client_state.mkdir(mode=0o700)
+        os.chown(client_state, member_user.pw_uid, member_user.pw_gid)
+        client = ['/usr/bin/setpriv', '--reuid=' + str(member_user.pw_uid), '--regid=' + str(member_user.pw_gid),
+                  '--clear-groups', '--inh-caps=-all', '--ambient-caps=-all', '--bounding-set=-all',
+                  '--no-new-privs', str(operator)]
+        # Actual configuration-only self-read transaction: all four native
+        # journals backed up, one member config replaced and both services
+        # resumed. No operator is allowed; contact and every financial gate stay.
+        self_read = base / 'ci-signed-self-read'
+        original_member = tomllib.loads(member.read_text())
+        self_credit = w.http_json('http://127.0.0.1:8787/api/v1/status')
+        prepared_self = json.loads(run(*launcher, '--cyberherd-self-read', 'prepare', str(self_read),
+            '--public-origin', 'https://example.com'))
+        assert prepared_self == {'prepared': True, 'self_read_auth_only': True, 'operator_access_enabled': False,
+            'services_changed': False, 'journals_opened': False, 'public_ingress_changed': False}
+        self_sha = hashlib.sha256((self_read / 'PREPARED.json').read_bytes()).hexdigest()
+        applied_self = json.loads(run(*launcher, '--cyberherd-self-read', 'apply', str(self_read),
+            '--review-sha256', self_sha, '--exclusive-maintenance'))
+        assert applied_self == {'self_reads_configured': True, 'operator_access_enabled': False,
+            'current_four_journal_backup_verified': True, 'financial_images_unchanged': True, 'services_started': False}
+        resumed_self = json.loads(run(*launcher, '--cyberherd-self-read', 'resume', str(self_read), '--approve-resumption'))
+        assert resumed_self == {'core_running': True, 'membership_running': True, 'self_reads_configured': True,
+            'operator_access_enabled': False, 'payouts_enabled': False}
+        self_member = tomllib.loads(member.read_text())
+        assert self_member['view'].pop('auth') == {'public_origin': 'https://example.com', 'operators': []}
+        assert self_member == original_member and counts['post'] == 0
+        signed_self = json.loads(run(*client, 'self-only'))
+        assert signed_self == {'self_reads_accepted': True, 'empty_operator_allowlist': True,
+            'signed_self_reads': True, 'operator_reads_and_mutations_refused': True,
+            'membership_revision_and_cycle_unchanged': True, 'provider_operations': 0, 'publications': 0}
+        self_after = w.http_json('http://127.0.0.1:8787/api/v1/status')
+        for key in ('feed_credit_sats', 'threshold_sats', 'feeds_due', 'remainder_sats', 'unresolved_feed_attempt'):
+            assert self_after[key] == self_credit[key]
+        # The following separate operator exercise deliberately authorizes only
+        # its synthetic fixture key. This is not the self-read activation policy.
+        run('/usr/bin/systemctl', 'stop', 'cyberherd.service')
+        operator_config = tomllib.loads(member.read_text())
+        assert operator_config['view']['auth'] == {'public_origin': 'https://example.com', 'operators': []}
+        operator_config['view']['auth']['operators'] = ['c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5']
+        member.write_text(w.toml_text(operator_config))
+        run('/usr/bin/systemctl', 'start', 'cyberherd.service')
+        w.await_ready(lambda: w.http_json('http://127.0.0.1:3340/api/v1/cyberherd'), 'operator-enabled native member')
+        w.await_ready(lambda: w.http_json('http://127.0.0.1:8787/api/v1/status')['feeder_override_active'] is True,
+                      'confirmed synthetic override before operator tests')
+        original_operator_pid = run('/usr/bin/systemctl', 'show', 'cyberherd.service', '-p', 'MainPID', '--value').strip()
+        exercised_operator = json.loads(run(*client, 'exercise'))
+        assert exercised_operator == {'exercise_accepted': True, 'real_native_http': True, 'synthetic_keys_only': True,
+            'settings_and_template_applied': True, 'guest_origin_body_and_pause_refusals': True,
+            'same_command_receipt_retained': True}
+        run('/usr/bin/systemctl', 'stop', 'cyberherd.service')
+        run('/usr/bin/systemctl', 'start', 'cyberherd.service')
+        w.await_ready(lambda: w.http_json('http://127.0.0.1:3340/api/v1/cyberherd'), 'restarted operator-enabled native member')
+        restarted_operator_pid = run('/usr/bin/systemctl', 'show', 'cyberherd.service', '-p', 'MainPID', '--value').strip()
+        assert original_operator_pid != restarted_operator_pid
+        replayed_operator = json.loads(run(*client, 'after-restart'))
+        assert replayed_operator == {'restart_accepted': True, 'actual_unexpired_nonce_replay_refused': True,
+            'settings_and_template_retained': True, 'same_command_receipt_retained': True,
+            'changed_command_conflict_refused': True, 'roster_empty': True, 'member_percent_zero': True,
+            'provider_operations': 0, 'publications': 0}
+        assert counts['post'] == 0
+        # Program-only maintenance of the now-current schema, including active
+        # contact and retained native operator receipts. Both installed and
+        # selected verifiers must accept the same actual four-journal backup
+        # before old/new status commands touch only a separate UID-owned copy.
+        # Programs have the same build bytes in this CI phase; actual different
+        # program replacement is covered separately by protected-file fixtures.
+        current_review = base / 'ci-current-core-review'
+        current_execution = base / 'ci-current-core-execution'
+        preserved = {path: hashlib.sha256(path.read_bytes()).hexdigest()
+                     for path in (config, member, unit)}
+        current_prepared = json.loads(run(*launcher, '--current-core-prepare', str(core_archive), str(review_archive),
+            source_commit, hashlib.sha256(core_archive.read_bytes()).hexdigest(),
+            hashlib.sha256(review_archive.read_bytes()).hexdigest(), str(current_review)))
+        assert current_prepared == {'prepared': True, 'activation_supported': False, 'services_changed': False,
+            'journals_opened': False, 'credentials_loaded': False, 'contact_enabled': True}
+        current_sha = hashlib.sha256((current_review / 'PREPARED.json').read_bytes()).hexdigest()
+        assert json.loads(run(*launcher, '--current-core-maintenance', 'plan', str(current_review), str(current_execution),
+            '--review-sha256', current_sha)) == {'planned': True, 'services_changed': False, 'journals_opened': False}
+        current_applied = json.loads(run(*launcher, '--current-core-maintenance', 'apply', str(current_execution),
+            '--exclusive-maintenance'))
+        assert current_applied == {'upgraded': True, 'four_journal_backup_verified': True, 'clone_compared': True,
+            'live_migration_performed': False, 'financial_images_unchanged': True, 'services_started': False,
+            'contact_enabled': True}
+        assert not (current_execution / 'MIGRATION-STARTED.json').exists()
+        assert not (current_execution / 'migrated').exists()
+        current_backup = json.loads((current_execution / 'backup/MANIFEST.json').read_text())
+        assert current_backup['policy'] == before_policy
+        assert current_backup['report']['pending_feeds'] == 1
+        assert current_backup['report']['rows']['core']['private_contact_intents'] == 0
+        # Review accepted native copies only. This leaves the stable backup
+        # manifest and every copied financial image byte-identical.
+        review_destination = root / 'current-reward-backlog-review'
+        reviewed_images = {item['name']: hashlib.sha256((current_execution / 'backup' / item['name']).read_bytes()).hexdigest()
+                           for item in current_backup['images']}
+        reviewed_manifest = hashlib.sha256((current_execution / 'backup/MANIFEST.json').read_bytes()).hexdigest()
+        review_result = json.loads(run('/usr/local/bin/cyberherd-statectl', '--config', '/etc/cyberherd/state-maintenance.toml',
+            'review-rewards', '--bundle', str(current_execution / 'backup'), '--destination', str(review_destination)))
+        assert review_result['operation'] == 'review_rewards' and review_result['accepted'] is True
+        assert review_result['activation_authorized'] is False
+        backlog_review = json.loads((review_destination / 'REVIEW.json').read_text())
+        assert backlog_review['bundle_id'] == current_backup['id'] and backlog_review['bundle_manifest_sha256'] == reviewed_manifest
+        assert backlog_review['all_barriers_examined'] is True and backlog_review['stages'] == {}
+        assert backlog_review['pending_feeds'] == 1 and backlog_review['unfinalized_core_reservations'] == 0
+        assert backlog_review['activation_authorized'] is False and backlog_review['external_reconciliation_required'] is True
+        assert not (review_destination / 'INCOMPLETE').exists()
+        assert reviewed_manifest == hashlib.sha256((current_execution / 'backup/MANIFEST.json').read_bytes()).hexdigest()
+        assert reviewed_images == {name: hashlib.sha256((current_execution / 'backup' / name).read_bytes()).hexdigest()
+                                   for name in reviewed_images}
+        current_resumed = json.loads(run(*launcher, '--current-core-maintenance', 'resume', str(current_execution),
+            '--approve-resumption'))
+        assert current_resumed == {'core_running': True, 'membership_running': True,
+            'contact_enabled': True, 'payouts_enabled': False}
+        assert preserved == {path: hashlib.sha256(path.read_bytes()).hexdigest() for path in preserved}
+        assert counts['post'] == 0
+        assert w.http_json('http://127.0.0.1:8787/healthz')['status'] == 'ok'
+        assert w.http_json('http://127.0.0.1:3340/api/v1/cyberherd')['roster']['members'] == []
+        for name in ('cyberherd-payout.service', 'cyberherd-signer.service'):
+            assert os.readlink('/etc/systemd/system/' + name) == '/dev/null'
+            assert run('/usr/bin/systemctl', 'show', name, '-p', 'MainPID', '--value').strip() == '0'
+        # Only this namespace's harmless gateway changes state. The retained
+        # unknown synthetic feeder UUID must keep the real core GET-only even
+        # when operator membership safety reads become ready. No physical or
+        # provider authority exists in this fixture.
+        financial_before = w.http_json('http://127.0.0.1:8787/api/v1/status')
+        assert isinstance(financial_before['unresolved_feed_attempt'], str)
+        assert operator_config['poll_seconds'] == 5  # bounded client wait covers three intake polls
+        gateway_safety.update(override_enabled=False, remote_enabled=True)
+        w.await_ready(lambda: w.http_json('http://127.0.0.1:8787/api/v1/status')['feeder_override_active'] is False,
+                      'synthetic gateway ready before membership commands')
+        ready_commands = json.loads(run(*client, 'ready'))
+        assert ready_commands == {'ready_commands_accepted': True, 'activation_and_score_applied': True,
+            'stale_revision_refused': True, 'explicit_unban_required': True,
+            'manual_score_lifetime_zero': True, 'member_percent_zero': True}
+        from decimal import Decimal, ROUND_DOWN
+        ready_state = json.loads((client_state / 'ready.json').read_text())
+        minimum = int(json.loads((client_state / 'state.json').read_text())['minimum'])
+        # Public points normalize the exact 210 weight units by the minimum,
+        # truncating only display precision to six places; they are not raw units.
+        expected_points = format((Decimal(210) / Decimal(max(1, minimum))).quantize(
+            Decimal('0.000001'), rounding=ROUND_DOWN).normalize(), 'f')
+        def score_is_visible():
+            roster = w.http_json('http://127.0.0.1:3340/api/v1/cyberherd')['roster']
+            return (roster['total_members'] == 1 and len(roster['members']) == 1
+                    and roster['revision'] == ready_state['revision'] and roster['cycle'] == ready_state['cycle']
+                    and roster['members'][0]['pubkey'] == ready_state['pubkey']
+                    and roster['members'][0]['amount_sats'] == '21'
+                    and roster['minimum_sats'] == str(minimum) and roster['members'][0]['points'] == expected_points
+                    and roster['members'][0]['share_micro_percent'] == 0 and roster['member_percent'] == 0)
+        w.await_ready(score_is_visible, 'actual public roster with the committed operator score')
+        roster = w.http_json('http://127.0.0.1:3340/api/v1/cyberherd')['roster']
+        assert roster['members'][0]['amount_sats'] == '21' and roster['members'][0]['points'] == expected_points
+        assert roster['members'][0]['share_micro_percent'] == 0 and roster['member_percent'] == 0
+        before_ready_restart = run('/usr/bin/systemctl', 'show', 'cyberherd.service', '-p', 'MainPID', '--value').strip()
+        run('/usr/bin/systemctl', 'stop', 'cyberherd.service')
+        run('/usr/bin/systemctl', 'start', 'cyberherd.service')
+        w.await_ready(lambda: w.http_json('http://127.0.0.1:3340/api/v1/cyberherd'), 'restarted active synthetic member')
+        assert run('/usr/bin/systemctl', 'show', 'cyberherd.service', '-p', 'MainPID', '--value').strip() != before_ready_restart
+        ready_restarted = json.loads(run(*client, 'after-ready-restart'))
+        assert ready_restarted == {'ready_restart_accepted': True, 'active_score_and_cycle_retained': True,
+            'original_command_receipt_retained': True, 'manual_score_lifetime_zero': True}
+        gateway_safety.update(override_enabled=True, remote_enabled=False)
+        w.await_ready(lambda: w.http_json('http://127.0.0.1:8787/api/v1/status')['feeder_override_active'] is True,
+                      'synthetic gateway paused before controls and reset')
+        paused_commands = json.loads(run(*client, 'paused-controls'))
+        assert paused_commands == {'paused_controls_accepted': True, 'new_score_refused_while_paused': True,
+            'original_score_receipt_retrievable': True, 'remove_ban_unban_work_while_paused': True,
+            'manual_reset_preserves_ban': True, 'settings_and_template_retained': True}
+        before_controls_restart = run('/usr/bin/systemctl', 'show', 'cyberherd.service', '-p', 'MainPID', '--value').strip()
+        run('/usr/bin/systemctl', 'stop', 'cyberherd.service')
+        run('/usr/bin/systemctl', 'start', 'cyberherd.service')
+        w.await_ready(lambda: w.http_json('http://127.0.0.1:3340/api/v1/cyberherd'), 'restarted reset synthetic member')
+        assert run('/usr/bin/systemctl', 'show', 'cyberherd.service', '-p', 'MainPID', '--value').strip() != before_controls_restart
+        controls_restarted = json.loads(run(*client, 'after-controls-restart'))
+        assert controls_restarted == {'controls_restart_accepted': True, 'reset_and_revision_retained': True,
+            'cross_cycle_receipts_retained_without_mutation': True, 'final_member_inactive': True,
+            'manual_score_lifetime_zero': True}
+        w.await_ready(lambda: w.http_json('http://127.0.0.1:3340/api/v1/cyberherd')['roster']['total_members'] == 0,
+                      'actual empty public roster after manual reset')
+        operator_edge = installed_operator_edge(root / 'core-payload', guard, client)
+        self_edge = installed_operator_edge(root / 'core-payload', guard, client, self_read=True)
+        # Choose a nonzero stored allocation using the real guarded native HTTP
+        # client. All installed financial ceilings stay zero; only private
+        # candidate files are prepared and checked below, never applied.
+        allocation = json.loads(run(*client, 'financial-preview-allocation'))
+        assert allocation == {'preview_allocation_selected': True, 'actual_native_operator_request': True,
+            'roster_membership_unchanged': True, 'provider_operations': 0, 'publications': 0}
+        w.await_ready(lambda: w.http_json('http://127.0.0.1:3340/api/v1/cyberherd')['roster']['member_percent'] == 10,
+                      'actual stored preview allocation')
+        financial_checker = fixture_executable(root, 'CHECK-ONLY-financial-stage')
+        shutil.copyfile(fixture_directory / financial_checker.name, financial_checker)
+        financial_checker.chmod(0o755)
+        financial_review = base / 'ci-financial-candidate-review'
+        financial_prepared = json.loads(run(*launcher, '--cyberherd-financial-stage', str(financial_review),
+            '--validator', str(financial_checker), '--validator-sha256', hashlib.sha256(financial_checker.read_bytes()).hexdigest(),
+            '--member-percent', '10', '--max-sats-per-feed', '100', '--max-sats-per-24h', '1000',
+            '--max-fee-sats', '0', '--max-net-sats', '100', '--max-new-per-hour', '100',
+            '--fee-mode', 'deduct_from_share'))
+        assert financial_prepared == {'prepared': True, 'financial_candidate_only': True, 'activation_authorized': False,
+            'services_changed': False, 'journals_opened': False, 'backlog_review_required': True}
+        financial_record = json.loads((financial_review / 'PREPARED.json').read_text())
+        assert financial_record['native_validation'] == {'accepted': True, 'configuration_only': True,
+            'candidate_limits_valid': True, 'journals_opened': False, 'credentials_loaded': False,
+            'provider_operations': 0, 'services_changed': False}
+        for row in financial_record['configurations']:
+            destination = Path(row['destination'])
+            assert hashlib.sha256(destination.read_bytes()).hexdigest() == row['original']['sha256']
+        assert len(financial_record['configurations']) == 4
+        financial_after = w.http_json('http://127.0.0.1:8787/api/v1/status')
+        for key in ('feed_credit_sats', 'threshold_sats', 'feeds_due', 'remainder_sats', 'unresolved_feed_attempt'):
+            assert financial_after[key] == financial_before[key]
+        assert counts['post'] == 0
+        # The separately reviewed program transaction upgrades ALL six native
+        # executables while retaining every existing zero financial limit. The
+        # current backup/reward report belongs to this maintenance window. Same
+        # build bytes here exercise real native/systemd behavior; protected-file
+        # tests separately exercise different-byte replacement/interruption.
+        program_review = base / 'ci-six-program-review'
+        program_originals = {path: hashlib.sha256(path.read_bytes()).hexdigest()
+                             for path in [config, member, unit,
+                                 Path('/etc/cyberherd-payout/config.toml'), Path('/etc/cyberherd-signer/config.toml')]}
+        programs_prepared = json.loads(run(*launcher, '--cyberherd-program-maintenance', 'prepare',
+            str(core_archive), str(review_archive), source_commit,
+            hashlib.sha256(core_archive.read_bytes()).hexdigest(),
+            hashlib.sha256(review_archive.read_bytes()).hexdigest(), str(program_review)))
+        assert programs_prepared == {'prepared': True, 'programs': 6, 'configurations_changed': False,
+            'activation_authorized': False, 'services_changed': False, 'journals_opened': False}
+        program_sha = hashlib.sha256((program_review / 'PREPARED.json').read_bytes()).hexdigest()
+        program_applied = json.loads(run(*launcher, '--cyberherd-program-maintenance', 'apply',
+            str(program_review), '--review-sha256', program_sha, '--exclusive-maintenance'))
+        assert program_applied == {'upgraded': True, 'programs': 6, 'current_four_journal_backup_verified': True,
+            'reward_backlog_reviewed': True, 'financial_images_unchanged': True,
+            'configurations_changed': False, 'services_started': False, 'activation_authorized': False}
+        program_backup = json.loads((program_review / 'backup/MANIFEST.json').read_text())
+        program_backlog = json.loads((program_review / 'reward-review/REVIEW.json').read_text())
+        assert program_backup['policy'] == before_policy and program_backup['report']['pending_feeds'] == 1
+        assert program_backlog['bundle_id'] == program_backup['id'] and program_backlog['all_barriers_examined'] is True
+        assert program_backlog['bundle_manifest_sha256'] == hashlib.sha256((program_review / 'backup/MANIFEST.json').read_bytes()).hexdigest()
+        assert program_backlog['activation_authorized'] is False and program_backlog['external_reconciliation_required'] is True
+        assert {path: sha for path, sha in program_originals.items() if path != unit} == {
+            path: hashlib.sha256(path.read_bytes()).hexdigest() for path in program_originals if path != unit}
+        program_resumed = json.loads(run(*launcher, '--cyberherd-program-maintenance', 'resume',
+            str(program_review), '--review-sha256', program_sha, '--approve-resumption'))
+        assert program_resumed == {'core_running': True, 'membership_running': True, 'original_programs': False,
+            'payouts_enabled': False, 'configurations_changed': False}
+        assert program_originals == {path: hashlib.sha256(path.read_bytes()).hexdigest() for path in program_originals}
+        after_programs = w.http_json('http://127.0.0.1:8787/api/v1/status')
+        for key in ('feed_credit_sats', 'threshold_sats', 'feeds_due', 'remainder_sats', 'unresolved_feed_attempt'):
+            assert after_programs[key] == financial_before[key]
+        assert counts['post'] == 0
+        # Genuine old payout prefix plus a separately compiled schema-8 native
+        # verifier. Neither the empty-prefix fixture nor the legacy executable
+        # is included in production release archives.
+        legacy = fixture_directory / 'inclusive-fee-legacy'
+        assert (legacy / 'SOURCE-COMMIT').read_text().strip() == 'be6ad767829b7d2693b4f1030aa3952f8b7d2555'
+        expected_legacy = {}
+        for line in (legacy / 'SHA256SUMS').read_text().splitlines():
+            digest, filename = line.split(None, 1)
+            assert filename in ('TEST-ONLY-schema8-statectl', 'SOURCE-COMMIT')
+            assert hashlib.sha256((legacy / filename).read_bytes()).hexdigest() == digest
+            expected_legacy[filename] = digest
+        assert set(expected_legacy) == {'TEST-ONLY-schema8-statectl', 'SOURCE-COMMIT'}
+        payout_user = pwd.getpwnam('cyberherd-payout')
+        stripped_fee = json.loads(run('/usr/bin/setpriv', '--reuid=' + str(payout_user.pw_uid),
+            '--regid=' + str(payout_user.pw_gid), '--clear-groups', '--inh-caps=-all',
+            '--ambient-caps=-all', '--bounding-set=-all', '--no-new-privs',
+            str(fixture), '--strip-empty-inclusive-fee-schema'))
+        assert stripped_fee == {'synthetic': True, 'payout_schema': 8, 'grants': 0, 'production_supported': False}
+        statectl = Path('/usr/local/bin/cyberherd-statectl')
+        shutil.copyfile(legacy / 'TEST-ONLY-schema8-statectl', statectl)
+        statectl.chmod(0o755)
+        fee_review = base / 'ci-inclusive-fee-review'
+        fee_prepared = json.loads(run(*launcher, '--cyberherd-program-maintenance', '--inclusive-fee-upgrade', 'prepare',
+            str(core_archive), str(review_archive), source_commit,
+            hashlib.sha256(core_archive.read_bytes()).hexdigest(), hashlib.sha256(review_archive.read_bytes()).hexdigest(), str(fee_review)))
+        assert fee_prepared['prepared'] is True and fee_prepared['journals_opened'] is False
+        fee_sha = hashlib.sha256((fee_review / 'PREPARED.json').read_bytes()).hexdigest()
+        fee_applied = json.loads(run(*launcher, '--cyberherd-program-maintenance', 'apply-inclusive-fees',
+            str(fee_review), '--review-sha256', fee_sha, '--exclusive-maintenance'))
+        assert fee_applied['live_migration_compared'] is True and fee_applied['services_started'] is False
+        fee_before = json.loads((fee_review / 'backup/MANIFEST.json').read_text())
+        fee_after = json.loads((fee_review / 'migrated/MANIFEST.json').read_text())
+        assert fee_before['report']['rows']['payout']['_sqlx_migrations'] == 7
+        assert fee_after['report']['rows']['payout']['_sqlx_migrations'] == 10
+        fee_resumed = json.loads(run(*launcher, '--cyberherd-program-maintenance', 'resume-inclusive-fees',
+            str(fee_review), '--review-sha256', fee_sha, '--approve-resumption'))
+        assert fee_resumed['core_running'] is True and fee_resumed['membership_running'] is True
+        assert fee_resumed['payouts_enabled'] is False
+        assert program_originals == {path: hashlib.sha256(path.read_bytes()).hexdigest() for path in program_originals}
+        assert counts['post'] == 0
+        fee_evidence = {'accepted': True, 'synthetic': True,
+            'legacy_verifier_source': (legacy / 'SOURCE-COMMIT').read_text().strip(),
+            'source_prefix_verified': True, 'runtime_uid_migration': True,
+            'source_migration_records': fee_before['report']['rows']['payout']['_sqlx_migrations'],
+            'target_migration_records': fee_after['report']['rows']['payout']['_sqlx_migrations'],
+            'four_journal_comparison': fee_applied['live_migration_compared'],
+            'original_configurations_retained': True, 'core_and_membership_resumed': True,
+            'payouts_enabled': fee_resumed['payouts_enabled'], 'gateway_post_count': counts['post'],
+            'provider_execution_qualified': False, 'external_recovery_adopted': False,
+            'live_host_qualified': False}
+        (root / 'INCLUSIVE-FEE-UPGRADE.json').write_text(json.dumps(fee_evidence, sort_keys=True))
+        # The earlier upgrade proofs deliberately retained the original unknown
+        # UUID. A reward cutoff must refuse that ambiguous source, even in CI.
+        import uuid
+        refused_preview = base / 'ci-refused-pending-reward-cutoff'
+        accepted_cutoff_source = json.loads(run(str(statectl), '--config', '/etc/cyberherd/state-maintenance.toml',
+            'verify', '--bundle', str(fee_review / 'migrated')))
+        assert accepted_cutoff_source == {'operation': 'verify', 'id': fee_after['id'], 'accepted': True, 'resume_authorized': False}
+        refused = subprocess.run([str(statectl), '--config', '/etc/cyberherd/state-maintenance.toml',
+            'preview-initial-reward-cutover', '--bundle', str(fee_review / 'migrated'),
+            '--destination', str(refused_preview), '--decision-id', str(uuid.uuid4())],
+            env={'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LC_ALL': 'C'},
+            capture_output=True, text=True, timeout=300)
+        assert refused.returncode != 0 and not refused_preview.exists()
+        assert 'physical or financial authority requires reconciliation' in refused.stderr
+        # This harness already proved root/GITHUB_ACTIONS/loopback-only namespace
+        # and the TEST-ONLY paid fixture above. Resolve ONLY that synthetic UUID
+        # through native accounting, not SQL edits, a restore or a gateway RPC.
+        virtual_id = financial_before['unresolved_feed_attempt']
+        assert isinstance(virtual_id, str) and str(uuid.UUID(virtual_id)) == virtual_id
+        assert gateway_safety == {'override_enabled': True, 'remote_enabled': False}
+        run('/usr/bin/systemctl', 'stop', 'cyberherd.service', 'lightning-goats-receive.service')
+        for name in ('cyberherd', 'lightning-goats-receive', 'cyberherd-payout', 'cyberherd-signer'):
+            assert run('/usr/bin/systemctl', 'show', name + '.service', '-p', 'MainPID', '--value').strip() == '0'
+        reconcile_config = guard / 'synthetic-reconcile.toml'
+        reconcile_config.write_bytes(config.read_bytes())
+        reconcile_config.chmod(0o440)
+        os.chown(reconcile_config, 0, runtime.pw_gid)
+        reconciled = run('/usr/bin/setpriv', '--reuid=' + str(runtime.pw_uid), '--regid=' + str(runtime.pw_gid),
+            '--clear-groups', '--inh-caps=-all', '--ambient-caps=-all', '--bounding-set=-all', '--no-new-privs',
+            '/usr/local/bin/lightning-goatsctl', '--config', str(reconcile_config),
+            'reconcile-feed', '--id', virtual_id, '--outcome', 'fed')
+        assert reconciled.strip() == 'reconciled feed attempt ' + virtual_id + ' as physically fed'
+        run('/usr/bin/systemctl', 'start', 'lightning-goats-receive.service', 'cyberherd.service')
+        w.await_ready(lambda: w.http_json('http://127.0.0.1:8787/healthz'), 'core after synthetic accounting reconciliation')
+        w.await_ready(lambda: json.loads(run(*client, 'diagnose-stream'))['native_member_feeding_barriers'] == [virtual_id],
+                      'native member consumed the known synthetic confirmation')
+        reconciled_status = w.http_json('http://127.0.0.1:8787/api/v1/status')
+        assert reconciled_status['unresolved_feed_attempt'] is None
+        assert reconciled_status['feed_credit_sats'] == financial_before['feed_credit_sats'] - financial_before['threshold_sats']
+        assert counts['post'] == 0
+        # Subsequent financial assertions use this explicitly changed fixture
+        # baseline. Earlier upgrade preservation evidence remains unchanged.
+        financial_before = reconciled_status
+        # FIRST financial activation on this disposable VM only. Its synthetic
+        # journals have no funded historical barriers or provider submissions.
+        # Every daemon joins the loopback-only fixture namespace. The signer
+        # credential is a known synthetic scalar, and its helper is a trap that
+        # must never run. An acknowledgment here is not real-provider acceptance.
+        for role in ('cyberherd-payout', 'cyberherd-signer'):
+            dropdir = Path('/etc/systemd/system') / (role + '.service.d')
+            dropdir.mkdir(mode=0o755)
+            drop = dropdir / '90-ci-network.conf'
+            drop.write_text('[Service]\nNetworkNamespacePath=/proc/' + str(os.getpid()) + '/ns/net\n')
+            drop.chmod(0o644)
+        run('/usr/bin/systemctl', 'daemon-reload')
+        signer_key = Path('/etc/credstore.encrypted/cyberherd-signer-client')
+        assert not signer_key.exists() and not signer_key.is_symlink()
+        w.encrypt(signer_key, 'nostr-client-key', ('0' * 63 + '2').encode())
+        synthetic_signing_artifacts.append((signer_key, hashlib.sha256(signer_key.read_bytes()).hexdigest(),
+                                           root / 'synthetic-signer-client.cred'))
+        signer_trap = Path('/usr/local/bin/nak')
+        assert not signer_trap.exists() and not signer_trap.is_symlink()
+        signer_trap.write_text('#!/usr/bin/python3\nfrom pathlib import Path\n'
+            'Path("/var/lib/cyberherd-signer/UNEXPECTED-TEST-SIGNING").write_text("unexpected")\nraise SystemExit(97)\n')
+        signer_trap.chmod(0o755)
+        synthetic_signing_artifacts.append((signer_trap, hashlib.sha256(signer_trap.read_bytes()).hexdigest(),
+                                           root / 'UNUSED-synthetic-nak-trap'))
+        activation_candidate = base / 'ci-financial-activation-candidate'
+        run(*launcher, '--cyberherd-financial-stage', str(activation_candidate),
+            '--validator', str(financial_checker), '--validator-sha256', hashlib.sha256(financial_checker.read_bytes()).hexdigest(),
+            '--member-percent', '10', '--max-sats-per-feed', '100', '--max-sats-per-24h', '1000',
+            '--max-fee-sats', '0', '--max-net-sats', '100', '--max-new-per-hour', '100',
+            '--fee-mode', 'deduct_from_share')
+        activation_candidate_sha = hashlib.sha256((activation_candidate / 'PREPARED.json').read_bytes()).hexdigest()
+        activation = base / 'ci-financial-activation'
+        planned_financial = json.loads(run(*launcher, '--cyberherd-financial-maintenance', 'plan',
+            str(activation_candidate), str(fee_review), str(activation),
+            '--candidate-sha256', activation_candidate_sha, '--program-review-sha256', fee_sha))
+        assert planned_financial == {'planned': True, 'configurations': 4, 'activation_authorized': False,
+            'services_changed': False, 'journals_opened': False}
+        activation_sha = hashlib.sha256((activation / 'PREPARED.json').read_bytes()).hexdigest()
+        financial_checkpoint = json.loads(run(*launcher, '--cyberherd-financial-maintenance', 'checkpoint',
+            str(activation), '--review-sha256', activation_sha, '--exclusive-maintenance'))
+        assert financial_checkpoint == {'checkpointed': True, 'current_native_backup_verified': True,
+            'private_reward_review_ready': True, 'configurations_changed': False,
+            'services_started': False, 'activation_authorized': False}
+        checkpoint_sha = hashlib.sha256((activation / 'CHECKPOINT.json').read_bytes()).hexdigest()
+        reward_review_sha = hashlib.sha256((activation / 'reward-review/REVIEW.json').read_bytes()).hexdigest()
+        activation_report = json.loads((activation / 'reward-review/REVIEW.json').read_text())
+        assert activation_report['unreceived_payment_events'] == activation_report['unreceived_feeding_events'] == 0
+        assert activation_report['stored_member_percent'] == 10 and activation_report['stored_max_members'] == 3
+        assert activation_report['stages'] == {'unplanned_no_strike_funding': 1}
+        cutoff_args = [str(activation), '--review-sha256', activation_sha,
+            '--checkpoint-sha256', checkpoint_sha, '--reward-review-sha256', reward_review_sha]
+        cutoff_prepared = json.loads(run(*launcher, '--cyberherd-reward-cutover-maintenance', 'prepare',
+            *cutoff_args, '--decision-id', str(uuid.uuid4())))
+        assert cutoff_prepared == {'prepared': True, 'rehearsed': True, 'live_journals_changed': False, 'activation_authorized': False}
+        cutoff = activation / 'reward-cutover'
+        cutoff_sha = hashlib.sha256((cutoff / 'PREPARED.json').read_bytes()).hexdigest()
+        cutoff_applied = json.loads(run(*launcher, '--cyberherd-reward-cutover-maintenance', 'apply',
+            *cutoff_args, '--cutoff-review-sha256', cutoff_sha, '--approve-initial-reward-cutover'))
+        assert cutoff_applied == {'cutoff_applied': True, 'retained_rows_unchanged': True,
+            'services_started': False, 'activation_authorized': False}
+        cutoff_applied_sha = hashlib.sha256((cutoff / 'APPLIED.json').read_bytes()).hexdigest()
+        cutoff_receipt = json.loads((cutoff / 'APPLIED.json').read_text())
+        assert cutoff_receipt['initial_reward_cutover']['historical_feedings'] == 1
+        assert len(cutoff_receipt['initial_reward_cutover']['decision_sha256']) == 64
+        cutoff_report = json.loads((cutoff / 'post/reward-review/REVIEW.json').read_text())
+        assert cutoff_report['stages'] == {'excluded_before_activation': 1}
+        assert cutoff_report['initial_reward_cutover'] == cutoff_receipt['initial_reward_cutover']
+        cutoff_resumed = json.loads(run(*launcher, '--cyberherd-reward-cutover-maintenance', 'resume-original',
+            *cutoff_args, '--cutoff-review-sha256', cutoff_sha, '--applied-sha256', cutoff_applied_sha,
+            '--approve-original-resumption'))
+        assert cutoff_resumed == {'core_running': True, 'membership_running': True,
+            'outgoing_roles_enabled': False, 'activation_authorized': False}
+        for name in ('cyberherd-payout', 'cyberherd-signer'):
+            assert os.readlink('/etc/systemd/system/' + name + '.service') == '/dev/null'
+            assert run('/usr/bin/systemctl', 'show', name + '.service', '-p', 'MainPID', '--value').strip() == '0'
+        cutoff_evidence = {'accepted': True, 'synthetic': True, 'actual_systemd_and_native_journals': True,
+            'ambiguous_source_refused': True, 'known_synthetic_confirmation_only': True,
+            'cutoff_preserved_post_confirmation_history': True, 'actual_member_uid_clone_and_apply': True,
+            'before_after_four_journal_comparison': True, 'exact_decision_sha256': cutoff_receipt['initial_reward_cutover']['decision_sha256'],
+            'historical_feedings_excluded': 1, 'original_roles_resumed': True, 'outgoing_roles_masked': True,
+            'provider_operations': 0, 'gateway_post_count': counts['post'], 'public_network_used': False,
+            'live_host_qualified': False, 'external_recovery_adopted': False}
+        (root / 'INITIAL-REWARD-CUTOVER.json').write_text(json.dumps(cutoff_evidence, sort_keys=True))
+        # The original checkpoint contains pre-cutoff bytes. A new plan AND
+        # candidate capture the resumed process identities and exact disposition.
+        activation_candidate = base / 'ci-cutoff-bound-financial-candidate'
+        run(*launcher, '--cyberherd-financial-stage', str(activation_candidate),
+            '--validator', str(financial_checker), '--validator-sha256', hashlib.sha256(financial_checker.read_bytes()).hexdigest(),
+            '--member-percent', '10', '--max-sats-per-feed', '100', '--max-sats-per-24h', '1000',
+            '--max-fee-sats', '0', '--max-net-sats', '100', '--max-new-per-hour', '100', '--fee-mode', 'deduct_from_share')
+        activation_candidate_sha = hashlib.sha256((activation_candidate / 'PREPARED.json').read_bytes()).hexdigest()
+        activation = base / 'ci-cutoff-bound-financial-activation'
+        run(*launcher, '--cyberherd-financial-maintenance', 'plan', str(activation_candidate), str(fee_review), str(activation),
+            '--candidate-sha256', activation_candidate_sha, '--program-review-sha256', fee_sha,
+            '--initial-reward-cutover', str(cutoff), '--cutoff-preparation-sha256', cutoff_sha,
+            '--cutoff-applied-sha256', cutoff_applied_sha)
+        activation_sha = hashlib.sha256((activation / 'PREPARED.json').read_bytes()).hexdigest()
+        run(*launcher, '--cyberherd-financial-maintenance', 'checkpoint', str(activation),
+            '--review-sha256', activation_sha, '--exclusive-maintenance')
+        checkpoint_sha = hashlib.sha256((activation / 'CHECKPOINT.json').read_bytes()).hexdigest()
+        reward_review_sha = hashlib.sha256((activation / 'reward-review/REVIEW.json').read_bytes()).hexdigest()
+        activation_report = json.loads((activation / 'reward-review/REVIEW.json').read_text())
+        assert activation_report['stages'] == {'excluded_before_activation': 1}
+        assert activation_report['initial_reward_cutover'] == cutoff_receipt['initial_reward_cutover']
+        assert activation_report['unreceived_payment_events'] == activation_report['unreceived_feeding_events'] == 0
+        assert activation_report['pending_reward_eligible_feeding_ingress'] == 0
+        financial_args = [str(activation), '--review-sha256', activation_sha,
+            '--checkpoint-sha256', checkpoint_sha, '--reward-review-sha256', reward_review_sha]
+        installed_financial = json.loads(run(*launcher, '--cyberherd-financial-maintenance', 'apply',
+            *financial_args, '--exclusive-maintenance'))
+        assert installed_financial == {'configured': True, 'configurations': 4,
+            'financial_images_unchanged': True, 'services_started': False}
+        financial_resumed = json.loads(run(*launcher, '--cyberherd-financial-maintenance', 'resume',
+            *financial_args, '--approve-financial-activation', '--acknowledge-provider-recipient-review'))
+        assert financial_resumed == {'core_running': True, 'membership_running': True,
+            'outgoing_roles_started': True, 'outgoing_roles_enabled': True, 'original_configuration': False,
+            'provider_execution_qualified': False, 'external_recovery_adopted': False}
+        for role in ('cyberherd-payout', 'cyberherd-signer'):
+            assert run('/usr/bin/systemctl', 'is-enabled', role + '.service').strip() == 'enabled'
+            assert run('/usr/bin/systemctl', 'is-active', role + '.service').strip() == 'active'
+            assert Path('/etc/systemd/system/multi-user.target.wants', role + '.service').resolve() == Path('/usr/local/lib/systemd/system', role + '.service')
+        # A real UDS server owned by the expected signer identity establishes
+        # startup beyond Type=simple's early exec transition, without an RPC.
+        signer_socket = Path('/run/cyberherd-signer/signer.sock')
+        w.await_ready(lambda: signer_socket.is_socket(), 'actual financial signing broker socket')
+        assert signer_socket.stat().st_uid == pwd.getpwnam('cyberherd-signer').pw_uid
+        assert not Path('/var/lib/cyberherd-signer/UNEXPECTED-TEST-SIGNING').exists()
+        financial_running = w.http_json('http://127.0.0.1:8787/api/v1/status')
+        for key in ('feed_credit_sats', 'threshold_sats', 'feeds_due', 'remainder_sats', 'unresolved_feed_attempt'):
+            assert financial_running[key] == financial_before[key]
+        for role, program in [('payout', 'cyberherd-payoutd'), ('signer', 'cyberherd-signerd')]:
+            role_name = 'cyberherd-' + role
+            pid = run('/usr/bin/systemctl', 'show', role_name + '.service', '-p', 'MainPID', '--value').strip()
+            assert pid.isdecimal() and int(pid) > 1
+            assert os.readlink('/proc/' + pid + '/ns/net') == os.readlink('/proc/self/ns/net')
+            assert hashlib.sha256(Path('/proc', pid, 'exe').read_bytes()).hexdigest() == hashlib.sha256(Path('/usr/local/bin', program).read_bytes()).hexdigest()
+        assert counts['post'] == 0
+        finished = True
+        return {'accepted': True, 'old_core_was_harmless_elf_standin': True,
+                'actual_native_schema_23_backup': True, 'actual_runtime_uid_clone_migration': True,
+                'actual_native_four_journal_comparisons': True, 'actual_live_schema_24_migration': True,
+                'actual_new_native_core_and_membership_resumed': True, 'all_original_paid_and_signed_rows_preserved': True,
+                'epoch_and_financial_policy_preserved': True, 'gateway_post_count': counts['post'],
+                'contact_enabled': False, 'synthetic_credentials_only': True,
+                'installed_private_contact_activation': {'accepted': True, 'actual_native_config_checker': True,
+                    'actual_current_four_journal_backup_verified': True, 'financial_images_unchanged_during_apply': True,
+                    'only_contact_configuration_added': True, 'actual_active_core_and_membership_resumed': True,
+                    'invalid_contact_refused_before_provider': True, 'outgoing_roles_masked': True,
+                    'gateway_post_count': counts['post'], 'signing_qualified': False, 'paid_delivery_qualified': False},
+                'installed_operator_http': {'accepted': True, 'exercise': exercised_operator,
+                    'after_actual_member_restart': replayed_operator, 'member_pid_changed': True,
+                    'operator_identity_was_synthetic': True, 'public_network_used': False,
+                    'gateway_post_count': counts['post'], 'production_operator_routes_enabled': False},
+                'installed_current_schema_patch': {'accepted': True, 'actual_four_journal_native_backup': True,
+                    'both_compiled_schema_verifiers_accepted': True, 'actual_uid_copy_status_compared': True,
+                    'live_database_images_unchanged': True, 'live_migration_performed': False,
+                    'actual_core_and_member_resumed': True, 'contact_configuration_retained': True,
+                    'outgoing_roles_masked': True, 'gateway_post_count': counts['post'],
+                    'different_program_builds_used': False, 'live_host_qualified': False},
+                'installed_reward_backlog_review': {'accepted': True, 'actual_native_cli_used': True,
+                    'accepted_backup_manifest_and_images_unchanged': True, 'all_barriers_examined': True,
+                    'pending_physical_feed_retained': True, 'report_private': True,
+                    'live_journals_opened': False, 'activation_authorized': False,
+                    'external_reconciliation_required': True, 'provider_operations': 0,
+                    'gateway_post_count': counts['post'], 'live_host_qualified': False},
+                'installed_operator_membership_controls': {'accepted': True, 'ready': ready_commands,
+                    'after_ready_member_restart': ready_restarted, 'paused': paused_commands,
+                    'after_reset_member_restart': controls_restarted,
+                    'actual_public_score_and_zero_share': True, 'final_public_roster_empty': True,
+                    'core_credit_and_original_unknown_uuid_unchanged': True, 'gateway_post_count': counts['post'],
+                    'provider_operations': 0, 'public_network_used': False, 'live_host_qualified': False},
+                'installed_operator_tls_edge': operator_edge,
+                'installed_self_read_tls_edge': self_edge,
+                'installed_financial_candidate_preparation': {'accepted': True,
+                    'actual_stored_allocation_selected': allocation,
+                    'four_native_candidate_configurations_validated': True,
+                    'original_core_uid_isolated_checker': True, 'original_configurations_unchanged': True,
+                    'candidate_limits_only_not_installed': True, 'backlog_review_still_required': True,
+                    'services_changed': False, 'journals_opened': False, 'provider_operations': 0,
+                    'gateway_post_count': counts['post'], 'public_network_used': False, 'live_host_qualified': False},
+                'installed_inclusive_fee_upgrade': fee_evidence,
+                'installed_six_program_maintenance': {'accepted': True, 'actual_six_native_programs_checked': True,
+                    'original_worker_uid_configuration_checks': True, 'actual_fresh_four_journal_backup': True,
+                    'both_compiled_schema_verifiers_accepted': True, 'actual_uid_copy_status_compared': True,
+                    'fresh_reward_backlog_review_bound': True, 'live_database_images_unchanged': True,
+                    'all_original_configuration_restored': True, 'actual_core_and_member_resumed': True,
+                    'outgoing_roles_masked': True, 'payouts_enabled': False, 'live_migration_performed': False,
+                    'different_program_builds_used': False, 'provider_operations': 0,
+                    'gateway_post_count': counts['post'], 'public_network_used': False, 'live_host_qualified': False},
+                'installed_initial_reward_cutover': cutoff_evidence,
+                'installed_first_financial_configuration': {'accepted': True,
+                    'actual_completed_program_upgrade_consumed': True, 'actual_four_native_candidate_parsers': True,
+                    'actual_stored_allocation_bound': True, 'fresh_four_journal_backup_verified': True,
+                    'fresh_financial_tail_and_frozen_backlog_reviewed': True, 'live_images_unchanged_during_apply': True,
+                    'only_four_configurations_installed': True, 'actual_four_roles_started': True,
+                    'outgoing_roles_enabled_for_boot': True, 'actual_signer_socket_owner_checked': True,
+                    'post_fixture_reconciliation_credit_and_uuid_preserved': True, 'exact_reviewed_reward_cutoff_bound': True,
+                    'synthetic_credentials_only': True,
+                    'provider_recipient_acknowledgment_was_synthetic': True, 'nak_helper_calls': 0,
+                    'provider_operations': 0, 'gateway_post_count': counts['post'], 'public_network_used': False,
+                    'provider_execution_qualified': False, 'external_recovery_adopted': False, 'live_host_qualified': False},
+                'installed_signed_self_read_activation': {'accepted': True,
+                    'native_original_uid_configuration_check': True, 'actual_current_four_journal_backup': True,
+                    'financial_images_unchanged_during_apply': True, 'only_member_auth_configuration_added': True,
+                    'actual_core_and_member_resumed': True, 'signed_self_read': signed_self,
+                    'core_credit_and_original_unknown_uuid_unchanged': True, 'operator_access_enabled': False,
+                    'public_ingress_changed': False, 'gateway_post_count': counts['post'], 'live_host_qualified': False},
+                'all_application_networking_loopback_isolated': True, 'live_host_qualified': False}
+    except Exception:
+        # Disposable synthetic fixture only. Never use this diagnostic or the
+        # fixture's schema transform against a production host or journal.
+        import sys
+        # Only these attested synthetic CI files are eligible for a diagnostic.
+        # The production command wrapper continues to suppress subprocess output.
+        if 'financial_checker' in locals():
+            expected_checker = hashlib.sha256(financial_checker.read_bytes()).digest()
+            for carrier in sorted(Path('/var/lib').glob('lg-financial-check-*'))[-4:]:
+                checker = carrier / 'checker'
+                paths = [carrier / (role + '.toml') for role in ('core', 'membership', 'payout', 'signer')]
+                if (carrier.resolve() != carrier or carrier.lstat().st_uid != 0
+                        or not checker.is_file() or checker.lstat().st_uid != 0
+                        or hashlib.sha256(checker.read_bytes()).digest() != expected_checker
+                        or not all(path.is_file() and path.lstat().st_uid == 0 for path in paths)):
+                    continue
+                carrier.chmod(0o711)
+                try:
+                    probe = subprocess.run(['/usr/bin/unshare', '--net', '--', '/usr/bin/setpriv',
+                        '--reuid=' + str(runtime.pw_uid), '--regid=' + str(runtime.pw_gid), '--clear-groups',
+                        '--inh-caps=-all', '--ambient-caps=-all', '--bounding-set=-all', '--no-new-privs',
+                        str(checker), *map(str, paths)],
+                        env={'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LC_ALL': 'C'},
+                        capture_output=True, text=True, timeout=30)
+                    print('DISPOSABLE FINANCIAL CONFIG DIAGNOSTIC exit=' + str(probe.returncode)
+                          + '\n' + probe.stderr[-2000:], file=sys.stderr)
+                except Exception:
+                    print('DISPOSABLE FINANCIAL CONFIG DIAGNOSTIC unavailable', file=sys.stderr)
+                finally:
+                    carrier.chmod(0o700)
+        for argv in ((['/usr/bin/setpriv', '--reuid=' + str(runtime.pw_uid), '--regid=' + str(runtime.pw_gid),
+                       '--clear-groups', '--inh-caps=-all', '--ambient-caps=-all', '--bounding-set=-all',
+                       '--no-new-privs', str(fixture), '--diagnose-installed-export']),
+                     ([*client, 'diagnose-stream'] if 'client' in locals() else [])):
+            if not argv:
+                continue
+            try:
+                print('DISPOSABLE NATIVE DIAGNOSTIC ' + run(*argv), file=sys.stderr)
+            except Exception:
+                print('DISPOSABLE NATIVE DIAGNOSTIC unavailable', file=sys.stderr)
+        for name in ('lightning-goats-receive.service', 'cyberherd.service', 'cyberherd-payout.service', 'cyberherd-signer.service'):
+            result = subprocess.run(['/usr/bin/journalctl', '--no-pager', '-u', name, '-n', '25', '-o', 'cat'],
+                                    capture_output=True, text=True, timeout=10)
+            print('DISPOSABLE CONTACT FIXTURE ' + name + '\n' + result.stdout[-8000:], file=sys.stderr)
+        raise
+    finally:
+        # Only disposable synthetic roles exist here. Stop outgoing workers
+        # before core/member, remove only this phase's enablement, and remask
+        # them before configuration-only cleanup. Retain every journal byte.
+        for role in ('cyberherd-payout', 'cyberherd-signer'):
+            mask = Path('/etc/systemd/system') / (role + '.service')
+            if not mask.is_symlink():
+                assert not mask.exists()
+                run('/usr/bin/systemctl', 'stop', role + '.service')
+                wanted = Path('/etc/systemd/system/multi-user.target.wants') / (role + '.service')
+                if wanted.is_symlink():
+                    assert wanted.resolve() == Path('/usr/local/lib/systemd/system') / (role + '.service')
+                    run('/usr/bin/systemctl', 'disable', role + '.service')
+                mask.symlink_to('/dev/null')
+            assert os.readlink(mask) == '/dev/null'
+        run('/usr/bin/systemctl', 'stop', 'cyberherd.service', 'lightning-goats-receive.service')
+        if not member_mask.exists() and not member_mask.is_symlink(): member_mask.symlink_to('/dev/null')
+        assert member_mask.is_symlink() and os.readlink(member_mask) == '/dev/null'
+        # Retain only our exact synthetic credential/trap privately. The next
+        # independent boundary rehearsal must create its own credentials and
+        # must continue refusing any pre-existing installed signing credential.
+        for artifact, expected_sha, evidence in synthetic_signing_artifacts:
+            assert artifact.is_file() and not artifact.is_symlink()
+            assert hashlib.sha256(artifact.read_bytes()).hexdigest() == expected_sha
+            assert not evidence.exists() and not evidence.is_symlink()
+            # /run is a separate tmpfs on hosted runners. Preserve the exact
+            # bytes privately before removing our stopped fixture's original.
+            raw = artifact.read_bytes()
+            assert hashlib.sha256(raw).hexdigest() == expected_sha
+            with evidence.open('xb') as stream:
+                os.fchmod(stream.fileno(), 0o600)
+                stream.write(raw)
+                stream.flush()
+                os.fsync(stream.fileno())
+            assert hashlib.sha256(evidence.read_bytes()).hexdigest() == expected_sha
+            assert hashlib.sha256(artifact.read_bytes()).hexdigest() == expected_sha
+            artifact.unlink()
+        if finished:
+            # Configuration-only fixture cleanup. Never roll back database bytes
+            # or the compatible new native programs after schema migration.
+            for name, data in original.items(): Path(name).write_bytes(data)
+        run('/usr/bin/systemctl', 'daemon-reload')
+        # Synthetic client evidence is retained privately; never remove a live
+        # auth nonce or command record to regain acceptance after a restart.
+        if (guard / 'operator-client').exists():
+            (guard / 'operator-client').rename(root / 'operator-client-evidence')
+        if (guard / 'edge-nginx').exists():
+            (guard / 'edge-nginx').rename(root / 'operator-edge-evidence')
+        if (guard / 'self-edge-nginx').exists():
+            (guard / 'self-edge-nginx').rename(root / 'self-edge-evidence')
+        if (guard / 'edge.crt').exists():
+            evidence = root / ('self-edge-evidence' if (root / 'self-edge-evidence').exists() else 'operator-edge-evidence')
+            (guard / 'edge.crt').rename(evidence / 'cert.pem')
+        if (guard / 'synthetic-reconcile.toml').exists():
+            # Retain the exact synthetic native reconciliation configuration
+            # privately with its journal evidence, outside the guard directory.
+            # Never recursively remove unknown entries to make cleanup pass.
+            (guard / 'synthetic-reconcile.toml').rename(root / 'synthetic-reconcile-evidence.toml')
+        (guard / 'ALLOW').unlink(); guard.rmdir()
+        gateway.shutdown(); gateway.server_close(); thread.join(timeout=2)
+
+
+def installed_operator_edge(payload, guard, client, *, self_read=False):
+    """Actual TLS/nginx/native path, only in the attested disposable namespace."""
+    if (os.geteuid() != 0 or os.environ.get('GITHUB_ACTIONS') != 'true'
+            or not os.environ.get('GITHUB_RUN_ID', '').isdigit()
+            or os.readlink('/proc/self/ns/net') == os.readlink('/proc/1/ns/net')
+            or {v['ifname'] for v in json.loads(run('/usr/sbin/ip', '-j', 'link', 'show'))} != {'lo'}
+            or (guard / 'ALLOW').read_text() != 'LIGHTNING_GOATS_DISPOSABLE_CONTACT_UPGRADE_CI_v1\n'
+                + os.readlink('/proc/self/ns/net') + '\n'):
+        raise ValueError('TLS operator rehearsal requires the attested isolated disposable host')
+    if self_read:
+        (guard / 'edge.crt').rename(guard / 'edge-nginx/ca.crt')
+    directory = guard / ('self-edge-nginx' if self_read else 'edge-nginx')
+    directory.mkdir(mode=0o755)
+    certificate, key = guard / 'edge.crt', directory / 'key.pem'
+    server_certificate, ca_key = directory / 'server.crt', directory / 'ca-key.pem'
+    assert not certificate.exists() and not certificate.is_symlink()
+    run('/usr/bin/openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1',
+        '-subj', '/CN=Disposable Lightning Goats operator fixture CA',
+        '-addext', 'basicConstraints=critical,CA:TRUE',
+        '-keyout', str(ca_key), '-out', str(certificate))
+    ca_key.chmod(0o600)
+    run('/usr/bin/openssl', 'req', '-new', '-newkey', 'rsa:2048', '-nodes',
+        '-subj', '/CN=example.com', '-keyout', str(key), '-out', str(directory / 'server.csr'))
+    extensions = directory / 'server.ext'
+    extensions.write_text('subjectAltName=DNS:example.com\nbasicConstraints=critical,CA:FALSE\n'
+                          'keyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\n')
+    run('/usr/bin/openssl', 'x509', '-req', '-days', '1', '-in', str(directory / 'server.csr'),
+        '-CA', str(certificate), '-CAkey', str(ca_key), '-set_serial', '1',
+        '-extfile', str(extensions), '-out', str(server_certificate))
+    key.chmod(0o600)
+    certificate.chmod(0o644)
+    worker = pwd.getpwnam('www-data')
+    for name in ('body', 'proxy', 'fastcgi', 'uwsgi', 'scgi'):
+        path = directory / name
+        path.mkdir(mode=0o700)
+        os.chown(path, worker.pw_uid, worker.pw_gid)
+    # Assemble the exact shipped HTTP rate limits and optional locations. No
+    # backend mock or weakened signature, Origin or command fence is substituted.
+    common = (payload / 'deploy/nginx/lightning-goats-http.conf.example').read_text()
+    routes = (payload / 'deploy/cyberherd' / ('self-read-nginx.conf.example' if self_read else 'authenticated-nginx.conf.example')).read_text()
+    config = directory / 'nginx.conf'
+    config.write_text(f'''daemon off;
+user www-data www-data;
+worker_processes 1;
+pid {directory}/nginx.pid;
+error_log {directory}/error.log crit;
+events {{ worker_connections 128; }}
+http {{
+    access_log off;
+    client_body_temp_path {directory}/body;
+    proxy_temp_path {directory}/proxy;
+    fastcgi_temp_path {directory}/fastcgi;
+    uwsgi_temp_path {directory}/uwsgi;
+    scgi_temp_path {directory}/scgi;
+    {common}
+    server {{
+        listen 127.0.0.1:443 ssl;
+        server_name example.com;
+        ssl_certificate {server_certificate};
+        ssl_certificate_key {key};
+        {routes}
+        location = /edge-ready {{ return 200 'ready'; }}
+        location / {{ return 404; }}
+    }}
+}}
+''')
+    run('/usr/sbin/nginx', '-t', '-p', str(directory), '-c', str(config))
+    process = subprocess.Popen(['/usr/sbin/nginx', '-p', str(directory), '-c', str(config)],
+        env={'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LC_ALL': 'C'},
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        import http.client
+        import socket
+        import ssl
+        import time
+        context = ssl.create_default_context(cafile=str(certificate))
+        for _ in range(100):
+            assert process.poll() is None, 'disposable TLS nginx exited'
+            try:
+                with socket.create_connection(('127.0.0.1', 443), timeout=1) as raw:
+                    with context.wrap_socket(raw, server_hostname='example.com') as stream:
+                        stream.sendall(b'GET /edge-ready HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n')
+                        response = http.client.HTTPResponse(stream)
+                        response.begin()
+                        assert response.status == 200 and response.read() == b'ready'
+                break
+            except OSError:
+                time.sleep(0.05)
+        else:
+            raise ValueError('disposable TLS nginx did not become ready')
+        result = json.loads(run(*client, 'self-edge' if self_read else 'edge'))
+        expected = {'self_edge_accepted': True, 'verified_synthetic_tls': True,
+            'real_native_self_read_through_nginx': True, 'nonce_replay_refused': True,
+            'public_operator_route_closed': True, 'native_query_refusal': True,
+            'membership_unchanged': True, 'provider_operations': 0, 'publications': 0} if self_read else {
+            'edge_accepted': True, 'verified_synthetic_tls': True,
+            'real_native_http_through_nginx': True, 'canonical_signed_query_and_body': True,
+            'guest_origin_body_and_nonce_refusals': True, 'settings_and_original_receipt_retained': True,
+            'member_percent_zero': True, 'provider_operations': 0, 'publications': 0}
+        assert result == expected
+    finally:
+        process.terminate()
+        process.wait(timeout=10)
+    for path in directory.glob('*.log'):
+        text = path.read_text(errors='replace')
+        assert 'Nostr ' not in text and 'minimum_sats' not in text
+    return dict(result, private_headers_and_body_absent_from_logs=True,
+                public_network_used=False, production_operator_routes_enabled=False)
+
+
+def hosts_with_local_hostname(original, hostname):
+    import re
+    if len(original.encode()) > 1024 * 1024 or re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9.-]{0,252}', hostname) is None:
+        raise ValueError('bounded hosts file and valid fixture hostname required')
+    return original + ('\n' if original and not original.endswith('\n') else '') + '127.0.1.1 ' + hostname + '\n'
+
+
+def isolate_fixture_hostname(root):
+    import socket
+    if os.geteuid() != 0 or os.readlink('/proc/self/ns/mnt') == os.readlink('/proc/1/ns/mnt'):
+        raise ValueError('private root mount namespace required for fixture hosts')
+    # A fresh mount namespace alone can inherit shared propagation. Contain the
+    # bind here before publishing any mount, leaving the runner's hosts intact.
+    run('/usr/bin/mount', '--make-rprivate', '/')
+    hosts = root / 'fixture-hosts'
+    hosts.write_text(hosts_with_local_hostname(Path('/etc/hosts').read_text(), socket.gethostname()))
+    hosts.chmod(0o644)
+    run('/usr/bin/mount', '--bind', str(hosts), '/etc/hosts')
+    run('/usr/bin/mount', '-o', 'remount,bind,ro', '/etc/hosts')
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('review', type=Path)
+    parser.add_argument('source')
+    parser.add_argument('fixture_directory', type=Path)
+    parser.add_argument('--core-archive', type=Path, required=True)
+    parser.add_argument('--disposable-ci-host', action='store_true', required=True)
+    args = parser.parse_args()
+    if (os.geteuid() != 0 or not args.disposable_ci_host or not Path('/run/systemd/system').is_dir()
+            or os.environ.get('GITHUB_ACTIONS') != 'true' or not os.environ.get('GITHUB_RUN_ID', '').isdigit()):
+        raise ValueError('disposable root systemd CI VM required')
+    # Require the private loopback-only namespace used by the other rehearsal.
+    # The inherited sysfs mount can still describe the host namespace. Query
+    # netlink in this process's namespace instead; do not weaken isolation.
+    interfaces = {link['ifname'] for link in json.loads(run('/usr/sbin/ip', '-j', 'link', 'show'))}
+    if interfaces != {'lo'} or os.readlink('/proc/self/ns/net') == os.readlink('/proc/1/ns/net'):
+        raise ValueError('fresh isolated network namespace required')
+    core = pwd.getpwnam('lightning-goats')  # Earlier fresh-canary fixture, no activation.
+    if core.pw_uid == 0 or core.pw_gid == 0:
+        raise ValueError('separate existing core fixture identity required')
+    tool_export = json.loads((args.fixture_directory / 'TOOL-EXPORT.json').read_text())
+    if tool_export['source_commit'] != args.source:
+        raise ValueError('test tool source mismatch')
+    fixture = args.fixture_directory / 'TEST-ONLY-prepare-legacy-core'
+    source_tools = args.fixture_directory / 'tool-bundle'
+    if hashlib.sha256((source_tools / 'launch-vps-upgrade.py').read_bytes()).hexdigest() != tool_export['launcher_sha256']:
+        raise ValueError('test launcher hash differs from pinned export')
+    root = Path(tempfile.mkdtemp(prefix='lg-cyberherd-install-rehearsal-', dir='/run'))
+    os.chown(root, 0, 0)
+    # The authenticated tool closure requires root:root ancestors. Only its
+    # synthetic fixture binary/configs need traversal by the non-root core UID;
+    # tool, backup, key and source children retain their own private modes.
+    root.chmod(0o755)
+    isolate_fixture_hostname(root)
+    tools = root / 'tools'
+    shutil.copytree(source_tools, tools)
+    tools.chmod(0o700)
+    for path in tools.iterdir():
+        os.chown(path, 0, 0)
+        path.chmod(0o600)
+    launcher = ['/usr/bin/python3', '-I', '-S', '-B', str(tools / 'launch-vps-upgrade.py'), tool_export['manifest_sha256']]
+    # The CI fixture is authenticated by the pinned exported tool closure, not
+    # by executing a helper from the review archive.
+    try:
+        sysusers = json.loads(run(*launcher, '--cyberherd-inactive', 'identities', '--create-identities'))
+    except Exception:
+        # Disposable CI accounts only. Expose the exact bounded policy-query
+        # failure without changing the installer's fail-closed sudo guard.
+        import sys
+        for role in ('cyberherd', 'cyberherd-payout', 'cyberherd-signer'):
+            result = subprocess.run(['/usr/bin/sudo', '-n', '-l', '-U', role],
+                env={'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LC_ALL': 'C'},
+                capture_output=True, text=True, timeout=15)
+            print('DISPOSABLE IDENTITY POLICY ' + json.dumps({'role': role,
+                'returncode': result.returncode, 'stdout': result.stdout[-2048:],
+                'stderr': result.stderr[-2048:]}), file=sys.stderr)
+        raise
+    assert sysusers['services_started'] is False
+    runtime = sysusers['runtime']
+    source = root / 'source'
+    source.mkdir(mode=0o700)
+    os.chown(source, core.pw_uid, core.pw_gid)
+    installed_fixture = fixture_executable(root, 'TEST-ONLY-prepare-legacy-core')
+    shutil.copyfile(fixture, installed_fixture)
+    installed_fixture.chmod(0o755)
+    prepared = json.loads(run('/usr/bin/setpriv', '--reuid=' + str(core.pw_uid), '--regid=' + str(core.pw_gid),
+                              '--clear-groups', '--inh-caps=-all', '--ambient-caps=-all', '--bounding-set=-all', '--no-new-privs',
+                              str(installed_fixture), str(source / 'core.db'), '--paid-fixture'))
+    assert prepared['synthetic'] is True and prepared['payments'] == 1 and prepared['engine'] == '3.54.1'
+    policy, bundle = core_upgrade(launcher, root, source, core, args.core_archive, args.source)
+    assert json.loads((bundle / 'MANIFEST.json').read_text())['report']['epoch'] == prepared['epoch']
+    # Read only the authenticated examples; no Python from the archive executes.
+    spec = importlib.util.spec_from_file_location('test_package', tools / 'verify-cyberherd-package.py')
+    package = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(package)
+    package.verify(args.review, args.source)
+    examples = {}
+    with tarfile.open(args.review, 'r:gz') as archive:
+        for member in archive:
+            name = str(Path(member.name))
+            if name in {f'deploy/cyberherd/{kind}.toml.example' for kind in ('config', 'payout', 'signer')}:
+                examples[name] = archive.extractfile(member).read().decode()
+    owner = '79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'
+    client = 'c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5'
+    configs = root / 'configs'
+    configs.mkdir(mode=0o755)
+    configs.chmod(0o755)
+    synthetic_key = root / 'TEST-ONLY-payout-key'
+    synthetic_key.write_bytes(b'test-only-no-installed-spend-key')
+    synthetic_key.chmod(0o600)
+    store = Path('/etc/credstore.encrypted')
+    if not store.exists():
+        store.mkdir(mode=0o700)
+    imported = json.loads(run(*launcher, '--cyberherd-payout-key', '--key-file', str(synthetic_key), '--import-key'))
+    assert imported['created'] is True and imported['permissions_checked'] is False and imported['payments_sent'] == 0
+    assert imported['credential_fingerprint'] == hashlib.sha256(synthetic_key.read_bytes()).hexdigest()
+    import grp
+    for role, kind in [('cyberherd', 'config'), ('cyberherd-payout', 'payout'), ('cyberherd-signer', 'signer')]:
+        text = examples[f'deploy/cyberherd/{kind}.toml.example']
+        text = text.replace('credential_fingerprint = "' + '0' * 64 + '"',
+                            'credential_fingerprint = "' + imported['credential_fingerprint'] + '"')
+        text = text.replace('account_id = "00000000-0000-0000-0000-000000000000"',
+                            'account_id = "00000000-0000-0000-0000-000000000001"')
+        text = text.replace('0' * 64, owner).replace('REPLACE_WITH_CLIENT_PUBLIC_KEY', client)
+        text = text.replace('00000000-0000-0000-0000-000000000000', prepared['epoch'])
+        text = text.replace('core_uid = 0', 'core_uid = ' + str(core.pw_uid))
+        text = text.replace('intake_uid = 0', 'intake_uid = ' + str(runtime['cyberherd']['uid']))
+        text = text.replace('signer_uid = 0', 'signer_uid = ' + str(runtime['cyberherd-signer']['uid']))
+        if role == 'cyberherd':
+            old = 'herd = "' + owner + '"'
+            assert text.count(old) == 1 and text.count('\nstart_after = 0\n') == 1
+            text = text.replace(old, '\n'.join(user + ' = "' + owner + '"' for user in ('herd', 'dexter', 'rowan', 'cosmo', 'newton', 'nova')))
+            # This disposable fixture has exactly one historical malformed event.
+            # Bind the fresh intake after it before initialization, never reset it.
+            text = text.replace('\nstart_after = 0\n', '\nstart_after = 1\n')
+        if role == 'cyberherd-signer':
+            text = text.replace('peer_uid = 0', 'peer_uid = ' + str(runtime['cyberherd-payout']['uid']))
+            text = text.replace('group_gid = 0', 'group_gid = ' + str(grp.getgrnam('cyberherd-payout-signer').gr_gid))
+        path = configs / (role + '.toml')
+        path.write_text(text)
+        path.chmod(0o644)
+    base = Path('/var/lib/lightning-goats-upgrades')
+    destination = base / 'ci-inactive-install'
+    receipt = json.loads(run(*launcher, '--cyberherd-inactive', 'install', str(args.review), str(configs), str(policy), str(bundle), str(destination),
+                             '--source', args.source, '--sha256', hashlib.sha256(args.review.read_bytes()).hexdigest(), '--install-disabled'))
+    assert receipt['services_masked'] is True and receipt['services_started'] is False and receipt['credentials_loaded'] is False
+    for role in runtime:
+        state = Path('/var/lib') / role
+        assert stat.S_IMODE(state.stat().st_mode) == 0o700 and state.stat().st_uid == runtime[role]['uid']
+        assert os.readlink(Path('/etc/systemd/system') / (role + '.service')) == '/dev/null'
+        assert (destination / 'INSTALLED.json').exists() and not (destination / 'INCOMPLETE').exists()
+    qualification_path = base / 'ci-installed-role-qualification'
+    try:
+        qualification = json.loads(run(*launcher, '--cyberherd-qualify', '--installation', str(destination),
+                                       '--destination', str(qualification_path), '--probe-disabled-roles'))
+    except Exception:
+        # This harness is guarded to a disposable CI host with synthetic state.
+        # Production qualifier diagnostics stay in its private transaction.
+        failure = qualification_path / 'FAILURE.json'
+        if failure.is_file():
+            import sys
+            print(failure.read_text()[-18000:], file=sys.stderr)
+        raise
+    assert qualification['accepted'] is True and qualification['actual_installed_os_policy_probes'] == 3
+    assert qualification['application_workers_started'] is False and qualification['real_credentials_loaded'] is False
+    workers_path = base / 'ci-installed-worker-qualification'
+    try:
+        workers = json.loads(run(*launcher, '--cyberherd-workers', '--installation', str(destination),
+                                 '--core-transaction', str(base / 'ci-core-upgrade'),
+                                 '--destination', str(workers_path), '--create-isolated-fixture'))
+    except Exception:
+        failure = workers_path / 'FAILURE.json'
+        if failure.is_file():
+            import sys
+            print(failure.read_text()[-24000:], file=sys.stderr)
+        raise
+    assert workers['accepted'] is True and workers['actual_installed_rust_workers'] == 4
+    assert workers['production_workers_started'] is False and workers['real_credentials_loaded'] is False
+    maintenance = overlay_maintenance(launcher, root, args.fixture_directory, destination,
+                                      args.core_archive, args.review, args.source)
+    contact = contact_upgrade_maintenance(launcher, root, args.fixture_directory,
+                                          args.core_archive, args.review, args.source)
+    print(json.dumps({'synthetic': True, 'source_commit': args.source, 'native_engine': prepared['engine'],
+                      'actual_nss_identities': 3, 'actual_native_initializers': 3, 'actual_masked_units': 3,
+                      'synthetic_payout_ciphertext_created': True,
+                      'installed_role_qualification': qualification,
+                      'installed_worker_qualification': workers,
+                      'installed_overlay_maintenance': maintenance,
+                      'installed_contact_upgrade_maintenance': contact,
+                      'actual_core_upgrade_transaction': True, 'harmless_core_fixture_started': True,
+                      'payment_daemon_started': True, 'cyberherd_units_started': True,
+                      'runtime_credentials_loaded': 'synthetic_only', 'provider_qualified': False,
+                      'household_qualified': False, 'live_host_qualified': False}, sort_keys=True))
+
+
+if __name__ == '__main__':
+    main()

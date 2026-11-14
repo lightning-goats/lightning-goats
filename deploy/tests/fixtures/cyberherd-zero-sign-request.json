@@ -1,0 +1,26 @@
+{
+  "method": "sign_payout",
+  "intent": {
+    "id": "00000000-0000-4000-8000-000000000011",
+    "grant_id": "00000000-0000-4000-8000-000000000012",
+    "owner": "c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5",
+    "member": "f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9",
+    "address": "member@example.com",
+    "recipient": {
+      "lnurl_url": "https://example.com/.well-known/lnurlp/member",
+      "callback": "https://pay.example.com/invoice",
+      "min_msat": 1000,
+      "max_msat": 100000,
+      "metadata_hash": "abababababababababababababababababababababababababababababababab",
+      "receipt_pubkey": "f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9"
+    },
+    "net_sats": 1,
+    "created_at": 0,
+    "relays": [
+      "wss://nostr.chaima.info/",
+      "wss://relay.artx.market/",
+      "wss://relay.damus.io/"
+    ],
+    "content": "SYNTHETIC socket-policy fixture; never pay or publish"
+  }
+}

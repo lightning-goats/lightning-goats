@@ -1100,6 +1100,11 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
         if (guard / 'edge.crt').exists():
             evidence = root / ('self-edge-evidence' if (root / 'self-edge-evidence').exists() else 'operator-edge-evidence')
             (guard / 'edge.crt').rename(evidence / 'cert.pem')
+        if (guard / 'synthetic-reconcile.toml').exists():
+            # Retain the exact synthetic native reconciliation configuration
+            # privately with its journal evidence, outside the guard directory.
+            # Never recursively remove unknown entries to make cleanup pass.
+            (guard / 'synthetic-reconcile.toml').rename(root / 'synthetic-reconcile-evidence.toml')
         (guard / 'ALLOW').unlink(); guard.rmdir()
         gateway.shutdown(); gateway.server_close(); thread.join(timeout=2)
 

@@ -67,3 +67,15 @@ changed migration description and changed signed-event bytes. This low-level
 fixture does not establish protected root preview acceptance, stopped-writer
 application or live readiness. The command never applies the cutoff or enables
 payouts. Qualification of this source is tracked separately from live staging.
+
+## Installed rehearsal follow-up
+
+Deployment run 43555060873 (source `3ba9f174910544a7a76eddd5777ca4a54105fa5a`)
+passed packaging, Rust, Security and NIP-46 checks. Its disposable systemd
+rehearsal reached final cleanup without entering the exception diagnostic path,
+but failed removing the guard directory because the new synthetic reconciliation
+configuration remained there. This is not a completed systemd acceptance result.
+The cleanup now retains that exact configuration privately with the other
+synthetic evidence; unknown entries still cause refusal rather than recursive
+deletion. The corrected complete rehearsal must pass before live cutoff work.
+No production cutoff, configuration activation or payout occurred in this run.

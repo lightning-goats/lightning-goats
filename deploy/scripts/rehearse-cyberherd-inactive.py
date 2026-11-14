@@ -769,8 +769,8 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
         activation_candidate_sha = hashlib.sha256((activation_candidate / 'PREPARED.json').read_bytes()).hexdigest()
         activation = base / 'ci-financial-activation'
         planned_financial = json.loads(run(*launcher, '--cyberherd-financial-maintenance', 'plan',
-            str(activation_candidate), str(program_review), str(activation),
-            '--candidate-sha256', activation_candidate_sha, '--program-review-sha256', program_sha))
+            str(activation_candidate), str(fee_review), str(activation),
+            '--candidate-sha256', activation_candidate_sha, '--program-review-sha256', fee_sha))
         assert planned_financial == {'planned': True, 'configurations': 4, 'activation_authorized': False,
             'services_changed': False, 'journals_opened': False}
         activation_sha = hashlib.sha256((activation / 'PREPARED.json').read_bytes()).hexdigest()

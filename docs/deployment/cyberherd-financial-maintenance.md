@@ -20,9 +20,22 @@ All six limits must already be explicitly chosen and match the actual stored
 member allocation. The candidate's four exact configurations, unchanged originals,
 native checker and cross-role UID/socket/owner/epoch/account bindings are rechecked.
 The completed program review is read as private data under its independently
-selected digest. Its selected six program hashes must match the current installed
-programs and original financial identity; original-program rollback/resumption
-does not qualify. No older tool code is interpreted from that review.
+selected digest. It may be either a completed program-only transaction or the
+explicit inclusive-fee schema transaction. Its selected six program hashes must
+match the current installed programs and original financial identity;
+original-program rollback/resumption does not qualify. No older tool code is
+interpreted from that review.
+
+For a completed inclusive-fee transaction, the financial reviewer additionally
+requires the accepted migration receipt, unchanged original-row/configuration
+flags and the retained before/after manifest digests. The currently installed,
+hash-matched native verifier must re-accept the exact old source bundle, current
+migrated bundle and four-journal comparison with the original receipt identities.
+These checks read only retained backup images; they do not reopen live journals,
+rerun migration, stop services or grant financial authority. Ambiguous transaction
+types, incomplete migration, changed images or mismatched native results refuse
+financial preparation. The installed rehearsal consumes this completed schema
+review, rather than relying on the earlier same-build program-only review.
 
 The new plan preserves installed programs, configuration, credentials, units,
 payees/aliases, private-contact/self-read/operator settings, template/publication

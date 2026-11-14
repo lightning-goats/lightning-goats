@@ -57,7 +57,9 @@ def sealed(path, expected):
 def program_review(path, expected, baseline):
     """Read an older qualified receipt as data, never interpret its tool code."""
     r = sealed(path, expected)
-    if (r.get('version') != 1 or r.get('program_upgrade_only') is not True
+    schema_review = r.get('program_upgrade_only') is False and r.get('inclusive_fee_upgrade') is True
+    program_only = r.get('program_upgrade_only') is True and 'inclusive_fee_upgrade' not in r
+    if (r.get('version') != 1 or not (program_only or schema_review)
             or any(r.get(k) is not False for k in ('activation_authorized', 'schema_upgrade_authorized',
                                                   'services_changed', 'journals_opened', 'credentials_loaded'))
             or re.fullmatch('[0-9a-f]{40}', r.get('source_commit', '')) is None
@@ -74,7 +76,38 @@ def program_review(path, expected, baseline):
         fp = baseline['files'][str(Q.BIN / name)]
         if fp['sha256'] != r['selected_program_sha256'][name]:
             raise ValueError('installed program differs from the separately qualified program review')
+    if schema_review:
+        completed_inclusive_review(path)
     return r
+
+
+def completed_inclusive_review(path):
+    # The distinct schema transaction is accepted only after native verification
+    # of its retained before/after images. Never interpret older review tool code
+    # or open the live journals to qualify a financial preparation.
+    applied = C.read_json(path / 'APPLIED.json')
+    if (applied.get('inclusive_fee_upgrade') is not True
+            or applied.get('retained_rows_unchanged') is not True
+            or any(applied.get(k) is not False for k in
+                   ('activation_authorized', 'services_started', 'configurations_changed'))):
+        raise ValueError('completed inclusive-fee migration receipt required')
+    for folder, field in (('backup', 'backup_manifest_sha256'), ('migrated', 'migrated_manifest_sha256')):
+        manifest = path / folder / 'MANIFEST.json'
+        C.protected(manifest)
+        if U.digest(manifest) != applied.get(field):
+            raise ValueError('completed inclusive-fee migration images changed')
+    program = str(Q.BIN / 'cyberherd-statectl')
+    common = (program, '--config', str(S.MAINTENANCE))
+    source = json.loads(C.command(*common, 'verify-inclusive-fee-upgrade-source',
+                                  '--bundle', str(path / 'backup'), timeout=300))
+    verified = json.loads(C.command(*common, 'verify', '--bundle', str(path / 'migrated'), timeout=300))
+    compared = json.loads(C.command(*common, 'compare-inclusive-fee-upgrade',
+        '--bundle', str(path / 'backup'), '--candidate-copy', str(path / 'migrated'), timeout=300))
+    backup = C.read_json(path / 'BACKUP-ACCEPTED.json')
+    if (backup.get('inclusive_fee_upgrade') is not True or source != backup.get('selected_source')
+            or verified != applied.get('verified') or compared != applied.get('compared')
+            or backup.get('manifest_sha256') != applied['backup_manifest_sha256']):
+        raise ValueError('completed inclusive-fee native comparison changed')
 
 
 def candidate_review(path, expected):

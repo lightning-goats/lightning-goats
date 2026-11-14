@@ -83,6 +83,57 @@ class ActivationBoundaries(unittest.TestCase):
             with self.assertRaises(ValueError):
                 H.first_activation_backlog(dict(backlog(), stored_max_members=value), candidate_support.LIMITS)
 
+    def test_completed_schema_review_reverifies_retained_native_images_and_refuses_drift(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            records = {}
+            for folder in ('backup', 'migrated'):
+                (root / folder).mkdir()
+                (root / folder / 'MANIFEST.json').write_text(folder)
+            def ack(operation):
+                return {'operation': operation, 'id': '11111111-1111-4111-8111-111111111111',
+                        'accepted': True, 'resume_authorized': False}
+            source, verified, compared = [ack(name) for name in
+                ('inclusive_fee_upgrade_source_verify', 'verify', 'inclusive_fee_upgrade_compare')]
+            applied = {'inclusive_fee_upgrade': True, 'retained_rows_unchanged': True,
+                'activation_authorized': False, 'services_started': False, 'configurations_changed': False,
+                'backup_manifest_sha256': H.U.digest(root / 'backup/MANIFEST.json'),
+                'migrated_manifest_sha256': H.U.digest(root / 'migrated/MANIFEST.json'),
+                'verified': verified, 'compared': compared}
+            backup = {'inclusive_fee_upgrade': True, 'selected_source': source,
+                      'manifest_sha256': applied['backup_manifest_sha256']}
+            records.update({'APPLIED.json': applied, 'BACKUP-ACCEPTED.json': backup})
+            operations = {'verify-inclusive-fee-upgrade-source': source, 'verify': verified,
+                          'compare-inclusive-fee-upgrade': compared}
+            def command(*args, **kwargs):
+                self.assertEqual(args[:3], (str(H.Q.BIN / 'cyberherd-statectl'), '--config', str(H.S.MAINTENANCE)))
+                self.assertNotIn('snapshot', args)
+                return json.dumps(operations[args[3]])
+            with patch.object(H.C, 'protected'), patch.object(H.C, 'read_json', side_effect=lambda p: records[p.name]), \
+                    patch.object(H.C, 'command', side_effect=command) as native:
+                H.completed_inclusive_review(root)
+                self.assertEqual(native.call_count, 3)
+                self.assertIn('--candidate-copy', native.call_args.args)
+                for field in ('inclusive_fee_upgrade', 'retained_rows_unchanged', 'activation_authorized', 'services_started'):
+                    old = applied[field]; applied[field] = not old
+                    with self.subTest(field=field), self.assertRaises(ValueError):
+                        H.completed_inclusive_review(root)
+                    applied[field] = old
+                for folder in ('backup', 'migrated'):
+                    path = root / folder / 'MANIFEST.json'
+                    original = path.read_bytes(); path.write_bytes(b'changed')
+                    native.reset_mock()
+                    with self.assertRaisesRegex(ValueError, 'images changed'):
+                        H.completed_inclusive_review(root)
+                    native.assert_not_called(); path.write_bytes(original)
+                operations['compare-inclusive-fee-upgrade'] = dict(compared, accepted=False)
+                with self.assertRaisesRegex(ValueError, 'native comparison changed'):
+                    H.completed_inclusive_review(root)
+                operations['compare-inclusive-fee-upgrade'] = compared
+                backup['selected_source'] = dict(source, id='22222222-2222-4222-8222-222222222222')
+                with self.assertRaisesRegex(ValueError, 'native comparison changed'):
+                    H.completed_inclusive_review(root)
+
     def test_direct_execution_refuses_before_substituted_local_code_import(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

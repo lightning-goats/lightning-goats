@@ -376,6 +376,9 @@ async fn root_four_journal_snapshot_preserves_wal_paid_pending_and_signed_state_
     assert_eq!(inventory.bundle_id, manifest.id);
     assert_eq!(inventory.counts["settled_payment"], 1);
     assert_eq!(inventory.counts["feeder_request"], 1);
+    assert_eq!(inventory.counts["core_signed_message"], 1);
+    assert!(inventory.counts.contains_key("member_signing_intent"));
+    assert!(inventory.counts.contains_key("payout_signed_request"));
     assert!(inventory.all_selected_rows_examined);
     assert!(
         !inventory.external_history_complete

@@ -25,6 +25,48 @@ struct Selection {
 const SELECTIONS: &[Selection] = &[
     Selection {
         role: Role::Core,
+        table: "message_outbox",
+        kind: "core_signed_message",
+        query: "SELECT json_object('kind','core_signed_message','event_id',event_id,'source_event_seq',source_event_seq,'state',status,'created_at',created_at,'published_at',published_at) AS body FROM message_outbox ORDER BY event_id",
+    },
+    Selection {
+        role: Role::Core,
+        table: "zap_receipt_jobs",
+        kind: "incoming_zap_receipt",
+        query: "SELECT json_object('kind','incoming_zap_receipt','settlement_id',settlement_id,'source_event_seq',source_event_seq,'receive_request_id',receive_request_id,'event_id',event_id,'paid_at',paid_at) AS body FROM zap_receipt_jobs ORDER BY settlement_id",
+    },
+    Selection {
+        role: Role::Membership,
+        table: "delivery_unsigned",
+        kind: "member_signing_intent",
+        query: "SELECT json_object('kind','member_signing_intent','owner',owner,'identity',identity,'destination',destination) AS body FROM delivery_unsigned ORDER BY owner,identity,destination",
+    },
+    Selection {
+        role: Role::Membership,
+        table: "delivery_signed",
+        kind: "member_signed_message",
+        query: "SELECT json_object('kind','member_signed_message','owner',owner,'identity',identity,'destination',destination,'event_id',event_id) AS body FROM delivery_signed ORDER BY owner,identity,destination",
+    },
+    Selection {
+        role: Role::Membership,
+        table: "notice_destinations",
+        kind: "lifecycle_message",
+        query: "SELECT json_object('kind','lifecycle_message','owner',owner,'identity',identity,'destination',destination,'canceled',canceled,'event_id',json_extract(signed_json,'$.id')) AS body FROM notice_destinations ORDER BY owner,identity,destination",
+    },
+    Selection {
+        role: Role::Signer,
+        table: "signer_intents",
+        kind: "payout_signing_intent",
+        query: "SELECT json_object('kind','payout_signing_intent','intent_id',id,'created_at',created_at) AS body FROM signer_intents ORDER BY id",
+    },
+    Selection {
+        role: Role::Signer,
+        table: "signer_results",
+        kind: "payout_signed_request",
+        query: "SELECT json_object('kind','payout_signed_request','intent_id',id,'event_id',json_extract(event_json,'$.id')) AS body FROM signer_results ORDER BY id",
+    },
+    Selection {
+        role: Role::Core,
         table: "strike_receive_requests",
         kind: "receive_request",
         query: "SELECT json_object('kind','receive_request','receive_request_id',receive_request_id,'payment_hash',payment_hash,'amount_msat',amount_msat,'created_at',created_at) AS body FROM strike_receive_requests ORDER BY receive_request_id",
@@ -236,7 +278,7 @@ impl Operator {
         )?;
         let mut sink = Sink::open(&destination.join("IDENTITIES.jsonl"))?;
         let mut counts = BTreeMap::new();
-        for role in [Role::Core, Role::Payout] {
+        for role in Role::ALL {
             let pool = rows::open_named(bundle, &role.file()).await?;
             let result: Result<()> = async {
                 for selection in SELECTIONS.iter().filter(|s| s.role == role) {
@@ -420,6 +462,64 @@ mod tests {
         assert_eq!(records[2]["intent_id"], "quote-intent");
         assert_eq!(records[2]["latest_state"], "COMPLETED");
         assert!(!raw.contains("private-invoice-context"));
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn publication_identity_inventory_preserves_unsigned_and_signed_work_without_bodies() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        for statement in [
+            "CREATE TABLE message_outbox(event_id TEXT,source_event_seq INTEGER,status TEXT,created_at INTEGER,published_at INTEGER,signed_event_json TEXT)",
+            "CREATE TABLE zap_receipt_jobs(settlement_id INTEGER,source_event_seq INTEGER,receive_request_id TEXT,event_id TEXT,paid_at INTEGER,signed_json TEXT)",
+            "CREATE TABLE delivery_unsigned(owner TEXT,identity TEXT,destination TEXT,document_json TEXT)",
+            "CREATE TABLE delivery_signed(owner TEXT,identity TEXT,destination TEXT,event_id TEXT,event_json TEXT)",
+            "CREATE TABLE notice_destinations(owner TEXT,identity TEXT,destination TEXT,canceled INTEGER,signed_json TEXT)",
+            "CREATE TABLE signer_intents(id TEXT,created_at INTEGER,document_json TEXT)",
+            "CREATE TABLE signer_results(id TEXT,event_json TEXT)",
+            "INSERT INTO message_outbox VALUES('core-event',1,'pending',100,NULL,'private-body')",
+            "INSERT INTO zap_receipt_jobs VALUES(1,1,'receive-id','receipt-event',100,'private-body')",
+            "INSERT INTO delivery_unsigned VALUES('owner','message','note','private-body')",
+            "INSERT INTO delivery_signed VALUES('owner','message','note','member-event','private-body')",
+            "INSERT INTO notice_destinations VALUES('owner','notice','note',0,'{\"id\":\"notice-event\",\"content\":\"private-body\"}')",
+            "INSERT INTO signer_intents VALUES('original-intent',100,'private-body')",
+            "INSERT INTO signer_results VALUES('original-intent','{\"id\":\"payout-event\",\"content\":\"private-body\"}')",
+        ] {
+            sqlx::query(statement).execute(&pool).await.unwrap();
+        }
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("publication.jsonl");
+        let mut sink = Sink::open(&path).unwrap();
+        for kind in [
+            "core_signed_message",
+            "incoming_zap_receipt",
+            "member_signing_intent",
+            "member_signed_message",
+            "lifecycle_message",
+            "payout_signing_intent",
+            "payout_signed_request",
+        ] {
+            let selection = SELECTIONS.iter().find(|s| s.kind == kind).unwrap();
+            stream(&pool, selection, &mut sink, 1).await.unwrap();
+        }
+        sink.finish().unwrap();
+        let raw = std::fs::read_to_string(path).unwrap();
+        assert!(!raw.contains("private-body"));
+        let records: Vec<serde_json::Value> = raw
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(records.len(), 7);
+        assert_eq!(records[0]["event_id"], "core-event");
+        assert_eq!(records[1]["event_id"], "receipt-event");
+        assert!(records[2].get("event_id").is_none());
+        assert_eq!(records[3]["event_id"], "member-event");
+        assert_eq!(records[4]["event_id"], "notice-event");
+        assert_eq!(records[5]["intent_id"], records[6]["intent_id"]);
+        assert_eq!(records[6]["event_id"], "payout-event");
         pool.close().await;
     }
 

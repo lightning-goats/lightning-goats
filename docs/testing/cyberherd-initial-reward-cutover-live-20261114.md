@@ -1,5 +1,10 @@
 # Live future-only reward cutoff — 2026-11-14
 
+Later status: the separately approved
+[financial activation](cyberherd-financial-activation-live-20261114.md) is complete.
+The masked-role and review-only observations below describe this earlier cutoff
+checkpoint; consult that activation record for the current financial stage.
+
 The operator selected rewards for future confirmed feedings only. The qualified
 program-only upgrade and historical no-payout disposition have now completed on
 the VPS. Core and membership resumed; payout and signer remain masked. This is

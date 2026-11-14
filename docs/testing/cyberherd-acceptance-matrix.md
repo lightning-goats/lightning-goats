@@ -20,6 +20,12 @@ disposition, not provider acceptance or financial activation. The same checkpoin
 records read-only verification of the current signed announcement/goal and current
 three-member settings; remaining zap, stream and lifecycle scopes stay open.
 
+The separately approved [live financial activation](cyberherd-financial-activation-live-20261114.md)
+has now completed against a fresh native checkpoint. All four services are
+running/enabled at the selected limits and all 20 historical barriers remain
+excluded. This establishes activation, not a successful real payout or external
+recovery adoption. Public member/lifecycle publication remains disabled.
+
 | Requirement | Source and recorded evidence | Remaining acceptance |
 | --- | --- | --- |
 | 1. Membership and arithmetic | `src/cyberherd/store.rs`, `shares.rs`; [live social intake](cyberherd-live-social-intake-20261110.md) records reaction/repost admission and restart retention. | Revalidate three-user capacity and current settings; exercise settled zap increase/displacement and rejection rules on the selected installed stage. NIP-05 remains unnecessary. |

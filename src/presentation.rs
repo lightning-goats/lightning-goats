@@ -295,16 +295,6 @@ impl MessageRenderer {
         })
     }
 
-    #[cfg(test)]
-    pub(crate) fn editable_feeding(
-        catalog: &Catalog,
-        event: &DurableEvent,
-        proof: &crate::cyberherd::feeding_delivery::Proof,
-        threshold: u64,
-    ) -> Result<Option<RenderedPresentation>> {
-        Self::editable_feeding_with_zap(catalog, event, proof, threshold, None, None)
-    }
-
     pub(crate) fn editable_feeding_with_zap(
         catalog: &Catalog,
         event: &DurableEvent,

@@ -315,10 +315,12 @@ async fn unread_output_hits_send_deadline_without_unbounded_queue() {
 
 #[tokio::test]
 async fn queued_weather_is_rechecked_after_waiting_to_send() {
+    let fixture = Fixture::new(Timing::default()).await;
     let time = chrono::DateTime::from_timestamp(crate::gateway::now_epoch().unwrap() - 299, 0)
         .unwrap()
         .to_rfc3339();
     let mut queue = render_window(
+        &fixture.ledger,
         vec![DurableEvent {
             seq: 8,
             event_type: "weather_status".into(),
@@ -327,6 +329,7 @@ async fn queued_weather_is_rechecked_after_waiting_to_send() {
         &MessageRenderer::embedded().unwrap(),
         1000,
     )
+    .await
     .unwrap();
     assert_eq!(
         serde_json::from_str::<Value>(&queue[0].body).unwrap()["type"],

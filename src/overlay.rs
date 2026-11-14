@@ -121,7 +121,8 @@ async fn snapshot(
     })
 }
 
-fn render_window(
+async fn render_window(
+    ledger: &LedgerStore,
     events: Vec<DurableEvent>,
     renderer: &MessageRenderer,
     threshold: u64,
@@ -131,7 +132,8 @@ fn render_window(
     for event in events {
         let seq = event.seq;
         let is_weather = event.event_type == "weather_status";
-        let body = durable_event_message(event, renderer, threshold)?;
+        let zap = ledger.verified_zap_attribution(&event).await?;
+        let body = durable_event_message_with_zap(event, renderer, threshold, zap.as_ref())?;
         size += body.len();
         if body.len() > MAX_MESSAGE || size > MAX_QUEUE {
             bail!("overlay replay exceeds output bounds");
@@ -178,10 +180,12 @@ async fn serve_with_timing(
     let mut queue = VecDeque::new();
     if let Some(after) = resume.after {
         let replay = if resume.stream == Some(stream) {
-            ledger
-                .overlay_event_window(after, checkpoint.seq)
-                .await?
-                .and_then(|events| render_window(events, &renderer, threshold).ok())
+            match ledger.overlay_event_window(after, checkpoint.seq).await? {
+                Some(events) => render_window(&ledger, events, &renderer, threshold)
+                    .await
+                    .ok(),
+                None => None,
+            }
         } else {
             None
         };
@@ -244,8 +248,10 @@ async fn serve_with_timing(
                 let latest = ledger.latest_event_seq().await?;
                 if latest == last_seq { continue; }
                 let through = latest.min(last_seq.saturating_add(100));
-                let messages = ledger.overlay_event_window(last_seq, through).await?
-                    .and_then(|events| render_window(events, &renderer, threshold).ok());
+                let messages = match ledger.overlay_event_window(last_seq, through).await? {
+                    Some(events) => render_window(&ledger, events, &renderer, threshold).await.ok(),
+                    None => None,
+                };
                 match messages {
                     Some(messages) => queue = messages,
                     None => queue.push_back(snapshot(&ledger, threshold, stream, Some("event_window_unavailable")).await?),
@@ -255,10 +261,20 @@ async fn serve_with_timing(
     }
 }
 
+#[cfg(test)]
 fn durable_event_message(
     event: DurableEvent,
     renderer: &MessageRenderer,
     threshold_sats: u64,
+) -> Result<String> {
+    durable_event_message_with_zap(event, renderer, threshold_sats, None)
+}
+
+fn durable_event_message_with_zap(
+    event: DurableEvent,
+    renderer: &MessageRenderer,
+    threshold_sats: u64,
+    zap: Option<&crate::zap_presentation::ZapAttribution>,
 ) -> Result<String> {
     let mut payload: Value = serde_json::from_str(&event.payload_json)
         .context("durable overlay event contains invalid JSON")?;
@@ -268,7 +284,7 @@ fn durable_event_message(
         return Ok(skipped_weather(event.seq));
     }
 
-    let presentation = renderer.render(&event, threshold_sats)?;
+    let presentation = renderer.render_with_zap(&event, threshold_sats, zap)?;
     if matches!(
         event.event_type.as_str(),
         "payment_received" | "operator_credit_added"

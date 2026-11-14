@@ -227,12 +227,22 @@ impl Store {
             let unsigned = match saved {
                 Some(raw) => serde_json::from_str(&raw)?,
                 None => {
-                    let unsigned = if message.broadcast.is_some() {
-                        super::feeding_state::unsigned_broadcast(
+                    let unsigned = if let Some(broadcast) = &message.broadcast {
+                        let before: i64 = sqlx::query_scalar("SELECT ingress_seq FROM feeding_barriers WHERE owner=? AND request_id=?")
+                            .bind(owner).bind(broadcast.request_id.to_string()).fetch_one(&mut *tx).await?;
+                        let zap = super::feeding_state::feeding_zap_attribution(
+                            &mut tx,
+                            owner,
+                            before,
+                            &broadcast.proof,
+                        )
+                        .await?;
+                        super::feeding_state::unsigned_broadcast_with_zap(
                             owner,
                             &message,
                             &destination,
                             row.try_get("created_at")?,
+                            zap.as_ref(),
                         )?
                     } else {
                         let target: ConversationTarget =

@@ -13,5 +13,13 @@
   },
   "member_score_updated": {
     "0": "🐐 {name}’s CyberHerd score has been updated to {new_total} sats."
+  },
+  "feeder_trigger_zap": {
+    "0": "⚡ {name} zapped {new_amount} sats and helped feed the herd! {difference_message}\n\nhttps://lightning-goats.com",
+    "1": "🐐 Feeding time, thanks to a {new_amount}-sat zap from {name}! {difference_message}\n\nhttps://lightning-goats.com",
+    "2": "🎉 The goats have been fed! Thank you, {name}, for zapping {new_amount} sats. {difference_message}\n\nhttps://lightning-goats.com",
+    "3": "⚡ {name} sent a {new_amount}-sat zap, and treats have reached the herd! {difference_message}\n\nhttps://lightning-goats.com",
+    "4": "🐐 Thanks, {name}! Your {new_amount}-sat zap helped feed the herd. {difference_message} Goats like {goat_name} have excellent memories and can recognize other goats and humans for years.\n\nhttps://lightning-goats.com",
+    "5": "⚡ Treats have reached the herd, thanks to a {new_amount}-sat zap from {name}! {difference_message} Goats are highly social animals and form strong bonds with their herd.\n\nhttps://lightning-goats.com"
   }
 }

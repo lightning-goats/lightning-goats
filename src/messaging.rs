@@ -42,25 +42,27 @@ pub async fn process_next_message(
         ledger.advance_message_cursor(event.seq).await?;
         return Ok(MessageProcessorStep::NonPublicSkipped { seq: event.seq });
     }
-    let rendered = renderer.render(&event, threshold_sats)?;
+    let zap = ledger.verified_zap_attribution(&event).await?;
+    let rendered = renderer.render_with_zap(&event, threshold_sats, zap.as_ref())?;
     let Some(content) = rendered.nostr_content else {
         ledger.advance_message_cursor(event.seq).await?;
         return Ok(MessageProcessorStep::NonPublicSkipped { seq: event.seq });
     };
 
     let nak = nak.context("active messaging requires a configured NIP-46 nak client")?;
-    let signed = nak
-        .sign_kind1(
-            &content,
-            vec![vec!["t".to_owned(), "LightningGoats".to_owned()]],
+    let mut tags = vec![vec!["t".to_owned(), "LightningGoats".to_owned()]];
+    if let Some(zap) = &zap {
+        if let Some(sender) = zap.sender() {
+            tags.push(vec!["p".into(), sender.into()]);
+        }
+        tags.push(vec!["lightning-goats".into(), zap.identity().into()]);
+    }
+    let signed = nak.sign_kind1(&content, tags).await.with_context(|| {
+        format!(
+            "failed signing Nostr message for durable event {}",
+            event.seq
         )
-        .await
-        .with_context(|| {
-            format!(
-                "failed signing Nostr message for durable event {}",
-                event.seq
-            )
-        })?;
+    })?;
     let signed_json =
         serde_json::to_string(&signed).context("failed serializing signed outbox event")?;
     ledger

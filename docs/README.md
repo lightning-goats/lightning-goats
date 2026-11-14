@@ -9,7 +9,12 @@ deferral in the historical delivery order below.
 The optional [read-only CyberHerd roster and OBS state](architecture/cyberherd-public-roster.md)
 are disabled by default and add no financial or operator mutation capability.
 The approved current rollout now serves the [live leaderboard](testing/cyberherd-live-readonly-site-20261110.md),
-with operator controls, CyberHerd Nostr and payouts still disabled.
+with operator controls. The separately approved
+[financial activation](testing/cyberherd-financial-activation-live-20261114.md)
+and [public messaging repair](testing/cyberherd-discovery-repair-live-20261114.md)
+now run all four services. Automatic CyberHerd replies under today's note and
+membership/lifecycle posts in stream chat are verified. Older checkpoint
+paragraphs below describe their state at the time.
 [Nostr self-status sign-in](testing/cyberherd-self-read-public-live-20261111.md)
 is now public on the leaderboard. [Operator controls](architecture/cyberherd-operator-interface.md)
 now authorize the existing project messaging identity. The operator-requested

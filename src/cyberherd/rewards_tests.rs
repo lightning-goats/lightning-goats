@@ -35,6 +35,9 @@ use crate::{
 #[path = "payout_bridge_tests.rs"]
 mod payout_bridge_tests;
 
+#[path = "reward_cutover_tests.rs"]
+mod reward_cutover_tests;
+
 fn key(n: u8) -> String {
     test_event(n, 0, 100, "{}", vec![]).pubkey
 }

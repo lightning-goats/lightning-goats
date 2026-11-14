@@ -29,7 +29,7 @@ impl Store {
         let mut tx = self.pool.begin().await?;
         // Select the earliest barrier even if planning/reservation is still
         // pending. Exporting later ready plans must not skip an earlier one.
-        let row=sqlx::query("SELECT b.ingress_seq,p.* FROM feeding_barriers b LEFT JOIN reward_plans p ON p.owner=b.owner AND p.request_id=b.request_id WHERE b.owner=? AND b.ingress_seq>? ORDER BY b.ingress_seq LIMIT 1")
+        let row=sqlx::query("SELECT b.ingress_seq,p.* FROM feeding_barriers b LEFT JOIN reward_plans p ON p.owner=b.owner AND p.request_id=b.request_id WHERE b.owner=? AND NOT EXISTS(SELECT 1 FROM operator_commands x WHERE x.owner=b.owner AND x.command_id='initial-reward-cutover-feed:'||b.request_id) AND b.ingress_seq>? ORDER BY b.ingress_seq LIMIT 1")
             .bind(owner).bind(after).fetch_optional(&mut *tx).await?;
         let Some(row) = row else { return Ok(None) };
         let state: Option<String> = row.try_get("state")?;
@@ -131,7 +131,7 @@ impl Store {
     /// replace this barrier's frozen roster. Reserved/no-payout rows are closed.
     pub async fn next_reward_feeding(&self, owner: &str) -> Result<Option<Uuid>> {
         validate_owner(owner)?;
-        let id: Option<String> = sqlx::query_scalar("SELECT b.request_id FROM feeding_barriers b LEFT JOIN reward_plans p ON b.owner=p.owner AND b.request_id=p.request_id WHERE b.owner=? AND (p.state IS NULL OR p.state='awaiting_reservation') ORDER BY b.ingress_seq LIMIT 1")
+        let id: Option<String> = sqlx::query_scalar("SELECT b.request_id FROM feeding_barriers b LEFT JOIN reward_plans p ON b.owner=p.owner AND b.request_id=p.request_id WHERE b.owner=? AND NOT EXISTS(SELECT 1 FROM operator_commands x WHERE x.owner=b.owner AND x.command_id='initial-reward-cutover-feed:'||b.request_id) AND (p.state IS NULL OR p.state='awaiting_reservation') ORDER BY b.ingress_seq LIMIT 1")
             .bind(owner).fetch_optional(&self.pool).await?;
         id.map(|id| id.parse().map_err(Into::into)).transpose()
     }
@@ -163,6 +163,12 @@ impl Store {
         } = preparation;
         validate_owner(owner)?;
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        if super::reward_cutover_state::exclusion(&mut tx, owner, id)
+            .await?
+            .is_some()
+        {
+            bail!("historical feeding is closed without payout by initial reward cutover");
+        }
         if let Some(row) = sqlx::query("SELECT * FROM reward_plans WHERE owner=? AND request_id=?")
             .bind(owner)
             .bind(id.to_string())

@@ -51,7 +51,8 @@ Operator instructions take precedence where the reference differs:
   that also covers historical feeding inputs still deferred/unreceived; do not
   merely skip already planned/frozen examples. Preserve feed-credit accounting,
   original UUIDs and snapshots, and refuse existing financial-claim conflicts.
-  See the [actual candidate and historical decision](../testing/cyberherd-financial-candidate-live-staging-20261114.md).
+  See the [actual candidate and historical decision](../testing/cyberherd-financial-candidate-live-staging-20261114.md)
+  and [cutover implementation boundary](../architecture/cyberherd-initial-reward-cutover.md).
 - Preserve the existing 10-sat payment-announcement floor; smaller legitimate
   settled zaps can update an active member's score without a payment announcement.
   Social notifications are separate from payment announcements.

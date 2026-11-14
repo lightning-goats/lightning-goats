@@ -171,12 +171,23 @@ impl Store {
                     let (key, proof) = payment_identity(payment)?;
                     Some((key, proof, "payment", serde_json::to_string(payment)?))
                 }
-                EventBody::Feeding(feeding) => Some((
-                    format!("feeding:{}", feeding.request_id),
-                    hash(feeding)?,
-                    "feeding",
-                    serde_json::to_string(feeding)?,
-                )),
+                EventBody::Feeding(feeding) => {
+                    super::reward_cutover_state::validate_ingested(
+                        &mut tx,
+                        owner,
+                        page.epoch,
+                        event.seq,
+                        feeding.request_id,
+                        &hash(feeding)?,
+                    )
+                    .await?;
+                    Some((
+                        format!("feeding:{}", feeding.request_id),
+                        hash(feeding)?,
+                        "feeding",
+                        serde_json::to_string(feeding)?,
+                    ))
+                }
                 // Virtual credit is not a paid invoice or real reward reserve.
                 EventBody::OperatorCredit { .. } | EventBody::Other => None,
             };

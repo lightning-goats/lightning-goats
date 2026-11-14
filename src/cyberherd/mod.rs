@@ -29,6 +29,7 @@ pub mod payout_bridge;
 pub mod relay;
 #[cfg(unix)]
 pub mod result_worker;
+pub mod reward_cutover;
 #[cfg(unix)]
 pub mod reward_worker;
 pub mod rewards;

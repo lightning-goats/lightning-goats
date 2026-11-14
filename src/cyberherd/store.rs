@@ -20,6 +20,9 @@ mod ingress_state;
 #[path = "reward_store.rs"]
 mod reward_state;
 
+#[path = "reward_cutover_store.rs"]
+mod reward_cutover_state;
+
 #[path = "result_store.rs"]
 mod result_state;
 

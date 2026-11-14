@@ -296,7 +296,7 @@ test-only writer-state observer; the production systemctl parser is tested
 separately. This is not installed four-user service, live provider, household or
 restore-adoption qualification. No real payment/post/feeding is submitted.
 
-## Known-identity inventory for recovery — source candidate
+## Known-identity inventory for recovery
 
 The additive `inventory-recovery` command prepares reconciliation inputs from an
 accepted four-journal backup. It verifies the entire native backup and policy,
@@ -338,3 +338,7 @@ and `resume_authorized=false`. Independent coverage through the outage interval,
 missing-identity reconstruction and a concrete approved adoption procedure remain
 required. Adding this preparation command does not complete restore adoption or
 the wider CyberHerd acceptance contract.
+
+Exact-source CI and actual backup-only host qualification are recorded in the
+[November 14 inventory checkpoint](../testing/cyberherd-recovery-inventory-checkpoint-20261114.md).
+The candidate is retained separately; the installed operator was not replaced.

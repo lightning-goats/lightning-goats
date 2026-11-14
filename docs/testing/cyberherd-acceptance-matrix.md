@@ -48,10 +48,10 @@ two correctly empty frozen no-payout plans
 and one retained America/Denver midnight reset receipt. No payments, feeds or
 membership resets were submitted for these observations.
 
-The [known-identity recovery inventory candidate](cyberherd-recovery-inventory-checkpoint-20261114.md)
+The [qualified known-identity recovery inventory](cyberherd-recovery-inventory-checkpoint-20261114.md)
 prepares original IDs from accepted copies without authorizing restore adoption.
-It is under implementation/qualification; independent history coverage and the
-concrete adoption path remain unfinished.
+Exact-source CI and actual backup-only host qualification pass; independent
+history coverage and the concrete adoption path remain unfinished.
 
 | Requirement | Source and recorded evidence | Remaining acceptance |
 | --- | --- | --- |

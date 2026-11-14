@@ -228,6 +228,11 @@ journal or a new quote into authority. The
 returns the original quote ID for duplicate idempotency keys, which is useful
 only while the exact original intent/idempotency identity remains available.
 
+The endpoint documentation was rechecked on 2026-11-14. Its scope, filtering,
+pagination and unknown-count fields still do not establish a complete retention
+window for recovery; no retention guarantee is supplied by that endpoint
+reference. This does not justify expanding routine payout credentials.
+
 These findings narrow the required evidence, not the full recovery obligation.
 No provider API request, credential change, marker clearance or adoption was
 performed for this documentation review. The concrete adoption implementation
@@ -290,3 +295,46 @@ positive completion marker inside an isolated CI network namespace. It uses a
 test-only writer-state observer; the production systemctl parser is tested
 separately. This is not installed four-user service, live provider, household or
 restore-adoption qualification. No real payment/post/feeding is submitted.
+
+## Known-identity inventory for recovery — source candidate
+
+The additive `inventory-recovery` command prepares reconciliation inputs from an
+accepted four-journal backup. It verifies the entire native backup and policy,
+then streams known incoming request/notification/settlement IDs, feeder UUIDs,
+core execution claims, outgoing invoice/quote/execute identities, original
+quote-idempotency keys, fee-probe/observation/promotion identities, bound
+provider payment IDs and conflicts into a new private `IDENTITIES.jsonl`.
+Discovery-only fee records are labeled; promotion can retain the same IDs in
+both discovery and final-intent records and never indicates another payment. It exports no callback capabilities, invoice contents,
+payment preimages, credentials or signed message bodies. Those retained journal
+contents remain in the original private backup.
+
+```sh
+sudo /usr/local/bin/cyberherd-statectl \
+  --config /etc/cyberherd/state-maintenance.toml \
+  inventory-recovery --bundle /var/lib/cyberherd-backups/ACCEPTED_BACKUP_ID \
+  --destination /var/lib/cyberherd-reviews/NEW_IDENTITY_INVENTORY
+```
+
+Use the qualified updated binary; this source candidate is not yet installed.
+The destination parent must already be protected/root-owned and must be separate
+from the backup. The tool creates a new root-private directory, 0600 records and
+an `INVENTORY.json` binding the exact backup manifest/policy hashes, every selected
+table's count and the streamed record file's byte count/SHA256. Records are not
+limited to the reward report's 32 examples. Each record is bounded and the output
+is read back before acceptance; any failure leaves `INCOMPLETE`. Existing output
+is never overwritten. Only operation/report ID and false adoption/resume flags
+are printed to stdout; all identities/counts remain private.
+
+Current services need not be stopped to inventory already accepted copies. This
+command never opens their configured live paths, calls a provider/gateway,
+loads credentials, clears markers, edits configuration or starts services.
+Notifications remain explicitly labeled notifications, not paid settlements.
+
+The inventory contains **known local identities as of that backup**. It cannot
+prove that a transfer or feeding absent from the backup never happened. Even an
+empty export has `external_history_complete=false`, `adoption_authorized=false`
+and `resume_authorized=false`. Independent coverage through the outage interval,
+missing-identity reconstruction and a concrete approved adoption procedure remain
+required. Adding this preparation command does not complete restore adoption or
+the wider CyberHerd acceptance contract.

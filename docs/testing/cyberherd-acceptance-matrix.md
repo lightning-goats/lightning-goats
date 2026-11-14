@@ -48,6 +48,11 @@ two correctly empty frozen no-payout plans
 and one retained America/Denver midnight reset receipt. No payments, feeds or
 membership resets were submitted for these observations.
 
+The [known-identity recovery inventory candidate](cyberherd-recovery-inventory-checkpoint-20261114.md)
+prepares original IDs from accepted copies without authorizing restore adoption.
+It is under implementation/qualification; independent history coverage and the
+concrete adoption path remain unfinished.
+
 | Requirement | Source and recorded evidence | Remaining acceptance |
 | --- | --- | --- |
 | 1. Membership and arithmetic | `src/cyberherd/store.rs`, `shares.rs`; [live social intake](cyberherd-live-social-intake-20261110.md) records reaction/repost admission and restart retention. | Three-user capacity and the ready three-member roster were revalidated after the latest deployment. Exercise settled zap increase/displacement and rejection rules on the installed stage. NIP-05 remains unnecessary. |

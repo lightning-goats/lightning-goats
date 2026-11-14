@@ -711,6 +711,7 @@ async fn lifecycle_invitation_two_hour_boundary_is_durable_and_nonpublic_or_stal
 #[tokio::test]
 async fn chat_opt_out_keeps_lifecycle_notes_without_invitations_or_queued_chat_retries() {
     let f = Fixture::new().await;
+    f.stream("live", "retained-chat", f.now - 3).await;
     f.observe(Some(true), f.now - 2).await;
     let no_chat = f.store.clone().with_stream_chat(false);
     // Old chat remains retained; only the existing note can be selected.

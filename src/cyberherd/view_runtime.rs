@@ -64,7 +64,7 @@ impl Config {
                     policy: policy.clone(),
                     timezone: timezone.clone(),
                     config: auth.clone(),
-                    core: core.clone(),
+                    core: Arc::new(core.for_interactive_requests()),
                     cache: cache.clone(),
                 },
             ));

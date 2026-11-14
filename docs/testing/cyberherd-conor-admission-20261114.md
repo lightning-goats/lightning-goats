@@ -13,7 +13,9 @@ A profileless nonmember like also waited indefinitely even though a like cannot
 enter an already full herd, regardless of the missing metadata.
 
 The membership runtime now shares one paced FIFO client across intake, view,
-reward/result, overlay and publishing actors. The server's admission, UID,
+reward/result, overlay and publishing actors. Authenticated operator actions
+retain their existing direct client and short deadlines; they do not bypass any
+server admission or authorization check. The server's admission, UID,
 capability, database and financial limits remain unchanged. Fresh feeder state
 and target/day projection are checked after lifecycle I/O and pacing waits.
 

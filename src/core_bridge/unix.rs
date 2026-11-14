@@ -639,6 +639,14 @@ impl Client {
         self.pacing = Some((interval, Arc::new(tokio::sync::Mutex::new(Instant::now()))));
         self
     }
+    /// Operator requests retain their existing short deadline and server gates.
+    pub(crate) fn for_interactive_requests(&self) -> Self {
+        Self {
+            socket: self.socket.clone(),
+            expected_uid: self.expected_uid,
+            pacing: None,
+        }
+    }
     async fn request(&self, request: &Request) -> Result<Response> {
         if let Some((interval, next)) = &self.pacing {
             let mut next = next.lock().await;
@@ -1383,11 +1391,18 @@ mod tests {
         let client = Client::new(config.socket, self_credentials().unwrap().0)
             .unwrap()
             .with_request_spacing(Duration::from_millis(600));
+        let operator = client.for_interactive_requests();
         let mut readers = tokio::task::JoinSet::new();
         for _ in 0..6 {
             let client = client.clone();
             readers.spawn(async move { client.safety().await });
         }
+        timeout(Duration::from_secs(1), async {
+            operator.safety().await.unwrap();
+            operator.safety().await.unwrap();
+        })
+        .await
+        .unwrap();
         timeout(Duration::from_secs(10), async {
             while let Some(result) = readers.join_next().await {
                 result.unwrap().unwrap();

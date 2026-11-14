@@ -318,6 +318,63 @@ pub(super) fn unsigned_broadcast_with_zap(
     })
 }
 
+/// Match the core's immutable consumed-credit identity, never a latest payer or
+/// amount-only guess. Page history to keep memory bounded for long-lived owners.
+pub(super) async fn feeding_zap_attribution(
+    tx: &mut Transaction<'_, Sqlite>,
+    owner: &str,
+    before: i64,
+    proof: &crate::cyberherd::feeding_delivery::Proof,
+) -> Result<Option<crate::zap_presentation::ZapAttribution>> {
+    proof.validate()?;
+    if proof.owner != owner || before <= 0 {
+        bail!("feeding zap attribution scope mismatch");
+    }
+    let Some(amount) = proof.triggering_payment_amount_sats else {
+        return Ok(None);
+    };
+    let binding: String = sqlx::query_scalar("SELECT binding_json FROM core_streams WHERE owner=?")
+        .bind(owner)
+        .fetch_one(&mut **tx)
+        .await?;
+    let binding: CoreBinding = serde_json::from_str(&binding)?;
+    binding.validate()?;
+    let epoch = binding.epoch.to_string();
+    let mut upper = before;
+    loop {
+        let rows = sqlx::query("SELECT seq,payload_json FROM ingress WHERE owner=? AND kind='payment' AND seq<? ORDER BY seq DESC LIMIT 128")
+            .bind(owner).bind(upper).fetch_all(&mut **tx).await?;
+        if rows.is_empty() {
+            return Ok(None);
+        }
+        for row in rows {
+            upper = row.try_get("seq")?;
+            let raw: String = row.try_get("payload_json")?;
+            let payment: crate::core_bridge::Payment = serde_json::from_str(&raw)?;
+            if payment.zap.is_none() || payment.amount_msat / 1000 != amount {
+                continue;
+            }
+            let key = format!("payment:{}:{}", payment.source, payment.source_id);
+            let identity =
+                crate::cyberherd::ingress::hash(&(&epoch, owner, "feeding-announcement", key))?;
+            if identity != proof.identity {
+                continue;
+            }
+            let zap = payment
+                .zap
+                .as_ref()
+                .context("matched zap lost its request")?;
+            if binding.payees.get(&payment.address_user) != Some(&zap.payee_pubkey)
+                || binding.credit_pool != payment.credit_pool
+            {
+                bail!("feeding zap differs from authenticated core binding");
+            }
+            return crate::zap_presentation::ZapAttribution::from_payment(&payment);
+        }
+        tokio::task::yield_now().await;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -372,61 +429,5 @@ mod tests {
         ))
         .unwrap();
         assert_ne!(a.event().id, b.event().id);
-    }
-}
-
-/// Match the core's immutable consumed-credit identity, never a latest payer or
-/// amount-only guess. Page history to keep memory bounded for long-lived owners.
-pub(super) async fn feeding_zap_attribution(
-    tx: &mut Transaction<'_, Sqlite>,
-    owner: &str,
-    before: i64,
-    proof: &crate::cyberherd::feeding_delivery::Proof,
-) -> Result<Option<crate::zap_presentation::ZapAttribution>> {
-    proof.validate()?;
-    if proof.owner != owner || before <= 0 {
-        bail!("feeding zap attribution scope mismatch");
-    }
-    let Some(amount) = proof.triggering_payment_amount_sats else {
-        return Ok(None);
-    };
-    let binding: String = sqlx::query_scalar("SELECT binding_json FROM core_streams WHERE owner=?")
-        .bind(owner)
-        .fetch_one(&mut **tx)
-        .await?;
-    let binding: CoreBinding = serde_json::from_str(&binding)?;
-    binding.validate()?;
-    let epoch = binding.epoch.to_string();
-    let mut upper = before;
-    loop {
-        let rows = sqlx::query("SELECT seq,payload_json FROM ingress WHERE owner=? AND kind='payment' AND seq<? ORDER BY seq DESC LIMIT 128")
-            .bind(owner).bind(upper).fetch_all(&mut **tx).await?;
-        if rows.is_empty() {
-            return Ok(None);
-        }
-        for row in rows {
-            upper = row.try_get("seq")?;
-            let raw: String = row.try_get("payload_json")?;
-            let payment: crate::core_bridge::Payment = serde_json::from_str(&raw)?;
-            if payment.zap.is_none() || payment.amount_msat / 1000 != amount {
-                continue;
-            }
-            let key = format!("payment:{}:{}", payment.source, payment.source_id);
-            let identity = super::ingress::hash(&(&epoch, owner, "feeding-announcement", key))?;
-            if identity != proof.identity {
-                continue;
-            }
-            let zap = payment
-                .zap
-                .as_ref()
-                .context("matched zap lost its request")?;
-            if binding.payees.get(&payment.address_user) != Some(&zap.payee_pubkey)
-                || binding.credit_pool != payment.credit_pool
-            {
-                bail!("feeding zap differs from authenticated core binding");
-            }
-            return crate::zap_presentation::ZapAttribution::from_payment(&payment);
-        }
-        tokio::task::yield_now().await;
     }
 }

@@ -829,7 +829,6 @@ mod tests {
                     sats_received: vec![template],
                     feeder_trigger: legacy.category_templates("feeder_trigger"),
                     interface_info: legacy.category_templates("interface_info"),
-                    sats_received_zap: legacy.category_templates("sats_received_zap"),
                 }),
             };
             let rendered = renderer
@@ -889,7 +888,6 @@ mod tests {
                 sats_received: vec![named_variant],
                 feeder_trigger: legacy.category_templates("feeder_trigger"),
                 interface_info: legacy.category_templates("interface_info"),
-                sats_received_zap: legacy.category_templates("sats_received_zap"),
             }),
         };
         let rendered = renderer

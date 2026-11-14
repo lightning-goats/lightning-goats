@@ -1121,3 +1121,106 @@ async fn profileless_like_cannot_block_a_full_herd_repost_but_cannot_claim_an_op
         0
     );
 }
+
+#[tokio::test]
+async fn feeding_zap_notice_uses_consumed_credit_not_a_later_same_amount_donor() {
+    let f = Fixture::new().await;
+    f.core
+        .configure_feeding_notices(Some(&f.owner))
+        .await
+        .unwrap();
+    f.paid(101, 2, 995, &f.note).await;
+    f.paid(102, 3, 10, &f.note).await;
+    let feed = f.core.begin_feed_attempt(1000).await.unwrap().unwrap();
+    // This later zap has exactly the same amount as the triggering zap. Its
+    // sender must not replace the consumed credit's immutable attribution.
+    f.paid(103, 4, 10, &f.note).await;
+    f.core.confirm_feed_attempt(feed).await.unwrap();
+    assert_eq!(f.core.feed_credit_sats().await.unwrap(), 15);
+    let event = f
+        .core
+        .events_after(0, 100)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|e| e.event_type == "feeder_confirmed")
+        .unwrap();
+    let zap = f
+        .core
+        .verified_zap_attribution(&event)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(zap.sender(), Some(public(3).as_str()));
+    assert_eq!(zap.amount_sats(), 10);
+    assert_eq!(f.ingest().await, 4);
+    for key in [2, 3, 4] {
+        assert!(matches!(
+            f.run(Some(&f.profile(key)), FeederAvailability::Ready)
+                .await,
+            Step::Interaction(_)
+        ));
+    }
+    assert!(matches!(
+        f.run(None, FeederAvailability::Ready).await,
+        Step::Feeding(_)
+    ));
+    f.store.initialize_delivery(&f.owner, 0).await.unwrap();
+    for catalog in [
+        super::templates::Catalog::legacy().unwrap(),
+        super::templates::Catalog::delivery_defaults().unwrap(),
+    ] {
+        f.store.seed_templates(&f.owner, &catalog).await.unwrap();
+    }
+    assert!(
+        f.store
+            .queue_next_feeding_announcement(&f.owner, &f.targets, f.now)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !f.store
+            .queue_next_feeding_announcement(&f.owner, &f.targets, f.now)
+            .await
+            .unwrap()
+    );
+    while f
+        .store
+        .queue_next_delivery(&f.owner, &["wss://relay.damus.io/".into()], f.now)
+        .await
+        .unwrap()
+    {}
+    let overlay = f
+        .store
+        .pending_feeding_overlay(&f.owner)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(overlay.message.contains("User 3"));
+    assert!(!overlay.message.contains("User 4"));
+    assert!(overlay.message.contains("10"));
+    assert!(overlay.broadcast.goats.is_empty());
+    let mut feeding = None;
+    for _ in 0..32 {
+        let Some(job) = f.store.reserve_delivery(&f.owner, f.now).await.unwrap() else {
+            break;
+        };
+        if job.feeding {
+            feeding = Some(job);
+            break;
+        }
+    }
+    let job = feeding.expect("feeding note must be queued");
+    assert!(job.unsigned.content.contains(&zap.nostr_name().unwrap()));
+    assert!(job.unsigned.tags.contains(&vec!["p".into(), public(3)]));
+    assert!(!job.unsigned.tags.contains(&vec!["p".into(), public(4)]));
+    // Presentation never debits again, including a reopen and another queue pass.
+    let reopened = Store::connect(&f.database).await.unwrap();
+    assert!(
+        !reopened
+            .queue_next_feeding_announcement(&f.owner, &f.targets, f.now)
+            .await
+            .unwrap()
+    );
+    assert_eq!(f.core.feed_credit_sats().await.unwrap(), 15);
+}

@@ -1944,3 +1944,116 @@ async fn failed_first_relay_does_not_starve_note_or_chat_and_keeps_exact_signatu
     assert_eq!(receipts, vec!["wss://relay.artx.market/".to_owned(); 2]);
     task.abort();
 }
+
+#[tokio::test]
+async fn chat_opt_out_preserves_queued_signed_chat_but_publishes_notes_and_overlay() {
+    let f = Fixture::new().await;
+    f.apply("join-no-chat", 34).await;
+    f.queue().await;
+    let mut stored_chat = None;
+    for _ in 0..2 {
+        let job = f
+            .store
+            .reserve_delivery(&f.owner, calendar::now().unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        let signed = Fake::default().sign(&job.unsigned).await.unwrap();
+        let raw = f
+            .store
+            .save_delivery_signature(&job, &signed)
+            .await
+            .unwrap();
+        if job.unsigned.kind == 1311 {
+            stored_chat = Some(raw);
+        }
+        f.store
+            .finish_delivery(&job, None, calendar::now().unwrap())
+            .await
+            .unwrap();
+    }
+    let stored_chat = stored_chat.unwrap();
+    let db = SqlitePool::connect(&f.url).await.unwrap();
+    sqlx::query("UPDATE delivery_work SET lease_until=0")
+        .execute(&db)
+        .await
+        .unwrap();
+    let no_chat = f.store.clone().with_stream_chat(false);
+    let (core, task) = f.bridge(RuntimeMode::Active).await;
+    let fake = Fake::default();
+    let worker = Worker {
+        store: no_chat.clone(),
+        core,
+        transport: fake.clone(),
+        owner: f.owner.clone(),
+    };
+    assert_eq!(tick(&f, &worker).await.unwrap(), Step::Published);
+    assert_eq!(tick(&f, &worker).await.unwrap(), Step::Idle);
+    assert_eq!(fake.signs.load(Ordering::SeqCst), 0);
+    assert!(fake.events.lock().unwrap().iter().all(|e| e.kind == 1));
+    let retained: String =
+        sqlx::query_scalar("SELECT event_json FROM delivery_signed WHERE event_json=?")
+            .bind(&stored_chat)
+            .fetch_one(&db)
+            .await
+            .unwrap();
+    assert_eq!(retained, stored_chat);
+    assert!(
+        no_chat
+            .pending_member_overlay(&f.owner)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    f.apply("increase-no-chat", 34).await;
+    while no_chat
+        .queue_next_delivery(
+            &f.owner,
+            &["wss://relay.damus.io/".into()],
+            calendar::now().unwrap(),
+        )
+        .await
+        .unwrap()
+    {}
+    let chats: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM delivery_destinations WHERE destination LIKE 'stream:%'",
+    )
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    assert_eq!(chats, 1); // Only the retained historical destination.
+    assert_eq!(tick(&f, &worker).await.unwrap(), Step::Published);
+    assert!(fake.events.lock().unwrap().iter().all(|e| e.kind == 1));
+    task.abort();
+}
+
+#[tokio::test]
+async fn chat_opt_out_retains_confirmed_feeding_note_and_overlay_with_live_stream_present() {
+    let mut f = Fixture::new().await;
+    f.store = f.store.clone().with_stream_chat(false);
+    assert!(f.targets.current().iter().any(|t| t.kind == 30311));
+    f.core
+        .configure_feeding_notices(Some(&f.owner))
+        .await
+        .unwrap();
+    feed_credit(&f, "no-chat-feeding", 1000).await;
+    confirm_food(&f).await;
+    let (client, task) = f.bridge(RuntimeMode::Canary).await;
+    freeze_food(&f, &client).await;
+    generate_food(&f, &f.targets).await;
+    let db = SqlitePool::connect(&f.url).await.unwrap();
+    let destinations: Vec<String> =
+        sqlx::query_scalar("SELECT destination FROM delivery_destinations")
+            .fetch_all(&db)
+            .await
+            .unwrap();
+    assert_eq!(destinations, vec!["broadcast:note"]);
+    assert!(
+        f.store
+            .pending_feeding_overlay(&f.owner)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    task.abort();
+}

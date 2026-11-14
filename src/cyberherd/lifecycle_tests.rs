@@ -707,3 +707,62 @@ async fn lifecycle_invitation_two_hour_boundary_is_durable_and_nonpublic_or_stal
     f.observe(Some(false), f.now + 14500).await;
     assert_eq!(f.count().await, 3);
 }
+
+#[tokio::test]
+async fn chat_opt_out_keeps_lifecycle_notes_without_invitations_or_queued_chat_retries() {
+    let f = Fixture::new().await;
+    f.observe(Some(true), f.now - 2).await;
+    let no_chat = f.store.clone().with_stream_chat(false);
+    // Old chat remains retained; only the existing note can be selected.
+    while let Some(job) = no_chat.reserve_notice(&f.owner, f.now).await.unwrap() {
+        assert_eq!(job.unsigned.kind, 1);
+        assert_eq!(job.destination, "note");
+        let signed = VerifiedEvent::verify(test_event(
+            1,
+            1,
+            job.unsigned.created_at,
+            &job.unsigned.content,
+            job.unsigned.tags.clone(),
+        ))
+        .unwrap();
+        no_chat.save_notice_signature(&job, &signed).await.unwrap();
+        let ack = RelayAck::synthetic(&signed, &job.relay);
+        no_chat
+            .finish_notice(&job, Some(&ack), f.now)
+            .await
+            .unwrap();
+    }
+    no_chat
+        .observe_lifecycle(
+            &f.owner,
+            Observation {
+                state: &Fixture::state(Some(false), f.now),
+                discovery_available: true,
+                timezone: "America/Denver",
+                relays: &f.relays,
+                now: f.now,
+            },
+        )
+        .await
+        .unwrap();
+    let chats: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM notice_destinations WHERE destination LIKE 'stream:%'",
+    )
+    .fetch_one(&f.db)
+    .await
+    .unwrap();
+    let invites: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM notice_events WHERE purpose='invitation'")
+            .fetch_one(&f.db)
+            .await
+            .unwrap();
+    assert_eq!(chats, 1); // Retain the original pause chat without publishing it.
+    assert_eq!(invites, 0);
+    let resume = no_chat
+        .reserve_notice(&f.owner, f.now + 1)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(resume.purpose, "resume");
+    assert_eq!(resume.unsigned.kind, 1);
+}

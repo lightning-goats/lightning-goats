@@ -60,6 +60,8 @@ herd = "0000000000000000000000000000000000000000000000000000000000000000"
 # start_after = 0
 # poll_millis = 1000
 # lifecycle = false
+# Keep CyberHerd on note threads and the overlay, out of stream chat.
+# stream_chat = false
 # Explicit optional pause/resume/evening notices and live-stream invitations.
 # Requires enabled messaging + signer; template deletion disables each category.
 # relays = ["wss://relay.damus.io/", "wss://nostr.chaima.info/", "wss://relay.artx.market/"]

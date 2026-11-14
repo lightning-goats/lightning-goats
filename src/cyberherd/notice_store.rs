@@ -106,7 +106,7 @@ impl Store {
             .observed_at
             .context("missing confirmed override time")?;
         let evening = paused && lifecycle::evening(timezone, state.solar.as_ref(), now)?;
-        let stream = if discovery_available {
+        let stream = if discovery_available && self.stream_chat {
             self.notice_stream(owner, evening, now).await?
         } else {
             None
@@ -301,8 +301,8 @@ impl Store {
         // bytes remain retained for audit; cancellation never creates a new ID.
         sqlx::query("UPDATE notice_destinations SET canceled=1 WHERE owner=? AND canceled=0 AND EXISTS(SELECT 1 FROM notice_events e WHERE e.owner=notice_destinations.owner AND e.identity=notice_destinations.identity AND e.purpose='invitation' AND e.created_at<=?)")
             .bind(owner).bind(now.saturating_sub(7200)).execute(&mut *tx).await?;
-        let rows=sqlx::query("SELECT e.identity,e.purpose,e.relays_json,e.seq,d.* FROM notice_events e JOIN notice_destinations d ON e.owner=d.owner AND e.identity=d.identity WHERE e.owner=? AND d.canceled=0 AND d.lease_until<=? AND (SELECT COUNT(*) FROM notice_receipts r WHERE r.owner=d.owner AND r.identity=d.identity AND r.destination=d.destination)<json_array_length(e.relays_json) ORDER BY d.attempted_at,e.seq,d.destination LIMIT 32")
-            .bind(owner).bind(now).fetch_all(&mut *tx).await?;
+        let rows=sqlx::query("SELECT e.identity,e.purpose,e.relays_json,e.seq,d.* FROM notice_events e JOIN notice_destinations d ON e.owner=d.owner AND e.identity=d.identity WHERE e.owner=? AND (? OR d.destination NOT LIKE 'stream:%') AND d.canceled=0 AND d.lease_until<=? AND (SELECT COUNT(*) FROM notice_receipts r WHERE r.owner=d.owner AND r.identity=d.identity AND r.destination=d.destination)<json_array_length(e.relays_json) ORDER BY d.attempted_at,e.seq,d.destination LIMIT 32")
+            .bind(owner).bind(self.stream_chat).bind(now).fetch_all(&mut *tx).await?;
         for row in rows {
             let identity: String = row.try_get("identity")?;
             let destination: String = row.try_get("destination")?;

@@ -68,6 +68,9 @@ impl<T: Transport> Worker<T> {
         };
         let event = VerifiedEvent::from_json(&raw)?;
         job.unsigned.validate_signed(&event)?;
+        if event.event().kind == 1311 && !self.store.stream_chat {
+            return Ok(None);
+        }
         // A failing first relay must not starve other frozen destinations.
         // Keep one signature and a bounded attempt within the 300-second lease.
         tokio::time::timeout(std::time::Duration::from_secs(180), async {

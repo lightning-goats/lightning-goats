@@ -18,6 +18,8 @@ pub struct Config {
     pub relays: Vec<String>,
     #[serde(default)]
     pub lifecycle: bool,
+    #[serde(default = "default_stream_chat")]
+    pub stream_chat: bool,
     #[serde(default)]
     pub signer: Option<Signer>,
 }
@@ -29,6 +31,10 @@ pub struct Signer {
     pub client_pubkey: String,
     pub bunker_relays: Vec<String>,
 }
+fn default_stream_chat() -> bool {
+    true
+}
+
 impl Config {
     pub fn validate(&self, owner: &str) -> Result<()> {
         crate::payout::invoice::receipt_relays(&self.relays)?;

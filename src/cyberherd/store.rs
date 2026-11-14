@@ -49,6 +49,7 @@ static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./cyberherd-migration
 #[derive(Debug, Clone)]
 pub struct Store {
     pool: SqlitePool,
+    pub(crate) stream_chat: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -152,6 +153,12 @@ pub enum TemplateEdit {
 }
 
 impl Store {
+    /// Route policy affects presentation only; retained events are never rewritten.
+    pub fn with_stream_chat(mut self, enabled: bool) -> Self {
+        self.stream_chat = enabled;
+        self
+    }
+
     /// Offline disposition must never create a database or run migrations.
     #[cfg(unix)]
     pub(crate) async fn open_existing_for_cutover(database_url: &str) -> Result<Self> {
@@ -161,7 +168,10 @@ impl Store {
             pool.close().await;
             return Err(error);
         }
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            stream_chat: true,
+        })
     }
     pub(crate) async fn close_after_initialization(self) {
         self.pool.close().await;
@@ -172,7 +182,10 @@ impl Store {
             .run(&pool)
             .await
             .context("failed applying separate CyberHerd migrations")?;
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            stream_chat: true,
+        })
     }
 
     pub async fn initialize(

@@ -204,7 +204,8 @@ impl Runtime {
             "sqlite://{}",
             database.to_str().context("state path must be UTF-8")?
         ))
-        .await?;
+        .await?
+        .with_stream_chat(config.messaging.as_ref().is_none_or(|m| m.stream_chat));
         std::fs::set_permissions(&database, std::fs::Permissions::from_mode(0o600))?;
         let now = calendar::now()?;
         store

@@ -46,6 +46,7 @@ pub(crate) struct Job {
     pub unsigned: Unsigned,
     pub signed: Option<String>,
     pub relay: String,
+    pub remaining_relays: Vec<String>,
 }
 
 impl Store {
@@ -315,7 +316,7 @@ impl Store {
             }
             let relays: Vec<String> =
                 serde_json::from_str(&row.try_get::<String, _>("relays_json")?)?;
-            let mut selected = None;
+            let mut remaining_relays = Vec::new();
             for relay in relays {
                 let done:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM notice_receipts WHERE owner=? AND identity=? AND destination=? AND relay=?)")
                     .bind(owner).bind(&identity).bind(&destination).bind(&relay).fetch_one(&mut *tx).await?;
@@ -327,14 +328,13 @@ impl Store {
                 let blocked:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM notice_events e JOIN notice_destinations d ON e.owner=d.owner AND e.identity=d.identity WHERE e.owner=? AND e.seq<? AND d.destination=? AND d.canceled=0 AND EXISTS(SELECT 1 FROM json_each(e.relays_json) WHERE value=?) AND NOT EXISTS(SELECT 1 FROM notice_receipts r WHERE r.owner=d.owner AND r.identity=d.identity AND r.destination=d.destination AND r.relay=?))")
                     .bind(owner).bind(row.try_get::<i64,_>("seq")?).bind(&destination).bind(&relay).bind(&relay).fetch_one(&mut *tx).await?;
                 if !blocked {
-                    selected = Some(relay);
-                    break;
+                    remaining_relays.push(relay);
                 }
             }
-            if let Some(relay) = selected {
+            if let Some(relay) = remaining_relays.first().cloned() {
                 let lease = Uuid::new_v4();
                 sqlx::query("UPDATE notice_destinations SET lease_id=?,lease_until=?,attempted_at=? WHERE owner=? AND identity=? AND destination=?")
-                    .bind(lease.to_string()).bind(now.saturating_add(60)).bind(now).bind(owner).bind(&identity).bind(&destination).execute(&mut *tx).await?;
+                    .bind(lease.to_string()).bind(now.saturating_add(300)).bind(now).bind(owner).bind(&identity).bind(&destination).execute(&mut *tx).await?;
                 let job = Job {
                     owner: owner.into(),
                     identity,
@@ -344,6 +344,7 @@ impl Store {
                     unsigned: serde_json::from_str(&row.try_get::<String, _>("unsigned_json")?)?,
                     signed: row.try_get("signed_json")?,
                     relay,
+                    remaining_relays,
                 };
                 tx.commit().await?;
                 return Ok(Some(job));

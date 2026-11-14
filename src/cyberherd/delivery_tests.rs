@@ -35,6 +35,7 @@ struct Fake {
     signs: Arc<AtomicUsize>,
     events: Arc<Mutex<Vec<crate::nostr::SignedNostrEvent>>>,
     lose: Arc<AtomicBool>,
+    failed_relay: Option<String>,
 }
 impl Transport for Fake {
     async fn sign(&self, u: &Unsigned) -> Result<VerifiedEvent> {
@@ -49,7 +50,7 @@ impl Transport for Fake {
     }
     async fn publish(&self, event: &VerifiedEvent, relay: &str) -> Result<RelayAck> {
         self.events.lock().unwrap().push(event.event().clone());
-        if self.lose.swap(false, Ordering::SeqCst) {
+        if self.failed_relay.as_deref() == Some(relay) || self.lose.swap(false, Ordering::SeqCst) {
             bail!("synthetic lost relay acknowledgement");
         }
         Ok(RelayAck {
@@ -1894,4 +1895,52 @@ async fn public_targets_distinguish_unknown_from_fresh_empty_and_do_not_reuse_fa
             .unwrap()
             .is_none()
     );
+}
+
+#[tokio::test]
+async fn failed_first_relay_does_not_starve_note_or_chat_and_keeps_exact_signature() {
+    let f = Fixture::new().await;
+    f.apply("join-fallback", 34).await;
+    while f
+        .store
+        .queue_next_delivery(
+            &f.owner,
+            &[
+                "wss://nostr.chaima.info/".into(),
+                "wss://relay.artx.market/".into(),
+            ],
+            calendar::now().unwrap(),
+        )
+        .await
+        .unwrap()
+    {}
+    let (core, task) = f.bridge(RuntimeMode::Active).await;
+    let fake = Fake {
+        failed_relay: Some("wss://nostr.chaima.info/".into()),
+        ..Fake::default()
+    };
+    let worker = Worker {
+        store: f.store.clone(),
+        core,
+        transport: fake.clone(),
+        owner: f.owner.clone(),
+    };
+    assert_eq!(tick(&f, &worker).await.unwrap(), Step::Published);
+    assert_eq!(tick(&f, &worker).await.unwrap(), Step::Published);
+    assert_eq!(fake.signs.load(Ordering::SeqCst), 2);
+    let events = fake.events.lock().unwrap().clone();
+    assert_eq!(events.len(), 4);
+    assert_eq!(events[0].id, events[1].id);
+    assert_eq!(events[2].id, events[3].id);
+    assert_eq!(
+        events.iter().map(|e| e.kind).collect::<BTreeSet<_>>(),
+        BTreeSet::from([1, 1311])
+    );
+    let db = SqlitePool::connect(&f.url).await.unwrap();
+    let receipts: Vec<String> = sqlx::query_scalar("SELECT relay FROM delivery_receipts")
+        .fetch_all(&db)
+        .await
+        .unwrap();
+    assert_eq!(receipts, vec!["wss://relay.artx.market/".to_owned(); 2]);
+    task.abort();
 }

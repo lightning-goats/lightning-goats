@@ -579,7 +579,11 @@ async fn lifecycle_publisher_waits_on_unknown_but_sends_pause_while_override_on_
         .unwrap();
     transport.lose.store(true, Ordering::SeqCst);
     tokio::time::sleep(std::time::Duration::from_millis(1050)).await;
-    assert!(worker.tick().await.is_err());
+    // The first relay loses its ACK; the second must receive the same event.
+    assert_eq!(
+        worker.tick().await.unwrap(),
+        crate::cyberherd::delivery_worker::Step::Published
+    );
     assert_eq!(transport.signs.load(Ordering::SeqCst), 1);
     sqlx::query("UPDATE notice_destinations SET lease_until=0")
         .execute(&f.db)
@@ -592,8 +596,8 @@ async fn lifecycle_publisher_waits_on_unknown_but_sends_pause_while_override_on_
     );
     assert_eq!(transport.signs.load(Ordering::SeqCst), 1);
     let ids = transport.ids.lock().unwrap();
-    assert_eq!(ids.len(), 2);
-    assert_eq!(ids[0], ids[1]);
+    assert_eq!(ids.len(), 3);
+    assert!(ids.iter().all(|id| id == &ids[0]));
     drop(ids);
     task.abort();
 }

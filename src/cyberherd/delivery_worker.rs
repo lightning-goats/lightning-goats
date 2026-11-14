@@ -89,14 +89,14 @@ pub(crate) struct Worker<T> {
 }
 impl<T: Transport> Worker<T> {
     pub async fn tick(&self) -> Result<Step> {
-        let Some(job) = self
+        let Some(mut job) = self
             .store
             .reserve_delivery(&self.owner, calendar::now()?)
             .await?
         else {
             return Ok(Step::Idle);
         };
-        let result = self.deliver(&job).await;
+        let result = self.deliver(&mut job).await;
         match result {
             Ok(Some(ack)) => {
                 self.store
@@ -118,7 +118,7 @@ impl<T: Transport> Worker<T> {
             }
         }
     }
-    async fn deliver(&self, job: &Job) -> Result<Option<RelayAck>> {
+    async fn deliver(&self, job: &mut Job) -> Result<Option<RelayAck>> {
         // Idle/backoff work does not consume the core's bounded IPC admission.
         // Once selected, fresh permission still precedes signing and publication.
         if !permitted(&self.core, job.feeding).await? {
@@ -133,10 +133,26 @@ impl<T: Transport> Worker<T> {
         };
         let event = VerifiedEvent::from_json(&raw)?;
         job.unsigned.validate_signed(&event)?;
-        if !permitted(&self.core, job.feeding).await? {
-            return Ok(None);
-        }
-        Ok(Some(self.transport.publish(&event, &job.relay).await?))
+        // A failing first relay must not starve other frozen destinations.
+        // Keep one signature and a bounded attempt within the 300-second lease.
+        tokio::time::timeout(std::time::Duration::from_secs(180), async {
+            for (index, relay) in job.remaining_relays.clone().into_iter().enumerate() {
+                if index > 0 {
+                    // Respect the core's one-token-per-500ms read admission.
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                }
+                if !permitted(&self.core, job.feeding).await? {
+                    return Ok(None);
+                }
+                job.relay = relay;
+                if let Ok(ack) = self.transport.publish(&event, &job.relay).await {
+                    ack.check(&event, &job.relay)?;
+                    return Ok(Some(ack));
+                }
+            }
+            bail!("no eligible relay acknowledged the frozen event")
+        })
+        .await?
     }
 }
 async fn permitted(core: &Client, confirmed_feeding: bool) -> Result<bool> {

@@ -53,6 +53,13 @@ prepares original IDs from accepted copies without authorizing restore adoption.
 Exact-source CI and actual backup-only host qualification pass; independent
 history coverage and the concrete adoption path remain unfinished.
 
+The [historical zap observation](cyberherd-historical-zap-observation-20261114.md)
+now verifies eight retained signed request/receipt pairs, exact request-description
+bindings and unique completed membership inputs. Two produced one join/displacement
+event each; six were discarded. These November 11–13 settlements predate today's
+cycle and the latest messaging release. Latest-runtime zap/public-copy acceptance,
+independent invoice/provider revalidation and actual payouts remain unproven.
+
 | Requirement | Source and recorded evidence | Remaining acceptance |
 | --- | --- | --- |
 | 1. Membership and arithmetic | `src/cyberherd/store.rs`, `shares.rs`; [live social intake](cyberherd-live-social-intake-20261110.md) records reaction/repost admission and restart retention. | Three-user capacity and the ready three-member roster were revalidated after the latest deployment. Exercise settled zap increase/displacement and rejection rules on the installed stage. NIP-05 remains unnecessary. |

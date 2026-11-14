@@ -1906,7 +1906,7 @@ async fn failed_first_relay_does_not_starve_note_or_chat_and_keeps_exact_signatu
         .queue_next_delivery(
             &f.owner,
             &[
-                "wss://relay.damus.io/".into(),
+                "wss://nostr.chaima.info/".into(),
                 "wss://relay.artx.market/".into(),
             ],
             calendar::now().unwrap(),
@@ -1916,7 +1916,7 @@ async fn failed_first_relay_does_not_starve_note_or_chat_and_keeps_exact_signatu
     {}
     let (core, task) = f.bridge(RuntimeMode::Active).await;
     let fake = Fake {
-        failed_relay: Some("wss://relay.damus.io/".into()),
+        failed_relay: Some("wss://nostr.chaima.info/".into()),
         ..Fake::default()
     };
     let worker = Worker {

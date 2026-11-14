@@ -63,7 +63,10 @@ impl Recipient {
             bail!("recipient metadata response too large");
         }
         let wire: Wire = serde_json::from_slice(raw).context("invalid recipient metadata")?;
-        if wire.status.is_some()
+        // Some LNURL services (including Primal) include an explicit success
+        // status alongside the normal payRequest fields. Only that exact
+        // success value is compatible; error/unknown statuses still fail closed.
+        if wire.status.as_deref().is_some_and(|status| status != "OK")
             || wire.tag != "payRequest"
             || wire.min_sendable == 0
             || wire.max_sendable < wire.min_sendable
@@ -175,6 +178,57 @@ mod tests {
         let r = Recipient::parse("a@example.com", &raw).unwrap();
         assert!(serde_json::to_vec(&r).unwrap().len() < 1024);
     }
+    #[test]
+    fn explicit_success_status_preserves_recipient_validation_and_error_refusal() {
+        let address = "member@example.com";
+        let baseline = Recipient::parse(address, &serde_json::to_vec(&wire()).unwrap()).unwrap();
+        let mut success = wire();
+        success["status"] = json!("OK");
+        assert_eq!(
+            Recipient::parse(address, &serde_json::to_vec(&success).unwrap()).unwrap(),
+            baseline
+        );
+        let receipt_key = crate::nostr_event::test_event(2, 0, 100, "{}", vec![]).pubkey;
+        success["allowsNostr"] = json!(true);
+        success["nostrPubkey"] = json!(receipt_key.clone());
+        assert_eq!(
+            Recipient::parse(address, &serde_json::to_vec(&success).unwrap())
+                .unwrap()
+                .receipt_pubkey,
+            Some(receipt_key)
+        );
+        for status in ["ERROR", "error", "ok", "", "PENDING", "OK "] {
+            let mut rejected = success.clone();
+            rejected["status"] = json!(status);
+            assert!(
+                Recipient::parse(address, &serde_json::to_vec(&rejected).unwrap()).is_err(),
+                "{status}"
+            );
+        }
+        for (field, value) in [
+            ("tag", json!("withdrawRequest")),
+            ("minSendable", json!(0)),
+            ("maxSendable", json!(999)),
+            ("callback", json!("https://10.8.0.6/invoice")),
+            (
+                "callback",
+                json!("https://pay.example.com/invoice?amount=1000"),
+            ),
+            (
+                "metadata",
+                json!("[[\"text/plain\",\"a\"],[\"text/plain\",\"b\"]]"),
+            ),
+            ("nostrPubkey", json!("00".repeat(32))),
+        ] {
+            let mut rejected = success.clone();
+            rejected[field] = value;
+            assert!(
+                Recipient::parse(address, &serde_json::to_vec(&rejected).unwrap()).is_err(),
+                "{field}"
+            );
+        }
+    }
+
     #[test]
     fn malformed_supported_recipients_private_callbacks_ambiguous_fields_and_errors_fail_closed() {
         let public = crate::nostr_event::test_event(2, 0, 100, "{}", vec![]).pubkey;

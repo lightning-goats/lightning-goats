@@ -40,6 +40,13 @@ native systemd rehearsal. Read-only live financial observation found two
 `no_payout` reward plans, zero payout grants/rows and no provider payment records.
 No actual payout or externally observed zap-aware message is claimed.
 
+Read-only [current-member recipient qualification](cyberherd-recipient-success-status-20261114.md)
+found two valid recipients and an explicit-success parsing defect for Primal.
+That correction is in progress; the failed recipient must not be counted as
+qualified. The same checkpoint records two correctly empty frozen no-payout plans
+and one retained America/Denver midnight reset receipt. No payments, feeds or
+membership resets were submitted for these observations.
+
 | Requirement | Source and recorded evidence | Remaining acceptance |
 | --- | --- | --- |
 | 1. Membership and arithmetic | `src/cyberherd/store.rs`, `shares.rs`; [live social intake](cyberherd-live-social-intake-20261110.md) records reaction/repost admission and restart retention. | Three-user capacity and the ready three-member roster were revalidated after the latest deployment. Exercise settled zap increase/displacement and rejection rules on the installed stage. NIP-05 remains unnecessary. |

@@ -168,7 +168,7 @@ fn payload(raw: Option<&str>) -> Result<Value> {
     Ok(value)
 }
 
-pub(super) async fn export_body(
+pub(crate) async fn export_body(
     tx: &mut Transaction<'_, Sqlite>,
     seq: u64,
     event_type: &str,

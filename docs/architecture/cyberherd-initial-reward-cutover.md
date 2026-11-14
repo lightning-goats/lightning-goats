@@ -59,3 +59,37 @@ production cutoff command yet. The native operator adapter must still:
 The source domain implementation does not satisfy these operator steps or the
 full recovery-adoption obligation. No live cutoff, historical payout, reservation
 release, feeder command or financial activation has been performed by this change.
+
+## Native backup-derived preview — development source
+
+`cyberherd-statectl preview-initial-reward-cutover --bundle PRIVATE_ACCEPTED_BUNDLE
+--destination NEW_PRIVATE_PREVIEW --decision-id UUID` now derives the inventory
+from the accepted core event head and protected membership binding. This is source
+functionality, not an installed production command or cutoff application.
+
+It reuses the authenticated bridge's core projection to validate original confirmed
+UUIDs, matching debits, consumed funding and feeding presentation. It checks the
+retained event interval for gaps, scans confirmed feeds exhaustively in bounded
+pages and validates the same typed event envelope. A truncated or contradictory
+source refuses; no supplied historical UUID list substitutes for that scan.
+Already-received membership proofs must match the independently derived inventory.
+
+Preview refuses pending physical work, existing reservation/grant/signing/execution
+history, held or unresolved provider money, nonterminal plans and an earlier cutoff.
+It reads only verified backup images and rechecks source hashes/native reports before
+writing a private preview. Output retains backup identity/hash, owner/policy scope
+and the complete bounded decision. It applies nothing and grants no activation.
+
+New native tests compare the read-only backup projection with the authenticated
+bridge projection, include a not-yet-received feeding, and reject wrong epoch and
+stale head. The mandatory root fixture additionally refuses preview of its retained
+pending physical work before creating output. Local formatting and focused Python
+checks pass; the new native preview still requires exact-source CI qualification.
+The earlier cutoff-domain source passed full Rust CI but its installed scenario
+failed before cutoff work when the runner refused a fixture executable under `/run`.
+The rehearsal now keeps executable copies in protected disk-backed storage while
+retaining `/run` database and attestation paths. Shipped sandbox policies are unchanged.
+
+The apply adapter, append-only post-cutover comparison, audited-exclusion native
+classification and financial-activation binding remain unfinished. Historical
+production opportunities are still retained and unapplied.

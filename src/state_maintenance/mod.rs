@@ -14,7 +14,11 @@ mod feeder_cap_upgrade;
 mod files;
 mod inclusive_fee_upgrade;
 pub mod legacy;
+mod reward_cutover;
 mod reward_review;
+pub use reward_cutover::Preview as RewardCutoverPreview;
+#[cfg(test)]
+pub(crate) use reward_cutover::derive_history as cutover_fixture_history;
 
 pub use database::Report;
 pub use reward_review::{Example as RewardReviewExample, RewardReview, Stage as RewardReviewStage};

@@ -22,6 +22,21 @@ import tempfile
 import tomllib
 
 
+def fixture_executable(root, name):
+    allowed = {'TEST-ONLY-prepare-legacy-core', 'TEST-ONLY-contact-upgrade-fixture',
+               'CHECK-ONLY-private-contact-stage', 'TEST-ONLY-installed-operator-client',
+               'CHECK-ONLY-financial-stage'}
+    if name not in allowed or not root.name.startswith('lg-cyberherd-install-rehearsal-'):
+        raise ValueError('fixed disposable executable name and fixture root required')
+    carrier = Path('/var/lib') / (root.name + '-executables')
+    carrier.mkdir(mode=0o755, exist_ok=True)
+    info = carrier.lstat()
+    if (carrier.resolve() != carrier or not stat.S_ISDIR(info.st_mode)
+            or info.st_uid != 0 or info.st_gid != 0 or info.st_mode & 0o022):
+        raise ValueError('protected disposable executable carrier required')
+    return carrier / name
+
+
 def run(*args):
     result = subprocess.run(args, env={'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LC_ALL': 'C'},
                             capture_output=True, text=True, timeout=300)
@@ -302,7 +317,7 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
     guard.mkdir(mode=0o755)
     (guard / 'ALLOW').write_text('LIGHTNING_GOATS_DISPOSABLE_CONTACT_UPGRADE_CI_v1\n' + os.readlink('/proc/self/ns/net') + '\n')
     (guard / 'ALLOW').chmod(0o444)
-    fixture = root / 'TEST-ONLY-contact-upgrade-fixture'
+    fixture = fixture_executable(root, 'TEST-ONLY-contact-upgrade-fixture')
     shutil.copyfile(fixture_directory / fixture.name, fixture)
     fixture.chmod(0o755)
     runtime = pwd.getpwnam('lightning-goats')
@@ -397,7 +412,7 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
         w.await_ready(lambda: w.http_json('http://127.0.0.1:8787/healthz'), 'synthetic active core before contact activation')
         w.await_ready(lambda: w.http_json('http://127.0.0.1:3340/api/v1/cyberherd'), 'membership before contact activation')
         before_config = tomllib.loads(config.read_text())
-        validator = root / 'CHECK-ONLY-private-contact-stage'
+        validator = fixture_executable(root, 'CHECK-ONLY-private-contact-stage')
         shutil.copyfile(fixture_directory / validator.name, validator)
         validator.chmod(0o755)
         activation = base / 'ci-private-contact-activation'
@@ -431,7 +446,7 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
         for name in ('cyberherd-payout.service', 'cyberherd-signer.service'):
             assert os.readlink('/etc/systemd/system/' + name) == '/dev/null'
             assert run('/usr/bin/systemctl', 'show', name, '-p', 'MainPID', '--value').strip() == '0'
-        operator = root / 'TEST-ONLY-installed-operator-client'
+        operator = fixture_executable(root, 'TEST-ONLY-installed-operator-client')
         shutil.copyfile(fixture_directory / operator.name, operator)
         operator.chmod(0o755)
         member_user = pwd.getpwnam('cyberherd')
@@ -624,7 +639,7 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
             'roster_membership_unchanged': True, 'provider_operations': 0, 'publications': 0}
         w.await_ready(lambda: w.http_json('http://127.0.0.1:3340/api/v1/cyberherd')['roster']['member_percent'] == 10,
                       'actual stored preview allocation')
-        financial_checker = root / 'CHECK-ONLY-financial-stage'
+        financial_checker = fixture_executable(root, 'CHECK-ONLY-financial-stage')
         shutil.copyfile(fixture_directory / financial_checker.name, financial_checker)
         financial_checker.chmod(0o755)
         financial_review = base / 'ci-financial-candidate-review'
@@ -1154,7 +1169,7 @@ def main():
     source = root / 'source'
     source.mkdir(mode=0o700)
     os.chown(source, core.pw_uid, core.pw_gid)
-    installed_fixture = root / 'TEST-ONLY-prepare-legacy-core'
+    installed_fixture = fixture_executable(root, 'TEST-ONLY-prepare-legacy-core')
     shutil.copyfile(fixture, installed_fixture)
     installed_fixture.chmod(0o755)
     prepared = json.loads(run('/usr/bin/setpriv', '--reuid=' + str(core.pw_uid), '--regid=' + str(core.pw_gid),

@@ -264,3 +264,54 @@ async fn historical_input_missing_from_inventory_cannot_advance_the_cursor_or_ga
             .is_none()
     );
 }
+
+#[tokio::test]
+async fn native_cutover_inventory_matches_authenticated_projection_and_includes_delayed_feeds() {
+    let f = Fixture::new(0).await;
+    let delayed = confirmed_virtual_feed(&f).await;
+    let expected = inventory(&f).await;
+    let cursor = f.store.core_cursor(&f.owner).await.unwrap();
+    assert!(cursor.received_through < expected.through);
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(
+            sqlx::sqlite::SqliteConnectOptions::new()
+                .filename(f._root.path().join("core.db"))
+                .read_only(true)
+                .create_if_missing(false)
+                .pragma("query_only", "ON"),
+        )
+        .await
+        .unwrap();
+    let observed =
+        crate::state_maintenance::cutover_fixture_history(&pool, &cursor.binding, expected.through)
+            .await
+            .unwrap();
+    assert_eq!(observed, expected.historical);
+    assert!(observed.iter().any(|item| item.request_id == delayed));
+    assert_eq!(f.store.core_cursor(&f.owner).await.unwrap(), cursor);
+    assert!(
+        f.store
+            .feeding_barrier(&f.owner, delayed)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        crate::state_maintenance::cutover_fixture_history(
+            &pool,
+            &cursor.binding,
+            expected.through - 1
+        )
+        .await
+        .is_err()
+    );
+    let mut wrong = cursor.binding.clone();
+    wrong.epoch = Uuid::new_v4();
+    assert!(
+        crate::state_maintenance::cutover_fixture_history(&pool, &wrong, expected.through)
+            .await
+            .is_err()
+    );
+    pool.close().await;
+}

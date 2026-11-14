@@ -311,6 +311,14 @@ async fn root_four_journal_snapshot_preserves_wal_paid_pending_and_signed_state_
     );
     assert!(!manifest.report.resume_authorized);
     assert_eq!(operator.verify(&bundle).await.unwrap(), manifest);
+    let refused_cutover = root.path().join("refused-initial-cutover");
+    assert!(
+        operator
+            .preview_initial_reward_cutover(&bundle, &refused_cutover, Uuid::new_v4())
+            .await
+            .is_err()
+    );
+    assert!(!refused_cutover.exists());
     // A verified offline copy can be reviewed even when the stopped-writer
     // condition no longer holds. No live source or service access is needed.
     let manifest_bytes = std::fs::read(bundle.join("MANIFEST.json")).unwrap();

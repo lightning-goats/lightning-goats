@@ -16,6 +16,7 @@ use crate::domain::payment::SettledPayment;
 mod contact;
 pub use contact::ContactDelivery;
 mod core_bridge;
+pub(crate) use core_bridge::export_body as inspect_core_event_body;
 mod cyberherd_overlay;
 mod events;
 mod failed_costs;

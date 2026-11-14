@@ -36,6 +36,16 @@ enum Command {
         #[arg(long)]
         destination: PathBuf,
     },
+    /// Derive a private initial reward cutoff preview from an accepted backup.
+    /// Never applies a cutoff, opens live journals or authorizes payouts.
+    PreviewInitialRewardCutover {
+        #[arg(long)]
+        bundle: PathBuf,
+        #[arg(long)]
+        destination: PathBuf,
+        #[arg(long)]
+        decision_id: uuid::Uuid,
+    },
     /// Copy only the exact compiled schema-23 source for the contact upgrade.
     /// Same four stopped/masked writers and file guards; never restore or resume.
     SnapshotBeforeContact {
@@ -131,6 +141,21 @@ async fn main() -> Result<()> {
                 "{}",
                 serde_json::json!({"operation":"review_rewards","id":review.id,
                 "accepted":true,"activation_authorized":false})
+            );
+            return Ok(());
+        }
+        Command::PreviewInitialRewardCutover {
+            bundle,
+            destination,
+            decision_id,
+        } => {
+            let preview = operator
+                .preview_initial_reward_cutover(&bundle, &destination, decision_id)
+                .await?;
+            println!(
+                "{}",
+                serde_json::json!({"operation":"preview_initial_reward_cutover",
+                "id":preview.id,"accepted":true,"cutover_applied":false,"activation_authorized":false})
             );
             return Ok(());
         }

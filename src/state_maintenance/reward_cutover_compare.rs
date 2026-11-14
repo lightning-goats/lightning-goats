@@ -279,4 +279,4 @@ impl Operator {
 
 #[cfg(test)]
 #[path = "reward_cutover_compare_tests.rs"]
-mod tests;
+pub(super) mod tests;

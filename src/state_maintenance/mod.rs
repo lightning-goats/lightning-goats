@@ -15,6 +15,8 @@ mod files;
 mod inclusive_fee_upgrade;
 pub mod legacy;
 mod reward_cutover;
+#[cfg(test)]
+mod reward_cutover_apply_tests;
 mod reward_cutover_compare;
 mod reward_review;
 #[cfg(test)]

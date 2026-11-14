@@ -39,3 +39,24 @@ all rejection/displacement cases or an actual payout. Payout readback still has
 zero execution intents/payment bindings/observations and zero reserved reward
 plans; the two existing plans remain no-payout plans. These gaps remain open in
 the [full acceptance inventory](cyberherd-acceptance-matrix.md).
+
+## Subsequent independent relay observation
+
+Bounded read-only kind-9735/known-ID queries retrieved matching signed event
+objects from Artx (four receipts), nos.lol (four), and Primal (five). Received
+objects matched the retained signed receipts; nak's default signature verification
+remained enabled. Damus's query failed and establishes neither presence nor
+absence. Per-relay counts are not summed: overlap was not retained in the sanitized
+report, so this observation does not prove independent retrieval of all eight.
+No authentication, publication, provider request or payment operation was requested.
+The Nak subprocesses used new isolated configuration directories with cleared
+environments; protected installed-file and Nak-binary guards passed before/after.
+
+Protected initial relay report:
+`/var/lib/lightning-goats-upgrades/zap-receipt-relay-observation-20261114/RESULT.json`,
+SHA256 `0d4c106a024db4a3c0a5dd9a7c32abfed4e1fdfdf80d01c456c9ed1279946532`.
+Protected follow-up report:
+`/var/lib/lightning-goats-upgrades/zap-receipt-relay-observation-20261114-followup/RESULT.json`,
+SHA256 `e5caecfe99d12d3b05ee4521c7e8237c4efda7ea529176bf8a4acf6505c4fc9f`.
+This supplies independent historical relay visibility for the retrieved subset;
+it does not establish current-release payment-copy or payout acceptance.

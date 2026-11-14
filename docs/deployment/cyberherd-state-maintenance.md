@@ -177,6 +177,10 @@ sudo /usr/local/bin/cyberherd-statectl \
   --writers-stopped
 ```
 
+Restore staging requires a separate, non-overlapping destination: the backup
+itself, a directory within it, or an ancestor is refused before creating output.
+This preserves accepted backup contents for later verification and reconciliation.
+
 The top stays root-private. Children `core`, `membership`, `payout`, `signer`
 receive byte-identical database/WAL images and original configured UIDs/GIDs.
 Each child first receives a root-owned `CYBERHERD_RECOVERY_REQUIRED` marker.

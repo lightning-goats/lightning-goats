@@ -133,13 +133,14 @@ impl<T: Transport> Worker<T> {
         };
         let event = VerifiedEvent::from_json(&raw)?;
         job.unsigned.validate_signed(&event)?;
-        if !permitted(&self.core, job.feeding).await? {
-            return Ok(None);
-        }
         // A failing first relay must not starve other frozen destinations.
         // Keep one signature and a bounded attempt within the 300-second lease.
         tokio::time::timeout(std::time::Duration::from_secs(180), async {
-            for relay in job.remaining_relays.clone() {
+            for (index, relay) in job.remaining_relays.clone().into_iter().enumerate() {
+                if index > 0 {
+                    // Respect the core's one-token-per-500ms read admission.
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                }
                 if !permitted(&self.core, job.feeding).await? {
                     return Ok(None);
                 }

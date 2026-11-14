@@ -5,6 +5,18 @@ Current CyberHerd checkpoint: **2026-11-14**. The full
 remains incomplete. It supersedes older CyberHerd deferrals; it does not resume
 Monero or authorize financial/physical activation.
 
+Current live state: the separately approved
+[future-only reward cutoff](testing/cyberherd-initial-reward-cutover-live-20261114.md)
+and [financial activation](testing/cyberherd-financial-activation-live-20261114.md)
+are applied. All four services are running with the configured financial limits.
+The [public messaging repair](testing/cyberherd-discovery-repair-live-20261114.md)
+is deployed and merged: automatic replies under today's CyberHerd note and
+membership/lifecycle posts in the authenticated stream chat are independently
+verified. The three-user roster recovered through normal relay backfill.
+Older checkpoint descriptions below retain their stage-specific limitations;
+they do not supersede these later live records. Full provider payout and recovery
+acceptance remain separate from public-message delivery.
+
 The operator supplied the financial limits and clarified that actual Strike fees
 are deducted from member payouts. The [inclusive-fee integration](architecture/cyberherd-inclusive-fees.md)
 is implemented, including fee probes and same-ID promotion into the guarded

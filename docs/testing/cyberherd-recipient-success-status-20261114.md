@@ -18,8 +18,14 @@ error/unknown statuses, invalid bounds, private/reserved callbacks, ambiguous
 metadata and invalid receipt keys.
 
 Only the membership reward worker calls `Recipient::fetch` in production. The
-payout worker validates the already frozen typed recipient, independently checks
-the invoice and preserves its existing financial execution policy. No schema,
+same all-status refusal also existed in the payout invoice-response parser.
+That wrapper now accepts absent status or exact `OK`, then always validates the
+signed invoice against the frozen amount/description, mainnet signature and
+remaining expiry. Regression fixtures cover ordinary and signed-zap invoices,
+explicit errors and success wrappers around contradictory/malformed invoices.
+No actual invoice callback was requested to inspect provider wrapper behavior.
+The membership and payout programs therefore both require the qualified update;
+all financial execution guards and historical signed intents remain intact. No schema,
 credential, ledger, historical plan, payout ceiling or feeder change is proposed.
 The read-only native helper must be rerun on all three addresses from the exact
 qualified candidate before declaring the discovered Primal failure resolved.

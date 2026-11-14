@@ -35,6 +35,7 @@ FILES = {
     'prepare-cyberherd-financial-stage.py',
     'maintain-cyberherd-programs.py',
     'activate-cyberherd-financial.py',
+    'maintain-cyberherd-reward-cutover.py',
     'enable-cyberherd-project-operator.py',
     'prepare-cyberherd-operator-site.py',
 }
@@ -155,6 +156,9 @@ def main():
         arguments = arguments[1:]
     elif arguments[:1] == ['--cyberherd-financial-maintenance']:
         operation = 'activate-cyberherd-financial.py'
+        arguments = arguments[1:]
+    elif arguments[:1] == ['--cyberherd-reward-cutover-maintenance']:
+        operation = 'maintain-cyberherd-reward-cutover.py'
         arguments = arguments[1:]
     sys.argv = [str(root / operation), *arguments]
     runpy.run_path(sys.argv[0], run_name='__main__', init_globals={

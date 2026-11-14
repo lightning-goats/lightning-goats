@@ -30,6 +30,7 @@ FILES = (
     'prepare-cyberherd-financial-stage.py',
     'maintain-cyberherd-programs.py',
     'activate-cyberherd-financial.py',
+    'maintain-cyberherd-reward-cutover.py',
     'enable-cyberherd-project-operator.py',
     'prepare-cyberherd-operator-site.py',
 )

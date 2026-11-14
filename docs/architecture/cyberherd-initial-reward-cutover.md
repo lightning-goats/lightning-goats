@@ -151,3 +151,53 @@ network remains isolated by the harness. Root execution is refused and a changed
 mock writer guard refuses a new live checkpoint; isolated accepted image comparison remains read-only. This tests filesystem/UID and native
 comparison authority, not real systemd masking or production deployment. It must
 produce its explicit positive marker in exact-source CI before being qualified.
+
+## Reviewed coordinator — development source
+
+The authenticated root tool closure now includes
+`maintain-cyberherd-reward-cutover.py`, selected with
+`--cyberherd-reward-cutover-maintenance`. It consumes an existing financial
+transaction's fresh stopped-writer checkpoint; it does not independently stop
+services or replace programs, configuration or credentials. The installed native
+programs must already contain the qualified cutoff commands.
+
+All operations retain the financial preparation, checkpoint and original reward
+report SHA256 pins. `prepare --decision-id UUID` verifies that original checkpoint,
+derives the native preview, runs the member child on an isolated copied journal,
+and proves the exact four-journal append-only comparison. Its private
+`reward-cutover/PREPARED.json` pins the preview, expected receipt and rehearsal.
+The live journals must remain unchanged. Incomplete preparations cannot apply.
+
+`apply --cutoff-review-sha256 SHA --approve-initial-reward-cutover` separately
+requires explicit maintenance authorization. It rechecks the original stopped
+images and retained rehearsal, records the start before running the member child,
+and requires the exact same receipt. It then takes/verifies a new four-journal
+backup, compares it to the original with the reviewed preview, and obtains a new
+native reward report whose cutoff summary matches the decision. Only successful
+verification produces `reward-cutover/APPLIED.json`. Configuration, payout/signing
+workers and existing ledger rows remain unchanged. Any failure retains the stopped
+state and start receipt; there is no automatic replay, rollback or database restore.
+
+`resume-original --cutoff-review-sha256 SHA --applied-sha256 SHA
+--approve-original-resumption` verifies the completed disposition and unchanged
+post-cutoff live images before restoring the original core/member units. This
+resumes normal receive/feeding behavior under the existing configuration and
+trusted gateway controls. Outgoing roles remain masked. Resumption is one-shot;
+a partial start requires inspection rather than automatic retry.
+
+The original financial checkpoint still records pre-cutoff bytes. Do not reuse it
+for financial configuration application or restore its old journals after the
+cutoff. A subsequent financial plan/checkpoint and explicit validated-cutoff
+binding remain required. The current financial backlog gate deliberately continues
+to refuse audited exclusions until that binding is implemented and qualified.
+No cutoff application, service resumption or financial activation has occurred on
+the production host through this new source.
+
+Eight focused coordinator tests cover protected files with mocked native/service
+operations, including no approval, changed original images, comparison refusal,
+post-apply failure, absent/unreviewed completion, and original-only resumption.
+The mandatory Rust fixture separately exercises actual root/member UIDs, native
+journal application and comparison. Launcher routing, exact tool inventory/export
+and existing financial activation regressions also pass locally. These are source
+and disposable-fixture results, not an installed combined systemd acceptance or a
+production approval.

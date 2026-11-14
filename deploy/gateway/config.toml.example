@@ -32,5 +32,6 @@ ack_timeout_seconds = 20
 ack_poll_milliseconds = 250
 # Defense in depth in the trusted gateway, in addition to the live OpenHAB
 # owner rule's own safety policy and lightning-goatsd's inter-feed delay.
-min_feed_interval_seconds = 30
-max_feeds_per_hour = 10
+min_feed_interval_seconds = 2
+# Zero disables the hourly cap; serialization, interval and safety checks remain.
+max_feeds_per_hour = 0

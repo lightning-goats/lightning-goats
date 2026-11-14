@@ -154,7 +154,9 @@ No Monero payment chooser or fiat account screen is needed to deliver that path.
   [weather/overlay](architecture/weather-overlay.md),
   [overlay stream](architecture/overlay-stream.md) and
   [WireGuard topology](deployment/wireguard-topology.md).
-- HOME: [gateway handoff](deployment/home-gateway-agent-handoff.md).
+- HOME: [gateway handoff](deployment/home-gateway-agent-handoff.md),
+  [current feed limits](deployment/gateway-feed-limits.md) and
+  [2026-11-08 deployment evidence](testing/evidence/home-gateway-feeding-20261108.md).
 - VPS: [remediation handoff](deployment/new-vps-remediation-handoff.md).
 - [Deployment artifacts](deployment/deployment-artifacts.md),
   [audit findings](deployment/audit-remediation.md),

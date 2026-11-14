@@ -233,4 +233,154 @@ mod tests {
                 .is_none()
         );
     }
+
+    #[tokio::test]
+    async fn editable_zap_feeding_templates_keep_custom_words_and_durable_opt_out() {
+        use crate::cyberherd::{
+            feeding_delivery::Proof,
+            membership::{Profile, Settings},
+            store::{Store, TemplateEdit},
+            templates::Catalog,
+        };
+        use crate::presentation::MessageRenderer;
+        let root = tempfile::TempDir::new().unwrap();
+        let url = format!("sqlite://{}", root.path().join("templates.db").display());
+        let store = Store::connect(&url).await.unwrap();
+        let owner = test_event(3, 1, 100, "", vec![]).pubkey;
+        store
+            .initialize(
+                &owner,
+                &Settings {
+                    minimum_sats: 10,
+                    max_members: 3,
+                    member_percent: 10,
+                },
+                100,
+            )
+            .await
+            .unwrap();
+        store
+            .seed_templates(&owner, &Catalog::legacy().unwrap())
+            .await
+            .unwrap();
+        store
+            .seed_templates(&owner, &Catalog::delivery_defaults().unwrap())
+            .await
+            .unwrap();
+        let event = crate::ledger::DurableEvent {
+            seq: 5,
+            event_type: "feeder_confirmed".into(),
+            payload_json: "{}".into(),
+        };
+        let proof = Proof {
+            owner: owner.clone(),
+            identity: "55".repeat(32),
+            source_seq: 5,
+            triggering_payment_amount_sats: Some(21),
+            feed_credit_sats: 9,
+        };
+        let profile = Profile {
+            name: "Alice".into(),
+            ..Default::default()
+        };
+        for anonymous in [false, true] {
+            let attribution = ZapAttribution::from_payment(&payment(anonymous))
+                .unwrap()
+                .unwrap();
+            let rendered = MessageRenderer::editable_feeding_with_zap(
+                &store.templates(&owner).await.unwrap(),
+                &event,
+                &proof,
+                1000,
+                Some(&attribution),
+                Some(&profile),
+            )
+            .unwrap()
+            .unwrap();
+            assert!(rendered.nostr_content.as_ref().unwrap().contains("21"));
+            assert!(
+                !rendered
+                    .nostr_content
+                    .as_ref()
+                    .unwrap()
+                    .contains("1000 sats")
+            );
+            let overlay = rendered.overlay_message.unwrap();
+            assert_eq!(
+                rendered.overlay_goats.len(),
+                usize::from(overlay.contains("Goats like"))
+            );
+            if anonymous {
+                assert!(overlay.contains("anonymous zapper"));
+                assert!(!overlay.contains("Alice"));
+                let public_sender = ZapAttribution::from_payment(&payment(false))
+                    .unwrap()
+                    .unwrap()
+                    .nostr_name()
+                    .unwrap();
+                assert!(!rendered.nostr_content.unwrap().contains(&public_sender));
+            } else {
+                assert!(overlay.contains("Alice"));
+                assert!(
+                    rendered
+                        .nostr_content
+                        .unwrap()
+                        .contains(&attribution.nostr_name().unwrap())
+                );
+            }
+        }
+        let edit = TemplateEdit::Set {
+            category: "feeder_trigger_zap".into(),
+            variant: "0".into(),
+            text: "Custom thanks to {name} for {new_amount} sats!".into(),
+        };
+        store
+            .edit_template(&owner, "custom-zap-template", &edit)
+            .await
+            .unwrap();
+        store
+            .seed_templates(&owner, &Catalog::delivery_defaults().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .templates(&owner)
+                .await
+                .unwrap()
+                .category("feeder_trigger_zap")
+                .unwrap()["0"],
+            "Custom thanks to {name} for {new_amount} sats!"
+        );
+        store
+            .edit_template(
+                &owner,
+                "disable-zap-template",
+                &TemplateEdit::DisableCategory {
+                    category: "feeder_trigger_zap".into(),
+                },
+            )
+            .await
+            .unwrap();
+        drop(store);
+        let reopened = Store::connect(&url).await.unwrap();
+        reopened
+            .seed_templates(&owner, &Catalog::delivery_defaults().unwrap())
+            .await
+            .unwrap();
+        let attribution = ZapAttribution::from_payment(&payment(false))
+            .unwrap()
+            .unwrap();
+        assert!(
+            MessageRenderer::editable_feeding_with_zap(
+                &reopened.templates(&owner).await.unwrap(),
+                &event,
+                &proof,
+                1000,
+                Some(&attribution),
+                None
+            )
+            .unwrap()
+            .is_none()
+        );
+    }
 }

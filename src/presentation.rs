@@ -306,13 +306,14 @@ impl MessageRenderer {
         if catalog.category("feeder_trigger").is_none() {
             return Ok(None);
         }
+        let goat = goat_for_event(event, None);
         if let Some(zap) = zap {
             if proof.triggering_payment_amount_sats != Some(zap.amount_sats()) {
                 bail!("feeding zap does not match its triggering payment");
             }
             let difference = difference_message(proof.feed_credit_sats, threshold);
-            let compose = |name: String| {
-                let mut values = common_values(zap.amount_sats(), &difference, "");
+            let compose = |name: String, goat_name: &str| {
+                let mut values = common_values(zap.amount_sats(), &difference, goat_name);
                 values.insert("name".into(), name);
                 catalog.render(
                     "feeder_trigger_zap",
@@ -321,8 +322,8 @@ impl MessageRenderer {
                 )
             };
             let (Some(nostr), Some(overlay)) = (
-                compose(zap.nostr_name()?)?,
-                compose(zap.overlay_name(profile)?)?,
+                compose(zap.nostr_name()?, goat.nostr_profile)?,
+                compose(zap.overlay_name(profile)?, goat.name)?,
             ) else {
                 return Ok(None);
             };
@@ -330,10 +331,16 @@ impl MessageRenderer {
                 nostr_content: Some(nostr),
                 overlay_type: Some("feeder_trigger".into()),
                 overlay_message: Some(overlay),
-                overlay_goats: vec![],
+                overlay_goats: if catalog
+                    .select("feeder_trigger_zap", &proof.identity)?
+                    .is_some_and(|text| text.contains("{goat_name}"))
+                {
+                    vec![overlay_goat(goat)]
+                } else {
+                    vec![]
+                },
             }));
         }
-        let goat = goat_for_event(event, None);
         let difference = difference_message(proof.feed_credit_sats, threshold);
         let compose = |name: &str| -> Result<Option<String>> {
             if let Some(amount) = proof.triggering_payment_amount_sats {

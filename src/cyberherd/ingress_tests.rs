@@ -1199,7 +1199,9 @@ async fn feeding_zap_notice_uses_consumed_credit_not_a_later_same_amount_donor()
     assert!(overlay.message.contains("User 3"));
     assert!(!overlay.message.contains("User 4"));
     assert!(overlay.message.contains("10"));
-    assert!(overlay.broadcast.goats.is_empty());
+    for goat in &overlay.broadcast.goats {
+        assert!(overlay.message.contains(&goat.name));
+    }
     let mut feeding = None;
     for _ in 0..32 {
         let Some(job) = f.store.reserve_delivery(&f.owner, f.now).await.unwrap() else {

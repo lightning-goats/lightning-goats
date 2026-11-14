@@ -12,8 +12,9 @@ The approved current rollout now serves the [live leaderboard](testing/cyberherd
 with operator controls. The separately approved
 [financial activation](testing/cyberherd-financial-activation-live-20261114.md)
 and [public messaging repair](testing/cyberherd-discovery-repair-live-20261114.md)
-now run all four services. Automatic CyberHerd replies under today's note and
-membership/lifecycle posts in stream chat are verified. Older checkpoint
+now run all four services. Automatic CyberHerd replies under today's note are verified. The operator's
+[subsequent chat opt-out](testing/cyberherd-no-stream-chat-20261114.md) now disables
+CyberHerd stream chat while preserving Nostr notes and overlay messages. Older checkpoint
 paragraphs below describe their state at the time.
 [Nostr self-status sign-in](testing/cyberherd-self-read-public-live-20261111.md)
 is now public on the leaderboard. [Operator controls](architecture/cyberherd-operator-interface.md)

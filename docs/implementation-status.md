@@ -10,9 +10,10 @@ Current live state: the separately approved
 and [financial activation](testing/cyberherd-financial-activation-live-20261114.md)
 are applied. All four services are running with the configured financial limits.
 The [public messaging repair](testing/cyberherd-discovery-repair-live-20261114.md)
-is deployed and merged: automatic replies under today's CyberHerd note and
-membership/lifecycle posts in the authenticated stream chat are independently
-verified. The three-user roster recovered through normal relay backfill.
+is deployed and merged, with automatic note replies independently verified.
+The subsequent [stream-chat opt-out](testing/cyberherd-no-stream-chat-20261114.md)
+is also deployed: CyberHerd notes and overlays remain enabled, while new and
+retained queued chat are excluded from publication. The three-user roster recovered through normal relay backfill.
 Older checkpoint descriptions below retain their stage-specific limitations;
 they do not supersede these later live records. Full provider payout and recovery
 acceptance remain separate from public-message delivery.

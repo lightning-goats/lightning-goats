@@ -290,6 +290,32 @@ pub async fn process(
                     Profile::default()
                 }
                 None => {
+                    // Capacity can conclusively reject a nonmember like without
+                    // inventing an address or blocking later authenticated input.
+                    let candidate = Interaction {
+                        source_id: source_id.clone(),
+                        source_hash: social.event.event().id.clone(),
+                        pubkey: social.event.event().pubkey.clone(),
+                        profile: Profile::default(),
+                        action: social.action,
+                        occurred_at: social.event.event().created_at as i64,
+                    };
+                    let matched = context.clone().map(|m| targets.interaction_context(m));
+                    if let Some(receipt) = store
+                        .decline_full_like_without_profile(
+                            owner,
+                            &candidate,
+                            target,
+                            feeder,
+                            matched.as_ref(),
+                        )
+                        .await?
+                    {
+                        store
+                            .finish_social(owner, &social.event.event().id, true, now)
+                            .await?;
+                        return Ok(SocialStep::Recorded(receipt));
+                    }
                     store
                         .finish_social(owner, &social.event.event().id, false, now)
                         .await?;

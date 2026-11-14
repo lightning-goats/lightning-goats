@@ -63,8 +63,7 @@ impl Config {
         store: Store,
         owner: &str,
         state: &Path,
-        core_socket: &Path,
-        core_uid: u32,
+        core: &Client,
         tasks: &mut tokio::task::JoinSet<()>,
     ) -> Result<()> {
         self.validate(owner)?;
@@ -117,7 +116,7 @@ impl Config {
         });
         let overlay_store = store.clone();
         let overlay_owner = owner.to_owned();
-        let overlay_core = Client::new(core_socket.to_path_buf(), core_uid)?;
+        let overlay_core = core.clone();
         tasks.spawn(async move {
             let mut ticks = tokio::time::interval(Duration::from_millis(millis));
             ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -142,7 +141,7 @@ impl Config {
         });
         let feeding_store = store.clone();
         let feeding_owner = owner.to_owned();
-        let feeding_core = Client::new(core_socket.to_path_buf(), core_uid)?;
+        let feeding_core = core.clone();
         tasks.spawn(async move {
             let mut ticks = tokio::time::interval(Duration::from_millis(millis));
             ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -170,7 +169,7 @@ impl Config {
             if self.lifecycle {
                 let notices = super::notice_worker::Worker {
                     store: store.clone(),
-                    core: Client::new(core_socket.to_path_buf(), core_uid)?,
+                    core: core.clone(),
                     transport: nak.clone(),
                     owner: owner.into(),
                 };
@@ -189,7 +188,7 @@ impl Config {
             }
             let worker = super::delivery_worker::Worker {
                 store,
-                core: Client::new(core_socket.to_path_buf(), core_uid)?,
+                core: core.clone(),
                 transport: nak,
                 owner: owner.into(),
             };

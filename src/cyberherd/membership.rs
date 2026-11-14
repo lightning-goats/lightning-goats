@@ -328,6 +328,24 @@ impl Roster {
                 awards.points() - previous_points,
             ));
         }
+        // A nonmember like cannot enter a full herd, regardless of profile data.
+        if amount == 0
+            && action == Action::Like
+            && self.active_count() >= usize::from(settings.max_members)
+        {
+            let lowest = self
+                .members
+                .values()
+                .filter(|m| m.active)
+                .map(|m| m.amount_sats)
+                .min()
+                .context("full herd has no member")?;
+            let required_sats = lowest
+                .checked_add(1)
+                .context("headbutt minimum overflow")?
+                .max(settings.minimum_sats);
+            return Ok((Decision::Full { required_sats }, 0, 0));
+        }
         if amount == 0 && profile.lud16.is_none() {
             return Ok((Decision::MissingPayoutAddress, 0, 0));
         }

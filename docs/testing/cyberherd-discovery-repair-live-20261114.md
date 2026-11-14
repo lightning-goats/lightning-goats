@@ -168,3 +168,10 @@ attempt and override OFF. The roster remains limited to three users; subsequent
 normal discovery also awarded Sat's like, reaching four points (revision 19).
 Public messaging is now live; the broader twelve-part CyberHerd acceptance and
 actual provider payout/recovery acceptance remain separately tracked.
+
+## Subsequent audience policy
+
+After this rollout, the operator requested no CyberHerd messages in stream chat.
+The [subsequent deployed opt-out](cyberherd-no-stream-chat-20261114.md) disables
+future chat delivery, including retained retries, while preserving notes and
+OBS/WebSocket messages. The chat events above remain historical evidence.

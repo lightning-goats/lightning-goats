@@ -136,8 +136,8 @@ journal was opened. This nonfinancial inspection does not replace native reward
 review, authorize a financial operation or establish publication acceptance.
 
 The backup retains 10 member messages created November 10–12 (America/Denver),
-across cycles 1–3: five reactions, four repost-related messages and one successful
-headbutt. There are 20 destination/work rows, zero frozen unsigned destinations,
+across cycles 1–3: four reactions, four repost-related messages, one successful
+headbutt and one member-added message. There are 20 destination/work rows, zero frozen unsigned destinations,
 zero signed destinations and zero relay receipts. All ten overlay copies have
 acknowledgments. There are no lifecycle notice rows. These are retained historical
 delivery intents, not evidence that Nostr delivery occurred.

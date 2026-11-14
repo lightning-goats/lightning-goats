@@ -751,6 +751,49 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
             'provider_execution_qualified': False, 'external_recovery_adopted': False,
             'live_host_qualified': False}
         (root / 'INCLUSIVE-FEE-UPGRADE.json').write_text(json.dumps(fee_evidence, sort_keys=True))
+        # The earlier upgrade proofs deliberately retained the original unknown
+        # UUID. A reward cutoff must refuse that ambiguous source, even in CI.
+        import uuid
+        refused_preview = base / 'ci-refused-pending-reward-cutoff'
+        accepted_cutoff_source = json.loads(run(str(statectl), '--config', '/etc/cyberherd/state-maintenance.toml',
+            'verify', '--bundle', str(fee_review / 'migrated')))
+        assert accepted_cutoff_source == {'operation': 'verify', 'id': fee_after['id'], 'accepted': True, 'resume_authorized': False}
+        refused = subprocess.run([str(statectl), '--config', '/etc/cyberherd/state-maintenance.toml',
+            'preview-initial-reward-cutover', '--bundle', str(fee_review / 'migrated'),
+            '--destination', str(refused_preview), '--decision-id', str(uuid.uuid4())],
+            env={'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LC_ALL': 'C'},
+            capture_output=True, text=True, timeout=300)
+        assert refused.returncode != 0 and not refused_preview.exists()
+        assert 'physical or financial authority requires reconciliation' in refused.stderr
+        # This harness already proved root/GITHUB_ACTIONS/loopback-only namespace
+        # and the TEST-ONLY paid fixture above. Resolve ONLY that synthetic UUID
+        # through native accounting, not SQL edits, a restore or a gateway RPC.
+        virtual_id = financial_before['unresolved_feed_attempt']
+        assert isinstance(virtual_id, str) and str(uuid.UUID(virtual_id)) == virtual_id
+        assert gateway_safety == {'override_enabled': True, 'remote_enabled': False}
+        run('/usr/bin/systemctl', 'stop', 'cyberherd.service', 'lightning-goats-receive.service')
+        for name in ('cyberherd', 'lightning-goats-receive', 'cyberherd-payout', 'cyberherd-signer'):
+            assert run('/usr/bin/systemctl', 'show', name + '.service', '-p', 'MainPID', '--value').strip() == '0'
+        reconcile_config = guard / 'synthetic-reconcile.toml'
+        reconcile_config.write_bytes(config.read_bytes())
+        reconcile_config.chmod(0o440)
+        os.chown(reconcile_config, 0, runtime.pw_gid)
+        reconciled = run('/usr/bin/setpriv', '--reuid=' + str(runtime.pw_uid), '--regid=' + str(runtime.pw_gid),
+            '--clear-groups', '--inh-caps=-all', '--ambient-caps=-all', '--bounding-set=-all', '--no-new-privs',
+            '/usr/local/bin/lightning-goatsctl', '--config', str(reconcile_config),
+            'reconcile-feed', '--id', virtual_id, '--outcome', 'fed')
+        assert reconciled.strip() == 'reconciled feed attempt ' + virtual_id + ' as physically fed'
+        run('/usr/bin/systemctl', 'start', 'lightning-goats-receive.service', 'cyberherd.service')
+        w.await_ready(lambda: w.http_json('http://127.0.0.1:8787/healthz'), 'core after synthetic accounting reconciliation')
+        w.await_ready(lambda: json.loads(run(*client, 'diagnose-stream'))['native_member_feeding_barriers'] == [virtual_id],
+                      'native member consumed the known synthetic confirmation')
+        reconciled_status = w.http_json('http://127.0.0.1:8787/api/v1/status')
+        assert reconciled_status['unresolved_feed_attempt'] is None
+        assert reconciled_status['feed_credit_sats'] == financial_before['feed_credit_sats'] - financial_before['threshold_sats']
+        assert counts['post'] == 0
+        # Subsequent financial assertions use this explicitly changed fixture
+        # baseline. Earlier upgrade preservation evidence remains unchanged.
+        financial_before = reconciled_status
         # FIRST financial activation on this disposable VM only. Its synthetic
         # journals have no funded historical barriers or provider submissions.
         # Every daemon joins the loopback-only fixture namespace. The signer
@@ -799,7 +842,64 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
         activation_report = json.loads((activation / 'reward-review/REVIEW.json').read_text())
         assert activation_report['unreceived_payment_events'] == activation_report['unreceived_feeding_events'] == 0
         assert activation_report['stored_member_percent'] == 10 and activation_report['stored_max_members'] == 3
-        assert activation_report['stages'] == {}
+        assert activation_report['stages'] == {'unplanned_no_strike_funding': 1}
+        cutoff_args = [str(activation), '--review-sha256', activation_sha,
+            '--checkpoint-sha256', checkpoint_sha, '--reward-review-sha256', reward_review_sha]
+        cutoff_prepared = json.loads(run(*launcher, '--cyberherd-reward-cutover-maintenance', 'prepare',
+            *cutoff_args, '--decision-id', str(uuid.uuid4())))
+        assert cutoff_prepared == {'prepared': True, 'rehearsed': True, 'live_journals_changed': False, 'activation_authorized': False}
+        cutoff = activation / 'reward-cutover'
+        cutoff_sha = hashlib.sha256((cutoff / 'PREPARED.json').read_bytes()).hexdigest()
+        cutoff_applied = json.loads(run(*launcher, '--cyberherd-reward-cutover-maintenance', 'apply',
+            *cutoff_args, '--cutoff-review-sha256', cutoff_sha, '--approve-initial-reward-cutover'))
+        assert cutoff_applied == {'cutoff_applied': True, 'retained_rows_unchanged': True,
+            'services_started': False, 'activation_authorized': False}
+        cutoff_applied_sha = hashlib.sha256((cutoff / 'APPLIED.json').read_bytes()).hexdigest()
+        cutoff_receipt = json.loads((cutoff / 'APPLIED.json').read_text())
+        assert cutoff_receipt['initial_reward_cutover']['historical_feedings'] == 1
+        assert len(cutoff_receipt['initial_reward_cutover']['decision_sha256']) == 64
+        cutoff_report = json.loads((cutoff / 'post/reward-review/REVIEW.json').read_text())
+        assert cutoff_report['stages'] == {'excluded_before_activation': 1}
+        assert cutoff_report['initial_reward_cutover'] == cutoff_receipt['initial_reward_cutover']
+        cutoff_resumed = json.loads(run(*launcher, '--cyberherd-reward-cutover-maintenance', 'resume-original',
+            *cutoff_args, '--cutoff-review-sha256', cutoff_sha, '--applied-sha256', cutoff_applied_sha,
+            '--approve-original-resumption'))
+        assert cutoff_resumed == {'core_running': True, 'membership_running': True,
+            'outgoing_roles_enabled': False, 'activation_authorized': False}
+        for name in ('cyberherd-payout', 'cyberherd-signer'):
+            assert os.readlink('/etc/systemd/system/' + name + '.service') == '/dev/null'
+            assert run('/usr/bin/systemctl', 'show', name + '.service', '-p', 'MainPID', '--value').strip() == '0'
+        cutoff_evidence = {'accepted': True, 'synthetic': True, 'actual_systemd_and_native_journals': True,
+            'ambiguous_source_refused': True, 'known_synthetic_confirmation_only': True,
+            'cutoff_preserved_post_confirmation_history': True, 'actual_member_uid_clone_and_apply': True,
+            'before_after_four_journal_comparison': True, 'exact_decision_sha256': cutoff_receipt['initial_reward_cutover']['decision_sha256'],
+            'historical_feedings_excluded': 1, 'original_roles_resumed': True, 'outgoing_roles_masked': True,
+            'provider_operations': 0, 'gateway_post_count': counts['post'], 'public_network_used': False,
+            'live_host_qualified': False, 'external_recovery_adopted': False}
+        (root / 'INITIAL-REWARD-CUTOVER.json').write_text(json.dumps(cutoff_evidence, sort_keys=True))
+        # The original checkpoint contains pre-cutoff bytes. A new plan AND
+        # candidate capture the resumed process identities and exact disposition.
+        activation_candidate = base / 'ci-cutoff-bound-financial-candidate'
+        run(*launcher, '--cyberherd-financial-stage', str(activation_candidate),
+            '--validator', str(financial_checker), '--validator-sha256', hashlib.sha256(financial_checker.read_bytes()).hexdigest(),
+            '--member-percent', '10', '--max-sats-per-feed', '100', '--max-sats-per-24h', '1000',
+            '--max-fee-sats', '0', '--max-net-sats', '100', '--max-new-per-hour', '100', '--fee-mode', 'deduct_from_share')
+        activation_candidate_sha = hashlib.sha256((activation_candidate / 'PREPARED.json').read_bytes()).hexdigest()
+        activation = base / 'ci-cutoff-bound-financial-activation'
+        run(*launcher, '--cyberherd-financial-maintenance', 'plan', str(activation_candidate), str(fee_review), str(activation),
+            '--candidate-sha256', activation_candidate_sha, '--program-review-sha256', fee_sha,
+            '--initial-reward-cutover', str(cutoff), '--cutoff-preparation-sha256', cutoff_sha,
+            '--cutoff-applied-sha256', cutoff_applied_sha)
+        activation_sha = hashlib.sha256((activation / 'PREPARED.json').read_bytes()).hexdigest()
+        run(*launcher, '--cyberherd-financial-maintenance', 'checkpoint', str(activation),
+            '--review-sha256', activation_sha, '--exclusive-maintenance')
+        checkpoint_sha = hashlib.sha256((activation / 'CHECKPOINT.json').read_bytes()).hexdigest()
+        reward_review_sha = hashlib.sha256((activation / 'reward-review/REVIEW.json').read_bytes()).hexdigest()
+        activation_report = json.loads((activation / 'reward-review/REVIEW.json').read_text())
+        assert activation_report['stages'] == {'excluded_before_activation': 1}
+        assert activation_report['initial_reward_cutover'] == cutoff_receipt['initial_reward_cutover']
+        assert activation_report['unreceived_payment_events'] == activation_report['unreceived_feeding_events'] == 0
+        assert activation_report['pending_reward_eligible_feeding_ingress'] == 0
         financial_args = [str(activation), '--review-sha256', activation_sha,
             '--checkpoint-sha256', checkpoint_sha, '--reward-review-sha256', reward_review_sha]
         installed_financial = json.loads(run(*launcher, '--cyberherd-financial-maintenance', 'apply',
@@ -883,13 +983,15 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
                     'outgoing_roles_masked': True, 'payouts_enabled': False, 'live_migration_performed': False,
                     'different_program_builds_used': False, 'provider_operations': 0,
                     'gateway_post_count': counts['post'], 'public_network_used': False, 'live_host_qualified': False},
+                'installed_initial_reward_cutover': cutoff_evidence,
                 'installed_first_financial_configuration': {'accepted': True,
                     'actual_completed_program_upgrade_consumed': True, 'actual_four_native_candidate_parsers': True,
                     'actual_stored_allocation_bound': True, 'fresh_four_journal_backup_verified': True,
                     'fresh_financial_tail_and_frozen_backlog_reviewed': True, 'live_images_unchanged_during_apply': True,
                     'only_four_configurations_installed': True, 'actual_four_roles_started': True,
                     'outgoing_roles_enabled_for_boot': True, 'actual_signer_socket_owner_checked': True,
-                    'core_credit_and_original_unknown_uuid_unchanged': True, 'synthetic_credentials_only': True,
+                    'post_fixture_reconciliation_credit_and_uuid_preserved': True, 'exact_reviewed_reward_cutoff_bound': True,
+                    'synthetic_credentials_only': True,
                     'provider_recipient_acknowledgment_was_synthetic': True, 'nak_helper_calls': 0,
                     'provider_operations': 0, 'gateway_post_count': counts['post'], 'public_network_used': False,
                     'provider_execution_qualified': False, 'external_recovery_adopted': False, 'live_host_qualified': False},
@@ -904,6 +1006,32 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
         # Disposable synthetic fixture only. Never use this diagnostic or the
         # fixture's schema transform against a production host or journal.
         import sys
+        # Only these attested synthetic CI files are eligible for a diagnostic.
+        # The production command wrapper continues to suppress subprocess output.
+        if 'financial_checker' in locals():
+            expected_checker = hashlib.sha256(financial_checker.read_bytes()).digest()
+            for carrier in sorted(Path('/run').glob('lg-financial-check-*'))[-4:]:
+                checker = carrier / 'checker'
+                paths = [carrier / (role + '.toml') for role in ('core', 'membership', 'payout', 'signer')]
+                if (carrier.resolve() != carrier or carrier.lstat().st_uid != 0
+                        or not checker.is_file() or checker.lstat().st_uid != 0
+                        or hashlib.sha256(checker.read_bytes()).digest() != expected_checker
+                        or not all(path.is_file() and path.lstat().st_uid == 0 for path in paths)):
+                    continue
+                carrier.chmod(0o711)
+                try:
+                    probe = subprocess.run(['/usr/bin/unshare', '--net', '--', '/usr/bin/setpriv',
+                        '--reuid=' + str(runtime.pw_uid), '--regid=' + str(runtime.pw_gid), '--clear-groups',
+                        '--inh-caps=-all', '--ambient-caps=-all', '--bounding-set=-all', '--no-new-privs',
+                        str(checker), *map(str, paths)],
+                        env={'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LC_ALL': 'C'},
+                        capture_output=True, text=True, timeout=30)
+                    print('DISPOSABLE FINANCIAL CONFIG DIAGNOSTIC exit=' + str(probe.returncode)
+                          + '\n' + probe.stderr[-2000:], file=sys.stderr)
+                except Exception:
+                    print('DISPOSABLE FINANCIAL CONFIG DIAGNOSTIC unavailable', file=sys.stderr)
+                finally:
+                    carrier.chmod(0o700)
         for argv in ((['/usr/bin/setpriv', '--reuid=' + str(runtime.pw_uid), '--regid=' + str(runtime.pw_gid),
                        '--clear-groups', '--inh-caps=-all', '--ambient-caps=-all', '--bounding-set=-all',
                        '--no-new-privs', str(fixture), '--diagnose-installed-export']),

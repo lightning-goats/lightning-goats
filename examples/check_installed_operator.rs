@@ -753,10 +753,15 @@ async fn diagnose_stream() -> Result<()> {
         let binding: Value = serde_json::from_str(&row.try_get::<String,_>("binding_json")?)?;
         Ok(json!({"received_through":row.try_get::<i64,_>("received_through")?,"epoch":binding["epoch"]}))
     }).collect::<Result<Vec<_>>>()?;
+    let barriers: Vec<String> =
+        sqlx::query_scalar("SELECT request_id FROM feeding_barriers ORDER BY ingress_seq LIMIT 2")
+            .fetch_all(&pool)
+            .await?;
     pool.close().await;
     println!(
         "{}",
-        json!({"synthetic_only":true,"native_member_cursors":cursors})
+        json!({"synthetic_only":true,"native_member_cursors":cursors,
+            "native_member_feeding_barriers":barriers})
     );
     Ok(())
 }

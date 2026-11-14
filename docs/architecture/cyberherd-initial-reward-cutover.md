@@ -248,3 +248,38 @@ suite in an isolated network namespace. The grouped fixture explicitly redirects
 the shared maintenance-lock helper into its disposable root; no production
 maintenance lock is needed. Rust changes are formatted locally and await the
 required exact-source CI build/tests rather than compiling on the production VPS.
+
+## Combined installed rehearsal — development source
+
+The disposable systemd rehearsal now exercises the cutoff coordinator and its
+subsequent financial binding with actual installed programs, journals and UIDs.
+It first verifies the retained accepted bundle and refuses preview specifically
+because the fixture's original feeding is still ambiguous. After the earlier
+upgrade-preservation proofs finish, the guarded CI operator stops the writers
+and reconciles only that known synthetic UUID as fed through the native offline
+CLI. This is synthetic accounting, not a gateway command or real food delivery.
+The signed payment history and UUID remain retained; the explicit debit becomes
+the baseline for later preservation assertions.
+
+A read-only test-only member probe waits for that confirmation's frozen barrier.
+The actual coordinator then prepares/rehearses/applies/verifies the cutoff and
+resumes only the original services. The report must classify the single historical
+feeding as excluded and retain its full decision hash. A new candidate and new
+financial plan capture the resumed process identities and bind the independently
+reviewed cutoff receipts. They take a new checkpoint before configuration and
+four-role activation on the disposable VM. Synthetic legacy funding is unavailable
+for payouts; signer calls, provider operations and gateway POSTs remain zero.
+
+The resulting rehearsal evidence distinguishes this explicit synthetic resolution
+from the earlier proofs that preserved an unresolved UUID across upgrades. It does
+not claim physical or real-provider qualification. Never perform a reconciliation
+against production merely to make a cutoff pass.
+
+The preceding deployment run at source `d5284c1` passed package/unit qualification
+but failed in installed four-role candidate validation, before the new cutoff
+sequence. The checker now emits only a static rejection category; arbitrary parser
+and policy details remain private. The guarded CI exception path may re-probe only
+its fingerprint-matched synthetic checker/config carriers to retain that category
+or an execution error. The production command wrapper still withholds subprocess
+output. A fresh successful combined installed run is required; these source
+changes do not establish it or authorize live financial activation.

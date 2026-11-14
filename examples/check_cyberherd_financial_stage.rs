@@ -1,7 +1,7 @@
 //! Configuration-only four-role financial candidate check. No runtime opens.
 #![forbid(unsafe_code)]
 
-use anyhow::{Result, bail, ensure};
+use anyhow::{Context as _, Result, bail, ensure};
 use lightning_goats::{
     config::AppConfig,
     cyberherd::runtime::Config as Member,
@@ -194,16 +194,16 @@ fn check() -> Result<()> {
     ensure!(paths.len() == 4, "four candidate paths required");
     for raw in &paths {
         let path = Path::new(raw);
-        protected_config(path)?;
+        protected_config(path).context("candidate file authority rejected")?;
         ensure!(
             std::fs::symlink_metadata(path)?.len() <= 65536,
             "candidate exceeds bound"
         );
     }
-    let core = AppConfig::load(Path::new(&paths[0]))?;
-    let member = Member::load(Path::new(&paths[1]))?;
-    let payout = Payout::load(Path::new(&paths[2]))?;
-    let signer = Signer::load(Path::new(&paths[3]))?;
+    let core = AppConfig::load(Path::new(&paths[0])).context("core candidate rejected")?;
+    let member = Member::load(Path::new(&paths[1])).context("member candidate rejected")?;
+    let payout = Payout::load(Path::new(&paths[2])).context("payout candidate rejected")?;
+    let signer = Signer::load(Path::new(&paths[3])).context("signer candidate rejected")?;
     ensure!(
         process_uid()? == member.core.core_uid,
         "original core UID required for configuration validation"
@@ -218,10 +218,33 @@ fn check() -> Result<()> {
     Ok(())
 }
 
+fn rejection_category(error: &anyhow::Error) -> &'static str {
+    // Never display an arbitrary parser/policy error or its private context.
+    match error.to_string().as_str() {
+        "candidate file authority rejected" => "protected-files",
+        "core candidate rejected" => "core-config",
+        "member candidate rejected" => "member-config",
+        "payout candidate rejected" => "payout-config",
+        "signer candidate rejected" => "signer-config",
+        "four distinct original runtime identities required" => "runtime-identities",
+        "complete candidate process and execution configuration required" => "enabled-flags",
+        "candidate monetary ceilings differ" => "monetary-ceilings",
+        "candidate limits are only partially selected" => "partial-limits",
+        "candidate planning or receipt policy differs" => "planner-or-receipts",
+        "candidate kernel peer or socket binding differs" => "kernel-bindings",
+        "candidate project, receive, provider or epoch binding differs" => "project-bindings",
+        "candidate must retain the six native payees" => "receive-registry",
+        "candidate omitted an operational receive alias" => "receive-aliases",
+        "original core UID required for configuration validation" => "core-uid",
+        _ => "unclassified-validation",
+    }
+}
+
 fn main() {
-    if check().is_err() {
+    if let Err(error) = check() {
         eprintln!(
-            "Four-role financial candidate did not validate; private configuration withheld."
+            "Four-role financial candidate did not validate ({}); private configuration withheld.",
+            rejection_category(&error)
         );
         std::process::exit(1);
     }
@@ -231,6 +254,16 @@ fn main() {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn rejection_categories_never_reproduce_private_parser_or_policy_details() {
+        let error = anyhow::anyhow!("private-value-marker");
+        assert_eq!(rejection_category(&error), "unclassified-validation");
+        assert_eq!(
+            rejection_category(&error.context("core candidate rejected")),
+            "core-config"
+        );
+    }
 
     fn fixture() -> [toml::Value; 4] {
         let owner = "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798";

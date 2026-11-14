@@ -50,3 +50,20 @@ payment/feeding messages are outside this reward-only decision.
 A fresh verified checkpoint and qualified native/review transaction remain needed
 before applying the cutoff or first financial configuration. The historical report
 is not current readiness, external reconciliation or activation authority.
+
+## Source-only cutoff comparison
+
+The native comparison command accepts a separately disposed four-journal copy
+and an independently pinned preview from a verified backup. It permits only
+the canonical control audit and one exclusion audit per historical feeding,
+appended with consecutive row identities. Original audit bytes and identities,
+all other table contents, migration history and schema catalog must match.
+Payment, feeder, payout and signer journals receive no allowed row changes.
+
+The synthetic regression constructs current four-journal paid/confirmed state
+with retained signed bytes and a pre-existing audit at row 37. It tests the
+allowed append and rejection of changed original JSON bytes, extra schema,
+changed migration description and changed signed-event bytes. This low-level
+fixture does not establish protected root preview acceptance, stopped-writer
+application or live readiness. The command never applies the cutoff or enables
+payouts. Qualification of this source is tracked separately from live staging.

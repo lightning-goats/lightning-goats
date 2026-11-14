@@ -15,6 +15,7 @@ mod files;
 mod inclusive_fee_upgrade;
 pub mod legacy;
 mod reward_cutover;
+mod reward_cutover_compare;
 mod reward_review;
 #[cfg(test)]
 pub(crate) use reward_cutover::derive_history as cutover_fixture_history;

@@ -46,6 +46,18 @@ enum Command {
         #[arg(long)]
         decision_id: uuid::Uuid,
     },
+    /// Compare a reviewed preview against a separate already-disposed copy.
+    /// Never writes live state, grants activation or starts services.
+    CompareInitialRewardCutover {
+        #[arg(long)]
+        bundle: PathBuf,
+        #[arg(long)]
+        preview: PathBuf,
+        #[arg(long)]
+        preview_sha256: String,
+        #[arg(long)]
+        candidate_copy: PathBuf,
+    },
     /// Copy only the exact compiled schema-23 source for the contact upgrade.
     /// Same four stopped/masked writers and file guards; never restore or resume.
     SnapshotBeforeContact {
@@ -159,6 +171,17 @@ async fn main() -> Result<()> {
             );
             return Ok(());
         }
+        Command::CompareInitialRewardCutover {
+            bundle,
+            preview,
+            preview_sha256,
+            candidate_copy,
+        } => (
+            "initial_reward_cutover_compare",
+            operator
+                .compare_initial_reward_cutover(&bundle, &preview, &preview_sha256, &candidate_copy)
+                .await?,
+        ),
         Command::SnapshotBeforeContact {
             destination,
             writers_stopped: true,

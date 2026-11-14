@@ -137,31 +137,39 @@ pub(in crate::state_maintenance) async fn digest(
     table: &str,
     columns: &[String],
 ) -> Result<Table> {
-    digest_selected(pool, table, columns, None).await
+    digest_selected(pool, table, columns, None, None).await
 }
 pub(in crate::state_maintenance) async fn migration_prefix_digest(
     pool: &SqlitePool,
 ) -> Result<Table> {
     let columns = columns(pool, "_sqlx_migrations").await?;
-    digest_selected(pool, "_sqlx_migrations", &columns, Some(23)).await
+    digest_selected(pool, "_sqlx_migrations", &columns, Some(23), None).await
 }
 pub(in crate::state_maintenance) async fn feeder_cap_prefix_digest(
     pool: &SqlitePool,
 ) -> Result<Table> {
     let columns = columns(pool, "_sqlx_migrations").await?;
-    digest_selected(pool, "_sqlx_migrations", &columns, Some(24)).await
+    digest_selected(pool, "_sqlx_migrations", &columns, Some(24), None).await
 }
 pub(in crate::state_maintenance) async fn inclusive_fee_prefix_digest(
     pool: &SqlitePool,
 ) -> Result<Table> {
     let columns = columns(pool, "_sqlx_migrations").await?;
-    digest_selected(pool, "_sqlx_migrations", &columns, Some(8)).await
+    digest_selected(pool, "_sqlx_migrations", &columns, Some(8), None).await
+}
+pub(in crate::state_maintenance) async fn audit_prefix_digest(
+    pool: &SqlitePool,
+    columns: &[String],
+    through: i64,
+) -> Result<Table> {
+    digest_selected(pool, "operator_commands", columns, None, Some(through)).await
 }
 async fn digest_selected(
     pool: &SqlitePool,
     table: &str,
     columns: &[String],
     prefix: Option<i64>,
+    audit_through: Option<i64>,
 ) -> Result<Table> {
     identifier(table)?;
     if columns.is_empty() || columns.len() > 256 {
@@ -172,7 +180,12 @@ async fn digest_selected(
         identifier(column)?;
         selected.push(format!("typeof(\"{column}\"),\"{column}\""));
     }
-    let predicate = if let Some(version) = prefix {
+    let predicate = if let Some(through) = audit_through {
+        if table != "operator_commands" || prefix.is_some() || through < 0 {
+            bail!("unsupported audit-prefix digest");
+        }
+        format!(" WHERE rowid<={through}")
+    } else if let Some(version) = prefix {
         if table != "_sqlx_migrations" {
             bail!("unsupported migration-prefix digest");
         }

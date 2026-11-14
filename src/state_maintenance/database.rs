@@ -397,7 +397,7 @@ async fn cross_check(pools: &BTreeMap<Role, SqlitePool>, policy: &Policy) -> Res
         }
     }
     drop(results);
-    super::reward_cutover::validate_recorded(core, membership, policy).await?;
+    let _ = super::reward_cutover::validate_recorded(core, membership, policy).await?;
     Ok(())
 }
 async fn equal_rows(local: &SqlitePool, core: &SqlitePool, rows: &str, lookup: &str) -> Result<()> {

@@ -474,6 +474,21 @@ async fn root_four_journal_snapshot_preserves_wal_paid_pending_and_signed_state_
         assert_eq!(files::hash_bytes(&std::fs::read(path).unwrap()), *digest);
     }
     assert!(operator.snapshot(&bundle).await.is_err());
+    let nested_restore = bundle.join("nested-restore");
+    assert!(
+        operator
+            .stage_restore(&bundle, &nested_restore)
+            .await
+            .is_err()
+    );
+    assert!(!nested_restore.exists());
+    assert!(operator.stage_restore(&bundle, &bundle).await.is_err());
+    assert!(operator.stage_restore(&bundle, root.path()).await.is_err());
+    assert_eq!(operator.verify(&bundle).await.unwrap(), manifest);
+    assert_eq!(
+        std::fs::read(bundle.join("MANIFEST.json")).unwrap(),
+        manifest_bytes
+    );
     let destination = root.path().join("restore");
     assert_eq!(
         operator.stage_restore(&bundle, &destination).await.unwrap(),

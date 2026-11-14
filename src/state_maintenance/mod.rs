@@ -314,6 +314,11 @@ impl Operator {
     /// Stage all four journals together in NEW directories. Does not overwrite,
     /// rebind an epoch, change configuration, install files or start a service.
     pub async fn stage_restore(&self, bundle: &Path, destination: &Path) -> Result<Manifest> {
+        files::absolute(bundle)?;
+        files::absolute(destination)?;
+        if destination.starts_with(bundle) || bundle.starts_with(destination) {
+            bail!("restore staging must be separate from its accepted backup");
+        }
         self.control.check(&self.policy).await?;
         let manifest = self.verify(bundle).await?;
         files::new_private_directory(destination)?;

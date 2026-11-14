@@ -6,7 +6,6 @@ members under both actual worker identities. Financial state, limits and
 credentials were preserved; actual payout/provider/recipient acceptance remains
 unobserved.
 
-
 Read-only installed qualification found that two current CyberHerd members'
 Lightning addresses passed native discovery, while Conor's Primal address did not.
 A public discovery GET returned HTTP 200 and otherwise valid `payRequest`
@@ -31,9 +30,9 @@ signed invoice against the frozen amount/description, mainnet signature and
 remaining expiry. Regression fixtures cover ordinary and signed-zap invoices,
 explicit errors and success wrappers around contradictory/malformed invoices.
 No actual invoice callback was requested to inspect provider wrapper behavior.
-The membership and payout programs therefore both require the qualified update;
-all financial execution guards and historical signed intents remain intact. No schema,
-credential, ledger, historical plan, payout ceiling or feeder change is proposed.
+The membership and payout programs were updated together. Financial execution
+guards and historical signed intents remain intact. No schema, credential,
+ledger, historical plan, payout ceiling or feeder control was changed.
 The read-only native helper was rerun on all three addresses from the exact
 qualified source; its actual results and maintenance evidence follow below.
 

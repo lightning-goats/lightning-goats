@@ -41,9 +41,10 @@ native systemd rehearsal. Read-only live financial observation found two
 No actual payout or externally observed zap-aware message is claimed.
 
 Read-only [current-member recipient qualification](cyberherd-recipient-success-status-20261114.md)
-found two valid recipients and an explicit-success parsing defect for Primal.
-That correction is in progress; the failed recipient must not be counted as
-qualified. The same checkpoint records two correctly empty frozen no-payout plans
+found and corrected an explicit-success parsing defect for Primal. The update
+is deployed; all three current recipients now pass native discovery under both
+actual worker UIDs, without invoices or payments. The same checkpoint records
+two correctly empty frozen no-payout plans
 and one retained America/Denver midnight reset receipt. No payments, feeds or
 membership resets were submitted for these observations.
 

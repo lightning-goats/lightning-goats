@@ -1,4 +1,4 @@
-# Public recipient relay routing — 2026-11-15 candidate
+# Public recipient relay routing — live 2026-11-15
 
 Operator decisions: supplement direct public publishing with Send It; publish
 user interactions to their relays; fully use Nostr relay-list conventions; do not
@@ -71,12 +71,15 @@ Only core/member services restarted; no program/schema change occurred. The init
 immediate readiness check raced startup; later health checks passed without another
 restart. No downstream visibility query was performed for this rollout.
 
-The code changes above are not yet deployed. Formatting/whitespace checks pass;
-full Rust/audit/native CI and exact program-only deployment qualification remain
-pending. Synthetic regressions cover NIP-65 direction, signed replacement/ties,
-cache rollback/outage, NIP-19 identity, NIP-17 separation, frozen member routes,
-core retry fairness/restart and immutable metadata signatures/routes. No real
-payment or physical feeding test is submitted by these regressions.
+The routing programs and private-contact broadcaster guard are now deployed from
+PR #133. Exact-source Rust (449 library tests plus integrations), Clippy, audit,
+real isolated nak, website, packaging and native systemd checks all passed.
+A fresh native four-journal checkpoint was verified by both the installed and
+candidate verifiers before replacing two programs and the contact asset. All four
+services resumed with pinned executables and passing health checks. Financial
+schemas, existing credentials, unit files, limits and feeder controls stayed exact.
+See the [deployment record](../testing/recipient-relay-routing-live-20261115.md)
+for source/artifact identities, rollback boundary and retained evidence.
 
 References: [NIP-65](https://github.com/nostr-protocol/nips/blob/master/65.md),
 [NIP-17](https://github.com/nostr-protocol/nips/blob/master/17.md),

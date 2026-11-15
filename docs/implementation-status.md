@@ -1,5 +1,14 @@
 # Lightning Goats implementation status
 
+Public messaging checkpoint **2026-11-15**: signed [recipient relay routing](architecture/recipient-relay-routing.md)
+is [deployed and qualified](testing/recipient-relay-routing-live-20261115.md).
+New public interaction notes use the author’s NIP-65 write relays and mentioned
+users’ NIP-65 read relays alongside configured direct relays and Send It.
+Private NIP-17 inbox routing remains separate; downstream visibility is not measured.
+The [lifecycle opt-out](testing/cyberherd-lifecycle-optout-20261115.md) and
+CyberHerd stream-chat opt-out remain effective. This publication-only rollout does
+not resolve the recovery-adoption blocker or complete the full CyberHerd plan.
+
 Current CyberHerd checkpoint: **2026-11-14**. The full
 [twelve-part implementation plan](planning/cyberherd-implementation-plan.md)
 remains incomplete. It supersedes older CyberHerd deferrals; it does not resume

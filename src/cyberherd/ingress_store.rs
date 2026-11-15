@@ -7,7 +7,7 @@ use super::{Store, decode_snapshot};
 use crate::{
     core_bridge::{AuthenticatedBatch, EventBody, Feeding},
     cyberherd::ingress::{
-        CoreBinding, CoreCursor, FeedingBarrier, Input, MAX_PENDING, Pending, hash,
+        CoreBinding, CoreCursor, FeedingBarrier, Input, MAX_PENDING, Pending, SocialHold, hash,
         payment_identity, validate_owner,
     },
 };
@@ -266,6 +266,89 @@ impl Store {
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    /// Release only the current optional social head. Its signed raw event and
+    /// exact disposition remain durable. Payments and feeding barriers cannot
+    /// use this path, and no membership/credit/reward state changes here.
+    pub(crate) async fn settle_optional_social(
+        &self,
+        owner: &str,
+        seq: i64,
+        id: &str,
+        reason: SocialHold,
+        now: i64,
+    ) -> Result<()> {
+        validate_owner(owner)?;
+        crate::nostr_event::validate_hex(id, 32)?;
+        if now < 0 {
+            bail!("invalid optional social disposition time");
+        }
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        require_head(&mut tx, owner, seq).await?;
+        let row = sqlx::query("SELECT kind,payload_json FROM ingress WHERE owner=? AND seq=?")
+            .bind(owner)
+            .bind(seq)
+            .fetch_one(&mut *tx)
+            .await?;
+        if row.try_get::<String, _>("kind")? != "social"
+            || serde_json::from_str::<String>(&row.try_get::<String, _>("payload_json")?)? != id
+        {
+            bail!("optional social disposition cannot release a financial input");
+        }
+        let parked = matches!(
+            reason,
+            SocialHold::ProfileUnavailable | SocialHold::EligibilityUnavailable
+        );
+        let updated=sqlx::query("UPDATE social_inbox SET state=CASE WHEN ? THEN state ELSE 'done' END,next_attempt=CASE WHEN ? THEN MAX(next_attempt,?+5) ELSE next_attempt END WHERE owner=? AND event_id=?")
+            .bind(parked).bind(parked).bind(now).bind(owner).bind(id).execute(&mut *tx).await?;
+        if updated.rows_affected() != 1 {
+            bail!("optional social inbox linkage missing");
+        }
+        let receipt = serde_json::json!({"status":if parked {"parked"} else {"ignored"},"reason":reason,"event_id":id});
+        sqlx::query("UPDATE ingress SET state='done',result_json=? WHERE owner=? AND seq=? AND state='pending'")
+            .bind(serde_json::to_string(&receipt)?).bind(owner).bind(seq).execute(&mut *tx).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Retry one due parked social event only when ordered work has drained.
+    /// It receives a NEW arrival position: recovery cannot change a frozen feed
+    /// roster or insert a late interaction before earlier financial input.
+    pub(crate) async fn queue_optional_social_retry(&self, owner: &str, now: i64) -> Result<bool> {
+        validate_owner(owner)?;
+        if now < 0 {
+            bail!("invalid optional social retry time");
+        }
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let pending: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM ingress WHERE owner=? AND state='pending')",
+        )
+        .bind(owner)
+        .fetch_one(&mut *tx)
+        .await?;
+        if pending {
+            tx.commit().await?;
+            return Ok(false);
+        }
+        let row=sqlx::query("SELECT s.event_id,s.attempts FROM social_inbox s JOIN observed_events e ON e.owner=s.owner AND e.event_id=s.event_id WHERE s.owner=? AND s.state='pending' AND s.next_attempt<=? AND EXISTS(SELECT 1 FROM ingress i WHERE i.owner=s.owner AND i.kind='social' AND i.state='done' AND i.payload_json=json_quote(s.event_id) AND json_extract(i.result_json,'$.status')='parked' AND json_extract(i.result_json,'$.reason') IN ('profile_unavailable','eligibility_unavailable')) ORDER BY s.next_attempt,e.created_at,s.event_id LIMIT 1")
+            .bind(owner).bind(now).fetch_optional(&mut *tx).await?;
+        let Some(row) = row else {
+            tx.commit().await?;
+            return Ok(false);
+        };
+        let id: String = row.try_get("event_id")?;
+        let attempts: i64 = row.try_get("attempts")?;
+        enqueue(
+            &mut tx,
+            owner,
+            &format!("social-retry:{id}:{attempts}"),
+            "social",
+            &serde_json::to_string(&id)?,
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(true)
     }
 
     pub(crate) async fn finish_ingress(

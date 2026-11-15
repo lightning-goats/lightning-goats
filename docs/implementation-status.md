@@ -1,5 +1,11 @@
 # Lightning Goats implementation status
 
+CyberHerd intake checkpoint **2026-11-15**: the optional-social
+[liveness correction](testing/cyberherd-intake-liveness-20261115.md) is under source
+qualification. It parks unavailable social eligibility and audits invalid social
+heads without holding later paid/feeding work. This correction is not installed;
+existing live financial limits and source identities remain unchanged.
+
 Public messaging checkpoint **2026-11-15**: signed [recipient relay routing](architecture/recipient-relay-routing.md)
 is [deployed and qualified](testing/recipient-relay-routing-live-20261115.md).
 New public interaction notes use the author’s NIP-65 write relays and mentioned

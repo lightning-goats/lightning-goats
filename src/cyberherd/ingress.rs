@@ -75,6 +75,16 @@ pub struct Pending {
     pub was_deferred: bool,
 }
 
+/// A disposition for optional social input, never a payment/feed resolution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum SocialHold {
+    ProfileUnavailable,
+    EligibilityUnavailable,
+    Malformed,
+    Unsupported,
+}
+
 /// Membership at a confirmed-feeding barrier, before any later-arriving input.
 /// This is not a funded payout plan: current payee eligibility, real reserves,
 /// recipient minima and fee budgets must still be frozen by the planner.

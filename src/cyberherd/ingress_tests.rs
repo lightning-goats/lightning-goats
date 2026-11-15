@@ -1037,7 +1037,7 @@ async fn closed_cycle_work_discards_without_profile_or_discovery_and_never_block
 #[tokio::test]
 async fn profileless_like_cannot_block_a_full_herd_repost_but_cannot_claim_an_open_seat() {
     use crate::cyberherd::membership::Decision;
-    let f = Fixture::new().await;
+    let mut f = Fixture::new().await;
     for key in 2..12 {
         let event = signed(
             key,
@@ -1059,7 +1059,14 @@ async fn profileless_like_cannot_block_a_full_herd_repost_but_cannot_claim_an_op
     social::stage(&f.store, &f.owner, event, f.now)
         .await
         .unwrap();
-    assert_eq!(f.run(None, FeederAvailability::Paused).await, Step::Waiting);
+    assert_eq!(f.run(None, FeederAvailability::Paused).await, Step::Ignored);
+    f.now += 6;
+    assert!(
+        f.store
+            .queue_optional_social_retry(&f.owner, f.now)
+            .await
+            .unwrap()
+    );
     let Step::Interaction(receipt) = f.run(None, FeederAvailability::Ready).await else {
         panic!("capacity-only rejection should drain the head")
     };
@@ -1093,7 +1100,7 @@ async fn profileless_like_cannot_block_a_full_herd_repost_but_cannot_claim_an_op
     social::stage(&f.store, &f.owner, event, f.now)
         .await
         .unwrap();
-    assert_eq!(f.run(None, FeederAvailability::Ready).await, Step::Waiting);
+    assert_eq!(f.run(None, FeederAvailability::Ready).await, Step::Ignored);
 
     let empty = Fixture::new().await;
     let event = signed(
@@ -1108,7 +1115,7 @@ async fn profileless_like_cannot_block_a_full_herd_repost_but_cannot_claim_an_op
         .unwrap();
     assert_eq!(
         empty.run(None, FeederAvailability::Ready).await,
-        Step::Waiting
+        Step::Ignored
     );
     assert_eq!(
         empty
@@ -1120,6 +1127,329 @@ async fn profileless_like_cannot_block_a_full_herd_repost_but_cannot_claim_an_op
             .active_count(),
         0
     );
+}
+
+#[tokio::test]
+async fn missing_repost_profile_cannot_hold_paid_zap_or_confirmed_feed_and_late_retry_cannot_backpay()
+ {
+    let mut f = Fixture::new().await;
+    f.core.initialize_reward_funding().await.unwrap();
+    let repost = signed(
+        2,
+        6,
+        f.now - 1,
+        "",
+        vec![tag(&["e", &f.note.event().id]), tag(&["p", &f.owner])],
+    );
+    let event_id = repost.event().id.clone();
+    social::stage(&f.store, &f.owner, repost.clone(), f.now)
+        .await
+        .unwrap();
+    f.paid(77, 3, 1000, &f.note).await;
+    let feed = f.core.begin_feed_attempt(1000).await.unwrap().unwrap();
+    f.core.confirm_feed_attempt(feed).await.unwrap();
+    assert_eq!(f.ingest().await, 2);
+    assert_eq!(f.run(None, FeederAvailability::Ready).await, Step::Ignored);
+    assert_eq!(
+        f.store
+            .snapshot(&f.owner)
+            .await
+            .unwrap()
+            .roster
+            .active_count(),
+        0
+    );
+    let pool = SqlitePool::connect(&f.database).await.unwrap();
+    let disposition: String =
+        sqlx::query_scalar("SELECT result_json FROM ingress WHERE source_key=?")
+            .bind(format!("nostr:{event_id}"))
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let disposition: serde_json::Value = serde_json::from_str(&disposition).unwrap();
+    assert_eq!(disposition["status"], "parked");
+    assert_eq!(disposition["reason"], "profile_unavailable");
+    assert!(
+        !f.store
+            .queue_optional_social_retry(&f.owner, f.now + 600)
+            .await
+            .unwrap()
+    );
+    // Restart retains the pending financial order and the original signed event.
+    f.store = Store::connect(&f.database).await.unwrap();
+    assert!(matches!(
+        f.run(Some(&f.profile(3)), FeederAvailability::Ready).await,
+        Step::Interaction(_)
+    ));
+    let Step::Feeding(barrier) = f.run(None, FeederAvailability::Ready).await else {
+        panic!("confirmed feeding must drain after the paid zap");
+    };
+    assert!(barrier.snapshot.roster.members[&public(3)].active);
+    assert!(!barrier.snapshot.roster.members.contains_key(&public(2)));
+    assert_eq!(f.core.feed_credit_sats().await.unwrap(), 0);
+    let frozen = *barrier;
+    f.now += 6;
+    assert!(
+        f.store
+            .queue_optional_social_retry(&f.owner, f.now)
+            .await
+            .unwrap()
+    );
+    assert!(matches!(
+        f.run(Some(&f.profile(2)), FeederAvailability::Ready).await,
+        Step::Interaction(_)
+    ));
+    assert!(f.store.snapshot(&f.owner).await.unwrap().roster.members[&public(2)].active);
+    assert_eq!(
+        f.store
+            .feeding_barrier(&f.owner, feed)
+            .await
+            .unwrap()
+            .unwrap(),
+        frozen
+    );
+    assert!(
+        !social::stage(&f.store, &f.owner, repost, f.now)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !f.store
+            .queue_optional_social_retry(&f.owner, f.now + 600)
+            .await
+            .unwrap()
+    );
+    assert_eq!(f.ingest().await, 0);
+    assert_eq!(f.core.feed_credit_sats().await.unwrap(), 0);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM observed_events WHERE event_id=?")
+            .bind(event_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn unavailable_social_eligibility_retries_with_backoff_without_holding_financial_work() {
+    let mut f = Fixture::new().await;
+    let repost = signed(2, 6, f.now - 1, "", vec![tag(&["e", &f.note.event().id])]);
+    let id = repost.event().id.clone();
+    social::stage(&f.store, &f.owner, repost, f.now)
+        .await
+        .unwrap();
+    assert_eq!(
+        f.run(Some(&f.profile(2)), FeederAvailability::Unknown)
+            .await,
+        Step::Ignored
+    );
+    let pool = SqlitePool::connect(&f.database).await.unwrap();
+    let raw: String = sqlx::query_scalar("SELECT result_json FROM ingress WHERE source_key=?")
+        .bind(format!("nostr:{id}"))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let disposition: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(disposition["reason"], "eligibility_unavailable");
+    f.paid(80, 3, 1000, &f.note).await;
+    let feed = f.core.begin_feed_attempt(1000).await.unwrap().unwrap();
+    f.core.confirm_feed_attempt(feed).await.unwrap();
+    f.ingest().await;
+    assert!(matches!(
+        f.run(Some(&f.profile(3)), FeederAvailability::Ready).await,
+        Step::Interaction(_)
+    ));
+    let Step::Feeding(barrier) = f.run(None, FeederAvailability::Ready).await else {
+        panic!("unavailable social eligibility blocked the financial queue");
+    };
+    assert!(!barrier.snapshot.roster.members.contains_key(&public(2)));
+    f.now += 6;
+    assert!(
+        f.store
+            .queue_optional_social_retry(&f.owner, f.now)
+            .await
+            .unwrap()
+    );
+    let retry = f.store.ingress_head(&f.owner).await.unwrap().unwrap();
+    assert!(
+        !f.store
+            .queue_optional_social_retry(&f.owner, f.now)
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        f.run(None, FeederAvailability::Unknown).await,
+        Step::Ignored
+    );
+    // The second failed attempt waits ten seconds, across a real store reopen.
+    f.store = Store::connect(&f.database).await.unwrap();
+    f.now += 9;
+    assert!(
+        !f.store
+            .queue_optional_social_retry(&f.owner, f.now)
+            .await
+            .unwrap()
+    );
+    f.now += 1;
+    assert!(
+        f.store
+            .queue_optional_social_retry(&f.owner, f.now)
+            .await
+            .unwrap()
+    );
+    assert!(f.store.ingress_head(&f.owner).await.unwrap().unwrap().seq > retry.seq);
+    // A frozen verified profile survives retries even when a new lookup is absent.
+    assert!(matches!(
+        f.run(None, FeederAvailability::Ready).await,
+        Step::Interaction(_)
+    ));
+    assert!(f.store.snapshot(&f.owner).await.unwrap().roster.members[&public(2)].active);
+    assert_eq!(
+        f.store
+            .feeding_barrier(&f.owner, feed)
+            .await
+            .unwrap()
+            .unwrap(),
+        *barrier
+    );
+    assert_eq!(f.core.feed_credit_sats().await.unwrap(), 0);
+}
+
+#[tokio::test]
+async fn legacy_malformed_and_unsupported_social_heads_are_audited_before_runtime_lookup() {
+    for (kind, body, expected) in [
+        (6, "not a signed embedded target", "malformed"),
+        (7, "-", "unsupported"),
+    ] {
+        let f = Fixture::new().await;
+        let event = signed(
+            2,
+            kind,
+            f.now - 1,
+            body,
+            vec![tag(&["e", &f.note.event().id])],
+        );
+        // Fixture-only legacy admission: the outer event remains cryptographically
+        // valid. Current ingress rejects malformed bodies before enqueueing.
+        let e = event.event();
+        let pool = SqlitePool::connect(&f.database).await.unwrap();
+        let mut tx = pool.begin().await.unwrap();
+        sqlx::query("INSERT INTO observed_events(owner,event_id,kind,author,created_at,event_json) VALUES(?,?,?,?,?,?)")
+            .bind(&f.owner).bind(&e.id).bind(e.kind as i64).bind(&e.pubkey).bind(e.created_at as i64)
+            .bind(serde_json::to_string(e).unwrap()).execute(&mut *tx).await.unwrap();
+        sqlx::query("INSERT INTO social_inbox(owner,event_id) VALUES(?,?)")
+            .bind(&f.owner)
+            .bind(&e.id)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO ingress(owner,source_key,kind,payload_json) VALUES(?,?,'social',?)",
+        )
+        .bind(&f.owner)
+        .bind(format!("nostr:{}", e.id))
+        .bind(serde_json::to_string(&e.id).unwrap())
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+        f.paid(78, 3, 1000, &f.note).await;
+        let feed = f.core.begin_feed_attempt(1000).await.unwrap().unwrap();
+        f.core.confirm_feed_attempt(feed).await.unwrap();
+        f.ingest().await;
+        assert!(
+            worker::screen_social_head(&f.store, &f.owner, f.now)
+                .await
+                .unwrap()
+        );
+        let raw: String = sqlx::query_scalar("SELECT result_json FROM ingress WHERE source_key=?")
+            .bind(format!("nostr:{}", e.id))
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let result: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(result["status"], "ignored");
+        assert_eq!(result["reason"], expected);
+        assert_eq!(
+            sqlx::query_scalar::<_, String>("SELECT state FROM social_inbox WHERE event_id=?")
+                .bind(&e.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            "done"
+        );
+        assert!(matches!(
+            f.run(Some(&f.profile(3)), FeederAvailability::Ready).await,
+            Step::Interaction(_)
+        ));
+        assert!(matches!(
+            f.run(None, FeederAvailability::Ready).await,
+            Step::Feeding(_)
+        ));
+        assert_eq!(f.core.feed_credit_sats().await.unwrap(), 0);
+        assert!(
+            !f.store
+                .queue_optional_social_retry(&f.owner, f.now + 600)
+                .await
+                .unwrap()
+        );
+    }
+}
+
+#[tokio::test]
+async fn optional_social_disposition_cannot_skip_money_and_late_failure_rolls_back_both_checkpoints()
+ {
+    use crate::cyberherd::ingress::SocialHold;
+    let f = Fixture::new().await;
+    let repost = signed(2, 6, f.now - 1, "", vec![tag(&["e", &f.note.event().id])]);
+    let id = repost.event().id.clone();
+    social::stage(&f.store, &f.owner, repost, f.now)
+        .await
+        .unwrap();
+    let head = f.store.ingress_head(&f.owner).await.unwrap().unwrap();
+    let pool = SqlitePool::connect(&f.database).await.unwrap();
+    sqlx::query("CREATE TRIGGER fail_optional_disposition BEFORE UPDATE OF state ON ingress WHEN NEW.state='done' BEGIN SELECT RAISE(ABORT,'synthetic disposition failure'); END").execute(&pool).await.unwrap();
+    assert!(
+        f.store
+            .settle_optional_social(&f.owner, head.seq, &id, SocialHold::Malformed, f.now)
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT state FROM social_inbox WHERE event_id=?")
+            .bind(&id)
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        "pending"
+    );
+    assert_eq!(
+        f.store.ingress_head(&f.owner).await.unwrap().unwrap().seq,
+        head.seq
+    );
+    sqlx::query("DROP TRIGGER fail_optional_disposition")
+        .execute(&pool)
+        .await
+        .unwrap();
+    f.store
+        .settle_optional_social(&f.owner, head.seq, &id, SocialHold::Malformed, f.now)
+        .await
+        .unwrap();
+    f.paid(79, 3, 1000, &f.note).await;
+    f.ingest().await;
+    let payment = f.store.ingress_head(&f.owner).await.unwrap().unwrap();
+    assert!(
+        f.store
+            .settle_optional_social(&f.owner, payment.seq, &id, SocialHold::Malformed, f.now)
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        f.store.ingress_head(&f.owner).await.unwrap().unwrap().seq,
+        payment.seq
+    );
+    assert_eq!(f.core.feed_credit_sats().await.unwrap(), 1000);
 }
 
 #[tokio::test]

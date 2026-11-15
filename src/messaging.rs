@@ -124,7 +124,7 @@ pub async fn run_outbox_publisher(ledger: LedgerStore, nak: NakClient) -> Result
 /// production entry point always uses pinned public networking above.
 pub async fn run_publication_worker<
     Q: crate::cyberherd::relay::Query + Send + Sync,
-    T: PublicationTransport + Send + Sync,
+    T: PublicationTransport + Send + Sync + 'static,
 >(
     ledger: LedgerStore,
     nak: NakClient,

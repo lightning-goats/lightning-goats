@@ -529,6 +529,10 @@ mod tests {
         lightning_invoice::InvoiceBuilder::new(lightning_invoice::Currency::Bitcoin)
             .amount_milli_satoshis(amount)
             .description("CyberHerd Treats!".into())
+            .payee_pub_key(bitcoin::secp256k1::PublicKey::from_secret_key(
+                &Secp256k1::new(),
+                &key,
+            ))
             .payment_hash(sha256::Hash::from_slice(&[0x22; 32]).unwrap())
             .payment_secret(lightning_invoice::PaymentSecret([0x44; 32]))
             .duration_since_epoch(Duration::from_secs(1000))
@@ -574,6 +578,31 @@ mod tests {
                 .is_err()
         );
         assert!(request.validate_invoice(&plain, 1271).is_err());
+        let parsed: lightning_invoice::Bolt11Invoice = plain.parse().unwrap();
+        let (original, _, _) = parsed.into_signed_raw().into_parts();
+        let key = bitcoin::secp256k1::SecretKey::from_slice(&[42; 32]).unwrap();
+        let mut testnet = original.clone();
+        testnet.hrp.currency = lightning_invoice::Currency::BitcoinTestnet;
+        let wrong_network = testnet
+            .sign(|hash| {
+                Ok::<_, std::convert::Infallible>(
+                    bitcoin::secp256k1::Secp256k1::new().sign_ecdsa_recoverable(hash, &key),
+                )
+            })
+            .unwrap()
+            .to_string();
+        assert!(request.validate_invoice(&wrong_network, 1000).is_err());
+        let wrong_key = bitcoin::secp256k1::SecretKey::from_slice(&[43; 32]).unwrap();
+        let wrong_signature = original
+            .sign(|hash| {
+                Ok::<_, std::convert::Infallible>(
+                    bitcoin::secp256k1::Secp256k1::new().sign_ecdsa_recoverable(hash, &wrong_key),
+                )
+            })
+            .unwrap()
+            .to_string();
+        assert!(request.validate_invoice(&wrong_signature, 1000).is_err());
+
         let metadata = crate::test_invoices::invoice_at(
             5000,
             &i.0.recipient.metadata_hash,

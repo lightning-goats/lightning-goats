@@ -402,12 +402,17 @@ impl InvoiceFetcher for FeeInvoices {
 
 #[tokio::test]
 async fn inclusive_worker_deducts_actual_fee_promotes_once_and_recovers_original_execution() {
-    for (nostr, plain) in [(false, false), (true, false), (true, true)] {
+    for (nostr, plain, with_broker) in [
+        (false, false, false),
+        (true, false, true),
+        (true, true, true),
+        (true, false, false),
+    ] {
         let w = unstarted_with_options(nostr, true).await;
         let (client, active) = core(&w, RuntimeMode::Active).await;
         let mut engine = worker(&w, client, w.store.clone());
         let count = Arc::new(AtomicUsize::new(0));
-        let broker = if nostr {
+        let broker = if nostr && with_broker {
             let (uid, gid) = self_credentials().unwrap();
             let socket = w.f.root.path().join("inclusive-signer.sock");
             let policy = signer::Policy {
@@ -448,7 +453,7 @@ async fn inclusive_worker_deducts_actual_fee_promotes_once_and_recovers_original
         let invoices = FeeInvoices {
             mock: Arc::clone(&w.mock),
             calls: AtomicUsize::new(0),
-            nostr,
+            nostr: nostr && with_broker,
             plain,
         };
         assert_eq!(tick(&engine).await, Step::InvoiceIntent);
@@ -508,7 +513,7 @@ async fn inclusive_worker_deducts_actual_fee_promotes_once_and_recovers_original
             .unwrap()
             .unwrap();
         assert_eq!(promoted.id(), original.id());
-        assert_eq!(promoted.0.nip57, nostr && !plain);
+        assert_eq!(promoted.0.nip57, nostr && with_broker && !plain);
         w.mock.lock().unwrap().lose_execute = true;
         tokio::time::sleep(std::time::Duration::from_millis(600)).await;
         assert!(engine.tick().await.is_err());
@@ -527,7 +532,10 @@ async fn inclusive_worker_deducts_actual_fee_promotes_once_and_recovers_original
         assert_eq!(engine.store.held_sats().await.unwrap(), 0);
         assert_eq!(tick(&engine).await, Step::Idle);
         assert_eq!(invoices.calls.load(Ordering::SeqCst), 2);
-        assert_eq!(count.load(Ordering::SeqCst), if nostr { 2 } else { 0 });
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            if nostr && with_broker { 2 } else { 0 }
+        );
         {
             let mock = w.mock.lock().unwrap();
             assert_eq!(mock.quotes.len(), 2);

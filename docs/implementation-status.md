@@ -6,6 +6,16 @@ qualification. It parks unavailable social eligibility and audits invalid social
 heads without holding later paid/feeding work. This correction is not installed;
 existing live financial limits and source identities remain unchanged.
 
+Outgoing reward checkpoint **2026-11-15**: the operator-approved
+[zap-preferred ordinary-Lightning fallback](architecture/cyberherd-outgoing-invoices.md)
+is [deployed](testing/payout-fallback-live-20261115.md), including receiver-supported
+`CyberHerd Treats!` comments. The isolated signer's Primal-only connection repair
+restored signing, and the retained provider journal records the first completed
+reward (92 sats plus 1 sat fee). The native checkpoint reader now correlates
+unpromoted fee-probe signatures; a fresh four-journal snapshot and verification
+passed before all six programs were installed. This is current-state retention,
+not external recovery adoption or completion of the full CyberHerd plan.
+
 Public messaging checkpoint **2026-11-15**: signed [recipient relay routing](architecture/recipient-relay-routing.md)
 is [deployed and qualified](testing/recipient-relay-routing-live-20261115.md).
 New public interaction notes use the author’s NIP-65 write relays and mentioned

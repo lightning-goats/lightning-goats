@@ -95,8 +95,7 @@ identity at a new observation position. It cannot change prior feeding snapshots
 Unavailable social eligibility uses the same path; malformed or unsupported
 legacy social queue entries are explicitly ignored with their raw event retained.
 These dispositions are restricted to social entries and cannot skip payments.
-Paused/unknown
-feeder state or unavailable target discovery cannot claim membership as applied.
+Paused/unknown feeder state or unavailable target discovery cannot claim membership as applied.
 Recovery must refresh targets before processing the batch. Confirmed stale work
 gets a minimal discard receipt without fetching an unnecessary profile.
 

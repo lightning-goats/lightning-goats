@@ -54,9 +54,20 @@ SQLite databases and authenticated Unix-socket fixtures:
 5. Manual reset rollback preserves parked work; successful reset prevents it
    from earning a new-cycle award while retaining replay receipts and raw input.
 
-Qualification results will be recorded after the exact candidate gates finish.
-Formatting, whitespace, published SQLite vendor verification and the active RSA
-dependency exclusion check pass locally. A cached advisory audit passes against
-1,509 local advisories; it is not a fresh advisory-database check. The locked Rust
-regression build and full CI remain running/pending. Installed qualification is
-pending. No generated build cache is a deployment artifact.
+The first integrated candidate `b5ed0d883e612555b83bf28520daec865c5d9a2c`
+passes [formatting, strict all-target/all-feature Clippy, the locked full Rust
+suite and root-owned state checks](https://github.com/lightning-goats/lightning-goats/actions/runs/43773027041).
+The library suite reports **456 passed, zero failures, six explicitly ignored**;
+all five cases above pass, alongside the integration suites. The
+[fresh advisory audit](https://github.com/lightning-goats/lightning-goats/actions/runs/43773027095)
+and [isolated signer](https://github.com/lightning-goats/lightning-goats/actions/runs/43773027043)
+also pass. Its release/systemd qualification is still running at this checkpoint.
+
+A subsequent retry-query refinement selects the original `nostr:<event-ID>`
+through the existing unique owner/source index, avoiding scans of completed
+history for every parked event. Exact final-source CI must qualify that refinement
+before release selection. Formatting, whitespace and published SQLite vendor
+verification pass locally; RSA remains absent from the active dependency graph.
+A separate cached advisory audit passes against 1,509 local advisories. Native
+host compilation remains in progress. Installed qualification is pending, and no
+generated build cache is a deployment artifact.

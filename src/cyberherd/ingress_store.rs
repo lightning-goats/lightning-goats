@@ -331,7 +331,7 @@ impl Store {
             tx.commit().await?;
             return Ok(false);
         }
-        let row=sqlx::query("SELECT s.event_id,s.attempts FROM social_inbox s JOIN observed_events e ON e.owner=s.owner AND e.event_id=s.event_id WHERE s.owner=? AND s.state='pending' AND s.next_attempt<=? AND EXISTS(SELECT 1 FROM ingress i WHERE i.owner=s.owner AND i.kind='social' AND i.state='done' AND i.payload_json=json_quote(s.event_id) AND json_extract(i.result_json,'$.status')='parked' AND json_extract(i.result_json,'$.reason') IN ('profile_unavailable','eligibility_unavailable')) ORDER BY s.next_attempt,e.created_at,s.event_id LIMIT 1")
+        let row=sqlx::query("SELECT s.event_id,s.attempts FROM social_inbox s JOIN observed_events e ON e.owner=s.owner AND e.event_id=s.event_id WHERE s.owner=? AND s.state='pending' AND s.next_attempt<=? AND EXISTS(SELECT 1 FROM ingress i WHERE i.owner=s.owner AND i.source_key='nostr:'||s.event_id AND i.kind='social' AND i.state='done' AND json_extract(i.result_json,'$.status')='parked' AND json_extract(i.result_json,'$.reason') IN ('profile_unavailable','eligibility_unavailable')) ORDER BY s.next_attempt,e.created_at,s.event_id LIMIT 1")
             .bind(owner).bind(now).fetch_optional(&mut *tx).await?;
         let Some(row) = row else {
             tx.commit().await?;

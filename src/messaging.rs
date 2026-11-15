@@ -6,7 +6,7 @@ use tokio::time::sleep;
 use crate::{
     config::RuntimeMode,
     ledger::LedgerStore,
-    nostr::{NakClient, SignedNostrEvent},
+    nostr::NakClient,
     presentation::MessageRenderer,
 };
 

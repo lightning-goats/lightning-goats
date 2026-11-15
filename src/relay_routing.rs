@@ -484,21 +484,21 @@ mod routing_tests {
         ];
         assert!(
             router
-                .public_relays(&[person.clone()], &base, 100)
+                .public_relays(std::slice::from_ref(&person), &base, 100)
                 .await
                 .unwrap()
                 .contains(&"wss://old.example/".into())
         );
         *source.events.lock().await = vec![old.clone(), empty];
         let routes = router
-            .public_relays(&[person.clone()], &base, 1100)
+            .public_relays(std::slice::from_ref(&person), &base, 1100)
             .await
             .unwrap();
         assert_eq!(routes, base);
         *source.events.lock().await = vec![old];
         assert_eq!(
             router
-                .public_relays(&[person.clone()], &base, 2100)
+                .public_relays(std::slice::from_ref(&person), &base, 2100)
                 .await
                 .unwrap(),
             base
@@ -525,7 +525,7 @@ mod routing_tests {
             fail: Arc::new(Mutex::new(false)),
         };
         let router = Router::with_source(source).unwrap();
-        let lists = router.lists(&[person.clone()], 200).await.unwrap();
+        let lists = router.lists(std::slice::from_ref(&person), 200).await.unwrap();
         assert_eq!(lists[&person].event().event().id, expected.event().id);
     }
     #[test]

@@ -23,11 +23,11 @@ readable relays and excludes Send It, which denies subscriptions.
 
 New CyberHerd notes freeze base plus recipient read relays with their immutable
 message record, outside network work/write locks and with source-cursor recheck.
-Their existing per-relay outbox/receipts retry exact signed bytes. Core public
+The author’s verified write relays are also included. Their existing per-relay outbox/receipts retry exact signed bytes. Core public
 notes likewise freeze a per-event route plan and retry each destination fairly,
 with at most four network attempts in flight. Direct configured relays precede
 recipient additions and metadata work follows note work. Up to eight addressed
-users/eight inbox relays each fit the 72-destination public limit.
+users/eight inbox relays each, eight author write relays, and up to eight configured relays fit the 80-destination public limit.
 Outages do not change financial accounting, feeder work or signed text.
 
 The author's existing signed kind-10002 list is preserved when configured storage
@@ -50,7 +50,7 @@ Core publication uses the existing extensible event-log contract for immutable
 `nostr_publication_plan`, `nostr_publication_plan_extension` (author metadata only),
 `nostr_publication_attempt`, `nostr_publication_ack`, `nostr_relay_metadata_intent`
 and `nostr_relay_metadata_observed` records. The original signed outbox is retained.
-Leased attempts and exponential per-relay retry prevent a failed destination from
+An incremental in-memory projection replays the sequence-indexed journal in bounded batches at startup and consumes only new records during polling; accepted routes leave its pending queue. No correlated historical JSON scans occur in the reservation loop. The projection has no independent authority or backup requirement. Leased attempts and exponential per-relay retry prevent a failed destination from
 blocking later notes; accepted destinations survive restarts. Broadcaster acceptance
 is recorded separately and cannot alone mark an event directly delivered. A relay
 ACK is not evidence of wider propagation or retention guarantees. No old published

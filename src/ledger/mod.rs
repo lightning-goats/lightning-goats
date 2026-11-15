@@ -56,6 +56,7 @@ static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 #[derive(Debug, Clone)]
 pub struct LedgerStore {
     pool: SqlitePool,
+    publication: std::sync::Arc<tokio::sync::Mutex<publication::Progress>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,7 +81,10 @@ impl LedgerStore {
             .await
             .context("failed applying Lightning Goats database migrations")?;
 
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            publication: Default::default(),
+        })
     }
 
     /// Record one provider-authoritative native BTC settlement exactly once.

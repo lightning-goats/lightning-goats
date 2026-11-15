@@ -119,7 +119,7 @@ pub fn people(content: &str, tags: &[Vec<String>]) -> Vec<String> {
 }
 
 pub fn public_relays(raw: &[String]) -> Result<Vec<String>> {
-    if raw.is_empty() || raw.len() > 72 {
+    if raw.is_empty() || raw.len() > 80 {
         bail!("public relay plan exceeds bound");
     }
     let mut result = Vec::new();
@@ -350,6 +350,26 @@ impl<Q: Query> Router<Q> {
             })
             .collect())
     }
+    /// NIP-65: author's write relays plus each mentioned user's read relays.
+    pub async fn public_interaction_relays(
+        &self,
+        author: &str,
+        content: &str,
+        tags: &[Vec<String>],
+        base: &[String],
+        now: i64,
+    ) -> Result<Vec<String>> {
+        let mut destinations = public_relays(base)?;
+        if let Some(list) = self.lists(&[author.to_owned()], now).await?.remove(author) {
+            for relay in list.write {
+                if !destinations.contains(&relay) {
+                    destinations.push(relay);
+                }
+            }
+        }
+        self.public_message_relays(content, tags, &destinations, now)
+            .await
+    }
     pub async fn public_message_relays(
         &self,
         content: &str,
@@ -556,6 +576,67 @@ mod routing_tests {
     }
     fn list(at: u64, tags: Vec<Vec<String>>) -> VerifiedEvent {
         VerifiedEvent::verify(crate::nostr_event::test_event(2, 10002, at, "", tags)).unwrap()
+    }
+    #[tokio::test]
+    async fn interactions_use_author_write_and_recipient_read_directions() {
+        let author = VerifiedEvent::verify(crate::nostr_event::test_event(
+            1,
+            10002,
+            100,
+            "",
+            vec![
+                vec![
+                    "r".into(),
+                    "wss://author-write.example/".into(),
+                    "write".into(),
+                ],
+                vec![
+                    "r".into(),
+                    "wss://author-read.example/".into(),
+                    "read".into(),
+                ],
+            ],
+        ))
+        .unwrap();
+        let recipient = list(
+            100,
+            vec![
+                vec![
+                    "r".into(),
+                    "wss://recipient-read.example/".into(),
+                    "read".into(),
+                ],
+                vec![
+                    "r".into(),
+                    "wss://recipient-write.example/".into(),
+                    "write".into(),
+                ],
+            ],
+        );
+        let author_key = author.event().pubkey.clone();
+        let tags = vec![vec!["p".into(), recipient.event().pubkey.clone()]];
+        let router = Router::with_source(Source {
+            events: Arc::new(Mutex::new(vec![author, recipient])),
+            fail: Arc::new(Mutex::new(false)),
+        })
+        .unwrap();
+        assert_eq!(
+            router
+                .public_interaction_relays(
+                    &author_key,
+                    "",
+                    &tags,
+                    &["wss://base.example/".into()],
+                    100
+                )
+                .await
+                .unwrap(),
+            vec![
+                "wss://base.example/",
+                "wss://author-write.example/",
+                "wss://recipient-read.example/"
+            ]
+        );
     }
     #[tokio::test]
     async fn newer_empty_lists_clear_inboxes_and_cached_heads_never_roll_back() {

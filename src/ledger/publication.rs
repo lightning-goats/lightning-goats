@@ -28,25 +28,114 @@ pub struct PublicationWork {
     attempt: u64,
 }
 
+// Reconstructible in-memory projection: only indexed, incremental sequence reads
+// touch the core event log. Network polling never repeatedly joins its history.
+#[derive(Debug, Default)]
+pub(super) struct Progress {
+    cursor: i64,
+    plans: std::collections::BTreeMap<String, Vec<String>>,
+    routes: std::collections::BTreeMap<(String, String), Route>,
+}
+#[derive(Debug, Default)]
+struct Route {
+    order: i64,
+    metadata: bool,
+    attempt: Option<Attempt>,
+}
+impl Progress {
+    async fn refresh(&mut self, pool: &sqlx::SqlitePool) -> Result<()> {
+        let end: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(seq),0) FROM event_log")
+            .fetch_one(pool)
+            .await?;
+        if end < self.cursor {
+            bail!("publication history moved backwards");
+        }
+        // Bound each allocation while replaying; sequence range uses the primary key.
+        while self.cursor < end {
+            let rows = sqlx::query("SELECT seq,event_type,payload_json FROM event_log WHERE seq>? AND seq<=? ORDER BY seq LIMIT 512")
+                .bind(self.cursor).bind(end).fetch_all(pool).await?;
+            if rows.is_empty() {
+                bail!("publication history has an unexpected gap");
+            }
+            for row in rows {
+                let seq: i64 = row.try_get("seq")?;
+                let kind: String = row.try_get("event_type")?;
+                let raw: String = row.try_get("payload_json")?;
+                match kind.as_str() {
+                    "nostr_publication_plan" | "nostr_publication_plan_extension" => {
+                        let plan: Plan = serde_json::from_str(&raw)?;
+                        let saved = self.plans.entry(plan.event_id.clone()).or_default();
+                        for relay in plan.relays {
+                            if !saved.contains(&relay) {
+                                saved.push(relay.clone());
+                            }
+                            self.routes
+                                .entry((plan.event_id.clone(), relay))
+                                .or_insert(Route {
+                                    order: seq,
+                                    metadata: kind == "nostr_publication_plan_extension",
+                                    ..Default::default()
+                                });
+                        }
+                    }
+                    "nostr_publication_attempt" => {
+                        let attempt: Attempt = serde_json::from_str(&raw)?;
+                        let route = self
+                            .routes
+                            .get_mut(&(attempt.event_id.clone(), attempt.relay.clone()))
+                            .ok_or_else(|| anyhow::anyhow!("publication attempt has no plan"))?;
+                        route.attempt = Some(attempt);
+                    }
+                    "nostr_publication_ack" => {
+                        let ack: serde_json::Value = serde_json::from_str(&raw)?;
+                        let event = ack["event_id"]
+                            .as_str()
+                            .ok_or_else(|| anyhow::anyhow!("invalid publication ACK"))?;
+                        let relay = ack["relay"]
+                            .as_str()
+                            .ok_or_else(|| anyhow::anyhow!("invalid publication ACK"))?;
+                        self.routes
+                            .remove(&(event.into(), relay.into()))
+                            .ok_or_else(|| anyhow::anyhow!("publication ACK has no plan"))?;
+                    }
+                    _ => {}
+                }
+                self.cursor = seq;
+            }
+        }
+        Ok(())
+    }
+}
 impl LedgerStore {
     pub async fn unplanned_publication(&self) -> Result<Option<OutboxEntry>> {
-        let row=sqlx::query("SELECT o.* FROM message_outbox o WHERE o.status IN ('pending','failed') AND NOT EXISTS(SELECT 1 FROM message_outbox_suppressions s WHERE s.event_id=o.event_id) AND NOT EXISTS(SELECT 1 FROM event_log e WHERE e.event_type IN ('nostr_publication_plan','nostr_publication_plan_extension') AND json_extract(e.payload_json,'$.event_id')=o.event_id) ORDER BY o.source_event_seq,o.created_at LIMIT 1")
-            .fetch_optional(&self.pool).await?;
-        row.map(|r| {
-            Ok(OutboxEntry {
-                event_id: r.try_get("event_id")?,
-                signed_event_json: r.try_get("signed_event_json")?,
-                source_event_seq: u64::try_from(r.try_get::<i64, _>("source_event_seq")?)?,
-                attempts: u64::try_from(r.try_get::<i64, _>("attempts")?)?,
-            })
-        })
-        .transpose()
+        let mut progress = self.publication.lock().await;
+        progress.refresh(&self.pool).await?;
+        // Financial outbox status is authoritative; projection only filters plans.
+        let rows=sqlx::query("SELECT o.* FROM message_outbox o WHERE o.status IN ('pending','failed') AND NOT EXISTS(SELECT 1 FROM message_outbox_suppressions s WHERE s.event_id=o.event_id) ORDER BY o.source_event_seq,o.created_at")
+            .fetch_all(&self.pool).await?;
+        for r in rows {
+            let event_id: String = r.try_get("event_id")?;
+            if !progress.plans.contains_key(&event_id) {
+                return Ok(Some(OutboxEntry {
+                    event_id,
+                    signed_event_json: r.try_get("signed_event_json")?,
+                    source_event_seq: u64::try_from(r.try_get::<i64, _>("source_event_seq")?)?,
+                    attempts: u64::try_from(r.try_get::<i64, _>("attempts")?)?,
+                }));
+            }
+        }
+        Ok(None)
     }
     pub async fn plan_publication(&self, event_id: &str, relays: &[String]) -> Result<()> {
         let plan = Plan {
             event_id: event_id.into(),
             relays: crate::relay_routing::public_relays(relays)?,
         };
+        let mut progress = self.publication.lock().await;
+        progress.refresh(&self.pool).await?;
+        if progress.plans.contains_key(event_id) {
+            return Ok(());
+        }
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let present: bool =
             sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM message_outbox WHERE event_id=?)")
@@ -56,10 +145,7 @@ impl LedgerStore {
         if !present {
             bail!("publication has no retained signed event");
         }
-        let old:Option<String>=sqlx::query_scalar("SELECT payload_json FROM event_log WHERE event_type='nostr_publication_plan' AND json_extract(payload_json,'$.event_id')=? ORDER BY seq LIMIT 1").bind(event_id).fetch_optional(&mut *tx).await?;
-        if old.is_none() {
-            append_event_in_transaction(&mut tx, "nostr_publication_plan", &plan).await?;
-        }
+        append_event_in_transaction(&mut tx, "nostr_publication_plan", &plan).await?;
         tx.commit().await?;
         Ok(())
     }
@@ -67,31 +153,46 @@ impl LedgerStore {
         if now < 0 {
             bail!("invalid publication clock");
         }
-        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        let row=sqlx::query("SELECT o.event_id,o.signed_event_json,j.value AS relay,(SELECT a.payload_json FROM event_log a WHERE a.event_type='nostr_publication_attempt' AND json_extract(a.payload_json,'$.event_id')=o.event_id AND json_extract(a.payload_json,'$.relay')=j.value ORDER BY a.seq DESC LIMIT 1) AS last_attempt FROM event_log p JOIN message_outbox o ON o.event_id=json_extract(p.payload_json,'$.event_id') JOIN json_each(p.payload_json,'$.relays') j WHERE p.event_type IN ('nostr_publication_plan','nostr_publication_plan_extension') AND NOT EXISTS(SELECT 1 FROM message_outbox_suppressions s WHERE s.event_id=o.event_id) AND NOT EXISTS(SELECT 1 FROM event_log a WHERE a.event_type='nostr_publication_ack' AND json_extract(a.payload_json,'$.event_id')=o.event_id AND json_extract(a.payload_json,'$.relay')=j.value) AND COALESCE(json_extract((SELECT a.payload_json FROM event_log a WHERE a.event_type='nostr_publication_attempt' AND json_extract(a.payload_json,'$.event_id')=o.event_id AND json_extract(a.payload_json,'$.relay')=j.value ORDER BY a.seq DESC LIMIT 1),'$.next_attempt'),0)<=? ORDER BY CASE WHEN EXISTS(SELECT 1 FROM event_log m WHERE m.seq=o.source_event_seq AND m.event_type IN ('nostr_relay_metadata_intent','nostr_relay_metadata_observed')) THEN 1 ELSE 0 END,COALESCE(json_extract((SELECT a.payload_json FROM event_log a WHERE a.event_type='nostr_publication_attempt' AND json_extract(a.payload_json,'$.event_id')=o.event_id AND json_extract(a.payload_json,'$.relay')=j.value ORDER BY a.seq DESC LIMIT 1),'$.next_attempt'),0),o.source_event_seq,j.key LIMIT 1")
-            .bind(now).fetch_optional(&mut *tx).await?;
-        let Some(row) = row else { return Ok(None) };
-        let old: Option<Attempt> = row
-            .try_get::<Option<String>, _>("last_attempt")?
-            .map(|s| serde_json::from_str(&s))
-            .transpose()?;
-        let attempt = Attempt {
-            event_id: row.try_get("event_id")?,
-            relay: row.try_get("relay")?,
-            lease: Uuid::new_v4(),
-            attempt: old.map_or(1, |a| a.attempt.saturating_add(1)),
-            next_attempt: now.saturating_add(30),
-        };
-        append_event_in_transaction(&mut tx, "nostr_publication_attempt", &attempt).await?;
-        let job = PublicationWork {
-            event_id: attempt.event_id,
-            signed_json: row.try_get("signed_event_json")?,
-            relay: attempt.relay,
-            lease: attempt.lease,
-            attempt: attempt.attempt,
-        };
-        tx.commit().await?;
-        Ok(Some(job))
+        let mut progress = self.publication.lock().await;
+        progress.refresh(&self.pool).await?;
+        let mut candidates: Vec<_> = progress
+            .routes
+            .iter()
+            .filter(|(_, r)| r.attempt.as_ref().is_none_or(|a| a.next_attempt <= now))
+            .collect();
+        candidates.sort_by_key(|(_, r)| {
+            (
+                r.metadata,
+                r.attempt.as_ref().map_or(0, |a| a.next_attempt),
+                r.order,
+            )
+        });
+        for ((event_id, relay), route) in candidates {
+            // Point lookup, including suppression, before any publication lease.
+            let raw: Option<String> = sqlx::query_scalar("SELECT o.signed_event_json FROM message_outbox o WHERE o.event_id=? AND NOT EXISTS(SELECT 1 FROM message_outbox_suppressions s WHERE s.event_id=o.event_id)").bind(event_id).fetch_optional(&self.pool).await?;
+            let Some(signed_json) = raw else { continue };
+            let attempt = Attempt {
+                event_id: event_id.clone(),
+                relay: relay.clone(),
+                lease: Uuid::new_v4(),
+                attempt: route
+                    .attempt
+                    .as_ref()
+                    .map_or(1, |a| a.attempt.saturating_add(1)),
+                next_attempt: now.saturating_add(30),
+            };
+            let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+            append_event_in_transaction(&mut tx, "nostr_publication_attempt", &attempt).await?;
+            tx.commit().await?;
+            return Ok(Some(PublicationWork {
+                event_id: attempt.event_id,
+                signed_json,
+                relay: attempt.relay,
+                lease: attempt.lease,
+                attempt: attempt.attempt,
+            }));
+        }
+        Ok(None)
     }
     pub async fn finish_publication(
         &self,
@@ -102,25 +203,33 @@ impl LedgerStore {
         if now < 0 {
             bail!("invalid publication clock");
         }
-        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        let current:String=sqlx::query_scalar("SELECT payload_json FROM event_log WHERE event_type='nostr_publication_attempt' AND json_extract(payload_json,'$.event_id')=? AND json_extract(payload_json,'$.relay')=? ORDER BY seq DESC LIMIT 1")
-            .bind(&job.event_id).bind(&job.relay).fetch_one(&mut *tx).await?;
-        let current: Attempt = serde_json::from_str(&current)?;
-        if current.lease != job.lease {
+        let mut progress = self.publication.lock().await;
+        progress.refresh(&self.pool).await?;
+        let Some(route) = progress
+            .routes
+            .get(&(job.event_id.clone(), job.relay.clone()))
+        else {
+            // Accepted routes have already left the pending projection.
+            if progress
+                .plans
+                .get(&job.event_id)
+                .is_some_and(|r| r.contains(&job.relay))
+            {
+                return Ok(());
+            }
+            bail!("publication result has no plan");
+        };
+        if route.attempt.as_ref().is_none_or(|a| a.lease != job.lease) {
             return Ok(());
         }
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         if accepted {
-            let exists:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM event_log WHERE event_type='nostr_publication_ack' AND json_extract(payload_json,'$.event_id')=? AND json_extract(payload_json,'$.relay')=?)")
-                .bind(&job.event_id).bind(&job.relay).fetch_one(&mut *tx).await?;
-            if !exists {
-                append_event_in_transaction(&mut tx,"nostr_publication_ack",&serde_json::json!({"event_id":job.event_id,"relay":job.relay,"accepted_at":now,"broadcaster_acceptance":crate::relay_routing::is_broadcaster(&job.relay)})).await?;
-            }
+            append_event_in_transaction(&mut tx,"nostr_publication_ack",&serde_json::json!({"event_id":job.event_id,"relay":job.relay,"accepted_at":now,"broadcaster_acceptance":crate::relay_routing::is_broadcaster(&job.relay)})).await?;
             if !crate::relay_routing::is_broadcaster(&job.relay) {
                 sqlx::query("UPDATE message_outbox SET status='published',attempts=attempts+1,last_error=NULL,published_at=? WHERE event_id=? AND status IN ('pending','failed')").bind(now).bind(&job.event_id).execute(&mut *tx).await?;
             }
         } else {
-            sqlx::query("UPDATE message_outbox SET attempts=attempts+1,last_error='relay acceptance pending',status=CASE WHEN status='pending' THEN 'failed' ELSE status END WHERE event_id=?")
-                .bind(&job.event_id).execute(&mut *tx).await?;
+            sqlx::query("UPDATE message_outbox SET attempts=attempts+1,last_error='relay acceptance pending',status=CASE WHEN status='pending' THEN 'failed' ELSE status END WHERE event_id=?").bind(&job.event_id).execute(&mut *tx).await?;
             let retry = Attempt {
                 event_id: job.event_id.clone(),
                 relay: job.relay.clone(),
@@ -183,6 +292,13 @@ mod tests {
         assert!(db.reserve_publication(200).await.unwrap().is_none());
         assert!(db.next_outbox_entry().await.unwrap().is_none());
         assert_eq!(db.feed_credit_sats().await.unwrap(), 0);
+        let progress = db.publication.lock().await;
+        assert!(progress.routes.is_empty());
+        let through = progress.cursor;
+        drop(progress);
+        db.append_event("overlay_only_fixture", &()).await.unwrap();
+        assert!(db.reserve_publication(300).await.unwrap().is_none());
+        assert!(db.publication.lock().await.cursor > through);
     }
 }
 
@@ -311,6 +427,8 @@ impl LedgerStore {
         let destinations = crate::relay_routing::public_relays(relays)?;
         let e = event.event();
         let raw = serde_json::to_string(e)?;
+        let mut progress = self.publication.lock().await;
+        progress.refresh(&self.pool).await?;
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let old: Option<String> =
             sqlx::query_scalar("SELECT signed_event_json FROM message_outbox WHERE event_id=?")
@@ -331,8 +449,7 @@ impl LedgerStore {
             sqlx::query("INSERT INTO message_outbox(event_id,signed_event_json,status,source_event_seq) VALUES(?,?,'pending',?)")
                 .bind(&e.id).bind(&raw).bind(i64::try_from(seq)?).execute(&mut *tx).await?;
         }
-        let previous:Vec<String>=sqlx::query_scalar("SELECT j.value FROM event_log p JOIN json_each(p.payload_json,'$.relays') j WHERE p.event_type IN ('nostr_publication_plan','nostr_publication_plan_extension') AND json_extract(p.payload_json,'$.event_id')=?")
-            .bind(&e.id).fetch_all(&mut *tx).await?;
+        let previous = progress.plans.get(&e.id).cloned().unwrap_or_default();
         let new: Vec<_> = destinations
             .into_iter()
             .filter(|r| !previous.contains(r))

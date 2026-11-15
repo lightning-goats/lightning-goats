@@ -151,7 +151,8 @@ pub async fn run_publication_worker<
             match crate::nostr_event::VerifiedEvent::from_json(&entry.signed_event_json) {
                 Ok(event) if matches!(event.event().kind, 1 | 10002) => {
                     let relays = router
-                        .public_message_relays(
+                        .public_interaction_relays(
+                            nak.project_pubkey(),
                             &event.event().content,
                             &event.event().tags,
                             &base,

@@ -110,7 +110,7 @@ impl Store {
             })
             .unwrap_or(("", vec![]));
         let relays = router
-            .public_message_relays(content, &tags, base, now)
+            .public_interaction_relays(owner, content, &tags, base, now)
             .await?;
         self.queue_next_delivery_expected(owner, &relays, now, Some(event.seq))
             .await

@@ -212,6 +212,60 @@ async fn bounded_json(pool: &SqlitePool, query: &str, key: Option<&str>) -> Resu
     }
     Ok(value)
 }
+// Fee discovery uses independent pre-execution IDs. Some are never promoted;
+// promoted IDs exist in both tables and must retain byte-identical documents.
+async fn has_probe_table(pool: &SqlitePool, name: &str) -> Result<bool> {
+    Ok(sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?)",
+    )
+    .bind(name)
+    .fetch_one(pool)
+    .await?)
+}
+async fn signing_intent(pool: &SqlitePool, id: &str) -> Result<String> {
+    let mut documents: Vec<Option<String>> = Vec::new();
+    documents.extend(sqlx::query_scalar::<_,Option<String>>("SELECT CASE WHEN length(CAST(document_json AS BLOB))<=131072 THEN document_json END FROM payout_invoice_intents WHERE id=?")
+        .bind(id).fetch_all(pool).await?);
+    if has_probe_table(pool, "payout_fee_probe_intents").await? {
+        documents.extend(sqlx::query_scalar::<_,Option<String>>("SELECT CASE WHEN length(CAST(document_json AS BLOB))<=131072 THEN document_json END FROM payout_fee_probe_intents WHERE id=?")
+            .bind(id).fetch_all(pool).await?);
+    }
+    let first = documents.first().and_then(|v| v.as_ref()).ok_or_else(|| {
+        anyhow::anyhow!("signer has no bounded original payout or fee-probe intent")
+    })?;
+    if documents.iter().any(|v| v.as_ref() != Some(first)) {
+        bail!("promoted fee-probe signing intent differs from original");
+    }
+    Ok(first.clone())
+}
+async fn signing_callback(pool: &SqlitePool, id: &str, signed: &str) -> Result<()> {
+    let mut callbacks: Vec<Option<String>> =
+        sqlx::query_scalar("SELECT raw_zap FROM payout_callback_requests WHERE intent_id=?")
+            .bind(id)
+            .fetch_all(pool)
+            .await?;
+    if has_probe_table(pool, "payout_fee_probe_callbacks").await? {
+        callbacks.extend(
+            sqlx::query_scalar::<_, Option<String>>(
+                "SELECT raw_zap FROM payout_fee_probe_callbacks WHERE intent_id=?",
+            )
+            .bind(id)
+            .fetch_all(pool)
+            .await?,
+        );
+    }
+    if let Some(first) = callbacks.first() {
+        if callbacks.iter().any(|v| v != first) {
+            bail!("promoted fee-probe callback differs from original");
+        }
+        // A valid but unused signature can survive a lost response followed by
+        // the operator-approved ordinary callback. It is never payment proof.
+        if first.as_deref().is_some_and(|raw| raw != signed) {
+            bail!("signer result differs from frozen payout callback bytes");
+        }
+    }
+    Ok(())
+}
 async fn cross_check(pools: &BTreeMap<Role, SqlitePool>, policy: &Policy) -> Result<()> {
     let core = &pools[&Role::Core];
     let membership = &pools[&Role::Membership];
@@ -362,12 +416,7 @@ async fn cross_check(pools: &BTreeMap<Role, SqlitePool>, policy: &Policy) -> Res
     let mut intents = sqlx::query("SELECT id,document_json FROM signer_intents").fetch(signer);
     while let Some(row) = intents.try_next().await? {
         let id: String = row.try_get("id")?;
-        let original = bounded_json(
-            payout,
-            "SELECT document_json FROM payout_invoice_intents WHERE id=?",
-            Some(&id),
-        )
-        .await?;
+        let original = signing_intent(payout, &id).await?;
         if row.try_get::<String, _>("document_json")? != original {
             bail!("signer lost its original payout invoice intent");
         }
@@ -378,23 +427,11 @@ async fn cross_check(pools: &BTreeMap<Role, SqlitePool>, policy: &Policy) -> Res
     let mut results = sqlx::query("SELECT id,event_json FROM signer_results").fetch(signer);
     while let Some(row) = results.try_next().await? {
         let id: String = row.try_get("id")?;
-        let document = bounded_json(
-            payout,
-            "SELECT document_json FROM payout_invoice_intents WHERE id=?",
-            Some(&id),
-        )
-        .await?;
+        let document = signing_intent(payout, &id).await?;
         let intent = crate::payout::invoice::Intent::restore(serde_json::from_str(&document)?)?;
         let signed: String = row.try_get("event_json")?;
         crate::payout::invoice::Request::restore(intent, Some(signed.clone()))?;
-        let frozen: Option<Option<String>> =
-            sqlx::query_scalar("SELECT raw_zap FROM payout_callback_requests WHERE intent_id=?")
-                .bind(&id)
-                .fetch_optional(payout)
-                .await?;
-        if frozen.is_some_and(|raw| raw.as_deref() != Some(&signed)) {
-            bail!("signer result differs from frozen payout callback bytes");
-        }
+        signing_callback(payout, &id, &signed).await?;
     }
     drop(results);
     let _ = super::reward_cutover::validate_recorded(core, membership, policy).await?;
@@ -484,6 +521,77 @@ mod inclusive_fee_prefix_tests {
             .unwrap();
         PAYOUT.run(&pool).await.unwrap();
         assert!(require_before_inclusive_fees(&pool).await.is_err());
+        pool.close().await;
+    }
+}
+
+#[cfg(test)]
+mod probe_correlation_tests {
+    use super::*;
+    #[tokio::test]
+    async fn unpromoted_promoted_and_legacy_signing_records_keep_strict_correlations() {
+        let directory = tempfile::tempdir().unwrap();
+        let url = format!(
+            "sqlite://{}",
+            directory.path().join("correlation.db").display()
+        );
+        let pool = crate::sqlite::connect_durable(&url, 1).await.unwrap();
+        for ddl in [
+            "CREATE TABLE payout_invoice_intents(id TEXT PRIMARY KEY,document_json TEXT)",
+            "CREATE TABLE payout_callback_requests(intent_id TEXT PRIMARY KEY,raw_zap TEXT)",
+        ] {
+            sqlx::query(ddl).execute(&pool).await.unwrap();
+        }
+        sqlx::query("INSERT INTO payout_invoice_intents VALUES('legacy','exact')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(signing_intent(&pool, "legacy").await.unwrap(), "exact");
+        signing_callback(&pool, "legacy", "signed").await.unwrap();
+        assert!(signing_intent(&pool, "missing").await.is_err());
+        for ddl in [
+            "CREATE TABLE payout_fee_probe_intents(id TEXT PRIMARY KEY,document_json TEXT)",
+            "CREATE TABLE payout_fee_probe_callbacks(intent_id TEXT PRIMARY KEY,raw_zap TEXT)",
+        ] {
+            sqlx::query(ddl).execute(&pool).await.unwrap();
+        }
+        sqlx::query("INSERT INTO payout_fee_probe_intents VALUES('probe','original')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(signing_intent(&pool, "probe").await.unwrap(), "original");
+        sqlx::query("INSERT INTO payout_fee_probe_callbacks VALUES('probe','signed')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        signing_callback(&pool, "probe", "signed").await.unwrap();
+        assert!(signing_callback(&pool, "probe", "changed").await.is_err());
+        sqlx::query("INSERT INTO payout_invoice_intents VALUES('probe','original')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(signing_intent(&pool, "probe").await.unwrap(), "original");
+        sqlx::query("UPDATE payout_invoice_intents SET document_json='changed' WHERE id='probe'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(signing_intent(&pool, "probe").await.is_err());
+        sqlx::query("INSERT INTO payout_callback_requests VALUES('probe',NULL)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(signing_callback(&pool, "probe", "signed").await.is_err());
+        sqlx::query("UPDATE payout_fee_probe_callbacks SET raw_zap=NULL WHERE intent_id='probe'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        signing_callback(&pool, "probe", "signed").await.unwrap();
+        sqlx::query("INSERT INTO payout_fee_probe_intents VALUES('oversized',?)")
+            .bind("x".repeat(131073))
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(signing_intent(&pool, "oversized").await.is_err());
         pool.close().await;
     }
 }

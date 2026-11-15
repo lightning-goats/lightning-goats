@@ -361,3 +361,27 @@ adoption/resume flags remain false. Exact-source/native CI and actual backup-onl
 host qualification passed in the [recovery primitives checkpoint](../testing/cyberherd-recovery-primitives-20261114.md).
 The corrected operator remains a separate protected candidate; the installed
 operator and live services were not replaced.
+
+
+## Fee-discovery signing correlations — 2026-11-15
+
+A live payout snapshot exposed a reader defect: an unpromoted fee-probe signing
+intent is a valid retained record, but the cross-journal verifier looked only in
+`payout_invoice_intents`. Fee rounds that were replaced before execution, and
+requests awaiting invoices, remain in `payout_fee_probe_intents`. The original
+maintenance attempt refused before program replacement; unchanged original
+services resumed, and both incomplete copies remain unaccepted.
+
+The reader now correlates signer intents/results against either original table.
+A promoted ID present in both must have identical bounded document bytes. Both
+callback tables are checked; non-null signed requests must match the exact broker
+result, and promoted callback copies must agree even when ordinary fallback is
+recorded. A valid unused signature is not payment evidence. Schema-8 snapshots
+without fee-probe tables retain their original lookup. Missing, conflicting and
+oversized originals remain errors. No schema, journal or accepted-backup manifest
+is rewritten, and no financial/restore/resumption authority is added.
+
+A qualified corrected native verifier must take and verify a fresh snapshot under
+normal four-writer quiescence; an old reader's refusal is retained as evidence,
+not bypassed by promoting its incomplete copy. This is a current-state retention
+repair, separate from external recovery adoption and independent history exports.

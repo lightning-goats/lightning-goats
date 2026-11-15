@@ -4,10 +4,7 @@ use anyhow::{Context, Result, bail};
 use tokio::time::sleep;
 
 use crate::{
-    config::RuntimeMode,
-    ledger::LedgerStore,
-    nostr::NakClient,
-    presentation::MessageRenderer,
+    config::RuntimeMode, ledger::LedgerStore, nostr::NakClient, presentation::MessageRenderer,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

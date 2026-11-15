@@ -525,7 +525,10 @@ mod routing_tests {
             fail: Arc::new(Mutex::new(false)),
         };
         let router = Router::with_source(source).unwrap();
-        let lists = router.lists(std::slice::from_ref(&person), 200).await.unwrap();
+        let lists = router
+            .lists(std::slice::from_ref(&person), 200)
+            .await
+            .unwrap();
         assert_eq!(lists[&person].event().event().id, expected.event().id);
     }
     #[test]

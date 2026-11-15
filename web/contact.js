@@ -10,7 +10,7 @@
         try {
             const url = new URL(value);
             return url.protocol === "wss:" && !url.username && !url.password && !url.hash &&
-                (!url.port || url.port === "443") && url.hostname.includes(".") &&
+                (!url.port || url.port === "443") && url.hostname !== "sendit.nosflare.com" && url.hostname.includes(".") &&
                 !/^(?:[0-9.]+|\[.*\]|.*\.(?:local|localhost))$/i.test(url.hostname);
         } catch (_) { return false; }
     }

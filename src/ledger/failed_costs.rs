@@ -16,7 +16,10 @@ impl LedgerStore {
         crate::payout::cost_recovery::existing_private_database(database_url)?;
         let pool = crate::sqlite::connect_existing_durable(database_url, 1).await?;
         crate::sqlite::require_current_schema(&pool, &super::MIGRATOR).await?;
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            publication: Default::default(),
+        })
     }
     /// Produce correlation fields only. Null cost/evidence and false review
     /// acknowledgement make this deliberately unusable as an approval.

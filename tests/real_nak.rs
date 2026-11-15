@@ -3,10 +3,14 @@
 #[path = "support/zap_receipt.rs"]
 mod receipt_fixture;
 
+#[path = "support/publication.rs"]
+mod publication_fixture;
+use publication_fixture::run_outbox_publisher;
+
 use lightning_goats::{
     config::{NostrConfig, RuntimeMode},
     ledger::LedgerStore,
-    messaging::{process_next_message, run_outbox_publisher},
+    messaging::process_next_message,
     nostr::{NakClient, SignedNostrEvent},
     presentation::MessageRenderer,
 };

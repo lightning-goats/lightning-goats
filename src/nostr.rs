@@ -48,6 +48,7 @@ pub struct NakClient {
     client_key: Arc<Zeroizing<String>>,
     relays: Vec<String>,
     signing_lock: Arc<tokio::sync::Mutex<()>>,
+    relay_router: Arc<tokio::sync::Mutex<Option<Arc<crate::relay_routing::Router>>>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -62,6 +63,13 @@ pub struct SignedNostrEvent {
 }
 
 impl NakClient {
+    pub fn project_pubkey(&self) -> &str {
+        &self.project_pubkey
+    }
+    pub fn publication_relays(&self) -> &[String] {
+        &self.relays
+    }
+
     /// Typed protocol callers freeze all unsigned fields before signing. Native
     /// verification prevents a signer/tool response from changing that intent.
     pub(crate) async fn sign_protocol_event(
@@ -71,7 +79,7 @@ impl NakClient {
         content: &str,
         tags: Vec<Vec<String>>,
     ) -> Result<crate::nostr_event::VerifiedEvent> {
-        if !matches!(kind, 1 | 1311 | 9734 | 9735)
+        if !matches!(kind, 1 | 1311 | 9734 | 9735 | 10002)
             || created_at > i64::MAX as u64
             || content.len() > 32_768
             || tags.len() > 1024
@@ -108,6 +116,31 @@ impl NakClient {
         }
         crate::nostr_event::VerifiedEvent::verify(event)
             .map_err(|_| anyhow::anyhow!("remote signer returned an invalid protocol signature"))
+    }
+
+    /// Best-effort NIP-65 attachment on member-note destinations. It reuses a
+    /// verified existing signature and never changes or delays accounting.
+    pub(crate) async fn advertise_on(&self, relay: &str) {
+        let router = {
+            let mut cached = self.relay_router.lock().await;
+            if cached.is_none() {
+                *cached = crate::relay_routing::Router::new(&self.relays)
+                    .ok()
+                    .map(Arc::new);
+            }
+            let Some(router) = cached.as_ref().cloned() else {
+                return;
+            };
+            router
+        };
+        let Ok(now) = crate::cyberherd::calendar::now() else {
+            return;
+        };
+        if let Ok(lists) = router.lists(&[self.project_pubkey.clone()], now).await
+            && let Some(list) = lists.get(&self.project_pubkey)
+        {
+            let _ = crate::zap_receipts::publish_protocol_event(list.event(), relay).await;
+        }
     }
 
     pub async fn sign_zap_receipt(
@@ -154,6 +187,7 @@ impl NakClient {
             project_pubkey: config.bunker_pubkey.to_ascii_lowercase(),
             client_key: Arc::new(Zeroizing::new(client_key)),
             relays: config.relays.clone(),
+            relay_router: Arc::new(tokio::sync::Mutex::new(None)),
             signing_lock: Arc::new(tokio::sync::Mutex::new(())),
         })
     }

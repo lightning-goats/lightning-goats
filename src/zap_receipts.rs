@@ -10,7 +10,7 @@ use tokio_tungstenite::tungstenite::Message;
 use crate::{ledger::LedgerStore, nostr::NakClient, nostr_event::VerifiedEvent};
 
 pub async fn publish_protocol_event(event: &VerifiedEvent, relay: &str) -> Result<()> {
-    if !matches!(event.event().kind, 1 | 1311 | 9735) {
+    if !matches!(event.event().kind, 1 | 1311 | 9735 | 10002) {
         bail!("this event kind cannot be published by the protocol outbox");
     }
     let mut socket = crate::public_network::connect_relay(relay).await?;

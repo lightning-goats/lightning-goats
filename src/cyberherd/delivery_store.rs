@@ -75,13 +75,64 @@ impl Store {
         tx.commit().await?;
         Ok(())
     }
+    /// Discover routing before taking the write transaction. Freeze the same
+    /// source sequence only; another worker advancing the cursor causes a retry.
+    pub async fn queue_next_routed_delivery<Q: crate::cyberherd::relay::Query>(
+        &self,
+        owner: &str,
+        base: &[String],
+        router: &crate::relay_routing::Router<Q>,
+        now: i64,
+    ) -> Result<bool> {
+        let mut tx = self.pool.begin().await?;
+        let row = sqlx::query("SELECT e.* FROM domain_events e JOIN delivery_cursors c ON c.owner=e.owner WHERE e.owner=? AND e.seq>c.through ORDER BY e.seq LIMIT 1")
+            .bind(owner).fetch_optional(&mut *tx).await?;
+        let Some(row) = row else { return Ok(false) };
+        let event = super::StoredEvent {
+            seq: row.try_get("seq")?,
+            owner: row.try_get("owner")?,
+            cycle: row.try_get("cycle")?,
+            source_id: row.try_get("source_id")?,
+            event_type: row.try_get("event_type")?,
+            snapshot_json: row.try_get("snapshot_json")?,
+        };
+        let catalog = load_catalog(&mut tx, owner).await?;
+        let message = delivery::render(&event, &catalog)?;
+        tx.commit().await?;
+        let (content, tags) = message
+            .as_ref()
+            .map(|m| {
+                let tags: Vec<_> = std::iter::once(&m.member)
+                    .chain(m.additional_members.iter())
+                    .map(|p| vec!["p".into(), p.clone()])
+                    .collect();
+                (m.nostr.as_str(), tags)
+            })
+            .unwrap_or(("", vec![]));
+        let relays = router
+            .public_interaction_relays(owner, content, &tags, base, now)
+            .await?;
+        self.queue_next_delivery_expected(owner, &relays, now, Some(event.seq))
+            .await
+    }
+
     pub async fn queue_next_delivery(
         &self,
         owner: &str,
         relays: &[String],
         now: i64,
     ) -> Result<bool> {
-        let relays = crate::payout::invoice::receipt_relays(relays)?;
+        self.queue_next_delivery_expected(owner, relays, now, None)
+            .await
+    }
+    async fn queue_next_delivery_expected(
+        &self,
+        owner: &str,
+        relays: &[String],
+        now: i64,
+        expected: Option<i64>,
+    ) -> Result<bool> {
+        let relays = crate::relay_routing::public_relays(relays)?;
         if now < 0 {
             bail!("negative delivery time");
         }
@@ -97,6 +148,9 @@ impl Store {
                 .fetch_optional(&mut *tx)
                 .await?;
         let Some(row) = row else { return Ok(false) };
+        if expected.is_some_and(|seq| row.get::<i64, _>("seq") != seq) {
+            return Ok(false);
+        }
         let event = super::StoredEvent {
             seq: row.try_get("seq")?,
             owner: row.try_get("owner")?,

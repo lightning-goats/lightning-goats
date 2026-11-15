@@ -4,10 +4,7 @@ use anyhow::{Context, Result, bail};
 use tokio::time::sleep;
 
 use crate::{
-    config::RuntimeMode,
-    ledger::LedgerStore,
-    nostr::{NakClient, SignedNostrEvent},
-    presentation::MessageRenderer,
+    config::RuntimeMode, ledger::LedgerStore, nostr::NakClient, presentation::MessageRenderer,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,49 +102,144 @@ pub async fn run_message_processor(
     }
 }
 
+pub trait PublicationTransport {
+    fn publish(
+        &self,
+        event: &crate::nostr_event::VerifiedEvent,
+        relay: &str,
+    ) -> impl std::future::Future<Output = Result<()>> + Send;
+}
+pub struct ProtocolTransport;
+impl PublicationTransport for ProtocolTransport {
+    async fn publish(&self, event: &crate::nostr_event::VerifiedEvent, relay: &str) -> Result<()> {
+        crate::zap_receipts::publish_protocol_event(event, relay).await
+    }
+}
 pub async fn run_outbox_publisher(ledger: LedgerStore, nak: NakClient) -> Result<()> {
+    let base = nak.publication_relays().to_vec();
+    let router = crate::relay_routing::Router::new(&base)?;
+    run_publication_worker(ledger, nak, router, base, ProtocolTransport).await
+}
+/// Dependency-injected transport permits isolated protocol qualification. The
+/// production entry point always uses pinned public networking above.
+pub async fn run_publication_worker<
+    Q: crate::cyberherd::relay::Query + Send + Sync,
+    T: PublicationTransport + Send + Sync + 'static,
+>(
+    ledger: LedgerStore,
+    nak: NakClient,
+    router: crate::relay_routing::Router<Q>,
+    base: Vec<String>,
+    transport: T,
+) -> Result<()> {
+    let mut metadata_checked = 0i64;
+    let mut author_metadata = None;
+    let transport = std::sync::Arc::new(transport);
+    let mut publications = tokio::task::JoinSet::new();
     loop {
-        let Some(entry) = ledger.next_outbox_entry().await? else {
-            sleep(Duration::from_millis(500)).await;
-            continue;
-        };
-
-        let event: SignedNostrEvent = match serde_json::from_str(&entry.signed_event_json) {
-            Ok(event) => event,
-            Err(error) => {
-                ledger
-                    .mark_outbox_failed(
-                        &entry.event_id,
-                        &format!("invalid signed event JSON: {error}"),
-                    )
-                    .await?;
-                tracing::error!(
-                    event_id = %entry.event_id,
-                    "persisted Nostr outbox row is invalid; publication blocked"
-                );
-                sleep(publish_retry_delay(entry.attempts)).await;
-                continue;
+        let now = crate::cyberherd::calendar::now()?;
+        if now.saturating_sub(metadata_checked) >= 900 {
+            match advertise_relay_list(&ledger, &nak, &router, now).await {
+                Ok(event) => author_metadata = Some(event),
+                Err(_) => tracing::warn!(
+                    "relay-list advertisement retained for retry; payment publication continues"
+                ),
             }
-        };
-
-        match nak.publish_signed(&event).await {
-            Ok(()) => {
-                ledger.mark_outbox_published(&entry.event_id).await?;
-                tracing::info!(event_id = %entry.event_id, "published persisted Nostr event");
-            }
-            Err(error) => {
-                ledger
-                    .mark_outbox_failed(&entry.event_id, &error.to_string())
-                    .await?;
-                tracing::warn!(
-                    %error,
-                    event_id = %entry.event_id,
-                    "Nostr publication failed; exact signed event will be retried"
-                );
-                sleep(publish_retry_delay(entry.attempts)).await;
+            metadata_checked = now;
+        }
+        if let Some(entry) = ledger.unplanned_publication().await? {
+            match crate::nostr_event::VerifiedEvent::from_json(&entry.signed_event_json) {
+                Ok(event) if matches!(event.event().kind, 1 | 10002) => {
+                    let relays = router
+                        .public_interaction_relays(
+                            nak.project_pubkey(),
+                            &event.event().content,
+                            &event.event().tags,
+                            &base,
+                            crate::cyberherd::calendar::now()?,
+                        )
+                        .await?;
+                    if event.event().kind != 10002
+                        && let Some(metadata) = &author_metadata
+                    {
+                        ledger.route_relay_metadata(metadata, &relays).await?;
+                    }
+                    ledger.plan_publication(&entry.event_id, &relays).await?;
+                }
+                _ => {
+                    ledger
+                        .mark_outbox_failed(&entry.event_id, "invalid signed public event")
+                        .await?;
+                    sleep(publish_retry_delay(entry.attempts)).await;
+                }
             }
         }
+        while publications.len() < 4 {
+            let Some(job) = ledger
+                .reserve_publication(crate::cyberherd::calendar::now()?)
+                .await?
+            else {
+                break;
+            };
+            let transport = transport.clone();
+            let project = nak.project_pubkey().to_owned();
+            publications.spawn(async move {
+                let accepted = match crate::nostr_event::VerifiedEvent::from_json(&job.signed_json)
+                {
+                    Ok(event)
+                        if event.event().id == job.event_id && event.event().pubkey == project =>
+                    {
+                        transport.publish(&event, &job.relay).await.is_ok()
+                    }
+                    _ => false,
+                };
+                (job, accepted)
+            });
+        }
+        if publications.is_empty() {
+            sleep(Duration::from_millis(100)).await;
+        } else if let Ok(Some(Ok((job, accepted)))) =
+            tokio::time::timeout(Duration::from_millis(100), publications.join_next()).await
+        {
+            ledger
+                .finish_publication(&job, accepted, crate::cyberherd::calendar::now()?)
+                .await?;
+        }
     }
+}
+
+async fn advertise_relay_list<Q: crate::cyberherd::relay::Query>(
+    ledger: &LedgerStore,
+    nak: &NakClient,
+    router: &crate::relay_routing::Router<Q>,
+    now: i64,
+) -> Result<crate::nostr_event::VerifiedEvent> {
+    let lists = router.lists(&[nak.project_pubkey().into()], now).await?;
+    // Missing metadata never authorizes erasing the author's existing read policy.
+    let current = lists
+        .get(nak.project_pubkey())
+        .context("project relay list unavailable")?;
+    if current.event().event().created_at >= now as u64 {
+        return Ok(current.event().clone());
+    }
+    let Some(tags) =
+        crate::relay_routing::advertised_write_tags(Some(current), nak.publication_relays())?
+    else {
+        return Ok(current.event().clone());
+    };
+    let intent = ledger
+        .relay_metadata_intent(nak.project_pubkey(), &current.event().event().id, tags, now)
+        .await?;
+    if ledger.relay_metadata_signed(&intent).await?.is_none() {
+        let signed = nak
+            .sign_protocol_event(10002, intent.created_at, "", intent.tags.clone())
+            .await?;
+        ledger.retain_relay_metadata(&intent, &signed).await?;
+    }
+    ledger
+        .relay_metadata_signed(&intent)
+        .await?
+        .context("relay metadata signature absent")
 }
 
 fn publish_retry_delay(previous_attempts: u64) -> Duration {

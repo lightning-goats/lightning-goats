@@ -82,7 +82,7 @@ impl Config {
                     nak_path: signer.nak_path.clone(),
                     nak_config_path: state.join("nak"),
                     bunker_pubkey: owner.into(),
-                    relays: vec![],
+                    relays: self.relays.clone(),
                     bunker_relays: Some(signer.bunker_relays.clone()),
                 },
                 key.to_string(),
@@ -94,6 +94,7 @@ impl Config {
         let generator_store = store.clone();
         let generator_owner = owner.to_owned();
         let relays = self.relays.clone();
+        let router = crate::relay_routing::Router::new(&relays)?;
         tasks.spawn(async move {
             let mut ticks = tokio::time::interval(Duration::from_millis(millis));
             ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -101,7 +102,12 @@ impl Config {
                 ticks.tick().await;
                 let result = async {
                     generator_store
-                        .queue_next_delivery(&generator_owner, &relays, calendar::now()?)
+                        .queue_next_routed_delivery(
+                            &generator_owner,
+                            &relays,
+                            &router,
+                            calendar::now()?,
+                        )
                         .await?;
                     generator_store
                         .resolve_legacy_delivery(&generator_owner)

@@ -181,9 +181,25 @@ pub trait Query {
         &'a self,
         filters: &'a [Filter],
     ) -> impl std::future::Future<Output = Result<ReadBatch>> + Send + 'a;
+    /// Optional bounded metadata discovery using public NIP-19/p-tag hints.
+    fn query_hints<'a>(
+        &'a self,
+        _relays: &'a [String],
+        _filters: &'a [Filter],
+    ) -> impl std::future::Future<Output = Result<ReadBatch>> + Send + 'a {
+        std::future::ready(Ok(ReadBatch {
+            events: vec![],
+            completed_relays: 0,
+            failed_relays: 0,
+            saturated: false,
+        }))
+    }
 }
 
 impl Query for Reader {
+    async fn query_hints(&self, relays: &[String], filters: &[Filter]) -> Result<ReadBatch> {
+        Reader::new(relays.to_vec())?.query(filters).await
+    }
     async fn query(&self, filters: &[Filter]) -> Result<ReadBatch> {
         Reader::query(self, filters).await
     }

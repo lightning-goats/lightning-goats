@@ -223,7 +223,10 @@ impl LedgerStore {
         };
         check().context("before offline retirement")?;
         let pool = crate::sqlite::connect_existing_durable(database_url, 1).await?;
-        let store = Self { pool };
+        let store = Self {
+            pool,
+            publication: Default::default(),
+        };
         let result = async {
             crate::sqlite::require_current_schema(&store.pool, &super::MIGRATOR).await?;
             store

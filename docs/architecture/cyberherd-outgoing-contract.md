@@ -63,9 +63,10 @@ No additional account/profile scope should be guessed before checking its endpoi
 Persist the row's exact planned destination/amount/fee ceiling, callback terms,
 invoice hash and unique source identity. When Nostr is supported, the signing
 broker must freeze the exact 9734 bytes before the callback; never publish it to a
-relay or downgrade on failure. Ordinary fallback remains explicitly recorded.
+relay. The [2026-11-15 zap-preferred policy](cyberherd-outgoing-invoices.md)
+allows recorded ordinary fallback before payment execution.
 Revalidate public-network boundaries for each callback and verify mainnet BOLT11
-signature, exact amount/description hash and expiry before requesting any quote.
+signature, exact amount/applicable description commitment and expiry before requesting any quote.
 
 Persist a quote-request intent before POST. A lost quote response cannot authorize
 execution using only a duplicate quote ID: its fees/amount/expiry remain unverified.

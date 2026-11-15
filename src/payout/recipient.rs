@@ -16,9 +16,14 @@ pub struct Recipient {
     pub min_msat: u64,
     pub max_msat: u64,
     pub metadata_hash: String,
-    /// None records ordinary-Lightning fallback; malformed advertised support
-    /// is an error, never grounds to downgrade silently.
+    /// None records ordinary Lightning when valid zap support is unavailable.
     pub receipt_pubkey: Option<String>,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub comment_allowed: u64,
+}
+
+fn is_zero(value: &u64) -> bool {
+    *value == 0
 }
 
 #[derive(Deserialize)]
@@ -32,6 +37,8 @@ struct Wire {
     metadata: String,
     allows_nostr: Option<bool>,
     nostr_pubkey: Option<String>,
+    #[serde(default)]
+    comment_allowed: u64,
 }
 
 pub fn address_url(address: &str) -> Result<String> {
@@ -99,11 +106,8 @@ impl Recipient {
             bail!("ambiguous LNURL metadata");
         }
         let receipt_pubkey = if wire.allows_nostr == Some(true) {
-            let key = wire
-                .nostr_pubkey
-                .context("advertised Nostr support lacks receipt key")?;
-            crate::nostr_event::validate_public_key(&key)?;
-            Some(key)
+            wire.nostr_pubkey
+                .filter(|key| crate::nostr_event::validate_public_key(key).is_ok())
         } else {
             None
         };
@@ -114,6 +118,7 @@ impl Recipient {
             max_msat: wire.max_sendable,
             metadata_hash: hex::encode(Sha256::digest(wire.metadata.as_bytes())),
             receipt_pubkey,
+            comment_allowed: wire.comment_allowed.min(256),
         };
         result.validate(address)?;
         Ok(result)
@@ -218,7 +223,6 @@ mod tests {
                 "metadata",
                 json!("[[\"text/plain\",\"a\"],[\"text/plain\",\"b\"]]"),
             ),
-            ("nostrPubkey", json!("00".repeat(32))),
         ] {
             let mut rejected = success.clone();
             rejected[field] = value;
@@ -250,7 +254,6 @@ mod tests {
                 "callback",
                 json!("https://pay.example.com/?nostr=already-selected"),
             ),
-            ("allowsNostr", json!(true)),
         ] {
             let mut w = wire();
             w[field] = value;
@@ -269,7 +272,19 @@ mod tests {
             Some(public)
         );
         w["nostrPubkey"] = json!("00".repeat(32));
-        assert!(Recipient::parse("a@example.com", &serde_json::to_vec(&w).unwrap()).is_err());
+        assert!(
+            Recipient::parse("a@example.com", &serde_json::to_vec(&w).unwrap())
+                .unwrap()
+                .receipt_pubkey
+                .is_none()
+        );
+        w.as_object_mut().unwrap().remove("nostrPubkey");
+        assert!(
+            Recipient::parse("a@example.com", &serde_json::to_vec(&w).unwrap())
+                .unwrap()
+                .receipt_pubkey
+                .is_none()
+        );
         let duplicate =
             serde_json::to_string(&wire())
                 .unwrap()

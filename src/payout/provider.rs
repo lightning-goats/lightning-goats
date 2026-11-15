@@ -47,12 +47,21 @@ impl QuoteDocument {
         {
             bail!("invalid committed payout quote intent");
         }
-        let invoice = crate::bolt11::verify(
-            &self.encoded,
-            self.amount_sats * 1000,
-            &self.payment_hash,
-            &self.description_hash,
-        )
+        let invoice = if self.nip57 {
+            crate::bolt11::verify(
+                &self.encoded,
+                self.amount_sats * 1000,
+                &self.payment_hash,
+                &self.description_hash,
+            )
+        } else {
+            crate::bolt11::verify_payout(
+                &self.encoded,
+                self.amount_sats * 1000,
+                &self.payment_hash,
+                &self.description_hash,
+            )
+        }
         .map_err(|_| anyhow::anyhow!("committed quote invoice is invalid"))?;
         if invoice.expires_at().map(|at| at.as_secs()) != Some(self.invoice_expires_at) {
             bail!("quote invoice expiry changed");

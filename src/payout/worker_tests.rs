@@ -359,6 +359,7 @@ struct FeeInvoices {
     mock: Arc<Mutex<Mock>>,
     calls: AtomicUsize,
     nostr: bool,
+    plain: bool,
 }
 impl InvoiceFetcher for FeeInvoices {
     async fn fetch(
@@ -367,12 +368,33 @@ impl InvoiceFetcher for FeeInvoices {
     ) -> anyhow::Result<crate::payout::invoice::ValidatedInvoice> {
         let n = self.calls.fetch_add(1, Ordering::SeqCst);
         assert_eq!(request.raw_zap().is_some(), self.nostr);
-        let encoded = crate::test_invoices::invoice_with_payment_hash(
-            request.amount_sats() * 1000,
-            request.description_hash(),
-            std::time::Duration::from_secs(now().try_into().unwrap()),
-            [u8::try_from(n + 20).unwrap(); 32],
-        );
+        let encoded = if self.plain {
+            use bitcoin::{
+                hashes::{Hash as _, sha256},
+                secp256k1::{Secp256k1, SecretKey},
+            };
+            let key = SecretKey::from_slice(&[42; 32]).unwrap();
+            lightning_invoice::InvoiceBuilder::new(lightning_invoice::Currency::Bitcoin)
+                .amount_milli_satoshis(request.amount_sats() * 1000)
+                .description("CyberHerd Treats!".into())
+                .payment_hash(
+                    sha256::Hash::from_slice(&[u8::try_from(n + 20).unwrap(); 32]).unwrap(),
+                )
+                .payment_secret(lightning_invoice::PaymentSecret([0x44; 32]))
+                .duration_since_epoch(std::time::Duration::from_secs(now().try_into().unwrap()))
+                .expiry_time(std::time::Duration::from_secs(300))
+                .min_final_cltv_expiry_delta(144)
+                .build_signed(|hash| Secp256k1::new().sign_ecdsa_recoverable(hash, &key))
+                .unwrap()
+                .to_string()
+        } else {
+            crate::test_invoices::invoice_with_payment_hash(
+                request.amount_sats() * 1000,
+                request.description_hash(),
+                std::time::Duration::from_secs(now().try_into().unwrap()),
+                [u8::try_from(n + 20).unwrap(); 32],
+            )
+        };
         self.mock.lock().unwrap().invoice = encoded.clone();
         request.validate_invoice(&encoded, now())
     }
@@ -380,12 +402,17 @@ impl InvoiceFetcher for FeeInvoices {
 
 #[tokio::test]
 async fn inclusive_worker_deducts_actual_fee_promotes_once_and_recovers_original_execution() {
-    for nostr in [false, true] {
+    for (nostr, plain, with_broker) in [
+        (false, false, false),
+        (true, false, true),
+        (true, true, true),
+        (true, false, false),
+    ] {
         let w = unstarted_with_options(nostr, true).await;
         let (client, active) = core(&w, RuntimeMode::Active).await;
         let mut engine = worker(&w, client, w.store.clone());
         let count = Arc::new(AtomicUsize::new(0));
-        let broker = if nostr {
+        let broker = if nostr && with_broker {
             let (uid, gid) = self_credentials().unwrap();
             let socket = w.f.root.path().join("inclusive-signer.sock");
             let policy = signer::Policy {
@@ -426,7 +453,8 @@ async fn inclusive_worker_deducts_actual_fee_promotes_once_and_recovers_original
         let invoices = FeeInvoices {
             mock: Arc::clone(&w.mock),
             calls: AtomicUsize::new(0),
-            nostr,
+            nostr: nostr && with_broker,
+            plain,
         };
         assert_eq!(tick(&engine).await, Step::InvoiceIntent);
         assert_eq!(tick(&engine).await, Step::InvoiceSigned);
@@ -485,6 +513,7 @@ async fn inclusive_worker_deducts_actual_fee_promotes_once_and_recovers_original
             .unwrap()
             .unwrap();
         assert_eq!(promoted.id(), original.id());
+        assert_eq!(promoted.0.nip57, nostr && with_broker && !plain);
         w.mock.lock().unwrap().lose_execute = true;
         tokio::time::sleep(std::time::Duration::from_millis(600)).await;
         assert!(engine.tick().await.is_err());
@@ -503,7 +532,10 @@ async fn inclusive_worker_deducts_actual_fee_promotes_once_and_recovers_original
         assert_eq!(engine.store.held_sats().await.unwrap(), 0);
         assert_eq!(tick(&engine).await, Step::Idle);
         assert_eq!(invoices.calls.load(Ordering::SeqCst), 2);
-        assert_eq!(count.load(Ordering::SeqCst), if nostr { 2 } else { 0 });
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            if nostr && with_broker { 2 } else { 0 }
+        );
         {
             let mock = w.mock.lock().unwrap();
             assert_eq!(mock.quotes.len(), 2);

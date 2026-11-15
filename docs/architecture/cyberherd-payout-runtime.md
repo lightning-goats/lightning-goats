@@ -36,8 +36,9 @@ The trusted payout UID still attests the original payee/intent. This broker does
 not claim independent membership or bank-reservation verification. It enforces
 the fixed event shape, project identity, configured receipt relays, per-invoice
 net ceiling and bounded new-intent admission per hour. The raw request travels
-only to the recipient callback. A supported recipient never silently falls back
-to ordinary Lightning after signing or callback failure.
+only to the recipient callback. The operator-approved [zap-preferred policy](cyberherd-outgoing-invoices.md) permits
+ordinary Lightning when signing or zap invoicing fails, retaining the same
+reservation/member identities and validated invoice mode.
 
 ## Journal-driven work
 
@@ -105,7 +106,7 @@ Temporary-database tests use actual Unix framing and loopback HTTP with syntheti
 credentials. They cover broker unsigned/signed restart recovery, changed-intent
 and signature rejection, identity/rate/zero policy, wrong peers, denied arbitrary
 signing, ordered reserved/no-payout export, worker lost-execute recovery, disabled
-execution recovery and the supported NIP-57 path without downgrade. Non-applying
+execution recovery and the supported NIP-57 path and ordinary fallback. Non-applying
 CLI fixtures check disabled startup, secret-field rejection and separate roles.
 Exact results belong in a source-pinned checkpoint after CI completes.
 The [runtime checkpoint](../testing/cyberherd-runtime-checkpoint-20261110.md)

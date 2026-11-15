@@ -137,7 +137,7 @@ pub struct Request {
 impl Request {
     pub(crate) fn restore(intent: Intent, raw_zap: Option<String>) -> Result<Self> {
         let description_hash = match (intent.unsigned_zap()?, &raw_zap) {
-            (None, None) => intent.0.recipient.metadata_hash.clone(),
+            (_, None) => intent.0.recipient.metadata_hash.clone(),
             (Some(expected), Some(raw)) => {
                 if raw.len() > crate::zap::MAX_ZAP_REQUEST_BYTES {
                     bail!("payout zap exceeds bound");
@@ -155,7 +155,7 @@ impl Request {
                 }
                 hex::encode(Sha256::digest(raw.as_bytes()))
             }
-            _ => bail!("supported recipient requires its exact signed zap; no downgrade"),
+            _ => bail!("recipient does not support the supplied zap"),
         };
         Ok(Self {
             intent,
@@ -181,12 +181,33 @@ impl Request {
             query.push(("nostr".into(), raw.clone()));
             query.push(("lnurl".into(), self.intent.lnurl()?));
         }
+        if self.intent.0.recipient.comment_allowed > 0 {
+            let memo = "CyberHerd Treats!"
+                .chars()
+                .take(self.intent.0.recipient.comment_allowed.min(256) as usize)
+                .collect::<String>();
+            query.push(("comment".into(), memo));
+        }
         Ok(query)
     }
     pub async fn fetch(&self) -> Result<ValidatedInvoice> {
+        let first = self.fetch_query(&self.query()?).await;
+        if first.is_ok() || self.raw_zap.is_none() {
+            return first;
+        }
+        // No invoice/quote/execute was retained: retry the same recipient and
+        // frozen amount as ordinary Lightning, without changing the signed zap.
+        let ordinary: Vec<_> = self
+            .query()?
+            .into_iter()
+            .filter(|(key, _)| key == "amount" || key == "comment")
+            .collect();
+        self.fetch_query(&ordinary).await
+    }
+    async fn fetch_query(&self, query: &[(String, String)]) -> Result<ValidatedInvoice> {
         let raw = public_network::get_json_query(
             &self.intent.0.recipient.callback,
-            &self.query()?,
+            query,
             MAX_INVOICE_RESPONSE,
         )
         .await
@@ -219,12 +240,37 @@ impl Request {
             .parse()
             .map_err(|_| anyhow::anyhow!("invalid outgoing BOLT11 invoice"))?;
         let payment_hash = parsed.payment_hash().to_string();
-        let parsed = crate::bolt11::verify(
-            encoded,
-            self.intent.0.net_sats * 1000,
-            &payment_hash,
-            &self.description_hash,
-        )
+        use lightning_invoice::Bolt11InvoiceDescriptionRef;
+        let (description_hash, nip57) = match parsed.description() {
+            Bolt11InvoiceDescriptionRef::Hash(h) if h.0.to_string() == self.description_hash => {
+                (self.description_hash.clone(), self.raw_zap.is_some())
+            }
+            Bolt11InvoiceDescriptionRef::Hash(h)
+                if h.0.to_string() == self.intent.0.recipient.metadata_hash =>
+            {
+                (self.intent.0.recipient.metadata_hash.clone(), false)
+            }
+            Bolt11InvoiceDescriptionRef::Direct(text) => (
+                hex::encode(Sha256::digest(text.to_string().as_bytes())),
+                false,
+            ),
+            _ => bail!("invoice description hash matches neither zap nor recipient metadata"),
+        };
+        let parsed = if nip57 {
+            crate::bolt11::verify(
+                encoded,
+                self.intent.0.net_sats * 1000,
+                &payment_hash,
+                &description_hash,
+            )
+        } else {
+            crate::bolt11::verify_payout(
+                encoded,
+                self.intent.0.net_sats * 1000,
+                &payment_hash,
+                &description_hash,
+            )
+        }
         .map_err(|_| anyhow::anyhow!("outgoing invoice contradicts frozen request"))?;
         let created = parsed.duration_since_epoch().as_secs();
         let expires_at = parsed
@@ -239,7 +285,8 @@ impl Request {
             intent_id: self.intent.id(),
             encoded: encoded.into(),
             payment_hash,
-            description_hash: self.description_hash.clone(),
+            description_hash,
+            nip57,
             amount_sats: self.intent.0.net_sats,
             expires_at,
             node_pubkey: parsed.recover_payee_pub_key().to_string(),
@@ -257,11 +304,17 @@ pub struct ValidatedInvoice {
     amount_sats: u64,
     expires_at: u64,
     node_pubkey: String,
+    // Derived again from retained signed bytes on every restore; preserve legacy JSON.
+    #[serde(skip)]
+    nip57: bool,
 }
 
 impl ValidatedInvoice {
     pub fn intent_id(&self) -> Uuid {
         self.intent_id
+    }
+    pub(crate) fn nip57(&self) -> bool {
+        self.nip57
     }
     pub fn encoded(&self) -> &str {
         &self.encoded
@@ -467,11 +520,127 @@ mod tests {
         }
     }
 
+    fn plain_invoice(amount: u64) -> String {
+        use bitcoin::{
+            hashes::{Hash as _, sha256},
+            secp256k1::{Secp256k1, SecretKey},
+        };
+        let key = SecretKey::from_slice(&[42; 32]).unwrap();
+        lightning_invoice::InvoiceBuilder::new(lightning_invoice::Currency::Bitcoin)
+            .amount_milli_satoshis(amount)
+            .description("CyberHerd Treats!".into())
+            .payee_pub_key(bitcoin::secp256k1::PublicKey::from_secret_key(
+                &Secp256k1::new(),
+                &key,
+            ))
+            .payment_hash(sha256::Hash::from_slice(&[0x22; 32]).unwrap())
+            .payment_secret(lightning_invoice::PaymentSecret([0x44; 32]))
+            .duration_since_epoch(Duration::from_secs(1000))
+            .expiry_time(Duration::from_secs(300))
+            .min_final_cltv_expiry_delta(144)
+            .build_signed(|hash| Secp256k1::new().sign_ecdsa_recoverable(hash, &key))
+            .unwrap()
+            .to_string()
+    }
     #[test]
-    fn supported_zap_preserves_exact_signed_json_and_never_downgrades_or_changes_intent() {
+    fn zap_preference_accepts_valid_ordinary_invoices_without_fabricating_zap_support() {
         let i = intent(true);
         let raw = signed(&i);
-        assert!(Request::restore(i.clone(), None).is_err());
+        let request = Request::restore(i.clone(), Some(raw)).unwrap();
+        let plain = plain_invoice(5000);
+        let invoice = request.validate_invoice(&plain, 1000).unwrap();
+        assert!(!invoice.nip57());
+        assert_eq!(
+            invoice.description_hash(),
+            hex::encode(Sha256::digest(b"CyberHerd Treats!"))
+        );
+        assert!(
+            crate::bolt11::verify(
+                &plain,
+                5000,
+                invoice.payment_hash(),
+                invoice.description_hash()
+            )
+            .is_err()
+        );
+        assert!(
+            crate::bolt11::verify_payout(
+                &plain,
+                5000,
+                invoice.payment_hash(),
+                invoice.description_hash()
+            )
+            .is_ok()
+        );
+        assert!(
+            request
+                .validate_invoice(&plain_invoice(6000), 1000)
+                .is_err()
+        );
+        assert!(request.validate_invoice(&plain, 1271).is_err());
+        let parsed: lightning_invoice::Bolt11Invoice = plain.parse().unwrap();
+        let (original, _, _) = parsed.into_signed_raw().into_parts();
+        let key = bitcoin::secp256k1::SecretKey::from_slice(&[42; 32]).unwrap();
+        let mut testnet = original.clone();
+        testnet.hrp.currency = lightning_invoice::Currency::BitcoinTestnet;
+        let wrong_network = testnet
+            .sign(|hash| {
+                Ok::<_, std::convert::Infallible>(
+                    bitcoin::secp256k1::Secp256k1::new().sign_ecdsa_recoverable(hash, &key),
+                )
+            })
+            .unwrap()
+            .to_string();
+        assert!(request.validate_invoice(&wrong_network, 1000).is_err());
+        let wrong_key = bitcoin::secp256k1::SecretKey::from_slice(&[43; 32]).unwrap();
+        let wrong_signature = original
+            .sign(|hash| {
+                Ok::<_, std::convert::Infallible>(
+                    bitcoin::secp256k1::Secp256k1::new().sign_ecdsa_recoverable(hash, &wrong_key),
+                )
+            })
+            .unwrap()
+            .to_string();
+        assert!(request.validate_invoice(&wrong_signature, 1000).is_err());
+
+        let metadata = crate::test_invoices::invoice_at(
+            5000,
+            &i.0.recipient.metadata_hash,
+            Duration::from_secs(1000),
+        );
+        assert!(!request.validate_invoice(&metadata, 1000).unwrap().nip57());
+        let zap = crate::test_invoices::invoice_at(
+            5000,
+            request.description_hash(),
+            Duration::from_secs(1000),
+        );
+        assert!(request.validate_invoice(&zap, 1000).unwrap().nip57());
+        assert!(
+            serde_json::to_value(invoice)
+                .unwrap()
+                .get("nip57")
+                .is_none()
+        );
+    }
+    #[test]
+    fn comments_respect_recipient_advertised_limit_and_old_recipient_bytes() {
+        let mut i = intent(false);
+        let original = serde_json::to_string(&i.0.recipient).unwrap();
+        assert!(!original.contains("comment_allowed"));
+        i.0.recipient.comment_allowed = 8;
+        let request = Request::restore(i, None).unwrap();
+        assert!(
+            request
+                .query()
+                .unwrap()
+                .contains(&("comment".into(), "CyberHer".into()))
+        );
+    }
+    #[test]
+    fn supported_zap_prefers_exact_signed_json_and_allows_unsigned_fallback() {
+        let i = intent(true);
+        let raw = signed(&i);
+        assert!(Request::restore(i.clone(), None).is_ok());
         let request = Request::restore(i.clone(), Some(raw.clone())).unwrap();
         assert_eq!(request.raw_zap(), Some(raw.as_str()));
         assert_eq!(

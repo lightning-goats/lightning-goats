@@ -727,6 +727,34 @@ async fn manual_reset_discards_same_second_deferred_work_atomically_without_eras
         crate::cyberherd::store::Status::Deferred
     );
     let db = SqlitePool::connect(&url).await.unwrap();
+    let parked = crate::nostr_event::VerifiedEvent::verify(test_event(
+        4,
+        6,
+        120,
+        "",
+        vec![vec!["e".into(), "aa".repeat(32)]],
+    ))
+    .unwrap();
+    let parked_id = parked.event().id.clone();
+    crate::cyberherd::social::stage(&s, &key(1), parked, 120)
+        .await
+        .unwrap();
+    let parked_head = s.ingress_head(&key(1)).await.unwrap().unwrap();
+    s.settle_optional_social(
+        &key(1),
+        parked_head.seq,
+        &parked_id,
+        crate::cyberherd::ingress::SocialHold::ProfileUnavailable,
+        120,
+    )
+    .await
+    .unwrap();
+    assert!(
+        s.frozen_interaction(&key(1), &format!("nostr:{parked_id}"))
+            .await
+            .unwrap()
+            .is_none()
+    );
     sqlx::query("INSERT INTO ingress(owner,source_key,kind,payload_json) VALUES(?,'fixture-reset-social','social','{}')").bind(key(1)).execute(&db).await.unwrap();
     let reset = command(0, Action::Reset);
     let proof = auth(&reset, 3, 120);
@@ -742,6 +770,14 @@ async fn manual_reset_discards_same_second_deferred_work_atomically_without_eras
         .is_err()
     );
     assert_eq!(s.deferred(&key(1), 10).await.unwrap().len(), 1);
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT state FROM social_inbox WHERE event_id=?")
+            .bind(&parked_id)
+            .fetch_one(&db)
+            .await
+            .unwrap(),
+        "pending"
+    );
     assert_eq!(
         sqlx::query_scalar::<_, String>(
             "SELECT state FROM ingress WHERE source_key='fixture-reset-social'"
@@ -765,6 +801,27 @@ async fn manual_reset_discards_same_second_deferred_work_atomically_without_eras
     .unwrap();
     let reopened = Store::connect(&url).await.unwrap();
     assert!(reopened.deferred(&key(1), 10).await.unwrap().is_empty());
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT state FROM social_inbox WHERE event_id=?")
+            .bind(&parked_id)
+            .fetch_one(&db)
+            .await
+            .unwrap(),
+        "done"
+    );
+    assert!(
+        !reopened
+            .queue_optional_social_retry(&key(1), 720)
+            .await
+            .unwrap()
+    );
+    assert!(
+        reopened
+            .observed_event(&key(1), &parked_id)
+            .await
+            .unwrap()
+            .is_some()
+    );
     assert_eq!(
         sqlx::query_scalar::<_, String>(
             "SELECT state FROM ingress WHERE source_key='fixture-reset-social'"

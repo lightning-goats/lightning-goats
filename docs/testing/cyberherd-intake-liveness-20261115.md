@@ -28,6 +28,8 @@ when references authenticate its target.
 - Restrict this completion path to the linked social head. Payment/feed entries,
   real storage failures and inconsistent authenticated state still fail closed.
   Pause observations still restrict all queued paid work before social screening.
+- Manual cycle resets close pending parked inbox work in the same transaction,
+  including same-second profileless events, without deleting their signed input.
 
 No live row/cursor edits, manual reward plans, replacement payout intents,
 provider transfers, physical actions, service replacements or limit changes are
@@ -49,9 +51,12 @@ SQLite databases and authenticated Unix-socket fixtures:
    result and allows later paid/feeding work to proceed.
 4. A late transaction failure rolls back both checkpoints; a social disposition
    cannot resolve a financial head.
+5. Manual reset rollback preserves parked work; successful reset prevents it
+   from earning a new-cycle award while retaining replay receipts and raw input.
 
 Qualification results will be recorded after the exact candidate gates finish.
 Formatting, whitespace, published SQLite vendor verification and the active RSA
-dependency exclusion check pass locally. The locked Rust regression build and
-cached advisory audit are running. Fresh CI and installed qualification remain
+dependency exclusion check pass locally. A cached advisory audit passes against
+1,509 local advisories; it is not a fresh advisory-database check. The locked Rust
+regression build and full CI remain running/pending. Installed qualification is
 pending. No generated build cache is a deployment artifact.

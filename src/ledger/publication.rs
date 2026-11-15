@@ -119,6 +119,8 @@ impl LedgerStore {
                 sqlx::query("UPDATE message_outbox SET status='published',attempts=attempts+1,last_error=NULL,published_at=? WHERE event_id=? AND status IN ('pending','failed')").bind(now).bind(&job.event_id).execute(&mut *tx).await?;
             }
         } else {
+            sqlx::query("UPDATE message_outbox SET attempts=attempts+1,last_error='relay acceptance pending',status=CASE WHEN status='pending' THEN 'failed' ELSE status END WHERE event_id=?")
+                .bind(&job.event_id).execute(&mut *tx).await?;
             let retry = Attempt {
                 event_id: job.event_id.clone(),
                 relay: job.relay.clone(),

@@ -102,8 +102,36 @@ pub async fn run_message_processor(
     }
 }
 
+pub trait PublicationTransport {
+    fn publish(
+        &self,
+        event: &crate::nostr_event::VerifiedEvent,
+        relay: &str,
+    ) -> impl std::future::Future<Output = Result<()>> + Send;
+}
+pub struct ProtocolTransport;
+impl PublicationTransport for ProtocolTransport {
+    async fn publish(&self, event: &crate::nostr_event::VerifiedEvent, relay: &str) -> Result<()> {
+        crate::zap_receipts::publish_protocol_event(event, relay).await
+    }
+}
 pub async fn run_outbox_publisher(ledger: LedgerStore, nak: NakClient) -> Result<()> {
-    let router = crate::relay_routing::Router::new(nak.publication_relays())?;
+    let base = nak.publication_relays().to_vec();
+    let router = crate::relay_routing::Router::new(&base)?;
+    run_publication_worker(ledger, nak, router, base, ProtocolTransport).await
+}
+/// Dependency-injected transport permits isolated protocol qualification. The
+/// production entry point always uses pinned public networking above.
+pub async fn run_publication_worker<
+    Q: crate::cyberherd::relay::Query + Send + Sync,
+    T: PublicationTransport + Send + Sync,
+>(
+    ledger: LedgerStore,
+    nak: NakClient,
+    router: crate::relay_routing::Router<Q>,
+    base: Vec<String>,
+    transport: T,
+) -> Result<()> {
     let mut metadata_checked = 0i64;
     let mut author_metadata = None;
     loop {
@@ -123,11 +151,7 @@ pub async fn run_outbox_publisher(ledger: LedgerStore, nak: NakClient) -> Result
                     let people =
                         crate::relay_routing::people(&event.event().content, &event.event().tags);
                     let relays = router
-                        .public_relays(
-                            &people,
-                            nak.publication_relays(),
-                            crate::cyberherd::calendar::now()?,
-                        )
+                        .public_relays(&people, &base, crate::cyberherd::calendar::now()?)
                         .await?;
                     if event.event().kind != 10002
                         && let Some(metadata) = &author_metadata
@@ -156,9 +180,7 @@ pub async fn run_outbox_publisher(ledger: LedgerStore, nak: NakClient) -> Result
                 if event.event().id == job.event_id
                     && event.event().pubkey == nak.project_pubkey() =>
             {
-                crate::zap_receipts::publish_protocol_event(&event, &job.relay)
-                    .await
-                    .is_ok()
+                transport.publish(&event, &job.relay).await.is_ok()
             }
             _ => false,
         };
@@ -169,10 +191,10 @@ pub async fn run_outbox_publisher(ledger: LedgerStore, nak: NakClient) -> Result
     }
 }
 
-async fn advertise_relay_list(
+async fn advertise_relay_list<Q: crate::cyberherd::relay::Query>(
     ledger: &LedgerStore,
     nak: &NakClient,
-    router: &crate::relay_routing::Router,
+    router: &crate::relay_routing::Router<Q>,
     now: i64,
 ) -> Result<crate::nostr_event::VerifiedEvent> {
     let lists = router.lists(&[nak.project_pubkey().into()], now).await?;

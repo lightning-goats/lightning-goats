@@ -2,10 +2,14 @@
 
 use std::{fs, os::unix::fs::PermissionsExt, time::Duration};
 
+#[path = "support/publication.rs"]
+mod publication_fixture;
+use publication_fixture::run_outbox_publisher;
+
 use lightning_goats::{
     config::{NostrConfig, RuntimeMode},
     ledger::LedgerStore,
-    messaging::{process_next_message, run_outbox_publisher},
+    messaging::process_next_message,
     nostr::NakClient,
     presentation::MessageRenderer,
 };

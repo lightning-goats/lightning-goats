@@ -4,6 +4,8 @@ use std::{fs, os::unix::fs::PermissionsExt, time::Duration};
 
 #[path = "support/publication.rs"]
 mod publication_fixture;
+#[path = "support/nostr.rs"]
+mod signature_fixture;
 use publication_fixture::run_outbox_publisher;
 
 use lightning_goats::{
@@ -240,27 +242,25 @@ async fn informational_events_never_invoke_the_signer() {
 
 #[tokio::test]
 async fn failed_publication_reopens_and_retries_exact_persisted_event_without_resigning() {
-    let fixture = Fixture::new("publish_fail_once");
+    let mut fixture = Fixture::new("publish_fail_once");
     let database = fixture.database();
     let ledger = LedgerStore::connect(&database).await.unwrap();
-    ledger
+    let seq = ledger
         .append_event(
             "payment_received",
-            &json!({
-                "amount_sats":250, "feed_credit_sats":250, "address_user":"dexter"
-            }),
+            &json!({"amount_sats":250,"feed_credit_sats":250,"address_user":"dexter"}),
         )
         .await
         .unwrap();
-    process_next_message(
-        &ledger,
-        Some(&fixture.client()),
-        &MessageRenderer::embedded().unwrap(),
-        1000,
-        RuntimeMode::Active,
-    )
-    .await
-    .unwrap();
+    // Native verification requires a real synthetic signature, not the CLI
+    // field-validation stub's placeholder. This tests retained-byte delivery;
+    // signing itself is covered by the separate real NIP-46 fixture.
+    let signed = signature_fixture::signed(1, 1, 1700000000, "retained payment note", tags());
+    fixture.config.bunker_pubkey = signed.pubkey.clone();
+    ledger
+        .enqueue_signed_message(seq, &signed.id, &serde_json::to_string(&signed).unwrap())
+        .await
+        .unwrap();
     let saved = ledger.next_outbox_entry().await.unwrap().unwrap();
     let worker = tokio::spawn(run_outbox_publisher(ledger.clone(), fixture.client()));
     timeout(Duration::from_secs(5), async {
@@ -293,7 +293,7 @@ async fn failed_publication_reopens_and_retries_exact_persisted_event_without_re
     worker.abort();
     let _ = worker.await;
     let calls = fixture.trace();
-    assert_eq!(calls.iter().filter(|c| c["phase"] == "sign").count(), 1);
+    assert_eq!(calls.iter().filter(|c| c["phase"] == "sign").count(), 0);
     let publications: Vec<_> = calls.iter().filter(|c| c["phase"] == "publish").collect();
     assert_eq!(publications.len(), 2);
     assert_eq!(publications[0]["payload"], publications[1]["payload"]);

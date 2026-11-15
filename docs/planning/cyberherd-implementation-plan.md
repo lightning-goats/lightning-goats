@@ -56,6 +56,10 @@ Operator instructions take precedence where the reference differs:
 - Preserve the existing 10-sat payment-announcement floor; smaller legitimate
   settled zaps can update an active member's score without a payment announcement.
   Social notifications are separate from payment announcements.
+- **Automatic feeder pause/resume broadcasts are disabled** (2026-11-15).
+  Keep `[messaging] lifecycle = false`, including suppression of retained retries;
+  preserve the independent OBS paused/queued indicator and normal payment/feed
+  and membership notes. See [the applied opt-out](../testing/cyberherd-lifecycle-optout-20261115.md).
 - Weather/information remain overlay-only. Existing scrolling messages have no
   paused prefix; the prominent paused/queued banner remains. CyberHerd adds only
   its specifically defined public event categories.

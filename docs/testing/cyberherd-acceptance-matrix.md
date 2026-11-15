@@ -108,3 +108,11 @@ receipts from Artx, nos.lol and Primal; complete eight-receipt coverage is not c
 Do not mark the objective complete by checking only the current migration or CI.
 For each row, retain actual evidence for its full scope and keep unsupported or
 unobserved behavior open. Production changes remain separate operator steps.
+
+## Lifecycle opt-out — 2026-11-15
+
+The operator subsequently [disabled automatic pause/resume broadcasts](cyberherd-lifecycle-optout-20261115.md).
+This overrides earlier lifecycle-enabled acceptance wording above. The live
+`messaging.lifecycle = false` suppresses both new notices and retained notice
+retries; keep the OBS paused/queued status and ordinary payment/feed/member notes.
+Do not reenable lifecycle or chat to satisfy historical acceptance criteria.

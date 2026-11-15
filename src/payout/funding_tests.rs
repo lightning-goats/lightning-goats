@@ -570,7 +570,7 @@ async fn outgoing_ordinary_invoice_journal_recovers_without_resigning_or_replaci
 }
 
 #[tokio::test]
-async fn outgoing_supported_zap_freezes_exact_bytes_before_callback_and_rejects_downgrades() {
+async fn outgoing_preferred_zap_freezes_exact_callback_bytes_after_protocol_choice() {
     use crate::payout::store::Store;
     let f = Fixture::new_with_nostr(true).await;
     let q = qualified(&f).await;
@@ -585,7 +585,6 @@ async fn outgoing_supported_zap_freezes_exact_bytes_before_callback_and_rejects_
         .unwrap();
     let unsigned = intent.unsigned_zap().unwrap().unwrap();
     assert_eq!(unsigned.kind, 9734);
-    assert!(store.freeze_request(intent.id(), None, now).await.is_err());
     let event = crate::nostr_event::test_event(
         1,
         unsigned.kind,
@@ -602,6 +601,12 @@ async fn outgoing_supported_zap_freezes_exact_bytes_before_callback_and_rejects_
         request.description_hash(),
         hex::encode(Sha256::digest(pretty.as_bytes()))
     );
+    assert!(
+        store
+            .freeze_request(intent.id(), None, now + 2)
+            .await
+            .is_err()
+    );
     let compact = serde_json::to_string(&event).unwrap();
     assert!(
         store
@@ -614,7 +619,7 @@ async fn outgoing_supported_zap_freezes_exact_bytes_before_callback_and_rejects_
     assert_eq!(request.raw_zap(), Some(pretty.as_str()));
     let wrong = crate::test_invoices::invoice_at(
         1000,
-        &f.plan.rows[0].recipient.as_ref().unwrap().metadata_hash,
+        &"ab".repeat(32),
         std::time::Duration::from_secs((now + 2).try_into().unwrap()),
     );
     assert!(

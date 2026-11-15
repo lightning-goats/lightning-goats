@@ -240,11 +240,6 @@ impl Store {
             .context("validated invoice is not frozen")?;
         let row=sqlx::query("SELECT r.fee_limit_sats,r.gross_sats FROM payout_rows r JOIN payout_invoice_intents i ON i.grant_id=r.grant_id AND i.member=r.member WHERE i.id=?")
             .bind(invoice_id.to_string()).fetch_one(&mut *tx).await?;
-        let callback: Option<String> =
-            sqlx::query_scalar("SELECT raw_zap FROM payout_callback_requests WHERE intent_id=?")
-                .bind(invoice_id.to_string())
-                .fetch_one(&mut *tx)
-                .await?;
         if now < 0
             || u64::try_from(now)? >= invoice.expires_at()
             || invoice.amount_sats() > self.policy.max_net_sats
@@ -263,7 +258,7 @@ impl Store {
             gross_sats: row.try_get::<i64, _>("gross_sats")?.try_into()?,
             invoice_expires_at: invoice.expires_at(),
             created_at: now,
-            nip57: callback.is_some(),
+            nip57: invoice.nip57(),
         };
         doc.validate()?;
         touch_clock(&mut tx, now).await?;

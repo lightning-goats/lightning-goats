@@ -258,7 +258,7 @@ impl Store {
             gross_sats: gross,
             invoice_expires_at: invoice.expires_at(),
             created_at: now,
-            nip57: intent.uses_nostr(),
+            nip57: invoice.nip57(),
         };
         doc.validate()?;
         touch_clock(&mut tx, now).await?;
@@ -366,7 +366,7 @@ pub(super) async fn load_quote(
         || doc.payment_hash != invoice.payment_hash()
         || doc.description_hash != invoice.description_hash()
         || doc.invoice_expires_at != invoice.expires_at()
-        || doc.nip57 != intent.uses_nostr()
+        || doc.nip57 != invoice.nip57()
         || doc.created_at < intent.0.created_at
     {
         bail!("probe quote contradicts original invoice");

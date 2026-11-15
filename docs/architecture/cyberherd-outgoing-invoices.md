@@ -13,18 +13,36 @@ Concurrent/restarted preparation returns the same UUID and unsigned fields.
 
 For a recipient advertising Nostr support, the prepared kind-9734 intent targets
 the member's profile, with exact amount, encoded LNURL, receipt relays and receipt
-signer. The remote signing broker remains required. Its response must have the
+signer. Zap signing uses the isolated remote broker. A successful response must have the
 project signature and exactly the frozen kind/timestamp/content/tags. The store
 commits the original signed JSON bytes before returning a callback capability.
 Retries cannot replace those bytes, including whitespace changes that preserve the
 Nostr ID but change the invoice description hash. Kind 9734 is not a relay post.
 [NIP-57](https://github.com/nostr-protocol/nips/blob/master/57.md)
 
-Unsupported recipients record explicit ordinary-Lightning fallback. Supported
-recipients cannot fall back because signing or invoice retrieval failed. Ordinary
-invoices commit to the raw LNURL metadata hash; Nostr invoices commit only to the
-SHA256 of the exact frozen signed request JSON.
-[LUD-06](https://github.com/lnurl/luds/blob/luds/06.md)
+The 2026-11-15 operator decision prefers, but does not require, NIP-57 for
+rewards. Missing/malformed zap capability or signing failure uses a durably frozen
+ordinary callback. A valid zap request is still frozen exactly before callback
+I/O. If its callback fails or returns an invalid invoice, one bounded ordinary
+callback retry uses the same endpoint, amount and optional comment without Nostr
+parameters. A signed invoice returned without zap binding can be paid as ordinary
+Lightning; this never establishes a zap receipt or authorizes a second payout.
+
+Actual NIP-57 requires the exact SHA256 of the frozen signed JSON. Ordinary
+invoices may bind the raw LNURL metadata hash or carry a signed text description.
+Text-description fallback is an explicitly authorized ordinary-payment compatibility
+policy: it authenticates the callback through the frozen public HTTPS endpoint,
+not through the LNURL metadata hash. Signature, network, exact amount, expiry,
+payment-hash uniqueness, reservations and execution idempotency remain mandatory.
+A different, unrecognized description hash still fails closed. Incoming invoice
+validation is unchanged. The quote's NIP-57 bit records the validated invoice's
+actual mode, not merely the wallet's advertised capability.
+
+A receiver-advertised `commentAllowed` permits `CyberHerd Treats!`, clipped to its
+limit and capped at 256 characters. This query comment is best-effort wallet
+presentation, not a guarantee about its invoice description or displayed memo.
+Old recipient JSON omits the new zero-default comment limit. No migration or
+historical invoice, signature, quote, execution or outcome rewrite is permitted.
 
 ## Callback and invoice checks
 
@@ -37,7 +55,7 @@ capabilities have no generic publication method or credential. Transport/provide
 error bodies are not exposed in returned diagnostics.
 
 The returned BOLT11 must have a valid mainnet signature, exact nonzero whole-sat
-amount and expected description hash. Future timestamps and less than thirty
+amount and applicable description commitment. Future timestamps and less than thirty
 seconds of remaining validity fail. The validated invoice is durably frozen before
 any future quote call. Its payment hash is unique across the payout database;
 another grant cannot create a second payment for that hash. A later callback result
@@ -54,7 +72,7 @@ The separate payout migrations add immutable intent/request/invoice records and 
 append-only invoice journal. They do not modify the core or membership schemas.
 Tests use synthetic signatures/invoices, temporary databases and loopback receive
 qualification. They exercise ordinary and supported request freezing, exact-byte
-restart recovery, no downgrade, altered callbacks/invoices, duplicate payment hashes,
+restart recovery, zap-preferred ordinary fallback, altered callbacks/invoices, duplicate payment hashes,
 expiry and protocol-query bounds. Their actual results must be recorded on the
 checked source; adding fixtures does not itself claim they passed.
 

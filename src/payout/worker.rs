@@ -310,7 +310,7 @@ impl Worker {
         if invoice.is_none() {
             let Some(callback) = self.store.fee_probe_callback(intent.id()).await? else {
                 let raw = if intent.uses_nostr() {
-                    Some(self.signer.sign(&intent).await?)
+                    self.signer.sign(&intent).await.ok()
                 } else {
                     None
                 };
@@ -404,7 +404,7 @@ impl Worker {
             Some(request) => request,
             None => {
                 let raw = if intent.uses_nostr() {
-                    Some(self.signer.sign(intent).await?)
+                    self.signer.sign(intent).await.ok()
                 } else {
                     None
                 };

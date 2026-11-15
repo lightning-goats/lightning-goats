@@ -34,6 +34,40 @@ pub(crate) fn verify(
     Ok(invoice)
 }
 
+/// Outgoing ordinary Lightning may use a signed text description. Its hash is
+/// frozen with the quote; incoming LNURL and actual zaps keep strict h-tag checks.
+pub(crate) fn verify_payout(
+    encoded: &str,
+    amount_msat: u64,
+    payment_hash: &str,
+    description_hash: &str,
+) -> Result<Bolt11Invoice> {
+    use sha2::{Digest as _, Sha256};
+    let invoice: Bolt11Invoice = encoded.parse().context("invalid signed payout invoice")?;
+    match invoice.description() {
+        Bolt11InvoiceDescriptionRef::Hash(_) => {
+            verify(encoded, amount_msat, payment_hash, description_hash)
+        }
+        Bolt11InvoiceDescriptionRef::Direct(text) => {
+            invoice
+                .check_signature()
+                .context("invalid payout invoice signature")?;
+            if invoice.currency() != Currency::Bitcoin
+                || amount_msat == 0
+                || invoice.amount_milli_satoshis() != Some(amount_msat)
+                || !invoice
+                    .payment_hash()
+                    .to_string()
+                    .eq_ignore_ascii_case(payment_hash)
+                || hex::encode(Sha256::digest(text.to_string().as_bytes())) != description_hash
+            {
+                bail!("ordinary payout invoice contradicts frozen terms");
+            }
+            Ok(invoice)
+        }
+    }
+}
+
 pub(crate) fn verify_issuance_expiry(invoice: &Bolt11Invoice, expected_seconds: u64) -> Result<()> {
     verify_expiry_at(
         invoice,

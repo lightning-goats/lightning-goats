@@ -2057,3 +2057,65 @@ async fn chat_opt_out_retains_confirmed_feeding_note_and_overlay_with_live_strea
     );
     task.abort();
 }
+
+#[tokio::test]
+async fn nip65_recipient_read_relays_are_frozen_with_the_message_before_signing() {
+    use crate::cyberherd::relay::{Filter, Query, ReadBatch};
+    struct Lists(VerifiedEvent);
+    impl Query for Lists {
+        async fn query(&self, filters: &[Filter]) -> Result<ReadBatch> {
+            Ok(ReadBatch {
+                events: if filters.iter().any(|f| f.matches(&self.0)) {
+                    vec![self.0.clone()]
+                } else {
+                    vec![]
+                },
+                completed_relays: 1,
+                failed_relays: 0,
+                saturated: false,
+            })
+        }
+    }
+    let f = Fixture::new().await;
+    f.apply("nip65-join", 10).await;
+    let now = calendar::now().unwrap();
+    let list = VerifiedEvent::verify(test_event(
+        2,
+        10002,
+        now as u64,
+        "",
+        vec![
+            vec![
+                "r".into(),
+                "wss://member-inbox.example/".into(),
+                "read".into(),
+            ],
+            vec![
+                "r".into(),
+                "wss://member-write.example/".into(),
+                "write".into(),
+            ],
+        ],
+    ))
+    .unwrap();
+    let router = crate::relay_routing::Router::with_source(Lists(list)).unwrap();
+    while f
+        .store
+        .queue_next_routed_delivery(&f.owner, &["wss://base.example/".into()], &router, now)
+        .await
+        .unwrap()
+    {}
+    let db = SqlitePool::connect(&f.url).await.unwrap();
+    let plans: Vec<String> = sqlx::query_scalar("SELECT relays_json FROM delivery_messages")
+        .fetch_all(&db)
+        .await
+        .unwrap();
+    assert!(!plans.is_empty());
+    for raw in plans {
+        let relays: Vec<String> = serde_json::from_str(&raw).unwrap();
+        assert!(relays.contains(&"wss://member-inbox.example/".into()));
+        assert!(!relays.contains(&"wss://member-write.example/".into()));
+    }
+    assert_eq!(f.core.feed_credit_sats().await.unwrap(), 0);
+    db.close().await;
+}

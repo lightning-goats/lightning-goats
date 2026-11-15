@@ -27,6 +27,8 @@ mod feeding_notices;
 mod feeding_presentation;
 mod operator_credit;
 mod outbox;
+mod publication;
+pub use publication::{PublicationWork, RelayMetadataIntent};
 mod payout_execution;
 mod reward_funding;
 mod reward_outcomes;

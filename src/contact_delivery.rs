@@ -64,6 +64,9 @@ pub async fn delivery_step(ledger: &LedgerStore) -> Result<()> {
     }
     for relay in &work.relays {
         crate::public_network::validate_destination(relay, "wss")?;
+        if crate::relay_routing::is_broadcaster(relay) {
+            bail!("private contact cannot use a public broadcaster");
+        }
     }
     let result = select_ok(
         work.relays

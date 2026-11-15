@@ -25,6 +25,9 @@ impl Config {
         }
         for relay in &self.inbox_relays {
             crate::public_network::validate_destination(relay, "wss")?;
+            if crate::relay_routing::is_broadcaster(relay) {
+                bail!("private contact cannot use a public broadcaster");
+            }
         }
         Ok(())
     }
@@ -111,6 +114,9 @@ impl Intent {
         }
         for relay in relays {
             crate::public_network::validate_destination(relay, "wss")?;
+            if crate::relay_routing::is_broadcaster(relay) {
+                bail!("private contact cannot use a public broadcaster");
+            }
         }
         let email = request.reply_email;
         // Validate transiently; persist only its digest. The browser includes

@@ -31,6 +31,7 @@ pub mod payout;
 pub mod presentation;
 pub mod public_network;
 pub mod quotes;
+pub mod relay_routing;
 pub mod reward_funding;
 pub mod secrets;
 pub mod strike;

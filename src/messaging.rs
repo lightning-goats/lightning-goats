@@ -106,48 +106,104 @@ pub async fn run_message_processor(
 }
 
 pub async fn run_outbox_publisher(ledger: LedgerStore, nak: NakClient) -> Result<()> {
+    let router = crate::relay_routing::Router::new(nak.publication_relays())?;
+    let mut metadata_checked = 0i64;
+    let mut author_metadata = None;
     loop {
-        let Some(entry) = ledger.next_outbox_entry().await? else {
+        let now = crate::cyberherd::calendar::now()?;
+        if now.saturating_sub(metadata_checked) >= 900 {
+            match advertise_relay_list(&ledger, &nak, &router, now).await {
+                Ok(event) => author_metadata = Some(event),
+                Err(_) => tracing::warn!(
+                    "relay-list advertisement retained for retry; payment publication continues"
+                ),
+            }
+            metadata_checked = now;
+        }
+        if let Some(entry) = ledger.unplanned_publication().await? {
+            match crate::nostr_event::VerifiedEvent::from_json(&entry.signed_event_json) {
+                Ok(event) if matches!(event.event().kind, 1 | 10002) => {
+                    let people =
+                        crate::relay_routing::people(&event.event().content, &event.event().tags);
+                    let relays = router
+                        .public_relays(
+                            &people,
+                            nak.publication_relays(),
+                            crate::cyberherd::calendar::now()?,
+                        )
+                        .await?;
+                    if event.event().kind != 10002
+                        && let Some(metadata) = &author_metadata
+                    {
+                        ledger.route_relay_metadata(metadata, &relays).await?;
+                    }
+                    ledger.plan_publication(&entry.event_id, &relays).await?;
+                }
+                _ => {
+                    ledger
+                        .mark_outbox_failed(&entry.event_id, "invalid signed public event")
+                        .await?;
+                    sleep(publish_retry_delay(entry.attempts)).await;
+                }
+            }
+        }
+        let Some(job) = ledger
+            .reserve_publication(crate::cyberherd::calendar::now()?)
+            .await?
+        else {
             sleep(Duration::from_millis(500)).await;
             continue;
         };
-
-        let event: SignedNostrEvent = match serde_json::from_str(&entry.signed_event_json) {
-            Ok(event) => event,
-            Err(error) => {
-                ledger
-                    .mark_outbox_failed(
-                        &entry.event_id,
-                        &format!("invalid signed event JSON: {error}"),
-                    )
-                    .await?;
-                tracing::error!(
-                    event_id = %entry.event_id,
-                    "persisted Nostr outbox row is invalid; publication blocked"
-                );
-                sleep(publish_retry_delay(entry.attempts)).await;
-                continue;
+        let accepted = match crate::nostr_event::VerifiedEvent::from_json(&job.signed_json) {
+            Ok(event)
+                if event.event().id == job.event_id
+                    && event.event().pubkey == nak.project_pubkey() =>
+            {
+                crate::zap_receipts::publish_protocol_event(&event, &job.relay)
+                    .await
+                    .is_ok()
             }
+            _ => false,
         };
-
-        match nak.publish_signed(&event).await {
-            Ok(()) => {
-                ledger.mark_outbox_published(&entry.event_id).await?;
-                tracing::info!(event_id = %entry.event_id, "published persisted Nostr event");
-            }
-            Err(error) => {
-                ledger
-                    .mark_outbox_failed(&entry.event_id, &error.to_string())
-                    .await?;
-                tracing::warn!(
-                    %error,
-                    event_id = %entry.event_id,
-                    "Nostr publication failed; exact signed event will be retried"
-                );
-                sleep(publish_retry_delay(entry.attempts)).await;
-            }
-        }
+        ledger
+            .finish_publication(&job, accepted, crate::cyberherd::calendar::now()?)
+            .await?;
+        sleep(Duration::from_millis(100)).await;
     }
+}
+
+async fn advertise_relay_list(
+    ledger: &LedgerStore,
+    nak: &NakClient,
+    router: &crate::relay_routing::Router,
+    now: i64,
+) -> Result<crate::nostr_event::VerifiedEvent> {
+    let lists = router.lists(&[nak.project_pubkey().into()], now).await?;
+    // Missing metadata never authorizes erasing the author's existing read policy.
+    let current = lists
+        .get(nak.project_pubkey())
+        .context("project relay list unavailable")?;
+    if current.event().event().created_at >= now as u64 {
+        return Ok(current.event().clone());
+    }
+    let Some(tags) =
+        crate::relay_routing::advertised_write_tags(Some(current), nak.publication_relays())?
+    else {
+        return Ok(current.event().clone());
+    };
+    let intent = ledger
+        .relay_metadata_intent(nak.project_pubkey(), &current.event().event().id, tags, now)
+        .await?;
+    if ledger.relay_metadata_signed(&intent).await?.is_none() {
+        let signed = nak
+            .sign_protocol_event(10002, intent.created_at, "", intent.tags.clone())
+            .await?;
+        ledger.retain_relay_metadata(&intent, &signed).await?;
+    }
+    ledger
+        .relay_metadata_signed(&intent)
+        .await?
+        .context("relay metadata signature absent")
 }
 
 fn publish_retry_delay(previous_attempts: u64) -> Duration {

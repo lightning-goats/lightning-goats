@@ -68,6 +68,7 @@ impl Transport for NakClient {
     }
     async fn publish(&self, event: &VerifiedEvent, relay: &str) -> Result<RelayAck> {
         crate::zap_receipts::publish_protocol_event(event, relay).await?;
+        self.advertise_on(relay).await;
         Ok(RelayAck {
             event_id: event.event().id.clone(),
             relay: relay.into(),

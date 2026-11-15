@@ -12,7 +12,7 @@ use std::{
 use tokio::sync::Mutex;
 
 const MAX_PEOPLE: usize = 8;
-const MAX_USER_RELAYS: usize = 4;
+const MAX_USER_RELAYS: usize = 8;
 const MAX_CACHE: usize = 256;
 const REFRESH_SECONDS: i64 = 900;
 
@@ -25,14 +25,35 @@ pub fn is_broadcaster(raw: &str) -> bool {
 
 /// Bound addressed identities, including NIP-19 npub/nprofile mentions. Relay
 /// hints inside an nprofile are discovery hints, not authority to deliver DMs.
-pub fn people(content: &str, tags: &[Vec<String>]) -> Vec<String> {
+#[derive(Debug, Clone, Default)]
+pub struct References {
+    pub people: Vec<String>,
+    pub hints: BTreeMap<String, Vec<String>>,
+}
+pub fn references(content: &str, tags: &[Vec<String>]) -> References {
     let mut keys = BTreeSet::new();
+    let mut hints: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    fn hint(hints: &mut BTreeMap<String, Vec<String>>, key: &str, raw: &str) {
+        if let Ok(url) = crate::public_network::validate_destination(raw, "wss")
+            && !is_broadcaster(url.as_str())
+        {
+            let entries = hints.entry(key.into()).or_default();
+            let relay = url.to_string();
+            if entries.len() < 2 && !entries.contains(&relay) {
+                entries.push(relay);
+            }
+        }
+    }
     for tag in tags {
         if tag.first().map(String::as_str) == Some("p")
             && let Some(key) = tag.get(1)
             && validate_public_key(key).is_ok()
         {
+            let key = key.to_ascii_lowercase();
             keys.insert(key.clone());
+            if let Some(relay) = tag.get(2) {
+                hint(&mut hints, &key, relay);
+            }
         }
     }
     for part in content.split("nostr:").skip(1).take(32) {
@@ -44,45 +65,71 @@ pub fn people(content: &str, tags: &[Vec<String>]) -> Vec<String> {
         let Ok((hrp, bytes)) = bitcoin::bech32::decode(&encoded) else {
             continue;
         };
+        let mut profile_relays = Vec::new();
         let key = if hrp.as_str().eq_ignore_ascii_case("npub") && bytes.len() == 32 {
             Some(hex::encode(&bytes))
         } else if hrp.as_str().eq_ignore_ascii_case("nprofile") {
             let mut offset = 0;
             let mut key = None;
+            let mut valid = true;
             while offset + 2 <= bytes.len() {
                 let kind = bytes[offset];
                 let size = usize::from(bytes[offset + 1]);
                 offset += 2;
                 if offset + size > bytes.len() {
-                    key = None;
+                    valid = false;
                     break;
                 }
-                if kind == 0 && size == 32 {
+                if kind == 0 {
+                    if size != 32 || key.is_some() {
+                        valid = false;
+                        break;
+                    }
                     key = Some(hex::encode(&bytes[offset..offset + size]));
+                } else if kind == 1
+                    && let Ok(relay) = std::str::from_utf8(&bytes[offset..offset + size])
+                {
+                    profile_relays.push(relay.to_owned());
                 }
                 offset += size;
             }
-            key
+            if valid && offset == bytes.len() {
+                key
+            } else {
+                None
+            }
         } else {
             None
         };
         if let Some(key) = key
             && validate_public_key(&key).is_ok()
         {
-            keys.insert(key);
+            keys.insert(key.clone());
+            for relay in profile_relays {
+                hint(&mut hints, &key, &relay);
+            }
         }
     }
-    keys.into_iter().take(MAX_PEOPLE).collect()
+    let people: Vec<_> = keys.into_iter().take(MAX_PEOPLE).collect();
+    hints.retain(|key, _| people.contains(key));
+    References { people, hints }
+}
+pub fn people(content: &str, tags: &[Vec<String>]) -> Vec<String> {
+    references(content, tags).people
 }
 
 pub fn public_relays(raw: &[String]) -> Result<Vec<String>> {
-    if raw.is_empty() || raw.len() > 48 {
+    if raw.is_empty() || raw.len() > 72 {
         bail!("public relay plan exceeds bound");
     }
-    raw.iter()
-        .map(|r| Ok(crate::public_network::validate_destination(r, "wss")?.to_string()))
-        .collect::<Result<BTreeSet<_>>>()
-        .map(|s| s.into_iter().collect())
+    let mut result = Vec::new();
+    for raw in raw {
+        let relay = crate::public_network::validate_destination(raw, "wss")?.to_string();
+        if !result.contains(&relay) {
+            result.push(relay);
+        }
+    }
+    Ok(result)
 }
 
 #[derive(Debug, Clone)]
@@ -173,6 +220,14 @@ impl<Q: Query> Router<Q> {
         })
     }
     pub async fn lists(&self, people: &[String], now: i64) -> Result<BTreeMap<String, RelayList>> {
+        self.lists_with_hints(people, &BTreeMap::new(), now).await
+    }
+    async fn lists_with_hints(
+        &self,
+        people: &[String],
+        hints: &BTreeMap<String, Vec<String>>,
+        now: i64,
+    ) -> Result<BTreeMap<String, RelayList>> {
         if now < 0 {
             bail!("invalid relay-list clock");
         }
@@ -216,10 +271,34 @@ impl<Q: Query> Router<Q> {
                     limit: 8,
                 })
                 .collect();
-            if let Ok(batch) = self.source.query(&filters).await
-                && batch.completed_relays > 0
-                && !batch.saturated
+            let mut batch =
+                self.source
+                    .query(&filters)
+                    .await
+                    .unwrap_or(crate::cyberherd::relay::ReadBatch {
+                        events: vec![],
+                        completed_relays: 0,
+                        failed_relays: 1,
+                        saturated: false,
+                    });
+            let hint_relays: Vec<_> = missing
+                .iter()
+                .flat_map(|p| hints.get(p).into_iter().flatten())
+                .filter_map(|raw| crate::public_network::validate_destination(raw, "wss").ok())
+                .filter(|u| !is_broadcaster(u.as_str()))
+                .map(|u| u.to_string())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .take(8)
+                .collect();
+            if !hint_relays.is_empty()
+                && let Ok(extra) = self.source.query_hints(&hint_relays, &filters).await
             {
+                batch.events.extend(extra.events);
+                batch.completed_relays += extra.completed_relays;
+                batch.saturated |= extra.saturated;
+            }
+            if batch.completed_relays > 0 && !batch.saturated {
                 let mut cache = self.cache.lock().await;
                 for person in missing {
                     let best = batch
@@ -271,23 +350,43 @@ impl<Q: Query> Router<Q> {
             })
             .collect())
     }
+    pub async fn public_message_relays(
+        &self,
+        content: &str,
+        tags: &[Vec<String>],
+        base: &[String],
+        now: i64,
+    ) -> Result<Vec<String>> {
+        let refs = references(content, tags);
+        let mut result = public_relays(base)?;
+        for list in self
+            .lists_with_hints(&refs.people, &refs.hints, now)
+            .await?
+            .into_values()
+        {
+            for relay in list.read {
+                if !result.contains(&relay) {
+                    result.push(relay);
+                }
+            }
+        }
+        public_relays(&result)
+    }
     pub async fn public_relays(
         &self,
         people: &[String],
         base: &[String],
         now: i64,
     ) -> Result<Vec<String>> {
-        let mut result = BTreeSet::new();
-        for relay in base {
-            result.insert(crate::public_network::validate_destination(relay, "wss")?.to_string());
-        }
+        let mut result = public_relays(base)?;
         for list in self.lists(people, now).await?.into_values() {
-            result.extend(list.read);
+            for relay in list.read {
+                if !result.contains(&relay) {
+                    result.push(relay);
+                }
+            }
         }
-        if result.is_empty() || result.len() > 48 {
-            bail!("public relay plan exceeds bound");
-        }
-        Ok(result.into_iter().collect())
+        public_relays(&result)
     }
 }
 
@@ -576,5 +675,60 @@ mod routing_tests {
             people(&format!("Thanks nostr:{reference}!"), &[]),
             vec![person]
         );
+    }
+}
+
+#[cfg(test)]
+mod hint_tests {
+    use super::*;
+    use crate::cyberherd::relay::ReadBatch;
+    struct HintSource(VerifiedEvent);
+    impl Query for HintSource {
+        async fn query(&self, filters: &[Filter]) -> Result<ReadBatch> {
+            assert!(filters.iter().all(|f| f.kinds == vec![10002]));
+            Ok(ReadBatch {
+                events: vec![],
+                completed_relays: 1,
+                failed_relays: 0,
+                saturated: false,
+            })
+        }
+        async fn query_hints(&self, relays: &[String], filters: &[Filter]) -> Result<ReadBatch> {
+            assert_eq!(relays, vec!["wss://hint.example/"]);
+            assert!(filters.iter().any(|f| f.matches(&self.0)));
+            Ok(ReadBatch {
+                events: vec![self.0.clone()],
+                completed_relays: 1,
+                failed_relays: 0,
+                saturated: false,
+            })
+        }
+    }
+    #[tokio::test]
+    async fn public_hints_only_discover_signed_lists_and_are_not_delivery_authority() {
+        let e = VerifiedEvent::verify(crate::nostr_event::test_event(
+            2,
+            10002,
+            100,
+            "",
+            vec![vec![
+                "r".into(),
+                "wss://signed-inbox.example/".into(),
+                "read".into(),
+            ]],
+        ))
+        .unwrap();
+        let key = e.event().pubkey.clone();
+        let router = Router::with_source(HintSource(e)).unwrap();
+        let tags = vec![vec!["p".into(), key, "wss://hint.example/".into()]];
+        let routes = router
+            .public_message_relays("", &tags, &["wss://base.example/".into()], 100)
+            .await
+            .unwrap();
+        assert_eq!(
+            routes,
+            vec!["wss://base.example/", "wss://signed-inbox.example/"]
+        );
+        assert!(!routes.contains(&"wss://hint.example/".into()));
     }
 }

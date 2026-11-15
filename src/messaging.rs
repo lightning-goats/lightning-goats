@@ -134,6 +134,8 @@ pub async fn run_publication_worker<
 ) -> Result<()> {
     let mut metadata_checked = 0i64;
     let mut author_metadata = None;
+    let transport = std::sync::Arc::new(transport);
+    let mut publications = tokio::task::JoinSet::new();
     loop {
         let now = crate::cyberherd::calendar::now()?;
         if now.saturating_sub(metadata_checked) >= 900 {
@@ -148,10 +150,13 @@ pub async fn run_publication_worker<
         if let Some(entry) = ledger.unplanned_publication().await? {
             match crate::nostr_event::VerifiedEvent::from_json(&entry.signed_event_json) {
                 Ok(event) if matches!(event.event().kind, 1 | 10002) => {
-                    let people =
-                        crate::relay_routing::people(&event.event().content, &event.event().tags);
                     let relays = router
-                        .public_relays(&people, &base, crate::cyberherd::calendar::now()?)
+                        .public_message_relays(
+                            &event.event().content,
+                            &event.event().tags,
+                            &base,
+                            crate::cyberherd::calendar::now()?,
+                        )
                         .await?;
                     if event.event().kind != 10002
                         && let Some(metadata) = &author_metadata
@@ -168,26 +173,37 @@ pub async fn run_publication_worker<
                 }
             }
         }
-        let Some(job) = ledger
-            .reserve_publication(crate::cyberherd::calendar::now()?)
-            .await?
-        else {
-            sleep(Duration::from_millis(500)).await;
-            continue;
-        };
-        let accepted = match crate::nostr_event::VerifiedEvent::from_json(&job.signed_json) {
-            Ok(event)
-                if event.event().id == job.event_id
-                    && event.event().pubkey == nak.project_pubkey() =>
-            {
-                transport.publish(&event, &job.relay).await.is_ok()
-            }
-            _ => false,
-        };
-        ledger
-            .finish_publication(&job, accepted, crate::cyberherd::calendar::now()?)
-            .await?;
-        sleep(Duration::from_millis(100)).await;
+        while publications.len() < 4 {
+            let Some(job) = ledger
+                .reserve_publication(crate::cyberherd::calendar::now()?)
+                .await?
+            else {
+                break;
+            };
+            let transport = transport.clone();
+            let project = nak.project_pubkey().to_owned();
+            publications.spawn(async move {
+                let accepted = match crate::nostr_event::VerifiedEvent::from_json(&job.signed_json)
+                {
+                    Ok(event)
+                        if event.event().id == job.event_id && event.event().pubkey == project =>
+                    {
+                        transport.publish(&event, &job.relay).await.is_ok()
+                    }
+                    _ => false,
+                };
+                (job, accepted)
+            });
+        }
+        if publications.is_empty() {
+            sleep(Duration::from_millis(100)).await;
+        } else if let Ok(Some(Ok((job, accepted)))) =
+            tokio::time::timeout(Duration::from_millis(100), publications.join_next()).await
+        {
+            ledger
+                .finish_publication(&job, accepted, crate::cyberherd::calendar::now()?)
+                .await?;
+        }
     }
 }
 

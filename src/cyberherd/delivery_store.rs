@@ -99,17 +99,19 @@ impl Store {
         let catalog = load_catalog(&mut tx, owner).await?;
         let message = delivery::render(&event, &catalog)?;
         tx.commit().await?;
-        let keys = message
+        let (content, tags) = message
             .as_ref()
             .map(|m| {
                 let tags: Vec<_> = std::iter::once(&m.member)
                     .chain(m.additional_members.iter())
                     .map(|p| vec!["p".into(), p.clone()])
                     .collect();
-                crate::relay_routing::people(&m.nostr, &tags)
+                (m.nostr.as_str(), tags)
             })
-            .unwrap_or_default();
-        let relays = router.public_relays(&keys, base, now).await?;
+            .unwrap_or(("", vec![]));
+        let relays = router
+            .public_message_relays(content, &tags, base, now)
+            .await?;
         self.queue_next_delivery_expected(owner, &relays, now, Some(event.seq))
             .await
     }

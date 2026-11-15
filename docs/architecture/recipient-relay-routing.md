@@ -15,14 +15,19 @@ ID per NIP-01. Future/expired/invalid lists and non-public/insecure destinations
 are refused. Explicit empty/new write-only records supersede earlier inboxes;
 refreshes cannot roll an observed head backward. Metadata is cached for fifteen
 minutes (negative results one minute), with bounded users/relays/cache size.
-NIP-19 npub/nprofile references identify mentioned people; embedded relay hints
-are not treated as private inbox authority. Discovery uses configured public
+NIP-19 npub/nprofile references identify mentioned people. Public nprofile and
+p-tag relay hints are bounded metadata-discovery sources; only a verified signed
+NIP-65 record authorizes extra public delivery destinations. Hints never become
+private inbox authority. Discovery uses configured public
 readable relays and excludes Send It, which denies subscriptions.
 
 New CyberHerd notes freeze base plus recipient read relays with their immutable
 message record, outside network work/write locks and with source-cursor recheck.
 Their existing per-relay outbox/receipts retry exact signed bytes. Core public
-notes likewise freeze a per-event route plan and retry each destination fairly.
+notes likewise freeze a per-event route plan and retry each destination fairly,
+with at most four network attempts in flight. Direct configured relays precede
+recipient additions and metadata work follows note work. Up to eight addressed
+users/eight inbox relays each fit the 72-destination public limit.
 Outages do not change financial accounting, feeder work or signed text.
 
 The author's existing signed kind-10002 list is preserved when configured storage

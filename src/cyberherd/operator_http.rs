@@ -253,7 +253,7 @@ async fn command(State(s): State<Service>, request: Request) -> Response {
         None
     } else {
         match tokio::time::timeout(
-            Duration::from_secs(1),
+            Duration::from_secs(2),
             super::operator::CoreFence::observe(&s.store, &s.owner, &s.core),
         )
         .await
@@ -266,7 +266,7 @@ async fn command(State(s): State<Service>, request: Request) -> Response {
         command.action,
         super::operator::Action::Activate { .. } | super::operator::Action::Amount { .. }
     ) {
-        match tokio::time::timeout(Duration::from_secs(1), s.core.safety()).await {
+        match tokio::time::timeout(Duration::from_secs(2), s.core.safety()).await {
             Ok(Ok(v)) => v.current_availability(calendar::now().unwrap_or(-1)),
             _ => Availability::Unknown,
         }

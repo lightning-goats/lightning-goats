@@ -55,6 +55,13 @@ configuration repair had not changed membership's separate connection list.
   traffic cannot consume membership's admission or connection slots.
 - Share one paced core client across payout intake/execution loops, including
   clones used for reconciliation. Preserve fractional quota-refill time.
+- Include operator requests in membership's slot clock with next-slot priority,
+  preserving FIFO for background work and removing priority on cancellation.
+  Individual core checks have a two-second deadline within the unchanged
+  five-second HTTP handler bound. The installed rehearsal caught that bypassing
+  pacing caused existing operator activation/amount commands to collide with
+  background reads after their burst was exhausted; priority scheduling fixes
+  the actual runtime instead of relaxing the rehearsal's assertions.
 - For frozen protocol events, try individual configured bunker relays instead
   of requiring a combined relay connection. Reuse exact unsigned fields, keep
   the full round and child cleanup within the existing 45-second budget, prefer
@@ -83,6 +90,8 @@ matching synthetic relay acknowledgements. Signer tests cover one-relay fallback
 unchanged fields across clones, complete outage/recovery, credential redaction
 and stalled-child cleanup. Quota regressions exercise payout flooding,
 independent membership admission, fractional refill and shared-client pacing.
+Six consecutive operator reads alongside queued background actors and cancelled
+priority waiters also have explicit regressions.
 Existing suites cover malformed and
 empty reposts, closed cycles, social retry/backoff, ordered payments and feeds,
 frozen reward snapshots, signing/ACK retries and audience opt-outs.

@@ -2,14 +2,22 @@
 //! connection gets one request. The peer never receives a database path/handle,
 //! signer credential, gateway client, grant method or feeder command.
 use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
-use std::{io::ErrorKind, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    io::ErrorKind,
+    path::PathBuf,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+    time::Duration,
+};
 
 use anyhow::{Context, Result, bail};
 use serde::{Serialize, de::DeserializeOwned};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{UnixListener, UnixStream},
-    sync::Semaphore,
+    sync::{Mutex, Notify, Semaphore},
     time::{Instant, timeout},
 };
 
@@ -509,9 +517,77 @@ async fn serve_one(
     write_frame(&mut stream, &response).await
 }
 
+struct RequestPacing {
+    interval: Duration,
+    next: Mutex<Instant>,
+    background: Mutex<()>,
+    operators: AtomicUsize,
+    changed: Notify,
+}
+
+struct OperatorWait<'a>(&'a RequestPacing);
+impl Drop for OperatorWait<'_> {
+    fn drop(&mut self) {
+        self.0.operators.fetch_sub(1, Ordering::AcqRel);
+        self.0.changed.notify_one();
+    }
+}
+
+impl RequestPacing {
+    fn new(interval: Duration) -> Self {
+        Self {
+            interval,
+            next: Mutex::new(Instant::now()),
+            background: Mutex::new(()),
+            operators: AtomicUsize::new(0),
+            changed: Notify::new(),
+        }
+    }
+
+    async fn wait(&self, operator: bool) {
+        let _operator = operator.then(|| {
+            self.operators.fetch_add(1, Ordering::AcqRel);
+            self.changed.notify_one();
+            OperatorWait(self)
+        });
+        // Background actors retain FIFO order, but never hold the slot clock
+        // while sleeping. An operator can take the next scheduled slot instead
+        // of bypassing pacing and colliding with the server's quota.
+        let _background = if operator {
+            None
+        } else {
+            Some(self.background.lock().await)
+        };
+        loop {
+            let changed = self.changed.notified();
+            let due = {
+                let mut next = self.next.lock().await;
+                if !operator && self.operators.load(Ordering::Acquire) > 0 {
+                    None
+                } else {
+                    let now = Instant::now();
+                    if *next <= now {
+                        *next = now + self.interval;
+                        return;
+                    }
+                    Some(*next)
+                }
+            };
+            match due {
+                Some(due) => tokio::select! {
+                    _ = tokio::time::sleep_until(due) => {},
+                    _ = changed => {},
+                },
+                None => changed.await,
+            }
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Client {
-    pacing: Option<(Duration, Arc<tokio::sync::Mutex<Instant>>)>,
+    pacing: Option<Arc<RequestPacing>>,
+    operator: bool,
     socket: PathBuf,
     expected_uid: u32,
 }
@@ -663,11 +739,12 @@ impl Client {
             socket,
             expected_uid,
             pacing: None,
+            operator: false,
         })
     }
     /// One shared FIFO for trusted background actors; server limits stay intact.
     pub(crate) fn with_request_spacing(mut self, interval: Duration) -> Self {
-        self.pacing = Some((interval, Arc::new(tokio::sync::Mutex::new(Instant::now()))));
+        self.pacing = Some(Arc::new(RequestPacing::new(interval)));
         self
     }
     /// Operator requests retain their existing short deadline and server gates.
@@ -675,14 +752,13 @@ impl Client {
         Self {
             socket: self.socket.clone(),
             expected_uid: self.expected_uid,
-            pacing: None,
+            pacing: self.pacing.clone(),
+            operator: true,
         }
     }
     async fn request(&self, request: &Request) -> Result<Response> {
-        if let Some((interval, next)) = &self.pacing {
-            let mut next = next.lock().await;
-            tokio::time::sleep_until(*next).await;
-            *next = Instant::now() + *interval;
+        if let Some(pacing) = &self.pacing {
+            pacing.wait(self.operator).await;
         }
         timeout(
             Duration::from_secs(if matches!(request, Request::PayoutOutcome { .. }) {
@@ -1450,9 +1526,13 @@ mod tests {
             let client = client.clone();
             readers.spawn(async move { client.safety().await });
         }
-        timeout(Duration::from_secs(1), async {
-            operator.safety().await.unwrap();
-            operator.safety().await.unwrap();
+        timeout(Duration::from_secs(8), async {
+            for _ in 0..6 {
+                timeout(Duration::from_secs(2), operator.safety())
+                    .await
+                    .unwrap()
+                    .unwrap();
+            }
         })
         .await
         .unwrap();
@@ -1464,5 +1544,78 @@ mod tests {
         .await
         .unwrap();
         task.abort();
+    }
+
+    #[tokio::test]
+    async fn operator_takes_next_paced_slot_and_cancellation_cannot_strand_background_fifo() {
+        let pacing = Arc::new(RequestPacing::new(Duration::from_millis(10)));
+        *pacing.next.lock().await = Instant::now() + Duration::from_secs(3600);
+        let (sent, mut received) = tokio::sync::mpsc::unbounded_channel();
+        let background = tokio::spawn({
+            let pacing = pacing.clone();
+            let sent = sent.clone();
+            async move {
+                pacing.wait(false).await;
+                sent.send("background").unwrap();
+            }
+        });
+        timeout(Duration::from_secs(1), async {
+            while pacing.background.try_lock().is_ok() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let operator = tokio::spawn({
+            let pacing = pacing.clone();
+            async move {
+                pacing.wait(true).await;
+                sent.send("operator").unwrap();
+            }
+        });
+        timeout(Duration::from_secs(1), async {
+            while pacing.operators.load(Ordering::Acquire) == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        *pacing.next.lock().await = Instant::now();
+        pacing.changed.notify_waiters();
+        assert_eq!(
+            timeout(Duration::from_secs(1), received.recv())
+                .await
+                .unwrap(),
+            Some("operator")
+        );
+        assert_eq!(
+            timeout(Duration::from_secs(1), received.recv())
+                .await
+                .unwrap(),
+            Some("background")
+        );
+        operator.await.unwrap();
+        background.await.unwrap();
+        *pacing.next.lock().await = Instant::now() + Duration::from_secs(3600);
+        let cancelled = tokio::spawn({
+            let pacing = pacing.clone();
+            async move {
+                pacing.wait(true).await;
+            }
+        });
+        timeout(Duration::from_secs(1), async {
+            while pacing.operators.load(Ordering::Acquire) == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        cancelled.abort();
+        assert!(cancelled.await.unwrap_err().is_cancelled());
+        assert_eq!(pacing.operators.load(Ordering::Acquire), 0);
+        *pacing.next.lock().await = Instant::now();
+        timeout(Duration::from_secs(1), pacing.wait(false))
+            .await
+            .unwrap();
     }
 }

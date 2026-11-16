@@ -62,6 +62,11 @@ configuration repair had not changed membership's separate connection list.
   pacing caused existing operator activation/amount commands to collide with
   background reads after their burst was exhausted; priority scheduling fixes
   the actual runtime instead of relaxing the rehearsal's assertions.
+- Catch up one bounded authenticated core page during operator ordering checks,
+  using normal atomic intake. Presentation traffic no longer keeps edits racing
+  a moving background cursor. Observe ordering after the paced safety read and
+  recheck that safety's freshness immediately before mutation. Confirmed feeding
+  inputs are staged and still block edits until their original snapshot is frozen.
 - For frozen protocol events, try individual configured bunker relays instead
   of requiring a combined relay connection. Reuse exact unsigned fields, keep
   the full round and child cleanup within the existing 45-second budget, prefer
@@ -92,6 +97,10 @@ and stalled-child cleanup. Quota regressions exercise payout flooding,
 independent membership admission, fractional refill and shared-client pacing.
 Six consecutive operator reads alongside queued background actors and cancelled
 priority waiters also have explicit regressions.
+A 130-event presentation tail requires two bounded observations, then permits an
+authenticated settings edit. A subsequent paid input and confirmed feed retain
+their ordered queue entries and conclusively refuse another edit. Real HTTP
+coverage also verifies a command can catch up presentation-only traffic.
 Existing suites cover malformed and
 empty reposts, closed cycles, social retry/backoff, ordered payments and feeds,
 frozen reward snapshots, signing/ACK retries and audience opt-outs.

@@ -253,6 +253,184 @@ impl Fixture {
         .await
         .unwrap()
     }
+    async fn bridge(&self) -> (Client, tokio::task::JoinHandle<anyhow::Result<()>>) {
+        let (uid, gid) = self_credentials().unwrap();
+        std::fs::set_permissions(
+            self._root.path(),
+            std::os::unix::fs::PermissionsExt::from_mode(0o750),
+        )
+        .unwrap();
+        let config = crate::core_bridge::BridgeConfig {
+            socket: self._root.path().join("delivery.sock"),
+            peer_uid: uid,
+            group_gid: gid,
+            reward_policy: None,
+            payout_peer_uid: None,
+            delegated_feeder_messages: false,
+            payout_execution_enabled: false,
+            payout_account_id: None,
+        };
+        let server = crate::core_bridge::unix::Server::bind(&config)
+            .await
+            .unwrap();
+        let task = tokio::spawn(server.run(self.core.clone(), crate::config::RuntimeMode::Active));
+        (
+            Client::new(config.socket, uid)
+                .unwrap()
+                .with_request_spacing(Duration::from_millis(1100)),
+            task,
+        )
+    }
+}
+
+#[tokio::test]
+async fn operator_fence_drains_bounded_presentation_tail_but_cannot_pass_a_confirmed_feeding() {
+    use crate::cyberherd::{http_auth, operator};
+    use base64::Engine as _;
+    use sha2::{Digest as _, Sha256};
+    fn authorize(cmd: &operator::Command, now: i64) -> http_auth::OperatorAuthorization {
+        let body = serde_json::to_vec(cmd).unwrap();
+        let proof = nostr::signed(
+            3,
+            27235,
+            now as u64,
+            "",
+            vec![
+                tag(&["u", "https://example.com/api/v1/cyberherd/operator/command"]),
+                tag(&["method", "POST"]),
+                tag(&["payload", &hex::encode(Sha256::digest(&body))]),
+                tag(&["nonce", &Uuid::new_v4().to_string()]),
+            ],
+        );
+        http_auth::Config {
+            public_origin: "https://example.com".into(),
+            operators: vec![public(3)],
+        }
+        .verify_operator(
+            &format!(
+                "Nostr {}",
+                base64::engine::general_purpose::STANDARD
+                    .encode(serde_json::to_vec(&proof).unwrap())
+            ),
+            "/api/v1/cyberherd/operator/command",
+            &body,
+            now,
+        )
+        .unwrap()
+    }
+    let f = Fixture::new().await;
+    for n in 0..130 {
+        f.core
+            .append_event("nostr_publication_attempt", &json!({"attempt":n}))
+            .await
+            .unwrap();
+    }
+    let (client, task) = f.bridge().await;
+    assert!(
+        operator::CoreFence::observe(&f.store, &f.owner, &client)
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        f.store
+            .core_cursor(&f.owner)
+            .await
+            .unwrap()
+            .received_through,
+        128
+    );
+    let fence = operator::CoreFence::observe(&f.store, &f.owner, &client)
+        .await
+        .unwrap();
+    fence
+        .validate(
+            &f.store.core_cursor(&f.owner).await.unwrap(),
+            crate::cyberherd::calendar::now().unwrap(),
+        )
+        .unwrap();
+    assert_eq!(
+        f.store
+            .core_cursor(&f.owner)
+            .await
+            .unwrap()
+            .received_through,
+        130
+    );
+    assert!(f.store.ingress_head(&f.owner).await.unwrap().is_none());
+    assert_eq!(f.store.snapshot(&f.owner).await.unwrap().revision, 0);
+    let mut cmd = operator::Command {
+        id: Uuid::new_v4(),
+        expected_revision: 0,
+        action: operator::Action::Settings {
+            minimum_sats: "20".into(),
+            max_members: 10,
+            member_percent: 10,
+        },
+    };
+    let now = crate::cyberherd::calendar::now().unwrap();
+    f.store
+        .operator_command(
+            &f.owner,
+            &authorize(&cmd, now),
+            &cmd,
+            operator::Environment {
+                feeder: FeederAvailability::Unknown,
+                context: crate::cyberherd::conversation::Context::default(),
+                ordering: Some(fence),
+                now,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(f.store.snapshot(&f.owner).await.unwrap().revision, 1);
+    f.paid(11, 2, 1000, &f.note).await;
+    let feed = f.core.begin_feed_attempt(1000).await.unwrap().unwrap();
+    f.core.confirm_feed_attempt(feed).await.unwrap();
+    let fence = operator::CoreFence::observe(&f.store, &f.owner, &client)
+        .await
+        .unwrap();
+    cmd.id = Uuid::new_v4();
+    cmd.expected_revision = 1;
+    cmd.action = operator::Action::Settings {
+        minimum_sats: "21".into(),
+        max_members: 10,
+        member_percent: 10,
+    };
+    let now = crate::cyberherd::calendar::now().unwrap();
+    let error = f
+        .store
+        .operator_command(
+            &f.owner,
+            &authorize(&cmd, now),
+            &cmd,
+            operator::Environment {
+                feeder: FeederAvailability::Ready,
+                context: crate::cyberherd::conversation::Context::default(),
+                ordering: Some(fence),
+                now,
+            },
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "operator edit awaits confirmed feeding snapshot"
+    );
+    assert_eq!(f.store.snapshot(&f.owner).await.unwrap().revision, 1);
+    assert_eq!(
+        f.store
+            .snapshot(&f.owner)
+            .await
+            .unwrap()
+            .settings
+            .minimum_sats,
+        20
+    );
+    assert!(matches!(
+        f.store.ingress_head(&f.owner).await.unwrap().unwrap().input,
+        crate::cyberherd::ingress::Input::Payment(_)
+    ));
+    task.abort();
 }
 
 #[tokio::test]
@@ -768,32 +946,11 @@ async fn signed_outbox_profile_resolves_second_member_like_and_repost_exactly_on
     );
     // Complete membership -> outbox -> private safety -> signing -> matching
     // ACK on temporary stores, with no public relay connection.
-    let (uid, gid) = self_credentials().unwrap();
-    std::fs::set_permissions(
-        f._root.path(),
-        std::os::unix::fs::PermissionsExt::from_mode(0o750),
-    )
-    .unwrap();
-    let config = crate::core_bridge::BridgeConfig {
-        socket: f._root.path().join("delivery.sock"),
-        peer_uid: uid,
-        group_gid: gid,
-        reward_policy: None,
-        payout_peer_uid: None,
-        delegated_feeder_messages: false,
-        payout_execution_enabled: false,
-        payout_account_id: None,
-    };
-    let server = crate::core_bridge::unix::Server::bind(&config)
-        .await
-        .unwrap();
-    let task = tokio::spawn(server.run(f.core.clone(), crate::config::RuntimeMode::Active));
+    let (core, task) = f.bridge().await;
     let transport = MemberPublication::default();
     let delivery = crate::cyberherd::delivery_worker::Worker {
         store: reopened.clone(),
-        core: Client::new(config.socket, uid)
-            .unwrap()
-            .with_request_spacing(Duration::from_millis(1100)),
+        core,
         transport: transport.clone(),
         owner: f.owner.clone(),
     };

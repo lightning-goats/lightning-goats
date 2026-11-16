@@ -1,0 +1,10 @@
+{
+  "result": "expected_rejection",
+  "exit_code": 1,
+  "mode": "--fees",
+  "reason": "case-specific completion marker missing in older zero-fee artifacts",
+  "runner_sha256": "ef7d01752009ee2d48cebee1259cd3606f6646ef4c55a949a16f200e0550624d",
+  "scope": "Negative artifact selection only; positive fees/change fixture remains uncompiled draft",
+  "log": "\nrunning 1 test\ntest strike::tests::cashu_treasury_tests::combined_fixture::combined_settlement_core_child ... COMBINED_CORE_ONE_SETTLEMENT_ONE_SYNTHETIC_FEED\nok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 501 filtered out; finished in 2.16s\n\n\n\nrunning 1 test\ntest acquisition::tests::core_settlement_fixture::combined_settlement_wallet_child ... COMBINED_WALLET_TWO_ACQUISITIONS_ONE_MELT\nok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 153 filtered out; finished in 1.34s\n\n\nTraceback (most recent call last):\n  File \"/home/linuxuser/lightning-goats/.worktrees/cashu-nutnovember-20261115/deploy/scripts/test-cashu-combined-settlement.py\", line 133, in <module>\n    main()\n    ~~~~^^\n  File \"/home/linuxuser/lightning-goats/.worktrees/cashu-nutnovember-20261115/deploy/scripts/test-cashu-combined-settlement.py\", line 99, in main\n    raise ValueError('combined fixture completion marker missing')\nValueError: combined fixture completion marker missing\n",
+  "production_changed": false
+}

@@ -1,0 +1,20 @@
+{
+  "result": "CASHU_BACKUP_SPECIAL_ENTRY_REJECTION_VERIFIED",
+  "regression_before_fix": "Unlisted FIFO was ignored; expected ValueError was not raised.",
+  "after_fix_tests_passed": 16,
+  "failed": 0,
+  "ignored": 0,
+  "special_entries_checked": [
+    "FIFO",
+    "Unix socket"
+  ],
+  "inaccessible_directory_rejected": true,
+  "test_execution": "Unprivileged disposable state outside the restrictive local-socket sandbox.",
+  "source_sha256": {
+    "deploy/scripts/verify-cashu-backup.py": "bf5ccd4320db23ad6d768bb40854c102d75d50cdf54ecc8fca533a61f471f4de",
+    "deploy/tests/test_cashu_backup_inventory.py": "c0439c37fe0233bc5db0ae7bedef29c51868a573e3aad05fe2d7961701cf22c4"
+  },
+  "coordinated_restore_qualified": false,
+  "external_reconciliation_verified": false,
+  "production_changes": false
+}

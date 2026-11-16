@@ -81,7 +81,7 @@ Do not guess these values.
 
 ### Strike
 
-- production receive-only API key with only the documented receive-request create/read permissions;
+- production core API key with the documented receive-request create/read permissions; CyberHerd independent outcome verification additionally requires `partner.payment.read`, never quote/execute/spend permissions (see [credential qualification](cyberherd-payout-credential.md));
 - production webhook secret;
 - sandbox equivalents for canary where available;
 - operator-defined maximum operational Strike balance and sweep procedure.

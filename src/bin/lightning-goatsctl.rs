@@ -104,6 +104,15 @@ enum Command {
         #[arg(long)]
         apply: bool,
     },
+    /// Preview/apply one reviewed pending financial plan release; never release custody.
+    ReleaseFinancialPlan {
+        #[arg(long)]
+        approval: PathBuf,
+        #[arg(long, required = true)]
+        writers_stopped: bool,
+        #[arg(long)]
+        apply: bool,
+    },
     /// Print the current durable feed-credit accounting state.
     Status,
 }
@@ -204,6 +213,54 @@ async fn main() -> Result<()> {
             bail!("credit retirement requires Unix protected-file authority");
         }
     }
+    if let Command::ReleaseFinancialPlan {
+        approval,
+        writers_stopped,
+        apply,
+    } = &args.command
+    {
+        #[cfg(unix)]
+        {
+            if !*writers_stopped {
+                bail!("explicit stopped-writer attestation required");
+            }
+            lightning_goats::payout::cost_recovery::require_protected_configuration(&args.config)?;
+            let decision = lightning_goats::cashu::financial_release::Approval::load(approval)?;
+            let config = AppConfig::load(&args.config)?;
+            if config.feeder.threshold_sats != decision.threshold_sats {
+                bail!("release threshold differs from protected configuration");
+            }
+            lightning_goats::cashu::financial_release::require_stopped_core().await?;
+            let ledger = LedgerStore::connect_existing_recovery(&config.database.url).await?;
+            if ledger.overlay_stream_id().await? != decision.epoch {
+                bail!("release approval belongs to another ledger epoch");
+            }
+            decision.require_current()?;
+            let would_release = ledger
+                .preview_financial_feed_plan_release(decision.plan_id, decision.threshold_sats)
+                .await?;
+            let changed = if *apply {
+                decision.require_current()?;
+                ledger
+                    .release_financial_feed_plan(decision.plan_id, decision.threshold_sats)
+                    .await?
+            } else {
+                false
+            };
+            println!(
+                "{}",
+                serde_json::json!({"plan_id":decision.plan_id,"would_release":would_release,
+                "apply_requested":apply,"changed":changed,"custody_released":false,
+                "provider_request":false,"physical_actuation":false})
+            );
+            return Ok(());
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (approval, writers_stopped, apply);
+            bail!("financial release requires Unix protected-file authority");
+        }
+    }
     let config = AppConfig::load(&args.config)?;
     if let Command::RetireFeedCredit {
         id,
@@ -244,6 +301,9 @@ async fn main() -> Result<()> {
     };
 
     match args.command {
+        Command::ReleaseFinancialPlan { .. } => {
+            bail!("financial release must use the protected offline path")
+        }
         Command::CheckCoreUpgrade { .. }
         | Command::BackupLegacyCore { .. }
         | Command::VerifyCoreUpgrade { .. } => {

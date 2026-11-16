@@ -45,7 +45,7 @@ pub(super) async fn private_catalog() -> Result<BTreeMap<String, Definition>> {
 
 pub(super) async fn compare_images(before: &Path, after: &Path, policy: &Policy) -> Result<()> {
     database::inspect_before_inclusive_fees(before, policy).await?;
-    let migrated = database::inspect(after, policy).await?;
+    let migrated = database::inspect_schema_25(after, policy).await?;
     for table in FEE_TABLES {
         if migrated.rows[&Role::Payout].get(table) != Some(&0) {
             bail!("inclusive-fee upgrade must add empty fee tables only");
@@ -198,13 +198,17 @@ mod tests {
         crate::state_maintenance::contact_upgrade::tests::Keep,
     ) {
         let (policy, keep) = super::super::contact_upgrade::tests::seed(root).await;
-        let core = crate::ledger::LedgerStore::connect(&format!(
-            "sqlite://{}",
-            policy.components[&Role::Core].database.display()
-        ))
+        let core = crate::sqlite::connect_durable(
+            &format!(
+                "sqlite://{}",
+                policy.components[&Role::Core].database.display()
+            ),
+            1,
+        )
         .await
         .unwrap();
-        drop(core);
+        database::migrate_core_through(&core, 25).await.unwrap();
+        core.close().await;
         let payout_url = format!(
             "sqlite://{}",
             policy.components[&Role::Payout].database.display()

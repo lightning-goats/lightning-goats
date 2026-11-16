@@ -1,0 +1,48 @@
+# Inactive review artifact; provision keys/registered state only by operator step.
+# No [Install] section, public publication, initialization or key generation hook.
+[Unit]
+Description=Purpose-limited Lightning Goats Cashu NIP-46 broker
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/lightning-goats-cashu-signer/config.json
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=lightning-goats-cashu-signer
+Group=lg-cashu-signer-ipc
+ExecStartPre=/usr/local/bin/lightning-goats-cashu-signerd check-config /etc/lightning-goats-cashu-signer/config.json
+ExecStart=/usr/local/bin/lightning-goats-cashu-signerd run /etc/lightning-goats-cashu-signer/config.json
+LoadCredentialEncrypted=cashu-nostr-client:/etc/credstore.encrypted/lg-cashu-nostr-client
+Restart=on-failure
+RestartSec=15s
+TimeoutStopSec=90s
+StateDirectory=lightning-goats-cashu-signer lightning-goats-cashu-nak
+StateDirectoryMode=0700
+RuntimeDirectory=lightning-goats-cashu-signer
+RuntimeDirectoryMode=0750
+UMask=0077
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectProc=invisible
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/lightning-goats-cashu-signer /var/lib/lightning-goats-cashu-nak /run/lightning-goats-cashu-signer
+InaccessiblePaths=-/etc/lightning-goats -/var/lib/lightning-goats -/etc/cyberherd -/var/lib/cyberherd -/etc/cyberherd-payout -/var/lib/cyberherd-payout -/etc/cyberherd-signer -/var/lib/cyberherd-signer -/etc/lightning-goats-cashu -/var/lib/lightning-goats-cashu -/etc/credstore -/etc/credstore.encrypted
+# No live bunker/relay access until separate egress acceptance and approval.
+IPAddressDeny=any

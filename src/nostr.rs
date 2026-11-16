@@ -11,7 +11,6 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use reqwest::Url;
-use serde::{Deserialize, Serialize};
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWriteExt},
     process::Command,
@@ -62,16 +61,7 @@ pub struct NakClient {
     relay_router: Arc<tokio::sync::Mutex<Option<Arc<crate::relay_routing::Router>>>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SignedNostrEvent {
-    pub id: String,
-    pub pubkey: String,
-    pub created_at: u64,
-    pub kind: u64,
-    pub tags: Vec<Vec<String>>,
-    pub content: String,
-    pub sig: String,
-}
+pub use lightning_goats_nostr_event::SignedNostrEvent;
 
 impl NakClient {
     pub fn project_pubkey(&self) -> &str {

@@ -1,0 +1,137 @@
+{
+  "scope": "Exact-commit notice discovery; these failures do not authorize substituting latest-branch text.",
+  "failures": [
+    {
+      "query": [
+        "hex_lit",
+        "Kixunil/hex_lit",
+        "a1b61585654a3280103a9622c272b2f8ba278a47",
+        "LICENSE"
+      ],
+      "error": {
+        "error": "GitHub API error 404: {\"message\":\"No commit found for the ref a1b61585654a3280103a9622c272b2f8ba278a47\",\"documentation_url\":\"https://docs.github.com/v3/repos/contents/\",\"status\":\"404\"}",
+        "error_code": "NOT_FOUND",
+        "error_data": {
+          "message": "No commit found for the ref a1b61585654a3280103a9622c272b2f8ba278a47",
+          "documentation_url": "https://docs.github.com/v3/repos/contents/",
+          "status": "404"
+        }
+      }
+    },
+    {
+      "query": [
+        "bitcoin-payment-instructions",
+        "rust-bitcoin/bitcoin-payment-instructions",
+        "3d5400ff95373a78138c09f2e310c751cc7d2770",
+        "LICENSE-MIT"
+      ],
+      "error": {
+        "error": "GitHub API error 404: {\"message\":\"Not Found\",\"documentation_url\":\"https://docs.github.com/rest/repos/contents#get-repository-content\",\"status\":\"404\"}",
+        "error_code": "NOT_FOUND",
+        "error_data": {
+          "message": "Not Found",
+          "documentation_url": "https://docs.github.com/rest/repos/contents#get-repository-content",
+          "status": "404"
+        }
+      }
+    },
+    {
+      "query": [
+        "r-efi-5",
+        "r-efi/r-efi",
+        "97b55bed1c2c91dcbf787674849f05337ff80b33",
+        "LICENSE-MIT"
+      ],
+      "error": {
+        "error": "GitHub API error 404: {\"message\":\"Not Found\",\"documentation_url\":\"https://docs.github.com/rest/repos/contents#get-repository-content\",\"status\":\"404\"}",
+        "error_code": "NOT_FOUND",
+        "error_data": {
+          "message": "Not Found",
+          "documentation_url": "https://docs.github.com/rest/repos/contents#get-repository-content",
+          "status": "404"
+        }
+      }
+    },
+    {
+      "query": [
+        "r-efi-6",
+        "r-efi/r-efi",
+        "7e1b0322d31d625f81a5656096330934f9cd835d",
+        "LICENSE-MIT"
+      ],
+      "error": {
+        "error": "GitHub API error 404: {\"message\":\"Not Found\",\"documentation_url\":\"https://docs.github.com/rest/repos/contents#get-repository-content\",\"status\":\"404\"}",
+        "error_code": "NOT_FOUND",
+        "error_data": {
+          "message": "Not Found",
+          "documentation_url": "https://docs.github.com/rest/repos/contents#get-repository-content",
+          "status": "404"
+        }
+      }
+    },
+    {
+      "query": [
+        "wasite",
+        "ardaku/wasite",
+        "0c72934ad329ab4670eb017581640c2d6eceb289",
+        "LICENSE-MIT"
+      ],
+      "error": {
+        "error": "GitHub API error 404: {\"message\":\"Not Found\",\"documentation_url\":\"https://docs.github.com/rest/repos/contents#get-repository-content\",\"status\":\"404\"}",
+        "error_code": "NOT_FOUND",
+        "error_data": {
+          "message": "Not Found",
+          "documentation_url": "https://docs.github.com/rest/repos/contents#get-repository-content",
+          "status": "404"
+        }
+      }
+    }
+  ],
+  "directories": [
+    {
+      "name": "r-efi",
+      "entries": [
+        ".github",
+        ".gitignore",
+        "AUTHORS",
+        "Cargo.toml",
+        "Makefile",
+        "NEWS.md",
+        "README.md",
+        "examples",
+        "src"
+      ]
+    },
+    {
+      "name": "wasite",
+      "entries": [
+        ".gitignore",
+        ".rustfmt.toml",
+        "CHANGELOG.md",
+        "Cargo.toml",
+        "LICENSE_APACHE_2_0.txt",
+        "LICENSE_BOOST_1_0.txt",
+        "LICENSE_MIT.txt",
+        "README.md",
+        "book.toml",
+        "docs",
+        "rust-toolchain",
+        "src"
+      ]
+    },
+    {
+      "name": "bitcoin-payment-instructions",
+      "entries": [
+        ".github",
+        ".gitignore",
+        "Cargo.toml",
+        "README",
+        "ci",
+        "fuzz",
+        "rustfmt.toml",
+        "src"
+      ]
+    }
+  ],
+  "gloo_redirect": "{\"message\":\"Moved Permanently\",\"url\":\"https://api.github.com/repositories/171954469/contents/?ref=f3bb1d1a1c33dbcccaf26446aca7d0cea8e9d574\",\"documentation_url\":\"https://docs.github.com/rest/guides/best-practices-for-using-the-rest-api#follow-redirects\"}"
+}

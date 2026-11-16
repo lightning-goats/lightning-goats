@@ -79,7 +79,7 @@ async fn private_catalog() -> Result<BTreeMap<String, Definition>> {
 
 pub(super) async fn compare_images(before: &Path, after: &Path, policy: &Policy) -> Result<()> {
     database::inspect_before_contact(before, policy).await?;
-    let migrated = database::inspect(after, policy).await?;
+    let migrated = database::inspect_schema_25(after, policy).await?;
     for table in PRIVATE_TABLES {
         if migrated.rows[&Role::Core].get(table) != Some(&0) {
             bail!("contact upgrade must add empty private tables only");

@@ -117,6 +117,7 @@ async fn contact_http_rejects_bad_admission_and_only_authoritative_fee_queues_pr
     )
     .unwrap();
     let state = AppState {
+        cashu: None,
         config: Arc::new(config),
         ledger: ledger.clone(),
         gateway: GatewayClient::new("http://127.0.0.1:9/").unwrap(),

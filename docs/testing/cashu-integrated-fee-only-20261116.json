@@ -1,0 +1,23 @@
+{
+  "result": "CASHU_COMBINED_SETTLEMENT_VERIFIED",
+  "core_test_sha256": "65eb1dd4409ec81e9b8654f337bd888c9572b1b67c9352ca6ac6f9edd028ce82",
+  "wallet_test_sha256": "8c94483ca22a2c74b206de81a80ce95c8990cc2f0fa4ed5563bccd9fc92c9d19",
+  "normal_and_lost_reply_passed": true,
+  "financial_result": {
+    "contributions": 3,
+    "original_granted_credit_sats": 1000,
+    "credit_sats": 0,
+    "receive_fees_sats": 2,
+    "conversion_fee_sats": 2,
+    "retained_change_sats": 0,
+    "supplemental_native_sats": 0,
+    "treasury_deposit_sats": 398,
+    "new_transfer_credit_sats": 0,
+    "synthetic_confirmed_feeds": 1
+  },
+  "lost_reply_strike_before_wallet_report": true,
+  "lost_reply_wallet_recovery_while_paused": true,
+  "distinct_uid_ipc": false,
+  "live_provider": false,
+  "physical_actuation": false
+}

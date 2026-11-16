@@ -82,6 +82,12 @@ impl LedgerStore {
             return Ok(None);
         }
 
+        let sources = super::feed_sources::select(&mut transaction, threshold_sats).await?;
+        if matches!(sources, super::feed_sources::Selection::Waiting) {
+            transaction.commit().await?;
+            return Ok(None);
+        }
+
         let id = Uuid::new_v4();
         sqlx::query(
             r#"
@@ -93,6 +99,10 @@ impl LedgerStore {
         .bind(threshold_i64)
         .execute(&mut *transaction)
         .await?;
+
+        if let super::feed_sources::Selection::Ready(plan, parts) = sources {
+            super::feed_sources::freeze(&mut transaction, id, plan, threshold_sats, &parts).await?;
+        }
 
         transaction.commit().await?;
         Ok(Some(id))
@@ -280,9 +290,13 @@ impl LedgerStore {
         // Message attribution only: remove the newest still-unspent credit to
         // find the receipt that completed this FIFO threshold. A later payment
         // during dispatch cannot replace the original funding contribution.
-        let triggering_credit = triggering_credit(&mut transaction, debit_id, feed_credit_sats)
-            .await
-            .unwrap_or(None);
+        let triggering_credit = if super::feed_sources::frozen(&mut transaction, id).await? {
+            super::feed_sources::triggering_credit(&mut transaction, id).await?
+        } else {
+            triggering_credit(&mut transaction, debit_id, feed_credit_sats)
+                .await
+                .unwrap_or(None)
+        };
         let mut payload = json!({
             "feed_attempt_id": id,
             "threshold_sats": threshold_sats,

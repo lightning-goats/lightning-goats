@@ -437,6 +437,13 @@ async fn lot_proof(tx: &mut Transaction<'_, Sqlite>, id: i64) -> Result<(&'stati
             p.try_get::<Option<i64>, _>("settled_at")?
         ]);
     }
+    #[cfg(unix)]
+    if l.try_get::<String, _>("entry_type")? == "CASHU_RECEIPT" {
+        if kind != "unavailable" || !identity.is_null() {
+            bail!("Cashu custody cannot be relabeled as direct Strike funding");
+        }
+        identity = super::cashu::lot_identity(tx, id).await?;
+    }
     let proof = json!([
         id,
         l.try_get::<String, _>("entry_type")?,
@@ -481,8 +488,42 @@ async fn consume(
         feed.map_or(0, |v| v.1),
         amount,
     )?;
+    let frozen = if let Some((id, _)) = feed {
+        let threshold: Option<i64> = sqlx::query_scalar(
+            "SELECT threshold_sats FROM feed_source_reservations WHERE request_id=?",
+        )
+        .bind(id.to_string())
+        .fetch_optional(&mut **tx)
+        .await?;
+        if let Some(threshold) = threshold {
+            if to_u64(threshold, "reserved threshold")? != amount {
+                bail!("frozen feed threshold changed");
+            }
+            true
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+    if frozen {
+        let total: i64 = sqlx::query_scalar(
+            "SELECT COALESCE(SUM(sats),0) FROM feed_source_parts WHERE request_id=?",
+        )
+        .bind(feed.context("missing frozen feeding")?.0.to_string())
+        .fetch_one(&mut **tx)
+        .await?;
+        if to_u64(total, "frozen source total")? != amount {
+            bail!("frozen source allocation changed");
+        }
+    }
     while left > 0 {
-        let rows=sqlx::query("SELECT ledger_id,kind,remaining_sats,proof_hash FROM reward_funding_lots WHERE remaining_sats>0 ORDER BY ledger_id LIMIT 256").fetch_all(&mut **tx).await?;
+        let rows = if frozen {
+            sqlx::query("SELECT l.ledger_id,l.kind,l.remaining_sats,l.proof_hash,p.sats AS frozen_sats FROM feed_source_parts p JOIN reward_funding_lots l ON l.ledger_id=p.ledger_id WHERE p.request_id=? ORDER BY l.ledger_id")
+                .bind(feed.context("missing frozen feeding")?.0.to_string()).fetch_all(&mut **tx).await?
+        } else {
+            sqlx::query("SELECT ledger_id,kind,remaining_sats,proof_hash FROM reward_funding_lots WHERE remaining_sats>0 ORDER BY ledger_id LIMIT 256").fetch_all(&mut **tx).await?
+        };
         if rows.is_empty() {
             bail!("funding lots cannot cover confirmed debit");
         }
@@ -498,7 +539,15 @@ async fn consume(
             if actual.0 != kind || actual.1 != proof {
                 bail!("funding source changed since observation");
             }
-            let take = left.min(remaining);
+            let take = if frozen {
+                let sats = to_u64(row.try_get("frozen_sats")?, "frozen source sats")?;
+                if sats == 0 || sats > remaining || sats > left {
+                    bail!("frozen source no longer covers physical debit");
+                }
+                sats
+            } else {
+                left.min(remaining)
+            };
             sqlx::query(
                 "UPDATE reward_funding_lots SET remaining_sats=remaining_sats-? WHERE ledger_id=?",
             )
@@ -515,6 +564,9 @@ async fn consume(
                 strike = strike.checked_add(take).context("real funding overflow")?;
             }
             left -= take;
+        }
+        if frozen && left > 0 {
+            bail!("frozen source allocation is incomplete");
         }
     }
     Ok((strike, hex::encode(hash.finalize())))

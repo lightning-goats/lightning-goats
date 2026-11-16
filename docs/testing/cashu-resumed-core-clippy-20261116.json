@@ -1,0 +1,13 @@
+{
+  "result": "format_and_strict_clippy_passed",
+  "source_manifest_sha256": "850b5b29ddb15682c477e7121b08dc5db43bf1c934b4d5435cfbf2eb9df074b8",
+  "gates": {
+    "fmt": 0,
+    "clippy": 0
+  },
+  "clippy_log_sha256": "e8c250bb5e123983f1dc1421128f0d82324486376fd9f7ea674a33ebb33a085b",
+  "full_tests": "still_running",
+  "wallet_gates": "queued",
+  "staged_http_and_fee_matrix_integrated": false,
+  "production_changed": false
+}

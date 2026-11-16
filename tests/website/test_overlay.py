@@ -12,6 +12,12 @@ ROOT = Path(__file__).resolve().parents[2] / "web"
 STREAM = "76a209bd-58fb-431b-a76d-3c63cdc9bb1a"
 
 
+def request_fixtures():
+    path = Path(os.environ.get("LG_CASHU_REQUEST_FIXTURES",
+                              str(Path(__file__).parent / "fixtures/cashu-requests.json")))
+    return json.loads(path.read_text())["requests"]
+
+
 class OverlayBrowserTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -66,6 +72,82 @@ class OverlayBrowserTests(unittest.TestCase):
     def snapshot(self, seq=0, credit=0, **extra):
         self.send({"type": "snapshot", "version": 1, "stream_id": STREAM,
                    "seq": seq, "feed_credit_sats": credit, "threshold_sats": 1000, **extra})
+
+    def test_cashu_requests_decode_without_case_conversion_at_both_sizes(self):
+        import io
+        from PIL import Image
+        import zxingcpp
+        fixtures = request_fixtures()
+        for width, height in [(1920, 1080), (1280, 720)]:
+            self.page.set_viewport_size({"width": width, "height": height})
+            self.page.goto("https://lightning-goats.com/overlay.html?fit=1")
+            self.page.wait_for_function("Boolean(window.mockSocket && window.mockSocket.onmessage)")
+            for request in fixtures.values():
+                self.snapshot(cashu={**request, "enabled": True})
+                self.assertTrue(self.page.locator("#cashu-code").is_visible())
+                image = Image.open(io.BytesIO(self.page.locator("#cashu-image").screenshot()))
+                decoded = zxingcpp.read_barcode(image)
+                self.assertIsNotNone(decoded)
+                self.assertEqual(decoded.text, request["request"])
+                boxes = self.page.locator("#cashu-code, #top-left-container, #qr-code, #feeding-state").evaluate_all("nodes => nodes.map(n => { const r=n.getBoundingClientRect(); return {x:r.x,y:r.y,right:r.right,bottom:r.bottom}; })")
+                for index, a in enumerate(boxes):
+                    for b in boxes[index+1:]:
+                        self.assertTrue(a["right"] <= b["x"] or b["right"] <= a["x"] or a["bottom"] <= b["y"] or b["bottom"] <= a["y"], (a,b))
+        self.assertEqual(self.errors, [])
+
+    def test_cashu_invalid_disabled_stale_and_disconnect_do_not_break_credit(self):
+        fixture = request_fixtures()["creqA"]
+        valid = {**fixture, "enabled": True}
+        self.snapshot(seq=2, credit=500, cashu=valid)
+        self.snapshot(seq=1, cashu=None)
+        self.assertTrue(self.page.locator("#cashu-code").is_visible())
+        for metadata in [None, {**valid, "enabled": False}, {**valid, "request": "cashuAfunds"}, {**valid, "request": "creqA" + "A"*2048}, {**valid, "id": "invalid"}]:
+            self.snapshot(seq=3, credit=600, cashu=metadata)
+            self.assertFalse(self.page.locator("#cashu-code").is_visible())
+            self.assertEqual(self.page.locator("#credit").inner_text(), "600 sats credit")
+            self.assertEqual(self.page.locator("#qr-image svg").count(), 1)
+        self.snapshot(seq=4, cashu=valid)
+        self.page.evaluate("window.mockSocket.close()")
+        self.assertFalse(self.page.locator("#cashu-code").is_visible())
+        self.assertEqual(self.errors, [])
+
+    def test_two_qrs_cards_long_status_and_payment_effects_do_not_collide(self):
+        fixture = request_fixtures()["creqA"]
+        def separated():
+            boxes = self.page.locator("#cashu-code, #top-left-container, #qr-code, #lightning-label, #feeding-state, #accordion-container, #sats-received-overlay, #feeder-triggered, #bottom-container").evaluate_all("nodes => nodes.filter(n=>n.getClientRects().length).map(n => {const r=n.getBoundingClientRect(); return {id:n.id,x:r.x,y:r.y,right:r.right,bottom:r.bottom};})")
+            for i, a in enumerate(boxes):
+                self.assertGreaterEqual(a["x"], 0, a)
+                self.assertGreaterEqual(a["y"], 0, a)
+                self.assertLessEqual(a["right"], width, a)
+                self.assertLessEqual(a["bottom"], height, a)
+                for b in boxes[i+1:]:
+                    self.assertTrue(a["right"] <= b["x"] or b["right"] <= a["x"] or a["bottom"] <= b["y"] or b["bottom"] <= a["y"], (a,b))
+        for width, height in [(1920,1080),(1280,720)]:
+            self.page.set_viewport_size({"width":width,"height":height})
+            self.page.emulate_media(reduced_motion="reduce")
+            self.page.goto("https://lightning-goats.com/overlay.html?fit=1")
+            self.page.wait_for_function("Boolean(window.mockSocket && window.mockSocket.onmessage)")
+            members=[{"rank":i+1,"pubkey":f"{i+1:064x}","display_name":"Long member name " * 4,"amount_sats":"9007199254740993","points":"9007199254740993","share_percent":"1","picture":""} for i in range(10)]
+            roster={"owner":"ab"*32,"cycle":1,"revision":1,"capacity":10,"minimum_sats":"10","member_percent":10,"total_members":10,"members":members}
+            self.snapshot(credit=9007199254740991, cashu={**fixture,"enabled":True}, cyberherd=roster)
+            self.assertEqual(self.page.locator(".accordion-item").count(),10)
+            separated()
+            for seq, source in [(1,"cashu"),(2,"nutzap")]:
+                self.send({"type":"sats_received","source_type":"payment_received","source":source,"seq":seq,"feed_credit_sats":1000,"amount_sats":150,"message":"Cashu received"})
+                self.assertTrue(self.page.locator("#sats-received-overlay").is_visible())
+                self.assertFalse(self.page.locator("#lightning-img").is_visible())
+                self.assertTrue(self.page.locator("#cashu-code").is_visible())
+                separated()
+            self.send({"type":"feeder_trigger","source_type":"feeder_confirmed","seq":3,"feed_credit_sats":0,"message":"Confirmed"})
+            self.assertTrue(self.page.locator("#feeder-triggered").is_visible())
+            separated()
+            self.page.clock.fast_forward(5000)
+            self.snapshot(seq=3, cashu={**fixture,"enabled":True}, reset_reason="fixture_goat_layout")
+            self.send({"type":"informational","seq":4,"message":"Dexter Rowan Cosmo Newton Nova"})
+            self.page.clock.run_for(30)
+            self.assertEqual(self.page.locator(".accordion-item").count(),5)
+            separated()
+        self.assertEqual(self.errors, [])
 
     def test_credit_confirmation_and_untrusted_text(self):
         self.snapshot(credit=2340)

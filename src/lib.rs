@@ -9,6 +9,8 @@ mod state_bootstrap;
 #[cfg(unix)]
 pub mod state_maintenance;
 
+#[cfg(unix)]
+pub mod cashu;
 pub mod config;
 pub mod contact;
 pub mod contact_delivery;

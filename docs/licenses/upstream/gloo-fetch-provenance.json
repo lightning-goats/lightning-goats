@@ -1,0 +1,10 @@
+[
+  {
+    "file": "docs/licenses/upstream/gloo-LICENSE-MIT",
+    "url": "https://github.com/rustwasm/gloo/blob/f3bb1d1a1c33dbcccaf26446aca7d0cea8e9d574/LICENSE-MIT",
+    "retrieved_url": "https://github.com/ranile/gloo/blob/f3bb1d1a1c33dbcccaf26446aca7d0cea8e9d574/LICENSE-MIT",
+    "redirect_evidence": "https://github.com/rustwasm/gloo",
+    "git_blob_sha1": "1ae4a6988028e2122acb3a755fdd00759b893426",
+    "sha256": "5a6f5443ea473f130adbdcf84254761d1292bc79759b5253915d4b5e7afbef66"
+  }
+]

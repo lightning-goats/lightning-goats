@@ -31,6 +31,12 @@ pub struct AppConfig {
     pub core_bridge: Option<crate::core_bridge::BridgeConfig>,
     #[serde(default)]
     pub contact: Option<crate::contact::Config>,
+    #[serde(default)]
+    pub cashu: Option<crate::cashu::intake::Config>,
+    #[serde(default)]
+    pub cashu_receipts: Option<crate::cashu::receipt_server::Config>,
+    #[serde(default)]
+    pub cashu_treasury: Option<crate::cashu::treasury_config::Config>,
 }
 
 impl AppConfig {
@@ -79,6 +85,15 @@ impl AppConfig {
         }
         if let Some(bridge) = &self.core_bridge {
             bridge.validate()?;
+        }
+        if let Some(cashu) = &self.cashu {
+            cashu.forwarder()?;
+        }
+        if let Some(treasury) = &self.cashu_treasury {
+            treasury.validate(self.cashu_receipts.as_ref(), self.cashu.as_ref())?;
+        }
+        if let Some(receipts) = &self.cashu_receipts {
+            receipts.validate()?;
         }
         Ok(())
     }
@@ -405,6 +420,9 @@ mod tests {
 
     fn valid_config() -> AppConfig {
         AppConfig {
+            cashu: None,
+            cashu_receipts: None,
+            cashu_treasury: None,
             service: ServiceConfig {
                 listen: "127.0.0.1:8787".parse().unwrap(),
                 mode: RuntimeMode::Shadow,

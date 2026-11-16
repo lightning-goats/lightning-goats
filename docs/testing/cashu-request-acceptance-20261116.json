@@ -1,0 +1,18 @@
+{
+  "result": "native_requests_and_cross_uid_metadata_qualified",
+  "full_source_gates": "cashu-request-integrated-gates-20261116.json",
+  "explicit_composition": "cashu-request-final-composition-20261116.json",
+  "native_parser_browser": "cashu-request-corrected-native-20261116.json",
+  "post_fixture_checks": {
+    "protocol": 0,
+    "parser": 0,
+    "whitespace": 0
+  },
+  "canonical_sha256": "6dd408e26fc8e0f76f7a8b3f1037272302a0aebd4da7cec8d2856c4c47d09047",
+  "production_changed": false,
+  "unqualified": [
+    "Real sender applications, phone scans and provider acceptance",
+    "Combined nonzero fees/change",
+    "Sender async status capability, protected release command and coordinated backup/restore"
+  ]
+}

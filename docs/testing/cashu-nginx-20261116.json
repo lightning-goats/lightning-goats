@@ -1,0 +1,22 @@
+{
+  "result": "passed",
+  "tests": 4,
+  "log": "....\n----------------------------------------------------------------------\nRan 4 tests in 0.966s\n\nOK\n",
+  "source_sha256": {
+    "deploy/nginx/lightning-goats-cashu.conf.example": "fdb090f6b2a2e40865ab2ad17748357d0e5477d275a903e882b5cdf145942e13",
+    "deploy/tests/test_cashu_nginx.py": "e5616f69a323641425a9dccb0e14ac480ad10946fed92ba8e29830eb2b0f3f81"
+  },
+  "scope": [
+    "Real isolated nginx parsing and loopback proxy",
+    "Exact allowed method/path forwarding",
+    "Query and unsupported path/method rejection before backend",
+    "Oversized body refused without forwarding or body-file spooling",
+    "Synthetic token/query marker absent from local nginx logs"
+  ],
+  "unqualified": [
+    "Installed edge configuration and request-rate capacity",
+    "External WAF/CDN suppression",
+    "Actual sender and wallet runtime through installed edge"
+  ],
+  "production_changed": false
+}

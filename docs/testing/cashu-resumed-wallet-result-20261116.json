@@ -1,0 +1,19 @@
+{
+  "gates": {
+    "fmt": 0,
+    "clippy": 0,
+    "tests": 101
+  },
+  "library": {
+    "passed": 153,
+    "failed": 1,
+    "ignored": 7
+  },
+  "failure": "signer-fence synchronous test invokes a Tokio UID helper outside a runtime",
+  "test_log_sha256": "b198328feff87942a69a87b8f90dd32a23082bbe9a676e1e54754069adceebda",
+  "source_manifest_sha256": "cac14394d82d8f08ae78d2b7b867a132fdb2e7651b55b241ccf45bdae09e41b6",
+  "async_correction_integrated": true,
+  "transport_fee_and_status_stages_integrated": true,
+  "new_source_native_qualified": false,
+  "later_binary_tests_and_vendor_gate": "not executed after Cargo library failure"
+}

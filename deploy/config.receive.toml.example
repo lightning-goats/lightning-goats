@@ -142,3 +142,36 @@ relays = [
   "wss://relay.primal.net",
   "wss://relay.damus.io",
 ]
+
+# Optional Cashu token delivery; omitted by default. Requires a separately
+# provisioned and qualified wallet. Registration values below are placeholders.
+# Enabling intake does not enable credit import or treasury spending.
+# [cashu]
+# socket = "/run/lightning-goats-cashu/intake.sock"
+# wallet_uid = 12345
+# wallet_instance = "11111111-1111-4111-8111-111111111111"
+# wallet_epoch = "22222222-2222-4222-8222-222222222222"
+# receive_cashu = false
+# receive_nutzap = false
+# body_bytes = 65536
+# concurrent_requests = 4
+# deadline_seconds = 5
+
+# Optional private Cashu receipt import. Omitted by default; no socket is opened.
+# Epochs/UIDs/GID are placeholders and must match protected wallet/core registration.
+# Import budgets are deliberately zero. Configure qualified mint/policy limits
+# explicitly before enabling new imports; retained exact replies remain replayable.
+# [cashu_receipts]
+# socket = "/run/lightning-goats/cashu-receipts.sock"
+# ipc_gid = 12347
+# wallet_uid = 12345
+# wallet_instance = "11111111-1111-4111-8111-111111111111"
+# wallet_epoch = "22222222-2222-4222-8222-222222222222"
+# core_epoch = "33333333-3333-4333-8333-333333333333"
+# import_enabled = false
+# receipts_per_24h = 0
+# credit_sats_per_24h = 0
+# maximum_custody_sats = 0
+# approved = []
+# deadline_seconds = 5
+# connections_per_second = 8

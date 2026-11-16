@@ -18,6 +18,10 @@ use crate::{
 
 type HmacSha256 = Hmac<Sha256>;
 
+#[cfg(unix)]
+#[path = "strike_cashu.rs"]
+mod cashu_treasury;
+
 const STRIKE_SOURCE: &str = "strike";
 const COMPLETED_RECEIVE_EVENT: &str = "receive-request.receive-completed";
 
@@ -144,6 +148,22 @@ impl StrikeClient {
         description_hash: &str,
         expiry_seconds: u64,
     ) -> Result<CreatedStrikeReceiveRequest> {
+        self.create_bolt11_receive_request_inner(
+            amount_msat,
+            description_hash,
+            expiry_seconds,
+            false,
+        )
+        .await
+    }
+
+    async fn create_bolt11_receive_request_inner(
+        &self,
+        amount_msat: u64,
+        description_hash: &str,
+        expiry_seconds: u64,
+        require_btc_target: bool,
+    ) -> Result<CreatedStrikeReceiveRequest> {
         if amount_msat == 0 {
             bail!("Strike receive amount must be greater than zero");
         }
@@ -174,6 +194,9 @@ impl StrikeClient {
                 "create receive request",
             )
             .await?;
+        if require_btc_target && response.target_currency.as_deref() != Some("BTC") {
+            bail!("treasury receive request omitted its exact BTC target");
+        }
         let invoice = validate_receive_request_response(&response, amount_msat, description_hash)?;
         crate::bolt11::verify_issuance_expiry(&invoice, expiry_seconds)?;
 
@@ -593,6 +616,13 @@ impl StrikeRuntime {
         } = issuance;
         crate::domain::invoice::validate_user(address_user)?;
         crate::domain::invoice::validate_user(credit_pool)?;
+        if ["contact", "cashu_treasury"].contains(&address_user)
+            || ["contact", "cashu_treasury"].contains(&credit_pool)
+        {
+            bail!(
+                "private receive purposes require their own immutable intent before provider contact"
+            );
+        }
         if amount_msat == 0
             || !amount_msat.is_multiple_of(1000)
             || amount_msat > i64::MAX as u64
@@ -741,10 +771,41 @@ impl StrikeRuntime {
                     event.receive_request_id
                 )
             })?;
+        #[cfg(unix)]
+        let treasury = ledger
+            .cashu_treasury_for_receive(stored.receive_request_id)
+            .await?;
+        #[cfg(unix)]
+        if let Some(intent) = treasury.as_ref() {
+            self.client.check_cashu_destination(&intent.destination)?;
+            let request = self
+                .client
+                .find_receive_request(stored.receive_request_id)
+                .await?;
+            if request.target_currency.as_deref() != Some("BTC") {
+                bail!("treasury provider target changed");
+            }
+        }
         let receive = self
             .client
             .reconcile_completed_receive(&stored, event.receive_id)
             .await?;
+        #[cfg(unix)]
+        if let Some(intent) = treasury {
+            return Ok(
+                if ledger
+                    .record_cashu_treasury_deposit(&intent, &receive)
+                    .await?
+                {
+                    SettlementOutcome::TreasurySettlementAccepted
+                } else {
+                    SettlementOutcome::Duplicate
+                },
+            );
+        }
+        if stored.address_user == "cashu_treasury" || stored.credit_pool == "cashu_treasury" {
+            bail!("treasury invoice omitted its immutable purpose binding");
+        }
         let contact = ledger
             .contact_for_receive(stored.receive_request_id)
             .await?;
@@ -1074,6 +1135,8 @@ pub(crate) fn btc_decimal_to_msat(value: &str) -> Result<u64> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    include!("strike_cashu_tests.rs");
     use std::sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
@@ -1213,6 +1276,11 @@ mod tests {
     }
 
     async fn spawn_mock(state: MockState) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        spawn_mock_on(listener, state)
+    }
+
+    fn spawn_mock_on(listener: TcpListener, state: MockState) -> String {
         let request_path = format!("/v1/receive-requests/{}", state.receive_request_id);
         let receives_path = format!("{request_path}/receives");
         let app = Router::new()
@@ -1220,7 +1288,6 @@ mod tests {
             .route(&request_path, get(request_handler))
             .route(&receives_path, get(receive_handler))
             .with_state(state);
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();

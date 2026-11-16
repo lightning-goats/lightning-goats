@@ -151,6 +151,10 @@ pub(in crate::state_maintenance) async fn feeder_cap_prefix_digest(
     let columns = columns(pool, "_sqlx_migrations").await?;
     digest_selected(pool, "_sqlx_migrations", &columns, Some(24), None).await
 }
+pub(in crate::state_maintenance) async fn cashu_prefix_digest(pool: &SqlitePool) -> Result<Table> {
+    let columns = columns(pool, "_sqlx_migrations").await?;
+    digest_selected(pool, "_sqlx_migrations", &columns, Some(25), None).await
+}
 pub(in crate::state_maintenance) async fn inclusive_fee_prefix_digest(
     pool: &SqlitePool,
 ) -> Result<Table> {
@@ -189,7 +193,7 @@ async fn digest_selected(
         if table != "_sqlx_migrations" {
             bail!("unsupported migration-prefix digest");
         }
-        if !matches!(version, 8 | 23 | 24) {
+        if !matches!(version, 8 | 23..=25) {
             bail!("unsupported migration prefix");
         }
         format!(" WHERE version<={version}")
@@ -299,18 +303,21 @@ pub(super) async fn compare(directory: &Path, original: &Report) -> Result<()> {
                 bail!("migration changed retained legacy rows, IDs or signed bytes");
             }
         }
-        for table in [
-            "reward_funding_state",
-            "reward_funding_lots",
-            "feed_reward_funding",
-            "feed_reward_funding_parts",
-            "reward_reservations",
-            "reward_outcome_manifests",
-            "reward_outcome_rows",
-            "reward_outcome_finals",
-            "payout_execution_claims",
-            "payout_failed_costs",
-        ] {
+        for table in super::super::cashu_upgrade::CASHU_TABLES
+            .into_iter()
+            .chain([
+                "reward_funding_state",
+                "reward_funding_lots",
+                "feed_reward_funding",
+                "feed_reward_funding_parts",
+                "reward_reservations",
+                "reward_outcome_manifests",
+                "reward_outcome_rows",
+                "reward_outcome_finals",
+                "payout_execution_claims",
+                "payout_failed_costs",
+            ])
+        {
             let count: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
                 .fetch_one(&pool)
                 .await?;

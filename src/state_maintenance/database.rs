@@ -26,26 +26,99 @@ static MEMBERSHIP: sqlx::migrate::Migrator = sqlx::migrate!("./cyberherd-migrati
 static PAYOUT: sqlx::migrate::Migrator = sqlx::migrate!("./payout-migrations");
 static SIGNER: sqlx::migrate::Migrator = sqlx::migrate!("./signer-migrations");
 
+#[derive(Clone, Copy)]
+enum ReviewScope {
+    OrdinaryMaintenance,
+    CashuCorrelationsOnly,
+}
+
 pub(super) async fn inspect(directory: &Path, policy: &Policy) -> Result<Report> {
-    inspect_version(directory, policy, 25, false).await
+    inspect_version(
+        directory,
+        policy,
+        26,
+        false,
+        ReviewScope::OrdinaryMaintenance,
+    )
+    .await
+}
+
+/// Only the distinct, read-only Cashu correlation review can select this scope.
+/// It never produces an ordinary accepted backup or restore authority.
+pub(super) async fn inspect_cashu_correlations(
+    directory: &Path,
+    policy: &Policy,
+) -> Result<Report> {
+    inspect_version(
+        directory,
+        policy,
+        26,
+        false,
+        ReviewScope::CashuCorrelationsOnly,
+    )
+    .await
+}
+pub(super) async fn inspect_schema_25(directory: &Path, policy: &Policy) -> Result<Report> {
+    inspect_version(
+        directory,
+        policy,
+        25,
+        false,
+        ReviewScope::OrdinaryMaintenance,
+    )
+    .await
+}
+#[cfg(test)]
+pub(super) async fn migrate_core_through(pool: &SqlitePool, version: i64) -> Result<()> {
+    let mut migrator = sqlx::migrate!("./migrations");
+    migrator.migrations = migrator
+        .iter()
+        .filter(|m| m.version <= version)
+        .cloned()
+        .collect::<Vec<_>>()
+        .into();
+    migrator.run(pool).await?;
+    Ok(())
 }
 pub(super) async fn inspect_before_contact(directory: &Path, policy: &Policy) -> Result<Report> {
-    inspect_version(directory, policy, 23, false).await
+    inspect_version(
+        directory,
+        policy,
+        23,
+        false,
+        ReviewScope::OrdinaryMaintenance,
+    )
+    .await
 }
 pub(super) async fn inspect_before_feeder_cap(directory: &Path, policy: &Policy) -> Result<Report> {
-    inspect_version(directory, policy, 24, false).await
+    inspect_version(
+        directory,
+        policy,
+        24,
+        false,
+        ReviewScope::OrdinaryMaintenance,
+    )
+    .await
 }
 pub(super) async fn inspect_before_inclusive_fees(
     directory: &Path,
     policy: &Policy,
 ) -> Result<Report> {
-    inspect_version(directory, policy, 25, true).await
+    inspect_version(
+        directory,
+        policy,
+        25,
+        true,
+        ReviewScope::OrdinaryMaintenance,
+    )
+    .await
 }
 async fn inspect_version(
     directory: &Path,
     policy: &Policy,
     core_version: i64,
     before_fees: bool,
+    scope: ReviewScope,
 ) -> Result<Report> {
     let mut pools = BTreeMap::new();
     let mut rows = BTreeMap::new();
@@ -88,7 +161,7 @@ async fn inspect_version(
         {
             bail!("journal integrity or foreign keys failed");
         }
-        if core_version != 25 && role == Role::Core {
+        if core_version != 26 && role == Role::Core {
             require_core_prefix(&pool, core_version).await?;
         } else if before_fees && role == Role::Payout {
             require_before_inclusive_fees(&pool).await?;
@@ -126,7 +199,7 @@ async fn inspect_version(
         rows.insert(role, counts);
         pools.insert(role, pool);
     }
-    let report = report(&pools, policy, rows, core_version).await;
+    let report = report(&pools, policy, rows, core_version, scope).await;
     for pool in pools.into_values() {
         pool.close().await;
     }
@@ -138,11 +211,22 @@ async fn report(
     policy: &Policy,
     rows: BTreeMap<Role, BTreeMap<String, u64>>,
     core_version: i64,
+    scope: ReviewScope,
 ) -> Result<Report> {
     cross_check(pools, policy).await?;
     let core = &pools[&Role::Core];
     if core_version >= 24 {
         crate::contact_state::verify(core).await?;
+    }
+    if core_version >= 26 {
+        let cashu: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM cashu_receipt_inbox)")
+            .fetch_one(core)
+            .await?;
+        if cashu && matches!(scope, ReviewScope::OrdinaryMaintenance) {
+            bail!(
+                "Cashu custody requires a coordinated wallet/core backup; four-journal maintenance is insufficient"
+            );
+        }
     }
     let payout = &pools[&Role::Payout];
     Ok(Report {
@@ -160,14 +244,14 @@ async fn report(
 // restore verification: only the separate contact comparison can select it.
 async fn require_core_prefix(pool: &SqlitePool, version: i64) -> Result<()> {
     let migrations: Vec<_> = CORE.iter().collect();
-    if !matches!(version, 23 | 24)
-        || migrations.len() != 25
-        || migrations.last().map(|m| m.version) != Some(25)
+    if !matches!(version, 23..=25)
+        || migrations.len() != 26
+        || migrations.last().map(|m| m.version) != Some(26)
     {
         bail!("additive upgrade requires the separately qualified schema prefix");
     }
     let rows = sqlx::query(
-        "SELECT version,success,checksum FROM _sqlx_migrations ORDER BY version LIMIT 26",
+        "SELECT version,success,checksum FROM _sqlx_migrations ORDER BY version LIMIT 27",
     )
     .fetch_all(pool)
     .await?;
@@ -191,6 +275,11 @@ async fn require_core_prefix(pool: &SqlitePool, version: i64) -> Result<()> {
         if private {
             bail!("contact upgrade source already contains private-contact schema");
         }
+    }
+    let cashu: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name LIKE 'cashu_%' OR name LIKE 'feed_source_%')")
+        .fetch_one(pool).await?;
+    if cashu {
+        bail!("Cashu upgrade source already contains new schema objects");
     }
     Ok(())
 }

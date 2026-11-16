@@ -1,0 +1,26 @@
+{
+  "result": "CASHU_CORRELATION_EXISTING_ROOT_MAINTENANCE_PASSED",
+  "scope": "eight existing fixture bodies and production code match selected standard-gate artifact; separate corrected Cashu-only ignored test is rebuilding",
+  "fixture_result": {
+    "core_test_sha256": "5e9f8656a2cccac694c4678c7261639e20b53fb32244f80f9fdc8124f188fbb1",
+    "count": 8,
+    "fixtures_passed": [
+      "state_maintenance::reward_cutover_apply_tests::root_cutover_round_trip_preserves_four_journals_and_fences_live_checkpoints",
+      "state_maintenance::inclusive_fee_upgrade::tests::root_inclusive_fee_upgrade_compares_private_images_and_retains_original_backup",
+      "ledger::feed_cap::tests::root_retirement_preserves_runtime_owner_and_exact_paid_history",
+      "payout::cost_recovery::tests::root_owned_approval_and_evidence_checks_are_real_filesystem_authority",
+      "state_maintenance::tests::root_four_journal_snapshot_preserves_wal_paid_pending_and_signed_state_and_blocks_restore_startup",
+      "state_bootstrap::tests::root_offline_bootstrap_qualifies_three_actual_runtime_uids_and_refuses_replacing_journals",
+      "state_maintenance::legacy::tests::root_legacy_core_upgrade_preserves_wal_pending_receipts_epoch_signed_bytes_and_compares_migrated_copies",
+      "state_maintenance::contact_upgrade::tests::root_contact_upgrade_compares_private_images_and_retains_original_backup"
+    ],
+    "production_changes": false,
+    "result": "CURRENT_ROOT_MAINTENANCE_FIXTURES_VERIFIED"
+  },
+  "production_source_matches_selected_artifact": true,
+  "changed_test_only_path": "src/state_maintenance/cashu_correlations/tests.rs",
+  "private_mount_and_network_namespaces": true,
+  "temporary_disk_storage_removed": true,
+  "cashu_correlation_corrected_fixture_qualified": false,
+  "production_changes": false
+}

@@ -1,0 +1,12 @@
+{
+  "scope": "inactive wallet unit syntax only",
+  "unit": "deploy/systemd/lightning-goats-cashu.service.example",
+  "sha256": "4c4f46137ea266a201bd51a9955c9dfd969c7cfc82ae67383bd4fe5b5115d541",
+  "verification": {
+    "command": "systemd-analyze verify --man=no /tmp/lg-cashu-unit-syntax.service",
+    "exit_code": 0,
+    "fixture_transformation": "Replace only /usr/local/bin/lightning-goats-cashud with /usr/bin/true so an uninstalled binary does not prevent unit parsing. Neither executable is run by this check."
+  },
+  "installed": false,
+  "runtime_or_network_qualified": false
+}

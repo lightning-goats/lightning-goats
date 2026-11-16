@@ -1,0 +1,220 @@
+{
+  "schema_version": 1,
+  "inventory_sha256": "1ee129c9cc1600094b9bc411fe06946e933a934c9e856fca8b8cfcc56271db2c",
+  "scope": "Exact upstream commits recorded in checksum-verified crate archives; no substitution of current-branch licenses.",
+  "packages": [
+    {
+      "package": "cashu@0.18.3",
+      "checksum": "8fae7ec6607dd662c92d6f5582b86be608b7709eefe08cfce965a8733f163449",
+      "commit": "b2035a3525c98b22226926bdc20fa128a1351ae5",
+      "files": [
+        {
+          "file": "docs/licenses/upstream/cdk-LICENSE-MIT",
+          "url": "https://github.com/cashubtc/cdk/blob/b2035a3525c98b22226926bdc20fa128a1351ae5/LICENSE-MIT",
+          "git_blob_sha1": "604328316cfbd34cf4e614f6bee296a16ca20cc9",
+          "sha256": "3663aab5c30dee2b10b4f358b46774d09d6e9713a01a38abd5bada63fe547257"
+        },
+        {
+          "file": "docs/licenses/upstream/cdk-LICENSE-APACHE",
+          "url": "https://github.com/cashubtc/cdk/blob/b2035a3525c98b22226926bdc20fa128a1351ae5/LICENSE-APACHE",
+          "git_blob_sha1": "9af4720b40cad9d8f66fcce557b2f6353cddf9e8",
+          "sha256": "26c2ed53b6f7afb4de9846d94e2af5cde27c348fcc5abeb7e28d9964c3aa22d4"
+        }
+      ]
+    },
+    {
+      "package": "cdk-common@0.18.3",
+      "checksum": "267bdcdf8a6bbc7fca2c531225f084f93ada55ad763a16dcfcd3d2d126218dfc",
+      "commit": "b2035a3525c98b22226926bdc20fa128a1351ae5",
+      "files": [
+        {
+          "file": "docs/licenses/upstream/cdk-LICENSE-MIT",
+          "url": "https://github.com/cashubtc/cdk/blob/b2035a3525c98b22226926bdc20fa128a1351ae5/LICENSE-MIT",
+          "git_blob_sha1": "604328316cfbd34cf4e614f6bee296a16ca20cc9",
+          "sha256": "3663aab5c30dee2b10b4f358b46774d09d6e9713a01a38abd5bada63fe547257"
+        },
+        {
+          "file": "docs/licenses/upstream/cdk-LICENSE-APACHE",
+          "url": "https://github.com/cashubtc/cdk/blob/b2035a3525c98b22226926bdc20fa128a1351ae5/LICENSE-APACHE",
+          "git_blob_sha1": "9af4720b40cad9d8f66fcce557b2f6353cddf9e8",
+          "sha256": "26c2ed53b6f7afb4de9846d94e2af5cde27c348fcc5abeb7e28d9964c3aa22d4"
+        }
+      ]
+    },
+    {
+      "package": "cdk-http-client@0.18.3",
+      "checksum": "262a1ce236bcdcb25a79a1e6f2e1f38a168ce3e4f33952fe89bbe6fa76cab992",
+      "commit": "b2035a3525c98b22226926bdc20fa128a1351ae5",
+      "files": [
+        {
+          "file": "docs/licenses/upstream/cdk-LICENSE-MIT",
+          "url": "https://github.com/cashubtc/cdk/blob/b2035a3525c98b22226926bdc20fa128a1351ae5/LICENSE-MIT",
+          "git_blob_sha1": "604328316cfbd34cf4e614f6bee296a16ca20cc9",
+          "sha256": "3663aab5c30dee2b10b4f358b46774d09d6e9713a01a38abd5bada63fe547257"
+        },
+        {
+          "file": "docs/licenses/upstream/cdk-LICENSE-APACHE",
+          "url": "https://github.com/cashubtc/cdk/blob/b2035a3525c98b22226926bdc20fa128a1351ae5/LICENSE-APACHE",
+          "git_blob_sha1": "9af4720b40cad9d8f66fcce557b2f6353cddf9e8",
+          "sha256": "26c2ed53b6f7afb4de9846d94e2af5cde27c348fcc5abeb7e28d9964c3aa22d4"
+        }
+      ]
+    },
+    {
+      "package": "cdk-signatory@0.18.3",
+      "checksum": "9a81e8eb20eaf45b0cbb5dc5d0e3bbfffd1292a47b9634bca735045d7db59cba",
+      "commit": "b2035a3525c98b22226926bdc20fa128a1351ae5",
+      "files": [
+        {
+          "file": "docs/licenses/upstream/cdk-LICENSE-MIT",
+          "url": "https://github.com/cashubtc/cdk/blob/b2035a3525c98b22226926bdc20fa128a1351ae5/LICENSE-MIT",
+          "git_blob_sha1": "604328316cfbd34cf4e614f6bee296a16ca20cc9",
+          "sha256": "3663aab5c30dee2b10b4f358b46774d09d6e9713a01a38abd5bada63fe547257"
+        },
+        {
+          "file": "docs/licenses/upstream/cdk-LICENSE-APACHE",
+          "url": "https://github.com/cashubtc/cdk/blob/b2035a3525c98b22226926bdc20fa128a1351ae5/LICENSE-APACHE",
+          "git_blob_sha1": "9af4720b40cad9d8f66fcce557b2f6353cddf9e8",
+          "sha256": "26c2ed53b6f7afb4de9846d94e2af5cde27c348fcc5abeb7e28d9964c3aa22d4"
+        }
+      ]
+    },
+    {
+      "package": "cdk-sql-common@0.18.3",
+      "checksum": "1490bc11c172bbd5b9bc7c7e6c4f11ec4bbc606fe87b04982a0cd69a62aaece1",
+      "commit": "b2035a3525c98b22226926bdc20fa128a1351ae5",
+      "files": [
+        {
+          "file": "docs/licenses/upstream/cdk-LICENSE-MIT",
+          "url": "https://github.com/cashubtc/cdk/blob/b2035a3525c98b22226926bdc20fa128a1351ae5/LICENSE-MIT",
+          "git_blob_sha1": "604328316cfbd34cf4e614f6bee296a16ca20cc9",
+          "sha256": "3663aab5c30dee2b10b4f358b46774d09d6e9713a01a38abd5bada63fe547257"
+        },
+        {
+          "file": "docs/licenses/upstream/cdk-LICENSE-APACHE",
+          "url": "https://github.com/cashubtc/cdk/blob/b2035a3525c98b22226926bdc20fa128a1351ae5/LICENSE-APACHE",
+          "git_blob_sha1": "9af4720b40cad9d8f66fcce557b2f6353cddf9e8",
+          "sha256": "26c2ed53b6f7afb4de9846d94e2af5cde27c348fcc5abeb7e28d9964c3aa22d4"
+        }
+      ]
+    },
+    {
+      "package": "cdk-sqlite@0.18.3",
+      "checksum": "c5302422baeb33a6e910a388845fae155043d7ac4973d5a1b499700fd31bb70e",
+      "commit": "b2035a3525c98b22226926bdc20fa128a1351ae5",
+      "files": [
+        {
+          "file": "docs/licenses/upstream/cdk-LICENSE-MIT",
+          "url": "https://github.com/cashubtc/cdk/blob/b2035a3525c98b22226926bdc20fa128a1351ae5/LICENSE-MIT",
+          "git_blob_sha1": "604328316cfbd34cf4e614f6bee296a16ca20cc9",
+          "sha256": "3663aab5c30dee2b10b4f358b46774d09d6e9713a01a38abd5bada63fe547257"
+        },
+        {
+          "file": "docs/licenses/upstream/cdk-LICENSE-APACHE",
+          "url": "https://github.com/cashubtc/cdk/blob/b2035a3525c98b22226926bdc20fa128a1351ae5/LICENSE-APACHE",
+          "git_blob_sha1": "9af4720b40cad9d8f66fcce557b2f6353cddf9e8",
+          "sha256": "26c2ed53b6f7afb4de9846d94e2af5cde27c348fcc5abeb7e28d9964c3aa22d4"
+        }
+      ]
+    },
+    {
+      "package": "valuable@0.1.1",
+      "checksum": "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65",
+      "commit": "9efc29b6e58cef28f6566a47aa7e142a55fead77",
+      "files": [
+        {
+          "file": "docs/licenses/upstream/valuable-LICENSE",
+          "url": "https://github.com/tokio-rs/valuable/blob/9efc29b6e58cef28f6566a47aa7e142a55fead77/LICENSE",
+          "git_blob_sha1": "4ca822a5cb54142a14070f5be388e60497781615",
+          "sha256": "ed60d479b8fd1f64e9cbc3de449a16a53ac1b3d1b6aeb9bf9d190a8e93061b44"
+        }
+      ]
+    },
+    {
+      "package": "lightning-invoice@0.34.2",
+      "checksum": "5e874476e461bcca94ae30335bc5263f126f9219fdbd7bde6e02b530dbaa6567",
+      "commit": "254bc9687dd190375956ad790f87239b97ebd058",
+      "files": [
+        {
+          "file": "docs/licenses/upstream/lightning-invoice-LICENSE-MIT",
+          "url": "https://github.com/lightningdevkit/rust-lightning/blob/254bc9687dd190375956ad790f87239b97ebd058/LICENSE-MIT",
+          "git_blob_sha1": "9d982a4d63256f23b8cc0854024d134e1140f4f3",
+          "sha256": "638da3722c9e102ccd8011d82f61ae3b611174e4a0f8da185c582df137b60a8c"
+        }
+      ]
+    },
+    {
+      "package": "lightning-macros@0.2.1",
+      "checksum": "d4c717494cdc2c8bb85bee7113031248f5f6c64f8802b33c1c9e2d98e594aa71",
+      "commit": "b18924cb17537ca8397992709b8bea536b19f9d2",
+      "files": [
+        {
+          "file": "docs/licenses/upstream/lightning-macros-LICENSE-MIT",
+          "url": "https://github.com/lightningdevkit/rust-lightning/blob/b18924cb17537ca8397992709b8bea536b19f9d2/LICENSE-MIT",
+          "git_blob_sha1": "9d982a4d63256f23b8cc0854024d134e1140f4f3",
+          "sha256": "638da3722c9e102ccd8011d82f61ae3b611174e4a0f8da185c582df137b60a8c"
+        }
+      ]
+    },
+    {
+      "package": "lightning-types@0.3.5",
+      "checksum": "c77c676d4a34cceb2ae3756916e446b4d17f9430a24107e099981f0f9aec77e6",
+      "commit": "5bc1dc84b3a1b084f84de4b7ece3d978b678d894",
+      "files": [
+        {
+          "file": "docs/licenses/upstream/lightning-types-LICENSE-MIT",
+          "url": "https://github.com/lightningdevkit/rust-lightning/blob/5bc1dc84b3a1b084f84de4b7ece3d978b678d894/LICENSE-MIT",
+          "git_blob_sha1": "9d982a4d63256f23b8cc0854024d134e1140f4f3",
+          "sha256": "638da3722c9e102ccd8011d82f61ae3b611174e4a0f8da185c582df137b60a8c"
+        }
+      ]
+    },
+    {
+      "package": "wasite@0.1.0",
+      "checksum": "b8dad83b4f25e74f184f64c43b150b91efe7647395b42289f38e50566d82855b",
+      "commit": "0c72934ad329ab4670eb017581640c2d6eceb289",
+      "files": [
+        {
+          "file": "docs/licenses/upstream/wasite-LICENSE-MIT",
+          "url": "https://github.com/ardaku/wasite/blob/0c72934ad329ab4670eb017581640c2d6eceb289/LICENSE_MIT.txt",
+          "git_blob_sha1": "9cf106272ac3b56b0c4c80218e8fc10a664ca5f4",
+          "sha256": "508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1"
+        }
+      ]
+    },
+    {
+      "package": "gloo-timers@0.3.0",
+      "checksum": "bbb143cf96099802033e0d4f4963b19fd2e0b728bcf076cd9cf7f6634f092994",
+      "commit": "f3bb1d1a1c33dbcccaf26446aca7d0cea8e9d574",
+      "files": [
+        {
+          "file": "docs/licenses/upstream/gloo-LICENSE-MIT",
+          "url": "https://github.com/rustwasm/gloo/blob/f3bb1d1a1c33dbcccaf26446aca7d0cea8e9d574/LICENSE-MIT",
+          "retrieved_url": "https://github.com/ranile/gloo/blob/f3bb1d1a1c33dbcccaf26446aca7d0cea8e9d574/LICENSE-MIT",
+          "redirect_evidence": "https://github.com/rustwasm/gloo",
+          "git_blob_sha1": "1ae4a6988028e2122acb3a755fdd00759b893426",
+          "sha256": "5a6f5443ea473f130adbdcf84254761d1292bc79759b5253915d4b5e7afbef66"
+        }
+      ]
+    },
+    {
+      "package": "cdk@0.18.3",
+      "checksum": "6969a2ea499035f5f49f5cdaf355f34251ce85a8ddd47c557177ecee5ed7da2a",
+      "commit": "b2035a3525c98b22226926bdc20fa128a1351ae5",
+      "files": [
+        {
+          "file": "docs/licenses/upstream/cdk-LICENSE-MIT",
+          "url": "https://github.com/cashubtc/cdk/blob/b2035a3525c98b22226926bdc20fa128a1351ae5/LICENSE-MIT",
+          "git_blob_sha1": "604328316cfbd34cf4e614f6bee296a16ca20cc9",
+          "sha256": "3663aab5c30dee2b10b4f358b46774d09d6e9713a01a38abd5bada63fe547257"
+        },
+        {
+          "file": "docs/licenses/upstream/cdk-LICENSE-APACHE",
+          "url": "https://github.com/cashubtc/cdk/blob/b2035a3525c98b22226926bdc20fa128a1351ae5/LICENSE-APACHE",
+          "git_blob_sha1": "9af4720b40cad9d8f66fcce557b2f6353cddf9e8",
+          "sha256": "26c2ed53b6f7afb4de9846d94e2af5cde27c348fcc5abeb7e28d9964c3aa22d4"
+        }
+      ]
+    }
+  ]
+}

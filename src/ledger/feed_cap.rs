@@ -305,6 +305,11 @@ impl LedgerStore {
         if !super::reward_funding::prepare(&mut tx).await? {
             bail!("original funding history must be initialized and verified first");
         }
+        let reserved: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM feed_financial_parts p JOIN feed_financial_plans f ON f.id=p.plan_id WHERE p.ledger_id=? AND f.state='pending')")
+            .bind(credit_id).fetch_one(&mut *tx).await?;
+        if reserved {
+            bail!("cannot retire credit reserved by a pending financial plan");
+        }
         let remaining: i64 =
             sqlx::query_scalar("SELECT remaining_sats FROM reward_funding_lots WHERE ledger_id=?")
                 .bind(credit_id)

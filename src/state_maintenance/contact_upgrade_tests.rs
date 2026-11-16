@@ -85,6 +85,25 @@ pub(in crate::state_maintenance) async fn seed(root: &Path) -> (Policy, Keep) {
     .await
     .unwrap();
     let pool = crate::sqlite::connect_durable(&core_url, 1).await.unwrap();
+    // Fixture-only removal of the empty Cashu addition before constructing
+    // historical sources; no runtime downgrade path exists.
+    for table in crate::state_maintenance::cashu_upgrade::CASHU_TABLES {
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(&format!("SELECT COUNT(*) FROM {table}"))
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            0
+        );
+        sqlx::query(&format!("DROP TABLE {table}"))
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    sqlx::query("DELETE FROM _sqlx_migrations WHERE version=26")
+        .execute(&pool)
+        .await
+        .unwrap();
     for table in [
         "message_outbox_suppressions",
         "feeding_announcement_sources",
@@ -162,7 +181,7 @@ async fn additive_contact_upgrade_retains_all_four_journals_and_refuses_row_or_d
         crate::sqlite::connect_durable(&format!("sqlite://{}", after.join("core.db").display()), 1)
             .await
             .unwrap();
-    sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+    database::migrate_core_through(&pool, 25).await.unwrap();
     pool.close().await;
     compare_images(&before, &after, &p).await.unwrap();
     assert_eq!(
@@ -357,7 +376,7 @@ async fn root_contact_upgrade_compares_private_images_and_retains_original_backu
         crate::sqlite::connect_durable(&format!("sqlite://{}", after.join("core.db").display()), 1)
             .await
             .unwrap();
-    sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+    database::migrate_core_through(&pool, 25).await.unwrap();
     pool.close().await;
     protect(&after);
     assert_eq!(

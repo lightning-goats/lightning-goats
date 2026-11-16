@@ -1,0 +1,13 @@
+{
+  "library": {
+    "passed": 314,
+    "failed": 191,
+    "ignored": 10
+  },
+  "sandbox_restriction_reproduced": "local Unix socket creation returned EPERM",
+  "representative_test": "payout::funding::tests::core_role_reads_are_separate_from_intake_and_never_enable_execution_by_default",
+  "unchanged_representative_outside_sandbox": "passed",
+  "all_failures_individually_diagnosed": false,
+  "rerun": "session 65306 unprivileged no-new-privileges fresh loopback-only netns",
+  "full_suite_qualified": false
+}

@@ -23,6 +23,8 @@ name = "cyberherdd"
 path = "src/bin/cyberherdd.rs"
 
 [dependencies]
+lightning-goats-cashu-receipt = { path = "crates/cashu-receipt", version = "=0.1.0" }
+lightning-goats-nostr-event = { path = "crates/nostr-event", version = "=0.1.0" }
 anyhow = "1"
 axum = { version = "0.8", features = ["ws"] }
 base64 = "=0.22.1"

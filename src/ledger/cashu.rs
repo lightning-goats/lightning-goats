@@ -1,0 +1,247 @@
+//! Atomic authenticated Cashu receipt import. No mint calls, proof material,
+//! native Strike settlement, membership, or payout authority is manufactured.
+use anyhow::{Context, Result, ensure};
+use lightning_goats_cashu_receipt::WireReceipt;
+use serde_json::json;
+use sqlx::{Row, Sqlite, Transaction};
+
+use super::{LedgerStore, append_event_in_transaction, to_i64, to_u64};
+use crate::cashu::receipt_authority::{PeerReceipt, ReceiptPolicy, RemainingBudget};
+
+mod financial_jobs;
+mod sweep_jobs;
+mod treasury;
+mod treasury_planning;
+mod treasury_scheduling;
+pub use treasury::TreasuryPlan;
+
+/// The immutable original acknowledgment, including on a retry after spending.
+pub use lightning_goats_cashu_receipt::acknowledgment::ImportResult as CashuImportResult;
+
+impl LedgerStore {
+    /// Only reachable with a kernel-authenticated private receipt. The separate
+    /// socket server must load policy from protected core configuration. New
+    /// import and duplicate acknowledgment deliberately have different gates.
+    pub async fn import_cashu_receipt(
+        &self,
+        policy: &ReceiptPolicy,
+        authenticated: &PeerReceipt,
+    ) -> Result<CashuImportResult> {
+        let receipt = authenticated.receipt();
+        let data = receipt.data();
+        let digest = hex::encode(receipt.digest()?);
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let epoch: String =
+            sqlx::query_scalar("SELECT stream_id FROM overlay_identity WHERE singleton=1")
+                .fetch_optional(&mut *tx)
+                .await?
+                .context("core epoch must be initialized before Cashu import")?;
+        ensure!(
+            epoch == policy.core_epoch.to_string(),
+            "core epoch changed; Cashu recovery required"
+        );
+        // Validate the authenticated registration even if an exact replay exists.
+        // Current policy limits can be reduced/off without hiding prior receipts.
+        policy.check_registration(authenticated)?;
+        let existing = sqlx::query(
+            "SELECT * FROM cashu_receipt_inbox WHERE wallet_instance=? AND acquisition_id=?",
+        )
+        .bind(data.wallet_instance.to_string())
+        .bind(data.acquisition_id.to_string())
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some(row) = existing {
+            ensure!(
+                row.try_get::<String, _>("receipt_digest")? == digest,
+                "Cashu acquisition conflicts with original receipt"
+            );
+            let result = verify_row(&mut tx, &row, receipt).await?;
+            tx.commit().await?;
+            return Ok(result);
+        }
+
+        // Reuse the audited source-lot substrate only after explicit startup
+        // initialization; importing a receipt never initializes paid history or
+        // enables the independently gated CyberHerd payout policy.
+        ensure!(
+            super::reward_funding::prepare(&mut tx).await?,
+            "source funding history requires explicit initialization"
+        );
+        let now: i64 = sqlx::query_scalar("SELECT unixepoch()")
+            .fetch_one(&mut *tx)
+            .await?;
+        let previous: Option<i64> =
+            sqlx::query_scalar("SELECT last_seen FROM cashu_import_clock WHERE singleton=1")
+                .fetch_optional(&mut *tx)
+                .await?;
+        ensure!(
+            now >= 0 && previous.is_none_or(|last| now >= last),
+            "Cashu import clock regressed"
+        );
+        let used = sqlx::query("SELECT COUNT(*) AS count,COALESCE(SUM(net_sats),0) AS sats FROM cashu_receipt_inbox WHERE accepted_at>=?")
+            .bind(now.saturating_sub(86_400)).fetch_one(&mut *tx).await?;
+        // Until a verified treasury allocation consumes custody, every acquired
+        // sat remains exposure, including credit retired by the payment cap.
+        let custody: i64 =
+            sqlx::query_scalar("SELECT (SELECT COALESCE(SUM(net_sats),0) FROM cashu_receipt_inbox)-(SELECT COALESCE(SUM(input_sats-change_sats),0) FROM cashu_treasury_source_results)")
+                .fetch_one(&mut *tx)
+                .await?;
+        let limits = &policy.limits;
+        for bound in [
+            limits.receipts_per_24h,
+            limits.credit_sats_per_24h,
+            limits.maximum_custody_sats,
+        ] {
+            ensure!(
+                bound > 0 && bound <= i64::MAX as u64,
+                "Cashu core limits are disabled or invalid"
+            );
+        }
+        let remaining = RemainingBudget {
+            receipt_count: limits
+                .receipts_per_24h
+                .saturating_sub(to_u64(used.try_get("count")?, "Cashu count")?),
+            credit_sats: limits
+                .credit_sats_per_24h
+                .saturating_sub(to_u64(used.try_get("sats")?, "Cashu rate usage")?),
+            custody_sats: limits
+                .maximum_custody_sats
+                .saturating_sub(to_u64(custody, "Cashu custody")?),
+        };
+        policy.check_new(authenticated, &remaining)?;
+        let amount = to_i64(data.net_sats, "Cashu net receipt")?;
+        let ledger_id = sqlx::query("INSERT INTO ledger_entries(entry_type,source_key,delta_sats,payment_source,payment_source_id,address_user,credit_pool) VALUES('CASHU_RECEIPT',?,?,?,?,'herd','herd')")
+            .bind(source_key(receipt)).bind(amount).bind(&data.transport).bind(data.acquisition_id.to_string())
+            .execute(&mut *tx).await?.last_insert_rowid();
+        let after = super::feed_cap::cap_new_credit(&mut tx, ledger_id, data.net_sats).await?;
+        // Intentionally narrow projection. The mint, balances, private evidence,
+        // source event IDs and all proof/operation material stay private.
+        let event =
+            append_event_in_transaction(&mut tx, "payment_received", &public_event(receipt, after))
+                .await?;
+        sqlx::query("INSERT INTO cashu_receipt_inbox(wallet_instance,acquisition_id,wallet_epoch,core_epoch,mint_id,evidence_digest,receipt_digest,receipt_json,net_sats,ledger_entry_id,event_seq,original_feed_credit_sats,accepted_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)")
+            .bind(data.wallet_instance.to_string()).bind(data.acquisition_id.to_string()).bind(data.wallet_epoch.to_string())
+            .bind(&epoch).bind(&data.mint_id).bind(&data.acquisition_evidence_digest).bind(&digest)
+            .bind(String::from_utf8(receipt.encode()?)?).bind(amount).bind(ledger_id).bind(to_i64(event,"Cashu event")?)
+            .bind(to_i64(after,"Cashu credit after cap")?).bind(now).execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO cashu_import_clock VALUES(1,?) ON CONFLICT(singleton) DO UPDATE SET last_seen=excluded.last_seen")
+            .bind(now).execute(&mut *tx).await?;
+        // The immutable private receipt exists before source proof capture.
+        super::reward_funding::prepare(&mut tx).await?;
+        let result = CashuImportResult {
+            acquisition_id: data.acquisition_id,
+            receipt_digest: digest,
+            event_seq: event,
+            net_sats: data.net_sats,
+            original_feed_credit_sats: after,
+        };
+        tx.commit().await?;
+        Ok(result)
+    }
+}
+
+fn source_key(receipt: &WireReceipt) -> String {
+    format!(
+        "cashu:{}:{}",
+        receipt.data().wallet_instance,
+        receipt.data().acquisition_id
+    )
+}
+fn public_event(receipt: &WireReceipt, after: u64) -> serde_json::Value {
+    json!({"source":receipt.data().transport,"amount_sats":receipt.data().net_sats,
+        "feed_credit_sats":after,"address_user":"herd","credit_pool":"herd"})
+}
+
+async fn verify_row(
+    tx: &mut Transaction<'_, Sqlite>,
+    row: &sqlx::sqlite::SqliteRow,
+    receipt: &WireReceipt,
+) -> Result<CashuImportResult> {
+    let stored = WireReceipt::decode(row.try_get::<String, _>("receipt_json")?.as_bytes())?;
+    ensure!(
+        stored.digest()? == receipt.digest()?,
+        "Cashu inbox data changed"
+    );
+    let data = receipt.data();
+    ensure!(
+        row.try_get::<String, _>("wallet_instance")? == data.wallet_instance.to_string()
+            && row.try_get::<String, _>("acquisition_id")? == data.acquisition_id.to_string()
+            && row.try_get::<String, _>("wallet_epoch")? == data.wallet_epoch.to_string()
+            && row.try_get::<String, _>("mint_id")? == data.mint_id
+            && row.try_get::<String, _>("evidence_digest")? == data.acquisition_evidence_digest
+            && row.try_get::<String, _>("receipt_digest")? == hex::encode(receipt.digest()?)
+            && row.try_get::<i64, _>("net_sats")? == to_i64(data.net_sats, "stored custody")?,
+        "Cashu inbox index disagrees with original receipt"
+    );
+    let ledger = sqlx::query("SELECT * FROM ledger_entries WHERE id=?")
+        .bind(row.try_get::<i64, _>("ledger_entry_id")?)
+        .fetch_one(&mut **tx)
+        .await?;
+    let data = receipt.data();
+    ensure!(
+        ledger.try_get::<String, _>("entry_type")? == "CASHU_RECEIPT"
+            && ledger.try_get::<String, _>("source_key")? == source_key(receipt)
+            && ledger.try_get::<i64, _>("delta_sats")? == to_i64(data.net_sats, "receipt amount")?
+            && ledger
+                .try_get::<Option<String>, _>("payment_source")?
+                .as_deref()
+                == Some(data.transport.as_str())
+            && ledger
+                .try_get::<Option<String>, _>("payment_source_id")?
+                .as_deref()
+                == Some(data.acquisition_id.to_string().as_str())
+            && ledger
+                .try_get::<Option<String>, _>("address_user")?
+                .as_deref()
+                == Some("herd")
+            && ledger
+                .try_get::<Option<String>, _>("credit_pool")?
+                .as_deref()
+                == Some("herd")
+            && ledger
+                .try_get::<Option<String>, _>("payment_hash")?
+                .is_none()
+            && ledger
+                .try_get::<Option<String>, _>("feed_attempt_id")?
+                .is_none(),
+        "Cashu receipt lost original credit provenance"
+    );
+    let after = to_u64(
+        row.try_get("original_feed_credit_sats")?,
+        "original Cashu acknowledgment",
+    )?;
+    let event = sqlx::query("SELECT event_type,payload_json FROM event_log WHERE seq=?")
+        .bind(row.try_get::<i64, _>("event_seq")?)
+        .fetch_one(&mut **tx)
+        .await?;
+    ensure!(
+        event.try_get::<String, _>("event_type")? == "payment_received"
+            && serde_json::from_str::<serde_json::Value>(
+                &event.try_get::<String, _>("payload_json")?
+            )? == public_event(receipt, after),
+        "Cashu receipt lost original public event"
+    );
+    Ok(CashuImportResult {
+        acquisition_id: data.acquisition_id,
+        receipt_digest: hex::encode(receipt.digest()?),
+        event_seq: to_u64(row.try_get("event_seq")?, "Cashu event")?,
+        net_sats: data.net_sats,
+        original_feed_credit_sats: after,
+    })
+}
+
+pub(super) async fn lot_identity(
+    tx: &mut Transaction<'_, Sqlite>,
+    ledger_id: i64,
+) -> Result<serde_json::Value> {
+    let row = sqlx::query("SELECT * FROM cashu_receipt_inbox WHERE ledger_entry_id=?")
+        .bind(ledger_id)
+        .fetch_one(&mut **tx)
+        .await?;
+    let receipt = WireReceipt::decode(row.try_get::<String, _>("receipt_json")?.as_bytes())?;
+    verify_row(tx, &row, &receipt).await?;
+    Ok(json!(["cashu-custody-v1", hex::encode(receipt.digest()?)]))
+}
+
+#[cfg(test)]
+mod tests;

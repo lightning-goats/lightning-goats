@@ -7,6 +7,9 @@ use std::{
 };
 use uuid::Uuid;
 
+mod cashu_correlations;
+mod cashu_upgrade;
+pub use cashu_correlations::CashuCorrelationReview;
 mod contact_upgrade;
 mod control;
 mod database;
@@ -183,6 +186,7 @@ enum SnapshotSchema {
     Current,
     BeforeContact,
     BeforeFeederCap,
+    BeforeCashu,
     BeforeInclusiveFees,
 }
 impl Operator {
@@ -210,6 +214,11 @@ impl Operator {
     /// Exact schema-24 source only; ordinary restore remains current-schema only.
     pub async fn snapshot_before_feeder_cap(&self, destination: &Path) -> Result<Manifest> {
         self.snapshot_schema(destination, SnapshotSchema::BeforeFeederCap)
+            .await
+    }
+    /// Snapshot the exact schema-25 source before the inactive Cashu addition.
+    pub async fn snapshot_before_cashu(&self, destination: &Path) -> Result<Manifest> {
+        self.snapshot_schema(destination, SnapshotSchema::BeforeCashu)
             .await
     }
     /// Snapshot only the exact old payout prefix; no migration or restore grant.
@@ -252,6 +261,9 @@ impl Operator {
             }
             SnapshotSchema::BeforeFeederCap => {
                 database::inspect_before_feeder_cap(destination, &self.policy).await?
+            }
+            SnapshotSchema::BeforeCashu => {
+                database::inspect_schema_25(destination, &self.policy).await?
             }
             SnapshotSchema::BeforeInclusiveFees => {
                 database::inspect_before_inclusive_fees(destination, &self.policy).await?

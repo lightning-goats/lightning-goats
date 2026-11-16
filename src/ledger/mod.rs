@@ -1,4 +1,8 @@
 mod admission;
+#[cfg(unix)]
+mod cashu;
+#[cfg(unix)]
+pub use cashu::{CashuImportResult, TreasuryPlan};
 mod credit;
 mod quotes;
 pub use credit::{
@@ -22,6 +26,8 @@ mod events;
 mod failed_costs;
 mod feed;
 mod feed_cap;
+mod feed_sources;
+mod financial_release;
 pub use feed_cap::CreditRetirementResult;
 mod feeding_notices;
 mod feeding_presentation;
@@ -62,6 +68,7 @@ pub struct LedgerStore {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SettlementOutcome {
     ContactFeeAccepted,
+    TreasurySettlementAccepted,
     Credited {
         sats: u64,
         address_user: String,
@@ -134,6 +141,14 @@ impl LedgerStore {
             || payment.credit_pool == "contact"
         {
             bail!("private contact fees cannot enter feed-credit settlement");
+        }
+        let treasury_collision:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM cashu_treasury_issuances WHERE payment_hash=lower(?)) OR EXISTS(SELECT 1 FROM cashu_treasury_deposits WHERE ?='strike' AND receive_id=?)")
+            .bind(payment.payment_hash.as_deref()).bind(&payment.source).bind(&payment.source_id).fetch_one(&mut *transaction).await?;
+        if treasury_collision
+            || payment.address_user == "cashu_treasury"
+            || payment.credit_pool == "cashu_treasury"
+        {
+            bail!("internal Cashu treasury transfers cannot enter contribution accounting");
         }
 
         let existing = sqlx::query(

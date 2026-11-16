@@ -1,0 +1,681 @@
+//! BIP 321 Payment Instruction Helpers
+//!
+//! This module provides helper functions for reading and creating BIP 321 `bitcoin:` URIs
+//! that can include cashu payment requests (NUT-26 `creq` parameter) alongside other
+//! payment methods (BOLT11, BOLT12, on-chain addresses).
+//!
+//! # Parsing
+//!
+//! Use [`parse_payment_instruction`] to parse a BIP 321 URI or standalone
+//! payment string into [`ParsedPaymentInstruction`]. A [`bitcoin::Network`]
+//! must be provided so that on-chain addresses are validated against the
+//! correct network.
+//!
+//! # Creating
+//!
+//! Use [`Bip321UriBuilder`] to construct a BIP 321 `bitcoin:` URI via the builder
+//! pattern and call `.to_string()` to produce the final URI string.
+//! A [`PaymentRequest`] can also be converted directly via the
+//! [`PaymentRequestBip321Ext::to_bip321`] extension method.
+//!
+//! # Example
+//!
+//! ```no_run
+//! use cdk::wallet::bip321::{parse_payment_instruction, Bip321UriBuilder};
+//!
+//! # async fn example() -> Result<(), cdk::error::Error> {
+//! // Create a BIP 321 URI with a cashu payment request
+//! let uri = Bip321UriBuilder::new()
+//!     .with_cashu_request_str("CREQB1...".to_string())
+//!     .to_string();
+//!
+//! // Parse it back (network is required for on-chain address validation)
+//! let parsed = parse_payment_instruction(&uri, bitcoin::Network::Bitcoin).await?;
+//! assert_eq!(parsed.cashu_requests.len(), 1);
+//! # Ok(())
+//! # }
+//! ```
+
+use core::fmt;
+use std::str::FromStr;
+#[cfg(all(feature = "bip353", not(target_arch = "wasm32")))]
+use std::sync::Arc;
+
+use bitcoin_payment_instructions::hrn_resolution::DummyHrnResolver;
+use bitcoin_payment_instructions::{
+    PaymentInstructions, PaymentMethod as BpiPaymentMethod, PossiblyResolvedPaymentMethod,
+};
+use tracing::instrument;
+use url::form_urlencoded;
+
+#[cfg(all(feature = "bip353", not(target_arch = "wasm32")))]
+use crate::bip353::Bip353Address;
+use crate::error::Error;
+use crate::nuts::PaymentRequest;
+#[cfg(all(feature = "bip353", not(target_arch = "wasm32")))]
+use crate::wallet::util::escape_log_value;
+#[cfg(all(feature = "bip353", not(target_arch = "wasm32")))]
+use crate::wallet::MintConnector;
+
+/// Parsed payment instruction with all available payment methods.
+#[derive(Debug, Clone, Default)]
+pub struct ParsedPaymentInstruction {
+    /// Cashu NUT-26 payment requests found in the instruction.
+    pub cashu_requests: Vec<PaymentRequest>,
+    /// BOLT11 invoice strings found.
+    pub bolt11_invoices: Vec<String>,
+    /// BOLT12 offer strings found.
+    pub bolt12_offers: Vec<String>,
+    /// On-chain bitcoin addresses found.
+    pub onchain_addresses: Vec<String>,
+    /// Description / label / message from the URI.
+    pub description: Option<String>,
+    /// Amount in millisatoshis (if a fixed-amount instruction).
+    pub amount_msats: Option<u64>,
+    /// Whether the amount is configurable (vs fixed).
+    pub is_configurable_amount: bool,
+}
+
+/// Builder for BIP 321 `bitcoin:` URIs.
+///
+/// # Example
+///
+/// ```no_run
+/// use cdk::wallet::bip321::Bip321UriBuilder;
+///
+/// let uri = Bip321UriBuilder::new()
+///     .with_onchain_address("bc1q...".to_string())
+///     .with_amount_sats(100_000)
+///     .with_message("Coffee payment".to_string())
+///     .to_string();
+/// ```
+#[derive(Debug, Clone, Default)]
+pub struct Bip321UriBuilder {
+    /// A cashu payment request as a NUT-18 `creqA` or NUT-26 `creqb1` string.
+    cashu_request_str: Option<String>,
+    /// A BOLT11 invoice string.
+    bolt11_invoice: Option<String>,
+    /// A BOLT12 offer string.
+    bolt12_offer: Option<String>,
+    /// An on-chain bitcoin address.
+    onchain_address: Option<String>,
+    /// Amount in satoshis.
+    amount_sats: Option<u64>,
+    /// Label for the payment (shown to user, not sent to payee).
+    label: Option<String>,
+    /// Message for the payment (displayed to user as a note).
+    message: Option<String>,
+}
+
+impl Bip321UriBuilder {
+    /// Create a new empty builder.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the cashu payment request from a raw NUT-18 or NUT-26 string.
+    pub fn with_cashu_request_str(mut self, creq: String) -> Self {
+        self.cashu_request_str = Some(creq);
+        self
+    }
+
+    /// Set the cashu payment request from a CDK [`PaymentRequest`].
+    ///
+    /// The request is encoded to bech32m format internally.
+    pub fn with_cashu_request(mut self, request: &PaymentRequest) -> Result<Self, Error> {
+        let bech32_str = request
+            .to_bech32_string()
+            .map_err(|e| Error::Bip321Encode(e.to_string()))?;
+        self.cashu_request_str = Some(bech32_str);
+        Ok(self)
+    }
+
+    /// Set the BOLT11 invoice string.
+    pub fn with_bolt11_invoice(mut self, invoice: String) -> Self {
+        self.bolt11_invoice = Some(invoice);
+        self
+    }
+
+    /// Set the BOLT12 offer string.
+    pub fn with_bolt12_offer(mut self, offer: String) -> Self {
+        self.bolt12_offer = Some(offer);
+        self
+    }
+
+    /// Set the on-chain bitcoin address.
+    pub fn with_onchain_address(mut self, address: String) -> Self {
+        self.onchain_address = Some(address);
+        self
+    }
+
+    /// Set the amount in satoshis.
+    ///
+    /// BIP 21 encodes amount values in BTC, so satoshis are formatted at
+    /// render time.
+    pub fn with_amount_sats(mut self, sats: u64) -> Self {
+        self.amount_sats = Some(sats);
+        self
+    }
+
+    /// Set the label for the payment (shown to user, not sent to payee).
+    pub fn with_label(mut self, label: String) -> Self {
+        self.label = Some(label);
+        self
+    }
+
+    /// Set the message for the payment (displayed to user as a note).
+    pub fn with_message(mut self, message: String) -> Self {
+        self.message = Some(message);
+        self
+    }
+}
+
+/// Extension trait for converting [`PaymentRequest`] values to BIP 321 builders.
+pub trait PaymentRequestBip321Ext {
+    /// Convert this request into a builder with the `creq=` field pre-populated.
+    fn to_bip321(&self) -> Result<Bip321UriBuilder, Error>;
+}
+
+impl PaymentRequestBip321Ext for PaymentRequest {
+    fn to_bip321(&self) -> Result<Bip321UriBuilder, Error> {
+        Bip321UriBuilder::new().with_cashu_request(self)
+    }
+}
+
+/// Parse a BIP 321 `bitcoin:` URI or standalone payment instruction string,
+/// validating on-chain addresses against the given [`bitcoin::Network`].
+///
+/// Supports BIP 321 URIs and standalone Cashu, BOLT11, BOLT12, and on-chain inputs.
+/// Human-readable name resolution (`user@domain.com`, BIP 353, LNURL) is not supported.
+#[instrument(skip_all)]
+pub async fn parse_payment_instruction(
+    instruction: &str,
+    network: bitcoin::Network,
+) -> Result<ParsedPaymentInstruction, Error> {
+    let resolver = DummyHrnResolver;
+
+    let parsed = PaymentInstructions::parse(instruction, network, &resolver, false)
+        .await
+        .map_err(|e| Error::Bip321Parse(format!("{e:?}")))?;
+
+    convert_payment_instructions(parsed)
+}
+
+/// Resolve a BIP353 address and parse the resulting concrete payment instruction.
+///
+/// This is the shared low-level helper for "resolve first, inspect later" flows. It accepts
+/// any [`MintConnector`] so callers do not need a full [`crate::wallet::Wallet`] just to resolve and inspect a
+/// human-readable payment instruction.
+///
+/// The `network` parameter is forwarded to [`parse_payment_instruction`] and controls
+/// which on-chain address prefixes are accepted in the resolved URI.
+#[cfg(all(feature = "bip353", not(target_arch = "wasm32")))]
+#[instrument(skip_all)]
+pub async fn resolve_bip353_payment_instruction(
+    client: &Arc<dyn MintConnector + Send + Sync>,
+    bip353_address: &str,
+    network: bitcoin::Network,
+) -> Result<ParsedPaymentInstruction, Error> {
+    let address = Bip353Address::from_str(bip353_address).map_err(|e| {
+        tracing::error!(
+            "Failed to parse BIP353 address '{}': {}",
+            escape_log_value(bip353_address),
+            escape_log_value(&e)
+        );
+        Error::Bip353Parse(e.to_string())
+    })?;
+
+    let address_string = address.to_string();
+    tracing::debug!(
+        "Resolving BIP353 address: {}",
+        escape_log_value(&address_string)
+    );
+
+    let resolved_uri = address.resolve(client).await.map_err(|e| {
+        tracing::error!(
+            "Failed to resolve BIP353 address '{}': {}",
+            escape_log_value(&address_string),
+            escape_log_value(&e)
+        );
+        Error::Bip353Resolve(e.to_string())
+    })?;
+
+    parse_payment_instruction(&resolved_uri, network)
+        .await
+        .map_err(|e| {
+            tracing::error!(
+                "Failed to parse resolved BIP353 payment instruction '{}': {}",
+                escape_log_value(&resolved_uri),
+                escape_log_value(&e)
+            );
+            Error::Bip321Parse(format!("Invalid resolved bitcoin URI: {e}"))
+        })
+}
+
+fn convert_payment_instructions(
+    parsed: PaymentInstructions,
+) -> Result<ParsedPaymentInstruction, Error> {
+    match parsed {
+        PaymentInstructions::FixedAmount(fixed) => {
+            let max_amount_msats = fixed.max_amount().map(|a| a.milli_sats());
+            extract_payment_methods(
+                fixed.methods(),
+                fixed.recipient_description().map(|d| d.to_string()),
+                max_amount_msats,
+                false,
+            )
+        }
+        PaymentInstructions::ConfigurableAmount(configurable) => extract_payment_methods(
+            configurable.methods().filter_map(|method| match method {
+                PossiblyResolvedPaymentMethod::Resolved(method) => Some(method),
+                _ => None,
+            }),
+            configurable.recipient_description().map(|d| d.to_string()),
+            None,
+            true,
+        ),
+    }
+}
+
+/// Extract CDK types from BPI payment methods.
+fn extract_payment_methods<'a>(
+    methods: impl IntoIterator<Item = &'a BpiPaymentMethod>,
+    description: Option<String>,
+    max_amount_msats: Option<u64>,
+    is_configurable: bool,
+) -> Result<ParsedPaymentInstruction, Error> {
+    let mut result = ParsedPaymentInstruction {
+        description,
+        amount_msats: max_amount_msats,
+        is_configurable_amount: is_configurable,
+        ..Default::default()
+    };
+
+    for method in methods {
+        match method {
+            BpiPaymentMethod::Cashu(cashu_req) => {
+                // Round-trip through bech32m string for safe conversion
+                let bech32_str = cashu_req.to_string();
+                let cdk_req = PaymentRequest::from_str(&bech32_str)
+                    .map_err(|e| Error::Bip321Parse(e.to_string()))?;
+                result.cashu_requests.push(cdk_req);
+            }
+            BpiPaymentMethod::LightningBolt11(invoice) => {
+                result.bolt11_invoices.push(invoice.to_string());
+            }
+            BpiPaymentMethod::LightningBolt12(offer) => {
+                result.bolt12_offers.push(offer.to_string());
+            }
+            BpiPaymentMethod::OnChain(address) => {
+                result.onchain_addresses.push(address.to_string());
+            }
+        }
+    }
+
+    Ok(result)
+}
+
+impl fmt::Display for Bip321UriBuilder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut uri = String::from("BITCOIN:");
+
+        if let Some(ref addr) = self.onchain_address {
+            uri.push_str(&uppercase_qr_address(addr));
+        }
+
+        let mut query_params = form_urlencoded::Serializer::new(String::new());
+
+        if let Some(amount_sats) = self.amount_sats {
+            let amount_btc = format_btc_amount_from_sats(amount_sats);
+            query_params.append_pair("AMOUNT", &amount_btc);
+        }
+
+        if let Some(ref label) = self.label {
+            query_params.append_pair("LABEL", &label.to_ascii_uppercase());
+        }
+
+        if let Some(ref message) = self.message {
+            query_params.append_pair("MESSAGE", &message.to_ascii_uppercase());
+        }
+
+        if let Some(ref bolt11) = self.bolt11_invoice {
+            query_params.append_pair("LIGHTNING", &bolt11.to_ascii_uppercase());
+        }
+
+        if let Some(ref bolt12) = self.bolt12_offer {
+            query_params.append_pair("LNO", &bolt12.to_ascii_uppercase());
+        }
+
+        if let Some(ref creq) = self.cashu_request_str {
+            query_params.append_pair("CREQ", &qr_friendly_cashu_request(creq));
+        }
+
+        let query_string = query_params.finish();
+        if !query_string.is_empty() {
+            uri.push('?');
+            uri.push_str(&query_string);
+        }
+
+        f.write_str(&uri)
+    }
+}
+
+fn qr_friendly_cashu_request(creq: &str) -> String {
+    // NUT-26 uses bech32m and can be uppercased for more efficient QR encoding.
+    // NUT-18 uses case-sensitive base64 and must be preserved verbatim.
+    if creq
+        .get(..6)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("creqb1"))
+    {
+        return creq.to_ascii_uppercase();
+    }
+
+    creq.to_string()
+}
+
+fn uppercase_qr_address(address: &str) -> String {
+    if is_qr_friendly_segwit_address(address) {
+        return address.to_ascii_uppercase();
+    }
+
+    address.to_string()
+}
+
+fn is_qr_friendly_segwit_address(address: &str) -> bool {
+    let lowercase = address.to_ascii_lowercase();
+
+    lowercase.starts_with("bc1") || lowercase.starts_with("tb1") || lowercase.starts_with("bcrt1")
+}
+
+/// Format satoshis to BTC string without trailing zeros, per BIP 21.
+fn format_btc_amount_from_sats(sats: u64) -> String {
+    let whole = sats / 100_000_000;
+    let fractional = sats % 100_000_000;
+
+    if fractional == 0 {
+        return whole.to_string();
+    }
+
+    let formatted = format!("{whole}.{fractional:08}");
+    formatted.trim_end_matches('0').to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(all(feature = "bip353", not(target_arch = "wasm32")))]
+    #[test]
+    fn bip353_log_values_escape_terminal_controls() {
+        let value = "alice\u{1b}]52;c;clipboard\u{07}\r\u{85}\u{202e}@example.com";
+        let escaped = escape_log_value(value);
+
+        assert_eq!(
+            escaped,
+            "alice\\e]52;c;clipboard\\a\\r\\u{85}\\u{202e}@example.com"
+        );
+        assert!(!escaped
+            .chars()
+            .any(|ch| { ch.is_control() || cdk_common::terminal::is_bidi_control_character(ch) }));
+    }
+
+    const TEST_CREQ: &str = "CREQB1QYQQWER9D4HNZV3NQGQQSQQQQQQQQQQRAQPSQQGQQSQQZQG9QQVXSAR5WPEN5TE0D45KUAPWV4UXZMTSD3JJUCM0D5RQQRJRDANXVET9YPCXZ7TDV4H8GXHR3TQ";
+    const TEST_BOLT11: &str = "lnbc1pvjluezsp5zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zygspp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqdpl2pkx2ctnv5sxxmmwwd5kgetjypeh2ursdae8g6twvus8g6rfwvs8qun0dfjkxaq9qrsgq357wnc5r2ueh7ck6q93dj32dlqnls087fxdwk8qakdyafkq3yap9us6v52vjjsrvywa6rt52cm9r9zqt8r2t7mlcwspyetp5h2tztugp9lfyql";
+
+    fn test_payment_request() -> PaymentRequest {
+        PaymentRequest::from_str(TEST_CREQ).expect("should parse test vector")
+    }
+
+    fn assert_has_creq(uri: &str) {
+        assert!(uri.starts_with("BITCOIN:?") || uri.starts_with("BITCOIN:BC1"));
+        assert!(uri.contains("CREQ="));
+    }
+
+    fn assert_demo_cashu(parsed: &ParsedPaymentInstruction) {
+        assert_eq!(parsed.cashu_requests.len(), 1);
+        assert!(!parsed.is_configurable_amount);
+
+        let req = &parsed.cashu_requests[0];
+        assert_eq!(req.payment_id, Some("demo123".to_string()));
+        assert_eq!(req.amount, Some(1000.into()));
+    }
+
+    #[test]
+    fn test_bip321_uri_cashu_only() {
+        let uri = Bip321UriBuilder::new()
+            .with_cashu_request_str(TEST_CREQ.to_string())
+            .to_string();
+
+        assert_has_creq(&uri);
+        assert!(uri.contains(TEST_CREQ));
+    }
+
+    #[test]
+    fn test_bip321_uri_uppercases_bech32_cashu_request() {
+        let uri = Bip321UriBuilder::new()
+            .with_cashu_request_str(TEST_CREQ.to_ascii_lowercase())
+            .to_string();
+
+        assert!(uri.contains(TEST_CREQ));
+    }
+
+    #[test]
+    fn test_bip321_uri_preserves_base64_cashu_request() {
+        let creq = test_payment_request().to_string();
+        assert!(creq.starts_with("creqA"));
+
+        let uri = Bip321UriBuilder::new()
+            .with_cashu_request_str(creq.clone())
+            .to_string();
+
+        let query = uri
+            .split_once('?')
+            .map(|(_, query)| query)
+            .expect("URI should contain a query");
+        let encoded_creq = form_urlencoded::parse(query.as_bytes())
+            .find_map(|(name, value)| (name == "CREQ").then_some(value))
+            .expect("URI should contain a CREQ parameter");
+
+        assert_eq!(encoded_creq, creq);
+        assert!(PaymentRequest::from_str(&encoded_creq).is_ok());
+    }
+
+    #[test]
+    fn test_bip321_uri_multi_method() {
+        let addr = "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq";
+        let uri = Bip321UriBuilder::new()
+            .with_cashu_request_str(TEST_CREQ.to_string())
+            .with_onchain_address(addr.to_string())
+            .with_amount_sats(100_000)
+            .with_message("Coffee payment".to_string())
+            .to_string();
+
+        assert!(uri.starts_with(&format!("BITCOIN:{}?", addr.to_ascii_uppercase())));
+        assert!(uri.contains("CREQ="));
+        assert!(uri.contains("AMOUNT=0.001"));
+        assert!(uri.contains("MESSAGE=COFFEE+PAYMENT"));
+    }
+
+    #[test]
+    fn test_bip321_uri_empty_params() {
+        let uri = Bip321UriBuilder::new().to_string();
+        assert_eq!(uri, "BITCOIN:");
+    }
+
+    #[test]
+    fn test_format_btc_amount_from_sats() {
+        assert_eq!(format_btc_amount_from_sats(100_000_000), "1");
+        assert_eq!(format_btc_amount_from_sats(100_000), "0.001");
+        assert_eq!(format_btc_amount_from_sats(1), "0.00000001");
+        assert_eq!(format_btc_amount_from_sats(2_100_000_000), "21");
+    }
+
+    #[test]
+    fn test_query_params_are_encoded() {
+        let uri = Bip321UriBuilder::new()
+            .with_label("a=b&c=d".to_string())
+            .with_message("hello world".to_string())
+            .to_string();
+        assert_eq!(uri, "BITCOIN:?LABEL=A%3DB%26C%3DD&MESSAGE=HELLO+WORLD");
+    }
+
+    #[tokio::test]
+    async fn test_parse_standalone_cashu_request() {
+        let parsed = parse_payment_instruction(TEST_CREQ, bitcoin::Network::Bitcoin)
+            .await
+            .expect("should parse standalone CREQB1");
+        assert_demo_cashu(&parsed);
+    }
+
+    #[tokio::test]
+    async fn test_parse_bip321_uri_with_cashu() {
+        let uri = format!("BITCOIN:?CREQ={TEST_CREQ}");
+        let parsed = parse_payment_instruction(&uri, bitcoin::Network::Bitcoin)
+            .await
+            .expect("should parse BITCOIN: URI with CREQ");
+        assert_demo_cashu(&parsed);
+    }
+
+    #[tokio::test]
+    async fn test_parse_bip321_uri_with_cashu_and_amount() {
+        let uri = format!("BITCOIN:?CREQ={TEST_CREQ}&AMOUNT=0.00001");
+        let parsed = parse_payment_instruction(&uri, bitcoin::Network::Bitcoin)
+            .await
+            .expect("should parse BITCOIN: URI with CREQ and AMOUNT");
+
+        assert_eq!(parsed.cashu_requests.len(), 1);
+        assert_eq!(parsed.amount_msats, Some(1_000_000));
+    }
+
+    #[tokio::test]
+    async fn test_roundtrip_create_then_parse() {
+        let uri = Bip321UriBuilder::new()
+            .with_cashu_request_str(TEST_CREQ.to_string())
+            .to_string();
+
+        let parsed = parse_payment_instruction(&uri, bitcoin::Network::Bitcoin)
+            .await
+            .expect("should parse created URI");
+        assert_demo_cashu(&parsed);
+    }
+
+    #[tokio::test]
+    async fn test_parse_standalone_bolt11() {
+        let result = parse_payment_instruction(TEST_BOLT11, bitcoin::Network::Bitcoin).await;
+        // This specific invoice may or may not parse depending on checksum
+        // validity, but we verify the parser at least tries.
+        if let Ok(parsed) = result {
+            assert!(!parsed.bolt11_invoices.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_bip321_uri_with_payment_request() {
+        let payment_request = test_payment_request();
+
+        let uri = Bip321UriBuilder::new()
+            .with_cashu_request(&payment_request)
+            .expect("should encode request")
+            .to_string();
+        assert_has_creq(&uri);
+    }
+
+    #[test]
+    fn test_payment_request_to_bip321() {
+        let payment_request = test_payment_request();
+
+        let uri = payment_request
+            .to_bip321()
+            .expect("should create builder")
+            .to_string();
+        assert_has_creq(&uri);
+    }
+
+    #[test]
+    fn test_payment_request_to_bip321_then_customise() {
+        let payment_request = test_payment_request();
+
+        let uri = payment_request
+            .to_bip321()
+            .expect("should create builder")
+            .with_onchain_address("bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq".to_string())
+            .with_amount_sats(100_000)
+            .to_string();
+        assert!(uri.contains("CREQ="));
+        assert!(uri.contains("BC1QAR0SRRR7XFKVY5L643LYDNW9RE59GTZZWF5MDQ"));
+        assert!(uri.contains("AMOUNT=0.001"));
+    }
+
+    #[tokio::test]
+    async fn test_parse_garbage_input_returns_error() {
+        let result =
+            parse_payment_instruction("not-a-valid-anything", bitcoin::Network::Bitcoin).await;
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_format_btc_amount_from_sats_zero() {
+        assert_eq!(format_btc_amount_from_sats(0), "0");
+    }
+
+    #[test]
+    fn test_bip321_uri_bolt12_only() {
+        let offer = "lno1qgsqtest";
+        let uri = Bip321UriBuilder::new()
+            .with_bolt12_offer(offer.to_string())
+            .to_string();
+        assert!(uri.starts_with("BITCOIN:?"));
+        assert!(uri.contains(&format!("LNO={}", offer.to_ascii_uppercase())));
+        assert!(!uri.contains("CREQ="));
+        assert!(!uri.contains("LIGHTNING="));
+    }
+
+    #[test]
+    fn test_bip321_uri_with_label() {
+        let uri = Bip321UriBuilder::new()
+            .with_label("Donation".to_string())
+            .to_string();
+        assert!(uri.contains("LABEL=DONATION"));
+    }
+
+    #[test]
+    fn test_base58_address_preserved() {
+        let addr = "175tWpb8K1S7NmH4Zx6rewF9WQrcZv245W";
+        let uri = Bip321UriBuilder::new()
+            .with_onchain_address(addr.to_string())
+            .to_string();
+
+        assert_eq!(uri, format!("BITCOIN:{addr}"));
+    }
+
+    #[test]
+    fn test_testnet_segwit_address_is_uppercased() {
+        let addr = "tb1qghfhmd4zh7ncpmxl3qzhmq566jk8ckq4gafnmg";
+        let uri = Bip321UriBuilder::new()
+            .with_onchain_address(addr.to_string())
+            .to_string();
+
+        assert_eq!(uri, format!("BITCOIN:{}", addr.to_ascii_uppercase()));
+    }
+
+    #[test]
+    fn test_regtest_segwit_address_is_uppercased() {
+        let addr = "bcrt1qxlvaw9k0v4m4u6sz5s4z7qjv3f4x0n8xk5m9z2";
+        let uri = Bip321UriBuilder::new()
+            .with_onchain_address(addr.to_string())
+            .to_string();
+
+        assert_eq!(uri, format!("BITCOIN:{}", addr.to_ascii_uppercase()));
+    }
+
+    #[tokio::test]
+    async fn test_parse_for_different_networks_both_succeed_for_non_onchain() {
+        // Cashu payment requests have no on-chain component, so they should
+        // parse successfully regardless of the network parameter.
+        let mainnet_result = parse_payment_instruction(TEST_CREQ, bitcoin::Network::Bitcoin).await;
+        let testnet_result = parse_payment_instruction(TEST_CREQ, bitcoin::Network::Testnet).await;
+
+        assert!(mainnet_result.is_ok());
+        assert!(testnet_result.is_ok());
+    }
+}

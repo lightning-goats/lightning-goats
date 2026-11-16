@@ -1,0 +1,35 @@
+{
+  "artifacts_sha256": {
+    "core": "9cde4e987ac65e0b8c63321b6226db760189f8a7e8527814cccee9ef47a5827a",
+    "signer": "5a499674d66019d729524fe911913b702f873daf53789169df2bb1501e7b9aaa",
+    "wallet": "43b8df9ef8f0a220d715c2c1b94eb6b5181014c5526b5665564698bfa7aa8da4"
+  },
+  "distinct_runtime_uids": true,
+  "empty_initialized_state_only": true,
+  "external_reconciliation_verified": false,
+  "fenced_wallet_bytes_unchanged": true,
+  "funded_restore_qualified": false,
+  "inventory_result": {
+    "acknowledged_receipts_checked": 0,
+    "components": 11,
+    "core_wallet_signer_registration_agrees": true,
+    "external_reconciliation_verified": false,
+    "mint_stores_checked": 2,
+    "restore_authorized": false,
+    "result": "CASHU_BACKUP_INVENTORY_VERIFIED",
+    "source_databases_opened": false
+  },
+  "missing_key_refused": true,
+  "missing_mint_namespace_refused": true,
+  "production_changes": false,
+  "result": "CASHU_EMPTY_NATIVE_BACKUP_VERIFIED",
+  "wallet_recovery_marker_refused": true,
+  "wrong_epoch_refused": true,
+  "runner_sha256": "985c51de5e0876a5d6da4880d5648d04316739afed623d51c8f82b7ad9d48127",
+  "verifier_sha256": "67144853dd56bdfbede3aa561e26f827d99394bfa4fe23aa42f86cd947e582f7",
+  "build_gates": {
+    "core": 0,
+    "wallet": 0
+  },
+  "source_manifest_sha256": "d637d1483b034389e6e6a3ab0e4c0163b88d5e9184be90404f3fe3590d1a19f0"
+}

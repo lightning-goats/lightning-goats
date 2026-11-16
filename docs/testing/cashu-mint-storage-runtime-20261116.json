@@ -1,0 +1,17 @@
+{
+  "gates": {
+    "fmt": 0,
+    "clippy": 0,
+    "tests": 0,
+    "vendor": 0
+  },
+  "test_totals": {
+    "passed": 165,
+    "failed": 0,
+    "ignored": 7
+  },
+  "source_hashes_unchanged": true,
+  "source_manifest_sha256": "9840221996ce986bbf8fee763834f1c1a9fd65fb68b9dbc38ac621b82a0be8ca",
+  "test_log_sha256": "c9c975804716b16a1e02723f967493ed2d85f11a79ba941ff29dfbd6bac02f3f",
+  "scope": "runtime scoped storage and legacy/pending fences; subsequent health patch separate"
+}

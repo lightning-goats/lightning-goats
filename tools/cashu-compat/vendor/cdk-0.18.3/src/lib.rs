@@ -1,0 +1,111 @@
+//! Rust implementation of the Cashu Protocol
+#![doc = include_str!("../README.md")]
+
+// Disallow enabling `tor` feature on wasm32 with a clear error.
+#[cfg(all(target_arch = "wasm32", feature = "tor"))]
+compile_error!("The 'tor' feature is not supported on wasm32 targets (browser). Disable the 'tor' feature or use a non-wasm32 target.");
+
+pub mod cdk_database {
+    //! CDK Database
+    pub use cdk_common::database::Error;
+    #[cfg(feature = "mint")]
+    pub use cdk_common::database::MintAuthDatabase;
+    #[cfg(feature = "wallet")]
+    pub use cdk_common::database::WalletDatabase;
+    #[cfg(feature = "mint")]
+    pub use cdk_common::database::{
+        KVStore, KVStoreCompareAndSwap, KVStoreDatabase, KVStoreTransaction, MintDatabase,
+        MintKeysDatabase, MintProofsDatabase, MintQuotesDatabase, MintSignaturesDatabase,
+        MintTransaction,
+    };
+}
+
+#[cfg(feature = "mint")]
+pub mod mint;
+#[cfg(feature = "wallet")]
+pub mod wallet;
+
+#[cfg(test)]
+mod test_helpers;
+
+#[cfg(all(feature = "bip353", not(target_arch = "wasm32")))]
+mod bip353;
+
+#[cfg(feature = "wallet")]
+mod lightning_address;
+
+#[cfg(any(feature = "wallet", feature = "mint"))]
+pub use cdk_common::auth::oidc::OidcClient;
+#[cfg(feature = "mint")]
+#[doc(hidden)]
+pub use cdk_common::payment as cdk_payment;
+#[cfg(feature = "wallet")]
+#[doc(hidden)]
+pub use cdk_common::wallet::WalletKey;
+/// Re-export amount type
+#[doc(hidden)]
+pub use cdk_common::{
+    amount, common as types, dhke, ensure_cdk,
+    error::{self, Error},
+    lightning_invoice,
+    melt::{MeltQuoteCreateResponse, MeltQuoteRequest, MeltQuoteResponse},
+    mint_quote::{MintQuoteRequest, MintQuoteResponse},
+    mint_url, nuts, secret, util, ws, Amount, Bolt11Invoice,
+};
+
+#[cfg(any(feature = "wallet", feature = "mint"))]
+pub mod event;
+pub mod fees;
+pub mod invoice;
+
+#[doc(hidden)]
+pub use bitcoin::secp256k1;
+#[cfg(feature = "mint")]
+#[doc(hidden)]
+pub use mint::Mint;
+#[cfg(feature = "wallet")]
+#[doc(hidden)]
+pub use wallet::{Wallet, WalletSubscription};
+
+#[doc(hidden)]
+pub use self::util::SECP256K1;
+#[cfg(feature = "wallet")]
+#[doc(hidden)]
+pub use self::wallet::HttpClient;
+
+/// Result
+#[doc(hidden)]
+pub type Result<T, E = Box<dyn std::error::Error>> = std::result::Result<T, E>;
+
+/// Re-export subscription
+pub use cdk_common::subscription;
+#[cfg(any(feature = "wallet", feature = "mint"))]
+pub mod http_client {
+    //! Re-export HTTP client types from `cdk-http-client` via `cdk-common`.
+    //!
+    //! HTTP client abstraction for making HTTP requests.
+    //!
+    //! Backend selection is owned by `cdk-http-client`. Applications using
+    //! `cdk` defaults get the default `bitreq` backend. `cdk` no-default
+    //! `wallet` and `mint` builds also get `bitreq` through `cdk-common/http`.
+    //! To use `reqwest`, add a direct `cdk-http-client` dependency with the
+    //! `reqwest` feature; if both backends are enabled, `reqwest` takes
+    //! precedence:
+    //!
+    //! ```toml
+    //! [dependencies]
+    //! cdk = { version = "0.17.0", default-features = false, features = [
+    //!     "wallet",
+    //! ] }
+    //! cdk-http-client = { version = "0.17.0", default-features = false, features = [
+    //!     "reqwest",
+    //! ] }
+    //! ```
+    pub use cdk_common::{
+        fetch, HttpClient, HttpClientBuilder, HttpError, RawResponse, RequestBuilder, Response,
+    };
+}
+
+/// Re-export futures::Stream
+#[cfg(any(feature = "wallet", feature = "mint"))]
+pub use futures::{Stream, StreamExt};

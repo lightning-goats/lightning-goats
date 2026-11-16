@@ -142,8 +142,8 @@ impl<T: Transport> Worker<T> {
         tokio::time::timeout(std::time::Duration::from_secs(180), async {
             for (index, relay) in job.remaining_relays.clone().into_iter().enumerate() {
                 if index > 0 {
-                    // Respect the core's one-token-per-500ms read admission.
-                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    // Respect this role's one-token-per-second read admission.
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                 }
                 if !permitted(&self.core, job.feeding).await? {
                     return Ok(None);

@@ -52,6 +52,17 @@ is dropped. A later signed profile removing its payout address supersedes an
 older usable address, including after restart. Failed lookups are not evidence
 that an address is absent.
 
+Profile discovery requests signed kind-0 metadata and kind-10002 relay lists.
+When configured relays return no valid profile, follow the newest authenticated
+NIP-65 write list for that actor with one bounded supplementary query. The same
+lookup serves membership and reward-profile reads. Lists are hints only: public
+WSS/DNS restrictions and native profile signature/author checks still apply;
+read-only relays, broadcasters and private destinations are excluded. A reward
+batch shares at most eight supplementary relays, chosen round robin across its
+actors. Supplementary discovery does not replace the configured relay quorum;
+an incomplete or saturated fallback remains unavailable. Newer signed address
+removals still win over cached usable profiles.
+
 ## Relay reader
 
 The reader opens only configured public WSS destinations through the pinned

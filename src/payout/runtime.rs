@@ -189,9 +189,13 @@ impl Config {
             key.clone(),
         )?;
         let sender = Sender::new(provider.clone(), key)?;
+        // Both loops use the same FIFO and the payout role's one/second core
+        // quota. Separate clients let synchronized retries exhaust admission.
+        let core = Core::new(self.core_socket.clone(), self.policy.scope.core_uid)?
+            .with_request_spacing(Duration::from_secs(1));
         let worker = Worker {
             store: store.clone(),
-            core: Core::new(self.core_socket.clone(), self.policy.scope.core_uid)?,
+            core: core.clone(),
             signer: Signer::new(self.signer_socket.clone(), self.signer_uid)?,
             sender,
             presentation: Some(Plans::new(
@@ -202,7 +206,7 @@ impl Config {
         };
         let intake = Intake {
             store,
-            core: Core::new(self.core_socket.clone(), self.policy.scope.core_uid)?,
+            core,
             plans: Plans::new(
                 self.intake_socket.clone(),
                 self.intake_uid,

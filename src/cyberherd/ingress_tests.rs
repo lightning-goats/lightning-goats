@@ -600,6 +600,308 @@ struct RelayFixture {
     saturated: bool,
     queries: std::sync::Mutex<Vec<Vec<Filter>>>,
 }
+
+struct ProfileOutboxes {
+    base: RelayFixture,
+    profiles: Vec<VerifiedEvent>,
+    complete: bool,
+    saturated: bool,
+    hints: std::sync::Mutex<Vec<Vec<String>>>,
+}
+impl Query for ProfileOutboxes {
+    async fn query(&self, filters: &[Filter]) -> anyhow::Result<ReadBatch> {
+        self.base.query(filters).await
+    }
+    async fn query_hints(
+        &self,
+        relays: &[String],
+        filters: &[Filter],
+    ) -> anyhow::Result<ReadBatch> {
+        assert!(!relays.is_empty() && relays.len() <= 8);
+        assert!(relays.iter().all(|r| r == "wss://outbox.example.com/"));
+        self.hints.lock().unwrap().push(relays.to_vec());
+        Ok(ReadBatch {
+            events: self
+                .profiles
+                .iter()
+                .filter(|e| filters.iter().any(|f| f.matches(e)))
+                .cloned()
+                .collect(),
+            completed_relays: usize::from(self.complete),
+            failed_relays: usize::from(!self.complete),
+            saturated: self.saturated,
+        })
+    }
+}
+
+fn profile_outboxes(
+    f: &Fixture,
+    quorum: usize,
+    complete: bool,
+    saturated: bool,
+) -> ProfileOutboxes {
+    ProfileOutboxes {
+        base: RelayFixture {
+            events: vec![
+                f.profile(2).event().clone(),
+                signed(
+                    3,
+                    10002,
+                    f.now - 1,
+                    "",
+                    vec![
+                        tag(&["r", "wss://outbox.example.com", "write"]),
+                        tag(&["r", "wss://read-only.example.com", "read"]),
+                        tag(&["r", "wss://127.0.0.1/private", "write"]),
+                        tag(&["r", "wss://sendit.nosflare.com", "write"]),
+                    ],
+                ),
+            ],
+            complete: quorum,
+            saturated: false,
+            queries: Default::default(),
+        },
+        profiles: vec![f.profile(3).event().clone()],
+        complete,
+        saturated,
+        hints: Default::default(),
+    }
+}
+
+#[derive(Clone, Default)]
+struct MemberPublication(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
+impl crate::cyberherd::delivery_worker::Transport for MemberPublication {
+    async fn sign(
+        &self,
+        unsigned: &crate::cyberherd::store::delivery_state::Unsigned,
+    ) -> anyhow::Result<VerifiedEvent> {
+        VerifiedEvent::verify(nostr::signed(
+            1,
+            unsigned.kind,
+            unsigned.created_at,
+            &unsigned.content,
+            unsigned.tags.clone(),
+        ))
+    }
+    async fn publish(
+        &self,
+        event: &VerifiedEvent,
+        relay: &str,
+    ) -> anyhow::Result<crate::cyberherd::delivery_worker::RelayAck> {
+        self.0.lock().unwrap().push(event.event().id.clone());
+        Ok(crate::cyberherd::delivery_worker::RelayAck::synthetic(
+            event, relay,
+        ))
+    }
+}
+
+#[tokio::test]
+async fn signed_outbox_profile_resolves_second_member_like_and_repost_exactly_once() {
+    let f = Fixture::new().await;
+    let discovery = Discovery::new(profile_outboxes(&f, 1, true, false), 1).unwrap();
+    let tags = vec![tag(&["e", &f.note.event().id]), tag(&["p", &f.owner])];
+    let events = [
+        signed(2, 6, f.now - 3, "", tags.clone()),
+        signed(3, 7, f.now - 2, "+", tags.clone()),
+        signed(3, 6, f.now - 1, "", tags),
+    ];
+    for event in &events {
+        assert!(
+            social::stage(&f.store, &f.owner, event.clone(), f.now)
+                .await
+                .unwrap()
+        );
+    }
+    for key in [2, 3, 3] {
+        let profile = discovery
+            .refresh_profile(&f.store, &f.owner, &public(key), f.now)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            f.run(Some(&profile), FeederAvailability::Ready).await,
+            Step::Interaction(_)
+        ));
+    }
+    let snapshot = f.store.snapshot(&f.owner).await.unwrap();
+    assert_eq!(snapshot.roster.active_count(), 2);
+    assert_eq!(snapshot.roster.awards[&public(2)].points(), 3);
+    assert_eq!(snapshot.roster.awards[&public(3)].points(), 4);
+    assert_eq!(discovery.source().hints.lock().unwrap().len(), 2);
+    let reopened = Store::connect(&f.database).await.unwrap();
+    for event in events {
+        assert!(
+            !social::stage(&reopened, &f.owner, event, f.now)
+                .await
+                .unwrap()
+        );
+    }
+    assert_eq!(reopened.snapshot(&f.owner).await.unwrap(), snapshot);
+    reopened
+        .seed_templates(
+            &f.owner,
+            &crate::cyberherd::templates::Catalog::legacy().unwrap(),
+        )
+        .await
+        .unwrap();
+    reopened
+        .seed_templates(
+            &f.owner,
+            &crate::cyberherd::templates::Catalog::delivery_defaults().unwrap(),
+        )
+        .await
+        .unwrap();
+    reopened.initialize_delivery(&f.owner, 0).await.unwrap();
+    while reopened
+        .queue_next_delivery(&f.owner, &["wss://relay.example.com/".into()], f.now)
+        .await
+        .unwrap()
+    {}
+    let db = SqlitePool::connect(&f.database).await.unwrap();
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM delivery_messages")
+        .fetch_one(&db)
+        .await
+        .unwrap();
+    assert_eq!(
+        count, 3,
+        "both joins and the follow-up repost retain public intents"
+    );
+    // Complete membership -> outbox -> private safety -> signing -> matching
+    // ACK on temporary stores, with no public relay connection.
+    let (uid, gid) = self_credentials().unwrap();
+    std::fs::set_permissions(
+        f._root.path(),
+        std::os::unix::fs::PermissionsExt::from_mode(0o750),
+    )
+    .unwrap();
+    let config = crate::core_bridge::BridgeConfig {
+        socket: f._root.path().join("delivery.sock"),
+        peer_uid: uid,
+        group_gid: gid,
+        reward_policy: None,
+        payout_peer_uid: None,
+        delegated_feeder_messages: false,
+        payout_execution_enabled: false,
+        payout_account_id: None,
+    };
+    let server = crate::core_bridge::unix::Server::bind(&config)
+        .await
+        .unwrap();
+    let task = tokio::spawn(server.run(f.core.clone(), crate::config::RuntimeMode::Active));
+    let transport = MemberPublication::default();
+    let delivery = crate::cyberherd::delivery_worker::Worker {
+        store: reopened.clone(),
+        core: Client::new(config.socket, uid)
+            .unwrap()
+            .with_request_spacing(Duration::from_millis(1100)),
+        transport: transport.clone(),
+        owner: f.owner.clone(),
+    };
+    for _ in 0..3 {
+        f.core
+            .update_feeding_presentation(
+                1000,
+                crate::config::RuntimeMode::Active,
+                Some(crate::gateway::FeederSafety {
+                    override_enabled: false,
+                    remote_enabled: true,
+                }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            delivery.tick().await.unwrap(),
+            crate::cyberherd::delivery_worker::Step::Published
+        );
+    }
+    assert_eq!(
+        delivery.tick().await.unwrap(),
+        crate::cyberherd::delivery_worker::Step::Idle
+    );
+    assert_eq!(
+        transport
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .collect::<BTreeSet<_>>()
+            .len(),
+        3
+    );
+    let receipts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM delivery_receipts")
+        .fetch_one(&db)
+        .await
+        .unwrap();
+    assert_eq!(receipts, 3);
+    task.abort();
+}
+
+#[tokio::test]
+async fn outbox_profiles_preserve_quorum_backoff_and_signed_address_removal() {
+    for (quorum, complete, saturated) in [(0, true, false), (1, false, false), (1, true, true)] {
+        let f = Fixture::new().await;
+        let discovery =
+            Discovery::new(profile_outboxes(&f, quorum, complete, saturated), 1).unwrap();
+        assert!(
+            discovery
+                .refresh_profile(&f.store, &f.owner, &public(3), f.now)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            f.store
+                .reward_profile_read(&f.owner, &public(3), f.now, 3600)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            f.store
+                .profile(&f.owner, &public(3), f.now)
+                .await
+                .unwrap()
+                .is_some(),
+            "signed evidence survives an incomplete read"
+        );
+    }
+    let f = Fixture::new().await;
+    f.store
+        .remember_profile(&f.owner, &f.profile(3))
+        .await
+        .unwrap();
+    let mut source = profile_outboxes(&f, 1, true, false);
+    source.profiles.push(signed(3, 0, f.now - 1, "{}", vec![]));
+    let discovery = Discovery::new(source, 1).unwrap();
+    discovery
+        .refresh_reward_profiles(&f.store, &f.owner, &[public(2), public(3)], f.now)
+        .await
+        .unwrap();
+    let profile = f
+        .store
+        .profile(&f.owner, &public(3), f.now)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        profile.profile().lud16.is_none(),
+        "new signed removal wins over a cached address"
+    );
+    assert!(
+        f.store
+            .reward_profile_read(&f.owner, &public(2), f.now, 3600)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        f.store
+            .reward_profile_read(&f.owner, &public(3), f.now, 3600)
+            .await
+            .unwrap()
+            .is_some()
+    );
+}
 impl Query for RelayFixture {
     async fn query(&self, filters: &[Filter]) -> anyhow::Result<ReadBatch> {
         for filter in filters {

@@ -80,6 +80,27 @@ struct ReadBudget {
     last: Instant,
 }
 
+struct RoleBudgets {
+    intake: ReadBudget,
+    payout: ReadBudget,
+}
+
+impl RoleBudgets {
+    fn new(now: Instant) -> Self {
+        Self {
+            intake: ReadBudget::new(now),
+            payout: ReadBudget::new(now),
+        }
+    }
+
+    fn allow(&mut self, role: Role, now: Instant) -> bool {
+        match role {
+            Role::Intake => self.intake.allow(now),
+            Role::Payout => self.payout.allow(now),
+        }
+    }
+}
+
 impl ReadBudget {
     fn new(now: Instant) -> Self {
         Self {
@@ -91,14 +112,13 @@ impl ReadBudget {
         let intervals = now
             .checked_duration_since(self.last)
             .unwrap_or_default()
-            .as_millis()
-            / 500;
+            .as_secs();
         if intervals > 0 {
             self.tokens = self
                 .tokens
                 .saturating_add(u8::try_from(intervals).unwrap_or(4))
                 .min(4);
-            self.last = now;
+            self.last += Duration::from_secs(intervals);
         }
         if self.tokens == 0 {
             return false;
@@ -190,10 +210,13 @@ impl Server {
         {
             bail!("outcome reader does not match configured account");
         }
-        let clients = Arc::new(Semaphore::new(8));
+        let intake_clients = Arc::new(Semaphore::new(4));
+        let payout_clients = Arc::new(Semaphore::new(4));
         // At most one bridge database operation competes for the financial pool,
         // including the explicitly enabled bounded reservation write.
-        // The eight admitted connections bound all waiters. A short FIFO wait
+        // The eight admitted connections (four per role) bound all waiters.
+        // An incomplete payout frame cannot occupy an intake connection slot.
+        // A short FIFO wait
         // lets synchronized intake/view calls take turns; expiry still rejects.
         let resources = Arc::new(Resources {
             reads: Arc::new(Semaphore::new(1)),
@@ -201,7 +224,11 @@ impl Server {
             reader,
             account: self.payout_account_id,
         });
-        let mut budget = ReadBudget::new(Instant::now());
+        // Reserve one request/second for each authenticated role. Payout
+        // retries cannot consume membership's event/safety/publication quota.
+        // Aggregate sustained admission remains two requests/second, with
+        // independently bounded four-request bursts and eight clients total.
+        let mut budget = RoleBudgets::new(Instant::now());
         loop {
             let (stream, _) = self.listener.accept().await?;
             let uid = stream.peer_cred()?.uid();
@@ -214,10 +241,14 @@ impl Server {
             };
             // Admission precedes frame parsing/crypto so malformed requests
             // cannot transfer unbounded work into the financial runtime UID.
-            if !budget.allow(Instant::now()) {
+            if !budget.allow(role, Instant::now()) {
                 continue;
             }
-            let Ok(permit) = Arc::clone(&clients).try_acquire_owned() else {
+            let clients = match role {
+                Role::Intake => &intake_clients,
+                Role::Payout => &payout_clients,
+            };
+            let Ok(permit) = Arc::clone(clients).try_acquire_owned() else {
                 continue;
             };
             let ledger = ledger.clone();
@@ -982,13 +1013,35 @@ mod tests {
             assert!(budget.allow(now));
         }
         assert!(!budget.allow(now));
-        assert!(!budget.allow(now + Duration::from_millis(499)));
-        assert!(budget.allow(now + Duration::from_millis(500)));
-        assert!(!budget.allow(now + Duration::from_millis(500)));
+        assert!(!budget.allow(now + Duration::from_millis(999)));
+        assert!(budget.allow(now + Duration::from_millis(1000)));
+        assert!(!budget.allow(now + Duration::from_millis(1000)));
         for _ in 0..4 {
             assert!(budget.allow(now + Duration::from_secs(100)));
         }
         assert!(!budget.allow(now + Duration::from_secs(100)));
+    }
+
+    #[test]
+    fn payout_retry_flood_cannot_spend_intake_admission_or_fractional_refill() {
+        let now = Instant::now();
+        let mut budgets = RoleBudgets::new(now);
+        for _ in 0..4 {
+            assert!(budgets.allow(Role::Payout, now));
+        }
+        for millis in 0..1000 {
+            assert!(!budgets.allow(Role::Payout, now + Duration::from_millis(millis)));
+        }
+        for _ in 0..4 {
+            assert!(budgets.allow(Role::Intake, now));
+        }
+        assert!(!budgets.allow(Role::Intake, now));
+        // Late observations must retain the fractional second for the next
+        // refill rather than progressively slowing an on-time shared client.
+        for millis in [1500, 2000, 3000] {
+            assert!(budgets.allow(Role::Intake, now + Duration::from_millis(millis)));
+            assert!(budgets.allow(Role::Payout, now + Duration::from_millis(millis)));
+        }
     }
 
     async fn fixture(peer_offset: u32) -> (tempfile::TempDir, BridgeConfig, LedgerStore) {
@@ -1390,7 +1443,7 @@ mod tests {
         let task = tokio::spawn(server.run(ledger, RuntimeMode::Active));
         let client = Client::new(config.socket, self_credentials().unwrap().0)
             .unwrap()
-            .with_request_spacing(Duration::from_millis(600));
+            .with_request_spacing(Duration::from_millis(1100));
         let operator = client.for_interactive_requests();
         let mut readers = tokio::task::JoinSet::new();
         for _ in 0..6 {

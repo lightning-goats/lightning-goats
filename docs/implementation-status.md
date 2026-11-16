@@ -1,5 +1,14 @@
 # Lightning Goats implementation status
 
+CyberHerd membership audit **2026-11-16**: the
+[morning join investigation](testing/cyberherd-membership-audit-20261116.md)
+identifies a missing profile lookup on the actor's signed outbox relays,
+shared core-bridge admission starvation and a stalled membership signer relay
+bundle. Source corrections add bounded profile fallback, independent role
+quotas/connection slots, shared payout-client pacing and individual signer-relay
+fallback, alongside the pending optional-social liveness correction below.
+Qualification is in progress; these changes are not installed.
+
 CyberHerd intake checkpoint **2026-11-15**: the optional-social
 [liveness correction](testing/cyberherd-intake-liveness-20261115.md) is under source
 qualification. It parks unavailable social eligibility and audits invalid social

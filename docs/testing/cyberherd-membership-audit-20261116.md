@@ -38,8 +38,9 @@ separating admission failures from an intentional operator pause.
 A separate non-signing check under the member UID found a signer transport
 blocker: its configured three-relay bunker connection timed out at 22 seconds,
 whereas Primal alone returned the expected project public key in 6.12 seconds.
-The existing encrypted client credential stayed in memory; no event was signed,
-published or inserted into a journal. The payout signer's earlier Primal-only
+The existing encrypted client credential stayed in memory; no project message
+was signed, published or inserted into a journal. Only the existing client's
+encrypted NIP-46 public-key control exchange ran. The payout signer's earlier Primal-only
 configuration repair had not changed membership's separate connection list.
 
 ## Corrections and preserved contracts
@@ -86,5 +87,9 @@ Existing suites cover malformed and
 empty reposts, closed cycles, social retry/backoff, ordered payments and feeds,
 frozen reward snapshots, signing/ACK retries and audience opt-outs.
 
+The first expanded source passes strict Clippy, all five new regressions, the
+advisory audit and isolated real NIP-46 acceptance. The full suite exposed two
+older delivery/payout fixtures using unpaced clients; they now share the same
+one-second pacing as their production counterparts, preserving all assertions.
 Final test results and exact source identity will be recorded after qualification.
 Production programs, configurations, journals and service state remain unchanged.

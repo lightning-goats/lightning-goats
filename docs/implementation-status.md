@@ -33,8 +33,8 @@ dependency-download mirror failure passed on retry.
 The [runbook](deployment/cashu-backup-collection.md) keeps installed writer
 quiescence, complete credential coverage and funded recovery explicitly unfinished.
 
-The subsequent [coordinated collector](testing/cashu-coordinated-collector-local-20261117.json)
-is implemented and under qualification.
+The subsequent [coordinated collector](testing/cashu-coordinated-collector-ci-20261117.json)
+passes the selected-source core, wallet and combined CI jobs at `3bdf518`.
 It requires all six writers to remain masked/stopped, retains correlated
 native/Cashu images, mint stores, declared key copies and exact artifacts, then streams an age-encrypted
 archive while retaining plaintext/incomplete evidence. The native key verifier
@@ -44,7 +44,7 @@ and retained-copy hashes, four collector refusals, six key-material refusals and
 two encryption fault cases; service-status responses and the host
 maintenance-lock path are mocked, with actual UID scans and native verification.
 Thirteen root-owned unit checks pass, including an actual isolated bootstrap
-refusal before collection. Exact-source CI, installed credential coverage,
+refusal before collection. Installed credential coverage,
 portable credential export/reprovisioning, historical descriptor completeness,
 funded rollback and external reconciliation remain open. No production key,
 service, real transfer or physical action was used by this work.

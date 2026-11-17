@@ -6,6 +6,39 @@ mod combined_fixture {
     use anyhow::ensure;
     use lightning_goats_cashu_receipt::treasury_rpc::{Command, Phase, Reply, Request};
     use std::path::{Path, PathBuf};
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
+    // This test captures logical checkpoints at controlled points in the
+    // fixture. The production collector uses the pinned SQLite backup API.
+    async fn snapshot(pool: &sqlx::SqlitePool, target: &Path) -> Result<()> {
+        ensure!(!target.exists(), "fixture snapshot already exists");
+        sqlx::query("VACUUM INTO ?")
+            .bind(target.to_str().unwrap())
+            .execute(pool)
+            .await?;
+        #[cfg(unix)]
+        std::fs::set_permissions(target, std::fs::Permissions::from_mode(0o600))?;
+        Ok(())
+    }
+
+    async fn assert_restored_core_fenced(directory: &Path) -> Result<()> {
+        let path = directory.join("strike.db");
+        let original = std::fs::read(&path)?;
+        std::fs::write(
+            directory.join(crate::state_maintenance::RECOVERY_MARKER),
+            b"synthetic restore requires reconciliation",
+        )?;
+        let result = LedgerStore::connect(&format!("sqlite://{}", path.display())).await;
+        let error = result.err().expect("fenced core must refuse");
+        assert!(error.chain().any(|cause| cause.to_string()
+            == "restored journal requires explicit external reconciliation before startup"));
+        assert_eq!(std::fs::read(&path)?, original);
+        for name in ["strike.db-wal", "strike.db-shm", "strike.db-journal"] {
+            assert!(!directory.join(name).exists());
+        }
+        Ok(())
+    }
 
     fn publish(root: &Path, name: &str, value: &impl serde::Serialize) -> Result<()> {
         let temporary = root.join(format!("{name}.pending"));
@@ -279,6 +312,8 @@ mod combined_fixture {
         let initial_credit = 1000 + 16 * u64::from(settle_change);
         let contribution_count = 1 + i64::try_from(receipt_count)?;
         let lost_reply = std::env::var("LG_CASHU_COMBINED_LOST_REPLY").as_deref() == Ok("1");
+        let funded_rollback =
+            std::env::var("LG_CASHU_COMBINED_FUNDED_ROLLBACK").as_deref() == Ok("1");
         let fees = std::env::var("LG_CASHU_COMBINED_FEES").as_deref() == Ok("1");
         let returned_change =
             fees && std::env::var("LG_CASHU_COMBINED_NO_CHANGE").as_deref() != Ok("1");
@@ -595,6 +630,13 @@ mod combined_fixture {
             Duration::from_secs(60),
         )?;
         assert_eq!(worker.tick(now + 2).await?, Tick::Progress);
+        if funded_rollback {
+            let old = private.join("funded-before-melt");
+            std::fs::create_dir(&old)?;
+            assert_eq!(count(&pool, "cashu_treasury_issuances").await?, 1);
+            assert_eq!(count(&pool, "cashu_treasury_deposits").await?, 0);
+            snapshot(&pool, &old.join("strike.db")).await?;
+        }
         assert_eq!(worker.tick(now + 3).await?, Tick::Progress);
         assert_eq!(
             count(&pool, "cashu_treasury_completions").await?,
@@ -857,6 +899,10 @@ mod combined_fixture {
         }
         if let Some(server) = public_server {
             server.abort();
+        }
+        if funded_rollback {
+            snapshot(&pool, &private.join("funded-after-effects.db")).await?;
+            assert_restored_core_fenced(&private.join("funded-before-melt")).await?;
         }
         if treasury_ipc {
             println!("COMBINED_CORE_FULL_FINANCIAL_IPC_VERIFIED");

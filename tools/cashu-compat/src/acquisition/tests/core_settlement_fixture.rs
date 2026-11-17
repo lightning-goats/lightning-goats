@@ -3,9 +3,56 @@
 use super::*;
 use lightning_goats_cashu_receipt::treasury::{Destination, Issued};
 use serde::Deserialize;
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 include!("multi_mint_settlement_fixture.rs");
+
+fn snapshot_funded_wallet(source: &Path, destination: &Path) -> Result<()> {
+    std::fs::create_dir(destination)?;
+    std::fs::set_permissions(destination, std::fs::Permissions::from_mode(0o700))?;
+    for name in ["journal.sqlite", "wallet.sqlite"] {
+        let input = rusqlite::Connection::open_with_flags(
+            source.join(name),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )?;
+        let mut output = rusqlite::Connection::open(destination.join(name))?;
+        let result = rusqlite::backup::Backup::new(&input, &mut output)?.step(-1)?;
+        ensure!(
+            matches!(result, rusqlite::backup::StepResult::Done),
+            "funded checkpoint backup did not finish"
+        );
+        let mode: String = output.query_row("PRAGMA journal_mode=DELETE", [], |r| r.get(0))?;
+        ensure!(
+            mode == "delete",
+            "funded checkpoint requires main-only images"
+        );
+        drop(output);
+        std::fs::set_permissions(
+            destination.join(name),
+            std::fs::Permissions::from_mode(0o600),
+        )?;
+    }
+    Ok(())
+}
+
+fn assert_restored_wallet_fenced(directory: &Path) -> Result<()> {
+    let journal = std::fs::read(directory.join("journal.sqlite"))?;
+    let cdk = std::fs::read(directory.join("wallet.sqlite"))?;
+    std::fs::write(
+        directory.join("CASHU_RECOVERY_REQUIRED"),
+        b"synthetic restore requires reconciliation",
+    )?;
+    let result = WriterLock::acquire(directory);
+    assert_eq!(
+        result.err().expect("fenced wallet must refuse").to_string(),
+        "Cashu recovery requires explicit reconciliation"
+    );
+    assert_eq!(std::fs::read(directory.join("journal.sqlite"))?, journal);
+    assert_eq!(std::fs::read(directory.join("wallet.sqlite"))?, cdk);
+    assert_eq!(std::fs::read_dir(directory)?.count(), 3);
+    Ok(())
+}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -211,6 +258,7 @@ async fn combined_settlement_wallet_child() -> Result<()> {
         "SDK sender requires HTTP composition"
     );
     let lost_reply = std::env::var("LG_CASHU_COMBINED_LOST_REPLY").as_deref() == Ok("1");
+    let funded_rollback = std::env::var("LG_CASHU_COMBINED_FUNDED_ROLLBACK").as_deref() == Ok("1");
     let fees = std::env::var("LG_CASHU_COMBINED_FEES").as_deref() == Ok("1");
     let returned_change =
         fees && std::env::var("LG_CASHU_COMBINED_NO_CHANGE").as_deref() != Ok("1");
@@ -589,6 +637,12 @@ async fn combined_settlement_wallet_child() -> Result<()> {
         .melt_status_unavailable
         .store(lost_reply, Ordering::SeqCst);
     let path = harness.directory.path().join("journal.sqlite");
+    if funded_rollback {
+        snapshot_funded_wallet(
+            harness.directory.path(),
+            &private.join("funded-before-melt"),
+        )?;
+    }
     let writer = if let Some(writer) = &shared_writer {
         writer.clone()
     } else {
@@ -1014,6 +1068,14 @@ async fn combined_settlement_wallet_child() -> Result<()> {
         health.total_accounted_fee_sats,
         health.receive_fee_sats + health.completed_conversion_fee_sats
     );
+    if funded_rollback {
+        snapshot_funded_wallet(
+            harness.directory.path(),
+            &private.join("funded-after-effects"),
+        )?;
+        assert_restored_wallet_fenced(&private.join("funded-before-melt"))?;
+        assert_eq!(harness.mint.melt_attempts.load(Ordering::SeqCst), 1);
+    }
     println!("COMBINED_WALLET_HEALTH_ACCOUNTING_VERIFIED");
     if settle_change {
         println!("COMBINED_WALLET_THREE_ACQUISITIONS_TWO_MELTS");

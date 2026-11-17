@@ -8,6 +8,7 @@ separate UIDs; HTTP mode adds actual public admission. Providers remain syntheti
 and physical confirmation is simulated in every mode.
 """
 import argparse
+from contextlib import closing
 import grp
 import hashlib
 import json
@@ -16,6 +17,7 @@ from pathlib import Path
 import pwd
 import runpy
 import shutil
+import sqlite3
 import subprocess
 import tempfile
 import time
@@ -31,6 +33,87 @@ def digest(path):
         for chunk in iter(lambda: stream.read(1024 * 1024), b''):
             value.update(chunk)
     return value.hexdigest()
+
+
+def verify_funded_rollback(root):
+    """Compare real fixture checkpoints after the synthetic side effects."""
+    core_dir, wallet_dir = root / 'core-private', root / 'wallet-private'
+    old_core = core_dir / 'funded-before-melt/strike.db'
+    new_core = core_dir / 'funded-after-effects.db'
+    old_wallet = wallet_dir / 'funded-before-melt/journal.sqlite'
+    new_wallet = wallet_dir / 'funded-after-effects/journal.sqlite'
+    agree = runpy.run_path(str(Path(__file__).with_name('verify-cashu-backup.py')))['receipt_agreement']
+
+    def rows(path, statement):
+        with closing(sqlite3.connect(path.as_uri() + '?mode=ro&immutable=1', uri=True)) as db:
+            return db.execute(statement).fetchall()
+
+    def require(condition, reason):
+        if not condition:
+            raise ValueError(reason)
+
+    scope_query = ('SELECT DISTINCT core_epoch,wallet_instance,wallet_epoch '
+                   'FROM cashu_receipt_inbox')
+    scope = rows(new_core, scope_query)
+    require(len(scope) == 1 and scope == rows(old_core, scope_query),
+            'before/after core registration differs')
+    expected = dict(zip(('core_epoch', 'wallet_instance', 'wallet_epoch'), scope[0]))
+    for image in (old_wallet, new_wallet):
+        require(rows(image, 'SELECT epoch FROM wallet_epoch') == [(expected['wallet_epoch'],)],
+                'before/after wallet registration differs')
+
+    issued = 'SELECT intent_id,receive_request_id,payment_hash FROM cashu_treasury_issuances'
+    instruction = 'SELECT id,receive_id,payment_hash FROM treasury_instructions'
+    original = rows(old_core, issued)
+    require(len(original) == 1 and rows(new_core, issued) == original
+            and rows(old_wallet, instruction) == original and rows(new_wallet, instruction) == original,
+            'recovery checkpoints did not preserve the original invoice and intent')
+    require(rows(old_wallet, 'SELECT state FROM treasury_instructions') == [('bound',)]
+            and rows(new_wallet, 'SELECT state FROM treasury_instructions') == [('reconciled',)],
+            'checkpoints do not straddle the original melt')
+    proofs = "SELECT COALESCE(SUM(amount),0) FROM proof WHERE state='UNSPENT'"
+    require(rows(old_wallet.with_name('wallet.sqlite'), proofs) == [(400,)]
+            and rows(new_wallet.with_name('wallet.sqlite'), proofs) == [(0,)],
+            'restored CDK checkpoint did not retain the original spent value as stale custody')
+    deposits = 'SELECT intent_id,payment_hash,deposit_sats FROM cashu_treasury_deposits'
+    feeds = 'SELECT id,status,threshold_sats FROM feed_attempts'
+    require(not rows(old_core, deposits) and not rows(old_core, feeds),
+            'older core checkpoint already records an external effect')
+    require(rows(new_core, deposits) == [(original[0][0], original[0][2], 398)],
+            'later core checkpoint does not retain the original verified deposit')
+    confirmed = rows(new_core, feeds)
+    require(len(confirmed) == 1 and confirmed[0][1:] == ('confirmed', 1000),
+            'later core checkpoint does not retain the one original feeding UUID')
+
+    def agreement(core, wallet):
+        return agree({'core_ledger': core, 'wallet_journal': wallet}, expected)
+
+    require(agreement(new_core, new_wallet) == 2, 'later checkpoint is not coherent')
+    try:
+        agreement(new_core, old_wallet)
+    except ValueError as exc:
+        require(str(exc) == 'core treasury result missing matching wallet report',
+                'wallet-only rollback refused for the wrong reason')
+    else:
+        raise ValueError('wallet-only rollback concealed a retained treasury result')
+    # Wallet-first delivery is valid, so core-only rollback cannot necessarily
+    # be detected by historical agreement. An internally coherent older pair
+    # also cannot discover external effects. Both remain behind the fences.
+    require(agreement(old_core, new_wallet) == 2 and agreement(old_core, old_wallet) == 2,
+            'fixture did not demonstrate the limits of local historical agreement')
+    require((old_core.parent / 'CYBERHERD_RECOVERY_REQUIRED').is_file()
+            and (old_wallet.parent / 'CASHU_RECOVERY_REQUIRED').is_file(),
+            'restore fence was lost')
+    return {
+        'wallet_only_history_refused': True,
+        'core_only_local_agreement_insufficient': True,
+        'coordinated_older_local_agreement_insufficient': True,
+        'restored_core_startup_fenced': True,
+        'restored_wallet_writer_fenced': True,
+        'original_invoice_and_intent_preserved': True,
+        'later_melt_deposit_and_feeding_retained': True,
+        'fence_clearance_qualified': False,
+    }
 
 
 def main():
@@ -50,7 +133,12 @@ def main():
     parser.add_argument('--repeat-request', action='store_true', help='acquire two distinct ordinary payments to one descriptor before settlement')
     parser.add_argument('--settle-change', action='store_true', help='settle retained one-sat change together with a distinct 16-sat Cashu contribution through a second independently verified Strike receive')
     parser.add_argument('--multi-mint', action='store_true', help='settle independently acquired contributions from two configured mint namespaces before one synthetic feeding')
+    parser.add_argument('--funded-rollback', action='store_true',
+                        help='exercise funded restore fences around a lost melt reply')
     args = parser.parse_args()
+    if args.funded_rollback and (not (args.http_intake and args.fees and args.no_change
+            and args.lost_reply) or args.multi_mint or args.repeat_request or args.settle_change):
+        parser.error('--funded-rollback requires its own HTTP fee-only lost-reply mode')
     if args.multi_mint and (not args.fees or not args.no_change or not args.http_intake or args.repeat_request or args.settle_change):
         parser.error('--multi-mint requires its own --fees --no-change --http-intake mode')
     if args.settle_change and (not args.fees or args.no_change or args.repeat_request or not args.http_intake):
@@ -121,6 +209,7 @@ def main():
         env['LG_CASHU_COMBINED_SETTLE_CHANGE'] = '1' if args.settle_change else '0'
         env['LG_CASHU_COMBINED_MULTI_MINT'] = '1' if args.multi_mint else '0'
         env['LG_CASHU_COMBINED_REPEAT_REQUEST'] = '1' if args.repeat_request else '0'
+        env['LG_CASHU_COMBINED_FUNDED_ROLLBACK'] = '1' if args.funded_rollback else '0'
         env.update(sender_environment)
         prefix = ['/usr/bin/setpriv', f'--reuid={identity}', f'--regid={identity}',
                   '--clear-groups', '--no-new-privs', '--']
@@ -224,6 +313,8 @@ def main():
                     supplemental_native_sats=0, settlement_operations=2, configured_mints=2)
             if result != expected:
                 raise ValueError('combined fixture result differs from expected conservation')
+            if args.funded_rollback:
+                result['funded_rollback'] = verify_funded_rollback(root)
             print(json.dumps({'result': 'CASHU_COMBINED_SETTLEMENT_VERIFIED', 'artifacts_sha256': hashes,
                               'financial_result': result, 'live_provider': False, 'wallet_health_verified': True,
                               'nonzero_fees': args.fees, 'returned_change': args.fees and not args.no_change,

@@ -357,6 +357,11 @@ jobs:
         run: |
           set -euo pipefail
           sudo unshare --net -- python3 deploy/scripts/test-cashu-combined-settlement.py --http-intake --receipt-ipc --treasury-ipc --fees --no-change --lost-reply --core-test "$RUNNER_TEMP/cashu-core/core-test" --wallet-test "$RUNNER_TEMP/cashu-wallet/wallet-test" 2>&1 | tee "$RUNNER_TEMP/cashu-combined-http-financial-lost-reply.json"
+      - name: Verify funded rollback fences after a lost melt reply
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo unshare --net -- python3 deploy/scripts/test-cashu-combined-settlement.py --funded-rollback --http-intake --receipt-ipc --treasury-ipc --fees --no-change --lost-reply --core-test "$RUNNER_TEMP/cashu-core/core-test" --wallet-test "$RUNNER_TEMP/cashu-wallet/wallet-test" 2>&1 | tee "$RUNNER_TEMP/cashu-funded-rollback.json"
       - uses: actions/setup-node@v4
         with:
           node-version: "22.23.1"
@@ -428,5 +433,6 @@ jobs:
             ${{ runner.temp }}/cashu-combined-financial-ipc-lost-reply.json
             ${{ runner.temp }}/cashu-combined-http-financial.json
             ${{ runner.temp }}/cashu-combined-http-financial-lost-reply.json
+            ${{ runner.temp }}/cashu-funded-rollback.json
           if-no-files-found: error
           retention-days: 14

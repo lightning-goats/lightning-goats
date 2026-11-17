@@ -109,11 +109,13 @@ def qualify_restore(source, output_root, collected, identity, selected, store):
             or report['reference_receipt_sha256'] is not None
             or report['selection'] != {'group': None, 'after': None, 'limit': 100}):
         raise ValueError('restore worklist omitted its exact source or page binding')
-    unknown_selection = output_root / 'unknown-strike-selection.json'
-    unknown = invoke_review(unknown_selection, '--strike-intent', '00000000-0000-4000-8000-000000000001')
-    if (unknown.returncode != 1 or unknown.stdout or unknown_selection.exists()
-            or unknown.stderr != b'Cashu restore review refused. Preserve the fenced checkpoint.\n'):
-        raise ValueError('authenticated restore launcher selected an absent Strike intent')
+    for kind, option in [('strike', '--strike-intent'), ('mint', '--mint-intent'),
+                         ('feeder', '--feeder-request')]:
+        unknown_selection = output_root / f'unknown-{kind}-selection.json'
+        unknown = invoke_review(unknown_selection, option, '00000000-0000-4000-8000-000000000001')
+        if (unknown.returncode != 1 or unknown.stdout or unknown_selection.exists()
+                or unknown.stderr != b'Cashu restore review refused. Preserve the fenced checkpoint.\n'):
+            raise ValueError('authenticated restore launcher selected an absent original operation')
     # Mutate one disposable stage image after authentication. Review must
     # refuse changed bytes even though its STAGED receipt still matches.
     tampered_output = output_root / 'tampered-worklist.json'
@@ -146,6 +148,7 @@ def qualify_restore(source, output_root, collected, identity, selected, store):
             'offline_worklist_launcher_verified': True, 'worklist_tampered_image_refused': True,
             'worklist_source_and_page_bound': True,
             'unknown_strike_selection_refused': True,
+            'unknown_mint_and_feeder_selections_refused': True,
             'external_reconciliation_verified': False, 'resume_authorized': False}
 
 

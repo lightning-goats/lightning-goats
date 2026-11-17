@@ -9,6 +9,7 @@ pub mod melt_reconciliation;
 pub mod mint_policy;
 pub mod operation_gate;
 pub mod ownership;
+pub mod restore_mint;
 pub mod transport;
 pub mod wallet;
 pub mod writer_lock;

@@ -64,13 +64,6 @@ impl Selection {
     }
 }
 
-fn private_parent(path: &Path) -> Result<&Path> {
-    files::absolute(path)?;
-    let parent = path.parent().context("private review parent missing")?;
-    files::private_bundle(parent)?;
-    Ok(parent)
-}
-
 /// Verify the selected original without opening a database or applying evidence.
 pub async fn verify(
     selection: &Path,
@@ -80,27 +73,21 @@ pub async fn verify(
     output: &Path,
 ) -> Result<()> {
     files::require_root()?;
-    private_parent(selection)?;
-    let parent = private_parent(output)?;
+    let parent = files::private_file_parent(output)?;
     ensure!(
         output
             .symlink_metadata()
             .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound),
         "Strike observation output must be a new file"
     );
-    let raw = files::read_private(selection, MAX_TREASURY_BYTES as u64)?;
-    let digest = files::hash_bytes(&raw);
-    ensure!(
-        digest == expected_sha256,
-        "Strike selection checksum differs"
-    );
-    let selection: Selection = serde_json::from_slice(&raw)?;
+    let (selection, digest): (Selection, _) =
+        files::review_selection(selection, expected_sha256, MAX_TREASURY_BYTES as u64)?;
     let original = selection.original_request()?;
     ensure!(
         selection.issued.intent.destination.origin == strike_origin,
         "reviewed Strike origin differs from the original"
     );
-    private_parent(credential)?;
+    files::private_file_parent(credential)?;
     let secret = Zeroizing::new(files::read_private(credential, 4096)?);
     let key = std::str::from_utf8(&secret)?.trim();
     let client = StrikeClient::new(strike_origin, key.to_owned())?;

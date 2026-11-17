@@ -276,3 +276,44 @@ writes the single observation with its source hashes to a new private file.
 The command opens no database and creates no invoices, payments or feeder
 requests. Continued recovery requires independent mint and feeder evidence,
 and the observation leaves the recovery fences in place.
+
+### Observe the original mint melt and feeder request
+
+Use the stage that retains the submitted mint operation. The selector checks
+the original issued invoice, quote, mint, wallet epoch and CDK operation. It
+copies the quote terms without inputs, blinded outputs or the wallet seed.
+
+```sh
+/usr/bin/python3 -I -S -B ROOT_CAPSULE/launch-cashu-backup.py TOOL_SHA256 review \
+  STAGED_DIRECTORY STAGED_RECEIPT_SHA256 --mint-intent ORIGINAL_INTENT_UUID \
+  --output NEW_PRIVATE_MINT_SELECTION
+lightning-goats-cashu-statectl observe-restored-mint \
+  PRIVATE_MINT_SELECTION SELECTION_SHA256 APPROVED_MINT_URL NEW_PRIVATE_MINT_OBSERVATION
+```
+
+The native tool verifies the signed invoice and performs one GET through the
+mint-scoped HTTPS transport. The approved mint URL must match the original.
+The reply must retain the quote identity, amount, fee reserve and expiry.
+A paid observation requires the original payment preimage. The private
+observation may contain that preimage and any returned blinded signatures.
+Retain it with the checkpoint evidence. A pending or unpaid reply still leaves
+the original reservation unresolved. Verify the independent Strike receive and
+change ownership before credit or proof reconciliation.
+
+```sh
+/usr/bin/python3 -I -S -B ROOT_CAPSULE/launch-cashu-backup.py TOOL_SHA256 review \
+  STAGED_DIRECTORY STAGED_RECEIPT_SHA256 --feeder-request ORIGINAL_REQUEST_UUID \
+  --output NEW_PRIVATE_FEEDER_SELECTION
+lightning-goatsctl observe-restored-cashu-feeder \
+  --selection PRIVATE_FEEDER_SELECTION --selection-sha256 SELECTION_SHA256 \
+  --gateway-origin REVIEWED_GATEWAY_ORIGIN --output NEW_PRIVATE_FEEDER_OBSERVATION
+```
+
+Use the independently reviewed gateway origin for the selected installation.
+The command performs one status GET for the original request UUID. The gateway
+may retain an acknowledgment while answering. It receives no actuation command.
+The private report retains the gateway result, stage hashes and any contradiction
+with the checkpoint's finalized outcome. A missing or incompatible reply yields
+no observation. A pending or ambiguous result remains unresolved. Keep all
+fences until the wider recovery review resolves external effects and stale
+ledger history.

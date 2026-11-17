@@ -24,6 +24,17 @@ struct Args {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Read the gateway status of one original feeder UUID from a fenced Cashu checkpoint.
+    ObserveRestoredCashuFeeder {
+        #[arg(long)]
+        selection: PathBuf,
+        #[arg(long)]
+        selection_sha256: String,
+        #[arg(long)]
+        gateway_origin: String,
+        #[arg(long)]
+        output: PathBuf,
+    },
     /// Read one original Strike treasury receive selected from a fenced Cashu checkpoint.
     VerifyRestoredCashuStrike {
         #[arg(long)]
@@ -148,6 +159,34 @@ enum ReconcileOutcome {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+    if let Command::ObserveRestoredCashuFeeder {
+        selection,
+        selection_sha256,
+        gateway_origin,
+        output,
+    } = &args.command
+    {
+        #[cfg(unix)]
+        {
+            lightning_goats::state_maintenance::cashu_feeder_review::observe(
+                selection,
+                selection_sha256,
+                gateway_origin,
+                output,
+            )
+            .await
+            .map_err(|_| anyhow::anyhow!("restored Cashu feeder observation refused"))?;
+            println!(
+                "{{\"result\":\"CASHU_RESTORE_FEEDER_REQUEST_OBSERVED\",\"resume_authorized\":false}}"
+            );
+            return Ok(());
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (selection, selection_sha256, gateway_origin, output);
+            bail!("restored Cashu feeder observation requires Unix protected-file authority");
+        }
+    }
     if let Command::VerifyRestoredCashuStrike {
         selection,
         selection_sha256,
@@ -410,7 +449,7 @@ async fn main() -> Result<()> {
     };
 
     match args.command {
-        Command::VerifyRestoredCashuStrike { .. } => {
+        Command::VerifyRestoredCashuStrike { .. } | Command::ObserveRestoredCashuFeeder { .. } => {
             unreachable!("handled before database initialization")
         }
         Command::ReleaseFinancialPlan { .. } => {

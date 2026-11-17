@@ -73,6 +73,13 @@ now checks the original signed treasury invoice and completed receive through
 the native CLI with the original destination and credential scope. The funded
 loopback fixture verifies a 398-sat receive without changing checkpoint bytes.
 The authenticated encrypted restore launcher refuses an unknown intent.
+The mint observer selects the submitted quote and CDK operation and uses the
+wallet's constrained HTTPS read path. The feeder observer queries the original
+UUID and records uncertainty or conflicts with the checkpoint. The funded local
+fixture selects the original mint quote and passes the feeder checks while the
+older core and wallet images remain fenced and unchanged. The fixture copies
+the selected CLI into an executable private file so GitHub's stripped artifact
+permissions do not interrupt the test.
 Installed recovery and live outcome verification remain open.
 
 Cashu operator controls update **2026-11-17**: the

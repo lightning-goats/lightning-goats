@@ -1,6 +1,7 @@
 //! Mint observations are private evidence, not authoritative Strike settlement.
 use anyhow::{Result, ensure};
 use cdk::{
+    mint_url::MintUrl,
     nuts::{CurrencyUnit, MeltQuoteBolt11Response, MeltQuoteState, PaymentMethod},
     wallet::MeltQuote,
 };
@@ -27,21 +28,14 @@ impl RecoveryContext {
                 && self.quote.request == self.issued.invoice,
             "recovery lookup scope mismatch"
         );
-        let observed: MeltQuoteBolt11Response<String> = transport
-            .http_get(self.quote_status_url()?, None)
-            .await
-            .map_err(|_| anyhow::anyhow!("original melt quote lookup failed"))?;
-        validate_observed_terms(&self.issued, &self.quote, &observed)?;
-        if observed.state != MeltQuoteState::Paid {
-            ensure!(
-                observed.payment_preimage.is_none()
-                    && observed.change.as_ref().is_none_or(Vec::is_empty),
-                "nonpaid quote carries conflicting paid evidence"
-            );
-            return Ok(None);
-        }
-        validate_paid_quote(&self.issued, &self.quote, &observed)?;
-        Ok(Some(observed))
+        let observed = poll_original_quote(
+            transport,
+            &self.issued,
+            &self.quote,
+            &self.derivation.mint_url,
+        )
+        .await?;
+        Ok((observed.state == MeltQuoteState::Paid).then_some(observed))
     }
 
     /// NUT-09 retrieves signatures for the original outputs; it never spends.
@@ -91,34 +85,56 @@ impl RecoveryContext {
 
     /// Build the original read-only quote lookup; never create a replacement.
     pub fn quote_status_url(&self) -> Result<url::Url> {
-        ensure!(
-            self.quote.id.len() <= 256
-                && !self.quote.id.is_empty()
-                && self
-                    .quote
-                    .id
-                    .bytes()
-                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'),
-            "quote identity is not supported by the constrained transport"
-        );
-        let mut url = self.derivation.mint_url.join("v1/melt/quote/bolt11/")?;
-        url.path_segments_mut()
-            .map_err(|_| anyhow::anyhow!("invalid quote origin"))?
-            .pop_if_empty()
-            .push(&self.quote.id);
-        Ok(url)
+        quote_status_url(&self.derivation.mint_url, &self.quote.id)
     }
 }
 
-/// Validate the original quote's paid observation, including its invoice preimage.
-/// Expiry is intentionally not checked: a late observation must reconcile the
-/// original operation. Change ownership and independent Strike deposit evidence
-/// are additional requirements before any settlement report can be exported.
-pub fn validate_paid_quote(
+fn quote_status_url(mint: &MintUrl, id: &str) -> Result<url::Url> {
+    ensure!(
+        !id.is_empty()
+            && id.len() <= 256
+            && id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'),
+        "quote identity is not supported by the constrained transport"
+    );
+    let mut url = mint.join("v1/melt/quote/bolt11/")?;
+    url.path_segments_mut()
+        .map_err(|_| anyhow::anyhow!("invalid quote origin"))?
+        .pop_if_empty()
+        .push(id);
+    Ok(url)
+}
+
+pub(crate) async fn poll_original_quote<T: cdk_http_client::Transport>(
+    transport: &T,
     issued: &Issued,
     original: &MeltQuote,
-    observed: &MeltQuoteBolt11Response<String>,
-) -> Result<()> {
+    mint: &MintUrl,
+) -> Result<MeltQuoteBolt11Response<String>> {
+    ensure!(
+        original.mint_url.as_ref() == Some(mint),
+        "original mint origin differs"
+    );
+    validate_original_quote(issued, original)?;
+    let observed: MeltQuoteBolt11Response<String> = transport
+        .http_get(quote_status_url(mint, &original.id)?, None)
+        .await
+        .map_err(|_| anyhow::anyhow!("original melt quote lookup failed"))?;
+    validate_observed_terms(issued, original, &observed)?;
+    if observed.state == MeltQuoteState::Paid {
+        validate_paid_preimage(issued, &observed)?;
+    } else {
+        ensure!(
+            observed.payment_preimage.is_none()
+                && observed.change.as_ref().is_none_or(Vec::is_empty),
+            "nonpaid quote carries conflicting paid evidence"
+        );
+    }
+    Ok(observed)
+}
+
+fn validate_original_quote(issued: &Issued, original: &MeltQuote) -> Result<()> {
     issued.intent.validate()?;
     let invoice: cdk::lightning_invoice::Bolt11Invoice = issued.invoice.parse()?;
     invoice.check_signature()?;
@@ -136,8 +152,28 @@ pub fn validate_paid_quote(
             && u64::from(original.fee_reserve) <= issued.intent.maximum_fee_sats,
         "retained quote differs from treasury instruction"
     );
-    ensure!(observed.state == MeltQuoteState::Paid, "quote is not paid");
+    Ok(())
+}
+
+/// Validate the original quote's paid observation, including its invoice preimage.
+/// Expiry is intentionally not checked: a late observation must reconcile the
+/// original operation. Change ownership and independent Strike deposit evidence
+/// are additional requirements before any settlement report can be exported.
+pub fn validate_paid_quote(
+    issued: &Issued,
+    original: &MeltQuote,
+    observed: &MeltQuoteBolt11Response<String>,
+) -> Result<()> {
+    validate_original_quote(issued, original)?;
     validate_observed_terms(issued, original, observed)?;
+    validate_paid_preimage(issued, observed)
+}
+
+fn validate_paid_preimage(
+    issued: &Issued,
+    observed: &MeltQuoteBolt11Response<String>,
+) -> Result<()> {
+    ensure!(observed.state == MeltQuoteState::Paid, "quote is not paid");
     let preimage = observed
         .payment_preimage
         .as_ref()
@@ -151,13 +187,6 @@ pub fn validate_paid_quote(
         lightning_goats_cashu_receipt::treasury::hex_digest(Sha256::digest(bytes).into())
             == issued.payment_hash,
         "paid preimage does not match original invoice"
-    );
-    ensure!(
-        observed
-            .change
-            .as_ref()
-            .is_none_or(|change| change.len() <= 1024),
-        "paid change exceeds bound"
     );
     Ok(())
 }
@@ -879,6 +908,65 @@ pub(crate) mod tests {
         changed.quote.id = "replacement".into();
         assert!(changed.poll_paid(&transport).await.is_err());
         assert_eq!(transport.calls.load(std::sync::atomic::Ordering::SeqCst), 4);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn restored_mint_observation_binds_original_quote_and_preserves_uncertain_state()
+    -> Result<()> {
+        let (issued, quote, response) = fixture();
+        let mint = quote.mint_url.clone().unwrap();
+        let mut historical_quote = serde_json::to_value(quote)?;
+        historical_quote.as_object_mut().unwrap().retain(|key, _| {
+            [
+                "id",
+                "mint_url",
+                "unit",
+                "amount",
+                "request",
+                "fee_reserve",
+                "expiry",
+                "payment_method",
+                "state",
+            ]
+            .contains(&key.as_str())
+        });
+        let selection: crate::restore_mint::Selection =
+            serde_json::from_value(serde_json::json!({
+                "version": 1,
+                "purpose": "cashu_restore_mint_melt",
+                "checkpoint_id": uuid::Uuid::from_u128(1),
+                "staged_receipt_sha256": "11".repeat(32),
+                "issued": issued,
+                "operation_id": uuid::Uuid::from_u128(2),
+                "quote": historical_quote,
+            }))?;
+        let mut transport = QuoteTransport {
+            response,
+            calls: Default::default(),
+            states: None,
+            restore: None,
+        };
+        let digest = "22".repeat(32);
+        assert!(
+            selection
+                .observe(&"https://different.example".parse()?, &digest, &transport)
+                .await
+                .is_err()
+        );
+        assert_eq!(transport.calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        let paid = selection.observe(&mint, &digest, &transport).await?;
+        assert_eq!(paid["paid_preimage_verified"], true);
+        assert_eq!(paid["selection_sha256"], digest);
+        assert_eq!(paid["resume_authorized"], false);
+        transport.response.state = MeltQuoteState::Pending;
+        assert!(selection.observe(&mint, &digest, &transport).await.is_err());
+        transport.response.payment_preimage = None;
+        transport.response.change = None;
+        let pending = selection.observe(&mint, &digest, &transport).await?;
+        assert_eq!(pending["paid_preimage_verified"], false);
+        assert_eq!(pending["resume_authorized"], false);
+        assert_eq!(transport.calls.load(std::sync::atomic::Ordering::SeqCst), 3);
         Ok(())
     }
     #[test]

@@ -93,6 +93,18 @@ WALLET_TREASURY = """
       LEFT JOIN treasury_results r ON r.intent_id=w.id
     ORDER BY w.id
 """
+MINT_SELECTION = """
+    SELECT i.issued_json,i.receive_id,i.payment_hash,q.mint_id,q.quote_id,q.quote_json,
+           p.operation_id,m.derivation,e.epoch,r.instance
+      FROM treasury_instructions i
+      JOIN treasury_quotes q ON q.intent_id=i.id
+      JOIN treasury_prepared p ON p.intent_id=i.id
+      JOIN treasury_melt_requests m ON m.intent_id=i.id
+      JOIN wallet_epoch e ON e.singleton=1
+      JOIN runtime_registration r ON r.singleton=1
+     WHERE i.id=? AND i.state IN ('submitted','reconciled')
+       AND length(i.issued_json)<=65536 AND length(q.quote_json)<=65536 AND length(m.derivation)<=1048576
+"""
 WALLET_SPLITS = """
     SELECT r.intent_id AS id, r.split_id, q.mint_id, p.cdk_operation,
            c.intent_id IS NOT NULL AS execution_claimed,
@@ -196,6 +208,36 @@ def select_strike(core, checkpoint, receipt_sha, intent_id, receive_id, decode):
     }
 
 
+def select_mint(wallet, checkpoint, receipt_sha, intent_id, decode):
+    row = wallet.execute(MINT_SELECTION, (intent_id,)).fetchone()
+    if row is None:
+        raise ValueError('original submitted mint quote is missing')
+    issued, quote, derivation = (decode(row[field]) for field in ('issued_json', 'quote_json', 'derivation'))
+    intent = issued['intent']
+    if (intent['id'] != intent_id or intent['mint_id'] != row['mint_id']
+            or intent['wallet_instance'] != row['instance'] or intent['wallet_epoch'] != row['epoch']
+            or issued['receive_request_id'] != row['receive_id'] or issued['payment_hash'] != row['payment_hash']
+            or quote['id'] != row['quote_id'] or quote['request'] != issued['invoice']
+            or derivation['quote_id'] != row['quote_id'] or derivation['mint_url'] != quote['mint_url']
+            or derivation['cdk_operation'] != row['operation_id']):
+        raise ValueError('submitted mint quote differs from the original wallet binding')
+    return {
+        'version': 1, 'purpose': 'cashu_restore_mint_melt', 'checkpoint_id': checkpoint,
+        'staged_receipt_sha256': receipt_sha, 'operation_id': row['operation_id'], 'issued': issued,
+        'quote': {field: quote[field] for field in ('id', 'mint_url', 'unit', 'amount', 'request',
+                                                    'fee_reserve', 'expiry', 'payment_method', 'state')},
+    }
+
+
+def select_feeder(core, checkpoint, receipt_sha, request_id):
+    row = core.execute('SELECT status,threshold_sats FROM feed_attempts WHERE id=?', (request_id,)).fetchone()
+    if row is None:
+        raise ValueError('original feeder request is missing')
+    return {'version': 1, 'purpose': 'cashu_restore_feeder_request', 'checkpoint_id': checkpoint,
+            'staged_receipt_sha256': receipt_sha, 'request_id': request_id,
+            'checkpoint_status': row['status'], 'threshold_sats': row['threshold_sats']}
+
+
 def worklist(core, wallet, reference_core=None, reference_wallet=None, limit=100, group=None, after=''):
     def identity(c, w):
         return (c.execute('SELECT stream_id FROM overlay_identity WHERE singleton=1').fetchone()[0],
@@ -238,6 +280,12 @@ def review(args, common):
         with closing(open_database(core, budget)) as core_db:
             return select_strike(core_db, checkpoint, args.staged_sha256, args.strike_intent,
                                  args.receive_id, common['document'])
+    if args.mint_intent is not None:
+        with closing(open_database(wallet, budget)) as wallet_db:
+            return select_mint(wallet_db, checkpoint, args.staged_sha256, args.mint_intent, common['document'])
+    if args.feeder_request is not None:
+        with closing(open_database(core, budget)) as core_db:
+            return select_feeder(core_db, checkpoint, args.staged_sha256, args.feeder_request)
     reference_id = None
     with closing(open_database(core, budget)) as core_db, closing(open_database(wallet, budget)) as wallet_db:
         if args.reference is None:
@@ -270,7 +318,10 @@ def main():
     parser.add_argument('--limit', type=int, default=100)
     parser.add_argument('--group', choices=GROUPS)
     parser.add_argument('--after', default='')
-    parser.add_argument('--strike-intent', type=uuid.UUID, help='select one original treasury invoice for provider verification')
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument('--strike-intent', type=uuid.UUID, help='select one original treasury invoice for provider verification')
+    selection.add_argument('--mint-intent', type=uuid.UUID, help='select one original submitted mint quote')
+    selection.add_argument('--feeder-request', type=uuid.UUID, help='select one original feeder operation')
     parser.add_argument('--receive-id', type=uuid.UUID, help='original provider receive ID if it is absent from the stage')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
@@ -279,13 +330,14 @@ def main():
         if (bool(args.reference) != bool(args.reference_sha256) or not 1 <= args.limit <= 1000
                 or (args.after and (args.group is None or str(uuid.UUID(args.after)) != args.after))):
             raise ValueError('invalid reference or review limit')
+        selected = args.strike_intent or args.mint_intent or args.feeder_request
         if (args.receive_id is not None and args.strike_intent is None
-                or args.strike_intent is not None
-                and (args.reference or args.group or args.after or args.limit != 100 or not args.strike_intent.int)):
-            raise ValueError('Strike selection requires one staged checkpoint and one intent')
-        if args.strike_intent is not None:
-            args.strike_intent = str(args.strike_intent)
-            args.receive_id = str(args.receive_id) if args.receive_id is not None else None
+                or selected is not None and (args.reference or args.group or args.after
+                                             or args.limit != 100 or not selected.int)):
+            raise ValueError('original selection requires one staged checkpoint and one operation')
+        for field in ('strike_intent', 'receive_id', 'mint_intent', 'feeder_request'):
+            if getattr(args, field) is not None:
+                setattr(args, field, str(getattr(args, field)))
         common = runpy.run_path(str(HERE / 'collect-cashu-backup.py'))
         common['protected_directory'](args.output.parent, private=True)
         if (not args.output.is_absolute() or args.output.is_relative_to(args.staged)
@@ -297,6 +349,10 @@ def main():
         summary = {'resume_authorized': False}
         if args.strike_intent is not None:
             summary['result'] = 'CASHU_RESTORE_STRIKE_SELECTED'
+        elif args.mint_intent is not None:
+            summary['result'] = 'CASHU_RESTORE_MINT_SELECTED'
+        elif args.feeder_request is not None:
+            summary['result'] = 'CASHU_RESTORE_FEEDER_SELECTED'
         else:
             summary['result'] = result['result']
             summary['counts'] = {kind: batch['total'] for kind, batch in result['records'].items()}

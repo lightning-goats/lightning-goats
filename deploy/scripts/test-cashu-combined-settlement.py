@@ -140,6 +140,88 @@ def verify_strike_read(selection, core_cli):
             thread.join()
 
 
+def verify_feeder_read(selection, core_cli):
+    request_id = selection['request_id']
+    original_path = f'/v1/feeder/request/{request_id}'
+    calls = []
+
+    class Gateway(BaseHTTPRequestHandler):
+        status = 200
+        payload = {'request_id': request_id, 'status': 'confirmed'}
+
+        def log_message(self, *args):
+            pass
+
+        def do_POST(self):
+            calls.append('POST ' + self.path)
+            self.send_error(405)
+
+        def do_GET(self):
+            calls.append(self.path)
+            if self.path != original_path:
+                self.send_error(404)
+                return
+            raw = json.dumps(type(self).payload).encode()
+            self.send_response(type(self).status)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
+    write = runpy.run_path(str(Path(__file__).with_name('collect-cashu-backup.py')))['write']
+    with (tempfile.TemporaryDirectory(prefix='lg-restore-feeder-', dir='/run') as temp,
+          ThreadingHTTPServer(('127.0.0.1', 0), Gateway) as server):
+        directory = Path(temp)
+        document = directory / 'selection.json'
+        write(document, json.dumps(selection).encode())
+        selection_sha = digest(document)
+        thread = Thread(target=server.serve_forever)
+        thread.start()
+        try:
+            origin = f'http://127.0.0.1:{server.server_port}/'
+
+            def invoke(name, expected=selection_sha):
+                output = directory / name
+                result = subprocess.run([
+                    str(core_cli.resolve(strict=True)), '--config', str(directory / 'unused.toml'),
+                    'observe-restored-cashu-feeder', '--selection', str(document),
+                    '--selection-sha256', expected, '--gateway-origin', origin, '--output', str(output),
+                ], stdin=subprocess.DEVNULL, capture_output=True, timeout=20,
+                    env={'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'})
+                return output, result
+
+            output, result = invoke('changed.json', '00' * 32)
+            if result.returncode != 1 or result.stdout or output.exists() or calls:
+                raise ValueError('changed feeder selection produced a gateway lookup')
+            for name, status, payload, expected in (
+                ('missing', 404, {}, None),
+                ('mismatched', 200, {'request_id': str(uuid.uuid4()), 'status': 'confirmed'}, None),
+                ('pending', 202, {'request_id': request_id, 'status': 'pending'}, False),
+                ('confirmed', 200, {'request_id': request_id, 'status': 'confirmed'}, False),
+                ('conflicting', 200, {'request_id': request_id, 'status': 'not_dispatched',
+                                      'refusal': {'reason': 'safety', 'retry_after_seconds': 20}}, True),
+            ):
+                Gateway.status, Gateway.payload = status, payload
+                output, result = invoke(name + '.json')
+                if expected is None:
+                    if (result.returncode != 1 or result.stdout or output.exists()
+                            or result.stderr != b'Error: restored Cashu feeder observation refused\n'):
+                        raise ValueError('unavailable or mismatched feeder reply accepted')
+                    continue
+                if result.returncode or output.stat().st_mode & 0o777 != 0o600:
+                    raise ValueError('original feeder observation did not complete privately')
+                receipt = json.loads(output.read_bytes())
+                if (receipt['selection_sha256'] != selection_sha or receipt['observation'] != payload
+                        or receipt['checkpoint_conflict'] is not expected
+                        or receipt['resume_authorized'] is not False):
+                    raise ValueError('feeder observation lost original identity or uncertainty')
+            if calls != [original_path] * 5:
+                raise ValueError('recovery queried something other than original feeder status')
+        finally:
+            server.shutdown()
+            thread.join()
+
+
 def verify_funded_rollback(root, core_cli):
     """Compare real fixture checkpoints after the synthetic side effects."""
     core_dir, wallet_dir = root / 'core-private', root / 'wallet-private'
@@ -223,6 +305,16 @@ def verify_funded_rollback(root, core_cli):
                                             original[0][0], None, collector['document'])
         earlier = review['select_strike'](previous_core, checkpoint, '22' * 32,
                                           original[0][0], retained_receive, collector['document'])
+        mint_selection = review['select_mint'](reference_wallet, checkpoint, '11' * 32,
+                                               original[0][0], collector['document'])
+        require(mint_selection['quote']['id'] == 'combined-original-quote'
+                and mint_selection['issued'] == selection['issued']
+                and 'payment_proof' not in mint_selection['quote'],
+                'original mint selection differs from bound treasury invoice')
+        feeder_selection = review['select_feeder'](reference_core, checkpoint, '11' * 32, confirmed[0][0])
+        require(feeder_selection['checkpoint_status'] == 'confirmed'
+                and feeder_selection['threshold_sats'] == 1000,
+                'original feeder selection lost retained outcome or threshold')
         require(earlier['issued'] == selection['issued'] and earlier['receive_id'] == selection['receive_id'],
                 'original Strike read selection changed across the funded restart')
         try:
@@ -248,8 +340,9 @@ def verify_funded_rollback(root, core_cli):
             'recovery worklist lost a later original provider or feeder reference')
     before = {path: digest(path) for path in (old_core, new_core, old_wallet, new_wallet)}
     verify_strike_read(earlier, core_cli)
+    verify_feeder_read(feeder_selection, core_cli)
     require(all(digest(path) == expected_hash for path, expected_hash in before.items()),
-            'read-only restore Strike verification changed checkpoint bytes')
+            'restore provider observations changed checkpoint bytes')
     return {
         'wallet_only_history_refused': True,
         'core_only_local_agreement_insufficient': True,
@@ -261,6 +354,8 @@ def verify_funded_rollback(root, core_cli):
         'fence_clearance_qualified': False,
         'later_original_references_listed': True,
         'original_strike_receive_read_verified': True,
+        'original_feeder_status_read_verified': True,
+        'original_submitted_mint_quote_selected': True,
     }
 
 
@@ -465,7 +560,18 @@ def main():
             if result != expected:
                 raise ValueError('combined fixture result differs from expected conservation')
             if args.funded_rollback:
-                result['funded_rollback'] = verify_funded_rollback(root, args.core_cli)
+                source = args.core_cli.resolve(strict=True)
+                if not source.is_file() or not 0 < source.stat().st_size <= 512 * 1024 * 1024:
+                    raise ValueError('invalid explicitly selected core CLI artifact')
+                # GitHub artifact downloads preserve bytes and strip executable
+                # mode. Run a disposable root-owned copy, as with the test binaries.
+                core_cli = root / 'core-operator-cli'
+                shutil.copyfile(source, core_cli)
+                core_cli.chmod(0o500)
+                hashes['core_cli'] = digest(core_cli)
+                if hashes['core_cli'] != digest(source):
+                    raise ValueError('staged core CLI differs from selected artifact')
+                result['funded_rollback'] = verify_funded_rollback(root, core_cli)
                 result['funded_rollback']['scoped_reconciliation_recorded_and_replayed'] = True
             print(json.dumps({'result': 'CASHU_COMBINED_SETTLEMENT_VERIFIED', 'artifacts_sha256': hashes,
                               'financial_result': result, 'live_provider': False, 'wallet_health_verified': True,

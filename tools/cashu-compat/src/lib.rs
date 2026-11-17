@@ -68,3 +68,4 @@ pub mod treasury_split;
 pub mod backup_copy;
 pub mod backup_keys;
 pub mod operator_reconciliation;
+pub mod operator_treasury;

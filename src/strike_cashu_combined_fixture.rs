@@ -29,8 +29,9 @@ mod combined_fixture {
             directory.join(crate::state_maintenance::RECOVERY_MARKER),
             b"synthetic restore requires reconciliation",
         )?;
-        let result = LedgerStore::connect(&format!("sqlite://{}", path.display())).await;
-        let error = result.err().expect("fenced core must refuse");
+        let Err(error) = LedgerStore::connect(&format!("sqlite://{}", path.display())).await else {
+            anyhow::bail!("fenced core unexpectedly opened");
+        };
         assert!(error.chain().any(|cause| cause.to_string()
             == "restored journal requires explicit external reconciliation before startup"));
         assert_eq!(std::fs::read(&path)?, original);

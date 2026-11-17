@@ -23,6 +23,20 @@ fn executable_help_usage_and_config_failure_are_bounded_and_redacted() {
     assert_eq!(prepare.status.code(), Some(1));
     assert!(prepare.stdout.is_empty());
     assert_eq!(prepare.stderr, b"wallet configuration rejected\n");
+    let treasury = Command::new(executable)
+        .args([
+            "reconcile-treasury",
+            "/missing/private-config-fixture",
+            "/missing/private-approval-fixture",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(treasury.status.code(), Some(1));
+    assert!(treasury.stdout.is_empty());
+    assert_eq!(
+        treasury.stderr,
+        b"treasury reconciliation approval rejected\n"
+    );
     for command in ["check-config", "initialize", "run", "status"] {
         let failed = Command::new(executable)
             .args([command, "/missing/private-token-fixture"])

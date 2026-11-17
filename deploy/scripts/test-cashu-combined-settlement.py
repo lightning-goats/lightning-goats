@@ -260,6 +260,8 @@ def main():
                     markers.append('COMBINED_CORE_TWO_MINTS_FINANCIAL_PLAN_VERIFIED')
                 if index == 1:
                     markers.append('COMBINED_WALLET_HEALTH_ACCOUNTING_VERIFIED')
+                    if args.funded_rollback:
+                        markers.append('COMBINED_WALLET_ORIGINAL_TREASURY_RECONCILIATION_VERIFIED')
                 if args.repeat_request:
                     markers.append(['COMBINED_CORE_REUSABLE_REQUEST_TWO_PAYMENTS_VERIFIED','COMBINED_WALLET_REUSABLE_REQUEST_TWO_PAYMENTS_VERIFIED'][index])
                 if args.cashu_ts_sender and index == 1:
@@ -315,6 +317,7 @@ def main():
                 raise ValueError('combined fixture result differs from expected conservation')
             if args.funded_rollback:
                 result['funded_rollback'] = verify_funded_rollback(root)
+                result['funded_rollback']['scoped_reconciliation_recorded_and_replayed'] = True
             print(json.dumps({'result': 'CASHU_COMBINED_SETTLEMENT_VERIFIED', 'artifacts_sha256': hashes,
                               'financial_result': result, 'live_provider': False, 'wallet_health_verified': True,
                               'nonzero_fees': args.fees, 'returned_change': args.fees and not args.no_change,

@@ -43,9 +43,11 @@ fn assert_restored_wallet_fenced(directory: &Path) -> Result<()> {
         directory.join("CASHU_RECOVERY_REQUIRED"),
         b"synthetic restore requires reconciliation",
     )?;
-    let result = WriterLock::acquire(directory);
+    let Err(error) = WriterLock::acquire(directory) else {
+        anyhow::bail!("fenced wallet unexpectedly opened");
+    };
     assert_eq!(
-        result.err().expect("fenced wallet must refuse").to_string(),
+        error.to_string(),
         "Cashu recovery requires explicit reconciliation"
     );
     assert_eq!(std::fs::read(directory.join("journal.sqlite"))?, journal);
@@ -654,6 +656,23 @@ async fn combined_settlement_wallet_child() -> Result<()> {
         mint: harness.policy(),
         seed: harness.seed,
     });
+    let operator_recovery = crate::treasury_recovery::Recovery {
+        transport: &harness.mint,
+        journal: delivery_journal.clone(),
+        database: database.clone(),
+        writer: writer.clone(),
+        binding: &binding,
+        keys: &harness.keys,
+        seed: &harness.seed,
+    };
+    if funded_rollback {
+        assert!(
+            crate::operator_treasury::reconcile_original(&operator_recovery, issued.intent.id)
+                .await
+                .is_err(),
+            "one-operation reconciliation accepted a merely bound instruction"
+        );
+    }
     let mut execution = Execution {
         execute: true,
         reconcile: true,
@@ -700,6 +719,18 @@ async fn combined_settlement_wallet_child() -> Result<()> {
                 .mint
                 .melt_status_unavailable
                 .store(false, Ordering::SeqCst);
+            if funded_rollback {
+                use crate::operator_treasury::{State, reconcile_original};
+                assert_eq!(
+                    reconcile_original(&operator_recovery, issued.intent.id).await?,
+                    State::ReportRecorded
+                );
+                assert_eq!(
+                    reconcile_original(&operator_recovery, issued.intent.id).await?,
+                    State::ReportAlreadyRetained
+                );
+                println!("COMBINED_WALLET_ORIGINAL_TREASURY_RECONCILIATION_VERIFIED");
+            }
         }
         if let Ok(value) = Journal::open(&path, harness.epoch, 64)?
             .treasury_melt_report(&binding, issued.intent.id)

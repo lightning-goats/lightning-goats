@@ -7,6 +7,7 @@ use std::{ffi::OsString, path::PathBuf, process::ExitCode};
 
 const USAGE: &str = "Usage: lightning-goats-cashud <check-config|initialize|run|status> <config.json>\n\
        lightning-goats-cashud reconcile-acquisition <config.json> <approval.json>\n\
+       lightning-goats-cashud reconcile-treasury <config.json> <approval.json>\n\
        lightning-goats-cashud prepare-announcement <config.json> <operation-uuid>\n\
        lightning-goats-cashud prepare-request <config.json> <https-endpoint> <creqA|creqB>\n\
 check-config  Validate protected configuration without opening wallet state or keys.\n\
@@ -14,6 +15,7 @@ initialize    Explicitly initialize empty wallet databases using provisioned key
 run           Open existing wallet state; serve private intake and configured acquisition.\n\
 status        Read bounded private journal status without loading keys or changing work.\n\
 reconcile-acquisition  Check one approved original acquisition; no swap/melt replay.\n\
+reconcile-treasury  Check one original submitted melt and retain its wallet report.\n\
 prepare-announcement  Offline: retain and preview configured kind 10019; no workers started.\n\
 prepare-request  Offline: preview a reusable request; no keys, state or network opened.\n\
 Receiving, relay intake, acquisition, receipt delivery and treasury execution default off.\n\
@@ -27,6 +29,7 @@ enum Command {
     Run(PathBuf),
     Status(PathBuf),
     ReconcileAcquisition(PathBuf, PathBuf),
+    ReconcileTreasury(PathBuf, PathBuf),
     PrepareAnnouncement(PathBuf, uuid::Uuid),
     PrepareRequest(PathBuf, String, Encoding),
 }
@@ -34,6 +37,16 @@ enum Command {
 fn parse(args: Vec<OsString>) -> Result<Command, ()> {
     if args.len() == 1 && (args[0] == "--help" || args[0] == "-h") {
         return Ok(Command::Help);
+    }
+    if args.len() == 3
+        && args[0] == "reconcile-treasury"
+        && !args[1].is_empty()
+        && !args[2].is_empty()
+    {
+        return Ok(Command::ReconcileTreasury(
+            PathBuf::from(&args[1]),
+            PathBuf::from(&args[2]),
+        ));
     }
     if args.len() == 3
         && args[0] == "reconcile-acquisition"
@@ -136,6 +149,24 @@ async fn execute(command: Command) -> Result<(), &'static str> {
             drop(runtime);
             println!("Wallet databases initialized; no service started.");
         }
+        Command::ReconcileTreasury(path, approval) => {
+            use lightning_goats_cashu_compat::operator_treasury::Approval;
+            let approval = Approval::load(&approval)
+                .map_err(|_| "treasury reconciliation approval rejected")?;
+            let config = approval
+                .load_config(&path)
+                .map_err(|_| "treasury reconciliation configuration rejected")?;
+            let runtime = Runtime::open(config).await.map_err(|_| "treasury reconciliation requires offline registered wallet state and matching keys")?;
+            let result = approval
+                .reconcile(&runtime)
+                .await
+                .map_err(|_| "treasury reconciliation failed; original operation retained")?;
+            println!(
+                "{}",
+                serde_json::to_string(&result)
+                    .map_err(|_| "treasury reconciliation outcome encoding failed")?
+            );
+        }
         Command::PrepareAnnouncement(path, id) => {
             let config = Config::load(&path).map_err(|_| "wallet configuration rejected")?;
             let runtime=Runtime::open(config).await.map_err(|_|"announcement preparation requires offline registered wallet state and matching keys")?;
@@ -190,6 +221,18 @@ mod tests {
     #[test]
     fn commands_require_explicit_mode_and_exact_arguments() {
         assert_eq!(parse(args(&["--help"])), Ok(Command::Help));
+        assert_eq!(
+            parse(args(&[
+                "reconcile-treasury",
+                "/fixture/config.json",
+                "/fixture/approval.json"
+            ])),
+            Ok(Command::ReconcileTreasury(
+                "/fixture/config.json".into(),
+                "/fixture/approval.json".into()
+            ))
+        );
+        assert!(parse(args(&["reconcile-treasury", "/fixture/config.json"])).is_err());
         for (name, encoding) in [("creqA", Encoding::CreqA), ("creqB", Encoding::CreqB)] {
             assert_eq!(
                 parse(args(&[

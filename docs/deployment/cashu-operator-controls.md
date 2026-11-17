@@ -89,8 +89,36 @@ request retention and conflicting retries. It does not qualify installed
 systemd, mint/provider behavior or funded custody; native funded tests and
 existing financial composition provide those separate synthetic boundaries.
 
-Constrained wallet reconciliation, held-policy updates, coordinated restore and
-installed operational acceptance remain separate required work.
+Held-policy updates, coordinated restore and installed operational acceptance
+remain separate required work.
+
+## Original treasury melt reconciliation
+
+`lightning-goats-cashud reconcile-treasury CONFIG APPROVAL` checks one retained
+submitted melt under the wallet's exclusive writer lock. Run it under the
+registered wallet UID with the wallet stopped. It uses the same original quote
+lookup, preimage validation and change ownership checks as the wallet's recovery
+worker. An already retained report can be returned from the journal without a
+mint request. A bound instruction with no recorded submission is refused.
+
+The root-owned approval JSON contains these exact fields:
+
+- `version` is `1`, and `purpose` is `"reconcile_original_treasury_melt"`.
+- `wallet_instance`, `wallet_epoch`, `core_epoch` and `intent_id` are UUIDs
+  from private diagnostics for the original operation.
+- `mint_id` identifies its configured mint, and `config_sha256` is the
+  lowercase SHA256 of the exact wallet configuration.
+- `approved_at` and `expires_at` bound the approval in Unix seconds, with a
+  maximum interval of 24 hours.
+
+An unpaid or pending quote produces `pending`. A proven paid quote produces
+`report_recorded`, and an exact retry produces `report_already_retained`.
+Transport and evidence errors retain the original operation for investigation.
+This command performs only the report stage. CDK cleanup and independent Strike
+verification are separate steps. The command creates no invoice, submits no
+payment and starts no services or workers. A restored wallet remains fenced.
+The funded lost-reply fixture exercises the report stage and exact replay with
+the synthetic mint. Installed acceptance remains open.
 
 
 ## Original acquisition ownership check

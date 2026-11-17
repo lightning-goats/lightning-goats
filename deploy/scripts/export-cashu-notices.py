@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import re
 import runpy
 import tarfile
 import tempfile
@@ -12,6 +13,10 @@ from urllib.parse import urlsplit
 
 def digest(data):
     return hashlib.sha256(data).hexdigest()
+
+
+def git_blob(data):
+    return hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest()
 
 
 def github_repository(value):
@@ -46,7 +51,45 @@ def source_origin(root, package):
             digest(archive.read_bytes()))
 
 
-def load_supplement(root, raw_inventory, inventory, path):
+def release_origin(package, row, cache):
+    """Recheck a reviewed signed release match for an archive missing VCS metadata."""
+    origin = row['release_source']
+    identity = package['name'] + '@' + package['version']
+    archive_name = identity.replace('@', '-') + '.crate'
+    if (package['status'] != 'verified_archive' or package.get('archive_vcs_info') is not None
+            or cache is None or set(origin) != {'tag', 'tag_object', 'git_commit', 'git_tree', 'member_git_blobs'}
+            or origin['tag'] != identity.replace('@', '-')
+            or row['commit'] != origin['git_commit']
+            or any(not re.fullmatch('[a-f0-9]{40}', value) for value in
+                   (origin['tag_object'], origin['git_tree'], row['commit']))):
+        raise ValueError('release provenance cannot replace an archive VCS binding')
+    archive = next((p for p in sorted(cache.glob('*/' + archive_name))
+                    if digest(p.read_bytes()) == package['checksum']), None)
+    if archive is None:
+        raise ValueError('reviewed release requires its checksum-verified archive')
+    actual = {}
+    names = set()
+    prefix = Path(archive_name.removesuffix('.crate'))
+    with tarfile.open(archive, 'r:gz') as bundle:
+        for member in bundle:
+            relative = Path(member.name).relative_to(prefix)
+            if member.isdir():
+                continue
+            if (not member.isfile() or '..' in relative.parts or member.size > 16 * 1024 * 1024
+                    or relative in names):
+                raise ValueError('invalid release archive member')
+            names.add(relative)
+            if relative in (Path('Cargo.lock'), Path('Cargo.toml')):
+                # Cargo generates these from the original tracked manifest.
+                continue
+            with bundle.extractfile(member) as source:
+                actual[str(relative)] = git_blob(source.read())
+    if ('Cargo.toml.orig' not in actual or actual != origin['member_git_blobs']):
+        raise ValueError('reviewed release source does not match the verified archive')
+    return row['commit'], package['archive_repository'], package['checksum']
+
+
+def load_supplement(root, raw_inventory, inventory, path, cache=None):
     """Accept only notice bytes bound to the archive's exact upstream commit."""
     if path is None:
         return {}
@@ -61,7 +104,10 @@ def load_supplement(root, raw_inventory, inventory, path):
         package = packages.get(identity)
         if package is None or identity in result or not row['files']:
             raise ValueError('unknown, duplicate or empty supplementary package')
-        commit, origin_repository, checksum = source_origin(root, package)
+        if 'release_source' in row:
+            commit, origin_repository, checksum = release_origin(package, row, cache)
+        else:
+            commit, origin_repository, checksum = source_origin(root, package)
         if (not commit or row['commit'] != commit or row['checksum'] != checksum):
             raise ValueError('supplement is not bound to the verified source archive')
         repository = github_repository(origin_repository or '')
@@ -78,9 +124,8 @@ def load_supplement(root, raw_inventory, inventory, path):
             if not url.startswith(repository + '/blob/' + commit + '/'):
                 raise ValueError('notice URL does not match pinned upstream repository')
             data = target.read_bytes()
-            blob = b'blob ' + str(len(data)).encode() + b'\0' + data
             if (digest(data) != notice['sha256']
-                    or hashlib.sha1(blob).hexdigest() != notice['git_blob_sha1']):
+                    or git_blob(data) != notice['git_blob_sha1']):
                 raise ValueError('supplementary notice bytes changed')
             texts[relative] = (data, notice)
         result[identity] = texts
@@ -99,7 +144,7 @@ def main():
     root = Path(__file__).resolve().parents[2]
     raw = args.inventory.read_bytes()
     inventory = json.loads(raw)
-    supplement = load_supplement(root, raw, inventory, args.supplement)
+    supplement = load_supplement(root, raw, inventory, args.supplement, args.cache)
     missing = [p['name'] + '@' + p['version'] for p in inventory['packages']
                if not p['license_notice_files_sha256']
                and p['name'] + '@' + p['version'] not in supplement]

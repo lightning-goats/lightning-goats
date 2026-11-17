@@ -2,9 +2,11 @@
 import copy
 import hashlib
 import importlib.util
+import io
 import json
 from pathlib import Path
 import tempfile
+import tarfile
 import unittest
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'scripts/export-cashu-notices.py'
@@ -121,6 +123,34 @@ class SupplementTests(unittest.TestCase):
         (self.root / 'elsewhere').write_bytes(self.data)
         with self.assertRaises(ValueError):
             self.load()
+
+    def test_signed_release_record_rechecks_complete_archive_payload(self):
+        cache = self.root / 'cache'
+        (cache / 'registry').mkdir(parents=True)
+        archive = cache / 'registry/fixture-1.0.0.crate'
+        payload = {'Cargo.toml.orig': b'tracked manifest', 'src/lib.rs': b'archive source'}
+        with tarfile.open(archive, 'w:gz') as bundle:
+            for name, data in {**payload, 'Cargo.toml': b'Cargo generated this file'}.items():
+                member = tarfile.TarInfo('fixture-1.0.0/' + name)
+                member.size = len(data)
+                bundle.addfile(member, io.BytesIO(data))
+        package = dict(self.inventory['packages'][0], archive_vcs_info=None,
+                       checksum=MODULE.digest(archive.read_bytes()))
+        row = {'commit': self.commit, 'release_source': {
+            'tag': 'fixture-1.0.0', 'git_commit': self.commit, 'tag_object': 'c' * 40,
+            'git_tree': 'd' * 40,
+            'member_git_blobs': {name: MODULE.git_blob(data) for name, data in payload.items()},
+        }}
+        self.assertEqual(MODULE.release_origin(package, row, cache)[0], self.commit)
+        incomplete = copy.deepcopy(row)
+        del incomplete['release_source']['member_git_blobs']['src/lib.rs']
+        with self.assertRaisesRegex(ValueError, 'does not match'):
+            MODULE.release_origin(package, incomplete, cache)
+        different = dict(row, commit='e' * 40)
+        with self.assertRaises(ValueError):
+            MODULE.release_origin(package, different, cache)
+        with self.assertRaises(ValueError):
+            MODULE.release_origin(dict(package, archive_vcs_info={'git': {}}), row, cache)
 
 
 if __name__ == '__main__':

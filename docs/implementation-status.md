@@ -87,6 +87,8 @@ its separate-UID fixture retains two source records after 80 identical retries
 per payment and preserves status across paused restart. The
 [notice inventory correction](testing/cashu-license-authors-20261117.json) passes
 13 tests and reduces missing notices to 15, with distribution readiness false.
+The later [Rust Bitcoin release comparison](testing/cashu-rust-bitcoin-release-notices-20261117.json)
+matches ten archives to signed tags and reduces the remaining notices to five.
 The [current-artifact financial matrix](testing/cashu-final-composition-20261117.json)
 now passes eight full HTTP/receipt/treasury IPC cases, including normal/lost
 replies and repeated descriptor use, with actual CDK and an offline SDK sender.

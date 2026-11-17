@@ -19,20 +19,30 @@ local CDK manifest against the license inventory. CDK retains `source: local`
 in the exported index. Other local packages gain no implicit upstream authority;
 changed manifests and unsupported local identities refuse.
 
+Ten published Rust Bitcoin archives omit VCS metadata and the root CC0 text.
+The supplement binds them to their signed release tags. Preparation checked
+GitHub's tag verification results, recomputed the Git tree hashes against the
+tagged commits, and matched every source member and original Cargo manifest to
+the corresponding Git blob. That includes the shared workspace files Cargo
+copied into some packages. The exporter rechecks those archive member hashes
+against the reviewed record and checks that the notice bytes match the pinned
+Git blob. Git tag verification is part of preparation. Export runs offline.
+[Rust Bitcoin release evidence](../testing/cashu-rust-bitcoin-release-notices-20261117.json)
+
 Development export:
 
 ```sh
 python3 deploy/scripts/export-cashu-notices.py \
   docs/testing/cashu-license-inventory-20261117.json \
-  .artifacts/cashu-development-notices-20261117-v9 \
+  .artifacts/cashu-development-notices-20261117-v10 \
   --supplement docs/licenses/cashu-upstream-supplement.json --allow-incomplete
 ```
 
 The output directory must not already exist. This checkpoint exports 462 package
-entries with 15 still missing notice files. It remains `distribution_ready:false`;
+entries with five missing notice files. It remains `distribution_ready:false`;
 `--allow-incomplete` is for development review only. SPDX expressions and notice
 presence alone do not qualify a distributable linked artifact. Evidence:
-[export result](../testing/cashu-license-authors-20261117.json).
+[export result](../testing/cashu-rust-bitcoin-release-notices-20261117.json).
 
 The v9 [inventory correction](../testing/cashu-license-authors-20261117.json)
 recognizes the full permission/copyright notice that `r-efi` ships in `AUTHORS`.

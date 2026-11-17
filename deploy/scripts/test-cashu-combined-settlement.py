@@ -104,6 +104,26 @@ def verify_funded_rollback(root):
     require((old_core.parent / 'CYBERHERD_RECOVERY_REQUIRED').is_file()
             and (old_wallet.parent / 'CASHU_RECOVERY_REQUIRED').is_file(),
             'restore fence was lost')
+    review = runpy.run_path(str(Path(__file__).with_name('review-cashu-restore.py')))
+    budget = runpy.run_path(str(Path(__file__).with_name('collect-cashu-backup.py')))['Budget'](0, 30)
+    with (closing(review['open_database'](old_core, budget)) as previous_core,
+          closing(review['open_database'](old_wallet, budget)) as previous_wallet,
+          closing(review['open_database'](new_core, budget)) as reference_core,
+          closing(review['open_database'](new_wallet, budget)) as reference_wallet):
+        worklist = review['worklist'](previous_core, previous_wallet, reference_core, reference_wallet)
+    strike = worklist['strike_receives']['items']
+    melt = worklist['mint_melts']['items']
+    feeding = worklist['feeder_requests']['items']
+    require(len(strike) == len(melt) == len(feeding) == 1
+            and strike[0]['staged']['id'] == original[0][0]
+            and strike[0]['reference']['receive_id'] is not None
+            and strike[0]['reference']['deposit_sats'] == 398
+            and melt[0]['staged']['quote_id'] is None
+            and melt[0]['reference']['quote_id'] == 'combined-original-quote'
+            and melt[0]['reference']['report_retained']
+            and feeding[0]['staged'] is None
+            and feeding[0]['reference']['id'] == confirmed[0][0],
+            'recovery worklist lost a later original provider or feeder reference')
     return {
         'wallet_only_history_refused': True,
         'core_only_local_agreement_insufficient': True,
@@ -113,6 +133,7 @@ def verify_funded_rollback(root):
         'original_invoice_and_intent_preserved': True,
         'later_melt_deposit_and_feeding_retained': True,
         'fence_clearance_qualified': False,
+        'later_original_references_listed': True,
     }
 
 

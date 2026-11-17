@@ -18,6 +18,27 @@ SOURCE=Path(__file__).resolve().parents[2]/'deploy/scripts'
 MODULE=runpy.run_path(str(SOURCE/'collect-cashu-backup.py'))
 LAUNCH=runpy.run_path(str(SOURCE/'launch-cashu-backup.py'))
 RESTORE=runpy.run_path(str(SOURCE/'stage-cashu-restore.py'))
+REVIEW=runpy.run_path(str(SOURCE/'review-cashu-restore.py'))
+
+
+class RecoveryWorklistTests(unittest.TestCase):
+    def test_recovery_keeps_missing_later_id_and_pages_after_original_id(self):
+        older = [{'id': 'a', 'receive_id': None}, {'id': 'b', 'receive_id': 'strike-b'}]
+        later = [{'id': 'a', 'receive_id': 'strike-a'}, {'id': 'b', 'receive_id': 'strike-b'},
+                 {'id': 'c', 'receive_id': 'strike-c'}]
+        compare = REVIEW['compare_rows']
+        page = compare(iter(older), iter(later), ('receive_id',), lambda _: False, 1)
+        self.assertEqual(page['total'], 2)
+        self.assertEqual(page['next_after'], 'a')
+        second = compare(iter(older), iter(later), ('receive_id',), lambda _: False, 1, page['next_after'])
+        self.assertEqual(second, {'total': 1, 'next_after': None,
+                                  'items': [{'staged': None, 'reference': later[-1]}]})
+
+    def test_conflicting_provider_id_is_refused_even_outside_requested_page(self):
+        older = [{'id': 'a', 'payment_hash': 'original'}]
+        later = [{'id': 'a', 'payment_hash': 'different'}]
+        with self.assertRaisesRegex(ValueError, 'immutable original'):
+            REVIEW['compare_rows'](iter(older), iter(later), ('payment_hash',), lambda _: False, 1, 'b')
 
 
 class RestoreArchiveTests(unittest.TestCase):

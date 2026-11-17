@@ -3,6 +3,7 @@
 
 Run with python3 -I -S -B TOOL_SHA256 POLICY POLICY_SHA256 DESTINATION
 or python3 -I -S -B TOOL_SHA256 stage ARCHIVE ARCHIVE_SHA256 RECEIPT IDENTITY DESTINATION OPTIONS.
+The review subcommand reads a staged checkpoint and preserves every fence.
 The trusted bootstrap verifies every local module before importing one.
 """
 import hashlib
@@ -14,7 +15,7 @@ import runpy
 import stat
 import sys
 
-FILES={'launch-cashu-backup.py','collect-cashu-backup.py','stage-cashu-restore.py',
+FILES={'launch-cashu-backup.py','collect-cashu-backup.py','stage-cashu-restore.py','review-cashu-restore.py',
        'verify-cashu-backup.py','verify-cashu-combined-backup.py'}
 
 
@@ -70,15 +71,16 @@ def verify(root,expected):
 def main():
     if os.geteuid()!=0 or not sys.flags.isolated or not sys.flags.no_site or not sys.dont_write_bytecode:
         raise ValueError('root and isolated Python -I -S -B required')
-    restoring = len(sys.argv) >= 3 and sys.argv[2] == 'stage'
-    if not restoring and len(sys.argv) != 5:
+    commands = {'stage': 'stage-cashu-restore.py', 'review': 'review-cashu-restore.py'}
+    subcommand = commands.get(sys.argv[2]) if len(sys.argv) >= 3 else None
+    if subcommand is None and len(sys.argv) != 5:
         raise ValueError('tool/policy hashes and new destination required')
     root=Path(__file__).absolute().parent
     expected=sys.argv[1]
     verify(root,expected)
     sys.path.insert(0,str(root))
-    script = root / ('stage-cashu-restore.py' if restoring else 'collect-cashu-backup.py')
-    arguments = sys.argv[3:] if restoring else sys.argv[2:]
+    script = root / (subcommand or 'collect-cashu-backup.py')
+    arguments = sys.argv[3:] if subcommand else sys.argv[2:]
     sys.argv = [str(script), *arguments]
     runpy.run_path(str(script),run_name='__main__',
         init_globals={'verified_tool_identity':lambda:verify(root,expected)})

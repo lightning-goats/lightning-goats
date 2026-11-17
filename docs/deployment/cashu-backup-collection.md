@@ -127,9 +127,9 @@ coverage, portable export/reprovisioning and historical-key administration remai
 acceptance requirements; a short manually declared extras list does not close them.
 
 The root-owned capsule contains exactly `launch-cashu-backup.py`,
-`collect-cashu-backup.py`, `stage-cashu-restore.py`, `verify-cashu-backup.py`,
+`collect-cashu-backup.py`, `stage-cashu-restore.py`, `review-cashu-restore.py`, `verify-cashu-backup.py`,
 `verify-cashu-combined-backup.py` and `TOOL.json`. The latter has version 1,
-the selected 40-character source commit and SHA256 for each of the five scripts.
+the selected 40-character source commit and SHA256 for each of the six scripts.
 Authenticate the bootstrap file externally before interpreting it, then use the
 reviewed manifest hash with isolated Python:
 
@@ -215,3 +215,24 @@ directory, runtime ownership, service policy or recovery marker is changed.
 Reconcile each original mint, Strike and feeder outcome before considering
 installation or resumption. `STAGED.json` records pending external reconciliation
 and leaves resumption unauthorized.
+
+Use the same launcher to produce a private list of original IDs for provider
+and feeder reconciliation:
+
+```sh
+/usr/bin/python3 -I -S -B ROOT_CAPSULE/launch-cashu-backup.py TOOL_SHA256 review \
+  STAGED_DIRECTORY STAGED_RECEIPT_SHA256 --output NEW_PRIVATE_REPORT
+```
+
+Supply the SHA256 of `STAGED.json` from the reviewed stage. The command
+rechecks every fenced file and reports pending Cashu acquisitions, original
+mint quotes, Strike receive requests and feeder UUIDs. When independently
+retained newer evidence exists, add `--reference REFERENCE_DIRECTORY
+--reference-sha256 REFERENCE_RECEIPT_SHA256`. The report then includes
+differing original records and rejects conflicting immutable identities or a
+different wallet registration. This finds operations missing from a stale
+image when the reference retained them. An empty worklist still requires
+external verification for effects after the last captured checkpoint. Keep
+the report private. If a category has a `next_after` UUID, run the same review
+with `--group CATEGORY --after UUID` to retrieve its next page. The command reads both stages without opening a live
+ledger and leaves all recovery fences in place.

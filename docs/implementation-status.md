@@ -57,6 +57,17 @@ fences. The same fixture records and replays the original wallet report through
 the scoped operator reconciliation function. This does not grant permission to
 clear a fence or resume from a restored checkpoint.
 
+The [encrypted restore stage](testing/cashu-encrypted-restore-stage-local-20261117.json)
+opens the real collector archive through the authenticated launcher, replays
+native inventory and key binding checks, and stages all six roles with recovery
+fences. The fixture verifies exact staged file hashes and committed WAL content.
+The follow-up review command checks these hashes again, reports original external
+references from the fenced images, and can compare a later retained checkpoint.
+The encrypted staging and changed-image refusal pass with isolated disposable
+native state. The funded fixture now also exercises recovery of the original
+mint quote, Strike receive and feeder UUID from later reference evidence.
+Installed recovery and live outcome verification remain open.
+
 Cashu operator controls update **2026-11-17**: the
 [protected planning/reconciliation checkpoint](testing/cashu-operator-controls-20261117.json)
 passes 650 core tests (12 ignored), 179 wallet tests (seven ignored), required

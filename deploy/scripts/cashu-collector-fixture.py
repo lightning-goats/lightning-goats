@@ -88,6 +88,35 @@ def qualify_restore(source, output_root, collected, identity, selected, store):
             raise ValueError('staged native store lost committed WAL content')
     if any(p.stat().st_mode & 0o111 for p in (destination / 'checkpoint-evidence/programs').iterdir()):
         raise ValueError('stager made an archived program executable')
+
+    def invoke_review(output):
+        return subprocess.run(
+            ['/usr/bin/python3', '-I', '-S', '-B', str(capsule / 'launch-cashu-backup.py'),
+             digest(manifest), 'review', str(destination), digest(destination / 'STAGED.json'),
+             '--output', str(output)],
+            stdin=subprocess.DEVNULL, capture_output=True, timeout=120,
+            env={'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'},
+        )
+
+    review_path = output_root / 'empty-restore-worklist.json'
+    review = invoke_review(review_path)
+    if review.returncode or any(json.loads(review.stdout)['counts'].values()):
+        raise ValueError('empty staged checkpoint produced unexpected review work')
+    if review_path.stat().st_mode & 0o777 != 0o600:
+        raise ValueError('restore worklist is not private')
+    # Mutate one disposable stage image after authentication. Review must
+    # refuse changed bytes even though its STAGED receipt still matches.
+    tampered_output = output_root / 'tampered-worklist.json'
+    with image.open('ab') as mutated:
+        mutated.write(b'changed')
+    try:
+        tampered = invoke_review(tampered_output)
+        if (tampered.returncode != 1 or tampered.stdout or tampered_output.exists()
+                or tampered.stderr != b'Cashu restore review refused. Preserve the fenced checkpoint.\n'):
+            raise ValueError('restore review accepted a changed staged image')
+    finally:
+        with image.open('r+b') as mutated:
+            mutated.truncate(image.stat().st_size - len(b'changed'))
     wrong_digest = output_root / 'restore-wrong-digest'
     wrong_key = output_root / 'other-age-identity'
     subprocess.run([str(selected['keygen']), '-o', str(wrong_key)], stdin=subprocess.DEVNULL,
@@ -104,6 +133,7 @@ def qualify_restore(source, output_root, collected, identity, selected, store):
     return {'actual_authenticated_launcher': True, 'real_age_archive': True,
             'staged_roles': len(roles), 'committed_wal_preserved': True, 'image_manifest_verified': True,
             'refusal_cases': 3, 'archive_programs_executable': False,
+            'offline_worklist_launcher_verified': True, 'worklist_tampered_image_refused': True,
             'external_reconciliation_verified': False, 'resume_authorized': False}
 
 

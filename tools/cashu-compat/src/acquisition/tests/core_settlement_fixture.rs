@@ -292,6 +292,21 @@ async fn combined_settlement_wallet_child() -> Result<()> {
         harness.open().await?
     };
     let delivery_journal = coordinator.journal.clone();
+    if funded_rollback {
+        // The fixture uses its own synthetic wallet registration. Retaining it
+        // in both images lets reconciliation enforce the same identity check
+        // used for an initialized production checkpoint.
+        use sha2::{Digest, Sha256};
+        let mut binding = Sha256::new();
+        binding.update(b"lightning-goats-cashu-runtime-keys-v1\0");
+        binding.update(harness.seed);
+        binding.update(harness.receiver.public_key().to_bytes());
+        delivery_journal.lock().unwrap().runtime_registration(
+            bootstrap.wallet_instance,
+            &binding.finalize().into(),
+            true,
+        )?;
+    }
     let mut descriptor_id = String::new();
     let mut http_replays: Vec<(Value, Value)> = Vec::new();
     let http_client = reqwest::Client::builder()

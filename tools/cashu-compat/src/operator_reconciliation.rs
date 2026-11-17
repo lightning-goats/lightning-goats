@@ -26,6 +26,8 @@ pub struct Approval {
     pub mint_id: String,
     pub config_sha256: String,
     pub reviewed_ownership_check: bool,
+    #[serde(default)]
+    pub reviewed_held_ownership_check: bool,
     pub approved_at: u64,
     pub expires_at: u64,
 }
@@ -125,13 +127,15 @@ impl Approval {
             journal.mint_id(self.acquisition_id)? == self.mint_id,
             "ownership approval acquisition mint mismatch"
         );
-        // Held, prepared, exported and credited work requires its separate recovery
-        // procedure. This command cannot clear a hold or touch an exported receipt.
+        let state = journal.state(self.acquisition_id)?;
+        let eligible = if self.reviewed_held_ownership_check {
+            matches!(state.as_str(), "held_for_reconciliation" | "acquired")
+                && journal.has_recheckable_ownership_hold(self.acquisition_id)?
+        } else {
+            matches!(state.as_str(), "acquiring" | "acquired")
+        };
         ensure!(
-            matches!(
-                journal.state(self.acquisition_id)?.as_str(),
-                "acquiring" | "acquired"
-            ),
+            eligible,
             "acquisition state requires a different recovery procedure"
         );
         Ok(())
@@ -180,12 +184,21 @@ impl Approval {
         self.require_current()?;
         let progress = tokio::time::timeout(
             Duration::from_secs(runtime.config.deadline_seconds),
-            coordinator.reconcile_owned(self.acquisition_id),
+            async {
+                if self.reviewed_held_ownership_check {
+                    coordinator
+                        .recheck_held_ownership(self.acquisition_id)
+                        .await
+                } else {
+                    coordinator.reconcile_owned(self.acquisition_id).await
+                }
+            },
         )
         .await;
         let state = match progress {
             Ok(Ok(Progress::Acquired(_))) => "acquired",
             Ok(Ok(Progress::Held(_))) => "held_for_reconciliation",
+            Err(_) if self.reviewed_held_ownership_check => "held_for_reconciliation",
             Ok(Ok(Progress::Pending(_))) | Err(_) => "pending",
             Ok(Ok(Progress::Receipt(_))) => {
                 anyhow::bail!("ownership check unexpectedly exported a receipt")
@@ -319,10 +332,15 @@ mod tests {
         assert!(approval.require_target(&journal).is_err());
         journal.start_acquisition(approval.acquisition_id)?;
         approval.require_target(&journal)?;
+        approval.reviewed_held_ownership_check = true;
+        assert!(approval.require_target(&journal).is_err());
+        approval.reviewed_held_ownership_check = false;
         approval.mint_id = "mint-b".into();
         assert!(approval.require_target(&journal).is_err());
         approval.mint_id = "mint-a".into();
         journal.hold(approval.acquisition_id, HoldReason::AmbiguousAcquisition)?;
+        assert!(approval.require_target(&journal).is_err());
+        approval.reviewed_held_ownership_check = true;
         assert!(approval.require_target(&journal).is_err());
         assert_eq!(
             journal.state(approval.acquisition_id)?,

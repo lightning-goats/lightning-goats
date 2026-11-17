@@ -433,17 +433,20 @@ Neither check authorizes installed systemd changes, provider requests or feeding
 
 For `lightning-goats-cashud reconcile-acquisition`, qualify the protected exact
 configuration and wallet/mint/acquisition binding, time/review limits, exclusive
-writer lock and restore fence. New, prepared, held, exported and credited states
-must refuse this narrowly scoped procedure. Use actual CDK-owned output tests to
-prove that fresh mint-state verification can complete only the original receive,
-without another swap/melt or receipt export. Missing derivation and unavailable
-responses must retain pending work; invalid ownership must not gain credit.
+writer lock and restore fence. New, prepared, exported and credited states
+must refuse this procedure. An ownership hold is eligible only with an explicit
+held-work approval and the original `acquiring` / `missing_owned_outputs`
+journal history. Use actual CDK-owned output tests to prove that fresh mint-state
+verification can complete only the original receive, without another swap/melt
+or receipt export. Missing derivations and unavailable or incomplete responses
+must preserve active holds. A successful recheck must preserve the original
+request, hold history, and exactly-once output attribution.
 
 Run `deploy/scripts/test-cashu-operator-reconciliation-cli.py` with the selected
 wallet executable/hash through the private-run helper in fresh mount/network
-namespaces. Its synthetic unfunded pending case establishes CLI/ownership/lock
-boundaries only; it does not establish a funded ownership transition or external
-reconciliation. Re-run the complete financial HTTP/receipt/treasury fixture on
-source-matched core and wallet test artifacts. Held-policy updates, treasury
-reconciliation, coordinated funded restore and installed/provider acceptance
-remain distinct required work.
+namespaces. Its synthetic unfunded cases cover exact CLI authority and unchanged
+pending and held states. Use the funded CDK test for a successful transition and
+separately qualify live provider reconciliation. Re-run the complete financial
+HTTP/receipt/treasury fixture on source-matched core and wallet test artifacts.
+Mint-policy updates, coordinated funded restore and installed/provider acceptance
+remain required.

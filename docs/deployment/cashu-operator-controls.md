@@ -133,8 +133,8 @@ retained acquisition under the exclusive wallet writer lock. Its native and
 actual CLI checks pass in the checkpoint above. It starts no listener,
 receipt-delivery worker or background scheduler. The protected approval binds the exact configuration bytes, wallet
 instance/epoch, mint and acquisition UUID, with explicit review and a current
-window no longer than 24 hours. It accepts no invoice, destination, replacement
-request, seed or replay/clear-hold option.
+window no longer than 24 hours. The command accepts only original-operation identifiers
+and the approval fields below.
 
 For a provisioned, separately approved installation:
 
@@ -157,6 +157,7 @@ checks use the distinct schema below, which is also intentionally invalid.
   "mint_id": "operator-selected-configured-mint",
   "config_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
   "reviewed_ownership_check": false,
+  "reviewed_held_ownership_check": false,
   "approved_at": 0,
   "expires_at": 0
 }
@@ -167,7 +168,7 @@ UID with protected root-owned approval/configuration and matching existing priva
 keys/state. Normal startup registration, namespace and restore fences still apply.
 An active wallet process retains its exclusive lock and prevents this command.
 
-Only `acquiring` work and idempotent already-`acquired` retries are accepted.
+The default scope accepts `acquiring` work and idempotent already-`acquired` retries.
 For acquiring work, reconciliation derives the original output identities,
 requires their existing CDK proof records and queries fresh mint states through
 the pinned transport. Existing cryptographic and conservation checks must prove
@@ -176,18 +177,25 @@ material or unavailable mint state remains pending; invalid ownership remains
 held. No swap, melt, quote, original-saga replay or receipt export is authorized.
 The separately controlled receipt worker can later import a proven acquisition.
 
-Validated/new, prepared, explicitly held, exported and credited operations are
-refused. This command cannot clear `CASHU_RECOVERY_REQUIRED`, remove proof/source
-claims, reset counters or reconcile an incoherent restored bundle. Those broader
-recovery and held-work procedures remain required work. Private `status` already
-prioritizes held acquisitions and reports their coarse causes without proof data.
+Set `reviewed_held_ownership_check` to `true` to recheck a hold with reason
+`missing_owned_outputs` raised while the original acquisition was `acquiring`.
+This scope retains the hold until the original signed outputs pass the full
+ownership, attribution and conservation checks. On success, one journal
+transaction records the output attribution and advances that acquisition to
+`acquired`. The original hold reason and request remain in the journal.
+The same approval can be retried while the recovered acquisition is `acquired`.
+Other hold reasons and operations already exported or credited require separate
+reconciliation. Keep `CASHU_RECOVERY_REQUIRED` in place on restored state.
+Private `status` prioritizes active holds and shows their coarse causes.
 
 The actual CLI fixture uses a disposable unfunded retained acquisition with no
 output derivation, so its successful result is truthfully pending. It checks
 exact approval scope, failed permissions/configuration, replay, active-writer
-and restore fences and refusal to touch other acquisition states. Separate real
-CDK tests cover owned-output reconciliation with all acquisition/replay/export
-permissions disabled.
+and restore fences and refusal to touch other acquisition states. The fixture
+also rechecks an eligible hold without enough evidence and leaves it unchanged.
+A funded CDK fixture drops part of a state response, restarts while the
+acquisition is held, and rechecks the original outputs before the receipt worker
+exports once. The mint executes one swap throughout.
 
 ```sh
 sudo unshare --mount --net -- python3 deploy/scripts/test-cashu-private-run.py -- \

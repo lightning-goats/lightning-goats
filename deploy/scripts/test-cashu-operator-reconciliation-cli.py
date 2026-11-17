@@ -156,10 +156,30 @@ def main():
             call(*arguments,success=False)
             if image() != before:
                 raise ValueError('refused state was changed')
+        with closing(sqlite3.connect(database)) as db:
+            db.execute("UPDATE acquisitions SET state='held_for_reconciliation' WHERE id=?", [acquisition])
+            db.execute("INSERT INTO operation_holds VALUES(?,'acquiring','missing_owned_outputs')", [acquisition])
+            db.commit()
+        held = image()
+        call(*arguments, success=False)
+        save(dict(decision, reviewed_held_ownership_check=True))
+        for _ in range(2):
+            outcome = json.loads(call(*arguments).stdout)
+            if (outcome['state'] != 'held_for_reconciliation' or outcome['acquisition_id'] != acquisition
+                    or outcome['swap_or_melt_submitted'] or outcome['receipt_exported'] or image() != held):
+                raise ValueError('reviewed hold with insufficient evidence did not remain unchanged')
+        with closing(sqlite3.connect(database)) as db:
+            db.execute("UPDATE operation_holds SET reason='ambiguous_acquisition' WHERE acquisition_id=?", [acquisition])
+            db.commit()
+        held = image()
+        call(*arguments, success=False)
+        if image() != held:
+            raise ValueError('out-of-scope hold was changed')
         print(json.dumps(dict(result='CASHU_OPERATOR_RECONCILIATION_CLI_VERIFIED',cli_sha256=args.cli_sha256,
             runtime_uid=uid,synthetic_unfunded_retained_operation=True,pending_replay_unchanged=True,
             active_writer_and_restore_fence_refused=True,configuration_scope_and_permissions_refused=True,
             held_prepared_new_and_exported_states_refused=True,mint_contact=False,
+            eligible_reviewed_hold_preserved_without_evidence=True,other_hold_reason_refused=True,
             acquired_transition_qualified_here=False,workers_started=False,
             sql_definitions_rows_and_rowids_unchanged=True,schema_object_insertion_order_ignored=True),sort_keys=True))
 

@@ -885,6 +885,10 @@ impl Journal {
             .optional()?)
     }
 
+    pub(crate) fn has_recheckable_ownership_hold(&self, id: Uuid) -> Result<bool> {
+        recheckable_ownership_hold(&self.connection, id)
+    }
+
     pub fn state(&self, id: Uuid) -> Result<String> {
         Ok(self.connection.query_row(
             "SELECT state FROM acquisitions WHERE id=?",
@@ -892,6 +896,14 @@ impl Journal {
             |r| r.get(0),
         )?)
     }
+}
+
+fn recheckable_ownership_hold(connection: &Connection, id: Uuid) -> Result<bool> {
+    Ok(connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM operation_holds WHERE acquisition_id=? AND previous_state='acquiring' AND reason=?)",
+        params![id.to_string(), HoldReason::MissingOwnedOutputs.as_str()],
+        |row| row.get(0),
+    )?)
 }
 
 /// Private wallet-to-core projection. Contains no proofs or spendable operation material.
@@ -923,7 +935,7 @@ impl Journal {
         fee: u64,
         evidence: &[u8],
     ) -> Result<()> {
-        self.record_acquired_outputs(id, net, fee, evidence, &[])
+        self.record_acquired_outputs(id, net, fee, evidence, &[], false)
     }
 
     pub(crate) fn record_acquired_outputs(
@@ -933,6 +945,7 @@ impl Journal {
         fee: u64,
         evidence: &[u8],
         outputs: &[(String, String, u64)],
+        recheck_hold: bool,
     ) -> Result<()> {
         #[cfg(not(test))]
         ensure!(!outputs.is_empty(), "owned output attribution missing");
@@ -982,13 +995,29 @@ impl Journal {
             net.checked_add(fee) == Some(gross),
             "acquisition conservation failure"
         );
+        if recheck_hold {
+            ensure!(
+                !outputs.is_empty()
+                    && matches!(state.as_str(), "held_for_reconciliation" | "acquired")
+                    && recheckable_ownership_hold(&tx, id)?,
+                "acquisition has no eligible ownership hold"
+            );
+        }
         if let Some(previous) = previous_evidence {
             ensure!(
                 previous == digest && previous_net == Some(net) && previous_fee == Some(fee),
                 "acquisition evidence conflict"
             );
         } else {
-            ensure!(state == "acquiring", "acquisition was not submitted");
+            ensure!(
+                state
+                    == if recheck_hold {
+                        "held_for_reconciliation"
+                    } else {
+                        "acquiring"
+                    },
+                "acquisition has no open ownership transition"
+            );
             tx.execute("UPDATE acquisitions SET state='acquired',net=?,receive_fee=?,acquired_evidence=? WHERE id=?",
                 params![net,fee,digest,id.to_string()])?;
         }
@@ -1398,20 +1427,20 @@ mod tests {
         journal.connection.execute_batch("CREATE TRIGGER fail_owned BEFORE INSERT ON owned_output_sources BEGIN SELECT RAISE(ABORT,'fixture'); END;")?;
         assert!(
             journal
-                .record_acquired_outputs(ids[0], 8, 0, b"owned", &outputs)
+                .record_acquired_outputs(ids[0], 8, 0, b"owned", &outputs, false)
                 .is_err()
         );
         assert_eq!(journal.state(ids[0])?, "acquiring");
         journal
             .connection
             .execute_batch("DROP TRIGGER fail_owned;")?;
-        journal.record_acquired_outputs(ids[0], 8, 0, b"owned", &outputs)?;
+        journal.record_acquired_outputs(ids[0], 8, 0, b"owned", &outputs, false)?;
         drop(journal);
         let mut journal = Journal::open(&path, epoch, 8)?;
-        journal.record_acquired_outputs(ids[0], 8, 0, b"owned", &outputs)?;
+        journal.record_acquired_outputs(ids[0], 8, 0, b"owned", &outputs, false)?;
         assert!(
             journal
-                .record_acquired_outputs(ids[1], 8, 0, b"other-owned", &outputs)
+                .record_acquired_outputs(ids[1], 8, 0, b"other-owned", &outputs, false)
                 .is_err()
         );
         assert_eq!(journal.state(ids[1])?, "acquiring");

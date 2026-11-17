@@ -188,9 +188,39 @@ impl<T: Transport + 'static> Coordinator<'_, T> {
     /// Read-only mint checks can reconcile outputs already persisted by CDK,
     /// including after a response/acknowledgment was lost. No replay occurs here.
     pub async fn reconcile_owned(&self, id: Uuid) -> Result<Progress> {
-        if let Some(progress) = self.ready(id)? {
+        self.check_owned(id, false).await
+    }
+
+    /// Explicit operator recheck of a hold raised while verifying original outputs.
+    /// Returning acquired here never exports a receipt, even if the worker can.
+    pub(crate) async fn recheck_held_ownership(&self, id: Uuid) -> Result<Progress> {
+        self.check_owned(id, true).await
+    }
+
+    async fn check_owned(&self, id: Uuid, recheck_hold: bool) -> Result<Progress> {
+        if recheck_hold {
+            let journal = self
+                .journal
+                .lock()
+                .map_err(|_| anyhow::anyhow!("wallet journal unavailable"))?;
+            ensure!(
+                journal.mint_id(id)? == self.mint_id
+                    && journal.has_recheckable_ownership_hold(id)?,
+                "operation has no eligible ownership hold for this mint"
+            );
+            match journal.state(id)?.as_str() {
+                "held_for_reconciliation" => {}
+                "acquired" => return Ok(Progress::Acquired(id)),
+                _ => anyhow::bail!("operation is no longer available for hold recheck"),
+            }
+        } else if let Some(progress) = self.ready(id)? {
             return Ok(progress);
         }
+        let unresolved = if recheck_hold {
+            Progress::Held(id)
+        } else {
+            Progress::Pending(id)
+        };
         let derivation = {
             let journal = self
                 .journal
@@ -198,7 +228,7 @@ impl<T: Transport + 'static> Coordinator<'_, T> {
                 .map_err(|_| anyhow::anyhow!("wallet journal unavailable"))?;
             match journal.derivation(id) {
                 Ok(binding) => binding,
-                Err(_) => return Ok(Progress::Pending(id)),
+                Err(_) => return Ok(unresolved),
             }
         };
         ensure!(
@@ -208,7 +238,7 @@ impl<T: Transport + 'static> Coordinator<'_, T> {
         let ys = derivation.output_ys(self.seed)?;
         let owned = self.database.get_proofs_by_ys(ys.clone()).await?;
         if owned.len() != ys.len() {
-            return Ok(Progress::Pending(id));
+            return Ok(unresolved);
         }
         let states = match self
             .wallet
@@ -217,7 +247,7 @@ impl<T: Transport + 'static> Coordinator<'_, T> {
             .await
         {
             Ok(states) => states,
-            Err(_) => return Ok(Progress::Pending(id)),
+            Err(_) => return Ok(unresolved),
         };
         {
             let mut journal = self
@@ -234,12 +264,15 @@ impl<T: Transport + 'static> Coordinator<'_, T> {
                 &owned,
                 &states,
             ) {
-                Ok(acquired) => acquired.commit(&mut journal)?,
+                Ok(acquired) => acquired.commit(&mut journal, recheck_hold)?,
                 Err(_) => {
                     journal.hold(id, HoldReason::MissingOwnedOutputs)?;
                     return Ok(Progress::Held(id));
                 }
             }
+        }
+        if recheck_hold {
+            return Ok(Progress::Acquired(id));
         }
         Ok(self.ready(id)?.unwrap_or(Progress::Acquired(id)))
     }

@@ -107,7 +107,18 @@ distinct runtime UIDs. Each native command stops at its recovery guard and
 leaves the restored files byte-for-byte unchanged. The wallet reports the
 fence with an unreadable seed file, and the Cashu signer reports it without
 a client credential. The rehearsal uses disposable state in private mount
-and network namespaces.
+and network namespaces. All ten workflows passed at `ebdbf47`.
+[Authenticated runtime fence evidence](testing/cashu-restore-runtime-fences-ci-20261117.json)
+records the six native results.
+
+An operator can recheck a `missing_owned_outputs` hold on an original acquiring
+operation using a protected exact-configuration approval. Fresh verified
+ownership advances the acquisition atomically and retains its hold history.
+The funded CDK test preserves the hold through an unavailable and an incomplete
+mint response, then recovers the original 7 sats after a 1-sat receive fee with
+one swap submission and no receipt export during the recheck. The unfunded CLI
+fixture verifies that insufficient evidence preserves the eligible hold and
+another hold cause is rejected.
 
 Cashu operator controls update **2026-11-17**: the
 [protected planning/reconciliation checkpoint](testing/cashu-operator-controls-20261117.json)

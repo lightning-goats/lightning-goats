@@ -208,7 +208,7 @@ impl Status {
         let exhausted_deliveries = tx.query_row("SELECT COUNT(*) FROM acquisitions a JOIN receipt_delivery_schedule s ON s.acquisition_id=a.id WHERE a.state IN ('acquired','credit_export_pending') AND ?>0 AND s.attempts>=?",params![delivery_budget,delivery_budget],|r|r.get(0))?;
         let mut operations = Vec::new();
         {
-            let mut query = tx.prepare("SELECT a.id,a.mint_id,a.state,h.reason,COALESCE(s.attempts,0),s.next_attempt,COALESCE(d.attempts,0),d.next_attempt FROM acquisitions a LEFT JOIN operation_holds h ON h.acquisition_id=a.id LEFT JOIN acquisition_schedule s ON s.acquisition_id=a.id LEFT JOIN receipt_delivery_schedule d ON d.acquisition_id=a.id WHERE a.state!='credited' ORDER BY CASE WHEN a.state='held_for_reconciliation' THEN 0 ELSE 1 END,a.rowid LIMIT ?")?;
+            let mut query = tx.prepare("SELECT a.id,a.mint_id,a.state,h.reason,COALESCE(s.attempts,0),s.next_attempt,COALESCE(d.attempts,0),d.next_attempt FROM acquisitions a LEFT JOIN operation_holds h ON h.acquisition_id=a.id AND a.state='held_for_reconciliation' LEFT JOIN acquisition_schedule s ON s.acquisition_id=a.id LEFT JOIN receipt_delivery_schedule d ON d.acquisition_id=a.id WHERE a.state!='credited' ORDER BY CASE WHEN a.state='held_for_reconciliation' THEN 0 ELSE 1 END,a.rowid LIMIT ?")?;
             let mut rows = query.query([i64::try_from(DETAIL_LIMIT)?])?;
             while let Some(row) = rows.next()? {
                 operations.push(Operation {

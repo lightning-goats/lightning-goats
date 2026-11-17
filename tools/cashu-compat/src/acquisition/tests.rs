@@ -46,6 +46,8 @@ struct FixtureMint {
     state: Arc<Mutex<IssuerState>>,
     lose_reply: Arc<AtomicBool>,
     fail_check_once: Arc<AtomicBool>,
+    incomplete_check_once: Arc<AtomicBool>,
+    swap_attempts: Arc<AtomicUsize>,
     executions: Arc<AtomicUsize>,
     melt_attempts: Arc<AtomicUsize>,
     melt_paid_reply: Arc<Mutex<Option<Value>>>,
@@ -96,6 +98,8 @@ impl FixtureMint {
             state: Arc::new(Mutex::new(IssuerState::default())),
             lose_reply: Arc::new(AtomicBool::new(false)),
             fail_check_once: Arc::new(AtomicBool::new(false)),
+            incomplete_check_once: Arc::new(AtomicBool::new(false)),
+            swap_attempts: Arc::new(AtomicUsize::new(0)),
             executions: Arc::new(AtomicUsize::new(0)),
             melt_attempts: Arc::new(AtomicUsize::new(0)),
             melt_paid_reply: Default::default(),
@@ -400,14 +404,20 @@ impl Transport for FixtureMint {
     ) -> Result<R, HttpError> {
         let payload = serde_json::to_value(payload).map_err(|_| refused())?;
         let value = match url.path() {
-            "/v1/swap" => self.swap(decode(payload)?)?,
+            "/v1/swap" => {
+                self.swap_attempts.fetch_add(1, Ordering::SeqCst);
+                self.swap(decode(payload)?)?
+            }
             "/v1/checkstate" => {
                 if self.fail_check_once.swap(false, Ordering::SeqCst) {
                     return Err(HttpError::Connection(
                         "synthetic state read unavailable".into(),
                     ));
                 }
-                let request: CheckStateRequest = decode(payload)?;
+                let mut request: CheckStateRequest = decode(payload)?;
+                if self.incomplete_check_once.swap(false, Ordering::SeqCst) {
+                    request.ys.pop();
+                }
                 let state = self.state.lock().unwrap();
                 serde_json::to_value(CheckStateResponse {
                     states: request
@@ -891,6 +901,72 @@ async fn completed_transaction_without_owned_outputs_never_exports_credit() -> R
             .is_err()
     );
     assert_eq!(harness.mint.executions.load(Ordering::SeqCst), 1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn reviewed_hold_rechecks_original_outputs_without_resubmission_or_export() -> Result<()> {
+    let harness = Harness::new(125)?;
+    let (id, request) = {
+        let mut coordinator = harness.open().await?;
+        let id = new_id(coordinator.admit(&harness.ordinary(
+            harness.mint.issue("held-ownership".into()),
+            "http-hold-recheck",
+        )?)?);
+        harness
+            .mint
+            .incomplete_check_once
+            .store(true, Ordering::SeqCst);
+        assert!(matches!(
+            coordinator.acquire_new(id, &harness.receiver).await?,
+            Progress::Held(held) if held == id
+        ));
+        let request = coordinator
+            .journal
+            .lock()
+            .unwrap()
+            .prepared_request(id)?
+            .unwrap();
+        (id, request)
+    };
+    let mut coordinator = harness.open().await?;
+    assert!(matches!(coordinator.recover_original(id).await?, Progress::Held(held) if held == id));
+    harness.mint.fail_check_once.store(true, Ordering::SeqCst);
+    assert!(
+        matches!(coordinator.recheck_held_ownership(id).await?, Progress::Held(held) if held == id)
+    );
+    harness
+        .mint
+        .incomplete_check_once
+        .store(true, Ordering::SeqCst);
+    assert!(
+        matches!(coordinator.recheck_held_ownership(id).await?, Progress::Held(held) if held == id)
+    );
+    {
+        let stored = coordinator.journal.lock().unwrap();
+        assert_eq!(stored.state(id)?, "held_for_reconciliation");
+        assert!(stored.has_recheckable_ownership_hold(id)?);
+    }
+
+    for _ in 0..2 {
+        assert!(
+            matches!(coordinator.recheck_held_ownership(id).await?, Progress::Acquired(acquired) if acquired == id)
+        );
+    }
+    {
+        let stored = coordinator.journal.lock().unwrap();
+        assert_eq!(stored.state(id)?, "acquired");
+        assert!(stored.has_recheckable_ownership_hold(id)?);
+        assert_eq!(stored.prepared_request(id)?, Some(request));
+    }
+    assert_eq!(harness.mint.swap_attempts.load(Ordering::SeqCst), 1);
+    assert_eq!(harness.mint.executions.load(Ordering::SeqCst), 1);
+    assert_eq!(harness.mint.melt_attempts.load(Ordering::SeqCst), 0);
+    let exported = receipt(coordinator.reconcile_owned(id).await?);
+    assert_eq!(exported.acquisition_id, id);
+    assert_eq!(exported.net_sats, 7);
+    assert_eq!(exported.receive_fee_sats, 1);
+    assert!(coordinator.recheck_held_ownership(id).await.is_err());
     Ok(())
 }
 

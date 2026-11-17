@@ -177,13 +177,14 @@ pub struct OwnedAcquisition {
     outputs: Vec<(String, String, u64)>,
 }
 impl OwnedAcquisition {
-    pub fn commit(self, journal: &mut Journal) -> Result<()> {
+    pub(crate) fn commit(self, journal: &mut Journal, recheck_hold: bool) -> Result<()> {
         journal.record_acquired_outputs(
             self.acquisition_id,
             self.net,
             self.fee,
             &self.evidence,
             &self.outputs,
+            recheck_hold,
         )
     }
 }
@@ -548,7 +549,7 @@ mod tests {
             &[info],
             &states,
         )?
-        .commit(&mut journal)?;
+        .commit(&mut journal, false)?;
         let receipt = journal.export_receipt(id)?;
         assert_eq!(receipt.net_sats, 8);
         assert_eq!(receipt.receive_fee_sats, 0);

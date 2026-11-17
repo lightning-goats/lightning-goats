@@ -38,6 +38,21 @@ request, retaining exactly two intake-source records and stable pending receipt
 capabilities. Paused restart still permits status lookup while refusing new
 admission. This qualifies admission/retry transport, not acquisition or credit.
 
+The [current-artifact financial matrix](cashu-final-composition-20261117.json)
+now passes eight full HTTP/receipt/treasury IPC cases with real CDK and the pinned
+offline Cashu-TS sender: zero-fee, fee-only, returned-change and repeated-request
+modes, each with normal and lost melt replies. Original treasury IDs and credit
+remain stable; internal transfers create no extra contribution. Returned dust
+still needs a later one-sat native contribution in that particular fixture.
+Economically viable residual-change settlement, multi-mint financial composition,
+real providers, independent phone clients and physical acceptance remain open.
+
+The operator confirmed a backed-up, new dedicated 12-word seed. The
+[offline seed-preparation script](../deployment/cashu-seed-provisioning.md)
+passes eight public/synthetic tests, including real terminal echo suppression
+and private atomic file creation. No operator phrase was supplied to Codex or
+installed into a runtime. The receiving key and NIP-46 credentials remain separate.
+
 | Required behavior / artifact | Established evidence | Required work still open |
 | --- | --- | --- |
 | Existing native Lightning, NIP-57 and paid history | Core regression suites and historical live checkpoints; no production change in this workstream | Final selected-source regression and approved installed/provider acceptance. |

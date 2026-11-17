@@ -10,8 +10,13 @@ its separate-UID fixture retains two source records after 80 identical retries
 per payment and preserves status across paused restart. The
 [notice inventory correction](testing/cashu-license-authors-20261117.json) passes
 13 tests and reduces missing notices to 15, with distribution readiness false.
-Final financial composition on these selected artifacts, operational/recovery
-work and independent-client acceptance remain open in the
+The [current-artifact financial matrix](testing/cashu-final-composition-20261117.json)
+now passes eight full HTTP/receipt/treasury IPC cases, including normal/lost
+replies and repeated descriptor use, with actual CDK and an offline SDK sender.
+The [dedicated seed preparation tool](deployment/cashu-seed-provisioning.md)
+also passes eight public/synthetic tests; the operator's phrase was never
+supplied or installed. Multi-mint/economical-change financial composition,
+operational/recovery work and independent-client acceptance remain open in the
 [full-plan map](testing/cashu-acceptance-gaps.md). The operator canceled the
 security review; no completed-review claim or Cashu activation follows.
 

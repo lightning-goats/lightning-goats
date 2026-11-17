@@ -1,0 +1,21 @@
+{
+  "date": "2026-11-17",
+  "purpose": "Offline hidden-prompt import of new dedicated 12-word English BIP39 seed into raw 64-byte service format",
+  "script_sha256": "9fc16fdd86879524aa68138b80bb54bb242c195192e3409c186267f3ca84dcaa",
+  "standalone_copy": "/home/linuxuser/lightning-goats/ADD-CASHU-SEED.py",
+  "tests": {
+    "passed": 8,
+    "skipped": 0,
+    "public_bip39_reference_vector": true,
+    "real_pseudo_terminal_entries_not_echoed": true,
+    "private_permissions_and_atomic_no_overwrite": true,
+    "symlink_and_unsafe_directory_refusal": true,
+    "write_failure_cleanup_and_argument_redaction": true
+  },
+  "execution": "Non-admin linuxuser in fresh network namespace, public/synthetic material only. Sandbox-only first attempt refused remapped root directory ownership; ordinary host ownership checks passed unchanged.",
+  "real_operator_seed_received": false,
+  "production_key_installed": false,
+  "service_initialized_or_started": false,
+  "specification": "https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki",
+  "reference_vectors": "https://github.com/trezor/python-mnemonic/blob/master/vectors.json"
+}

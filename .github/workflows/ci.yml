@@ -37,6 +37,8 @@ jobs:
         run: python3 -m unittest discover -s deploy/tests -p test_cashu_notice_supplement.py
       - name: Verify Cashu archive permission notice inventory
         run: python3 -m unittest discover -s deploy/tests -p test_cashu_license_inventory.py
+      - name: Verify offline Cashu seed preparation
+        run: python3 -m unittest discover -s deploy/tests -p test_cashu_seed_import.py
       - name: Verify pinned SDK fixture inventory copying
         run: python3 -m unittest discover -s deploy/tests -p test_cashu_sdk_inventory.py
 

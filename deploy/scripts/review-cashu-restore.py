@@ -2,7 +2,7 @@
 """List original external references from a fenced Cashu recovery checkpoint."""
 import argparse
 from contextlib import closing
-import hashlib
+from itertools import zip_longest
 import json
 from pathlib import Path
 import runpy
@@ -132,6 +132,14 @@ def compare_rows(older, later, immutable, pending, limit, after=''):
     return {'total': count, 'next_after': cursor, 'items': rows}
 
 
+def require_event_prefix(staged, reference):
+    end = staged.execute('SELECT COALESCE(MAX(seq),0) FROM event_log').fetchone()[0]
+    events = 'SELECT seq,event_type,payload_json,created_at FROM event_log WHERE seq<=? ORDER BY seq'
+    if any(before != later for before, later in zip_longest(
+            staged.execute(events, (end,)), reference.execute(events, (end,)))):
+        raise ValueError('reference does not preserve the staged core event history')
+
+
 def worklist(core, wallet, reference_core=None, reference_wallet=None, limit=100, group=None, after=''):
     def identity(c, w):
         return (c.execute('SELECT stream_id FROM overlay_identity WHERE singleton=1').fetchone()[0],
@@ -141,9 +149,7 @@ def worklist(core, wallet, reference_core=None, reference_wallet=None, limit=100
     if reference_core is not None:
         if identity(core, wallet) != identity(reference_core, reference_wallet):
             raise ValueError('reference and staged wallet registration differ')
-        sequence = 'SELECT COALESCE(MAX(seq),0) FROM event_log'
-        if core.execute(sequence).fetchone()[0] > reference_core.execute(sequence).fetchone()[0]:
-            raise ValueError('reference precedes the staged core event history')
+        require_event_prefix(core, reference_core)
 
     def diff(before, newer, sql, immutable, pending):
         reference = iter(newer.execute(sql)) if newer is not None else None
@@ -181,8 +187,11 @@ def review(args, common):
                   closing(open_database(reference_wallet, budget)) as wallet_ref):
                 items = worklist(core_db, wallet_db, core_ref, wallet_ref, args.limit, args.group, args.after)
     return {
-        'result': 'CASHU_RESTORE_WORKLIST', 'checkpoint_id': checkpoint,
-        'reference_checkpoint_id': reference_id, 'records': items,
+        'version': 1, 'result': 'CASHU_RESTORE_WORKLIST', 'checkpoint_id': checkpoint,
+        'staged_receipt_sha256': args.staged_sha256, 'reference_checkpoint_id': reference_id,
+        'reference_receipt_sha256': args.reference_sha256,
+        'selection': {'group': args.group, 'after': args.after or None, 'limit': args.limit},
+        'records': items,
         'external_reconciliation_verified': False, 'restore_authorized': False,
         'resume_authorized': False,
     }

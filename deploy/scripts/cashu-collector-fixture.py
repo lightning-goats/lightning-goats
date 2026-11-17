@@ -104,6 +104,11 @@ def qualify_restore(source, output_root, collected, identity, selected, store):
         raise ValueError('empty staged checkpoint produced unexpected review work')
     if review_path.stat().st_mode & 0o777 != 0o600:
         raise ValueError('restore worklist is not private')
+    report = json.loads(review_path.read_bytes())
+    if (report['version'] != 1 or report['staged_receipt_sha256'] != digest(destination / 'STAGED.json')
+            or report['reference_receipt_sha256'] is not None
+            or report['selection'] != {'group': None, 'after': None, 'limit': 100}):
+        raise ValueError('restore worklist omitted its exact source or page binding')
     # Mutate one disposable stage image after authentication. Review must
     # refuse changed bytes even though its STAGED receipt still matches.
     tampered_output = output_root / 'tampered-worklist.json'
@@ -134,6 +139,7 @@ def qualify_restore(source, output_root, collected, identity, selected, store):
             'staged_roles': len(roles), 'committed_wal_preserved': True, 'image_manifest_verified': True,
             'refusal_cases': 3, 'archive_programs_executable': False,
             'offline_worklist_launcher_verified': True, 'worklist_tampered_image_refused': True,
+            'worklist_source_and_page_bound': True,
             'external_reconciliation_verified': False, 'resume_authorized': False}
 
 

@@ -230,9 +230,12 @@ mint quotes, Strike receive requests and feeder UUIDs. When independently
 retained newer evidence exists, add `--reference REFERENCE_DIRECTORY
 --reference-sha256 REFERENCE_RECEIPT_SHA256`. The report then includes
 differing original records and rejects conflicting immutable identities or a
-different wallet registration. This finds operations missing from a stale
-image when the reference retained them. An empty worklist still requires
-external verification for effects after the last captured checkpoint. Keep
-the report private. If a category has a `next_after` UUID, run the same review
-with `--group CATEGORY --after UUID` to retrieve its next page. The command reads both stages without opening a live
-ledger and leaves all recovery fences in place.
+different wallet registration. The reference must preserve the exact staged core
+event history before adding later events. This finds operations missing from a
+stale image when the reference retained them. An empty worklist still requires
+external verification for effects after the last captured checkpoint.
+
+Keep the report private. Each report records the selected stage receipt hashes
+and page parameters. If a category has a `next_after` UUID, run the same review
+with `--group CATEGORY --after UUID` to retrieve its next page. The command reads
+both stages without opening a live ledger and leaves all recovery fences in place.

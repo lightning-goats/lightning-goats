@@ -1,4 +1,5 @@
 """Root-only disposable filesystem and quiescence tests; no service mutations."""
+from contextlib import closing
 import hashlib
 import io
 import json
@@ -7,6 +8,7 @@ from pathlib import Path
 import pwd
 import runpy
 import shutil
+import sqlite3
 import subprocess
 import tarfile
 import tempfile
@@ -39,6 +41,24 @@ class RecoveryWorklistTests(unittest.TestCase):
         later = [{'id': 'a', 'payment_hash': 'different'}]
         with self.assertRaisesRegex(ValueError, 'immutable original'):
             REVIEW['compare_rows'](iter(older), iter(later), ('payment_hash',), lambda _: False, 1, 'b')
+
+    def test_reference_preserves_exact_core_event_prefix(self):
+        require_prefix = REVIEW['require_event_prefix']
+        with (closing(sqlite3.connect(':memory:')) as staged,
+              closing(sqlite3.connect(':memory:')) as reference):
+            for db in (staged, reference):
+                db.execute('CREATE TABLE event_log(seq INTEGER PRIMARY KEY,event_type TEXT,payload_json TEXT,created_at INTEGER)')
+                db.executemany('INSERT INTO event_log VALUES(?,?,?,?)',
+                               [(1, 'payment_received', '{"amount":10}', 123),
+                                (3, 'feeder_confirmed', '{}', 456)])
+            reference.execute("INSERT INTO event_log VALUES(4,'interface_info','{}',789)")
+            require_prefix(staged, reference)
+            reference.execute("UPDATE event_log SET payload_json='{}' WHERE seq=1")
+            with self.assertRaisesRegex(ValueError, 'staged core event history'):
+                require_prefix(staged, reference)
+            reference.execute('DELETE FROM event_log WHERE seq=1')
+            with self.assertRaisesRegex(ValueError, 'staged core event history'):
+                require_prefix(staged, reference)
 
 
 class RestoreArchiveTests(unittest.TestCase):

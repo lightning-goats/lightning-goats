@@ -977,17 +977,24 @@ async fn combined_settlement_wallet_child() -> Result<()> {
     }
     let health_db = rusqlite::Connection::open(&path)?;
     let health = crate::status::Funds::read(&health_db, None, i64::try_from(now)?)?;
-    if settle_change {
-        assert_eq!(health.journal_custody_sats, 0);
-    }
-    assert_eq!(health.acquired_net_sats, 400);
+    assert_eq!(
+        health.acquired_net_sats,
+        400 + 16 * u64::from(settle_change)
+    );
     assert_eq!(health.unverified_input_sats, 0);
-    assert_eq!(health.journal_custody_sats, u64::from(returned_change));
+    assert_eq!(
+        health.journal_custody_sats,
+        u64::from(returned_change && !settle_change)
+    );
     assert_eq!(health.pending_input_reserved_sats, 0);
     assert_eq!(health.ambiguous_submitted_input_sats, 0);
     assert_eq!(
         health.reported_treasury_deposit_sats,
-        report.sources.iter().map(|s| s.deposit_sats).sum::<u64>()
+        std::iter::once(&report)
+            .chain(residual_report.iter())
+            .flat_map(|r| &r.sources)
+            .map(|s| s.deposit_sats)
+            .sum::<u64>()
     );
     assert_eq!(
         health.receive_fee_sats,
@@ -1006,6 +1013,10 @@ async fn combined_settlement_wallet_child() -> Result<()> {
         health.receive_fee_sats + health.completed_conversion_fee_sats
     );
     println!("COMBINED_WALLET_HEALTH_ACCOUNTING_VERIFIED");
-    println!("COMBINED_WALLET_TWO_ACQUISITIONS_ONE_MELT");
+    if settle_change {
+        println!("COMBINED_WALLET_THREE_ACQUISITIONS_TWO_MELTS");
+    } else {
+        println!("COMBINED_WALLET_TWO_ACQUISITIONS_ONE_MELT");
+    }
     Ok(())
 }

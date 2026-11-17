@@ -779,7 +779,11 @@ mod combined_fixture {
         if treasury_ipc {
             println!("COMBINED_CORE_FULL_FINANCIAL_IPC_VERIFIED");
         }
-        println!("COMBINED_CORE_ONE_SETTLEMENT_ONE_SYNTHETIC_FEED");
+        if settle_change {
+            println!("COMBINED_CORE_TWO_SETTLEMENTS_ONE_SYNTHETIC_FEED");
+        } else {
+            println!("COMBINED_CORE_ONE_SETTLEMENT_ONE_SYNTHETIC_FEED");
+        }
         Ok(())
     }
 }

@@ -154,8 +154,9 @@ def main():
                 time.sleep(0.05)
             if any(process.returncode != 0 for process in processes):
                 raise ValueError('combined fixture failed')
-            for index, (log, marker) in enumerate(zip(logs, ['COMBINED_CORE_ONE_SETTLEMENT_ONE_SYNTHETIC_FEED',
-                                                            'COMBINED_WALLET_TWO_ACQUISITIONS_ONE_MELT'])):
+            completion = (['COMBINED_CORE_TWO_SETTLEMENTS_ONE_SYNTHETIC_FEED', 'COMBINED_WALLET_THREE_ACQUISITIONS_TWO_MELTS']
+                          if args.settle_change else ['COMBINED_CORE_ONE_SETTLEMENT_ONE_SYNTHETIC_FEED', 'COMBINED_WALLET_TWO_ACQUISITIONS_ONE_MELT'])
+            for index, (log, marker) in enumerate(zip(logs, completion)):
                 log.seek(0)
                 output = log.read()
                 markers = [marker]

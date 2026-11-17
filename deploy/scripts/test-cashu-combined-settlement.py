@@ -88,7 +88,8 @@ def verify_strike_read(selection, core_cli):
             self.end_headers()
             self.wfile.write(raw)
 
-    write = runpy.run_path(str(Path(__file__).with_name('collect-cashu-backup.py')))['write']
+    collector = runpy.run_path(str(Path(__file__).with_name('collect-cashu-backup.py')))
+    write = collector['write']
     with (tempfile.TemporaryDirectory(prefix='lg-restore-strike-', dir='/run') as temp,
           ThreadingHTTPServer((origin.hostname, origin.port), Provider) as server):
         thread = Thread(target=server.serve_forever)
@@ -96,7 +97,7 @@ def verify_strike_read(selection, core_cli):
         try:
             directory = Path(temp)
             document, credential, wrong_key = (directory / name for name in ('selection', 'key', 'wrong-key'))
-            write(document, json.dumps(selection).encode())
+            collector['write_json'](document, selection)
             write(credential, key)
             write(wrong_key, b'wrong-synthetic-key')
 
@@ -127,7 +128,8 @@ def verify_strike_read(selection, core_cli):
             if (result.returncode != 0 or len(calls) != 2 or evidence.stat().st_mode & 0o777 != 0o600
                     or json.loads(result.stdout)['resume_authorized'] is not False):
                 raise ValueError('actual read-only restore Strike CLI did not complete')
-            report = json.loads(evidence.read_bytes())
+            raw = evidence.read_bytes()
+            report = json.loads(raw)
             observation = report['observation']
             if (report['selection_sha256'] != digest(document) or report['resume_authorized'] is not False
                     or report['external_reconciliation_verified'] is not False
@@ -135,6 +137,7 @@ def verify_strike_read(selection, core_cli):
                     or observation['amount_msat'] != sats * 1000
                     or observation['payment_hash'] != issued['payment_hash']):
                 raise ValueError('restore Strike evidence did not retain the original binding')
+            return raw
         finally:
             server.shutdown()
             thread.join()
@@ -168,12 +171,12 @@ def verify_feeder_read(selection, core_cli):
             self.end_headers()
             self.wfile.write(raw)
 
-    write = runpy.run_path(str(Path(__file__).with_name('collect-cashu-backup.py')))['write']
+    collector = runpy.run_path(str(Path(__file__).with_name('collect-cashu-backup.py')))
     with (tempfile.TemporaryDirectory(prefix='lg-restore-feeder-', dir='/run') as temp,
           ThreadingHTTPServer(('127.0.0.1', 0), Gateway) as server):
         directory = Path(temp)
         document = directory / 'selection.json'
-        write(document, json.dumps(selection).encode())
+        collector['write_json'](document, selection)
         selection_sha = digest(document)
         thread = Thread(target=server.serve_forever)
         thread.start()
@@ -193,6 +196,7 @@ def verify_feeder_read(selection, core_cli):
             output, result = invoke('changed.json', '00' * 32)
             if result.returncode != 1 or result.stdout or output.exists() or calls:
                 raise ValueError('changed feeder selection produced a gateway lookup')
+            reports = {}
             for name, status, payload, expected in (
                 ('missing', 404, {}, None),
                 ('mismatched', 200, {'request_id': str(uuid.uuid4()), 'status': 'confirmed'}, None),
@@ -210,16 +214,94 @@ def verify_feeder_read(selection, core_cli):
                     continue
                 if result.returncode or output.stat().st_mode & 0o777 != 0o600:
                     raise ValueError('original feeder observation did not complete privately')
-                receipt = json.loads(output.read_bytes())
+                raw = output.read_bytes()
+                receipt = json.loads(raw)
                 if (receipt['selection_sha256'] != selection_sha or receipt['observation'] != payload
                         or receipt['checkpoint_conflict'] is not expected
                         or receipt['resume_authorized'] is not False):
                     raise ValueError('feeder observation lost original identity or uncertainty')
+                reports[name] = raw
             if calls != [original_path] * 5:
                 raise ValueError('recovery queried something other than original feeder status')
+            return reports
         finally:
             server.shutdown()
             thread.join()
+
+
+def verify_combined_observation_review(paths, strike, mint, feeder, common, budget):
+    comparison = runpy.run_path(str(Path(__file__).with_name('reconcile-cashu-restore.py')))
+    reviewed = comparison['compare']
+    no_authority = comparison['NO_AUTHORITY']
+    strike_report = common['document'](strike)
+    staged_sha, reference_sha = strike_report['staged_receipt_sha256'], mint['staged_receipt_sha256']
+    intent = mint['issued']['intent']
+    fee_totals = {'input_sats': 400, 'deposit_sats': 398, 'fee_sats': 2, 'change_sats': 0}
+    feeder_confirmed = common['document'](feeder['confirmed'])
+    with (tempfile.TemporaryDirectory(prefix='lg-restore-observations-', dir='/run') as temp,
+          closing(comparison['REVIEW']['open_database'](paths[0], budget)) as old_core,
+          closing(comparison['REVIEW']['open_database'](paths[1], budget)) as old_wallet,
+          closing(comparison['REVIEW']['open_database'](paths[2], budget)) as new_core,
+          closing(comparison['REVIEW']['open_database'](paths[3], budget)) as new_wallet):
+        parent = Path(temp)
+        stages = {staged_sha: (strike_report['checkpoint_id'], old_core, old_wallet),
+                  reference_sha: (mint['checkpoint_id'], new_core, new_wallet)}
+        # The wallet fixture persisted the real simulated mint response. Use
+        # those exact terms in the observation format checked separately by
+        # the wallet's native observer test.
+        paid = new_wallet.execute('SELECT paid_evidence FROM treasury_results WHERE intent_id=?', (intent['id'],)).fetchone()
+        mint_report = {
+            'version': 1, 'result': comparison['RESULTS']['mint'], 'checkpoint_id': mint['checkpoint_id'],
+            'staged_receipt_sha256': reference_sha, 'selection_sha256': common['sha'](common['json_bytes'](mint)),
+            'intent_id': intent['id'], 'intent_digest': strike_report['intent_digest'], 'mint_id': intent['mint_id'],
+            'operation_id': mint['operation_id'], 'mint_url': mint['quote']['mint_url'],
+            'observed_at': strike_report['observed_at'], 'paid_preimage_verified': True,
+            'observation': common['document'](paid[0]), **no_authority,
+        }
+
+        def preserve(name, raw):
+            common['write'](parent / name, raw)
+            return {'file': name, 'sha256': common['sha'](raw)}
+
+        plan = {'version': 1, 'treasury': {'intent_id': intent['id'], 'strike': preserve('strike.json', strike),
+                                          'mint': preserve('mint.json', common['json_bytes'](mint_report))},
+                'feeder': {'request_id': feeder_confirmed['observation']['request_id'],
+                           'gateway_origin': feeder_confirmed['gateway_origin'],
+                           'observation': preserve('feeder.json', feeder['confirmed'])}}
+        result = reviewed(plan, parent, stages, staged_sha, reference_sha, common, budget)
+        treasury, feeding = result['treasury'], result['feeder']
+        if (not treasury['observed_pair_matches'] or not treasury['paid_observation_missing_from_stage']
+                or treasury['staged_accounting']['completion_totals'] is not None
+                or treasury['reference_accounting']['completion_totals'] != fee_totals
+                or not feeding['confirmed_observation_missing_from_stage']
+                or feeding['reference_status'] != 'confirmed' or any(result[k] for k in no_authority)):
+            raise ValueError('combined review missed the original financial or feeder rollback')
+        plan['feeder']['observation'] = preserve('conflict.json', feeder['conflicting'])
+        result = reviewed(plan, parent, stages, staged_sha, reference_sha, common, budget)
+        if result['feeder']['checkpoint_conflict'] is not True:
+            raise ValueError('combined review suppressed the contradictory gateway outcome')
+        pending = {**mint_report, 'paid_preimage_verified': False, 'observation': {
+            **mint_report['observation'], 'state': 'PENDING', 'payment_preimage': None, 'change': None}}
+        plan['treasury']['mint'] = preserve('pending.json', common['json_bytes'](pending))
+        result = reviewed(plan, parent, stages, staged_sha, reference_sha, common, budget)
+        if (result['treasury']['observed_pair_matches'] or result['treasury']['mint_state'] != 'PENDING'
+                or result['resume_authorized']):
+            raise ValueError('pending mint observation treated as an independently paid pair')
+        mutations = (
+            ('spliced', {'selection_sha256': '11' * 32}, 'exact retained original selection'),
+            ('preimage', {'observation': {**mint_report['observation'], 'payment_preimage': '00' * 32}},
+             'original preimage'),
+            ('foreign', {'staged_receipt_sha256': '33' * 32}, None),
+        )
+        for name, patch, expected in mutations:
+            plan['treasury']['mint'] = preserve(f'{name}.json', common['json_bytes']({**mint_report, **patch}))
+            try:
+                reviewed(plan, parent, stages, staged_sha, reference_sha, common, budget)
+            except (ValueError, KeyError) as error:
+                if expected is not None and expected not in str(error):
+                    raise
+            else:
+                raise ValueError('combined review accepted altered rehashed evidence')
 
 
 def verify_funded_rollback(root, core_cli):
@@ -303,7 +385,7 @@ def verify_funded_rollback(root, core_cli):
         checkpoint = str(uuid.uuid4())
         selection = review['select_strike'](reference_core, checkpoint, '11' * 32,
                                             original[0][0], None, collector['document'])
-        earlier = review['select_strike'](previous_core, checkpoint, '22' * 32,
+        earlier = review['select_strike'](previous_core, str(uuid.uuid4()), '22' * 32,
                                           original[0][0], retained_receive, collector['document'])
         mint_selection = review['select_mint'](reference_wallet, checkpoint, '11' * 32,
                                                original[0][0], collector['document'])
@@ -339,8 +421,10 @@ def verify_funded_rollback(root, core_cli):
             and feeding[0]['reference']['id'] == confirmed[0][0],
             'recovery worklist lost a later original provider or feeder reference')
     before = {path: digest(path) for path in (old_core, new_core, old_wallet, new_wallet)}
-    verify_strike_read(earlier, core_cli)
-    verify_feeder_read(feeder_selection, core_cli)
+    strike_observation = verify_strike_read(earlier, core_cli)
+    feeder_observations = verify_feeder_read(feeder_selection, core_cli)
+    verify_combined_observation_review((old_core, old_wallet, new_core, new_wallet),
+                                       strike_observation, mint_selection, feeder_observations, collector, budget)
     require(all(digest(path) == expected_hash for path, expected_hash in before.items()),
             'restore provider observations changed checkpoint bytes')
     return {
@@ -356,6 +440,7 @@ def verify_funded_rollback(root, core_cli):
         'original_strike_receive_read_verified': True,
         'original_feeder_status_read_verified': True,
         'original_submitted_mint_quote_selected': True,
+        'combined_original_evidence_compared': True,
     }
 
 

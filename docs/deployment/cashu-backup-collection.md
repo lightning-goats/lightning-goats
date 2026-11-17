@@ -127,9 +127,10 @@ coverage, portable export/reprovisioning and historical-key administration remai
 acceptance requirements; a short manually declared extras list does not close them.
 
 The root-owned capsule contains exactly `launch-cashu-backup.py`,
-`collect-cashu-backup.py`, `stage-cashu-restore.py`, `review-cashu-restore.py`, `verify-cashu-backup.py`,
+`collect-cashu-backup.py`, `stage-cashu-restore.py`, `review-cashu-restore.py`,
+`reconcile-cashu-restore.py`, `verify-cashu-backup.py`,
 `verify-cashu-combined-backup.py` and `TOOL.json`. The latter has version 1,
-the selected 40-character source commit and SHA256 for each of the six scripts.
+the selected 40-character source commit and SHA256 for each of the seven scripts.
 Authenticate the bootstrap file externally before interpreting it, then use the
 reviewed manifest hash with isolated Python:
 
@@ -317,3 +318,48 @@ with the checkpoint's finalized outcome. A missing or incompatible reply yields
 no observation. A pending or ambiguous result remains unresolved. Keep all
 fences until the wider recovery review resolves external effects and stale
 ledger history.
+
+### Compare observations with the checkpoint
+
+Keep the unmodified native observation files in a root-private directory.
+Record each observation's reviewed SHA256 in a private manifest beside those
+files. Supply one original treasury pair, one original feeder request, or both.
+Use `null` for an absent selection. A manifest for both uses this shape:
+
+```json
+{
+  "version": 1,
+  "treasury": {
+    "intent_id": "ORIGINAL_INTENT_UUID",
+    "mint": {"file": "mint.json", "sha256": "MINT_OBSERVATION_SHA256"},
+    "strike": {"file": "strike.json", "sha256": "STRIKE_OBSERVATION_SHA256"}
+  },
+  "feeder": {
+    "request_id": "ORIGINAL_REQUEST_UUID",
+    "gateway_origin": "REVIEWED_GATEWAY_ORIGIN",
+    "observation": {"file": "feeder.json", "sha256": "FEEDER_OBSERVATION_SHA256"}
+  }
+}
+```
+
+```sh
+/usr/bin/python3 -I -S -B ROOT_CAPSULE/launch-cashu-backup.py TOOL_SHA256 reconcile \
+  STAGED_DIRECTORY STAGED_RECEIPT_SHA256 PRIVATE_EVIDENCE_MANIFEST MANIFEST_SHA256 \
+  --reference REFERENCE_DIRECTORY --reference-sha256 REFERENCE_RECEIPT_SHA256 \
+  --output NEW_PRIVATE_COMPARISON
+```
+
+Omit the reference options when every selected original exists in the staged
+checkpoint. A reference must preserve the earlier event prefix and wallet
+registration. Each provider observation must trace to one selected checkpoint.
+The comparison reconstructs the exact original selector bytes, matches the
+mint and Strike observations to one invoice and verifies the paid preimage and
+BTC amount. It compares retained completion and wallet accounting totals. A
+later completion or feeder confirmation can be present in the reference and
+missing from the older stage. The report also records gateway conflicts and
+counts other differences in the worklist.
+
+The report retains observation hashes and accounting results. Keep the raw
+observations alongside it for separate ownership and external-history review.
+This comparison does not discover all external operations, revalidate current
+mint change ownership, apply accounting changes or authorize clearing a fence.

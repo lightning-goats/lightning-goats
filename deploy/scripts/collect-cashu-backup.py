@@ -162,8 +162,12 @@ def write(path, raw):
         os.fsync(output.fileno())
 
 
+def json_bytes(value):
+    return json.dumps(value, sort_keys=True, separators=(',', ':')).encode() + b'\n'
+
+
 def write_json(path, value):
-    write(path, json.dumps(value, sort_keys=True, separators=(',', ':')).encode() + b'\n')
+    write(path, json_bytes(value))
 
 
 def sync(path):

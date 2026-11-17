@@ -80,6 +80,13 @@ fixture selects the original mint quote and passes the feeder checks while the
 older core and wallet images remain fenced and unchanged. The fixture copies
 the selected CLI into an executable private file so GitHub's stripped artifact
 permissions do not interrupt the test.
+All ten workflows passed at [the mint and feeder checkpoint](testing/cashu-restore-mint-feeder-ci-20261117.json).
+The combined comparison matches provider observations to the exact original
+selections in the fenced stage and independently retained reference. The funded
+fixture detects the deposit and confirmed feeder attempt missing from the older
+checkpoint and verifies retained allocation totals. It keeps pending observations
+unresolved and refuses rehashed evidence with a spliced selection, foreign
+checkpoint or wrong preimage.
 Installed recovery and live outcome verification remain open.
 
 Cashu operator controls update **2026-11-17**: the

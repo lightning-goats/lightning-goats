@@ -116,6 +116,23 @@ def qualify_restore(source, output_root, collected, identity, selected, store):
         if (unknown.returncode != 1 or unknown.stdout or unknown_selection.exists()
                 or unknown.stderr != b'Cashu restore review refused. Preserve the fenced checkpoint.\n'):
             raise ValueError('authenticated restore launcher selected an absent original operation')
+    missing_evidence = output_root / 'missing-original.json'
+    missing_evidence.write_text(json.dumps({'version': 1, 'treasury': None,
+        'feeder': {'request_id': '00000000-0000-4000-8000-000000000001',
+                   'gateway_origin': 'http://127.0.0.1:1/',
+                   'observation': {'file': 'absent-provider-output.json', 'sha256': '00' * 32}}}))
+    missing_evidence.chmod(0o600)
+    comparison_output = output_root / 'missing-original-comparison.json'
+    comparison = subprocess.run(
+        ['/usr/bin/python3', '-I', '-S', '-B', str(capsule / 'launch-cashu-backup.py'),
+         digest(manifest), 'reconcile', str(destination), digest(destination / 'STAGED.json'),
+         str(missing_evidence), digest(missing_evidence), '--output', str(comparison_output)],
+        stdin=subprocess.DEVNULL, capture_output=True, timeout=120,
+        env={'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'},
+    )
+    if (comparison.returncode != 1 or comparison.stdout or comparison_output.exists()
+            or comparison.stderr != b'Cashu restore reconciliation review refused. Preserve the fenced checkpoint.\n'):
+        raise ValueError('actual recovery comparison launcher accepted absent provider evidence')
     # Mutate one disposable stage image after authentication. Review must
     # refuse changed bytes even though its STAGED receipt still matches.
     tampered_output = output_root / 'tampered-worklist.json'
@@ -149,6 +166,7 @@ def qualify_restore(source, output_root, collected, identity, selected, store):
             'worklist_source_and_page_bound': True,
             'unknown_strike_selection_refused': True,
             'unknown_mint_and_feeder_selections_refused': True,
+            'comparison_missing_evidence_refused': True,
             'external_reconciliation_verified': False, 'resume_authorized': False}
 
 

@@ -217,6 +217,12 @@ Reconcile each original mint, Strike and feeder outcome before considering
 installation or resumption. `STAGED.json` records pending external reconciliation
 and leaves resumption unauthorized.
 
+The encrypted archive rehearsal copies the six fenced images into disposable
+role directories with separate runtime UIDs. Each native command must reach
+its recovery guard and leave the copied files unchanged. The Cashu wallet stops
+before reading its seed or receiving key. The Cashu signer stops before loading
+its NIP-46 client credential. Both report the recovery fence explicitly.
+
 Use the same launcher to produce a private list of original IDs for provider
 and feeder reconciliation:
 

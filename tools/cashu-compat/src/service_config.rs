@@ -113,6 +113,7 @@ impl Config {
     pub fn load_keys(&self) -> Result<crate::service_keys::Keys> {
         let prepared = self.prepare()?;
         self.require_runtime_identity()?;
+        crate::writer_lock::check_recovery_marker(&self.state_directory)?;
         crate::service_keys::Keys::load(&self.state_directory, prepared.receiver)
     }
     /// Public receiving instructions only: no runtime identity, key or journal access.

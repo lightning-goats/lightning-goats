@@ -99,6 +99,7 @@ impl Config {
     }
     pub fn open(self) -> Result<Runtime> {
         self.require_identity()?;
+        crate::writer_lock::check_recovery_marker(&self.state_directory)?;
         let backend = Nak::new(self.nak, load_client_credential()?)?;
         let broker = Broker::open(&self.state_directory, self.policy)?;
         Ok(Runtime {

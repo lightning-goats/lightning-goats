@@ -1,6 +1,6 @@
 //! Separate Cashu NIP-46 client process; no wallet keys or public listener.
 #![forbid(unsafe_code)]
-use lightning_goats_cashu_compat::signing_service::Config;
+use lightning_goats_cashu_compat::{signing_service::Config, writer_lock::RecoveryRequired};
 use std::{ffi::OsString, path::Path, process::ExitCode};
 const USAGE: &str = "Usage: lightning-goats-cashu-signerd <check-config|initialize|run> <config.json>\n\
 check-config  Validate protected configuration without state, credentials or network.\n\
@@ -44,7 +44,14 @@ async fn execute(args: &[OsString]) -> Result<(), (u8, &'static str)> {
             let mut interrupt =
                 tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
                     .map_err(|_| (1, "signer interrupt handler unavailable"))?;
-            let runtime = config.open().map_err(|_| (1,"signer startup rejected; inspect configuration, credentials and retained state"))?;
+            let runtime = config.open().map_err(|error| {
+                let message = if error.is::<RecoveryRequired>() {
+                    RecoveryRequired::MESSAGE
+                } else {
+                    "signer startup rejected; inspect configuration, credentials and retained state"
+                };
+                (1, message)
+            })?;
             runtime
                 .serve(async move {
                     tokio::select! { _=terminate.recv()=>{}, _=interrupt.recv()=>{} }

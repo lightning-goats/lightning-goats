@@ -21,7 +21,81 @@ def digest(path):
     return h.hexdigest()
 
 
-def qualify_restore(source, output_root, collected, identity, selected, store):
+def verify_restored_runtime_fences(stage, root, workers, binaries, configurations, roles):
+    """Open exact restored copies as distinct disposable runtime identities."""
+    runtime = root / 'restored-runtime'
+    runtime.mkdir(mode=0o711)
+    states = {}
+    for role, name in roles.items():
+        directory = runtime / role
+        original = stage / 'fenced-images' / role
+        shutil.copytree(original, directory, copy_function=shutil.copyfile)
+        for path in directory.iterdir():
+            path.chmod(0o600)
+            os.chown(path, workers[role]['uid'], workers[role]['gid'])
+        directory.chmod(0o700)
+        os.chown(directory, workers[role]['uid'], workers[role]['gid'])
+        states[role] = directory
+        config = configurations[name].read_text()
+        if workers[role]['state'] not in config:
+            raise ValueError('fixture configuration does not identify its original state')
+        config = config.replace(workers[role]['state'], str(directory))
+        if role in ('membership', 'payout', 'signer'):
+            if not config.startswith('enabled = false\n') and '\nenabled = false\n' not in config:
+                raise ValueError('fixture configuration is missing its disabled switch')
+            config = config.replace('enabled = false\n', 'enabled = true\n', 1)
+        config_path = runtime / (role + '.conf')
+        config_path.write_text(config)
+        config_path.chmod(0o444)
+
+    names = list(roles)
+    for index, (role, name) in enumerate(roles.items()):
+        directory = states[role]
+        before = {path.name: digest(path) for path in directory.iterdir()}
+        archived = stage / 'fenced-images' / role
+        if before != {path.name: digest(path) for path in archived.iterdir()}:
+            raise ValueError('runtime image differs from exact fenced checkpoint')
+        worker = workers[role]
+        user = ['/usr/bin/setpriv', f"--reuid={worker['uid']}", f"--regid={worker['gid']}",
+                '--clear-groups', '--no-new-privs', '--']
+
+        def run(*args):
+            return subprocess.run([*user, *map(str, args)], stdin=subprocess.DEVNULL,
+                                  capture_output=True, timeout=15, umask=0o077,
+                                  env={'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'})
+
+        own = next(path for path in directory.iterdir() if path.suffix in ('.db', '.sqlite'))
+        other = states[names[index - 1]]
+        if run('/usr/bin/test', '-r', own).returncode or run('/usr/bin/test', '-x', other).returncode != 1:
+            raise ValueError('restored role permissions do not isolate the runtime images')
+        config_path = runtime / (role + '.conf')
+        message = b'restored journal requires explicit external reconciliation before startup'
+        args = ['--config', config_path]
+        if role == 'core':
+            args.append('status')
+        elif role in ('wallet', 'cashu_signer'):
+            args = ['run', config_path]
+            message = b'Cashu recovery requires explicit reconciliation'
+        refused = run(binaries[name], *args)
+        if refused.returncode != 1 or message not in refused.stderr:
+            raise ValueError(f'{role} did not refuse runtime startup at its recovery fence: '
+                             + refused.stderr.decode(errors='replace'))
+        if role == 'wallet':
+            seed = directory / 'wallet-seed.bin'
+            seed.chmod(0)
+            try:
+                no_seed_access = run(binaries[name], *args)
+                if no_seed_access.returncode != 1 or no_seed_access.stderr != refused.stderr:
+                    raise ValueError('wallet did not reject its recovery fence before key access')
+            finally:
+                seed.chmod(0o600)
+        if before != {path.name: digest(path) for path in directory.iterdir()}:
+            raise ValueError(f'{role} runtime modified restored state after refusal')
+    return sorted(roles)
+
+
+def qualify_restore(source, output_root, collected, identity, selected, store,
+                    workers, binaries, configurations, native_roles):
     """Pass the real encrypted collector output through the isolated launcher."""
     scripts = source / 'deploy/scripts'
     capsule = output_root / 'restore-capsule'
@@ -88,6 +162,8 @@ def qualify_restore(source, output_root, collected, identity, selected, store):
             raise ValueError('staged native store lost committed WAL content')
     if any(p.stat().st_mode & 0o111 for p in (destination / 'checkpoint-evidence/programs').iterdir()):
         raise ValueError('stager made an archived program executable')
+    runtime_fences = verify_restored_runtime_fences(
+        destination, output_root.parent, workers, binaries, configurations, native_roles)
 
     def invoke_review(output, *options):
         return subprocess.run(
@@ -200,6 +276,9 @@ def qualify_restore(source, output_root, collected, identity, selected, store):
         raise ValueError('failed restore altered source or promoted an incomplete copy')
     return {'actual_authenticated_launcher': True, 'real_age_archive': True,
             'staged_roles': len(roles), 'committed_wal_preserved': True, 'image_manifest_verified': True,
+            'restored_runtime_fences_refused': runtime_fences,
+            'restored_runtime_roles_isolated': True, 'restored_runtime_bytes_unchanged': True,
+            'wallet_fence_checked_before_keys': True, 'cashu_signer_fence_checked_without_client_credential': True,
             'refusal_cases': 3, 'archive_programs_executable': False,
             'offline_worklist_launcher_verified': True, 'worklist_tampered_image_refused': True,
             'worklist_source_and_page_bound': True,
@@ -318,7 +397,8 @@ def qualify(source,root,states,uids,binaries,configurations,native_policy,args):
                 raise ValueError('encrypted archive omitted or changed a retained component')
     after={str(p):digest(p) for directory in states.values() for p in directory.rglob('*') if p.is_file()}
     if original!=after:raise ValueError('collector changed original application bytes')
-    restore_result = qualify_restore(source, output_root, destination, identity, selected, store)
+    restore_result = qualify_restore(source, output_root, destination, identity, selected, store,
+                                    workers, binaries, configurations, native_roles)
     key_stage=destination/'plaintext/recovery-material'
     key_negatives=0
     def key_check(success):

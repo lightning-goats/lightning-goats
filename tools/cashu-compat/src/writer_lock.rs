@@ -23,6 +23,30 @@ pub(crate) struct Operation {
 }
 pub(crate) type ActiveOperation = std::sync::Arc<std::sync::Mutex<Option<Operation>>>;
 
+#[derive(Debug)]
+pub struct RecoveryRequired;
+
+impl RecoveryRequired {
+    pub const MESSAGE: &str = "Cashu recovery requires explicit reconciliation";
+}
+
+impl std::fmt::Display for RecoveryRequired {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(Self::MESSAGE)
+    }
+}
+
+impl std::error::Error for RecoveryRequired {}
+
+pub(crate) fn check_recovery_marker(directory: &Path) -> Result<()> {
+    // Even a dangling alias is a recovery fence.
+    match std::fs::symlink_metadata(directory.join("CASHU_RECOVERY_REQUIRED")) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+        Ok(_) => Err(RecoveryRequired.into()),
+    }
+}
+
 pub struct WriterLock {
     _file: File,
     active: ActiveOperation,
@@ -62,13 +86,7 @@ impl WriterLock {
         self.active.clone()
     }
     pub fn acquire(directory: &Path) -> Result<Self> {
-        // Restore tooling leaves this marker until external state and both
-        // ledger epochs are reconciled. Even a dangling alias blocks startup.
-        match std::fs::symlink_metadata(directory.join("CASHU_RECOVERY_REQUIRED")) {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error.into()),
-            Ok(_) => anyhow::bail!("Cashu recovery requires explicit reconciliation"),
-        }
+        check_recovery_marker(directory)?;
         let file = private_state_file(&directory.join("wallet-writer.lock"))?;
         rustix::fs::flock(&file, FlockOperation::NonBlockingLockExclusive)
             .map_err(|_| anyhow::anyhow!("wallet writer already active"))?;

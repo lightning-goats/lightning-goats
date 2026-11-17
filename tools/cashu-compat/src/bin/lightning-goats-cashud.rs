@@ -1,7 +1,7 @@
 //! Separate wallet process. No implicit initialization, key generation or public listener.
 #![forbid(unsafe_code)]
 use lightning_goats_cashu_compat::{
-    descriptor::Encoding, service::Runtime, service_config::Config,
+    descriptor::Encoding, service::Runtime, service_config::Config, writer_lock::RecoveryRequired,
 };
 use std::{ffi::OsString, path::PathBuf, process::ExitCode};
 
@@ -185,7 +185,13 @@ async fn execute(command: Command) -> Result<(), &'static str> {
             let mut interrupt =
                 tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
                     .map_err(|_| "wallet interrupt handler unavailable")?;
-            let runtime = Runtime::open(config).await.map_err(|_| "wallet startup rejected; configuration, keys and retained state require inspection")?;
+            let runtime = Runtime::open(config).await.map_err(|error| {
+                if error.is::<RecoveryRequired>() {
+                    RecoveryRequired::MESSAGE
+                } else {
+                    "wallet startup rejected; configuration, keys and retained state require inspection"
+                }
+            })?;
             runtime.serve(async move {
                 tokio::select! { _ = terminate.recv() => {}, _ = interrupt.recv() => {} }
             }).await.map_err(|_| "wallet service stopped after an internal error; retained state requires inspection")?;

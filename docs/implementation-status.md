@@ -66,6 +66,8 @@ references from the fenced images, and can compare a later retained checkpoint.
 The encrypted staging and changed-image refusal pass with isolated disposable
 native state. The funded fixture now also exercises recovery of the original
 mint quote, Strike receive and feeder UUID from later reference evidence.
+[Selected-source CI evidence](testing/cashu-staged-restore-worklist-ci-20261117.json)
+records the authenticated archive and funded worklist results at `55fcc19`.
 Installed recovery and live outcome verification remain open.
 
 Cashu operator controls update **2026-11-17**: the

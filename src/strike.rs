@@ -277,8 +277,21 @@ impl StrikeClient {
         stored: &StoredStrikeReceiveRequest,
         receive_id: Uuid,
     ) -> Result<ReconciledStrikeReceive> {
+        self.reconcile_completed_receive_inner(stored, receive_id, false)
+            .await
+    }
+
+    async fn reconcile_completed_receive_inner(
+        &self,
+        stored: &StoredStrikeReceiveRequest,
+        receive_id: Uuid,
+        require_native_btc: bool,
+    ) -> Result<ReconciledStrikeReceive> {
         let request = self.find_receive_request(stored.receive_request_id).await?;
         validate_stored_request(&request, stored)?;
+        if require_native_btc && request.target_currency.as_deref() != Some("BTC") {
+            bail!("treasury receive request omitted its exact BTC target");
+        }
 
         let receive = self
             .find_receive(stored.receive_request_id, receive_id)
@@ -288,6 +301,11 @@ impl StrikeClient {
         }
         if receive.state != "COMPLETED" {
             bail!("Strike receive is not completed (state={})", receive.state);
+        }
+        if require_native_btc
+            && (receive.receive_type != "LIGHTNING" || receive.conversion_rate.is_some())
+        {
+            bail!("treasury requires an exact native BTC Lightning receipt");
         }
         validate_provider_amount(&receive.amount_received)?;
         if let Some(rate) = &receive.conversion_rate {
@@ -776,22 +794,12 @@ impl StrikeRuntime {
             .cashu_treasury_for_receive(stored.receive_request_id)
             .await?;
         #[cfg(unix)]
-        if let Some(intent) = treasury.as_ref() {
-            self.client.check_cashu_destination(&intent.destination)?;
-            let request = self
-                .client
-                .find_receive_request(stored.receive_request_id)
-                .await?;
-            if request.target_currency.as_deref() != Some("BTC") {
-                bail!("treasury provider target changed");
-            }
-        }
-        let receive = self
-            .client
-            .reconcile_completed_receive(&stored, event.receive_id)
-            .await?;
         #[cfg(unix)]
         if let Some(intent) = treasury {
+            let receive = self
+                .client
+                .verify_cashu_treasury_receive(&intent, &stored, event.receive_id)
+                .await?;
             return Ok(
                 if ledger
                     .record_cashu_treasury_deposit(&intent, &receive)
@@ -806,6 +814,10 @@ impl StrikeRuntime {
         if stored.address_user == "cashu_treasury" || stored.credit_pool == "cashu_treasury" {
             bail!("treasury invoice omitted its immutable purpose binding");
         }
+        let receive = self
+            .client
+            .reconcile_completed_receive(&stored, event.receive_id)
+            .await?;
         let contact = ledger
             .contact_for_receive(stored.receive_request_id)
             .await?;
@@ -1169,6 +1181,7 @@ mod tests {
         conversion: Option<Value>,
         receive_state: &'static str,
         receive_type: &'static str,
+        request_target_currency: Option<&'static str>,
         api_calls: Arc<AtomicUsize>,
         unavailable: Arc<AtomicUsize>,
         page_padding: bool,
@@ -1212,7 +1225,7 @@ mod tests {
         Json(json!({
             "receiveRequestId": state.receive_request_id,
             "created": "2026-09-07T17:00:00Z",
-            "targetCurrency": "BTC",
+            "targetCurrency": state.request_target_currency,
             "bolt11": {
                 "invoice": state.invoice,
                 "requestedAmount": {"amount": state.amount_btc, "currency":"BTC"},
@@ -1309,6 +1322,7 @@ mod tests {
             conversion: None,
             receive_state: "COMPLETED",
             receive_type: "LIGHTNING",
+            request_target_currency: Some("BTC"),
             api_calls: Arc::new(AtomicUsize::new(0)),
             unavailable: Arc::new(AtomicUsize::new(0)),
             page_padding: false,
@@ -1766,6 +1780,37 @@ mod tests {
         };
         assert!(runtime.reconcile_and_credit(&ledger, &event).await.is_err());
         assert_eq!(ledger.feed_credit_sats().await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn treasury_reads_one_exact_btc_request_and_only_accepts_native_lightning() {
+        for (target, receive_type, calls, settled) in [
+            (None, "LIGHTNING", 1, false),
+            (Some("USD"), "LIGHTNING", 1, false),
+            (Some("BTC"), "P2P", 2, false),
+            (Some("BTC"), "LIGHTNING", 2, true),
+        ] {
+            let mut state = state();
+            state.request_target_currency = target;
+            state.receive_type = receive_type;
+            let base_url = spawn_mock(state.clone()).await;
+            let client = StrikeClient::new(&base_url, state.api_key.to_owned()).unwrap();
+            let stored = StoredStrikeReceiveRequest {
+                receive_request_id: state.receive_request_id,
+                address_user: "cashu_treasury".into(),
+                credit_pool: "cashu_treasury".into(),
+                amount_msat: 2_340_000,
+                description_hash: state.description_hash,
+                payment_hash: state.payment_hash,
+                invoice: state.invoice,
+                created_provider: None,
+            };
+            let result = client
+                .reconcile_completed_receive_inner(&stored, state.receive_id, true)
+                .await;
+            assert_eq!(result.is_ok(), settled);
+            assert_eq!(state.api_calls.load(Ordering::SeqCst), calls);
+        }
     }
 
     #[tokio::test]

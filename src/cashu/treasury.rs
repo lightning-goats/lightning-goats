@@ -7,6 +7,8 @@ use std::collections::BTreeMap;
 
 use super::receipt_authority::{KernelPeer, ReceiptPolicy};
 
+pub(crate) const TREASURY_USER: &str = "cashu_treasury";
+
 #[derive(Clone, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Limits {

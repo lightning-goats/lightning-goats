@@ -10,10 +10,8 @@ use uuid::Uuid;
 use super::super::{LedgerStore, StoredStrikeReceiveRequest, to_i64, to_u64};
 use crate::cashu::{
     receipt_authority::ReceiptPolicy,
-    treasury::{PeerMelt, Policy},
+    treasury::{PeerMelt, Policy, TREASURY_USER},
 };
-
-pub const TREASURY_USER: &str = "cashu_treasury";
 
 /// Core worker input. Public receiving does not expose this operation.
 pub struct TreasuryPlan {

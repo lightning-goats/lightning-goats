@@ -94,6 +94,11 @@ remain separate required work.
 
 ## Original treasury melt reconciliation
 
+Core verifies the original Strike receive against the retained treasury intent,
+destination and signed invoice. A single authoritative receive-request lookup
+must confirm the BTC target. The completed receive must match the original
+Lightning invoice, payment hash and amount in BTC before core records it.
+
 `lightning-goats-cashud reconcile-treasury CONFIG APPROVAL` checks one retained
 submitted melt under the wallet's exclusive writer lock. Run it under the
 registered wallet UID with the wallet stopped. It uses the same original quote

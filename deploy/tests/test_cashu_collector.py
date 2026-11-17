@@ -21,9 +21,35 @@ MODULE=runpy.run_path(str(SOURCE/'collect-cashu-backup.py'))
 LAUNCH=runpy.run_path(str(SOURCE/'launch-cashu-backup.py'))
 RESTORE=runpy.run_path(str(SOURCE/'stage-cashu-restore.py'))
 REVIEW=runpy.run_path(str(SOURCE/'review-cashu-restore.py'))
+RECONCILE=runpy.run_path(str(SOURCE/'reconcile-cashu-restore.py'))
 
 
 class RecoveryWorklistTests(unittest.TestCase):
+    def test_mint_custody_pages_preserve_exact_unspent_and_reserved_points(self):
+        url = 'https://mint.example/Bitcoin'
+        page = REVIEW['custody_page']
+        with closing(sqlite3.connect(':memory:')) as store:
+            store.execute('CREATE TABLE proof(y BLOB PRIMARY KEY,amount INTEGER,state TEXT,mint_url TEXT,unit TEXT,secret TEXT)')
+            points = [b'\x02' + n.to_bytes(32, 'big') for n in range(130)]
+            store.executemany('INSERT INTO proof VALUES(?,?,?,?,?,?)',
+                              [(point, 1, 'RESERVED' if n == 128 else 'UNSPENT', url, 'sat', 'do not export')
+                               for n, point in enumerate(points)])
+            store.execute("UPDATE proof SET state='SPENT' WHERE y=?", (points[0],))
+            first = page(store, 'mint-name', url, 'fixture-checkpoint', '11' * 32, '22' * 32)
+            self.assertEqual(first['total_candidates'], 129)
+            self.assertEqual(first['next_after_y'], points[128].hex())
+            self.assertEqual(len(first['proofs']), 128)
+            self.assertEqual(set(first['proofs'][0]), {'y', 'amount_sats', 'local_state'})
+            self.assertEqual(first['proofs'][-1]['local_state'], 'RESERVED')
+            final = page(store, 'mint-name', url, 'fixture-checkpoint', '11' * 32, '22' * 32, first['next_after_y'])
+            self.assertEqual(final['proofs'][0]['y'], points[129].hex())
+            self.assertIsNone(final['next_after_y'])
+            with self.assertRaisesRegex(ValueError, 'cursor does not belong'):
+                page(store, 'mint-name', url, 'fixture-checkpoint', '11' * 32, '22' * 32, points[0].hex())
+            store.execute("UPDATE proof SET mint_url='https://foreign.example' WHERE y=?", (points[129],))
+            with self.assertRaisesRegex(ValueError, 'original sat mint namespace'):
+                page(store, 'mint-name', url, 'fixture-checkpoint', '11' * 32, '22' * 32)
+
     def test_recovery_keeps_missing_later_id_and_pages_after_original_id(self):
         older = [{'id': 'a', 'receive_id': None}, {'id': 'b', 'receive_id': 'strike-b'}]
         later = [{'id': 'a', 'receive_id': 'strike-a'}, {'id': 'b', 'receive_id': 'strike-b'},
@@ -164,6 +190,55 @@ class CollectorTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root=Path(self.temp.name);self.root.chmod(0o700)
         self.budget=MODULE['Budget'](1024*1024,30)
+
+    def test_custody_comparison_requires_every_page_in_checkpoint_order(self):
+        mint, url, stage = 'mint-name', 'https://mint.example/Bitcoin', '11' * 32
+        checkpoint = '10000000-0000-4000-8000-000000000001'
+        journal = self.root / 'acquisition.sqlite'
+        path = self.root / REVIEW['mint_store_name'](mint, MODULE)
+        with closing(sqlite3.connect(journal)) as db:
+            db.execute('CREATE TABLE cdk_mint_namespaces(mint_id,mint_url,ready)')
+            db.execute('INSERT INTO cdk_mint_namespaces VALUES(?,?,1)', (mint,url))
+            db.commit()
+        with closing(sqlite3.connect(path)) as db:
+            db.execute('CREATE TABLE lg_mint_namespace(singleton,mint_id,mint_url)')
+            db.execute('INSERT INTO lg_mint_namespace VALUES(1,?,?)', (mint,url))
+            db.execute('CREATE TABLE proof(y BLOB PRIMARY KEY,amount INTEGER,state TEXT,mint_url TEXT,unit TEXT)')
+            db.executemany('INSERT INTO proof VALUES(?,1,?,?,?)',
+                           [(b'\x02' + n.to_bytes(32, 'big'), 'UNSPENT', url, 'sat') for n in range(129)])
+            db.commit()
+        for database in (path, journal):
+            database.chmod(0o600)
+        store_sha = MODULE['sha'](path.read_bytes())
+        with REVIEW['open_custody_store'](journal, mint, store_sha, MODULE, self.budget) as (db, url):
+            first = REVIEW['custody_page'](db, mint, url, checkpoint, stage, store_sha)
+            last = REVIEW['custody_page'](db, mint, url, checkpoint, stage, store_sha, first['next_after_y'])
+        observations = []
+        for index, page in enumerate((first,last)):
+            state = 'SPENT' if index == 0 else 'PENDING'
+            report = {**page, **RECONCILE['NO_AUTHORITY'], 'result': RECONCILE['RESULTS']['custody'],
+                      'selection_sha256': MODULE['sha'](MODULE['json_bytes'](page)),
+                      'queried_mint': True, 'observed_at': 123 + index,
+                      'proofs': [{**p, 'mint_state': state} for p in page['proofs']],
+                      'mint_unspent_sats': 0, 'mint_spent_sats': 128 if index == 0 else 0,
+                      'mint_unresolved_sats': index, 'stale_local_unspent_sats': 128 if index == 0 else 0}
+            raw = MODULE['json_bytes'](report)
+            file = self.source(f'page-{index}.json', raw)
+            observations.append({'file': file.name, 'sha256': MODULE['sha'](raw)})
+
+        def compare(pages):
+            entry = {'mint_id': mint, 'staged_receipt_sha256': stage, 'observations': pages}
+            return RECONCILE['compare_custody'](entry, self.root, {stage: (checkpoint, None, None)},
+                                               (journal, store_sha), MODULE, self.budget)
+
+        result = compare(observations)
+        self.assertEqual(result['selected_count'], 129)
+        self.assertEqual(result['stale_local_unspent_sats'], 128)
+        self.assertEqual(result['mint_unresolved_sats'], 1)
+        with self.assertRaisesRegex(ValueError, 'omit a required page'):
+            compare(observations[:1])
+        with self.assertRaisesRegex(ValueError, 'exact retained original selection'):
+            compare(observations[::-1])
 
     def source(self,name='input',raw=b'disposable bytes',mode=0o600):
         p=self.root/name;p.write_bytes(raw);p.chmod(mode);return p

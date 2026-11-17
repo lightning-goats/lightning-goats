@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """List original external references from a fenced Cashu recovery checkpoint."""
 import argparse
-from contextlib import closing
+from contextlib import closing, contextmanager
 from itertools import zip_longest
 import json
 from pathlib import Path
+import re
 import runpy
 import sqlite3
 import time
@@ -14,7 +15,7 @@ HERE = Path(__file__).resolve().parent
 RESTORE = runpy.run_path(str(HERE / 'stage-cashu-restore.py'))
 
 
-def open_images(stage, expected, common, budget):
+def open_images(stage, expected, common, budget, mint_store=None):
     common['protected_directory'](stage, private=True)
     common['absent'](stage / 'INCOMPLETE')
     read = common['COMBINED']['read_private']
@@ -53,13 +54,16 @@ def open_images(stage, expected, common, budget):
             with closing(common['Frozen'](directory / path, 0, 1024**3, budget)) as file:
                 if file.digest != member['sha256'] or file.expected[6] != member['bytes']:
                     raise ValueError('staged image changed since verification')
+                if role == 'wallet' and path.name == mint_store:
+                    selected['mint'] = file.digest
             if role == 'core' or (role == 'wallet' and path.name == 'acquisition.sqlite'):
                 if role in selected:
                     raise ValueError('staged journal is ambiguous')
                 selected[role] = directory / path
         if {p.name for p in directory.iterdir()} != names:
             raise ValueError('staged role has unlisted files or sidecars')
-    return checkpoint, selected['core'], selected['wallet']
+    paths = (checkpoint, selected['core'], selected['wallet'])
+    return paths if mint_store is None else (*paths, selected['mint'])
 
 
 CORE_TREASURY = """
@@ -238,6 +242,64 @@ def select_feeder(core, checkpoint, receipt_sha, request_id):
             'checkpoint_status': row['status'], 'threshold_sats': row['threshold_sats']}
 
 
+def custody_total(store, mint_url):
+    total, invalid = store.execute("""
+        SELECT COUNT(*), COALESCE(MAX(CASE WHEN typeof(y)!='blob' OR length(y)!=33
+                 OR unit!='sat' OR rtrim(mint_url,'/')!=? OR typeof(amount)!='integer' OR amount<=0
+                 THEN 1 ELSE 0 END),0)
+          FROM proof WHERE state!='SPENT'
+    """, (mint_url.rstrip('/'),)).fetchone()
+    if invalid:
+        raise ValueError('retained proof metadata differs from the original sat mint namespace')
+    return total
+
+
+def custody_page(store, mint, mint_url, checkpoint, receipt_sha, store_sha, after=None, total=None):
+    if after is not None and not re.fullmatch(r'0[23][0-9a-f]{64}', after):
+        raise ValueError('invalid custody cursor')
+    cursor = bytes.fromhex(after) if after is not None else b''
+    if total is None:
+        total = custody_total(store, mint_url)
+    if after is not None and store.execute("SELECT 1 FROM proof WHERE y=? AND state!='SPENT'", (cursor,)).fetchone() is None:
+        raise ValueError('custody cursor does not belong to this checkpoint')
+    rows = store.execute("SELECT y,amount,state FROM proof WHERE state!='SPENT' AND y>? ORDER BY y LIMIT 129", (cursor,)).fetchall()
+    proofs = []
+    for y, amount, state in rows:
+        if (type(y) is not bytes or not re.fullmatch(r'0[23][0-9a-f]{64}', y.hex())
+                or type(amount) is not int or amount <= 0
+                or state not in ('UNSPENT', 'RESERVED', 'PENDING', 'UNKNOWN', 'PENDING_SPENT')):
+            raise ValueError('invalid retained CDK proof metadata')
+        proofs.append({'y': y.hex(), 'amount_sats': amount, 'local_state': state})
+    return {'version': 1, 'purpose': 'cashu_restore_mint_custody', 'checkpoint_id': checkpoint,
+            'staged_receipt_sha256': receipt_sha, 'mint_id': mint, 'mint_url': mint_url,
+            'mint_store_sha256': store_sha, 'total_candidates': total, 'after_y': after,
+            'next_after_y': proofs[127]['y'] if len(proofs) == 129 else None, 'proofs': proofs[:128]}
+
+
+def mint_store_name(mint, common):
+    if not isinstance(mint, str) or not 1 <= len(mint) <= 256:
+        raise ValueError('invalid mint namespace ID')
+    return 'mint-' + common['sha'](b'lightning-goats/cdk-mint-store/v1\0' + mint.encode()) + '.sqlite'
+
+
+@contextmanager
+def open_custody_store(wallet_path, mint, expected_store_sha, common, budget):
+    with closing(open_database(wallet_path, budget)) as wallet:
+        rows = wallet.execute('SELECT mint_url,ready FROM cdk_mint_namespaces WHERE mint_id=?', (mint,)).fetchall()
+    if len(rows) != 1 or rows[0]['ready'] != 1:
+        raise ValueError('mint custody requires one initialized namespace')
+    mint_url = rows[0]['mint_url']
+    path = wallet_path.parent / mint_store_name(mint, common)
+    with closing(common['Frozen'](path, 0, 1024**3, budget)) as original, closing(open_database(path, budget)) as store:
+        if original.digest != expected_store_sha:
+            raise ValueError('mint custody store changed after reading stage manifest')
+        namespaces = store.execute('SELECT mint_id,mint_url FROM lg_mint_namespace WHERE singleton=1').fetchall()
+        if [tuple(row) for row in namespaces] != [(mint, mint_url)]:
+            raise ValueError('mint custody store differs from retained namespace')
+        yield store, mint_url
+        original.check()
+
+
 def worklist(core, wallet, reference_core=None, reference_wallet=None, limit=100, group=None, after=''):
     def identity(c, w):
         return (c.execute('SELECT stream_id FROM overlay_identity WHERE singleton=1').fetchone()[0],
@@ -275,6 +337,12 @@ def worklist(core, wallet, reference_core=None, reference_wallet=None, limit=100
 
 def review(args, common):
     budget = common['Budget'](0, 300)
+    if args.custody_mint is not None:
+        name = mint_store_name(args.custody_mint, common)
+        checkpoint, _, wallet, store_sha = open_images(args.staged, args.staged_sha256, common, budget, name)
+        with open_custody_store(wallet, args.custody_mint, store_sha, common, budget) as (store, mint_url):
+            return custody_page(store, args.custody_mint, mint_url, checkpoint,
+                                args.staged_sha256, store_sha, args.custody_after)
     checkpoint, core, wallet = open_images(args.staged, args.staged_sha256, common, budget)
     if args.strike_intent is not None:
         with closing(open_database(core, budget)) as core_db:
@@ -322,6 +390,8 @@ def main():
     selection.add_argument('--strike-intent', type=uuid.UUID, help='select one original treasury invoice for provider verification')
     selection.add_argument('--mint-intent', type=uuid.UUID, help='select one original submitted mint quote')
     selection.add_argument('--feeder-request', type=uuid.UUID, help='select one original feeder operation')
+    selection.add_argument('--custody-mint', help='select one mint namespace for a bounded custody proof check')
+    parser.add_argument('--custody-after', help='next_after_y from the preceding custody page')
     parser.add_argument('--receive-id', type=uuid.UUID, help='original provider receive ID if it is absent from the stage')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
@@ -332,8 +402,10 @@ def main():
             raise ValueError('invalid reference or review limit')
         selected = args.strike_intent or args.mint_intent or args.feeder_request
         if (args.receive_id is not None and args.strike_intent is None
-                or selected is not None and (args.reference or args.group or args.after
-                                             or args.limit != 100 or not selected.int)):
+                or args.custody_after is not None and args.custody_mint is None
+                or selected is not None and not selected.int
+                or (selected is not None or args.custody_mint is not None)
+                and (args.reference or args.group or args.after or args.limit != 100)):
             raise ValueError('original selection requires one staged checkpoint and one operation')
         for field in ('strike_intent', 'receive_id', 'mint_intent', 'feeder_request'):
             if getattr(args, field) is not None:
@@ -353,6 +425,8 @@ def main():
             summary['result'] = 'CASHU_RESTORE_MINT_SELECTED'
         elif args.feeder_request is not None:
             summary['result'] = 'CASHU_RESTORE_FEEDER_SELECTED'
+        elif args.custody_mint is not None:
+            summary['result'] = 'CASHU_RESTORE_CUSTODY_SELECTED'
         else:
             summary['result'] = result['result']
             summary['counts'] = {kind: batch['total'] for kind, batch in result['records'].items()}

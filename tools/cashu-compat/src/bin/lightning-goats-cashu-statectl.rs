@@ -4,6 +4,7 @@ use std::{path::PathBuf, process::ExitCode};
 const USAGE: &str = "Usage: lightning-goats-cashu-statectl normalize-copy <private-stage> <raw-name.db> <normalized-name.db> <max-bytes>\n\
        lightning-goats-cashu-statectl verify-recovery-keys <private-stage>\n\
        lightning-goats-cashu-statectl observe-restored-mint <selection> <selection-sha256> <mint-url> <output>\n\
+       lightning-goats-cashu-statectl observe-restored-custody <selection> <selection-sha256> <mint-url> <output>\n\
 Outputs private recovery evidence for separate operator review.";
 fn main() -> ExitCode {
     let args = std::env::args_os().skip(1).collect::<Vec<_>>();
@@ -12,7 +13,8 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
     let key_mode = args.len() == 2 && args[0] == "verify-recovery-keys";
-    if args.len() == 5 && args[0] == "observe-restored-mint" {
+    let custody = args.len() == 5 && args[0] == "observe-restored-custody";
+    if custody || args.len() == 5 && args[0] == "observe-restored-mint" {
         let result = (|| {
             let expected = args[2].to_str().ok_or(())?;
             let mint = args[3].to_str().ok_or(())?;
@@ -20,24 +22,35 @@ fn main() -> ExitCode {
                 .enable_all()
                 .build()
                 .map_err(|_| ())?;
+            let selection = PathBuf::from(&args[1]);
+            let output = PathBuf::from(&args[4]);
+            use lightning_goats_cashu_compat::restore_mint;
             runtime
-                .block_on(lightning_goats_cashu_compat::restore_mint::observe(
-                    &PathBuf::from(&args[1]),
-                    expected,
-                    mint,
-                    &PathBuf::from(&args[4]),
-                ))
+                .block_on(async {
+                    if custody {
+                        restore_mint::observe_custody(&selection, expected, mint, &output).await
+                    } else {
+                        restore_mint::observe(&selection, expected, mint, &output).await
+                    }
+                })
                 .map_err(|_| ())
         })();
         return match result {
             Ok(()) => {
-                println!(
-                    "{{\"result\":\"CASHU_RESTORE_MINT_MELT_OBSERVED\",\"resume_authorized\":false}}"
-                );
+                let observed = if custody {
+                    "CASHU_RESTORE_MINT_CUSTODY_OBSERVED"
+                } else {
+                    "CASHU_RESTORE_MINT_MELT_OBSERVED"
+                };
+                println!("{{\"result\":\"{observed}\",\"resume_authorized\":false}}");
                 ExitCode::SUCCESS
             }
             Err(()) => {
-                eprintln!("Restored Cashu mint observation refused.");
+                if custody {
+                    eprintln!("Restored Cashu custody observation refused.");
+                } else {
+                    eprintln!("Restored Cashu mint observation refused.");
+                }
                 ExitCode::from(1)
             }
         };

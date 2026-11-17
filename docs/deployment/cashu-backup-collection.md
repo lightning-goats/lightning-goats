@@ -363,3 +363,55 @@ The report retains observation hashes and accounting results. Keep the raw
 observations alongside it for separate ownership and external-history review.
 This comparison does not discover all external operations, revalidate current
 mint change ownership, apply accounting changes or authorize clearing a fence.
+
+### Observe the mint's current custody state
+
+Select a configured mint ID from the fenced stage. The selector checks the
+verified namespace image hash and the original sat-denominated mint URL. It
+reads up to 128 proof points in storage order and includes their local states
+and amounts. The selection keeps spending secrets and signatures in the wallet
+image. Use the configured and independently reviewed original mint URL.
+
+```sh
+/usr/bin/python3 -I -S -B ROOT_CAPSULE/launch-cashu-backup.py TOOL_SHA256 review \
+  STAGED_DIRECTORY STAGED_RECEIPT_SHA256 --custody-mint MINT_ID \
+  --output NEW_PRIVATE_CUSTODY_SELECTION
+lightning-goats-cashu-statectl observe-restored-custody \
+  PRIVATE_CUSTODY_SELECTION SELECTION_SHA256 APPROVED_MINT_URL NEW_PRIVATE_CUSTODY_OBSERVATION
+```
+
+The observer submits only public proof points to the mint's proof-state
+lookup. Its response must cover the exact selected points once each. A local
+unspent proof reported spent by the mint is stale custody. Pending and other
+nonterminal observations remain unresolved. An empty selection needs no
+lookup. For more than one page, use the recorded `next_after_y` with
+`--custody-after` and a new selection and observation file until it is `null`.
+Keep all pages private and together with their selected checkpoint.
+
+The `reconcile` manifest accepts a `custody` entry for one mint. Set
+`staged_receipt_sha256` to the stage used for every selection in the batch. Use
+the primary stage hash or its independently reviewed reference hash. List all
+native observation files in the order their selections were produced. Set the
+`treasury` and `feeder` entries to `null` for a custody-only comparison.
+
+```json
+{
+  "version": 1,
+  "treasury": null,
+  "feeder": null,
+  "custody": {
+    "mint_id": "MINT_ID",
+    "staged_receipt_sha256": "STAGED_RECEIPT_SHA256",
+    "observations": [{"file": "custody-page-1.json", "sha256": "OBSERVATION_SHA256"}]
+  }
+}
+```
+
+The comparison reconstructs every page from the verified namespace image,
+checks the reported amounts and states, and requires an ordered sequence that
+covers the complete selection. It records the observation time range because
+the mint may change state between pages.
+
+Mint-reported unspent value is an observation of those points. Continue to
+verify ownership, old and newly discovered operations, database history, and
+external accounting before any restore or resumption decision.

@@ -36,6 +36,45 @@ fn snapshot_funded_wallet(source: &Path, destination: &Path) -> Result<()> {
     Ok(())
 }
 
+async fn observe_checkpoint_custody(
+    path: &Path,
+    policy: &MintPolicy,
+    transport: &impl cdk_http_client::Transport,
+) -> Result<serde_json::Value> {
+    use lightning_goats_cashu_receipt::treasury::hex_digest;
+    use sha2::{Digest, Sha256};
+
+    let original = std::fs::read(path)?;
+    let db =
+        rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let mut query = db.prepare(
+        "SELECT lower(hex(y)),amount,state FROM proof WHERE state!='SPENT' ORDER BY y LIMIT 129",
+    )?;
+    let proofs = query
+        .query_map([], |r| {
+            let (y, amount, state): (String, u64, String) = (r.get(0)?, r.get(1)?, r.get(2)?);
+            Ok(serde_json::json!({"y":y,"amount_sats":amount,"local_state":state}))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    ensure!(proofs.len() <= 128, "custody fixture exceeds one page");
+    let selection: crate::restore_mint::CustodySelection =
+        serde_json::from_value(serde_json::json!({
+            "version":1, "purpose":"cashu_restore_mint_custody", "checkpoint_id":Uuid::from_u128(1),
+            "staged_receipt_sha256":"11".repeat(32),
+            "mint_store_sha256":hex_digest(Sha256::digest(&original).into()),
+            "mint_id":policy.id, "mint_url":policy.advertised_url, "total_candidates":proofs.len(),
+            "after_y":null, "next_after_y":null, "proofs":proofs,
+        }))?;
+    let result = selection
+        .observe(&policy.advertised_url.parse()?, &"22".repeat(32), transport)
+        .await?;
+    ensure!(
+        std::fs::read(path)? == original,
+        "custody observation changed checkpoint bytes"
+    );
+    Ok(result)
+}
+
 fn assert_restored_wallet_fenced(directory: &Path) -> Result<()> {
     let journal = std::fs::read(directory.join("journal.sqlite"))?;
     let cdk = std::fs::read(directory.join("wallet.sqlite"))?;
@@ -1120,7 +1159,32 @@ async fn combined_settlement_wallet_child() -> Result<()> {
             &private.join("funded-after-effects"),
         )?;
         assert_restored_wallet_fenced(&private.join("funded-before-melt"))?;
+        let previous = observe_checkpoint_custody(
+            &private.join("funded-before-melt/wallet.sqlite"),
+            &harness.policy(),
+            &harness.mint,
+        )
+        .await?;
+        let later = observe_checkpoint_custody(
+            &private.join("funded-after-effects/wallet.sqlite"),
+            &harness.policy(),
+            &harness.mint,
+        )
+        .await?;
+        assert_eq!(previous["stale_local_unspent_sats"], 400);
+        assert_eq!(previous["mint_spent_sats"], 400);
+        assert_eq!(previous["queried_mint"], true);
+        // CDK keeps nonspendable history after reconciliation. Observe it as
+        // well, and distinguish it from spendable value in the old snapshot.
+        assert!(later["total_candidates"].as_u64().is_some_and(|n| n > 0));
+        assert!(later["mint_spent_sats"].as_u64().is_some_and(|n| n > 0));
+        assert_eq!(later["mint_unspent_sats"], 0);
+        assert_eq!(later["stale_local_unspent_sats"], 0);
+        assert_eq!(later["queried_mint"], true);
+        assert_eq!(previous["resume_authorized"], false);
+        assert_eq!(later["resume_authorized"], false);
         assert_eq!(harness.mint.melt_attempts.load(Ordering::SeqCst), 1);
+        println!("COMBINED_WALLET_STALE_UNSPENT_CUSTODY_VERIFIED");
     }
     println!("COMBINED_WALLET_HEALTH_ACCOUNTING_VERIFIED");
     if settle_change {

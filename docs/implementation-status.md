@@ -87,6 +87,16 @@ fixture detects the deposit and confirmed feeder attempt missing from the older
 checkpoint and verifies retained allocation totals. It keeps pending observations
 unresolved and refuses rehashed evidence with a spliced selection, foreign
 checkpoint or wrong preimage.
+[All ten workflows passed for the comparison checkpoint](testing/cashu-restore-comparison-ci-20261117.json).
+The mint custody observer selects pages from a fenced CDK namespace by its
+verified file hash and compares the exact retained proof points with the mint.
+The comparison rejects missing or reordered pages and recomputes the reported
+totals. The authenticated archive fixture exercises the native observation and
+comparison of an empty namespace with no external lookup.
+The funded rollback fixture observes all 400 sats listed as unspent in the
+older image as already spent by the synthetic mint. It also observes the
+retained non-spendable records in the newer image, finds no mint-reported
+unspent value, and preserves both database images.
 Installed recovery and live outcome verification remain open.
 
 Cashu operator controls update **2026-11-17**: the

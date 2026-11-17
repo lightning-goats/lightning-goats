@@ -441,6 +441,7 @@ def verify_funded_rollback(root, core_cli):
         'original_feeder_status_read_verified': True,
         'original_submitted_mint_quote_selected': True,
         'combined_original_evidence_compared': True,
+        'stale_unspent_custody_observed': True,
     }
 
 
@@ -591,6 +592,7 @@ def main():
                     markers.append('COMBINED_WALLET_HEALTH_ACCOUNTING_VERIFIED')
                     if args.funded_rollback:
                         markers.append('COMBINED_WALLET_ORIGINAL_TREASURY_RECONCILIATION_VERIFIED')
+                        markers.append('COMBINED_WALLET_STALE_UNSPENT_CUSTODY_VERIFIED')
                 if args.repeat_request:
                     markers.append(['COMBINED_CORE_REUSABLE_REQUEST_TWO_PAYMENTS_VERIFIED','COMBINED_WALLET_REUSABLE_REQUEST_TWO_PAYMENTS_VERIFIED'][index])
                 if args.cashu_ts_sender and index == 1:

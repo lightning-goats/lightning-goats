@@ -109,6 +109,45 @@ def qualify_restore(source, output_root, collected, identity, selected, store):
             or report['reference_receipt_sha256'] is not None
             or report['selection'] != {'group': None, 'after': None, 'limit': 100}):
         raise ValueError('restore worklist omitted its exact source or page binding')
+    journal = destination / 'fenced-images/wallet/acquisition.sqlite'
+    with closing(sqlite3.connect(journal.as_uri() + '?immutable=1&mode=ro', uri=True)) as db:
+        mint, mint_url = db.execute('SELECT mint_id,mint_url FROM cdk_mint_namespaces ORDER BY mint_id LIMIT 1').fetchone()
+    custody_selection = output_root / 'empty-custody-selection.json'
+    custody = invoke_review(custody_selection, '--custody-mint', mint)
+    if custody.returncode or json.loads(custody.stdout)['result'] != 'CASHU_RESTORE_CUSTODY_SELECTED':
+        raise ValueError('authenticated launcher did not select an original mint custody namespace')
+    custody_file = output_root / 'empty-custody-observation.json'
+    observed = subprocess.run([str(selected['copy']), 'observe-restored-custody', str(custody_selection),
+                               digest(custody_selection), mint_url, str(custody_file)], stdin=subprocess.DEVNULL,
+                              capture_output=True, timeout=15, env={'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'})
+    if observed.returncode or custody_file.stat().st_mode & 0o777 != 0o600:
+        raise ValueError('native statectl did not observe the sealed empty custody page')
+    custody_receipt = json.loads(custody_file.read_bytes())
+    if (custody_receipt['proofs'] or custody_receipt['mint_id'] != mint
+            or custody_receipt['total_candidates'] != 0 or custody_receipt['queried_mint'] is not False
+            or custody_receipt['resume_authorized'] is not False
+            or custody_receipt['selection_sha256'] != digest(custody_selection)):
+        raise ValueError('empty custody observer reported a lookup or missing source binding')
+    custody_plan = output_root / 'custody-evidence.json'
+    custody_plan.write_text(json.dumps({'version': 1, 'treasury': None, 'feeder': None,
+        'custody': {'mint_id': mint, 'staged_receipt_sha256': digest(destination / 'STAGED.json'),
+                    'observations': [{'file': custody_file.name, 'sha256': digest(custody_file)}]}}))
+    custody_plan.chmod(0o600)
+    custody_report = output_root / 'empty-custody-comparison.json'
+    compared = subprocess.run(
+        ['/usr/bin/python3', '-I', '-S', '-B', str(capsule / 'launch-cashu-backup.py'),
+         digest(manifest), 'reconcile', str(destination), digest(destination / 'STAGED.json'),
+         str(custody_plan), digest(custody_plan), '--output', str(custody_report)],
+        stdin=subprocess.DEVNULL, capture_output=True, timeout=120,
+        env={'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'},
+    )
+    if compared.returncode or custody_report.stat().st_mode & 0o777 != 0o600:
+        raise ValueError('authenticated comparison did not accept the complete empty custody observation')
+    custody_comparison = json.loads(custody_report.read_bytes())
+    if (custody_comparison['custody']['selected_count'] != 0
+            or custody_comparison['custody']['observation_sha256'] != [digest(custody_file)]
+            or custody_comparison['resume_authorized'] is not False):
+        raise ValueError('custody comparison result lost the selected namespace or authority boundary')
     for kind, option in [('strike', '--strike-intent'), ('mint', '--mint-intent'),
                          ('feeder', '--feeder-request')]:
         unknown_selection = output_root / f'unknown-{kind}-selection.json'
@@ -167,6 +206,8 @@ def qualify_restore(source, output_root, collected, identity, selected, store):
             'unknown_strike_selection_refused': True,
             'unknown_mint_and_feeder_selections_refused': True,
             'comparison_missing_evidence_refused': True,
+            'empty_custody_observed_by_native_statectl': True,
+            'empty_custody_compared_by_authenticated_launcher': True,
             'external_reconciliation_verified': False, 'resume_authorized': False}
 
 

@@ -249,16 +249,6 @@ async fn contact_upgrade_qualifies_empty_cashu_addition_and_refuses_custody_or_d
     compare_images(&before, &after, &p).await.unwrap();
     database::migrate_core_through(&pool, 26).await.unwrap();
     compare_images(&before, &after, &p).await.unwrap();
-    sqlx::query("INSERT INTO cashu_import_clock VALUES(1,100)")
-        .execute(&pool)
-        .await
-        .unwrap();
-    assert!(compare_images(&before, &after, &p).await.is_err());
-    sqlx::query("DELETE FROM cashu_import_clock")
-        .execute(&pool)
-        .await
-        .unwrap();
-    compare_images(&before, &after, &p).await.unwrap();
     sqlx::query(
         "CREATE TRIGGER unqualified_cashu AFTER INSERT ON cashu_import_clock BEGIN SELECT 1; END",
     )
@@ -280,6 +270,13 @@ async fn contact_upgrade_qualifies_empty_cashu_addition_and_refuses_custody_or_d
         .await
         .unwrap();
     compare_images(&before, &after, &p).await.unwrap();
+    // The production trigger deliberately retains this monotonic clock. Check
+    // refusal last so the fixture never tries to erase used Cashu state.
+    sqlx::query("INSERT INTO cashu_import_clock VALUES(1,100)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(compare_images(&before, &after, &p).await.is_err());
     pool.close().await;
     assert_eq!(std::fs::read(before.join("core.db")).unwrap(), original);
     assert_eq!(std::fs::read(before.join("core.db-wal")).ok(), original_wal);

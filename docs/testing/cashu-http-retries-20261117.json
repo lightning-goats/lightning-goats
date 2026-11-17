@@ -1,0 +1,134 @@
+{
+  "results": [
+    {
+      "name": "core-format",
+      "command": [
+        "/home/linuxuser/.cargo/bin/cargo",
+        "fmt",
+        "--all",
+        "--check"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 3.4
+    },
+    {
+      "name": "core-clippy",
+      "command": [
+        "/home/linuxuser/.cargo/bin/cargo",
+        "clippy",
+        "--offline",
+        "--locked",
+        "--all-targets",
+        "--all-features",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 684.61
+    },
+    {
+      "name": "core-tests",
+      "command": [
+        "/home/linuxuser/.cargo/bin/cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--all-features"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 2131.68
+    },
+    {
+      "name": "core-audit",
+      "command": [
+        "/home/linuxuser/.cargo/bin/cargo",
+        "audit",
+        "--no-fetch",
+        "--stale",
+        "--ignore",
+        "RUSTSEC-2023-0071"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 1.47
+    },
+    {
+      "name": "core-rsa-inverse",
+      "command": [
+        "/home/linuxuser/.cargo/bin/cargo",
+        "tree",
+        "--offline",
+        "--locked",
+        "-i",
+        "rsa"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.8
+    },
+    {
+      "name": "whitespace",
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.03
+    }
+  ],
+  "sources": {
+    "src/cashu/http.rs": "7a285df251fb4f687d9e1255fc5088c74ca37a93fa0bab7f9156af95d9ddd45c",
+    "src/cashu/public_request/cross_uid_fixture.rs": "0d71c46061759c09c72e1362eb1c4bc8375b0e2bbe49dae16dd6adeec16c17aa",
+    "deploy/scripts/test-cashu-public-request-cross-uid.py": "0f1fc51269aa21d829d76299d2b3ab759ae17073e428810a94d09a1c217fe087",
+    "Cargo.lock": "880e667ecbd768a02487ae281e61114b01dd1278a20d4912e4ce19d7870e4b00"
+  },
+  "sources_unchanged": true,
+  "providers": "synthetic only",
+  "production_changes": false,
+  "date": "2026-11-17",
+  "base_revision": "ec112a2",
+  "scope": "Stable private delivery identity for identical bounded HTTP payloads; 80 retries per distinct payment across real authenticated core/wallet IPC",
+  "core_tests": {
+    "passed": 648,
+    "ignored": 12
+  },
+  "fixture": {
+    "acquired_or_credited": false,
+    "acquisitions_created": 2,
+    "artifacts_sha256": {
+      "core-test": "d080893de450129f3e22118b099e6780f8a0f52d01bc7e42361ebbfd12c996fd",
+      "wallet-test": "198f277a57cf0d577a7cd68b4e5771b2907377e2aa46cafd8b4ca55cf16755af"
+    },
+    "core_uid": 60000,
+    "http_and_snapshot": true,
+    "identical_http_retries_per_payment": 80,
+    "intake_sources_retained": 2,
+    "melt_requests": 0,
+    "paused_restart_hides_descriptor": true,
+    "quote_requests": 0,
+    "result": "CASHU_PUBLIC_REQUEST_CROSS_UID_VERIFIED",
+    "rogue_uid": 60002,
+    "status_survives_paused_restart": true,
+    "wallet_uid": 60001
+  },
+  "dependency_audit": {
+    "database": "cached, no fetch",
+    "existing_exception": "RUSTSEC-2023-0071; inverse dependency check found no active rsa path"
+  },
+  "limitations": [
+    "Identical byte payloads reuse delivery identity; changed wrappers still use proof deduplication and bounded alias admission.",
+    "Fixture admits pending work; it does not acquire or credit ecash.",
+    "No real mint, independent phone client, installed Cashu service or physical feeder acceptance.",
+    "No completed security review; operator canceled it."
+  ],
+  "log_sha256": {
+    "whitespace.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "core-rsa-inverse.log": "4dc8e4fe7f86c681d8b81d94c4e76a3dda13457f37def5513d5850195a7778f6",
+    "core-clippy.log": "98d77bd36d4f96edf96a1ffff02ca63fceb681e53584e89f40d8a35c00804a5b",
+    "core-tests.log": "f2e7d707b35d6597083e6e0ade1c6aca0c1ca69d9dd4f2c0f451eb6c763ac6b7",
+    "core-clippy-initial.log": "3332328cdfbac93cc9fbb46f5355208667b4f44c45ff100ed4ef79b4b9cd1ee3",
+    "core-audit.log": "b5c00defd8e468e3271cd41037db5b3c4f05d39cc8d3edf4a6a6d2a0e0427d54",
+    "core-format.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "cross-uid.log": "0cf6c8b0a5f8c2aef382e081a9f3652429a8473070cbcd6346cb2c1f2188fddb"
+  }
+}

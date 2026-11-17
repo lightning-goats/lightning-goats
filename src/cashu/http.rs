@@ -10,8 +10,8 @@ use axum::{
     routing::{get, post},
 };
 use lightning_goats_cashu_receipt::receive_status::{AdmissionOutcome, Capability};
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
-use uuid::Uuid;
 
 pub fn router(forwarder: Option<Arc<Forwarder>>) -> Router {
     let limit = forwarder
@@ -114,7 +114,17 @@ async fn deliver(
     if !serde_json::from_str::<serde_json::Value>(&body).is_ok_and(|v| v.is_object()) {
         return StatusCode::BAD_REQUEST.into_response();
     }
-    match forwarder.submit_with_status(Uuid::new_v4(), body).await {
+    // A sender may have lost every previous reply. Identical bounded bodies
+    // must reuse their private delivery binding rather than consume one durable
+    // source alias per HTTP attempt. This ID grants no status/credit authority.
+    let mut digest = Sha256::new();
+    digest.update(b"lightning-goats/cashu-http-delivery/v1\0");
+    digest.update(body.as_bytes());
+    let digest = digest.finalize();
+    let mut identity = [0_u8; 16];
+    identity.copy_from_slice(&digest[..16]);
+    let delivery_id = uuid::Builder::from_custom_bytes(identity).into_uuid();
+    match forwarder.submit_with_status(delivery_id, body).await {
         Ok(reply) => match reply.result {
             AdmissionOutcome::Rejected => (
                 StatusCode::BAD_REQUEST,
@@ -195,6 +205,7 @@ mod tests {
     use super::*;
     use crate::cashu::intake::Policy;
     use std::time::Duration;
+    use uuid::Uuid;
 
     async fn start(forwarder: Option<Arc<Forwarder>>) -> (String, tokio::task::JoinHandle<()>) {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

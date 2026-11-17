@@ -430,6 +430,13 @@ unavailability (HTTP 503), never a claim that a mint has rejected or paid tokens
 Credited history and proof claims remain retained; these queue limits are not a
 total database quota or a permission to delete unresolved financial state.
 
+HTTP delivery uses a domain-separated SHA-256 digest of the bounded, exact
+request body to form a private version-8 delivery UUID. Repeating identical
+bytes therefore retains the original delivery binding, even when every earlier
+HTTP reply was lost. Distinct token bodies still reach shared proof-set
+deduplication; reusable descriptors are never used as donation identity.
+This delivery ID is neither published nor a receipt-status capability.
+
 Browser senders receive wildcard-origin CORS with only POST/OPTIONS and the
 content-type header permitted; credentials are not enabled. All route responses,
 including body-limit rejections, are no-store with no-referrer. This endpoint has

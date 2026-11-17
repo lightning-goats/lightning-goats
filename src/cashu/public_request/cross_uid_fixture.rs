@@ -173,18 +173,21 @@ async fn isolated_public_request_core_child() -> Result<()> {
                 capability.as_str().is_some_and(|value| value.len() == 64),
                 "missing capability"
             );
-            // Discarding a prior response must not create a second acquisition.
-            let repeated = http
-                .post(format!("http://{address}/api/v1/cashu"))
-                .json(submission)
-                .send()
-                .await?;
-            ensure!(
-                repeated.status() == reqwest::StatusCode::ACCEPTED,
-                "HTTP replay did not acknowledge durable admission"
-            );
-            let repeated: serde_json::Value = repeated.json().await?;
-            ensure!(repeated == reply, "HTTP replay changed pending receipt");
+            // More than the journal's 64-alias bound: lost replies must not
+            // consume a fresh source alias per identical HTTP submission.
+            for _ in 0..80 {
+                let repeated = http
+                    .post(format!("http://{address}/api/v1/cashu"))
+                    .json(submission)
+                    .send()
+                    .await?;
+                ensure!(
+                    repeated.status() == reqwest::StatusCode::ACCEPTED,
+                    "HTTP replay did not acknowledge durable admission"
+                );
+                let repeated: serde_json::Value = repeated.json().await?;
+                ensure!(repeated == reply, "HTTP replay changed pending receipt");
+            }
             saved.push(capability);
         }
         ensure!(
@@ -192,6 +195,7 @@ async fn isolated_public_request_core_child() -> Result<()> {
             "descriptor used as donation identity"
         );
         std::fs::write(&capability_file, serde_json::to_vec(&saved)?)?;
+        println!("PUBLIC_HTTP_80_IDENTICAL_RETRIES_PER_PAYMENT_VERIFIED");
         saved
     } else {
         let response = http

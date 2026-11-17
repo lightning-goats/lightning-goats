@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import pwd
 import shutil
+import sqlite3
 import subprocess
 import tempfile
 import time
@@ -106,7 +107,7 @@ def main():
                 clients.append((core_uid, phase, f"PUBLIC_CORE_HTTP_SNAPSHOT_VERIFIED_{phase}"))
                 for uid, mode, marker in clients:
                     client = subprocess.run(command(uid, binaries[0], CORE_TEST, "--exact", "--ignored", "--nocapture"), env=dict(environment, LG_CASHU_PUBLIC_PHASE=mode), stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=15)
-                    if client.returncode or marker not in client.stdout or (mode != "rogue" and f"PUBLIC_HTTP_PENDING_STATUS_REPLAY_VERIFIED_{phase}" not in client.stdout):
+                    if client.returncode or marker not in client.stdout or (mode != "rogue" and f"PUBLIC_HTTP_PENDING_STATUS_REPLAY_VERIFIED_{phase}" not in client.stdout) or (mode == "initial" and "PUBLIC_HTTP_80_IDENTICAL_RETRIES_PER_PAYMENT_VERIFIED" not in client.stdout):
                         raise ValueError("core fixture failed: " + (client.stdout + client.stderr)[-8192:])
                 (root / "stop").touch()
                 output, error = server.communicate(timeout=5)
@@ -116,8 +117,11 @@ def main():
                 if server.poll() is None:
                     server.kill()
                     server.communicate(timeout=5)
+        with sqlite3.connect(f'file:{root / "wallet/journal.sqlite"}?mode=ro', uri=True) as database:
+            if database.execute('SELECT COUNT(*) FROM intake_sources').fetchone()[0] != 2:
+                raise ValueError('identical HTTP retries consumed extra source aliases')
         print(json.dumps({"result": "CASHU_PUBLIC_REQUEST_CROSS_UID_VERIFIED", "core_uid": core_uid,
-            "wallet_uid": wallet_uid, "rogue_uid": rogue_uid, "acquisitions_created": 2, "acquired_or_credited": False, "status_survives_paused_restart": True, "http_and_snapshot": True,
+            "wallet_uid": wallet_uid, "rogue_uid": rogue_uid, "acquisitions_created": 2, "intake_sources_retained": 2, "identical_http_retries_per_payment": 80, "acquired_or_credited": False, "status_survives_paused_restart": True, "http_and_snapshot": True,
             "quote_requests": 0, "melt_requests": 0, "paused_restart_hides_descriptor": True,
             "artifacts_sha256": digests}, sort_keys=True))
 

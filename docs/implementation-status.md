@@ -1,5 +1,20 @@
 # Lightning Goats implementation status
 
+Cashu intake update **2026-11-17**: durable
+[backpressure](testing/cashu-intake-backpressure-20261117.json) bounds uncredited
+work and replay aliases. [Independent receives after compensated rejection](testing/cashu-mint-progress-20261117.json)
+retain original recovery material and counter fences; all 170 wallet tests pass
+(seven ignored). The [HTTP retry checkpoint](testing/cashu-http-retries-20261117.json)
+passes all 648 core tests (12 ignored), strict Clippy and required local gates;
+its separate-UID fixture retains two source records after 80 identical retries
+per payment and preserves status across paused restart. The
+[notice inventory correction](testing/cashu-license-authors-20261117.json) passes
+13 tests and reduces missing notices to 15, with distribution readiness false.
+Final financial composition on these selected artifacts, operational/recovery
+work and independent-client acceptance remain open in the
+[full-plan map](testing/cashu-acceptance-gaps.md). The operator canceled the
+security review; no completed-review claim or Cashu activation follows.
+
 Cashu recovery update **2026-11-16**: the
 [initialized combined native backup rehearsal](testing/cashu-empty-combined-native-backup-20261116.json)
 now verifies 14 Cashu components/two mint stores together with all four native
@@ -21,7 +36,7 @@ physical activation is deployed by this work. The
 [development runtime](deployment/cashu-wallet-development.md) distinguish source
 fixtures from installed acceptance.
 
-Latest selected-artifact qualification now passes the full loopback HTTP,
+The 2026-11-16 selected-artifact qualification passes the full loopback HTTP,
 authenticated receipt and treasury IPC, actual CDK and independently mocked Strike
 composition. The [four-case SDK matrix](testing/cashu-repeated-request-result-20261116.json)
 includes two distinct acquired ordinary payments to one descriptor, each with its

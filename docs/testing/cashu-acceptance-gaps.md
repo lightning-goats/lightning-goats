@@ -30,6 +30,14 @@ notice already present in both `r-efi` archives' `AUTHORS` file. Exact upstream
 blob comparisons and 13 archive/supplement tests pass. Dependency coverage remains
 462 packages with no unresolved sources; distribution readiness remains false.
 
+The [HTTP retry checkpoint](cashu-http-retries-20261117.json) now passes all
+648 core tests with 12 explicitly ignored fixture entry points, formatting,
+strict Clippy and cached dependency checks. Its explicit separate-UID runner
+passes 80 identical HTTP retries for each of two distinct payments to the same
+request, retaining exactly two intake-source records and stable pending receipt
+capabilities. Paused restart still permits status lookup while refusing new
+admission. This qualifies admission/retry transport, not acquisition or credit.
+
 | Required behavior / artifact | Established evidence | Required work still open |
 | --- | --- | --- |
 | Existing native Lightning, NIP-57 and paid history | Core regression suites and historical live checkpoints; no production change in this workstream | Final selected-source regression and approved installed/provider acceptance. |

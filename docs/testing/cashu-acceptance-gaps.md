@@ -78,6 +78,16 @@ ledger and actual-CDK ownership tests provide their separate boundaries.
 Installed acceptance, held/policy and treasury controls, coordinated funded
 restore, multi-mint and economical change remain required.
 
+Public Cashu development is now in [draft PR #139](https://github.com/lightning-goats/lightning-goats/pull/139).
+The missing published `rusqlite` lockfile discovered by clean-checkout CI is
+retained exactly at `c36df2c`; fresh-export vendor and 13 notice tests pass.
+The new `--settle-change` composition mode is implemented but **under qualification**:
+it combines retained one-sat change with a distinct 16-sat ordinary Cashu
+contribution, retains a second treasury identity, and checks a second independently
+verified Strike receive without new transfer credit or a native top-up. Its
+normal/lost-reply CI cases must pass before the economical-change row can close.
+Multi-mint financial composition and the rest of the full plan remain required.
+
 | Required behavior / artifact | Established evidence | Required work still open |
 | --- | --- | --- |
 | Existing native Lightning, NIP-57 and paid history | Core regression suites and historical live checkpoints; no production change in this workstream | Final selected-source regression and approved installed/provider acceptance. |

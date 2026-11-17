@@ -358,6 +358,11 @@ jobs:
                   flags = (['--repeat-request'] if repeated else []) + (['--lost-reply'] if lost else [])
                   with output.open('w') as stream:
                       subprocess.run(command + flags, stdout=stream, stderr=subprocess.STDOUT, check=True)
+          residual = [arg for arg in command if arg != '--no-change'] + ['--settle-change']
+          for lost in [False, True]:
+              output = root / ('cashu-sdk-residual' + ('-lost' if lost else '') + '.json')
+              with output.open('w') as stream:
+                  subprocess.run(residual + (['--lost-reply'] if lost else []), stdout=stream, stderr=subprocess.STDOUT, check=True)
           PYCODE
       - uses: actions/upload-artifact@v4
         with:
@@ -367,6 +372,8 @@ jobs:
             ${{ runner.temp }}/cashu-sdk-sender-lost.json
             ${{ runner.temp }}/cashu-sdk-sender-repeated.json
             ${{ runner.temp }}/cashu-sdk-sender-repeated-lost.json
+            ${{ runner.temp }}/cashu-sdk-residual.json
+            ${{ runner.temp }}/cashu-sdk-residual-lost.json
             ${{ runner.temp }}/cashu-native-backup.json
             ${{ runner.temp }}/cashu-cross-uid.json
             ${{ runner.temp }}/cashu-signer-cross-uid.json

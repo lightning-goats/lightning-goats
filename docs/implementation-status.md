@@ -1,5 +1,18 @@
 # Lightning Goats implementation status
 
+Cashu publication update **2026-11-17**: public publication is authorized and
+[draft PR #139](https://github.com/lightning-goats/lightning-goats/pull/139) is open.
+The fully qualified membership repair [#138](https://github.com/lightning-goats/lightning-goats/pull/138)
+has merged; the Cashu draft now targets main. Fresh CI exposed an omitted upstream
+`rusqlite` archive lockfile. Commit `c36df2c` retains the exact published bytes;
+a fresh Git export passes vendor verification and all 13 notice tests. Core and
+wallet CI gates now pass for that checkpoint; combined/other CI qualification is
+recorded separately. A new two-settlement retained-change composition case is
+implemented and awaiting selected-commit CI; it grants one distinct 16-sat Cashu
+contribution, combines it with retained one-sat change, and requires a second
+verified 15-sat Strike deposit before the original feeding can progress. No
+new live-provider, operator-seed installation or physical activation is claimed.
+
 Cashu operator controls update **2026-11-17**: the
 [protected planning/reconciliation checkpoint](testing/cashu-operator-controls-20261117.json)
 passes 650 core tests (12 ignored), 179 wallet tests (seven ignored), required

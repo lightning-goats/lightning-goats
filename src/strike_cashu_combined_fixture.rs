@@ -36,6 +36,66 @@ mod combined_fixture {
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
     }
+    type ProviderStates = Arc<std::sync::Mutex<Vec<MockState>>>;
+    async fn residual_create(
+        State(states): State<ProviderStates>,
+        headers: HeaderMap,
+        Json(body): Json<Value>,
+    ) -> axum::response::Response {
+        let selected = states
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|s| body["bolt11"]["descriptionHash"] == s.description_hash)
+            .cloned();
+        match selected {
+            Some(state) => create_handler(State(state), headers, Json(body))
+                .await
+                .into_response(),
+            None => StatusCode::BAD_REQUEST.into_response(),
+        }
+    }
+    async fn residual_request(
+        State(states): State<ProviderStates>,
+        axum::extract::Path(id): axum::extract::Path<Uuid>,
+    ) -> axum::response::Response {
+        let selected = states
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|s| s.receive_request_id == id)
+            .cloned();
+        match selected {
+            Some(state) => request_handler(State(state)).await.into_response(),
+            None => StatusCode::NOT_FOUND.into_response(),
+        }
+    }
+    async fn residual_receives(
+        State(states): State<ProviderStates>,
+        axum::extract::Path(id): axum::extract::Path<Uuid>,
+        query: Query<ReceiveQuery>,
+    ) -> axum::response::Response {
+        let selected = states
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|s| s.receive_request_id == id)
+            .cloned();
+        match selected {
+            Some(state) => receive_handler(State(state), query).await.into_response(),
+            None => StatusCode::NOT_FOUND.into_response(),
+        }
+    }
+    fn spawn_residual_provider(listener: TcpListener, states: ProviderStates) {
+        let app = Router::new()
+            .route("/v1/receive-requests", post(residual_create))
+            .route("/v1/receive-requests/{id}", get(residual_request))
+            .route("/v1/receive-requests/{id}/receives", get(residual_receives))
+            .with_state(states);
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+    }
     struct FixtureWallet {
         root: PathBuf,
         registration: Arc<ReceiptPolicy>,
@@ -45,6 +105,8 @@ mod combined_fixture {
         runtime: StrikeRuntime,
         event: StrikeCompletedReceiveEvent,
         treasury_socket: Option<PathBuf>,
+        round: u64,
+        expected_credit: u64,
     }
     impl Wallet for FixtureWallet {
         async fn exchange(
@@ -86,11 +148,25 @@ mod combined_fixture {
                                 .await?,
                             SettlementOutcome::TreasurySettlementAccepted
                         );
-                        assert_eq!(count(&self.pool, "cashu_treasury_completions").await?, 0);
-                        assert_eq!(count(&self.pool, "cashu_treasury_deposits").await?, 1);
-                        assert_eq!(self.ledger.feed_credit_sats().await?, 1000);
+                        assert_eq!(
+                            count(&self.pool, "cashu_treasury_completions").await?,
+                            self.round as i64
+                        );
+                        assert_eq!(
+                            count(&self.pool, "cashu_treasury_deposits").await?,
+                            self.round as i64 + 1
+                        );
+                        assert_eq!(self.ledger.feed_credit_sats().await?, self.expected_credit);
                         assert!(self.ledger.begin_feed_attempt(1000).await?.is_none());
-                        publish(&self.root, "provider-verified.json", &issued.intent.id)?;
+                        publish(
+                            &self.root,
+                            if self.round == 0 {
+                                "provider-verified.json"
+                            } else {
+                                "residual-provider-verified.json"
+                            },
+                            &issued.intent.id,
+                        )?;
                         provider_verified = true;
                     }
                     tokio::time::sleep(Duration::from_millis(25)).await;
@@ -125,9 +201,15 @@ mod combined_fixture {
                         .await?,
                     SettlementOutcome::TreasurySettlementAccepted
                 );
-                assert_eq!(count(&self.pool, "cashu_treasury_completions").await?, 0);
-                assert_eq!(count(&self.pool, "cashu_treasury_deposits").await?, 1);
-                assert_eq!(self.ledger.feed_credit_sats().await?, 1000);
+                assert_eq!(
+                    count(&self.pool, "cashu_treasury_completions").await?,
+                    self.round as i64
+                );
+                assert_eq!(
+                    count(&self.pool, "cashu_treasury_deposits").await?,
+                    self.round as i64 + 1
+                );
+                assert_eq!(self.ledger.feed_credit_sats().await?, self.expected_credit);
                 assert!(self.ledger.begin_feed_attempt(1000).await?.is_none());
                 assert_eq!(count(&self.pool, "feed_attempts").await?, 0);
                 assert_eq!(count(&self.pool, "event_log").await?, 3);
@@ -187,7 +269,13 @@ mod combined_fixture {
             !repeat_request || http_intake,
             "repeated request requires HTTP composition"
         );
-        let receipt_count = 2 + usize::from(repeat_request);
+        let settle_change = std::env::var("LG_CASHU_COMBINED_SETTLE_CHANGE").as_deref() == Ok("1");
+        ensure!(
+            !settle_change || (http_intake && !repeat_request),
+            "residual settlement requires ordinary HTTP and its own mode"
+        );
+        let receipt_count = 2 + usize::from(repeat_request || settle_change);
+        let initial_credit = 1000 + 16 * u64::from(settle_change);
         let contribution_count = 1 + i64::try_from(receipt_count)?;
         let lost_reply = std::env::var("LG_CASHU_COMBINED_LOST_REPLY").as_deref() == Ok("1");
         let fees = std::env::var("LG_CASHU_COMBINED_FEES").as_deref() == Ok("1");
@@ -258,8 +346,8 @@ mod combined_fixture {
                 maximum_deposit_sats: 400,
                 maximum_input_sats: 400,
                 maximum_fee_sats: conversion_fee_sats,
-                operations_per_24h: 1,
-                input_sats_per_24h: 400,
+                operations_per_24h: 1 + u64::from(settle_change),
+                input_sats_per_24h: 400 + 17 * u64::from(settle_change),
                 maximum_in_flight_sats: 400,
             },
         });
@@ -350,10 +438,19 @@ mod combined_fixture {
         };
         assert_eq!(data.len(), receipt_count);
         assert_eq!((&*data[0].transport, data[0].net_sats), ("nutzap", 250));
-        for ordinary in &data[1..] {
+        for (index, ordinary) in data[1..].iter().enumerate() {
             assert_eq!(
                 (&*ordinary.transport, ordinary.net_sats),
-                ("cashu", if repeat_request { 75 } else { 150 })
+                (
+                    "cashu",
+                    if settle_change && index == 1 {
+                        16
+                    } else if repeat_request {
+                        75
+                    } else {
+                        150
+                    }
+                )
             );
         }
         let mut receipts = Vec::new();
@@ -369,7 +466,7 @@ mod combined_fixture {
             }
             receipts.push(receipt);
         }
-        assert_eq!(ledger.feed_credit_sats().await?, 1000);
+        assert_eq!(ledger.feed_credit_sats().await?, initial_credit);
         assert!(ledger.begin_feed_attempt(1000).await?.is_none());
         let runtime = StrikeRuntime::new(
             StrikeClient::new(&origin, state.api_key.into())?,
@@ -401,7 +498,10 @@ mod combined_fixture {
             .fetch_one(&pool)
             .await?;
         let intent = ledger.cashu_treasury_intent(id.parse()?).await?.unwrap();
-        assert_eq!(intent.sources.len(), receipt_count);
+        assert_eq!(
+            intent.sources.len(),
+            receipt_count - usize::from(settle_change)
+        );
         assert_eq!(count(&pool, "feed_financial_treasury").await?, 1);
         state.description_hash = hex_digest(intent.digest()?);
         state.payment_hash = hex::encode(Sha256::digest([55u8; 32]));
@@ -413,7 +513,12 @@ mod combined_fixture {
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?,
             Sha256::digest([55u8; 32]).into(),
         );
-        spawn_mock_on(listener, state.clone());
+        let provider_states = Arc::new(std::sync::Mutex::new(vec![state.clone()]));
+        if settle_change {
+            spawn_residual_provider(listener, provider_states.clone());
+        } else {
+            spawn_mock_on(listener, state.clone());
+        }
         drop(planner);
         let event = StrikeCompletedReceiveEvent {
             event_id: Uuid::new_v4(),
@@ -424,7 +529,7 @@ mod combined_fixture {
             ledger.clone(),
             runtime.clone(),
             registration.clone(),
-            policy,
+            policy.clone(),
             FixtureWallet {
                 root: root.clone(),
                 registration: registration.clone(),
@@ -433,7 +538,9 @@ mod combined_fixture {
                 pool: pool.clone(),
                 runtime: runtime.clone(),
                 event: event.clone(),
-                treasury_socket: treasury_ipc.then_some(treasury_socket),
+                treasury_socket: treasury_ipc.then_some(treasury_socket.clone()),
+                round: 0,
+                expected_credit: initial_credit,
             },
             Controls {
                 issue: true,
@@ -470,8 +577,104 @@ mod combined_fixture {
         assert_eq!(worker.tick(now + 100).await?, Tick::Idle);
         assert_eq!(count(&pool, "settled_payments").await?, 1);
         assert_eq!(count(&pool, "event_log").await?, contribution_count);
-        assert_eq!(ledger.feed_credit_sats().await?, 1000);
-        if returned_change {
+        assert_eq!(ledger.feed_credit_sats().await?, initial_credit);
+        if settle_change {
+            assert!(returned_change, "residual mode requires returned change");
+            assert!(ledger.begin_feed_attempt(1000).await?.is_none());
+            let request = crate::cashu::treasury_sweep::Request {
+                id: Uuid::new_v4(),
+                mint_id: "fixture".into(),
+                maximum_input_sats: 17,
+            };
+            let second = ledger
+                .plan_operator_cashu_settlement(&registration, &policy, &request, true)
+                .await?
+                .unwrap();
+            assert_eq!(
+                (
+                    second.input_sats,
+                    second.deposit_sats,
+                    second.maximum_fee_sats
+                ),
+                (17, 15, 2)
+            );
+            assert_eq!(second.sources.len(), 2);
+            assert_eq!(second.sources.iter().map(|s| s.input_sats).sum::<u64>(), 17);
+            assert!(second.sources.iter().any(|s| s.acquisition_id
+                == receipts.last().unwrap().data().acquisition_id
+                && s.input_sats == 16));
+            let mut state2 = state.clone();
+            state2.receive_request_id = Uuid::new_v4();
+            state2.receive_id = Uuid::new_v4();
+            state2.description_hash = hex_digest(second.digest()?);
+            state2.payment_hash = hex::encode(Sha256::digest([56u8; 32]));
+            state2.amount_btc = msat_to_btc_decimal(second.deposit_sats * 1000);
+            state2.credited_amount = Some(json!({"amount":state2.amount_btc,"currency":"BTC"}));
+            state2.invoice = crate::test_invoices::invoice_with_payment_hash(
+                second.deposit_sats * 1000,
+                &state2.description_hash,
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?,
+                Sha256::digest([56u8; 32]).into(),
+            );
+            provider_states.lock().unwrap().push(state2.clone());
+            publish(&root, "residual-ready.json", &second.id)?;
+            let event2 = StrikeCompletedReceiveEvent {
+                event_id: Uuid::new_v4(),
+                receive_request_id: state2.receive_request_id,
+                receive_id: state2.receive_id,
+            };
+            let worker2 = Worker::new(
+                ledger.clone(),
+                runtime.clone(),
+                registration.clone(),
+                policy.clone(),
+                FixtureWallet {
+                    root: root.clone(),
+                    registration: registration.clone(),
+                    lost_reply,
+                    ledger: ledger.clone(),
+                    pool: pool.clone(),
+                    runtime: runtime.clone(),
+                    event: event2.clone(),
+                    treasury_socket: Some(treasury_socket.clone()),
+                    round: 1,
+                    expected_credit: initial_credit,
+                },
+                Controls {
+                    issue: true,
+                    deliver: true,
+                    inspect: true,
+                    maximum_attempts: 8,
+                    ..Default::default()
+                },
+                Duration::from_secs(60),
+            )?;
+            assert_eq!(worker2.tick(now + 101).await?, Tick::Progress);
+            assert_eq!(worker2.tick(now + 102).await?, Tick::Progress);
+            assert_eq!(
+                runtime.reconcile_and_credit(&ledger, &event2).await?,
+                if lost_reply {
+                    SettlementOutcome::Duplicate
+                } else {
+                    SettlementOutcome::TreasurySettlementAccepted
+                }
+            );
+            assert_eq!(
+                runtime.reconcile_and_credit(&ledger, &event2).await?,
+                SettlementOutcome::Duplicate
+            );
+            assert_eq!(count(&pool, "cashu_treasury_completions").await?, 2);
+            assert_eq!(count(&pool, "settled_payments").await?, 2);
+            assert_eq!(count(&pool, "event_log").await?, contribution_count);
+            assert_eq!(ledger.feed_credit_sats().await?, initial_credit);
+            let replay = ledger
+                .plan_operator_cashu_settlement(&registration, &policy, &request, true)
+                .await?
+                .unwrap();
+            assert!(replay == second);
+            assert_eq!(count(&pool, "cashu_treasury_intents").await?, 2);
+            println!("COMBINED_CORE_RESIDUAL_CHANGE_SETTLED");
+        } else if returned_change {
             // The retained one-sat change remains custody and original credit,
             // but is not yet settled coverage. Later native funding can proceed.
             assert!(ledger.begin_feed_attempt(1000).await?.is_none());
@@ -480,7 +683,14 @@ mod combined_fixture {
         }
         let feeding = ledger.begin_feed_attempt(1000).await?.unwrap();
         ledger.confirm_feed_attempt(feeding).await?;
-        assert_eq!(ledger.feed_credit_sats().await?, u64::from(returned_change));
+        assert_eq!(
+            ledger.feed_credit_sats().await?,
+            if settle_change {
+                16
+            } else {
+                u64::from(returned_change)
+            }
+        );
         if receipt_ipc {
             publish(&root, "credit-consumed.json", &feeding)?;
             let replayed: u64 = read_when_ready(&root, "receipt-replayed.json").await?;
@@ -501,20 +711,38 @@ mod combined_fixture {
                     .await?;
             }
         }
-        assert_eq!(ledger.feed_credit_sats().await?, u64::from(returned_change));
+        assert_eq!(
+            ledger.feed_credit_sats().await?,
+            if settle_change {
+                16
+            } else {
+                u64::from(returned_change)
+            }
+        );
         assert!(ledger.begin_feed_attempt(1000).await?.is_none());
         assert_eq!(count(&pool, "feed_attempts").await?, 1);
         assert_eq!(
             count(&pool, "event_log").await?,
-            contribution_count + 1 + i64::from(returned_change)
+            contribution_count + 1 + i64::from(returned_change && !settle_change)
         );
         let reward: i64 =
             sqlx::query_scalar("SELECT strike_sats FROM feed_reward_funding WHERE request_id=?")
                 .bind(feeding.to_string())
                 .fetch_one(&pool)
                 .await?;
-        assert_eq!(reward, if returned_change { 601 } else { 600 });
-        let result = if fees {
+        assert_eq!(
+            reward,
+            if returned_change && !settle_change {
+                601
+            } else {
+                600
+            }
+        );
+        let result = if settle_change {
+            json!({"credit_sats":16,"contributions":4,"synthetic_confirmed_feeds":1,"treasury_deposit_sats":413,
+                "new_transfer_credit_sats":0,"original_granted_credit_sats":1016,"receive_fees_sats":3,"conversion_fee_sats":3,
+                "retained_change_sats":0,"supplemental_native_sats":0,"settlement_operations":2})
+        } else if fees {
             json!({"credit_sats":u64::from(returned_change),"contributions":contribution_count + i64::from(returned_change),"synthetic_confirmed_feeds":1,
                 "treasury_deposit_sats":400-conversion_fee_sats,"new_transfer_credit_sats":0,
                 "original_granted_credit_sats":1000,"receive_fees_sats":receipt_count,

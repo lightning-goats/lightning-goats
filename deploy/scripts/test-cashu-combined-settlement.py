@@ -47,7 +47,10 @@ def main():
     parser.add_argument('--sender-files-sha256')
     parser.add_argument('--sender-node', type=Path, default=Path('/usr/bin/node'))
     parser.add_argument('--repeat-request', action='store_true', help='acquire two distinct ordinary payments to one descriptor before settlement')
+    parser.add_argument('--settle-change', action='store_true', help='settle retained one-sat change together with a distinct 16-sat Cashu contribution through a second independently verified Strike receive')
     args = parser.parse_args()
+    if args.settle_change and (not args.fees or args.no_change or args.repeat_request or not args.http_intake):
+        parser.error('--settle-change requires --fees --http-intake, returned change, and its own mode')
     if args.repeat_request and not args.http_intake:
         parser.error('--repeat-request requires --http-intake')
     if args.cashu_ts_sender and (not args.http_intake or args.sender_installation is None or not args.sender_files_sha256):
@@ -111,6 +114,7 @@ def main():
                'LG_CASHU_COMBINED_IPC_GID':str(ipc_gid),
                'LG_CASHU_COMBINED_TREASURY_IPC':'1' if args.treasury_ipc else '0',
                'LG_CASHU_COMBINED_HTTP_INTAKE':'1' if args.http_intake else '0'}
+        env['LG_CASHU_COMBINED_SETTLE_CHANGE'] = '1' if args.settle_change else '0'
         env['LG_CASHU_COMBINED_REPEAT_REQUEST'] = '1' if args.repeat_request else '0'
         env.update(sender_environment)
         prefix = ['/usr/bin/setpriv', f'--reuid={identity}', f'--regid={identity}',
@@ -173,6 +177,8 @@ def main():
                 if args.fees:
                     markers.append(['COMBINED_CORE_FEES_CHANGE_CONSERVED',
                                     'COMBINED_WALLET_REAL_FEES_CHANGE_VERIFIED'][index])
+                if args.settle_change:
+                    markers.append(['COMBINED_CORE_RESIDUAL_CHANGE_SETTLED', 'COMBINED_WALLET_RESIDUAL_CHANGE_SETTLED'][index])
                 if args.no_change:
                     markers.append(['COMBINED_CORE_FEE_ONLY_ORIGINAL_CREDIT_CONSUMED',
                                     'COMBINED_WALLET_FEE_ONLY_ZERO_CHANGE_VERIFIED'][index])
@@ -196,6 +202,11 @@ def main():
                     expected['treasury_deposit_sats'] -= 1
                     expected['receive_fees_sats'] += 1
                     expected['conversion_fee_sats'] += 1
+            if args.settle_change:
+                expected = dict(credit_sats=16, contributions=4, synthetic_confirmed_feeds=1,
+                    treasury_deposit_sats=413, new_transfer_credit_sats=0, original_granted_credit_sats=1016,
+                    receive_fees_sats=3, conversion_fee_sats=3, retained_change_sats=0,
+                    supplemental_native_sats=0, settlement_operations=2)
             if result != expected:
                 raise ValueError('combined fixture result differs from expected conservation')
             print(json.dumps({'result': 'CASHU_COMBINED_SETTLEMENT_VERIFIED', 'artifacts_sha256': hashes,
@@ -203,7 +214,7 @@ def main():
                               'nonzero_fees': args.fees, 'returned_change': args.fees and not args.no_change,
                               'lost_melt_reply': args.lost_reply, 'strike_before_wallet_report': args.lost_reply,
                               'wallet_recovery_while_paused': args.lost_reply,
-                              'physical_actuation': False, 'distinct_uid_ipc': args.treasury_ipc, 'distinct_uid_receipt_ipc': args.receipt_ipc, 'treasury_ipc': args.treasury_ipc, 'http_intake': args.http_intake, 'tls_verified': False, 'independent_sender': False, 'cashu_ts_offline_sender': args.cashu_ts_sender, 'repeat_request': args.repeat_request, 'sender_inventory': sender_inventory, 'sender_node_sha256': digest(root / 'sender-node') if args.cashu_ts_sender else None, 'sender_script_sha256': digest(root / 'sender.mjs') if args.cashu_ts_sender else None}, sort_keys=True))
+                              'physical_actuation': False, 'distinct_uid_ipc': args.treasury_ipc, 'distinct_uid_receipt_ipc': args.receipt_ipc, 'treasury_ipc': args.treasury_ipc, 'http_intake': args.http_intake, 'tls_verified': False, 'independent_sender': False, 'cashu_ts_offline_sender': args.cashu_ts_sender, 'repeat_request': args.repeat_request, 'residual_change_settled': args.settle_change, 'sender_inventory': sender_inventory, 'sender_node_sha256': digest(root / 'sender-node') if args.cashu_ts_sender else None, 'sender_script_sha256': digest(root / 'sender.mjs') if args.cashu_ts_sender else None}, sort_keys=True))
         except Exception:
             for log in logs:
                 log.flush()

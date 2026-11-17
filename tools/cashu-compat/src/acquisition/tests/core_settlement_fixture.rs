@@ -197,7 +197,12 @@ async fn combined_settlement_wallet_child() -> Result<()> {
         !repeat_request || http_intake,
         "repeated request requires HTTP composition"
     );
-    let receipt_count = 2 + usize::from(repeat_request);
+    let settle_change = std::env::var("LG_CASHU_COMBINED_SETTLE_CHANGE").as_deref() == Ok("1");
+    ensure!(
+        !settle_change || (http_intake && !repeat_request),
+        "residual settlement requires its own HTTP mode"
+    );
+    let receipt_count = 2 + usize::from(repeat_request || settle_change);
     let sdk_sender = std::env::var_os("LG_CASHU_COMBINED_SENDER_NODE").is_some();
     ensure!(
         !sdk_sender || http_intake,
@@ -324,7 +329,9 @@ async fn combined_settlement_wallet_child() -> Result<()> {
     };
     coordinator.wallet.set_target_proof_count(0);
     let mut receipts = Vec::new();
-    let payments = if repeat_request {
+    let payments = if settle_change {
+        vec![(250, true), (150, false), (16, false)]
+    } else if repeat_request {
         vec![(250, true), (75, false), (75, false)]
     } else {
         vec![(250, true), (150, false)]
@@ -597,8 +604,8 @@ async fn combined_settlement_wallet_child() -> Result<()> {
         maximum_attempts: 4,
         maximum_input_sats: 400,
         maximum_fee_sats: conversion_fee_sats,
-        operations_per_24h: 1,
-        input_sats_per_24h: 400,
+        operations_per_24h: 1 + u64::from(settle_change),
+        input_sats_per_24h: 400 + 17 * u64::from(settle_change),
         maximum_in_flight_sats: 400,
         split: Default::default(),
     };
@@ -672,7 +679,7 @@ async fn combined_settlement_wallet_child() -> Result<()> {
                 .iter()
                 .map(|receipt| receipt.gross_sats)
                 .sum::<u64>(),
-            400 + u64::try_from(receipt_count)?
+            400 + 16 * u64::from(settle_change) + u64::try_from(receipt_count)?
         );
         assert_eq!(
             receipts
@@ -720,6 +727,172 @@ async fn combined_settlement_wallet_child() -> Result<()> {
     }
     if !treasury_ipc {
         publish(&root, "report.json", &report)?;
+    }
+    let mut residual_report = None;
+    if settle_change {
+        ensure!(
+            returned_change && treasury_ipc,
+            "residual mode requires financial IPC and retained change"
+        );
+        // Complete the first operation through its ordinary cleanup action before
+        // authorizing another melt. Never delete a saga/proof to bypass a fence.
+        let worker = Worker::from_parts(
+            Arc::new(Mutex::new(Journal::open(&path, harness.epoch, 64)?)),
+            database.clone(),
+            writer.clone(),
+            harness.keys.clone(),
+            vec![(policy.clone(), harness.mint.clone())],
+            execution.clone(),
+            std::time::Duration::from_secs(10),
+            65536,
+        )?;
+        for tick in 0..8 {
+            worker.tick(now as i64 + 20 + tick).await?;
+        }
+        drop(worker);
+        let cleanup = rusqlite::Connection::open_with_flags(
+            &path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )?;
+        assert_eq!(
+            cleanup.query_row(
+                "SELECT COUNT(*) FROM treasury_cdk_cleanup WHERE intent_id=?",
+                [issued.intent.id.to_string()],
+                |r| r.get::<_, u64>(0)
+            )?,
+            1
+        );
+        drop(cleanup);
+        let id: Uuid = read_when_ready(&root, "residual-ready.json").await?;
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(120);
+        let second = loop {
+            if let Ok(value) =
+                Journal::open(&path, harness.epoch, 64)?.treasury_instruction(&binding, id)
+            {
+                break value;
+            }
+            ensure!(
+                tokio::time::Instant::now() < deadline,
+                "residual treasury admission deadline"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        };
+        assert_eq!(
+            (
+                second.intent.input_sats,
+                second.intent.deposit_sats,
+                second.intent.maximum_fee_sats
+            ),
+            (17, 15, 2)
+        );
+        assert_eq!(second.intent.sources.len(), 2);
+        assert!(second.intent.sources.iter().any(|s| s.acquisition_id
+            == receipts.last().unwrap().acquisition_id
+            && s.input_sats == 16));
+        let quote = json!({"quote":"combined-residual-quote","amount":15,"fee_reserve":1,"state":"UNPAID",
+            "expiry":now+240,"payment_preimage":null,"change":null,"request":second.invoice,"unit":"sat","method":"bolt11"});
+        *harness.mint.quote_reply.lock().unwrap() = Some(quote.clone());
+        let mut paid = quote;
+        paid["state"] = "PAID".into();
+        paid["payment_preimage"] = "38".repeat(32).into();
+        paid["change"] = json!([]);
+        *harness.mint.melt_paid_reply.lock().unwrap() = Some(paid);
+        harness
+            .mint
+            .return_melt_change
+            .store(false, Ordering::SeqCst);
+        harness
+            .mint
+            .consume_melt_reserve
+            .store(true, Ordering::SeqCst);
+        harness.mint.melt_settled.store(false, Ordering::SeqCst);
+        harness
+            .mint
+            .lose_melt_reply
+            .store(lost_reply, Ordering::SeqCst);
+        harness
+            .mint
+            .melt_status_unavailable
+            .store(lost_reply, Ordering::SeqCst);
+        execution.execute = true;
+        let mut paused = false;
+        for tick in 0..80 {
+            let worker = Worker::from_parts(
+                Arc::new(Mutex::new(Journal::open(&path, harness.epoch, 64)?)),
+                database.clone(),
+                writer.clone(),
+                harness.keys.clone(),
+                vec![(policy.clone(), harness.mint.clone())],
+                execution.clone(),
+                std::time::Duration::from_secs(10),
+                65536,
+            )?;
+            let outcome = worker.tick(now as i64 + 40 + tick).await?;
+            drop(worker);
+            if lost_reply && !paused && harness.mint.melt_settled.load(Ordering::SeqCst) {
+                assert_eq!(outcome, crate::treasury_scheduler::Tick::RetryRetained);
+                assert!(
+                    Journal::open(&path, harness.epoch, 64)?
+                        .treasury_melt_report(&binding, id)
+                        .is_err()
+                );
+                let observed: Uuid =
+                    read_when_ready(&root, "residual-provider-verified.json").await?;
+                assert_eq!(observed, id);
+                execution.execute = false;
+                paused = true;
+                harness
+                    .mint
+                    .melt_status_unavailable
+                    .store(false, Ordering::SeqCst);
+            }
+            if let Ok(value) =
+                Journal::open(&path, harness.epoch, 64)?.treasury_melt_report(&binding, id)
+            {
+                residual_report = Some(value);
+                break;
+            }
+        }
+        let second_report = residual_report
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("residual change did not settle"))?;
+        assert_eq!(paused, lost_reply);
+        assert_eq!(
+            second_report
+                .sources
+                .iter()
+                .map(|s| s.input_sats)
+                .sum::<u64>(),
+            17
+        );
+        assert_eq!(
+            second_report
+                .sources
+                .iter()
+                .map(|s| s.deposit_sats)
+                .sum::<u64>(),
+            15
+        );
+        assert_eq!(
+            second_report
+                .sources
+                .iter()
+                .map(|s| s.fee_sats)
+                .sum::<u64>(),
+            2
+        );
+        assert_eq!(
+            second_report
+                .sources
+                .iter()
+                .map(|s| s.change_sats)
+                .sum::<u64>(),
+            0
+        );
+        assert_eq!(harness.mint.executions.load(Ordering::SeqCst), 3);
+        assert_eq!(harness.mint.quote_attempts.load(Ordering::SeqCst), 2);
+        assert_eq!(harness.mint.melt_attempts.load(Ordering::SeqCst), 2);
+        println!("COMBINED_WALLET_RESIDUAL_CHANGE_SETTLED");
     }
     if let Some(client) = &receipt_client {
         let _: Uuid = read_when_ready(&root, "credit-consumed.json").await?;
@@ -794,6 +967,9 @@ async fn combined_settlement_wallet_child() -> Result<()> {
     }
     let health_db = rusqlite::Connection::open(&path)?;
     let health = crate::status::Funds::read(&health_db, None, i64::try_from(now)?)?;
+    if settle_change {
+        assert_eq!(health.journal_custody_sats, 0);
+    }
     assert_eq!(health.acquired_net_sats, 400);
     assert_eq!(health.unverified_input_sats, 0);
     assert_eq!(health.journal_custody_sats, u64::from(returned_change));
@@ -809,7 +985,11 @@ async fn combined_settlement_wallet_child() -> Result<()> {
     );
     assert_eq!(
         health.completed_conversion_fee_sats,
-        report.sources.iter().map(|s| s.fee_sats).sum::<u64>()
+        std::iter::once(&report)
+            .chain(residual_report.iter())
+            .flat_map(|r| &r.sources)
+            .map(|s| s.fee_sats)
+            .sum::<u64>()
     );
     assert_eq!(
         health.total_accounted_fee_sats,

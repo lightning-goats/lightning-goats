@@ -60,6 +60,43 @@ class RecoveryWorklistTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'staged core event history'):
                 require_prefix(staged, reference)
 
+    def test_recovery_lists_original_split_operation_across_submission(self):
+        with (closing(sqlite3.connect(':memory:')) as staged,
+              closing(sqlite3.connect(':memory:')) as reference):
+            for db in (staged, reference):
+                db.row_factory = sqlite3.Row
+                db.executescript('''
+                    CREATE TABLE overlay_identity(singleton,stream_id);
+                    INSERT INTO overlay_identity VALUES(1,'core');
+                    CREATE TABLE wallet_epoch(singleton,epoch);
+                    INSERT INTO wallet_epoch VALUES(1,'wallet');
+                    CREATE TABLE runtime_registration(singleton,instance,key_binding);
+                    INSERT INTO runtime_registration VALUES(1,'instance',X'01');
+                    CREATE TABLE event_log(seq,event_type,payload_json,created_at);
+                    CREATE TABLE treasury_split_reservations(intent_id,split_id);
+                    CREATE TABLE treasury_quotes(intent_id,mint_id);
+                    CREATE TABLE treasury_split_execution_claims(intent_id);
+                    CREATE TABLE treasury_split_requests(intent_id,cdk_operation);
+                    CREATE TABLE treasury_split_submissions(intent_id,submitted_at,request_digest);
+                    CREATE TABLE treasury_split_replies(intent_id);
+                    CREATE TABLE treasury_split_results(intent_id);
+                    INSERT INTO treasury_split_reservations VALUES('intent','split');
+                    INSERT INTO treasury_quotes VALUES('intent','fixture-mint');
+                    INSERT INTO treasury_split_execution_claims VALUES('intent');
+                ''')
+            reference.execute("INSERT INTO treasury_split_requests VALUES('intent','swap-operation')")
+            reference.execute('INSERT INTO treasury_split_submissions VALUES(?,?,?)',
+                              ('intent', 123, b'\xaa' * 32))
+            reference.execute("INSERT INTO treasury_split_replies VALUES('intent')")
+            report = REVIEW['worklist'](staged, staged, reference, reference, group='mint_splits')
+            item, = report['mint_splits']['items']
+            self.assertIsNone(item['staged']['submitted_request_digest'])
+            self.assertEqual(item['reference']['split_id'], 'split')
+            self.assertEqual(item['reference']['cdk_operation'], 'swap-operation')
+            self.assertEqual(item['reference']['submitted_request_digest'], 'aa' * 32)
+            self.assertEqual(item['reference']['reply_retained'], 1)
+            self.assertEqual(item['reference']['result_retained'], 0)
+
 
 class RestoreArchiveTests(unittest.TestCase):
     @staticmethod

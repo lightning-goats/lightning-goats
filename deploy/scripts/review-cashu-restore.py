@@ -81,9 +81,24 @@ WALLET_TREASURY = """
       LEFT JOIN treasury_results r ON r.intent_id=w.id
     ORDER BY w.id
 """
+WALLET_SPLITS = """
+    SELECT r.intent_id AS id, r.split_id, q.mint_id, p.cdk_operation,
+           c.intent_id IS NOT NULL AS execution_claimed,
+           s.submitted_at, CASE WHEN s.request_digest IS NOT NULL
+                               THEN lower(hex(s.request_digest)) END AS submitted_request_digest,
+           v.intent_id IS NOT NULL AS reply_retained, f.intent_id IS NOT NULL AS result_retained
+      FROM treasury_split_reservations r
+      LEFT JOIN treasury_quotes q ON q.intent_id=r.intent_id
+      LEFT JOIN treasury_split_execution_claims c ON c.intent_id=r.intent_id
+      LEFT JOIN treasury_split_requests p ON p.intent_id=r.intent_id
+      LEFT JOIN treasury_split_submissions s ON s.intent_id=r.intent_id
+      LEFT JOIN treasury_split_replies v ON v.intent_id=r.intent_id
+      LEFT JOIN treasury_split_results f ON f.intent_id=r.intent_id
+    ORDER BY r.intent_id
+"""
 FEED = "SELECT id,status,threshold_sats FROM feed_attempts ORDER BY id"
 ACQUISITION = "SELECT id,mint_id,state,net FROM acquisitions ORDER BY id"
-GROUPS = ('strike_receives', 'mint_melts', 'feeder_requests', 'cashu_acquisitions')
+GROUPS = ('strike_receives', 'mint_melts', 'mint_splits', 'feeder_requests', 'cashu_acquisitions')
 
 
 def open_database(path, budget):
@@ -163,6 +178,10 @@ def worklist(core, wallet, reference_core=None, reference_wallet=None, limit=100
         'mint_melts': lambda: diff(wallet, reference_wallet, WALLET_TREASURY,
                            ('receive_request_id', 'payment_hash', 'quote_id', 'operation_id'),
                            lambda row: row is not None and not row['report_retained']),
+        'mint_splits': lambda: diff(wallet, reference_wallet, WALLET_SPLITS,
+                            ('split_id', 'mint_id', 'cdk_operation', 'submitted_at',
+                             'submitted_request_digest'),
+                            lambda row: row is not None and not row['result_retained']),
         'feeder_requests': lambda: diff(core, reference_core, FEED, ('threshold_sats',),
                                 lambda row: row is not None and row['status'] in ('intent_committed', 'unknown')),
         'cashu_acquisitions': lambda: diff(wallet, reference_wallet, ACQUISITION, ('mint_id', 'net'),

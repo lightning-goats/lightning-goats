@@ -226,7 +226,9 @@ and feeder reconciliation:
 
 Supply the SHA256 of `STAGED.json` from the reviewed stage. The command
 rechecks every fenced file and reports pending Cashu acquisitions, original
-mint quotes, Strike receive requests and feeder UUIDs. When independently
+mint melt quotes and split operations, Strike receive requests and feeder UUIDs.
+The split list retains the original split and CDK operation IDs and the
+submitted request digest when available. When independently
 retained newer evidence exists, add `--reference REFERENCE_DIRECTORY
 --reference-sha256 REFERENCE_RECEIPT_SHA256`. The report then includes
 differing original records and rejects conflicting immutable identities or a

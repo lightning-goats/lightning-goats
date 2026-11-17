@@ -664,7 +664,10 @@ mod combined_fixture {
                 SettlementOutcome::Duplicate
             );
             assert_eq!(count(&pool, "cashu_treasury_completions").await?, 2);
-            assert_eq!(count(&pool, "settled_payments").await?, 2);
+            assert_eq!(count(&pool, "cashu_treasury_deposits").await?, 2);
+            // Both treasury receives retain their own purpose-bound evidence.
+            // The original native donation remains the only settled-payment row.
+            assert_eq!(count(&pool, "settled_payments").await?, 1);
             assert_eq!(count(&pool, "event_log").await?, contribution_count);
             assert_eq!(ledger.feed_credit_sats().await?, initial_credit);
             let replay = ledger

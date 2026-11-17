@@ -1,5 +1,21 @@
 # Lightning Goats implementation status
 
+Cashu operator controls update **2026-11-17**: the
+[protected planning/reconciliation checkpoint](testing/cashu-operator-controls-20261117.json)
+passes 650 core tests (12 ignored), 179 wallet tests (seven ignored), required
+format/strict Clippy/dependency/vendor gates and both actual CLI fixtures under
+unused UIDs in private namespaces. The [current-source financial matrix](testing/cashu-operator-composition-20261117.json)
+passes all eight HTTP/receipt/treasury cases with health accounting. A bounded
+root-reviewed core request can preview/retain custody reservations and replay its
+original intent. A separately approved wallet command can verify owned outputs
+for one original acquiring operation without swap/melt replay or receipt export.
+The [runbook](deployment/cashu-operator-controls.md) records exact scopes and
+fixture limits: empty/unfunded CLI state and mocked systemctl remain separate
+from funded native tests and installed acceptance. Held-policy administration,
+treasury reconciliation, coordinated funded restore, multi-mint/economical-change
+composition and independent client/provider acceptance remain open. No Cashu
+service, operator seed installation or live financial/physical activation occurred.
+
 Cashu private health update **2026-11-17**: the
 [operational diagnostic checkpoint](testing/cashu-private-health-20261117.json)
 passes 175 wallet tests (seven ignored), strict Clippy/format/vendor/dependency
@@ -26,8 +42,9 @@ The [current-artifact financial matrix](testing/cashu-final-composition-20261117
 now passes eight full HTTP/receipt/treasury IPC cases, including normal/lost
 replies and repeated descriptor use, with actual CDK and an offline SDK sender.
 The [dedicated seed preparation tool](deployment/cashu-seed-provisioning.md)
-also passes eight public/synthetic tests; the operator's phrase was never
-supplied or installed. Multi-mint/economical-change financial composition,
+also passes eight public/synthetic tests. The operator confirmed seed staging;
+metadata-only observation found a private 64-byte file under a 0700 directory.
+The phrase was not supplied to Codex; runtime installation remains pending. Multi-mint/economical-change financial composition,
 operational/recovery work and independent-client acceptance remain open in the
 [full-plan map](testing/cashu-acceptance-gaps.md). The operator canceled the
 security review; no completed-review claim or Cashu activation follows.

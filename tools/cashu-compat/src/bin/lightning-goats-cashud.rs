@@ -6,12 +6,14 @@ use lightning_goats_cashu_compat::{
 use std::{ffi::OsString, path::PathBuf, process::ExitCode};
 
 const USAGE: &str = "Usage: lightning-goats-cashud <check-config|initialize|run|status> <config.json>\n\
+       lightning-goats-cashud reconcile-acquisition <config.json> <approval.json>\n\
        lightning-goats-cashud prepare-announcement <config.json> <operation-uuid>\n\
        lightning-goats-cashud prepare-request <config.json> <https-endpoint> <creqA|creqB>\n\
 check-config  Validate protected configuration without opening wallet state or keys.\n\
 initialize    Explicitly initialize empty wallet databases using provisioned keys.\n\
 run           Open existing wallet state; serve private intake and configured acquisition.\n\
 status        Read bounded private journal status without loading keys or changing work.\n\
+reconcile-acquisition  Check one approved original acquisition; no swap/melt replay.\n\
 prepare-announcement  Offline: retain and preview configured kind 10019; no workers started.\n\
 prepare-request  Offline: preview a reusable request; no keys, state or network opened.\n\
 Receiving, relay intake, acquisition, receipt delivery and treasury execution default off.\n\
@@ -24,6 +26,7 @@ enum Command {
     Initialize(PathBuf),
     Run(PathBuf),
     Status(PathBuf),
+    ReconcileAcquisition(PathBuf, PathBuf),
     PrepareAnnouncement(PathBuf, uuid::Uuid),
     PrepareRequest(PathBuf, String, Encoding),
 }
@@ -31,6 +34,16 @@ enum Command {
 fn parse(args: Vec<OsString>) -> Result<Command, ()> {
     if args.len() == 1 && (args[0] == "--help" || args[0] == "-h") {
         return Ok(Command::Help);
+    }
+    if args.len() == 3
+        && args[0] == "reconcile-acquisition"
+        && !args[1].is_empty()
+        && !args[2].is_empty()
+    {
+        return Ok(Command::ReconcileAcquisition(
+            PathBuf::from(&args[1]),
+            PathBuf::from(&args[2]),
+        ));
     }
     if args.len() == 3 && args[0] == "prepare-announcement" && !args[1].is_empty() {
         let id = uuid::Uuid::parse_str(args[2].to_str().ok_or(())?).map_err(|_| ())?;
@@ -94,6 +107,25 @@ async fn execute(command: Command) -> Result<(), &'static str> {
             println!(
                 "{}",
                 serde_json::to_string(&status).map_err(|_| "wallet status encoding failed")?
+            );
+        }
+        Command::ReconcileAcquisition(path, approval) => {
+            let decision =
+                lightning_goats_cashu_compat::operator_reconciliation::Approval::load(&approval)
+                    .map_err(|_| "ownership approval rejected")?;
+            let config = decision
+                .load_config(&path)
+                .map_err(|_| "ownership configuration rejected")?;
+            let runtime = Runtime::open(config).await.map_err(
+                |_| "ownership check requires offline registered state and matching keys",
+            )?;
+            let outcome = decision
+                .reconcile(&runtime)
+                .await
+                .map_err(|_| "ownership check rejected; original operation retained")?;
+            println!(
+                "{}",
+                serde_json::to_string(&outcome).map_err(|_| "ownership outcome encoding failed")?
             );
         }
         Command::Initialize(path) => {
@@ -173,6 +205,17 @@ mod tests {
                 ))
             );
         }
+        assert_eq!(
+            parse(args(&[
+                "reconcile-acquisition",
+                "/fixture/config.json",
+                "/fixture/approval.json"
+            ])),
+            Ok(Command::ReconcileAcquisition(
+                "/fixture/config.json".into(),
+                "/fixture/approval.json".into()
+            ))
+        );
         let id = uuid::Uuid::from_u128(1);
         assert_eq!(
             parse(args(&[
@@ -200,6 +243,9 @@ mod tests {
         for values in [
             vec![],
             vec!["run"],
+            vec!["reconcile-acquisition", "file"],
+            vec!["reconcile-acquisition", "file", ""],
+            vec!["reconcile-acquisition", "file", "approval", "--clear-hold"],
             vec!["initialize", ""],
             vec!["--help", "extra"],
             vec!["run", "file", "extra"],

@@ -53,7 +53,9 @@ impl Config {
     pub fn validate(&self) -> Result<()> {
         self.policy().map(|_| ())
     }
-    pub(crate) fn policy(&self) -> Result<ReceiptPolicy> {
+    /// Build the validated registration policy. Callers still authenticate peers
+    /// or require protected operator configuration before granting authority.
+    pub fn policy(&self) -> Result<ReceiptPolicy> {
         crate::private_ipc::socket_path(&self.socket)?;
         ensure!(
             self.ipc_gid > 0

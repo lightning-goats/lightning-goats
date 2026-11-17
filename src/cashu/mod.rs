@@ -19,3 +19,6 @@ pub mod public_request;
 
 #[cfg(unix)]
 pub mod financial_release;
+
+#[cfg(unix)]
+pub mod operator_settlement;

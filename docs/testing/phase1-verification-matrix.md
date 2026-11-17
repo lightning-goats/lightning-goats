@@ -412,3 +412,38 @@ must not be counted twice. The combined runner requires the wallet's health
 accounting marker; older artifacts without that check must refuse qualification.
 Mocked deposits/simulated feed confirmation do not qualify installed providers,
 real mint custody or physical dispatch.
+
+## Dated Cashu exception: protected operator controls
+
+Qualify `lightning-goatsctl plan-cashu-settlement` against the exact selected
+core artifact. Its approval must bind the protected configuration bytes, core
+and wallet identities, mint, request UUID, input ceiling and a bounded current
+review window. Preview must roll back the same planner transaction used by
+apply, including source reservations and request rows. Funded apply/restart
+retries must return the original intent without a second reservation or credit.
+Conflicting reuse, unapproved mint and excessive input must fail closed.
+
+Run the actual CLI through `deploy/scripts/test-cashu-operator-settlement-cli.py`
+in fresh mount/network namespaces using `test-cashu-private-run.py` and the
+selected executable SHA-256. Confirm active/unknown core-service refusal, exact
+configuration/scope/permissions, no initialization of a missing core epoch, and
+stable empty-custody request retention. This fixture uses mocked systemctl and
+empty custody; qualify funded selection separately with the native ledger test.
+Neither check authorizes installed systemd changes, provider requests or feeding.
+
+For `lightning-goats-cashud reconcile-acquisition`, qualify the protected exact
+configuration and wallet/mint/acquisition binding, time/review limits, exclusive
+writer lock and restore fence. New, prepared, held, exported and credited states
+must refuse this narrowly scoped procedure. Use actual CDK-owned output tests to
+prove that fresh mint-state verification can complete only the original receive,
+without another swap/melt or receipt export. Missing derivation and unavailable
+responses must retain pending work; invalid ownership must not gain credit.
+
+Run `deploy/scripts/test-cashu-operator-reconciliation-cli.py` with the selected
+wallet executable/hash through the private-run helper in fresh mount/network
+namespaces. Its synthetic unfunded pending case establishes CLI/ownership/lock
+boundaries only; it does not establish a funded ownership transition or external
+reconciliation. Re-run the complete financial HTTP/receipt/treasury fixture on
+source-matched core and wallet test artifacts. Held-policy updates, treasury
+reconciliation, coordinated funded restore and installed/provider acceptance
+remain distinct required work.

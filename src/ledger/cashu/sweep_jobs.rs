@@ -45,11 +45,59 @@ async fn available(
 }
 
 impl LedgerStore {
+    /// Protected local operator planning. No invoice, provider or feeder calls.
+    /// Preview rolls back the same source-selection transaction used by apply.
+    pub async fn plan_operator_cashu_settlement(
+        &self,
+        registration: &ReceiptPolicy,
+        policy: &Policy,
+        request: &treasury_sweep::Request,
+        apply: bool,
+    ) -> Result<Option<Intent>> {
+        ensure!(
+            registration.wallet_uid > 0
+                && !registration.wallet_instance.is_nil()
+                && !registration.wallet_epoch.is_nil()
+                && !registration.core_epoch.is_nil(),
+            "operator settlement wallet registration is absent"
+        );
+        policy.validate()?;
+        ensure!(policy.enabled, "treasury planning is disabled");
+        let mint = policy
+            .approved_mints
+            .get(&request.mint_id)
+            .context("operator settlement mint is not approved")?;
+        ensure!(
+            request.maximum_input_sats <= policy.limits.maximum_input_sats
+                && request.maximum_input_sats <= mint.maximum_input_sats,
+            "operator settlement exceeds protected input ceiling"
+        );
+        let sweep = treasury_sweep::Policy {
+            enabled: true,
+            requests: vec![request.clone()],
+            ..Default::default()
+        };
+        self.plan_cashu_sweep_mode(registration, policy, &sweep, apply, true)
+            .await
+    }
+
     pub(crate) async fn plan_cashu_sweep(
         &self,
         registration: &ReceiptPolicy,
         policy: &Policy,
         sweep: &treasury_sweep::Policy,
+    ) -> Result<Option<Intent>> {
+        self.plan_cashu_sweep_mode(registration, policy, sweep, true, false)
+            .await
+    }
+
+    async fn plan_cashu_sweep_mode(
+        &self,
+        registration: &ReceiptPolicy,
+        policy: &Policy,
+        sweep: &treasury_sweep::Policy,
+        apply: bool,
+        replay_assigned: bool,
     ) -> Result<Option<Intent>> {
         policy.validate()?;
         sweep.validate(policy)?;
@@ -94,6 +142,19 @@ impl LedgerStore {
             .fetch_one(&mut *tx)
             .await?;
             if assigned {
+                if replay_assigned {
+                    let id: String = sqlx::query_scalar(
+                        "SELECT intent_id FROM cashu_sweep_jobs WHERE request_id=?",
+                    )
+                    .bind(request.id.to_string())
+                    .fetch_one(&mut *tx)
+                    .await?;
+                    let original =
+                        super::treasury::load_intent(&mut tx, uuid::Uuid::parse_str(&id)?).await?;
+                    ensure!(original.is_some(), "operator settlement intent is missing");
+                    finish(tx, apply).await?;
+                    return Ok(original);
+                }
                 continue;
             }
             let Some(mut funds) = available(&mut tx, registration, &request.mint_id).await? else {
@@ -110,7 +171,7 @@ impl LedgerStore {
                 let evidence = serde_json::json!({"request_id":request.id}).to_string();
                 sqlx::query("INSERT INTO cashu_sweep_jobs(intent_id,reason,request_id,trigger_json) VALUES(?,'operator',?,?)")
                     .bind(intent.id.to_string()).bind(request.id.to_string()).bind(evidence).execute(&mut *tx).await?;
-                tx.commit().await?;
+                finish(tx, apply).await?;
                 return Ok(Some(intent));
             }
         }
@@ -142,10 +203,19 @@ impl LedgerStore {
                 .context("sweep trigger scope changed")?;
             sqlx::query("INSERT INTO cashu_sweep_jobs(intent_id,reason,request_id,trigger_json) VALUES(?,?,NULL,?)")
                 .bind(intent.id.to_string()).bind(*reason).bind(evidence).execute(&mut *tx).await?;
-            tx.commit().await?;
+            finish(tx, apply).await?;
             return Ok(Some(intent));
         }
-        tx.commit().await?;
+        finish(tx, apply).await?;
         Ok(None)
     }
+}
+
+async fn finish(tx: Transaction<'_, Sqlite>, apply: bool) -> Result<()> {
+    if apply {
+        tx.commit().await?;
+    } else {
+        tx.rollback().await?;
+    }
+    Ok(())
 }

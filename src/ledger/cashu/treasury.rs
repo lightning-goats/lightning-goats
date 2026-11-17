@@ -282,7 +282,10 @@ pub(super) async fn require_epoch(tx: &mut Transaction<'_, Sqlite>, expected: Uu
     );
     Ok(())
 }
-async fn load_intent(tx: &mut Transaction<'_, Sqlite>, id: Uuid) -> Result<Option<Intent>> {
+pub(super) async fn load_intent(
+    tx: &mut Transaction<'_, Sqlite>,
+    id: Uuid,
+) -> Result<Option<Intent>> {
     let row=sqlx::query("SELECT intent_json,intent_digest,mint_id,input_sats,deposit_sats FROM cashu_treasury_intents WHERE id=?")
         .bind(id.to_string()).fetch_optional(&mut **tx).await?;
     row.map(|row| -> Result<Intent> {

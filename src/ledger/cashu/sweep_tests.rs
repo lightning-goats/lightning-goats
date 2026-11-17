@@ -1,4 +1,36 @@
 #[tokio::test]
+async fn operator_settlement_preview_rolls_back_and_apply_replays_original() {
+    let (_dir,url,store,registration)=fixture().await;
+    let receipt=wire(&registration,500);
+    store.import_cashu_receipt(&registration,&authenticated(&registration,&receipt)).await.unwrap();
+    let policy=feed_treasury_policy();
+    let request=crate::cashu::treasury_sweep::Request {id:Uuid::new_v4(),mint_id:"mint-a".into(),maximum_input_sats:200};
+    let before=store.latest_event_seq().await.unwrap();
+    let preview=store.plan_operator_cashu_settlement(&registration,&policy,&request,false).await.unwrap().unwrap();
+    assert_eq!(preview.input_sats,200);
+    for table in ["cashu_sweep_requests","cashu_sweep_jobs","cashu_treasury_intents","cashu_treasury_sources"] {
+        assert_eq!(count(&store,table).await,0);
+    }
+    assert_eq!(store.latest_event_seq().await.unwrap(),before);
+    let original=store.plan_operator_cashu_settlement(&registration,&policy,&request,true).await.unwrap().unwrap();
+    assert_eq!(original.input_sats,preview.input_sats);
+    assert_eq!(original.deposit_sats,preview.deposit_sats);
+    let reopened=LedgerStore::connect(&url).await.unwrap();
+    assert!(reopened.plan_operator_cashu_settlement(&registration,&policy,&request,true).await.unwrap()==Some(original.clone()));
+    assert!(reopened.plan_operator_cashu_settlement(&registration,&policy,&request,false).await.unwrap()==Some(original));
+    let changed=crate::cashu::treasury_sweep::Request {maximum_input_sats:201,..request.clone()};
+    assert!(reopened.plan_operator_cashu_settlement(&registration,&policy,&changed,true).await.is_err());
+    let unapproved=crate::cashu::treasury_sweep::Request {id:Uuid::new_v4(),mint_id:"unapproved".into(),..request.clone()};
+    assert!(reopened.plan_operator_cashu_settlement(&registration,&policy,&unapproved,true).await.is_err());
+    let excessive=crate::cashu::treasury_sweep::Request {id:Uuid::new_v4(),maximum_input_sats:u64::MAX,..request};
+    assert!(reopened.plan_operator_cashu_settlement(&registration,&policy,&excessive,true).await.is_err());
+    assert_eq!(count(&store,"cashu_sweep_requests").await,1);
+    assert_eq!(count(&store,"cashu_treasury_intents").await,1);
+    assert_eq!(store.feed_credit_sats().await.unwrap(),500);
+    assert_eq!(count(&store,"feed_attempts").await,0);
+}
+
+#[tokio::test]
 async fn age_sweep_reserves_below_threshold_custody_without_new_credit_or_food() {
     let (_dir, _url, store, registration) = fixture().await;
     let receipt = wire(&registration, 500);

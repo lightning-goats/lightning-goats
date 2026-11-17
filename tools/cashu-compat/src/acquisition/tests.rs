@@ -2071,3 +2071,32 @@ mod core_settlement_fixture;
 mod split_tests;
 
 mod multi_mint;
+
+#[tokio::test]
+async fn operator_ownership_check_uses_existing_outputs_without_swap_or_receipt_export()
+-> Result<()> {
+    let harness = Harness::new(0)?;
+    harness.mint.fail_check_once.store(true, Ordering::SeqCst);
+    let mut coordinator = harness.open().await?;
+    let id = new_id(coordinator.admit(&harness.ordinary(
+        harness.mint.issue("operator-owned-only".into()),
+        "operator-owned-only",
+    )?)?);
+    assert!(matches!(
+        coordinator.acquire_new(id, &harness.receiver).await?,
+        Progress::Pending(_)
+    ));
+    assert_eq!(harness.mint.executions.load(Ordering::SeqCst), 1);
+    coordinator.set_permissions(Permissions::default());
+    assert!(
+        matches!(coordinator.reconcile_owned(id).await?,Progress::Acquired(found) if found==id)
+    );
+    assert_eq!(coordinator.journal.lock().unwrap().state(id)?, "acquired");
+    assert!(
+        matches!(coordinator.reconcile_owned(id).await?,Progress::Acquired(found) if found==id)
+    );
+    assert_eq!(coordinator.journal.lock().unwrap().state(id)?, "acquired");
+    assert_eq!(harness.mint.executions.load(Ordering::SeqCst), 1);
+    assert_eq!(harness.mint.melt_attempts.load(Ordering::SeqCst), 0);
+    Ok(())
+}

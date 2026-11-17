@@ -81,6 +81,18 @@ jobs:
           subprocess.run(['sudo', 'unshare', '--mount', '--net', '--fork', '--', 'python3', 'deploy/scripts/test-cashu-financial-release-cli.py', '--cli', str(cli), '--cli-sha256', digest], check=True)
           PYCODE
 
+      - name: Verify protected Cashu settlement planning through the actual CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYCODE'
+          import hashlib, subprocess
+          from pathlib import Path
+          cli = Path('target/debug/lightning-goatsctl').resolve(strict=True)
+          digest = hashlib.sha256(cli.read_bytes()).hexdigest()
+          subprocess.run(['sudo', 'unshare', '--mount', '--net', '--', 'python3', 'deploy/scripts/test-cashu-private-run.py', '--', 'python3', 'deploy/scripts/test-cashu-operator-settlement-cli.py', '--cli', str(cli), '--cli-sha256', digest], check=True)
+          PYCODE
+
       - name: Select current core Cashu fixture artifact
         run: |
           python3 deploy/scripts/select-cashu-test-artifact.py "$RUNNER_TEMP/native-test-artifacts.jsonl" Cargo.toml "$RUNNER_TEMP/core-test"
@@ -154,6 +166,17 @@ jobs:
           CARGO_TARGET_DIR=target cargo build --locked --bin lightning-goats-cashud --bin lightning-goats-cashu-signerd
           sudo unshare --net -- python3 ../../deploy/scripts/test-cashu-request-cli.py --binary target/debug/lightning-goats-cashud 2>&1 | tee "$RUNNER_TEMP/cashu-request-cli.json"
           sudo unshare --net -- python3 ../../deploy/scripts/test-cashu-request-cli.py --binary target/debug/lightning-goats-cashud --long-request 2>&1 | tee "$RUNNER_TEMP/cashu-request-cli-long.json"
+      - name: Verify protected original-acquisition CLI in private namespaces
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYCODE'
+          import hashlib, subprocess
+          from pathlib import Path
+          cli = Path('target/debug/lightning-goats-cashud').resolve(strict=True)
+          digest = hashlib.sha256(cli.read_bytes()).hexdigest()
+          subprocess.run(['sudo', 'unshare', '--mount', '--net', '--', 'python3', '../../deploy/scripts/test-cashu-private-run.py', '--', 'python3', '../../deploy/scripts/test-cashu-operator-reconciliation-cli.py', '--cli', str(cli), '--cli-sha256', digest], check=True)
+          PYCODE
       - uses: actions/upload-artifact@v4
         with:
           name: cashu-request-cli-${{ github.sha }}

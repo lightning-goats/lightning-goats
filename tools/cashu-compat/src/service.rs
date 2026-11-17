@@ -459,6 +459,200 @@ mod tests {
         Ok(())
     }
     #[tokio::test]
+    async fn health_reports_legacy_and_future_ages_without_inventing_times() -> Result<()> {
+        use crate::journal::{Transport, ValidatedIntake};
+        let directory = crate::test_directory()?;
+        keys(directory.path())?;
+        let config = configuration(directory.path(), Uuid::new_v4(), Uuid::new_v4())?;
+        let runtime = Runtime::initialize(config).await?;
+        let proofs = [crate::intake::tests::proof("private-health-input".into())];
+        runtime.journal.lock().unwrap().admit_at(
+            &ValidatedIntake {
+                mint_id: "historical",
+                policy_version: "v1",
+                transport: Transport::Cashu,
+                source_ref: "private-source",
+                source_author: None,
+                proofs: &proofs,
+            },
+            300,
+        )?;
+        let future = crate::status::Status::read_at(&runtime.config, 200)?;
+        assert_eq!(future.health.queue.future_admission_timestamps, 1);
+        assert_eq!(future.health.queue.oldest_pending_age_seconds, None);
+        let db = rusqlite::Connection::open(directory.path().join("acquisition.sqlite"))?;
+        db.execute("DELETE FROM acquisition_admission_times", [])?;
+        let legacy = crate::status::Status::read_at(&runtime.config, 400)?;
+        assert_eq!(legacy.health.queue.pending_age_unknown, 1);
+        assert_eq!(legacy.health.queue.oldest_pending_age_seconds, None);
+        db.execute("DROP TABLE acquisition_admission_times", [])?;
+        let old_schema = crate::status::Status::read_at(&runtime.config, 400)?;
+        assert_eq!(old_schema.health.queue.pending_age_unknown, 1);
+        let recreated: bool = db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='acquisition_admission_times')",
+            [],
+            |r| r.get(0),
+        )?;
+        assert!(!recreated);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn health_detail_truncation_does_not_truncate_custody_or_pending_totals() -> Result<()> {
+        use crate::journal::{Transport, ValidatedIntake};
+        let directory = crate::test_directory()?;
+        keys(directory.path())?;
+        let config = configuration(directory.path(), Uuid::new_v4(), Uuid::new_v4())?;
+        let runtime = Runtime::initialize(config).await?;
+        let mut last = None;
+        for index in 0..70 {
+            let proofs = [crate::intake::tests::proof(format!(
+                "private-health-proof-{index}"
+            ))];
+            last = Some(runtime.journal.lock().unwrap().admit_at(
+                &ValidatedIntake {
+                    mint_id: &format!("mint-{index:03}"),
+                    policy_version: "v1",
+                    transport: Transport::Cashu,
+                    source_ref: &format!("private-source-{index}"),
+                    source_author: None,
+                    proofs: &proofs,
+                },
+                100,
+            )?);
+        }
+        let Some(crate::journal::Admission::New(id)) = last else {
+            panic!("expected new receipt")
+        };
+        {
+            let mut journal = runtime.journal.lock().unwrap();
+            journal.prepare(id, b"synthetic original swap")?;
+            journal.start_acquisition(id)?;
+            journal.record_acquired(id, 7, 1, b"synthetic owned outputs")?;
+        }
+        let status = crate::status::Status::read_at(&runtime.config, 200)?;
+        assert_eq!(status.health.mints.len(), 64);
+        assert!(status.health.mints_truncated);
+        assert!(status.health.mints.iter().all(|m| !m.configured));
+        assert_eq!(status.health.queue.pending_receipts, 70);
+        assert_eq!(status.health.totals.unverified_input_sats, 552);
+        assert_eq!(status.health.totals.journal_custody_sats, 7);
+        assert!(
+            status
+                .health
+                .mints
+                .iter()
+                .all(|m| m.funds.journal_custody_sats == 0)
+        );
+        let body = serde_json::to_string(&status)?;
+        assert!(!body.contains("private-health-proof") && !body.contains("private-source"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn health_reports_retained_core_epochs_and_invalid_ack_json_without_leaks() -> Result<()>
+    {
+        use crate::journal::{Admission, Transport, ValidatedIntake};
+        use lightning_goats_cashu_receipt::acknowledgment::{Acknowledgment, ImportResult};
+        let directory = crate::test_directory()?;
+        keys(directory.path())?;
+        let mut config = configuration(directory.path(), Uuid::new_v4(), Uuid::new_v4())?;
+        let expected_core = Uuid::new_v4();
+        config.receipt_delivery = Some(crate::receipt_outbox::Config {
+            enabled: false,
+            socket: "/run/core/receipts.sock".into(),
+            core_epoch: expected_core,
+            maximum_attempts: 0,
+            deadline_seconds: 5,
+        });
+        let runtime = Runtime::initialize(config).await?;
+        let proofs = [crate::intake::tests::proof("private-ack-proof".into())];
+        let previous_core = Uuid::new_v4();
+        let id = {
+            let mut journal = runtime.journal.lock().unwrap();
+            let Admission::New(id) = journal.admit_at(
+                &ValidatedIntake {
+                    mint_id: "fixture",
+                    policy_version: "v1",
+                    transport: Transport::Cashu,
+                    source_ref: "private-ack-source",
+                    source_author: None,
+                    proofs: &proofs,
+                },
+                100,
+            )?
+            else {
+                panic!("expected new receipt")
+            };
+            journal.prepare(id, b"fixture original swap")?;
+            journal.start_acquisition(id)?;
+            journal.record_acquired(id, 8, 0, b"fixture owned outputs")?;
+            let receipt = journal.export_receipt(id)?;
+            let wire = crate::receipt_wire::from_private(runtime.config.wallet_instance, &receipt)?;
+            let ack = Acknowledgment {
+                version: 1,
+                wallet_instance: runtime.config.wallet_instance,
+                wallet_epoch: runtime.config.wallet_epoch,
+                core_epoch: previous_core,
+                result: ImportResult {
+                    acquisition_id: id,
+                    receipt_digest: hex::encode(wire.digest()?),
+                    event_seq: 1,
+                    net_sats: 8,
+                    original_feed_credit_sats: 8,
+                },
+            };
+            journal.acknowledge_verified_credit(
+                runtime.config.wallet_instance,
+                previous_core,
+                id,
+                &ack.encode()?,
+            )?;
+            id
+        };
+        let status = crate::status::Status::read_at(&runtime.config, 200)?;
+        assert_eq!(status.health.expected_core_epoch, Some(expected_core));
+        assert_eq!(
+            status.health.retained_acknowledgments_other_core_epochs,
+            Some(1)
+        );
+        assert_eq!(status.health.malformed_retained_acknowledgments, 0);
+        let db = rusqlite::Connection::open(directory.path().join("acquisition.sqlite"))?;
+        // Disposable corruption fixture: malformed data must be counted, not echoed.
+        db.execute(
+            "UPDATE acquisitions SET core_ack=? WHERE id=?",
+            rusqlite::params![b"private-invalid-ack".as_slice(), id.to_string()],
+        )?;
+        let status = crate::status::Status::read_at(&runtime.config, 200)?;
+        assert_eq!(status.health.malformed_retained_acknowledgments, 1);
+        let body = serde_json::to_string(&status)?;
+        assert!(!body.contains("private-invalid-ack") && !body.contains("private-ack-proof"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn mismatched_wallet_health_is_fenced_and_cannot_resume_runtime() -> Result<()> {
+        let directory = crate::test_directory()?;
+        keys(directory.path())?;
+        let original_epoch = Uuid::new_v4();
+        let original_instance = Uuid::new_v4();
+        let runtime = Runtime::initialize(configuration(
+            directory.path(),
+            original_instance,
+            original_epoch,
+        )?)
+        .await?;
+        let wrong = configuration(directory.path(), Uuid::new_v4(), Uuid::new_v4())?;
+        let status = crate::status::Status::read_at(&wrong, 200)?;
+        assert!(!status.registration_matches && status.recovery_required);
+        assert_eq!(status.observed_wallet_epoch, original_epoch);
+        assert_eq!(status.observed_wallet_instance, original_instance);
+        drop(runtime);
+        assert!(Runtime::open(wrong).await.is_err());
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn status_is_read_only_bounded_and_available_while_the_writer_is_active() -> Result<()> {
         use crate::journal::{HoldReason, Transport, ValidatedIntake};
         use cdk::{
@@ -480,14 +674,17 @@ mod tests {
                 Secret::new(format!("private-proof-secret-{index}")),
                 runtime.policy.receiver,
             )];
-            let admitted = runtime.journal.lock().unwrap().admit(&ValidatedIntake {
-                mint_id: "fixture",
-                policy_version: "v1",
-                transport: Transport::Cashu,
-                source_ref: &format!("private-source-{index}"),
-                source_author: None,
-                proofs: &proofs,
-            })?;
+            let admitted = runtime.journal.lock().unwrap().admit_at(
+                &ValidatedIntake {
+                    mint_id: "fixture",
+                    policy_version: "v1",
+                    transport: Transport::Cashu,
+                    source_ref: &format!("private-source-{index}"),
+                    source_author: None,
+                    proofs: &proofs,
+                },
+                100 + index,
+            )?;
             if let crate::journal::Admission::New(id) = admitted {
                 ids.push(id);
             }
@@ -506,10 +703,16 @@ mod tests {
             dir.path().join("wallet-seed.bin"),
             dir.path().join("seed-hidden"),
         )?;
-        let status = crate::status::Status::read(&runtime.config)?;
+        let status = crate::status::Status::read_at(&runtime.config, 20000)?;
         assert_eq!(status.state_counts.get("validated"), Some(&64));
         assert_eq!(status.state_counts.get("held_for_reconciliation"), Some(&1));
         assert_eq!(status.exhausted_acquisitions, 1);
+        assert_eq!(status.health.queue.oldest_pending_age_seconds, Some(19900));
+        assert_eq!(status.health.queue.scheduled_lag_seconds, Some(19890));
+        assert_eq!(status.health.queue.pending_age_unknown, 0);
+        assert_eq!(status.health.totals.unverified_input_sats, 520);
+        assert_eq!(status.health.totals.journal_custody_sats, 0);
+        assert!(status.registration_matches);
         assert_eq!(status.operations.len(), 64);
         assert!(status.operations_truncated);
         assert_eq!(status.operations[0].acquisition_id, ids[64]);
@@ -520,12 +723,12 @@ mod tests {
         let json = serde_json::to_string(&status)?;
         assert!(!json.contains("private-proof-secret") && !json.contains("private-source"));
         assert_eq!(runtime.journal.lock().unwrap().state(ids[0])?, "validated");
-        let repeated = crate::status::Status::read(&runtime.config)?;
+        let repeated = crate::status::Status::read_at(&runtime.config, 20000)?;
         assert_eq!(serde_json::to_string(&repeated)?, json);
         assert!(!repeated.recovery_required);
         let marker = dir.path().join("CASHU_RECOVERY_REQUIRED");
         std::os::unix::fs::symlink("absent-recovery-target", &marker)?;
-        let fenced = crate::status::Status::read(&runtime.config)?;
+        let fenced = crate::status::Status::read_at(&runtime.config, 20000)?;
         assert!(fenced.recovery_required);
         assert!(std::fs::symlink_metadata(&marker)?.file_type().is_symlink());
         assert!(!dir.path().join("absent-recovery-target").exists());

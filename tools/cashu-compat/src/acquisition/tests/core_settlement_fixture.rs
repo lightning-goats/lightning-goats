@@ -792,6 +792,30 @@ async fn combined_settlement_wallet_child() -> Result<()> {
     if sdk_sender {
         println!("COMBINED_WALLET_CASHU_TS_SENDER_VERIFIED");
     }
+    let health_db = rusqlite::Connection::open(&path)?;
+    let health = crate::status::Funds::read(&health_db, None, i64::try_from(now)?)?;
+    assert_eq!(health.acquired_net_sats, 400);
+    assert_eq!(health.unverified_input_sats, 0);
+    assert_eq!(health.journal_custody_sats, u64::from(returned_change));
+    assert_eq!(health.pending_input_reserved_sats, 0);
+    assert_eq!(health.ambiguous_submitted_input_sats, 0);
+    assert_eq!(
+        health.reported_treasury_deposit_sats,
+        report.sources.iter().map(|s| s.deposit_sats).sum::<u64>()
+    );
+    assert_eq!(
+        health.receive_fee_sats,
+        receipts.iter().map(|r| r.receive_fee_sats).sum::<u64>()
+    );
+    assert_eq!(
+        health.completed_conversion_fee_sats,
+        report.sources.iter().map(|s| s.fee_sats).sum::<u64>()
+    );
+    assert_eq!(
+        health.total_accounted_fee_sats,
+        health.receive_fee_sats + health.completed_conversion_fee_sats
+    );
+    println!("COMBINED_WALLET_HEALTH_ACCOUNTING_VERIFIED");
     println!("COMBINED_WALLET_TWO_ACQUISITIONS_ONE_MELT");
     Ok(())
 }

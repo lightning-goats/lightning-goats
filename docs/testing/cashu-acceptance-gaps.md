@@ -53,6 +53,15 @@ passes eight public/synthetic tests, including real terminal echo suppression
 and private atomic file creation. No operator phrase was supplied to Codex or
 installed into a runtime. The receiving key and NIP-46 credentials remain separate.
 
+The [private operational health checkpoint](cashu-private-health-20261117.json)
+passes 175 wallet tests (seven explicitly ignored fixture entry points), strict
+Clippy/format/vendor/dependency gates and eight explicit financial composition
+cases with health-accounting checks. It reports journal custody/fees, queue age
+and schedule lag, legacy unknown times, future timestamps, retained core epochs
+and fenced wallet identity mismatches without reading keys or exposing proofs.
+Global totals include historical mints beyond the detail limit. These are
+private diagnostics; provider balances and installed runtime health remain separate.
+
 | Required behavior / artifact | Established evidence | Required work still open |
 | --- | --- | --- |
 | Existing native Lightning, NIP-57 and paid history | Core regression suites and historical live checkpoints; no production change in this workstream | Final selected-source regression and approved installed/provider acceptance. |
@@ -75,7 +84,7 @@ installed into a runtime. The receiving key and NIP-46 credentials remain separa
 | Private descriptor IPC, HTTP and overlay snapshots | Pre-correction increment passes 637 core/156 wallet tests and all gates | The [positive separate-UID HTTP/snapshot checkpoint](cashu-request-acceptance-20261116.json) passes; keep final selected-source and sender-status composition qualification separate. |
 | Requested two-QR layout at 1080p/720p | 44 browser cases, long-request decoding, card/banner/effect collisions | Corrected native output requalification, actual wallets and physical phone scans. |
 | Edge CORS, body limits and log privacy | Four real isolated nginx tests; application CORS/default-off tests | Installed CDN/WAF suppression, real browser-wallet cross-origin POST/OPTIONS, sender retry behavior and ingress abuse acceptance. |
-| Protected operational commands and useful private health | Wallet config/status/request/announcement commands; separate paused treasury controls | Protected financial-plan release with preview, approval and stopped-service checks is now integrated and under qualification; explicit root/CLI acceptance, constrained settlement/reconcile/held-policy/backup commands and custody/age/lag health remain incomplete. |
+| Protected operational commands and useful private health | Wallet config/status/request/announcement commands; separate paused treasury controls; qualified private custody/fee/age/lag/identity diagnostics | Protected financial-plan release has explicit root/CLI acceptance below. Constrained settlement/reconcile/held-policy/backup commands and installed operational acceptance remain incomplete. |
 | Coordinated backup inventory and rollback fences | Existing independent epoch/startup checks; old maintenance tool refuses Cashu state; an explicit recovery marker now fences wallet and signer startup before database access, with native verification pending | The offline verifier now checks hashes, private files, database integrity, expected core/wallet/signer registrations and current-registration receipt/acknowledgment agreement in both directions, plus retained treasury report agreement and exact ready mint-namespace inventory (14 synthetic tests). Writer quiescence, actual native-store snapshots, full treasury/CDK ownership reconciliation, wallet-only/core-only rollback, coordinated restore and historical-key recovery remain open. |
 | Inactive install/package, current docs and pinned dependencies | Inactive unit/edge examples; pinned CDK/SQLite vendor verification; initial November inventory | Full install/package/network/backup rehearsal and selected-commit CI. The operator skipped the security review on 2026-11-17; the scan was canceled before validation/completion and supplies no completed-review claim. |
 | Public November package and demo | Pre-November and Cashu starting references recorded; fixture evidence retained | Reviewable public commits/PR/tag, distribution license notices, current submission rules, compatibility matrix and honestly labeled recording. The checksum-verified inventory covers 462 entries from both lock graphs with no unresolved entries; it is not a linked-binary or distribution-notice inventory. |

@@ -1,5 +1,17 @@
 # Lightning Goats implementation status
 
+Cashu private health update **2026-11-17**: the
+[operational diagnostic checkpoint](testing/cashu-private-health-20261117.json)
+passes 175 wallet tests (seven ignored), strict Clippy/format/vendor/dependency
+gates and eight full HTTP/receipt/treasury composition cases with independent
+health-accounting assertions. Private status now reports journal custody and
+fees, queue age/lag, unknown legacy ages, future timestamps, retained core epochs
+and fenced wallet registration mismatches. It reads no keys or provider state;
+journal values are not current balances or spend permission. Constrained
+operational commands, complete coordinated recovery and installed acceptance
+remain open. No new runtime identity, key, service or financial/physical activation
+was performed by this increment.
+
 Cashu intake update **2026-11-17**: durable
 [backpressure](testing/cashu-intake-backpressure-20261117.json) bounds uncredited
 work and replay aliases. [Independent receives after compensated rejection](testing/cashu-mint-progress-20261117.json)

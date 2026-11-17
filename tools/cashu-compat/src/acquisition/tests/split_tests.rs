@@ -487,6 +487,14 @@ async fn executor_case(
     assert_eq!(harness.mint.quote_attempts.load(Ordering::SeqCst), 1);
     assert_eq!(harness.mint.melt_attempts.load(Ordering::SeqCst), 0);
     {
+        let health_db = rusqlite::Connection::open(&path)?;
+        let health = crate::status::Funds::read(&health_db, None, i64::try_from(now)?)?;
+        assert_eq!(health.acquired_net_sats, 16);
+        assert_eq!(health.journal_custody_sats, 15);
+        assert_eq!(health.split_preparation_fee_sats, 1);
+        assert_eq!(health.unsettled_preparation_fee_sats, 1);
+        assert_eq!(health.completed_conversion_fee_sats, 0);
+        assert_eq!(health.total_accounted_fee_sats, health.receive_fee_sats + 1);
         let mut locked = journal.lock().unwrap();
         let selected = locked.select_treasury_proofs(&policy.binding, issued.intent.id, now)?;
         assert_eq!(selected[&acquisition].len(), 1);
@@ -723,6 +731,14 @@ async fn worker_case(
     assert_eq!(report.sources[0].deposit_sats, 3);
     assert_eq!(report.sources[0].fee_sats, 2); // one split fee plus one melt input fee
     assert_eq!(report.sources[0].change_sats, 0);
+    let health_db = rusqlite::Connection::open(&path)?;
+    let health = crate::status::Funds::read(&health_db, None, i64::try_from(now)?)?;
+    assert_eq!(health.journal_custody_sats, 11);
+    assert_eq!(health.split_preparation_fee_sats, 1);
+    assert_eq!(health.unsettled_preparation_fee_sats, 0);
+    assert_eq!(health.completed_conversion_fee_sats, 2);
+    assert_eq!(health.reported_treasury_deposit_sats, 3);
+    assert_eq!(health.total_accounted_fee_sats, health.receive_fee_sats + 2);
     assert_eq!(harness.mint.executions.load(Ordering::SeqCst), 2);
     assert_eq!(harness.mint.quote_attempts.load(Ordering::SeqCst), 1);
     assert_eq!(harness.mint.melt_attempts.load(Ordering::SeqCst), 1);

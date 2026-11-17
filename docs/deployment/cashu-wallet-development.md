@@ -53,9 +53,38 @@ first). Details include acquisition/mint IDs, coarse hold reasons, attempts and
 persisted next-attempt timestamps. A truncation flag makes incomplete details
 explicit. Output is private operator data; do not publish it in the overlay.
 It does not expose proof bodies, secrets, memos, source authors or raw mint
-requests/replies. It verifies journal instance/epoch but does not load/verify
-private keys, query the core, establish current custody valuation, measure
-historical pending age, or certify worker liveness.
+requests/replies. It does not load private keys, query providers/the core or
+certify worker liveness. Expected and observed wallet instance/epoch are explicit;
+a mismatch reports `registration_matches:false` and `recovery_required:true`.
+This diagnostic does not relax the daemon's existing startup registration fence.
+
+Private `health` now reports global journal accounting plus at most 64 configured
+or historical mint summaries. `mints_truncated` never truncates global totals.
+`unverified_input_sats` is submitted face value, not owned money.
+`journal_custody_sats` is acquired net value minus completed treasury consumption
+and committed preparation fees for unfinished melts. It can still include value
+whose external outcome is ambiguous; it is not a current mint balance or spend
+permission. `ambiguous_submitted_input_sats` exposes that unresolved whole-input
+bound separately. Pending reservations are original input allowances, so they can
+include preparation costs already consumed and must not be added to custody.
+
+Receive fees, completed conversion fees, split preparation fees and unfinished
+preparation fees are separate. Total accounted fees count receive fees plus
+completed conversion costs plus unfinished preparation costs; completed split
+fees are already inside completed conversion costs. Reported treasury deposits
+are wallet journal claims, not independent Strike verification. The rolling
+24-hour execution-admission count/input are admitted budgets, not expenditure.
+
+New acquisition timestamps commit with admission and never change on retries.
+Queue health exposes oldest known pending age and overdue persisted schedule lag.
+Older records have unknown age; status never backfills a guessed receipt time or
+creates the optional timing table. Future timestamps are counted separately to
+expose clock rollback without reporting negative ages. Schedule lag describes
+retained deadlines even when work is paused or attempts are exhausted.
+Historical core acknowledgment epochs are compared only with the configured
+expected core epoch. Different epochs are diagnostic, not proof that an earlier
+credit was invalid or that a currently running core matches the configuration.
+Invalid acknowledgment JSON is counted without echoing its contents.
 
 
 Optional `relay_intake` configuration enables the bounded NIP-61 reader only when

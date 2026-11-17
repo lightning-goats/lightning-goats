@@ -5,12 +5,18 @@ use rusqlite::{Connection, OpenFlags, params};
 use serde::Serialize;
 use std::{collections::BTreeMap, os::unix::fs::MetadataExt, time::Duration};
 use uuid::Uuid;
+mod health;
+pub use health::{Funds, Health, MintFunds, Queue};
 
 const DETAIL_LIMIT: usize = 64;
 #[derive(Serialize)]
 pub struct Status {
     pub wallet_instance: Uuid,
     pub wallet_epoch: Uuid,
+    pub observed_wallet_instance: Uuid,
+    pub observed_wallet_epoch: Uuid,
+    pub registration_matches: bool,
+    pub health: Health,
     pub recovery_required: bool,
     pub cdk_namespace_layout: Option<u32>,
     pub mint_namespaces: Vec<MintNamespace>,
@@ -75,6 +81,16 @@ pub struct Operation {
 impl Status {
     /// Safe while the runtime holds its writer lock. This connection cannot initialize state.
     pub fn read(config: &Config) -> Result<Self> {
+        let now = i64::try_from(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_secs(),
+        )?;
+        Self::read_at(config, now)
+    }
+
+    pub(crate) fn read_at(config: &Config, now: i64) -> Result<Self> {
+        ensure!(now >= 0, "invalid status observation time");
         config.prepare()?;
         config.require_runtime_identity()?;
         // Report the fence without following it or interpreting its contents.
@@ -114,11 +130,15 @@ impl Status {
             [],
             |r| r.get(0),
         )?;
+        let observed_wallet_epoch = Uuid::parse_str(&epoch)?;
+        let observed_wallet_instance = Uuid::parse_str(&instance)?;
         ensure!(
-            epoch == config.wallet_epoch.to_string()
-                && instance == config.wallet_instance.to_string(),
-            "status registration mismatch"
+            !observed_wallet_epoch.is_nil() && !observed_wallet_instance.is_nil(),
+            "invalid retained wallet identity"
         );
+        let registration_matches = observed_wallet_epoch == config.wallet_epoch
+            && observed_wallet_instance == config.wallet_instance;
+        let health = Health::read(&tx, config, now)?;
         let mut state_counts = BTreeMap::new();
         {
             let mut query = tx.prepare("SELECT state,COUNT(*) FROM acquisitions GROUP BY state")?;
@@ -234,7 +254,11 @@ impl Status {
         Ok(Self {
             wallet_instance: config.wallet_instance,
             wallet_epoch: config.wallet_epoch,
-            recovery_required,
+            observed_wallet_instance,
+            observed_wallet_epoch,
+            registration_matches,
+            health,
+            recovery_required: recovery_required || !registration_matches,
             cdk_namespace_layout,
             mint_namespaces_truncated: namespace_count > mint_namespaces.len() as u64,
             mint_namespaces,

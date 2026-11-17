@@ -388,3 +388,27 @@ Coverage is in native `reward_cutover`/`reward_review` tests and protected-file
 The latter mock services/native calls; root UID/native-store qualification runs
 separately. Combined installed-systemd, provider/recipient, recovery adoption and
 explicit production activation remain separate acceptance requirements.
+
+## Dated Cashu exception: private operational health
+
+For the [Cashu implementation plan](../planning/cashu-nutnovember-implementation-plan.md),
+qualify the protected wallet status command with its isolated wallet gates.
+It must remain readable with hidden keys and an active writer, without modifying
+journals, initializing missing stores or querying a provider. Configured/observed
+wallet identity mismatches must report a recovery fence while daemon startup
+continues to refuse them. Retained core acknowledgment epochs are diagnostics,
+not evidence of the live core's identity.
+
+Check timestamp replay/restart preservation, legacy unknown ages, missing timing
+tables, future timestamps, overdue schedules, invalid acknowledgment JSON and
+detail truncation beyond 64 historical mints. Global financial totals must include
+value outside the displayed mint detail list. Unverified input face value must
+never be reported as acquired custody or credit.
+
+Use actual CDK split/melt regressions and the explicit combined HTTP/receipt/
+treasury fixture to verify receive fees, completed conversion costs, unfinished
+preparation fees, dust change and pending reservations. Completed split fees
+must not be counted twice. The combined runner requires the wallet's health
+accounting marker; older artifacts without that check must refuse qualification.
+Mocked deposits/simulated feed confirmation do not qualify installed providers,
+real mint custody or physical dispatch.

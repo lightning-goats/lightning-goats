@@ -155,6 +155,8 @@ def main():
                 log.seek(0)
                 output = log.read()
                 markers = [marker]
+                if index == 1:
+                    markers.append('COMBINED_WALLET_HEALTH_ACCOUNTING_VERIFIED')
                 if args.repeat_request:
                     markers.append(['COMBINED_CORE_REUSABLE_REQUEST_TWO_PAYMENTS_VERIFIED','COMBINED_WALLET_REUSABLE_REQUEST_TWO_PAYMENTS_VERIFIED'][index])
                 if args.cashu_ts_sender and index == 1:
@@ -197,7 +199,7 @@ def main():
             if result != expected:
                 raise ValueError('combined fixture result differs from expected conservation')
             print(json.dumps({'result': 'CASHU_COMBINED_SETTLEMENT_VERIFIED', 'artifacts_sha256': hashes,
-                              'financial_result': result, 'live_provider': False,
+                              'financial_result': result, 'live_provider': False, 'wallet_health_verified': True,
                               'nonzero_fees': args.fees, 'returned_change': args.fees and not args.no_change,
                               'lost_melt_reply': args.lost_reply, 'strike_before_wallet_report': args.lost_reply,
                               'wallet_recovery_while_paused': args.lost_reply,

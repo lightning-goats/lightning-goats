@@ -4,6 +4,12 @@ Development contract for implementation-plan section 13. This is an inventory
 and reconciliation contract; coordinated backup/restore tooling and destructive
 rollback fixtures remain incomplete. No production maintenance is authorized.
 
+The optional `acquisition_admission_times` table is observational metadata inside
+the complete wallet journal. New records commit with admission; older records
+may legitimately lack a timestamp. Missing timing metadata means unknown age,
+never permission to replace financial identities, retry a new operation, infer
+settlement or release a recovery fence. Status reads do not migrate old stores.
+
 A recovery set must identify one quiesced checkpoint across these components:
 
 | Component | Required retained material | Why it is required |

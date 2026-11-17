@@ -101,6 +101,10 @@ CREATE TABLE IF NOT EXISTS receive_status_capabilities (
  acquisition_id TEXT PRIMARY KEY REFERENCES acquisitions(id),
  capability TEXT NOT NULL UNIQUE CHECK(length(capability)=64)
 );
+CREATE TABLE IF NOT EXISTS acquisition_admission_times (
+ acquisition_id TEXT PRIMARY KEY REFERENCES acquisitions(id),
+ admitted_at INTEGER NOT NULL CHECK(admitted_at>=0)
+);
 CREATE TRIGGER IF NOT EXISTS receive_status_capabilities_no_update
  BEFORE UPDATE ON receive_status_capabilities BEGIN SELECT RAISE(ABORT,'retained receipt capability'); END;
 CREATE TRIGGER IF NOT EXISTS receive_status_capabilities_no_delete
@@ -441,6 +445,16 @@ impl Journal {
     /// All-or-nothing admission: overlapping old/new sets are rejected before
     /// any fresh proof is claimed. Proof identity excludes memo/witness/transport.
     pub fn admit(&mut self, intake: &ValidatedIntake<'_>) -> Result<Admission> {
+        let now = i64::try_from(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_secs(),
+        )?;
+        self.admit_at(intake, now)
+    }
+
+    pub(crate) fn admit_at(&mut self, intake: &ValidatedIntake<'_>, now: i64) -> Result<Admission> {
+        ensure!(now >= 0, "invalid intake observation time");
         ensure!(
             !intake.proofs.is_empty() && intake.proofs.len() <= self.max_proofs,
             "invalid proof count"
@@ -532,6 +546,10 @@ impl Journal {
                 params![id.to_string(), intake.mint_id, intake.policy_version, intake.transport.as_str(), intake.source_ref, i64::try_from(proofs.len())?, gross])?;
             tx.execute("INSERT INTO acquisition_context(acquisition_id,proofs,source_author) VALUES(?,?,?)",
                 params![id.to_string(),admitted_proofs,intake.source_author])?;
+            tx.execute(
+                "INSERT INTO acquisition_admission_times(acquisition_id,admitted_at) VALUES(?,?)",
+                params![id.to_string(), now],
+            )?;
             for (y, evidence) in proofs {
                 tx.execute("INSERT INTO proof_index(mint_id,unit,y,evidence,acquisition_id) VALUES(?,'sat',?,?,?)",
                     params![intake.mint_id, y, evidence, id.to_string()])?;
@@ -1104,6 +1122,34 @@ mod tests {
             Admission::New(id) => id,
             Admission::Duplicate(_) => panic!("expected new acquisition"),
         }
+    }
+
+    #[test]
+    fn admission_time_is_atomic_and_retries_never_rewrite_it() -> Result<()> {
+        let directory = crate::test_directory()?;
+        let path = directory.path().join("observed.sqlite");
+        let epoch = Uuid::new_v4();
+        let proofs = [proof("timed-proof")];
+        let mut journal = Journal::open(&path, epoch, 8)?;
+        assert!(
+            journal
+                .admit_at(&intake(&proofs, "timed", Transport::Cashu), -1)
+                .is_err()
+        );
+        let first = new_id(journal.admit_at(&intake(&proofs, "timed", Transport::Cashu), 100)?);
+        drop(journal);
+        let mut journal = Journal::open(&path, epoch, 8)?;
+        assert_eq!(
+            journal.admit_at(&intake(&proofs, "later-alias", Transport::Cashu), 999)?,
+            Admission::Duplicate(first)
+        );
+        let (count, time): (u64, i64) = journal.connection.query_row(
+            "SELECT COUNT(*),MIN(admitted_at) FROM acquisition_admission_times",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        assert_eq!((count, time), (1, 100));
+        Ok(())
     }
 
     #[test]

@@ -24,7 +24,10 @@ transfer credit. The matched source/CI trees and artifact hashes are retained in
 that checkpoint. Installed Runtime, Android, live provider and physical acceptance
 remain open. The separate [native backup-copy helper](testing/cashu-copy-normalization-local-20261117.json)
 passes local main/WAL, row-ID/signed-byte and 21 refusal/interruption checks,
-strict Clippy and its CLI privacy test; fresh selected-source CI is pending.
+strict Clippy and its CLI privacy test. The later
+[FIFO correction](testing/cashu-copy-special-files-20261117.json) prevents blocking
+before file-type validation and passes 24 refusal/interruption cases in isolated
+root fixtures; its selected-source CI is pending.
 The [runbook](deployment/cashu-backup-collection.md) keeps writer quiescence,
 coordinated encrypted collection and funded recovery explicitly unfinished.
 

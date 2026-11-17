@@ -87,13 +87,13 @@ def main():
             expected = connection.execute('SELECT rowid,note,signature FROM retained ORDER BY rowid').fetchall()
             return selected, connection, expected
 
-        def command(selected, input_name='raw-state.db', output_name='normalized-state.db', maximum=8*1024*1024, prefix=(), limit=None):
+        def command(selected, input_name='raw-state.db', output_name='normalized-state.db', maximum=8*1024*1024, prefix=(), limit=None, deadline=90):
             def bounded_size():
                 resource.setrlimit(resource.RLIMIT_CORE, (0,0))
                 resource.setrlimit(resource.RLIMIT_FSIZE, (4096,4096))
             return subprocess.run([*prefix,str(cli),'normalize-copy',str(selected),input_name,output_name,str(maximum)],
                 stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
-                env={'PATH':'/usr/bin:/bin'},timeout=90,preexec_fn=bounded_size if limit else None)
+                env={'PATH':'/usr/bin:/bin'},timeout=deadline,preexec_fn=bounded_size if limit else None)
 
         positive, negative = 0, 0
         for wal in (False,True):
@@ -133,8 +133,8 @@ def main():
             positive+=1
             negative+=1
 
-        for case in ('missing-marker','bad-marker','marker-link','broad-directory','input-link','input-hardlink',
-                     'wrong-owner','broad-file','wal-link','rollback-journal','existing-output','orphan-output-wal',
+        for case in ('missing-marker','bad-marker','marker-link','marker-fifo','broad-directory','input-link','input-fifo','input-hardlink',
+                     'wrong-owner','broad-file','wal-link','wal-fifo','rollback-journal','existing-output','orphan-output-wal',
                      'byte-bound','input-traversal','output-traversal','non-root'):
             selected, connection, _ = copied('negative-'+case)
             original=selected/'raw-state.db'
@@ -144,13 +144,18 @@ def main():
             elif case=='bad-marker': (selected/'INCOMPLETE').write_bytes(b'not-an-approved-copy-stage')
             elif case=='marker-link':
                 (selected/'INCOMPLETE').unlink(); (selected/'INCOMPLETE').symlink_to('absent')
+            elif case=='marker-fifo':
+                (selected/'INCOMPLETE').unlink(); os.mkfifo(selected/'INCOMPLETE',0o600)
             elif case=='broad-directory': selected.chmod(0o755)
             elif case=='input-link':
                 original.rename(selected/'retained.db'); original.symlink_to('retained.db')
+            elif case=='input-fifo':
+                original.rename(selected/'retained.db'); os.mkfifo(original,0o600)
             elif case=='input-hardlink': os.link(original,selected/'retained-hardlink.db')
             elif case=='wrong-owner': os.chown(original,uid,uid)
             elif case=='broad-file': original.chmod(0o644)
             elif case=='wal-link': (selected/'raw-state.db-wal').symlink_to('absent-wal')
+            elif case=='wal-fifo': os.mkfifo(selected/'raw-state.db-wal',0o600)
             elif case=='rollback-journal': (selected/'raw-state.db-journal').touch(mode=0o600)
             elif case=='existing-output': (selected/'normalized-state.db').write_bytes(b'preserve-existing-output')
             elif case=='orphan-output-wal': (selected/'normalized-state.db-wal').touch(mode=0o600)
@@ -159,13 +164,14 @@ def main():
             elif case=='output-traversal': options['output_name']='../private-output-token'
             elif case=='non-root':
                 options['prefix']=('/usr/bin/setpriv',f'--reuid={uid}',f'--regid={uid}','--clear-groups','--no-new-privs','--')
+            if case.endswith('-fifo'): options['deadline']=3
             result=command(selected,**options)
             assert result.returncode!=0 and result.stdout==b'' and result.stderr==ERROR, case
             if case not in ('existing-output',):
                 assert not (selected/'normalized-state.db').exists(),case
             else:
                 assert (selected/'normalized-state.db').read_bytes()==b'preserve-existing-output'
-            retained=selected/'retained.db' if case=='input-link' else original
+            retained=selected/'retained.db' if case in ('input-link','input-fifo') else original
             assert digest(retained)==before
             connection.close()
             negative+=1

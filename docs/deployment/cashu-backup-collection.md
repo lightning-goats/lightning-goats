@@ -2,9 +2,12 @@
 
 The coordinated, encrypted production backup collector remains unfinished.
 `lightning-goats-cashu-statectl normalize-copy` is its first native primitive.
-The [local native checkpoint](../testing/cashu-copy-normalization-local-20261117.json)
-passes two positive and 21 refusal/interruption cases; selected-source CI is
-pending. It opens only explicitly supplied private copies;
+The initial [local native checkpoint](../testing/cashu-copy-normalization-local-20261117.json)
+passes two positive and 21 refusal/interruption cases. The later
+[special-file correction](../testing/cashu-copy-special-files-20261117.json)
+passes two positive and 24 refusal/interruption cases, including marker/main/WAL
+FIFOs with three-second fixture deadlines; its selected-source CI is pending.
+It opens only explicitly supplied private copies;
 it neither stops services nor loads wallet keys. Do not use it on installed state.
 The [recovery inventory](cashu-recovery-inventory.md) remains authoritative for
 the complete checkpoint, historical policies and recovery fences.
@@ -26,7 +29,8 @@ database with committed WAL data is incomplete.
 The stage must be a canonical absolute directory, mode 0700 or stricter, beneath
 root-owned ancestors with no group/other write permission. Every input and marker
 must be a root-owned, private regular file with one link; aliases and symlinks
-refuse. The stage must contain `INCOMPLETE`, mode 0600 or stricter, with exactly:
+refuse. Descriptor opens use `O_NONBLOCK` so FIFO inputs refuse promptly before
+SQLite access. The stage must contain `INCOMPLETE`, mode 0600 or stricter, with exactly:
 
 ```text
 LIGHTNING_GOATS_CASHU_BACKUP_COPY_V1

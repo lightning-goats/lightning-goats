@@ -267,7 +267,12 @@ impl Fixture {
         };
         let server = Server::bind(&config).await.unwrap();
         let task = tokio::spawn(server.run(self.core.clone(), mode));
-        (Client::new(config.socket, uid).unwrap(), task)
+        (
+            Client::new(config.socket, uid)
+                .unwrap()
+                .with_request_spacing(std::time::Duration::from_secs(1)),
+            task,
+        )
     }
 }
 async fn tick(f: &Fixture, worker: &Worker<Fake>) -> Result<Step> {

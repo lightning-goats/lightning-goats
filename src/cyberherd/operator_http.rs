@@ -248,12 +248,26 @@ async fn command(State(s): State<Service>, request: Request) -> Response {
         .operator_recorded(&s.owner, &proof, &command)
         .await
         .unwrap_or(false);
+    let availability = if !recorded
+        && matches!(
+            command.action,
+            super::operator::Action::Activate { .. } | super::operator::Action::Amount { .. }
+        ) {
+        match tokio::time::timeout(Duration::from_secs(2), s.core.safety()).await {
+            Ok(Ok(v)) => Some(v),
+            _ => None,
+        }
+    } else {
+        None
+    };
+    // Observe ordering last: a paced safety read must not leave the fence a
+    // second behind the stream before the mutation transaction even begins.
     let ordering = if recorded || matches!(command.action, super::operator::Action::Template { .. })
     {
         None
     } else {
         match tokio::time::timeout(
-            Duration::from_secs(1),
+            Duration::from_secs(2),
             super::operator::CoreFence::observe(&s.store, &s.owner, &s.core),
         )
         .await
@@ -262,17 +276,6 @@ async fn command(State(s): State<Service>, request: Request) -> Response {
             _ => return StatusCode::CONFLICT.into_response(),
         }
     };
-    let availability = if matches!(
-        command.action,
-        super::operator::Action::Activate { .. } | super::operator::Action::Amount { .. }
-    ) {
-        match tokio::time::timeout(Duration::from_secs(1), s.core.safety()).await {
-            Ok(Ok(v)) => v.current_availability(calendar::now().unwrap_or(-1)),
-            _ => Availability::Unknown,
-        }
-    } else {
-        Availability::Unknown
-    };
     let context = match s.store.public_targets(&s.policy, &s.timezone, now).await {
         Ok(Some(targets)) => Context {
             note: targets.iter().find(|t| t.kind == 1).cloned(),
@@ -280,12 +283,15 @@ async fn command(State(s): State<Service>, request: Request) -> Response {
         },
         _ => Context::default(),
     };
-    let feeder = match availability {
+    let now = calendar::now().unwrap_or(-1);
+    let feeder = match availability
+        .map(|v| v.current_availability(now))
+        .unwrap_or(Availability::Unknown)
+    {
         Availability::Ready => super::membership::FeederAvailability::Ready,
         Availability::Paused => super::membership::FeederAvailability::Paused,
         Availability::Unknown => super::membership::FeederAvailability::Unknown,
     };
-    let now = calendar::now().unwrap_or(-1);
     match s
         .store
         .operator_command(
@@ -552,6 +558,12 @@ mod tests {
                 .header(header::AUTHORIZATION, signature)
                 .body(body.clone())
         };
+        core.append_event(
+            "nostr_publication_attempt",
+            &serde_json::json!({"attempt":1}),
+        )
+        .await
+        .unwrap();
         let saved = send(signed.clone()).send().await.unwrap();
         assert_eq!(saved.status(), StatusCode::OK);
         let receipt: serde_json::Value = saved.json().await.unwrap();
@@ -588,7 +600,12 @@ mod tests {
         );
         assert_eq!(core.feed_credit_sats().await.unwrap(), 0);
         assert!(core.next_outbox_entry().await.unwrap().is_none());
-        assert!(core.events_after(0, 100).await.unwrap().is_empty());
+        assert_eq!(core.events_after(0, 100).await.unwrap().len(), 1);
+        assert_eq!(
+            store.core_cursor(&key(1)).await.unwrap().received_through,
+            1
+        );
+        assert!(store.ingress_head(&key(1)).await.unwrap().is_none());
         http_task.abort();
         core_task.abort();
     }

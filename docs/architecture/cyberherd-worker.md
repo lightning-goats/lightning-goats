@@ -41,9 +41,20 @@ stay financially valid and complete without creating membership points.
 
 Raw signed social staging and authenticated core ingestion append to the same
 ordered queue. This records first observation, rather than trusting payer/event
-timestamps to reorder already observed work. One blocked head remains before a
-feeding; missing profiles, unknown safety or incomplete discovery cannot silently
-skip it. A later-arriving backdated social event stays after that feeding.
+timestamps to reorder already observed work. Payments retain their position until
+resolved; unavailable paid eligibility cannot silently skip a payment before a
+feeding. Optional social input with an unavailable profile or eligibility is
+instead parked with an explicit durable disposition. Malformed or unsupported
+social input receives an ignored disposition before runtime reference lookup.
+Neither disposition grants membership, changes credit or resolves a payment.
+A later-arriving backdated social event stays after that feeding.
+
+Parked social input retains its signed event and existing bounded retry backoff.
+Only when pending ordered work has drained does one due retry receive a new queue
+position. It retains the original event/source identity and frozen interaction,
+so it cannot score twice or alter an earlier immutable feeding snapshot. Raw
+replay never reopens completed social work. Real storage, authentication and
+financial errors still fail closed; this is not a catch-all queue skip.
 
 Applied domain receipts survive a crash before queue completion. A retry uses the
 same frozen profile, increment and source, even if discovery/profile services are

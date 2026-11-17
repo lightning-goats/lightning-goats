@@ -261,8 +261,12 @@ impl Runtime {
             )
             .await?;
         draining(worker::poll_core(&self.store, owner, &self.client).await)?;
+        self.store.queue_optional_social_retry(owner, now).await?;
         if self.availability().await != FeederAvailability::Ready {
             self.store.defer_pending_payments(owner).await?;
+        }
+        if worker::screen_social_head(&self.store, owner, now).await? {
+            return Ok(Step::Ignored);
         }
         let policy = self.config.policy();
         let day = DayWindow::at(&self.config.timezone, now)?;
@@ -289,7 +293,8 @@ impl Runtime {
             )?;
         }
         // Profile lookup follows durable staging. The result is needed only
-        // for this head; a slow/missing profile cannot move another input ahead.
+        // for this head. Missing optional social profiles are parked by the
+        // worker; paid inputs retain their ordered retry semantics.
         let profile = match pubkey {
             Some(pubkey) => {
                 self.discovery

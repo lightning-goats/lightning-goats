@@ -139,8 +139,15 @@ impl CoreFence {
     ) -> Result<Self> {
         let cursor = store.core_cursor(owner).await?;
         let page = core
-            .events(Some(cursor.binding.epoch), cursor.received_through, 1)
+            .events(Some(cursor.binding.epoch), cursor.received_through, 128)
             .await?;
+        // Presentation events also advance the core stream. Catch up one
+        // authenticated page instead of waiting for the slower background poll
+        // to land on an otherwise constantly moving high-water mark. Financial
+        // inputs are staged through the normal atomic intake, never skipped;
+        // operator_command still refuses any pending confirmed feeding.
+        store.ingest_core(owner, &page).await?;
+        let cursor = store.core_cursor(owner).await?;
         if page.core_uid() != cursor.binding.core_uid || page.latest != cursor.received_through {
             bail!("operator edit awaits core intake catch-up");
         }

@@ -89,6 +89,12 @@ payment and source identities remain retained; recovery cannot re-admit them.
 
 Before a new roster/settings/reset command, the service obtains an authenticated
 core high-water observation matching the pinned epoch/UID and intake cursor. The
+observation first stages one bounded authenticated page through normal intake,
+so a tail of presentation records does not require a lucky background-poll race.
+An incomplete page leaves the edit held for another bounded retry. Payment and
+feeding inputs on that page retain their normal ordered identities; they are
+never ignored to permit an edit. Safety is read before the final high-water
+observation and checked again for freshness at mutation time. The
 same mutation transaction rechecks that cursor and a five-second freshness bound.
 It refuses to pass any pending confirmed-feeding barrier. Thus an HTTP edit cannot
 silently enter a feeding snapshot that is already waiting in ordered intake.

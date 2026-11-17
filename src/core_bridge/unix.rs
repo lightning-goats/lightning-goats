@@ -2,14 +2,22 @@
 //! connection gets one request. The peer never receives a database path/handle,
 //! signer credential, gateway client, grant method or feeder command.
 use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
-use std::{io::ErrorKind, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    io::ErrorKind,
+    path::PathBuf,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+    time::Duration,
+};
 
 use anyhow::{Context, Result, bail};
 use serde::{Serialize, de::DeserializeOwned};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{UnixListener, UnixStream},
-    sync::Semaphore,
+    sync::{Mutex, Notify, Semaphore},
     time::{Instant, timeout},
 };
 
@@ -80,6 +88,27 @@ struct ReadBudget {
     last: Instant,
 }
 
+struct RoleBudgets {
+    intake: ReadBudget,
+    payout: ReadBudget,
+}
+
+impl RoleBudgets {
+    fn new(now: Instant) -> Self {
+        Self {
+            intake: ReadBudget::new(now),
+            payout: ReadBudget::new(now),
+        }
+    }
+
+    fn allow(&mut self, role: Role, now: Instant) -> bool {
+        match role {
+            Role::Intake => self.intake.allow(now),
+            Role::Payout => self.payout.allow(now),
+        }
+    }
+}
+
 impl ReadBudget {
     fn new(now: Instant) -> Self {
         Self {
@@ -91,14 +120,13 @@ impl ReadBudget {
         let intervals = now
             .checked_duration_since(self.last)
             .unwrap_or_default()
-            .as_millis()
-            / 500;
+            .as_secs();
         if intervals > 0 {
             self.tokens = self
                 .tokens
                 .saturating_add(u8::try_from(intervals).unwrap_or(4))
                 .min(4);
-            self.last = now;
+            self.last += Duration::from_secs(intervals);
         }
         if self.tokens == 0 {
             return false;
@@ -190,10 +218,13 @@ impl Server {
         {
             bail!("outcome reader does not match configured account");
         }
-        let clients = Arc::new(Semaphore::new(8));
+        let intake_clients = Arc::new(Semaphore::new(4));
+        let payout_clients = Arc::new(Semaphore::new(4));
         // At most one bridge database operation competes for the financial pool,
         // including the explicitly enabled bounded reservation write.
-        // The eight admitted connections bound all waiters. A short FIFO wait
+        // The eight admitted connections (four per role) bound all waiters.
+        // An incomplete payout frame cannot occupy an intake connection slot.
+        // A short FIFO wait
         // lets synchronized intake/view calls take turns; expiry still rejects.
         let resources = Arc::new(Resources {
             reads: Arc::new(Semaphore::new(1)),
@@ -201,7 +232,11 @@ impl Server {
             reader,
             account: self.payout_account_id,
         });
-        let mut budget = ReadBudget::new(Instant::now());
+        // Reserve one request/second for each authenticated role. Payout
+        // retries cannot consume membership's event/safety/publication quota.
+        // Aggregate sustained admission remains two requests/second, with
+        // independently bounded four-request bursts and eight clients total.
+        let mut budget = RoleBudgets::new(Instant::now());
         loop {
             let (stream, _) = self.listener.accept().await?;
             let uid = stream.peer_cred()?.uid();
@@ -214,10 +249,14 @@ impl Server {
             };
             // Admission precedes frame parsing/crypto so malformed requests
             // cannot transfer unbounded work into the financial runtime UID.
-            if !budget.allow(Instant::now()) {
+            if !budget.allow(role, Instant::now()) {
                 continue;
             }
-            let Ok(permit) = Arc::clone(&clients).try_acquire_owned() else {
+            let clients = match role {
+                Role::Intake => &intake_clients,
+                Role::Payout => &payout_clients,
+            };
+            let Ok(permit) = Arc::clone(clients).try_acquire_owned() else {
                 continue;
             };
             let ledger = ledger.clone();
@@ -478,9 +517,77 @@ async fn serve_one(
     write_frame(&mut stream, &response).await
 }
 
+struct RequestPacing {
+    interval: Duration,
+    next: Mutex<Instant>,
+    background: Mutex<()>,
+    operators: AtomicUsize,
+    changed: Notify,
+}
+
+struct OperatorWait<'a>(&'a RequestPacing);
+impl Drop for OperatorWait<'_> {
+    fn drop(&mut self) {
+        self.0.operators.fetch_sub(1, Ordering::AcqRel);
+        self.0.changed.notify_one();
+    }
+}
+
+impl RequestPacing {
+    fn new(interval: Duration) -> Self {
+        Self {
+            interval,
+            next: Mutex::new(Instant::now()),
+            background: Mutex::new(()),
+            operators: AtomicUsize::new(0),
+            changed: Notify::new(),
+        }
+    }
+
+    async fn wait(&self, operator: bool) {
+        let _operator = operator.then(|| {
+            self.operators.fetch_add(1, Ordering::AcqRel);
+            self.changed.notify_one();
+            OperatorWait(self)
+        });
+        // Background actors retain FIFO order, but never hold the slot clock
+        // while sleeping. An operator can take the next scheduled slot instead
+        // of bypassing pacing and colliding with the server's quota.
+        let _background = if operator {
+            None
+        } else {
+            Some(self.background.lock().await)
+        };
+        loop {
+            let changed = self.changed.notified();
+            let due = {
+                let mut next = self.next.lock().await;
+                if !operator && self.operators.load(Ordering::Acquire) > 0 {
+                    None
+                } else {
+                    let now = Instant::now();
+                    if *next <= now {
+                        *next = now + self.interval;
+                        return;
+                    }
+                    Some(*next)
+                }
+            };
+            match due {
+                Some(due) => tokio::select! {
+                    _ = tokio::time::sleep_until(due) => {},
+                    _ = changed => {},
+                },
+                None => changed.await,
+            }
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Client {
-    pacing: Option<(Duration, Arc<tokio::sync::Mutex<Instant>>)>,
+    pacing: Option<Arc<RequestPacing>>,
+    operator: bool,
     socket: PathBuf,
     expected_uid: u32,
 }
@@ -632,11 +739,12 @@ impl Client {
             socket,
             expected_uid,
             pacing: None,
+            operator: false,
         })
     }
     /// One shared FIFO for trusted background actors; server limits stay intact.
     pub(crate) fn with_request_spacing(mut self, interval: Duration) -> Self {
-        self.pacing = Some((interval, Arc::new(tokio::sync::Mutex::new(Instant::now()))));
+        self.pacing = Some(Arc::new(RequestPacing::new(interval)));
         self
     }
     /// Operator requests retain their existing short deadline and server gates.
@@ -644,14 +752,13 @@ impl Client {
         Self {
             socket: self.socket.clone(),
             expected_uid: self.expected_uid,
-            pacing: None,
+            pacing: self.pacing.clone(),
+            operator: true,
         }
     }
     async fn request(&self, request: &Request) -> Result<Response> {
-        if let Some((interval, next)) = &self.pacing {
-            let mut next = next.lock().await;
-            tokio::time::sleep_until(*next).await;
-            *next = Instant::now() + *interval;
+        if let Some(pacing) = &self.pacing {
+            pacing.wait(self.operator).await;
         }
         timeout(
             Duration::from_secs(if matches!(request, Request::PayoutOutcome { .. }) {
@@ -982,13 +1089,35 @@ mod tests {
             assert!(budget.allow(now));
         }
         assert!(!budget.allow(now));
-        assert!(!budget.allow(now + Duration::from_millis(499)));
-        assert!(budget.allow(now + Duration::from_millis(500)));
-        assert!(!budget.allow(now + Duration::from_millis(500)));
+        assert!(!budget.allow(now + Duration::from_millis(999)));
+        assert!(budget.allow(now + Duration::from_millis(1000)));
+        assert!(!budget.allow(now + Duration::from_millis(1000)));
         for _ in 0..4 {
             assert!(budget.allow(now + Duration::from_secs(100)));
         }
         assert!(!budget.allow(now + Duration::from_secs(100)));
+    }
+
+    #[test]
+    fn payout_retry_flood_cannot_spend_intake_admission_or_fractional_refill() {
+        let now = Instant::now();
+        let mut budgets = RoleBudgets::new(now);
+        for _ in 0..4 {
+            assert!(budgets.allow(Role::Payout, now));
+        }
+        for millis in 0..1000 {
+            assert!(!budgets.allow(Role::Payout, now + Duration::from_millis(millis)));
+        }
+        for _ in 0..4 {
+            assert!(budgets.allow(Role::Intake, now));
+        }
+        assert!(!budgets.allow(Role::Intake, now));
+        // Late observations must retain the fractional second for the next
+        // refill rather than progressively slowing an on-time shared client.
+        for millis in [1500, 2000, 3000] {
+            assert!(budgets.allow(Role::Intake, now + Duration::from_millis(millis)));
+            assert!(budgets.allow(Role::Payout, now + Duration::from_millis(millis)));
+        }
     }
 
     async fn fixture(peer_offset: u32) -> (tempfile::TempDir, BridgeConfig, LedgerStore) {
@@ -1390,16 +1519,20 @@ mod tests {
         let task = tokio::spawn(server.run(ledger, RuntimeMode::Active));
         let client = Client::new(config.socket, self_credentials().unwrap().0)
             .unwrap()
-            .with_request_spacing(Duration::from_millis(600));
+            .with_request_spacing(Duration::from_millis(1100));
         let operator = client.for_interactive_requests();
         let mut readers = tokio::task::JoinSet::new();
         for _ in 0..6 {
             let client = client.clone();
             readers.spawn(async move { client.safety().await });
         }
-        timeout(Duration::from_secs(1), async {
-            operator.safety().await.unwrap();
-            operator.safety().await.unwrap();
+        timeout(Duration::from_secs(8), async {
+            for _ in 0..6 {
+                timeout(Duration::from_secs(2), operator.safety())
+                    .await
+                    .unwrap()
+                    .unwrap();
+            }
         })
         .await
         .unwrap();
@@ -1411,5 +1544,78 @@ mod tests {
         .await
         .unwrap();
         task.abort();
+    }
+
+    #[tokio::test]
+    async fn operator_takes_next_paced_slot_and_cancellation_cannot_strand_background_fifo() {
+        let pacing = Arc::new(RequestPacing::new(Duration::from_millis(10)));
+        *pacing.next.lock().await = Instant::now() + Duration::from_secs(3600);
+        let (sent, mut received) = tokio::sync::mpsc::unbounded_channel();
+        let background = tokio::spawn({
+            let pacing = pacing.clone();
+            let sent = sent.clone();
+            async move {
+                pacing.wait(false).await;
+                sent.send("background").unwrap();
+            }
+        });
+        timeout(Duration::from_secs(1), async {
+            while pacing.background.try_lock().is_ok() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let operator = tokio::spawn({
+            let pacing = pacing.clone();
+            async move {
+                pacing.wait(true).await;
+                sent.send("operator").unwrap();
+            }
+        });
+        timeout(Duration::from_secs(1), async {
+            while pacing.operators.load(Ordering::Acquire) == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        *pacing.next.lock().await = Instant::now();
+        pacing.changed.notify_waiters();
+        assert_eq!(
+            timeout(Duration::from_secs(1), received.recv())
+                .await
+                .unwrap(),
+            Some("operator")
+        );
+        assert_eq!(
+            timeout(Duration::from_secs(1), received.recv())
+                .await
+                .unwrap(),
+            Some("background")
+        );
+        operator.await.unwrap();
+        background.await.unwrap();
+        *pacing.next.lock().await = Instant::now() + Duration::from_secs(3600);
+        let cancelled = tokio::spawn({
+            let pacing = pacing.clone();
+            async move {
+                pacing.wait(true).await;
+            }
+        });
+        timeout(Duration::from_secs(1), async {
+            while pacing.operators.load(Ordering::Acquire) == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        cancelled.abort();
+        assert!(cancelled.await.unwrap_err().is_cancelled());
+        assert_eq!(pacing.operators.load(Ordering::Acquire), 0);
+        *pacing.next.lock().await = Instant::now();
+        timeout(Duration::from_secs(1), pacing.wait(false))
+            .await
+            .unwrap();
     }
 }

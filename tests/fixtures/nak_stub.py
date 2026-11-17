@@ -48,6 +48,13 @@ if phase == "publish":
     print(json.dumps(payload))
     sys.exit(0)
 if mode.startswith("protocol_"):
+    bunker_relays = parse_qs(urlparse(os.environ.get("NOSTR_SECRET_KEY", "")).query).get("relay", [])
+    if mode == "protocol_all_relays_fail" or (mode == "protocol_first_relay_fail" and bunker_relays == ["wss://relay-one.example"]):
+        sys.stderr.write(os.environ.get("NOSTR_CLIENT_KEY", ""))
+        sys.exit(7)
+    if mode == "protocol_first_relay_stall" and bunker_relays == ["wss://relay-one.example"]:
+        (root / "stalled-pid").write_text(str(os.getpid()))
+        time.sleep(30)
     event = json.loads((root / "protocol-event.json").read_text())
     if mode == "protocol_wrong_signature":
         event["sig"] = "00" * 64

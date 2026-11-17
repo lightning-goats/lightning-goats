@@ -231,6 +231,15 @@ impl Store {
                 })?;
                 sqlx::query("UPDATE ingress SET state='done',result_json=? WHERE owner=? AND state='pending' AND kind IN ('social','payment')")
                     .bind(&discarded).bind(owner).execute(&mut *tx).await?;
+                // Parked social heads are already complete in ingress, but
+                // remain retryable in the inbox. Close that observation boundary
+                // too, including profileless work created in this same second.
+                sqlx::query(
+                    "UPDATE social_inbox SET state='done' WHERE owner=? AND state='pending'",
+                )
+                .bind(owner)
+                .execute(&mut *tx)
+                .await?;
                 sqlx::query("UPDATE interactions SET status='discarded',result_json=? WHERE owner=? AND status='deferred'")
                     .bind(discarded).bind(owner).execute(&mut *tx).await?;
             }

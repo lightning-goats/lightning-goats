@@ -30,12 +30,24 @@ Only an unchanged, stale, owned socket is reclaimed after a refused connection.
 Each connection receives one length-prefixed JSON request. Request/response
 schemas reject unknown fields. Frame size, clients, database reads, page count,
 page bytes and time are bounded. At most one bridge read transaction competes
-for the core connection pool. Admission allows two requests per second with a
-four-request burst, before reading/parsing frames or verifying invoice data.
-Within the existing eight-connection admission cap, a reader may wait up to
+for the core connection pool. Each authenticated role (membership and payout)
+has its own one-request-per-second quota, four-request burst and four connection
+slots, before reading/parsing frames or verifying invoice data. Sustained total
+admission remains at most two requests per second and total connections at most
+eight. Payout retry traffic and incomplete frames cannot spend membership's
+quota or connection slots. Both payout background loops share one paced client;
+membership background actors also share one paced client. Fractional refill time
+is retained so scheduling jitter does not progressively reduce capacity.
+Operator HTTP calls share that same slot clock with priority for the next slot;
+they do not bypass pacing or wait behind the entire background FIFO. Cancellation
+removes the priority waiter so an expired HTTP request cannot strand background
+processing. Each operator core check allows two seconds within the existing
+five-second HTTP handler bound, covering the one-second scheduled wait plus IPC.
+Within the eight-connection admission cap, a reader may wait up to
 100 milliseconds for the single database-operation permit. FIFO admission lets
 synchronized view/intake calls take turns; timeout still rejects. There is no
-unbounded waiter queue or increase to the two-per-second/four-burst rate limit.
+unbounded waiter queue or increase to the two-per-second sustained rate limit.
+The two independently bounded bursts can admit eight requests in total.
 Error responses contain no raw payment/configuration data.
 
 ## Financial and feeding proof

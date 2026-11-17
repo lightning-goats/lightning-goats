@@ -253,6 +253,184 @@ impl Fixture {
         .await
         .unwrap()
     }
+    async fn bridge(&self) -> (Client, tokio::task::JoinHandle<anyhow::Result<()>>) {
+        let (uid, gid) = self_credentials().unwrap();
+        std::fs::set_permissions(
+            self._root.path(),
+            std::os::unix::fs::PermissionsExt::from_mode(0o750),
+        )
+        .unwrap();
+        let config = crate::core_bridge::BridgeConfig {
+            socket: self._root.path().join("delivery.sock"),
+            peer_uid: uid,
+            group_gid: gid,
+            reward_policy: None,
+            payout_peer_uid: None,
+            delegated_feeder_messages: false,
+            payout_execution_enabled: false,
+            payout_account_id: None,
+        };
+        let server = crate::core_bridge::unix::Server::bind(&config)
+            .await
+            .unwrap();
+        let task = tokio::spawn(server.run(self.core.clone(), crate::config::RuntimeMode::Active));
+        (
+            Client::new(config.socket, uid)
+                .unwrap()
+                .with_request_spacing(Duration::from_millis(1100)),
+            task,
+        )
+    }
+}
+
+#[tokio::test]
+async fn operator_fence_drains_bounded_presentation_tail_but_cannot_pass_a_confirmed_feeding() {
+    use crate::cyberherd::{http_auth, operator};
+    use base64::Engine as _;
+    use sha2::{Digest as _, Sha256};
+    fn authorize(cmd: &operator::Command, now: i64) -> http_auth::OperatorAuthorization {
+        let body = serde_json::to_vec(cmd).unwrap();
+        let proof = nostr::signed(
+            3,
+            27235,
+            now as u64,
+            "",
+            vec![
+                tag(&["u", "https://example.com/api/v1/cyberherd/operator/command"]),
+                tag(&["method", "POST"]),
+                tag(&["payload", &hex::encode(Sha256::digest(&body))]),
+                tag(&["nonce", &Uuid::new_v4().to_string()]),
+            ],
+        );
+        http_auth::Config {
+            public_origin: "https://example.com".into(),
+            operators: vec![public(3)],
+        }
+        .verify_operator(
+            &format!(
+                "Nostr {}",
+                base64::engine::general_purpose::STANDARD
+                    .encode(serde_json::to_vec(&proof).unwrap())
+            ),
+            "/api/v1/cyberherd/operator/command",
+            &body,
+            now,
+        )
+        .unwrap()
+    }
+    let f = Fixture::new().await;
+    for n in 0..130 {
+        f.core
+            .append_event("nostr_publication_attempt", &json!({"attempt":n}))
+            .await
+            .unwrap();
+    }
+    let (client, task) = f.bridge().await;
+    assert!(
+        operator::CoreFence::observe(&f.store, &f.owner, &client)
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        f.store
+            .core_cursor(&f.owner)
+            .await
+            .unwrap()
+            .received_through,
+        128
+    );
+    let fence = operator::CoreFence::observe(&f.store, &f.owner, &client)
+        .await
+        .unwrap();
+    fence
+        .validate(
+            &f.store.core_cursor(&f.owner).await.unwrap(),
+            crate::cyberherd::calendar::now().unwrap(),
+        )
+        .unwrap();
+    assert_eq!(
+        f.store
+            .core_cursor(&f.owner)
+            .await
+            .unwrap()
+            .received_through,
+        130
+    );
+    assert!(f.store.ingress_head(&f.owner).await.unwrap().is_none());
+    assert_eq!(f.store.snapshot(&f.owner).await.unwrap().revision, 0);
+    let mut cmd = operator::Command {
+        id: Uuid::new_v4(),
+        expected_revision: 0,
+        action: operator::Action::Settings {
+            minimum_sats: "20".into(),
+            max_members: 10,
+            member_percent: 10,
+        },
+    };
+    let now = crate::cyberherd::calendar::now().unwrap();
+    f.store
+        .operator_command(
+            &f.owner,
+            &authorize(&cmd, now),
+            &cmd,
+            operator::Environment {
+                feeder: FeederAvailability::Unknown,
+                context: crate::cyberherd::conversation::Context::default(),
+                ordering: Some(fence),
+                now,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(f.store.snapshot(&f.owner).await.unwrap().revision, 1);
+    f.paid(11, 2, 1000, &f.note).await;
+    let feed = f.core.begin_feed_attempt(1000).await.unwrap().unwrap();
+    f.core.confirm_feed_attempt(feed).await.unwrap();
+    let fence = operator::CoreFence::observe(&f.store, &f.owner, &client)
+        .await
+        .unwrap();
+    cmd.id = Uuid::new_v4();
+    cmd.expected_revision = 1;
+    cmd.action = operator::Action::Settings {
+        minimum_sats: "21".into(),
+        max_members: 10,
+        member_percent: 10,
+    };
+    let now = crate::cyberherd::calendar::now().unwrap();
+    let error = f
+        .store
+        .operator_command(
+            &f.owner,
+            &authorize(&cmd, now),
+            &cmd,
+            operator::Environment {
+                feeder: FeederAvailability::Ready,
+                context: crate::cyberherd::conversation::Context::default(),
+                ordering: Some(fence),
+                now,
+            },
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "operator edit awaits confirmed feeding snapshot"
+    );
+    assert_eq!(f.store.snapshot(&f.owner).await.unwrap().revision, 1);
+    assert_eq!(
+        f.store
+            .snapshot(&f.owner)
+            .await
+            .unwrap()
+            .settings
+            .minimum_sats,
+        20
+    );
+    assert!(matches!(
+        f.store.ingress_head(&f.owner).await.unwrap().unwrap().input,
+        crate::cyberherd::ingress::Input::Payment(_)
+    ));
+    task.abort();
 }
 
 #[tokio::test]
@@ -599,6 +777,287 @@ struct RelayFixture {
     complete: usize,
     saturated: bool,
     queries: std::sync::Mutex<Vec<Vec<Filter>>>,
+}
+
+struct ProfileOutboxes {
+    base: RelayFixture,
+    profiles: Vec<VerifiedEvent>,
+    complete: bool,
+    saturated: bool,
+    hints: std::sync::Mutex<Vec<Vec<String>>>,
+}
+impl Query for ProfileOutboxes {
+    async fn query(&self, filters: &[Filter]) -> anyhow::Result<ReadBatch> {
+        self.base.query(filters).await
+    }
+    async fn query_hints(
+        &self,
+        relays: &[String],
+        filters: &[Filter],
+    ) -> anyhow::Result<ReadBatch> {
+        assert!(!relays.is_empty() && relays.len() <= 8);
+        assert!(relays.iter().all(|r| r == "wss://outbox.example.com/"));
+        self.hints.lock().unwrap().push(relays.to_vec());
+        Ok(ReadBatch {
+            events: self
+                .profiles
+                .iter()
+                .filter(|e| filters.iter().any(|f| f.matches(e)))
+                .cloned()
+                .collect(),
+            completed_relays: usize::from(self.complete),
+            failed_relays: usize::from(!self.complete),
+            saturated: self.saturated,
+        })
+    }
+}
+
+fn profile_outboxes(
+    f: &Fixture,
+    quorum: usize,
+    complete: bool,
+    saturated: bool,
+) -> ProfileOutboxes {
+    ProfileOutboxes {
+        base: RelayFixture {
+            events: vec![
+                f.profile(2).event().clone(),
+                signed(
+                    3,
+                    10002,
+                    f.now - 1,
+                    "",
+                    vec![
+                        tag(&["r", "wss://outbox.example.com", "write"]),
+                        tag(&["r", "wss://read-only.example.com", "read"]),
+                        tag(&["r", "wss://127.0.0.1/private", "write"]),
+                        tag(&["r", "wss://sendit.nosflare.com", "write"]),
+                    ],
+                ),
+            ],
+            complete: quorum,
+            saturated: false,
+            queries: Default::default(),
+        },
+        profiles: vec![f.profile(3).event().clone()],
+        complete,
+        saturated,
+        hints: Default::default(),
+    }
+}
+
+#[derive(Clone, Default)]
+struct MemberPublication(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
+impl crate::cyberherd::delivery_worker::Transport for MemberPublication {
+    async fn sign(
+        &self,
+        unsigned: &crate::cyberherd::store::delivery_state::Unsigned,
+    ) -> anyhow::Result<VerifiedEvent> {
+        VerifiedEvent::verify(nostr::signed(
+            1,
+            unsigned.kind,
+            unsigned.created_at,
+            &unsigned.content,
+            unsigned.tags.clone(),
+        ))
+    }
+    async fn publish(
+        &self,
+        event: &VerifiedEvent,
+        relay: &str,
+    ) -> anyhow::Result<crate::cyberherd::delivery_worker::RelayAck> {
+        self.0.lock().unwrap().push(event.event().id.clone());
+        Ok(crate::cyberherd::delivery_worker::RelayAck::synthetic(
+            event, relay,
+        ))
+    }
+}
+
+#[tokio::test]
+async fn signed_outbox_profile_resolves_second_member_like_and_repost_exactly_once() {
+    let f = Fixture::new().await;
+    let discovery = Discovery::new(profile_outboxes(&f, 1, true, false), 1).unwrap();
+    let tags = vec![tag(&["e", &f.note.event().id]), tag(&["p", &f.owner])];
+    let events = [
+        signed(2, 6, f.now - 3, "", tags.clone()),
+        signed(3, 7, f.now - 2, "+", tags.clone()),
+        signed(3, 6, f.now - 1, "", tags),
+    ];
+    for event in &events {
+        assert!(
+            social::stage(&f.store, &f.owner, event.clone(), f.now)
+                .await
+                .unwrap()
+        );
+    }
+    for key in [2, 3, 3] {
+        let profile = discovery
+            .refresh_profile(&f.store, &f.owner, &public(key), f.now)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            f.run(Some(&profile), FeederAvailability::Ready).await,
+            Step::Interaction(_)
+        ));
+    }
+    let snapshot = f.store.snapshot(&f.owner).await.unwrap();
+    assert_eq!(snapshot.roster.active_count(), 2);
+    assert_eq!(snapshot.roster.awards[&public(2)].points(), 3);
+    assert_eq!(snapshot.roster.awards[&public(3)].points(), 4);
+    assert_eq!(discovery.source().hints.lock().unwrap().len(), 2);
+    let reopened = Store::connect(&f.database).await.unwrap();
+    for event in events {
+        assert!(
+            !social::stage(&reopened, &f.owner, event, f.now)
+                .await
+                .unwrap()
+        );
+    }
+    assert_eq!(reopened.snapshot(&f.owner).await.unwrap(), snapshot);
+    reopened
+        .seed_templates(
+            &f.owner,
+            &crate::cyberherd::templates::Catalog::legacy().unwrap(),
+        )
+        .await
+        .unwrap();
+    reopened
+        .seed_templates(
+            &f.owner,
+            &crate::cyberherd::templates::Catalog::delivery_defaults().unwrap(),
+        )
+        .await
+        .unwrap();
+    reopened.initialize_delivery(&f.owner, 0).await.unwrap();
+    while reopened
+        .queue_next_delivery(&f.owner, &["wss://relay.example.com/".into()], f.now)
+        .await
+        .unwrap()
+    {}
+    let db = SqlitePool::connect(&f.database).await.unwrap();
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM delivery_messages")
+        .fetch_one(&db)
+        .await
+        .unwrap();
+    assert_eq!(
+        count, 3,
+        "both joins and the follow-up repost retain public intents"
+    );
+    // Complete membership -> outbox -> private safety -> signing -> matching
+    // ACK on temporary stores, with no public relay connection.
+    let (core, task) = f.bridge().await;
+    let transport = MemberPublication::default();
+    let delivery = crate::cyberherd::delivery_worker::Worker {
+        store: reopened.clone(),
+        core,
+        transport: transport.clone(),
+        owner: f.owner.clone(),
+    };
+    for _ in 0..3 {
+        f.core
+            .update_feeding_presentation(
+                1000,
+                crate::config::RuntimeMode::Active,
+                Some(crate::gateway::FeederSafety {
+                    override_enabled: false,
+                    remote_enabled: true,
+                }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            delivery.tick().await.unwrap(),
+            crate::cyberherd::delivery_worker::Step::Published
+        );
+    }
+    assert_eq!(
+        delivery.tick().await.unwrap(),
+        crate::cyberherd::delivery_worker::Step::Idle
+    );
+    assert_eq!(
+        transport
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .collect::<BTreeSet<_>>()
+            .len(),
+        3
+    );
+    let receipts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM delivery_receipts")
+        .fetch_one(&db)
+        .await
+        .unwrap();
+    assert_eq!(receipts, 3);
+    task.abort();
+}
+
+#[tokio::test]
+async fn outbox_profiles_preserve_quorum_backoff_and_signed_address_removal() {
+    for (quorum, complete, saturated) in [(0, true, false), (1, false, false), (1, true, true)] {
+        let f = Fixture::new().await;
+        let discovery =
+            Discovery::new(profile_outboxes(&f, quorum, complete, saturated), 1).unwrap();
+        assert!(
+            discovery
+                .refresh_profile(&f.store, &f.owner, &public(3), f.now)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            f.store
+                .reward_profile_read(&f.owner, &public(3), f.now, 3600)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            f.store
+                .profile(&f.owner, &public(3), f.now)
+                .await
+                .unwrap()
+                .is_some(),
+            "signed evidence survives an incomplete read"
+        );
+    }
+    let f = Fixture::new().await;
+    f.store
+        .remember_profile(&f.owner, &f.profile(3))
+        .await
+        .unwrap();
+    let mut source = profile_outboxes(&f, 1, true, false);
+    source.profiles.push(signed(3, 0, f.now - 1, "{}", vec![]));
+    let discovery = Discovery::new(source, 1).unwrap();
+    discovery
+        .refresh_reward_profiles(&f.store, &f.owner, &[public(2), public(3)], f.now)
+        .await
+        .unwrap();
+    let profile = f
+        .store
+        .profile(&f.owner, &public(3), f.now)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        profile.profile().lud16.is_none(),
+        "new signed removal wins over a cached address"
+    );
+    assert!(
+        f.store
+            .reward_profile_read(&f.owner, &public(2), f.now, 3600)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        f.store
+            .reward_profile_read(&f.owner, &public(3), f.now, 3600)
+            .await
+            .unwrap()
+            .is_some()
+    );
 }
 impl Query for RelayFixture {
     async fn query(&self, filters: &[Filter]) -> anyhow::Result<ReadBatch> {
@@ -1037,7 +1496,7 @@ async fn closed_cycle_work_discards_without_profile_or_discovery_and_never_block
 #[tokio::test]
 async fn profileless_like_cannot_block_a_full_herd_repost_but_cannot_claim_an_open_seat() {
     use crate::cyberherd::membership::Decision;
-    let f = Fixture::new().await;
+    let mut f = Fixture::new().await;
     for key in 2..12 {
         let event = signed(
             key,
@@ -1059,7 +1518,14 @@ async fn profileless_like_cannot_block_a_full_herd_repost_but_cannot_claim_an_op
     social::stage(&f.store, &f.owner, event, f.now)
         .await
         .unwrap();
-    assert_eq!(f.run(None, FeederAvailability::Paused).await, Step::Waiting);
+    assert_eq!(f.run(None, FeederAvailability::Paused).await, Step::Ignored);
+    f.now += 6;
+    assert!(
+        f.store
+            .queue_optional_social_retry(&f.owner, f.now)
+            .await
+            .unwrap()
+    );
     let Step::Interaction(receipt) = f.run(None, FeederAvailability::Ready).await else {
         panic!("capacity-only rejection should drain the head")
     };
@@ -1093,7 +1559,7 @@ async fn profileless_like_cannot_block_a_full_herd_repost_but_cannot_claim_an_op
     social::stage(&f.store, &f.owner, event, f.now)
         .await
         .unwrap();
-    assert_eq!(f.run(None, FeederAvailability::Ready).await, Step::Waiting);
+    assert_eq!(f.run(None, FeederAvailability::Ready).await, Step::Ignored);
 
     let empty = Fixture::new().await;
     let event = signed(
@@ -1108,7 +1574,7 @@ async fn profileless_like_cannot_block_a_full_herd_repost_but_cannot_claim_an_op
         .unwrap();
     assert_eq!(
         empty.run(None, FeederAvailability::Ready).await,
-        Step::Waiting
+        Step::Ignored
     );
     assert_eq!(
         empty
@@ -1120,6 +1586,329 @@ async fn profileless_like_cannot_block_a_full_herd_repost_but_cannot_claim_an_op
             .active_count(),
         0
     );
+}
+
+#[tokio::test]
+async fn missing_repost_profile_cannot_hold_paid_zap_or_confirmed_feed_and_late_retry_cannot_backpay()
+ {
+    let mut f = Fixture::new().await;
+    f.core.initialize_reward_funding().await.unwrap();
+    let repost = signed(
+        2,
+        6,
+        f.now - 1,
+        "",
+        vec![tag(&["e", &f.note.event().id]), tag(&["p", &f.owner])],
+    );
+    let event_id = repost.event().id.clone();
+    social::stage(&f.store, &f.owner, repost.clone(), f.now)
+        .await
+        .unwrap();
+    f.paid(77, 3, 1000, &f.note).await;
+    let feed = f.core.begin_feed_attempt(1000).await.unwrap().unwrap();
+    f.core.confirm_feed_attempt(feed).await.unwrap();
+    assert_eq!(f.ingest().await, 2);
+    assert_eq!(f.run(None, FeederAvailability::Ready).await, Step::Ignored);
+    assert_eq!(
+        f.store
+            .snapshot(&f.owner)
+            .await
+            .unwrap()
+            .roster
+            .active_count(),
+        0
+    );
+    let pool = SqlitePool::connect(&f.database).await.unwrap();
+    let disposition: String =
+        sqlx::query_scalar("SELECT result_json FROM ingress WHERE source_key=?")
+            .bind(format!("nostr:{event_id}"))
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let disposition: serde_json::Value = serde_json::from_str(&disposition).unwrap();
+    assert_eq!(disposition["status"], "parked");
+    assert_eq!(disposition["reason"], "profile_unavailable");
+    assert!(
+        !f.store
+            .queue_optional_social_retry(&f.owner, f.now + 600)
+            .await
+            .unwrap()
+    );
+    // Restart retains the pending financial order and the original signed event.
+    f.store = Store::connect(&f.database).await.unwrap();
+    assert!(matches!(
+        f.run(Some(&f.profile(3)), FeederAvailability::Ready).await,
+        Step::Interaction(_)
+    ));
+    let Step::Feeding(barrier) = f.run(None, FeederAvailability::Ready).await else {
+        panic!("confirmed feeding must drain after the paid zap");
+    };
+    assert!(barrier.snapshot.roster.members[&public(3)].active);
+    assert!(!barrier.snapshot.roster.members.contains_key(&public(2)));
+    assert_eq!(f.core.feed_credit_sats().await.unwrap(), 0);
+    let frozen = *barrier;
+    f.now += 6;
+    assert!(
+        f.store
+            .queue_optional_social_retry(&f.owner, f.now)
+            .await
+            .unwrap()
+    );
+    assert!(matches!(
+        f.run(Some(&f.profile(2)), FeederAvailability::Ready).await,
+        Step::Interaction(_)
+    ));
+    assert!(f.store.snapshot(&f.owner).await.unwrap().roster.members[&public(2)].active);
+    assert_eq!(
+        f.store
+            .feeding_barrier(&f.owner, feed)
+            .await
+            .unwrap()
+            .unwrap(),
+        frozen
+    );
+    assert!(
+        !social::stage(&f.store, &f.owner, repost, f.now)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !f.store
+            .queue_optional_social_retry(&f.owner, f.now + 600)
+            .await
+            .unwrap()
+    );
+    assert_eq!(f.ingest().await, 0);
+    assert_eq!(f.core.feed_credit_sats().await.unwrap(), 0);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM observed_events WHERE event_id=?")
+            .bind(event_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn unavailable_social_eligibility_retries_with_backoff_without_holding_financial_work() {
+    let mut f = Fixture::new().await;
+    let repost = signed(2, 6, f.now - 1, "", vec![tag(&["e", &f.note.event().id])]);
+    let id = repost.event().id.clone();
+    social::stage(&f.store, &f.owner, repost, f.now)
+        .await
+        .unwrap();
+    assert_eq!(
+        f.run(Some(&f.profile(2)), FeederAvailability::Unknown)
+            .await,
+        Step::Ignored
+    );
+    let pool = SqlitePool::connect(&f.database).await.unwrap();
+    let raw: String = sqlx::query_scalar("SELECT result_json FROM ingress WHERE source_key=?")
+        .bind(format!("nostr:{id}"))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let disposition: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(disposition["reason"], "eligibility_unavailable");
+    f.paid(80, 3, 1000, &f.note).await;
+    let feed = f.core.begin_feed_attempt(1000).await.unwrap().unwrap();
+    f.core.confirm_feed_attempt(feed).await.unwrap();
+    f.ingest().await;
+    assert!(matches!(
+        f.run(Some(&f.profile(3)), FeederAvailability::Ready).await,
+        Step::Interaction(_)
+    ));
+    let Step::Feeding(barrier) = f.run(None, FeederAvailability::Ready).await else {
+        panic!("unavailable social eligibility blocked the financial queue");
+    };
+    assert!(!barrier.snapshot.roster.members.contains_key(&public(2)));
+    f.now += 6;
+    assert!(
+        f.store
+            .queue_optional_social_retry(&f.owner, f.now)
+            .await
+            .unwrap()
+    );
+    let retry = f.store.ingress_head(&f.owner).await.unwrap().unwrap();
+    assert!(
+        !f.store
+            .queue_optional_social_retry(&f.owner, f.now)
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        f.run(None, FeederAvailability::Unknown).await,
+        Step::Ignored
+    );
+    // The second failed attempt waits ten seconds, across a real store reopen.
+    f.store = Store::connect(&f.database).await.unwrap();
+    f.now += 9;
+    assert!(
+        !f.store
+            .queue_optional_social_retry(&f.owner, f.now)
+            .await
+            .unwrap()
+    );
+    f.now += 1;
+    assert!(
+        f.store
+            .queue_optional_social_retry(&f.owner, f.now)
+            .await
+            .unwrap()
+    );
+    assert!(f.store.ingress_head(&f.owner).await.unwrap().unwrap().seq > retry.seq);
+    // A frozen verified profile survives retries even when a new lookup is absent.
+    assert!(matches!(
+        f.run(None, FeederAvailability::Ready).await,
+        Step::Interaction(_)
+    ));
+    assert!(f.store.snapshot(&f.owner).await.unwrap().roster.members[&public(2)].active);
+    assert_eq!(
+        f.store
+            .feeding_barrier(&f.owner, feed)
+            .await
+            .unwrap()
+            .unwrap(),
+        *barrier
+    );
+    assert_eq!(f.core.feed_credit_sats().await.unwrap(), 0);
+}
+
+#[tokio::test]
+async fn legacy_malformed_and_unsupported_social_heads_are_audited_before_runtime_lookup() {
+    for (kind, body, expected) in [
+        (6, "not a signed embedded target", "malformed"),
+        (7, "-", "unsupported"),
+    ] {
+        let f = Fixture::new().await;
+        let event = signed(
+            2,
+            kind,
+            f.now - 1,
+            body,
+            vec![tag(&["e", &f.note.event().id])],
+        );
+        // Fixture-only legacy admission: the outer event remains cryptographically
+        // valid. Current ingress rejects malformed bodies before enqueueing.
+        let e = event.event();
+        let pool = SqlitePool::connect(&f.database).await.unwrap();
+        let mut tx = pool.begin().await.unwrap();
+        sqlx::query("INSERT INTO observed_events(owner,event_id,kind,author,created_at,event_json) VALUES(?,?,?,?,?,?)")
+            .bind(&f.owner).bind(&e.id).bind(e.kind as i64).bind(&e.pubkey).bind(e.created_at as i64)
+            .bind(serde_json::to_string(e).unwrap()).execute(&mut *tx).await.unwrap();
+        sqlx::query("INSERT INTO social_inbox(owner,event_id) VALUES(?,?)")
+            .bind(&f.owner)
+            .bind(&e.id)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO ingress(owner,source_key,kind,payload_json) VALUES(?,?,'social',?)",
+        )
+        .bind(&f.owner)
+        .bind(format!("nostr:{}", e.id))
+        .bind(serde_json::to_string(&e.id).unwrap())
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+        f.paid(78, 3, 1000, &f.note).await;
+        let feed = f.core.begin_feed_attempt(1000).await.unwrap().unwrap();
+        f.core.confirm_feed_attempt(feed).await.unwrap();
+        f.ingest().await;
+        assert!(
+            worker::screen_social_head(&f.store, &f.owner, f.now)
+                .await
+                .unwrap()
+        );
+        let raw: String = sqlx::query_scalar("SELECT result_json FROM ingress WHERE source_key=?")
+            .bind(format!("nostr:{}", e.id))
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let result: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(result["status"], "ignored");
+        assert_eq!(result["reason"], expected);
+        assert_eq!(
+            sqlx::query_scalar::<_, String>("SELECT state FROM social_inbox WHERE event_id=?")
+                .bind(&e.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            "done"
+        );
+        assert!(matches!(
+            f.run(Some(&f.profile(3)), FeederAvailability::Ready).await,
+            Step::Interaction(_)
+        ));
+        assert!(matches!(
+            f.run(None, FeederAvailability::Ready).await,
+            Step::Feeding(_)
+        ));
+        assert_eq!(f.core.feed_credit_sats().await.unwrap(), 0);
+        assert!(
+            !f.store
+                .queue_optional_social_retry(&f.owner, f.now + 600)
+                .await
+                .unwrap()
+        );
+    }
+}
+
+#[tokio::test]
+async fn optional_social_disposition_cannot_skip_money_and_late_failure_rolls_back_both_checkpoints()
+ {
+    use crate::cyberherd::ingress::SocialHold;
+    let f = Fixture::new().await;
+    let repost = signed(2, 6, f.now - 1, "", vec![tag(&["e", &f.note.event().id])]);
+    let id = repost.event().id.clone();
+    social::stage(&f.store, &f.owner, repost, f.now)
+        .await
+        .unwrap();
+    let head = f.store.ingress_head(&f.owner).await.unwrap().unwrap();
+    let pool = SqlitePool::connect(&f.database).await.unwrap();
+    sqlx::query("CREATE TRIGGER fail_optional_disposition BEFORE UPDATE OF state ON ingress WHEN NEW.state='done' BEGIN SELECT RAISE(ABORT,'synthetic disposition failure'); END").execute(&pool).await.unwrap();
+    assert!(
+        f.store
+            .settle_optional_social(&f.owner, head.seq, &id, SocialHold::Malformed, f.now)
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT state FROM social_inbox WHERE event_id=?")
+            .bind(&id)
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        "pending"
+    );
+    assert_eq!(
+        f.store.ingress_head(&f.owner).await.unwrap().unwrap().seq,
+        head.seq
+    );
+    sqlx::query("DROP TRIGGER fail_optional_disposition")
+        .execute(&pool)
+        .await
+        .unwrap();
+    f.store
+        .settle_optional_social(&f.owner, head.seq, &id, SocialHold::Malformed, f.now)
+        .await
+        .unwrap();
+    f.paid(79, 3, 1000, &f.note).await;
+    f.ingest().await;
+    let payment = f.store.ingress_head(&f.owner).await.unwrap().unwrap();
+    assert!(
+        f.store
+            .settle_optional_social(&f.owner, payment.seq, &id, SocialHold::Malformed, f.now)
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        f.store.ingress_head(&f.owner).await.unwrap().unwrap().seq,
+        payment.seq
+    );
+    assert_eq!(f.core.feed_credit_sats().await.unwrap(), 1000);
 }
 
 #[tokio::test]

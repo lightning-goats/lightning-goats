@@ -34,7 +34,12 @@ async fn core(
         mode,
         Some(Arc::new(reader)),
     ));
-    (Client::new(path, uid).unwrap(), task)
+    (
+        Client::new(path, uid)
+            .unwrap()
+            .with_request_spacing(std::time::Duration::from_secs(1)),
+        task,
+    )
 }
 fn worker(w: &Workflow, core: Client, store: Store) -> Worker {
     Worker {

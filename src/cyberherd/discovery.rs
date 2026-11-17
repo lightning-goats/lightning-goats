@@ -1,7 +1,7 @@
 //! Refresh authenticated heads before recovery. The configured relay completion
 //! quorum is explicit; saturation or missing quorum makes discovery unavailable,
 //! never evidence that cached targets became stale. No daily note is fabricated.
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Result, bail};
 
@@ -278,16 +278,14 @@ impl<R: Query> Discovery<R> {
         pubkey: &str,
         now: i64,
     ) -> Result<Option<AuthenticatedProfile>> {
-        crate::nostr_event::validate_public_key(pubkey)?;
-        let mut query = filter(vec![0]);
-        query.authors.push(pubkey.into());
-        query.until = Some(now.try_into()?);
-        let (events, complete) = self.read(&[query]).await;
+        let keys = vec![pubkey.to_owned()];
+        let (events, availability) = self.read_profiles(&keys, now).await?;
         for event in events {
             if let Ok(profile) = AuthenticatedProfile::parse(event, pubkey, now) {
                 store.remember_profile(owner, &profile).await?;
             }
         }
+        let complete = availability[pubkey];
         store
             .record_reward_profile_read(owner, pubkey, complete, now)
             .await?;
@@ -307,6 +305,88 @@ impl<R: Query> Discovery<R> {
         }
     }
 
+    /// A complete configured-relay query may contain a signed relay list but
+    /// no profile. Follow the author's public NIP-65 write relays, rather than
+    /// retrying that same empty query forever. Hints never authenticate profiles
+    /// or replace the configured completion quorum.
+    async fn read_profiles(
+        &self,
+        keys: &[String],
+        now: i64,
+    ) -> Result<(Vec<VerifiedEvent>, BTreeMap<String, bool>)> {
+        if keys.is_empty() || keys.len() > 8 || now < 0 {
+            bail!("profile query batch exceeds bound");
+        }
+        let mut filters = Vec::new();
+        for key in keys {
+            crate::nostr_event::validate_public_key(key)?;
+            let mut query = filter(vec![0, 10002]);
+            query.authors.push(key.clone());
+            query.until = Some(now as u64);
+            filters.push(query);
+        }
+        let (mut events, complete) = self.read(&filters).await;
+        let mut availability: BTreeMap<_, _> =
+            keys.iter().map(|key| (key.clone(), complete)).collect();
+        let mut missing = BTreeMap::new();
+        for key in keys {
+            if events
+                .iter()
+                .any(|event| AuthenticatedProfile::parse(event.clone(), key, now).is_ok())
+            {
+                continue;
+            }
+            let list = events
+                .iter()
+                .filter_map(|event| crate::relay_routing::RelayList::parse(event, key, now).ok())
+                .max_by(|a, b| {
+                    a.event()
+                        .event()
+                        .created_at
+                        .cmp(&b.event().event().created_at)
+                        .then_with(|| b.event().event().id.cmp(&a.event().event().id))
+                });
+            if let Some(list) = list.filter(|list| !list.write.is_empty()) {
+                missing.insert(key.clone(), list.write);
+            }
+        }
+        if !missing.is_empty() {
+            // Round robin gives every actor in a reward batch an outbox before
+            // filling the shared eight-relay bound with additional destinations.
+            let mut relays = Vec::new();
+            for index in 0..8 {
+                for outboxes in missing.values() {
+                    if let Some(relay) = outboxes.get(index)
+                        && relays.len() < 8
+                        && !relays.contains(relay)
+                    {
+                        relays.push(relay.clone());
+                    }
+                }
+            }
+            let filters: Vec<_> = missing
+                .keys()
+                .map(|key| {
+                    let mut query = filter(vec![0]);
+                    query.authors.push(key.clone());
+                    query.until = Some(now as u64);
+                    query
+                })
+                .collect();
+            let completed = match self.source.query_hints(&relays, &filters).await {
+                Ok(batch) => {
+                    events.extend(batch.events);
+                    batch.completed_relays > 0 && !batch.saturated
+                }
+                Err(_) => false,
+            };
+            for key in missing.keys() {
+                availability.insert(key.clone(), complete && completed);
+            }
+        }
+        Ok((events, availability))
+    }
+
     /// One bounded query, rather than serially opening relays for each member.
     /// A saturated/incomplete batch is not proof of a missing payout address.
     pub async fn refresh_reward_profiles(
@@ -319,15 +399,7 @@ impl<R: Query> Discovery<R> {
         if keys.is_empty() || keys.len() > 8 || now < 0 {
             bail!("reward profile batch exceeds bound");
         }
-        let mut filters = Vec::new();
-        for key in keys {
-            crate::nostr_event::validate_public_key(key)?;
-            let mut query = filter(vec![0]);
-            query.authors.push(key.clone());
-            query.until = Some(now as u64);
-            filters.push(query);
-        }
-        let (events, complete) = self.read(&filters).await;
+        let (events, availability) = self.read_profiles(keys, now).await?;
         for event in events {
             if keys.contains(&event.event().pubkey) {
                 if let Ok(profile) =
@@ -339,7 +411,7 @@ impl<R: Query> Discovery<R> {
         }
         for key in keys {
             store
-                .record_reward_profile_read(owner, key, complete, now)
+                .record_reward_profile_read(owner, key, availability[key], now)
                 .await?;
         }
         Ok(())

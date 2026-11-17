@@ -1,10 +1,10 @@
 //! One ordered step. Network lookup and financial settlement never run inside a
-//! membership transaction. A blocked head remains ahead of a confirmed feeding;
-//! retries reuse frozen interactions and cannot move later input ahead of it.
+//! membership transaction. Financial inputs remain ordered; optional social
+//! failures are retained without holding later money/feeding work indefinitely.
 use anyhow::{Context, Result, bail};
 
 use super::{
-    ingress::{FeedingBarrier, Input, Pending, payment_identity},
+    ingress::{FeedingBarrier, Input, Pending, SocialHold, payment_identity},
     membership::{Action, FeederAvailability, Profile, Target},
     social::{self, SocialEnvironment, SocialEvent, SocialStep},
     store::{Interaction, Receipt, Status, Store},
@@ -57,8 +57,20 @@ pub async fn step(store: &Store, owner: &str, environment: Environment<'_>) -> R
                 .observed_event(owner, id)
                 .await?
                 .context("ordered social event is missing")?;
-            let social = SocialEvent::parse(event, owner, environment.now)?
-                .context("unsupported ordered social input")?;
+            let social = match SocialEvent::parse(event, owner, environment.now) {
+                Ok(Some(social)) => social,
+                result => {
+                    let reason = if result.is_err() {
+                        SocialHold::Malformed
+                    } else {
+                        SocialHold::Unsupported
+                    };
+                    store
+                        .settle_optional_social(owner, head.seq, id, reason, environment.now)
+                        .await?;
+                    return Ok(Step::Ignored);
+                }
+            };
             let result = social::process(
                 store,
                 owner,
@@ -73,9 +85,33 @@ pub async fn step(store: &Store, owner: &str, environment: Environment<'_>) -> R
             )
             .await?;
             match result {
-                SocialStep::AwaitingProfile => Ok(Step::Waiting),
+                SocialStep::AwaitingProfile => {
+                    store
+                        .settle_optional_social(
+                            owner,
+                            head.seq,
+                            id,
+                            SocialHold::ProfileUnavailable,
+                            environment.now,
+                        )
+                        .await?;
+                    Ok(Step::Ignored)
+                }
                 SocialStep::Recorded(receipt) => {
-                    complete_interaction(store, owner, &head, receipt).await
+                    if receipt.status == Status::Deferred {
+                        store
+                            .settle_optional_social(
+                                owner,
+                                head.seq,
+                                id,
+                                SocialHold::EligibilityUnavailable,
+                                environment.now,
+                            )
+                            .await?;
+                        Ok(Step::Ignored)
+                    } else {
+                        complete_interaction(store, owner, &head, receipt).await
+                    }
                 }
             }
         }
@@ -83,6 +119,35 @@ pub async fn step(store: &Store, owner: &str, environment: Environment<'_>) -> R
         Input::Feeding(_) => Ok(Step::Feeding(Box::new(
             store.freeze_feeding_barrier(owner, head.seq).await?,
         ))),
+    }
+}
+
+/// Screen before runtime target/profile lookup so a malformed optional envelope
+/// cannot repeatedly fail head-reference discovery before the worker sees it.
+pub(crate) async fn screen_social_head(store: &Store, owner: &str, now: i64) -> Result<bool> {
+    let Some(head) = store.ingress_head(owner).await? else {
+        return Ok(false);
+    };
+    let Input::Social(id) = &head.input else {
+        return Ok(false);
+    };
+    let event = store
+        .observed_event(owner, id)
+        .await?
+        .context("ordered social event is missing")?;
+    match SocialEvent::parse(event, owner, now) {
+        Ok(Some(_)) => Ok(false),
+        result => {
+            let reason = if result.is_err() {
+                SocialHold::Malformed
+            } else {
+                SocialHold::Unsupported
+            };
+            store
+                .settle_optional_social(owner, head.seq, id, reason, now)
+                .await?;
+            Ok(true)
+        }
     }
 }
 

@@ -746,14 +746,24 @@ async fn combined_settlement_wallet_child() -> Result<()> {
             std::time::Duration::from_secs(10),
             65536,
         )?;
-        for tick in 0..8 {
-            worker.tick(now as i64 + 20 + tick).await?;
-        }
-        drop(worker);
         let cleanup = rusqlite::Connection::open_with_flags(
             &path,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
         )?;
+        for tick in 0..8 {
+            // Round two may already be admitted. Stop at the original cleanup
+            // checkpoint before any new quote can use the old fixture reply.
+            let completed: u64 = cleanup.query_row(
+                "SELECT COUNT(*) FROM treasury_cdk_cleanup WHERE intent_id=?",
+                [issued.intent.id.to_string()],
+                |row| row.get(0),
+            )?;
+            if completed == 1 {
+                break;
+            }
+            worker.tick(now as i64 + 20 + tick).await?;
+        }
+        drop(worker);
         assert_eq!(
             cleanup.query_row(
                 "SELECT COUNT(*) FROM treasury_cdk_cleanup WHERE intent_id=?",

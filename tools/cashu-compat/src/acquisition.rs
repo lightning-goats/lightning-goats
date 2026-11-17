@@ -165,7 +165,10 @@ impl<T: Transport + 'static> Coordinator<'_, T> {
             .lock()
             .map_err(|_| anyhow::anyhow!("wallet journal unavailable"))?
             .admitted_proofs(id)?;
-        let _lease = self.gate.arm(id, false, self.maximum_receive_fee_sats)?;
+        let _lease = self
+            .gate
+            .arm_new_acquisition(id, self.maximum_receive_fee_sats)
+            .await?;
         let options = ReceiveOptions {
             p2pk_signing_keys: vec![receiving_key.clone()],
             ..Default::default()

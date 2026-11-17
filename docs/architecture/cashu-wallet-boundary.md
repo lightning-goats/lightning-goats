@@ -522,6 +522,17 @@ claim selection stop the worker; operation errors leave the original work for
 bounded later reconciliation. A crash before the acquisition hook may still
 need explicit CDK/journal reconciliation, rather than a fresh attempt.
 
+After CDK compensates a definitively rejected receive, its removed saga no
+longer makes the mint unavailable to independent input proofs. The acquisition
+gate now holds the process writer lease while checking that CDK has no unfinished
+work, every other unresolved acquisition has retained derivation material, and
+the mint store's durable keyset counters cover all of those output ranges.
+Capturing a new request additionally refuses overlap with retained recovery
+ranges. Failure or cancellation releases only the process lease. Original
+requests, proof claims, derivations and recovery states remain intact and never
+become credits based on a rejection. Missing material, rolled-back counters and
+unfinished CDK work continue to require reconciliation.
+
 This adds a library service loop, not an installed daemon. CLI/systemd wiring,
 status for exhausted work, positive network-level scheduler qualification,
 receipt delivery, and coordinated restore remain outstanding.

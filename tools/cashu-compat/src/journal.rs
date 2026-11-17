@@ -709,6 +709,15 @@ impl Journal {
         id: Uuid,
         derivation: &crate::ownership::SwapDerivation,
     ) -> Result<()> {
+        for previous in self.unresolved_derivations_except(id)? {
+            ensure!(
+                previous.mint_url != derivation.mint_url
+                    || previous.keyset_id != derivation.keyset_id
+                    || derivation.counter_end <= previous.counter_start
+                    || derivation.counter_start >= previous.counter_end,
+                "new output range overlaps retained recovery material"
+            );
+        }
         let bytes = crate::transport::serialize_body(derivation, 1_048_576)
             .map_err(|_| anyhow::anyhow!("derivation material exceeds limit"))?;
         let tx = self
@@ -799,6 +808,18 @@ impl Journal {
             "SELECT EXISTS(SELECT 1 FROM acquisitions a JOIN acquisitions current ON a.mint_id=current.mint_id WHERE current.id=? AND a.id!=current.id AND a.state IN ('acquisition_prepared','acquiring','held_for_reconciliation'))",
             [id.to_string()], |row| row.get(0),
         )?)
+    }
+
+    pub(crate) fn unresolved_derivations_except(
+        &self,
+        id: Uuid,
+    ) -> Result<Vec<crate::ownership::SwapDerivation>> {
+        let mut statement = self.connection.prepare(
+            "SELECT a.id FROM acquisitions a JOIN acquisitions current ON a.mint_id=current.mint_id WHERE current.id=? AND a.id!=current.id AND a.state IN ('acquisition_prepared','acquiring','held_for_reconciliation')",
+        )?;
+        let ids = statement.query_map([id.to_string()], |row| row.get::<_, String>(0))?;
+        ids.map(|other| self.derivation(Uuid::parse_str(&other?)?))
+            .collect()
     }
 
     /// Preserve the original operation and proof claims. A hold never frees funds

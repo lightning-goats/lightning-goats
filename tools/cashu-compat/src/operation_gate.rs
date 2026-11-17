@@ -340,6 +340,51 @@ impl<T: Transport> OperationGate<T> {
         recover_original: bool,
         maximum_receive_fee_sats: u64,
     ) -> Result<OperationLease> {
+        self.arm_with_recovery_fence(id, recover_original, maximum_receive_fee_sats, false)
+    }
+
+    /// CDK may have compensated a rejected receive while our original recovery
+    /// record remains. New, disjoint inputs may proceed only after CDK cleanup
+    /// and with every retained output counter range durably reserved.
+    pub async fn arm_new_acquisition(
+        &self,
+        id: Uuid,
+        maximum_receive_fee_sats: u64,
+    ) -> Result<OperationLease> {
+        let database = self.database.as_ref().ok_or_else(refused)?;
+        let (mint_id, _) = self.key_policy.as_ref().ok_or_else(refused)?;
+        let lease = self.arm_with_recovery_fence(id, false, maximum_receive_fee_sats, true)?;
+        let bindings = {
+            let journal = self.journal.lock().map_err(|_| refused())?;
+            ensure!(
+                journal.mint_id(id)? == *mint_id,
+                "acquisition mint mismatch"
+            );
+            journal.unresolved_derivations_except(id)?
+        };
+        let sagas = database.get_incomplete_sagas().await?;
+        // Stores are mint-scoped. Any incomplete CDK work requires its original
+        // recovery path; no success/failure inference comes from a mint error.
+        ensure!(sagas.is_empty(), "CDK wallet work remains unresolved");
+        for binding in bindings {
+            let counter = database
+                .increment_keyset_counter(&binding.keyset_id, 0)
+                .await?;
+            ensure!(
+                counter >= binding.counter_end,
+                "retained output counter range is not reserved"
+            );
+        }
+        Ok(lease)
+    }
+
+    fn arm_with_recovery_fence(
+        &self,
+        id: Uuid,
+        recover_original: bool,
+        maximum_receive_fee_sats: u64,
+        retained_recovery_checked: bool,
+    ) -> Result<OperationLease> {
         let mut active = self
             .active
             .lock()
@@ -358,7 +403,7 @@ impl<T: Transport> OperationGate<T> {
                 "new operation is not admitted"
             );
             ensure!(
-                !journal.mint_has_other_unresolved_operation(id)?,
+                retained_recovery_checked || !journal.mint_has_other_unresolved_operation(id)?,
                 "mint has unresolved financial work"
             );
         }

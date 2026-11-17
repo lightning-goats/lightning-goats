@@ -269,7 +269,10 @@ impl FixtureMint {
             }
             let key = self.private_keys.get(&proof.amount).ok_or_else(refused)?;
             if dhke::sign_message(key, &y).map_err(|_| refused())? != proof.c {
-                return Err(refused());
+                return Err(HttpError::Status {
+                    status: 400,
+                    message: "synthetic invalid proof".into(),
+                });
             }
             // The fixture also enforces the receiver's actual P2PK witness.
             if proof.secret.as_bytes().first() == Some(&b'[') {
@@ -640,6 +643,114 @@ fn receipt(progress: Progress) -> Box<Receipt> {
 }
 
 #[tokio::test]
+async fn rejected_bearer_proof_does_not_block_later_owned_receives_after_restart() -> Result<()> {
+    let harness = Harness::new(0)?;
+    let mut forged = harness.mint.issue("original-fixture-secret".into());
+    forged.secret = Secret::new("unissued-forged-secret");
+    forged.dleq = None;
+    let bad = harness.ordinary(forged, "bad-delivery")?;
+    let bad_id = {
+        let mut coordinator = harness.open().await?;
+        let id = new_id(coordinator.admit(&bad)?);
+        assert!(matches!(
+            coordinator.acquire_new(id, &harness.receiver).await?,
+            Progress::Pending(_)
+        ));
+        assert!(
+            coordinator
+                .database
+                .get_incomplete_sagas()
+                .await?
+                .is_empty()
+        );
+        assert_eq!(harness.mint.executions.load(Ordering::SeqCst), 0);
+        id
+    };
+    let mut coordinator = harness.open().await?;
+    let old = coordinator.journal.lock().unwrap().derivation(bad_id)?;
+    let valid = harness.ordinary(
+        harness.mint.issue("later-valid-secret".into()),
+        "good-delivery",
+    )?;
+    let good_id = new_id(coordinator.admit(&valid)?);
+    assert!(coordinator.gate.arm(good_id, false, 1).is_err());
+    // Simulate a wallet-only rollback behind the retained application journal.
+    let counter = coordinator
+        .database
+        .increment_keyset_counter(&old.keyset_id, 0)
+        .await?;
+    let database = rusqlite::Connection::open(harness.directory.path().join("wallet.sqlite"))?;
+    assert_eq!(
+        database.execute(
+            "UPDATE keyset_counter SET counter=0 WHERE keyset_id=?",
+            [old.keyset_id.to_string()]
+        )?,
+        1
+    );
+    assert!(
+        coordinator
+            .gate
+            .arm_new_acquisition(good_id, 1)
+            .await
+            .is_err()
+    );
+    assert_eq!(harness.mint.executions.load(Ordering::SeqCst), 0);
+    database.execute(
+        "UPDATE keyset_counter SET counter=? WHERE keyset_id=?",
+        rusqlite::params![counter, old.keyset_id.to_string()],
+    )?;
+    drop(database);
+    let received = receipt(coordinator.acquire_new(good_id, &harness.receiver).await?);
+    assert_eq!(received.net_sats, 8);
+    let mut journal = coordinator.journal.lock().unwrap();
+    assert_eq!(journal.state(bad_id)?, "acquiring");
+    assert!(journal.derivation(bad_id)? == old);
+    assert!(journal.export_receipt(bad_id).is_err());
+    assert!(journal.derivation(good_id)?.counter_start >= old.counter_end);
+    assert!(
+        journal
+            .record_derivation(good_id, &old)
+            .unwrap_err()
+            .to_string()
+            .contains("overlaps retained recovery")
+    );
+    drop(journal);
+    assert_eq!(coordinator.admit(&bad)?, Admission::Duplicate(bad_id));
+    assert_eq!(harness.mint.executions.load(Ordering::SeqCst), 1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn missing_recovery_material_still_fences_new_mint_work() -> Result<()> {
+    let harness = Harness::new(0)?;
+    let coordinator = harness.open().await?;
+    let first =
+        new_id(coordinator.admit(
+            &harness.ordinary(harness.mint.issue("missing-first".into()), "missing-first")?,
+        )?);
+    let second = new_id(coordinator.admit(&harness.ordinary(
+        harness.mint.issue("missing-second".into()),
+        "missing-second",
+    )?)?);
+    {
+        let mut journal = coordinator.journal.lock().unwrap();
+        journal.prepare(first, b"retained original")?;
+        journal.start_acquisition(first)?;
+    }
+    assert!(
+        coordinator
+            .gate
+            .arm_new_acquisition(second, 1)
+            .await
+            .is_err()
+    );
+    // A refused arm drops its lease rather than wedging the process coordinator.
+    let _original = coordinator.gate.arm(first, true, 1)?;
+    assert_eq!(harness.mint.executions.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
+#[tokio::test]
 async fn ordinary_and_nutzap_use_real_cdk_and_one_reusable_descriptor() -> Result<()> {
     let harness = Harness::new(0)?;
     let mut coordinator = harness.open().await?;
@@ -685,6 +796,21 @@ async fn lost_mint_reply_restarts_and_restores_without_a_second_execution() -> R
     };
     harness.mint.cache_enabled.store(false, Ordering::SeqCst);
     let mut coordinator = harness.open().await?;
+    let waiting = new_id(coordinator.admit(&harness.ordinary(
+        harness.mint.issue("waiting-for-ambiguous".into()),
+        "waiting",
+    )?)?);
+    assert!(
+        coordinator
+            .gate
+            .arm_new_acquisition(waiting, 1)
+            .await
+            .is_err()
+    );
+    assert!(matches!(
+        coordinator.acquire_new(waiting, &harness.receiver).await?,
+        Progress::Pending(_)
+    ));
     let recovered = receipt(coordinator.recover_original(id).await?);
     assert_eq!(recovered.net_sats, 8);
     assert_eq!(harness.mint.executions.load(Ordering::SeqCst), 1);
@@ -692,6 +818,11 @@ async fn lost_mint_reply_restarts_and_restores_without_a_second_execution() -> R
         receipt(coordinator.recover_original(id).await?).acquisition_id,
         id
     );
+    assert_eq!(
+        receipt(coordinator.acquire_new(waiting, &harness.receiver).await?).net_sats,
+        8
+    );
+    assert_eq!(harness.mint.executions.load(Ordering::SeqCst), 2);
     Ok(())
 }
 

@@ -15,6 +15,15 @@ vendor verification and cached dependency audits. This does not resolve the
 separate mint-operation fence after rejected/ambiguous acquisition, provide a
 total database quota, or qualify production receiving.
 
+The subsequent [mint-progress checkpoint](cashu-mint-progress-20261117.json)
+allows an independent receive after CDK has compensated a definitive rejection,
+while retaining original recovery records and checking reserved/disjoint output
+counter ranges. All 170 wallet tests pass with seven explicitly ignored fixture
+entry points, formatting, strict Clippy, vendor verification and the cached
+dependency audit. Counter rollback and missing recovery material fail closed;
+unfinished CDK work still waits for original-operation recovery. This is
+synthetic-provider evidence, not live mint or complete recovery qualification.
+
 | Required behavior / artifact | Established evidence | Required work still open |
 | --- | --- | --- |
 | Existing native Lightning, NIP-57 and paid history | Core regression suites and historical live checkpoints; no production change in this workstream | Final selected-source regression and approved installed/provider acceptance. |

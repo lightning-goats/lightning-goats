@@ -357,14 +357,21 @@ jobs:
                   output = root / ('cashu-sdk-sender' + suffix + '.json')
                   flags = (['--repeat-request'] if repeated else []) + (['--lost-reply'] if lost else [])
                   with output.open('w') as stream:
-                      subprocess.run(command + flags, stdout=stream, stderr=subprocess.STDOUT, check=True)
+                      result = subprocess.run(command + flags, stdout=stream, stderr=subprocess.STDOUT)
+                  if result.returncode:
+                      print(output.read_text()[-24000:], flush=True)
+                      result.check_returncode()
           residual = [arg for arg in command if arg != '--no-change'] + ['--settle-change']
           for lost in [False, True]:
               output = root / ('cashu-sdk-residual' + ('-lost' if lost else '') + '.json')
               with output.open('w') as stream:
-                  subprocess.run(residual + (['--lost-reply'] if lost else []), stdout=stream, stderr=subprocess.STDOUT, check=True)
+                  result = subprocess.run(residual + (['--lost-reply'] if lost else []), stdout=stream, stderr=subprocess.STDOUT)
+              if result.returncode:
+                  print(output.read_text()[-24000:], flush=True)
+                  result.check_returncode()
           PYCODE
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: cashu-cross-uid-${{ github.sha }}
           path: |

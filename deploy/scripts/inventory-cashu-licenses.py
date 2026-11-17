@@ -21,6 +21,15 @@ def license_name(path):
                for part in path.parts)
 
 
+def authors_license(path, data):
+    # r-efi ships its actual permission/copyright notice in AUTHORS. A bare
+    # contributor list must not count as a license notice merely by its name.
+    return (path.name.upper() == 'AUTHORS'
+            and b'Permission is hereby granted, free of charge' in data
+            and b'THE SOFTWARE IS PROVIDED "AS IS"' in data
+            and b'COPYRIGHT:' in data)
+
+
 def registry_record(package, cache):
     filename = f"{package['name']}-{package['version']}.crate"
     candidates = sorted(cache.glob('*/' + filename))
@@ -41,7 +50,8 @@ def registry_record(package, cache):
                 continue
             if not entry.isfile():
                 raise ValueError('nonregular archive member')
-            if relative not in [Path('Cargo.toml'), Path('.cargo_vcs_info.json')] and not license_name(relative):
+            if (relative not in [Path('Cargo.toml'), Path('.cargo_vcs_info.json')]
+                    and not license_name(relative) and relative.name.upper() != 'AUTHORS'):
                 continue
             if entry.size > 1024 * 1024:
                 raise ValueError('oversized manifest/license')
@@ -50,7 +60,7 @@ def registry_record(package, cache):
                 manifest = tomllib.loads(data.decode())['package']
             elif relative == Path('.cargo_vcs_info.json'):
                 vcs = json.loads(data)
-            else:
+            elif license_name(relative) or authors_license(relative, data):
                 files[str(relative)] = digest(data)
     if manifest is None or manifest['name'] != package['name'] or manifest['version'] != package['version']:
         raise ValueError('archive package identity mismatch')

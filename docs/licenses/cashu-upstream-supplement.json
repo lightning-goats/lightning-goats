@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "inventory_sha256": "1ee129c9cc1600094b9bc411fe06946e933a934c9e856fca8b8cfcc56271db2c",
+  "inventory_sha256": "a21553edbc33f0bed0aad00be5d61dec2015a91fcb241ab6e4578fc22a0d54f1",
   "scope": "Exact upstream commits recorded in checksum-verified crate archives; no substitution of current-branch licenses.",
   "packages": [
     {

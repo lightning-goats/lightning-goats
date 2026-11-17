@@ -23,16 +23,24 @@ Development export:
 
 ```sh
 python3 deploy/scripts/export-cashu-notices.py \
-  docs/testing/cashu-license-inventory-20261116.json \
-  .artifacts/cashu-development-notices-20261116-v8 \
+  docs/testing/cashu-license-inventory-20261117.json \
+  .artifacts/cashu-development-notices-20261117-v9 \
   --supplement docs/licenses/cashu-upstream-supplement.json --allow-incomplete
 ```
 
 The output directory must not already exist. This checkpoint exports 462 package
-entries with 17 still missing notice files. It remains `distribution_ready:false`;
+entries with 15 still missing notice files. It remains `distribution_ready:false`;
 `--allow-incomplete` is for development review only. SPDX expressions and notice
 presence alone do not qualify a distributable linked artifact. Evidence:
-[export result](../testing/cashu-upstream-notice-supplement-20261116.json).
+[export result](../testing/cashu-license-authors-20261117.json).
+
+The v9 [inventory correction](../testing/cashu-license-authors-20261117.json)
+recognizes the full permission/copyright notice that `r-efi` ships in `AUTHORS`.
+Both checksum-verified archives match their exact upstream Git blob. This does
+not treat a contributor list alone as a license notice. The three archive
+regressions and ten supplement checks pass, and strict export still refuses
+the remaining 15 missing notices without creating output. The development
+inventory's complete dependency coverage does not establish distribution readiness.
 
 The Gloo archive records a workspace subdirectory URL under `rustwasm/gloo`.
 Its public repository redirects to `ranile/gloo`; the exact recorded commit

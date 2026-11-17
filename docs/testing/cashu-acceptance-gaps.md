@@ -24,6 +24,12 @@ dependency audit. Counter rollback and missing recovery material fail closed;
 unfinished CDK work still waits for original-operation recovery. This is
 synthetic-provider evidence, not live mint or complete recovery qualification.
 
+The [2026-11-17 notice correction](cashu-license-authors-20261117.json) reduces
+missing notices from 17 to 15 by recognizing the full MIT permission/copyright
+notice already present in both `r-efi` archives' `AUTHORS` file. Exact upstream
+blob comparisons and 13 archive/supplement tests pass. Dependency coverage remains
+462 packages with no unresolved sources; distribution readiness remains false.
+
 | Required behavior / artifact | Established evidence | Required work still open |
 | --- | --- | --- |
 | Existing native Lightning, NIP-57 and paid history | Core regression suites and historical live checkpoints; no production change in this workstream | Final selected-source regression and approved installed/provider acceptance. |

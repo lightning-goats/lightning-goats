@@ -21,6 +21,92 @@ def digest(path):
     return h.hexdigest()
 
 
+def qualify_restore(source, output_root, collected, identity, selected, store):
+    """Pass the real encrypted collector output through the isolated launcher."""
+    scripts = source / 'deploy/scripts'
+    capsule = output_root / 'restore-capsule'
+    capsule.mkdir(mode=0o700)
+    files = runpy.run_path(str(scripts / 'launch-cashu-backup.py'))['FILES']
+    for name in files:
+        target = capsule / name
+        shutil.copyfile(scripts / name, target)
+        target.chmod(0o400)
+    manifest = capsule / 'TOOL.json'
+    manifest.write_text(json.dumps({'version': 1, 'source_commit': '01' * 20,
+                                    'files': {name: digest(capsule / name) for name in files}}))
+    manifest.chmod(0o600)
+    ciphertext = collected / 'checkpoint.tar.age'
+    checksum = digest(ciphertext)
+    receipt = collected / 'COMPLETE.json'
+
+    def invoke(destination, digest_override=checksum, key=identity):
+        return subprocess.run(
+            ['/usr/bin/python3', '-I', '-S', '-B', str(capsule / 'launch-cashu-backup.py'),
+             digest(manifest), 'stage', str(ciphertext), digest_override, str(receipt),
+             str(key), str(destination), '--age', str(selected['age']), '--age-sha256',
+             digest(selected['age']), '--statectl', str(selected['statectl']),
+             '--key-verifier', str(selected['copy']), '--max-bytes', str(1024**3)],
+            stdin=subprocess.DEVNULL, capture_output=True, timeout=180,
+            env={'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'},
+        )
+
+    destination = output_root / 'restore-positive'
+    outcome = invoke(destination)
+    if outcome.returncode:
+        raise ValueError('actual restore staging CLI refused original fixture archive')
+    result = json.loads(outcome.stdout)
+    roles = sorted(('core', 'membership', 'payout', 'signer', 'wallet', 'cashu_signer'))
+    if (result['result'] != 'CASHU_RESTORE_STAGED' or result['fenced_roles'] != roles
+            or result['keys_verified'] is not True or result['resume_authorized'] is not False
+            or result['restore_authorized'] is not False
+            or result['external_reconciliation_verified'] is not False
+            or result != json.loads((destination / 'STAGED.json').read_bytes())
+            or (destination / 'INCOMPLETE').exists() or (destination / 'decrypted.tar').exists()):
+        raise ValueError('restore staging outcome differs from expected scope')
+    manifest_path = destination / 'FENCED_IMAGES.json'
+    image_manifest = json.loads(manifest_path.read_bytes())
+    if (digest(manifest_path) != result['fenced_images_sha256']
+            or image_manifest['checkpoint_id'] != result['checkpoint_id']
+            or sorted(image_manifest['roles']) != roles):
+        raise ValueError('staged image manifest differs from receipt')
+    for role in roles:
+        directory = destination / 'fenced-images' / role
+        marker = ('CASHU_RECOVERY_REQUIRED' if role in ('wallet', 'cashu_signer')
+                  else 'CYBERHERD_RECOVERY_REQUIRED')
+        if ((directory / marker).read_text().strip() != result['checkpoint_id']
+                or directory.stat().st_uid != 0 or directory.stat().st_mode & 0o777 != 0o700
+                or any(p.stat().st_uid != 0 or p.stat().st_mode & 0o777 != 0o600
+                       for p in directory.iterdir())):
+            raise ValueError('staged images lack protected ownership or recovery fence')
+        for item in image_manifest['roles'][role]:
+            image = directory / item['name']
+            if digest(image) != item['sha256'] or image.stat().st_size != item['bytes']:
+                raise ValueError('staged image differs from retained manifest')
+    image = destination / 'fenced-images/wallet' / store.name
+    with closing(sqlite3.connect(image.as_uri() + '?immutable=1&mode=ro', uri=True)) as db:
+        if db.execute('SELECT value FROM collector_fixture_wal').fetchall() != [(b'synthetic committed WAL value',)]:
+            raise ValueError('staged native store lost committed WAL content')
+    if any(p.stat().st_mode & 0o111 for p in (destination / 'checkpoint-evidence/programs').iterdir()):
+        raise ValueError('stager made an archived program executable')
+    wrong_digest = output_root / 'restore-wrong-digest'
+    wrong_key = output_root / 'other-age-identity'
+    subprocess.run([str(selected['keygen']), '-o', str(wrong_key)], stdin=subprocess.DEVNULL,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10, check=True)
+    failed_decrypt = output_root / 'restore-wrong-identity'
+    for attempt in (invoke(wrong_digest, '00' * 32), invoke(destination), invoke(failed_decrypt, key=wrong_key)):
+        if (attempt.returncode != 1 or attempt.stdout
+                or attempt.stderr != b'Cashu restore staging refused. Preserve any incomplete private stage.\n'):
+            raise ValueError('restore staging did not refuse cleanly')
+    if (wrong_digest.exists() or not (failed_decrypt / 'INCOMPLETE').is_file()
+            or (failed_decrypt / 'fenced-images').exists() or (failed_decrypt / 'STAGED.json').exists()
+            or digest(ciphertext) != checksum):
+        raise ValueError('failed restore altered source or promoted an incomplete copy')
+    return {'actual_authenticated_launcher': True, 'real_age_archive': True,
+            'staged_roles': len(roles), 'committed_wal_preserved': True, 'image_manifest_verified': True,
+            'refusal_cases': 3, 'archive_programs_executable': False,
+            'external_reconciliation_verified': False, 'resume_authorized': False}
+
+
 def qualify(source,root,states,uids,binaries,configurations,native_policy,args):
     config_root=root/'collector-config'; config_root.mkdir(mode=0o700)
     output_root=root/'collector-output'; output_root.mkdir(mode=0o700)
@@ -128,6 +214,7 @@ def qualify(source,root,states,uids,binaries,configurations,native_policy,args):
                 raise ValueError('encrypted archive omitted or changed a retained component')
     after={str(p):digest(p) for directory in states.values() for p in directory.rglob('*') if p.is_file()}
     if original!=after:raise ValueError('collector changed original application bytes')
+    restore_result = qualify_restore(source, output_root, destination, identity, selected, store)
     key_stage=destination/'plaintext/recovery-material'
     key_negatives=0
     def key_check(success):
@@ -207,4 +294,5 @@ def qualify(source,root,states,uids,binaries,configurations,native_policy,args):
         'encryption_output_limit_refused':True,'encryption_timeout_stub_refused':True,
         'maintenance_lock_path_is_disposable':True,'authenticated_launcher_executed':False,
         'empty_native_state_only':True,'funded_restore_qualified':False,
-        'installed_or_live_acceptance':False,'production_or_physical_side_effects':False}
+        'installed_or_live_acceptance':False,'production_or_physical_side_effects':False,
+        'restore_staging': restore_result}

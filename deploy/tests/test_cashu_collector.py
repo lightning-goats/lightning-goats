@@ -1,5 +1,6 @@
 """Root-only disposable filesystem and quiescence tests; no service mutations."""
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -7,6 +8,7 @@ import pwd
 import runpy
 import shutil
 import subprocess
+import tarfile
 import tempfile
 import types
 import unittest
@@ -15,6 +17,66 @@ from unittest.mock import patch
 SOURCE=Path(__file__).resolve().parents[2]/'deploy/scripts'
 MODULE=runpy.run_path(str(SOURCE/'collect-cashu-backup.py'))
 LAUNCH=runpy.run_path(str(SOURCE/'launch-cashu-backup.py'))
+RESTORE=runpy.run_path(str(SOURCE/'stage-cashu-restore.py'))
+
+
+class RestoreArchiveTests(unittest.TestCase):
+    @staticmethod
+    def tar(entries, format=tarfile.USTAR_FORMAT):
+        raw = io.BytesIO()
+        with tarfile.open(fileobj=raw, mode='w', format=format) as archive:
+            for name, kind, data in entries:
+                member = tarfile.TarInfo(name)
+                member.type = kind
+                member.mode = 0o777
+                member.uid = 123
+                member.size = len(data)
+                archive.addfile(member, io.BytesIO(data))
+        raw.seek(0)
+        return raw
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+
+    def extract(self, archive, name='stage', maximum=1024):
+        return RESTORE['extract_plain_tar'](archive, self.root / name, MODULE['Budget'](maximum, 10))
+
+    def test_regular_files_and_directories_get_private_modes(self):
+        archive = self.tar([('wallet', tarfile.DIRTYPE, b''),
+                            ('wallet/journal', tarfile.REGTYPE, b'stored bytes')])
+        self.extract(archive)
+        wallet = self.root / 'stage/wallet'
+        self.assertEqual((wallet / 'journal').read_bytes(), b'stored bytes')
+        self.assertEqual(wallet.stat().st_mode & 0o777, 0o700)
+        self.assertEqual((wallet / 'journal').stat().st_mode & 0o777, 0o600)
+
+    def test_unsafe_members_and_duplicate_names_are_refused(self):
+        for i, entries in enumerate([
+            [('../outside', tarfile.REGTYPE, b'ignored')],
+            [('linked', tarfile.SYMTYPE, b'')],
+            [('linked', tarfile.LNKTYPE, b'')],
+            [('duplicate', tarfile.REGTYPE, b'a'), ('duplicate', tarfile.REGTYPE, b'b')],
+        ]):
+            with self.subTest(entries=entries), self.assertRaises(ValueError):
+                self.extract(self.tar(entries), f'stage-{i}')
+        self.assertFalse((self.root / 'outside').exists())
+        self.assertEqual((self.root / 'stage-3/duplicate').read_bytes(), b'a')
+
+    def test_extended_headers_and_data_after_terminator_are_refused(self):
+        extended = self.tar([('x' * 256, tarfile.REGTYPE, b'a')], tarfile.PAX_FORMAT)
+        with self.assertRaises(ValueError):
+            self.extract(extended, 'extended')
+        ordinary = self.tar([('file', tarfile.REGTYPE, b'original')])
+        with self.assertRaises(ValueError):
+            self.extract(io.BytesIO(ordinary.getvalue() + b'extra'), 'trailing')
+
+    def test_component_cannot_overrun_aggregate_remaining_bytes(self):
+        archive = self.tar([('file', tarfile.REGTYPE, b'data')])
+        with self.assertRaises(ValueError):
+            self.extract(archive, maximum=3)
+        self.assertFalse((self.root / 'stage/file').exists())
 
 
 @unittest.skipUnless(os.geteuid()==0,'requires disposable root-owned files')

@@ -127,9 +127,9 @@ coverage, portable export/reprovisioning and historical-key administration remai
 acceptance requirements; a short manually declared extras list does not close them.
 
 The root-owned capsule contains exactly `launch-cashu-backup.py`,
-`collect-cashu-backup.py`, `verify-cashu-backup.py`,
+`collect-cashu-backup.py`, `stage-cashu-restore.py`, `verify-cashu-backup.py`,
 `verify-cashu-combined-backup.py` and `TOOL.json`. The latter has version 1,
-the selected 40-character source commit and SHA256 for each of the four scripts.
+the selected 40-character source commit and SHA256 for each of the five scripts.
 Authenticate the bootstrap file externally before interpreting it, then use the
 reviewed manifest hash with isolated Python:
 
@@ -174,3 +174,44 @@ schemas, the native copy/key helper, native correlation verification and an actu
 age decrypt/byte comparison. Service statuses and the maintenance-lock path are
 explicitly mocked there; `/proc` UID scans and file locks are actual. Its initialized
 empty journals do not establish funded restore or installed service acceptance.
+
+## Stage a checkpoint for reconciliation
+
+Keep the encrypted archive, collection receipt and independently recorded
+ciphertext SHA256 together. On an offline recovery host, place copies of the
+archive, receipt and native age identity in protected root-owned directories.
+Use the same authenticated launcher and separately obtained local verifier
+executables:
+
+```sh
+/usr/bin/python3 -I -S -B ROOT_CAPSULE/launch-cashu-backup.py TOOL_SHA256 stage \
+  ARCHIVE ARCHIVE_SHA256 RECEIPT AGE_IDENTITY NEW_PRIVATE_DESTINATION \
+  --age AGE_EXECUTABLE --age-sha256 AGE_SHA256 \
+  --statectl CYBERHERD_STATECTL --key-verifier CASHU_STATECTL \
+  --max-bytes STAGING_BYTE_BUDGET --deadline-seconds 300
+```
+
+Select a new child of a private root-owned directory. The storage budget
+covers the temporary decrypted tar, extracted evidence and new fenced copies
+at the same time. The root-private age identity contains one native X25519
+key. The separately supplied age hash pins the executable before decryption.
+The native verifier files must match the hashes bound to the collected policy.
+Archived executables stay in the evidence tree with execution permissions off.
+
+The launcher checks the ciphertext hash and receipt before decryption. The
+stager accepts regular files and directories from the collector's USTAR format,
+rechecks recorded copy hashes, reruns the combined inventory verifier, and
+binds the recovered keys to the wallet journal and collected configurations.
+It creates the recovery markers for all six roles before copying the normalized
+images into `fenced-images/`. The remaining policies, signer credentials,
+historical keys, raw sidecars and program bytes stay under `checkpoint-evidence/`.
+
+A successful stage contains `STAGED.json` and root-private images for review.
+The receipt binds `FENCED_IMAGES.json`, which lists each staged file with its
+size and hash so the reconciliation review can identify the exact images.
+The temporary tar is removed after verification. A failed stage keeps its
+`INCOMPLETE` marker and any private evidence already written. No installed
+directory, runtime ownership, service policy or recovery marker is changed.
+Reconcile each original mint, Strike and feeder outcome before considering
+installation or resumption. `STAGED.json` records pending external reconciliation
+and leaves resumption unauthorized.

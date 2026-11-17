@@ -256,7 +256,7 @@ jobs:
           path: ${{ runner.temp }}/cashu-wallet
       - name: Prepare pinned official backup encryption fixture dependency
         run: python3 deploy/scripts/prepare-cashu-backup-age.py "$RUNNER_TEMP/backup-age"
-      - name: Verify empty combined native and Cashu recovery inventory
+      - name: Verify native Cashu backup and encrypted restore staging
         shell: bash
         run: |
           set -euo pipefail

@@ -342,7 +342,10 @@ mod multi_mint {
                 );
                 tokio::time::sleep(Duration::from_millis(25)).await;
             };
-            binding.validate_new_invoice(&issued, u64::try_from(now)?)?;
+            let observed_now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_secs();
+            binding.validate_new_invoice(&issued, observed_now)?;
             let input = if round == 0 { 250 } else { 150 };
             let deposit = input - 2;
             assert_eq!(
@@ -359,7 +362,7 @@ mod multi_mint {
                 receipts[round].acquisition_id
             );
             let quote = json!({"quote":format!("multi-mint-{round}"),"amount":deposit,"fee_reserve":1,
-                "state":"UNPAID","expiry":now+240,"payment_preimage":null,"change":null,
+                "state":"UNPAID","expiry":observed_now+240,"payment_preimage":null,"change":null,
                 "request":issued.invoice,"unit":"sat","method":"bolt11"});
             *h.mint.quote_reply.lock().unwrap() = Some(quote.clone());
             let mut paid = quote;

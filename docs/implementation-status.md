@@ -9,9 +9,13 @@ a fresh Git export passes vendor verification and all 13 notice tests. Core and
 wallet CI gates now pass for that checkpoint; combined/other CI qualification is
 recorded separately. The [two-settlement residual-change composition](testing/cashu-residual-settlement-20261117.json)
 passes normal/lost-reply CI at `69ba9de`, with no transfer credit or native top-up.
-Deployment qualification still fails the contact-upgrade comparison because the
-current binary adds schema 26; the strict empty-Cashu comparison fix is under
-qualification.
+The strict empty-Cashu contact comparison passes the installed rehearsal at
+`42e9956`. A later historical payout-8 upgrade failed because its pinned old
+verifier cannot read core schema 26. A distinct reviewed empty-Cashu source
+selector and native payout-only comparison are now implemented for qualification;
+the default legacy path still requires both original and selected verifiers.
+The corrected retention regression at `b1487cf` passes core and wallet CI gates;
+complete deployment qualification remains open.
 
 Cashu operator controls update **2026-11-17**: the
 [protected planning/reconciliation checkpoint](testing/cashu-operator-controls-20261117.json)

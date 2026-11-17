@@ -88,7 +88,11 @@ def native_configuration_checks(directory, record):
             'configurations_checked': 3, 'journals_opened': False, 'credentials_loaded': False}
 
 
-def prepare(archive, review_archive, source, archive_sha, review_sha, directory, *, inclusive_fee_upgrade=False):
+def prepare(archive, review_archive, source, archive_sha, review_sha, directory, *, inclusive_fee_upgrade=False,
+            cashu_core_source=False):
+    if (type(cashu_core_source) is not bool
+            or (cashu_core_source and not inclusive_fee_upgrade)):
+        raise ValueError('Cashu-core source requires a distinct inclusive-fee preparation')
     C.root()
     C.protected(C.BASE, directory=True, private=True)
     if (directory.parent != C.BASE or re.fullmatch('[A-Za-z0-9_.-]{1,128}', directory.name) is None
@@ -145,6 +149,7 @@ def prepare(archive, review_archive, source, archive_sha, review_sha, directory,
         TX.copy_durable(path, directory / f'original-{index}', baseline['files'][path])
     record = {'version': 1, 'tool': verified_tool_identity(), 'program_upgrade_only': not inclusive_fee_upgrade,
         **({'inclusive_fee_upgrade': True} if inclusive_fee_upgrade else {}),
+        **({'cashu_core_source': True} if cashu_core_source else {}),
         'source_commit': source, 'release': accepted, 'review_archive_sha256': review_sha,
         'baseline': baseline, 'original_order': list(baseline['files']), 'selected_program_sha256': hashes,
         'activation_authorized': False, 'schema_upgrade_authorized': False,
@@ -179,6 +184,8 @@ def load(directory, expected, *, inclusive_fee_upgrade=False):
     if (r.get('version') != 1 or r.get('tool') != verified_tool_identity()
             or r.get('program_upgrade_only') is not (not inclusive_fee_upgrade)
             or r.get('inclusive_fee_upgrade', False) is not inclusive_fee_upgrade
+            or type(r.get('cashu_core_source', False)) is not bool
+            or (r.get('cashu_core_source', False) and not inclusive_fee_upgrade)
             or any(r.get(k) is not False for k in ('activation_authorized', 'schema_upgrade_authorized',
                                                  'services_changed', 'journals_opened', 'credentials_loaded'))
             or set(r['selected_program_sha256']) != set(PROGRAMS)):
@@ -308,14 +315,33 @@ def inclusive_backup(directory, m, r):
         raise ValueError('distinct inclusive-fee upgrade review required')
     U.stopped(m, r)
     observed = U.state_files(r)
-    original_verify(directory, 'snapshot', '--destination', directory / 'backup', '--writers-stopped')
-    original = original_verify(directory, 'verify', '--bundle', directory / 'backup')
+    cashu_core = r.get('cashu_core_source', False)
+    if type(cashu_core) is not bool:
+        raise ValueError('invalid reviewed Cashu-core source selector')
+    if cashu_core:
+        # The old payout-prefix verifier predates core schema 26. Its refusal
+        # cannot silently select another authority: the independently reviewed
+        # preparation must explicitly select the new exact-prefix verifier.
+        created = inclusive_native(directory, 'snapshot-before-inclusive-fees', '--destination',
+                                   directory / 'backup', '--writers-stopped')
+        original = None
+    else:
+        original_verify(directory, 'snapshot', '--destination', directory / 'backup', '--writers-stopped')
+        original = original_verify(directory, 'verify', '--bundle', directory / 'backup')
     selected = inclusive_native(directory, 'verify-inclusive-fee-upgrade-source', '--bundle', directory / 'backup')
-    if original['id'] != selected['id']:
+    if cashu_core:
+        if created['id'] != selected['id']:
+            raise ValueError('Cashu-core snapshot and source verification identities differ')
+        manifest = C.read_json(directory / 'backup/MANIFEST.json')
+        count = manifest['report']['rows']['core'].get('_sqlx_migrations')
+        if type(count) is not int or count != 26:
+            raise ValueError('reviewed Cashu-core source requires exact core schema 26')
+    elif original['id'] != selected['id']:
         raise ValueError('original and selected source verifiers accepted different backups')
     U.sources_match(m, r, observed)
     M.note(directory, 'BACKUP-ACCEPTED.json', {'native': original, 'selected_source': selected,
             'originals': observed, 'manifest_sha256': U.digest(directory / 'backup/MANIFEST.json'),
+            **({'cashu_core_source': True, 'original_verifier_used': False} if cashu_core else {}),
             'inclusive_fee_upgrade': True, 'migration_started': False})
     return observed
 
@@ -325,6 +351,7 @@ def inclusive_clone_compare(directory, m, r, observed):
     U.sources_match(m, r, observed)
     accepted = C.read_json(directory / 'BACKUP-ACCEPTED.json')
     if (accepted.get('inclusive_fee_upgrade') is not True
+            or accepted.get('cashu_core_source', False) is not r.get('cashu_core_source', False)
             or accepted['manifest_sha256'] != U.digest(directory / 'backup/MANIFEST.json')
             or inclusive_native(directory, 'verify-inclusive-fee-upgrade-source',
                                 '--bundle', directory / 'backup') != accepted['selected_source']):
@@ -499,6 +526,7 @@ def apply_inclusive_fee_upgrade(directory, expected, approved):
         backup = C.read_json(directory / 'BACKUP-ACCEPTED.json')
         clone = C.read_json(directory / 'CLONE-ACCEPTED.json')
         if (clone.get('inclusive_fee_upgrade') is not True
+                or backup.get('cashu_core_source', False) is not r.get('cashu_core_source', False)
                 or clone['backup_manifest_sha256'] != backup['manifest_sha256']
                 or inclusive_native(directory, 'verify-inclusive-fee-upgrade-source',
                                     '--bundle', directory / 'backup') != backup['selected_source']
@@ -640,6 +668,8 @@ def resume_inclusive_fee_upgrade(directory, expected, approved):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--inclusive-fee-upgrade', action='store_true', help='prepare a distinct schema-upgrade review; does not apply it')
+    parser.add_argument('--cashu-core-source', action='store_true',
+                        help='explicitly review an empty schema-26 core with the selected native prefix verifier')
     commands = parser.add_subparsers(dest='operation', required=True)
     preparation = commands.add_parser('prepare')
     for name in ('archive', 'review_archive', 'source', 'archive_sha256', 'review_sha256', 'directory'):
@@ -654,8 +684,11 @@ def main():
     args = parser.parse_args()
     if args.inclusive_fee_upgrade and args.operation != 'prepare':
         raise ValueError('inclusive-fee upgrade application requires its separate reviewed coordinator')
+    if args.cashu_core_source and (not args.inclusive_fee_upgrade or args.operation != 'prepare'):
+        raise ValueError('Cashu-core source requires a distinct inclusive-fee preparation')
     if args.operation == 'prepare':
-        result = prepare(args.archive, args.review_archive, args.source, args.archive_sha256, args.review_sha256, args.directory, inclusive_fee_upgrade=args.inclusive_fee_upgrade)
+        result = prepare(args.archive, args.review_archive, args.source, args.archive_sha256, args.review_sha256, args.directory,
+                         inclusive_fee_upgrade=args.inclusive_fee_upgrade, cashu_core_source=args.cashu_core_source)
     elif args.operation == 'apply-inclusive-fees':
         result = apply_inclusive_fee_upgrade(args.directory, args.review_sha256, args.exclusive_maintenance)
     elif args.operation == 'resume-inclusive-fees':

@@ -104,14 +104,48 @@ pub(super) async fn inspect_before_inclusive_fees(
     directory: &Path,
     policy: &Policy,
 ) -> Result<Report> {
-    inspect_version(
+    inspect_inclusive_fees(directory, policy, true).await
+}
+
+pub(super) async fn inspect_after_inclusive_fees(
+    directory: &Path,
+    policy: &Policy,
+) -> Result<Report> {
+    inspect_inclusive_fees(directory, policy, false).await
+}
+
+async fn inspect_inclusive_fees(
+    directory: &Path,
+    policy: &Policy,
+    before_fees: bool,
+) -> Result<Report> {
+    if let Ok(report) = inspect_version(
         directory,
         policy,
         25,
-        true,
+        before_fees,
         ReviewScope::OrdinaryMaintenance,
     )
     .await
+    {
+        return Ok(report);
+    }
+    // A payout-only upgrade may also preserve a current core with the exact
+    // inactive extension. This is not a coordinated Cashu-custody backup.
+    let report = inspect_version(
+        directory,
+        policy,
+        26,
+        before_fees,
+        ReviewScope::OrdinaryMaintenance,
+    )
+    .await?;
+    for table in super::cashu_upgrade::CASHU_TABLES {
+        if report.rows[&Role::Core].get(table) != Some(&0) {
+            bail!("inclusive-fee maintenance requires empty inactive Cashu tables");
+        }
+    }
+    Ok(report)
 }
 async fn inspect_version(
     directory: &Path,

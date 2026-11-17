@@ -90,8 +90,10 @@ sats of contribution credit, and permit one synthetic 1000-sat feeding with
 16 credit left. The transfers add no donation or credit. Wallet health verifies
 zero remaining custody and three sats each of receive/conversion fees. This
 does not test admission after the first melt or real providers. The deployment
-rehearsal still fails the contact-upgrade schema comparison; its fix requires
-separate selected-source qualification.
+rehearsal now passes the strict contact comparison. It reaches a later historical
+payout-8 source-verifier failure on core schema 26. An explicit reviewed
+empty-Cashu source variant is implemented; selected-source native and installed
+qualification remain pending.
 Multi-mint financial composition and the rest of the full plan remain required.
 
 | Required behavior / artifact | Established evidence | Required work still open |

@@ -722,7 +722,7 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
         shutil.copyfile(legacy / 'TEST-ONLY-schema8-statectl', statectl)
         statectl.chmod(0o755)
         fee_review = base / 'ci-inclusive-fee-review'
-        fee_prepared = json.loads(run(*launcher, '--cyberherd-program-maintenance', '--inclusive-fee-upgrade', 'prepare',
+        fee_prepared = json.loads(run(*launcher, '--cyberherd-program-maintenance', '--inclusive-fee-upgrade', '--cashu-core-source', 'prepare',
             str(core_archive), str(review_archive), source_commit,
             hashlib.sha256(core_archive.read_bytes()).hexdigest(), hashlib.sha256(review_archive.read_bytes()).hexdigest(), str(fee_review)))
         assert fee_prepared['prepared'] is True and fee_prepared['journals_opened'] is False
@@ -732,6 +732,11 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
         assert fee_applied['live_migration_compared'] is True and fee_applied['services_started'] is False
         fee_before = json.loads((fee_review / 'backup/MANIFEST.json').read_text())
         fee_after = json.loads((fee_review / 'migrated/MANIFEST.json').read_text())
+        fee_acceptance = json.loads((fee_review / 'BACKUP-ACCEPTED.json').read_text())
+        assert fee_acceptance['cashu_core_source'] is True
+        assert fee_acceptance['original_verifier_used'] is False and fee_acceptance['native'] is None
+        assert fee_before['report']['rows']['core']['_sqlx_migrations'] == 26
+        assert fee_after['report']['rows']['core']['_sqlx_migrations'] == 26
         assert fee_before['report']['rows']['payout']['_sqlx_migrations'] == 7
         assert fee_after['report']['rows']['payout']['_sqlx_migrations'] == 10
         fee_resumed = json.loads(run(*launcher, '--cyberherd-program-maintenance', 'resume-inclusive-fees',
@@ -742,6 +747,9 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
         assert counts['post'] == 0
         fee_evidence = {'accepted': True, 'synthetic': True,
             'legacy_verifier_source': (legacy / 'SOURCE-COMMIT').read_text().strip(),
+            'legacy_verifier_used_for_source': False,
+            'selected_exact_core_26_payout_8_prefix_verifier': True,
+            'cashu_core_source_explicitly_reviewed': True,
             'source_prefix_verified': True, 'runtime_uid_migration': True,
             'source_migration_records': fee_before['report']['rows']['payout']['_sqlx_migrations'],
             'target_migration_records': fee_after['report']['rows']['payout']['_sqlx_migrations'],

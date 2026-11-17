@@ -45,7 +45,7 @@ pub(super) async fn private_catalog() -> Result<BTreeMap<String, Definition>> {
 
 pub(super) async fn compare_images(before: &Path, after: &Path, policy: &Policy) -> Result<()> {
     database::inspect_before_inclusive_fees(before, policy).await?;
-    let migrated = database::inspect_schema_25(after, policy).await?;
+    let migrated = database::inspect_after_inclusive_fees(after, policy).await?;
     for table in FEE_TABLES {
         if migrated.rows[&Role::Payout].get(table) != Some(&0) {
             bail!("inclusive-fee upgrade must add empty fee tables only");
@@ -244,6 +244,84 @@ mod tests {
         payout.close().await;
         (policy, keep)
     }
+    #[tokio::test]
+    async fn fee_upgrade_preserves_current_empty_cashu_core_and_refuses_used_state() {
+        let root = tempfile::TempDir::new().unwrap();
+        let (policy, _keep) = seed(root.path()).await;
+        let core = crate::sqlite::connect_durable(
+            &format!(
+                "sqlite://{}",
+                policy.components[&Role::Core].database.display()
+            ),
+            1,
+        )
+        .await
+        .unwrap();
+        database::migrate_core_through(&core, 26).await.unwrap();
+        core.close().await;
+        let before = root.path().join("before");
+        let after = root.path().join("after");
+        super::super::contact_upgrade::tests::copy_images(&policy, &before);
+        super::super::contact_upgrade::tests::copy_images(&policy, &after);
+        let original = std::fs::read(before.join("core.db")).unwrap();
+        let original_wal = std::fs::read(before.join("core.db-wal")).ok();
+        database::inspect_before_inclusive_fees(&before, &policy)
+            .await
+            .unwrap();
+        let payout = crate::sqlite::connect_durable(
+            &format!("sqlite://{}", after.join("payout.db").display()),
+            1,
+        )
+        .await
+        .unwrap();
+        sqlx::migrate!("./payout-migrations")
+            .run(&payout)
+            .await
+            .unwrap();
+        compare_images(&before, &after, &policy).await.unwrap();
+        let core = crate::sqlite::connect_durable(
+            &format!("sqlite://{}", after.join("core.db").display()),
+            1,
+        )
+        .await
+        .unwrap();
+        sqlx::query("UPDATE ledger_entries SET delta_sats=delta_sats+1 WHERE id=1")
+            .execute(&core)
+            .await
+            .unwrap();
+        assert!(compare_images(&before, &after, &policy).await.is_err());
+        sqlx::query("UPDATE ledger_entries SET delta_sats=delta_sats-1 WHERE id=1")
+            .execute(&core)
+            .await
+            .unwrap();
+        compare_images(&before, &after, &policy).await.unwrap();
+        sqlx::query("INSERT INTO cashu_import_clock VALUES(1,100)")
+            .execute(&core)
+            .await
+            .unwrap();
+        assert!(compare_images(&before, &after, &policy).await.is_err());
+        core.close().await;
+        payout.close().await;
+        assert_eq!(std::fs::read(before.join("core.db")).unwrap(), original);
+        assert_eq!(std::fs::read(before.join("core.db-wal")).ok(), original_wal);
+        let core = crate::sqlite::connect_durable(
+            &format!("sqlite://{}", before.join("core.db").display()),
+            1,
+        )
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO cashu_import_clock VALUES(1,100)")
+            .execute(&core)
+            .await
+            .unwrap();
+        assert!(
+            database::inspect_before_inclusive_fees(&before, &policy)
+                .await
+                .is_err()
+        );
+        core.close().await;
+    }
+
     #[tokio::test]
     async fn fee_upgrade_retains_all_journals_and_rejects_extra_schema_or_changed_paid_rows() {
         let root = tempfile::TempDir::new().unwrap();

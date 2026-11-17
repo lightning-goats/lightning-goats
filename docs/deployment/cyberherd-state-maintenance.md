@@ -290,6 +290,13 @@ not widen ordinary current-schema verification or restore eligibility. They do
 not grant recovery adoption, service resumption or financial authority. Installed
 transaction qualification and operator-directed maintenance remain required.
 
+The development source also permits that exact payout prefix with an unchanged
+core-26 journal only when every Cashu table is empty. Its separately reviewed
+coordinator selector and verifier authority are documented in the
+[inclusive-fee upgrade contract](cyberherd-inclusive-fee-upgrade.md). It does not
+qualify a backup containing Cashu custody or permit core-schema changes during
+a payout-only upgrade.
+
 ## Verification boundary
 
 Tests use real schemas/native SQLite, committed WAL, private ownership, pending

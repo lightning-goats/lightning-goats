@@ -16,7 +16,7 @@ A recovery set must identify one quiesced checkpoint across these components:
 | --- | --- | --- |
 | Core ledger | Complete SQLite database, ledger epoch, Cashu receipt inbox, grants/retirements, financial plans, source allocations, treasury jobs/results/deposits, feeder requests/results and signed outboxes | Prevent duplicate contributions, repeated deposits, reward grants and physical dispatch. |
 | Wallet journal | Complete `acquisition.sqlite`, wallet epoch/instance registration, admitted input identities, prepared request bytes, acquired evidence, acknowledgments, schedules, treasury reservations/results/change and publication outboxes | Recover exact operations and ownership; an input marked spent does not prove output ownership. |
-| CDK wallet | Complete `wallet.sqlite` and its operation/counter/proof state at the same checkpoint | Retain wallet-owned outputs and deterministic preparation state without reverting proof reservations. |
+| CDK wallet | Complete legacy `wallet.sqlite` plus every retained `mint-<sha256>.sqlite` namespace, with their operation/counter/proof state at the same checkpoint | Retain wallet-owned outputs and deterministic preparation state without reverting proof reservations. |
 | Wallet keys | Protected `wallet-seed.bin` (64 raw bytes), `receiving-key.bin` (32 raw bytes), and retained historical receiving keys with policy bindings | Seed recovery alone cannot restore pending P2PK inputs, original receipt attribution or core decisions. Never generate replacement keys during restore. |
 | Signing broker | Complete `cashu-signing.sqlite`, broker epoch, wallet binding and exact signed-event records | Preserve signing authorization and exact-event retry identity. |
 | CyberHerd membership | Complete membership journal, owner/core cursor bindings, retained roster, reward plans and exact message outboxes | Preserve the existing four-journal correlations and avoid replaying membership/reward decisions. |
@@ -85,6 +85,11 @@ does not authorize restore or establish writer quiescence, complete schema
 compatibility, receipt/treasury acknowledgment agreement, external outcomes,
 historical-key completeness or the completeness of policy
 files. Those checks and coordinated snapshot creation remain required.
+
+The native [copy-normalization helper](cashu-backup-collection.md) is being
+qualified separately. It operates on protected raw copies with the wallet's
+pinned SQLite engine; it supplies no writer-quiescence, encryption, coordinated
+checkpoint or restore authority.
 
 Matching registrations identify the expected stores; they do not detect an older
 snapshot of the same epoch. Cross-store receipt/treasury digests and external

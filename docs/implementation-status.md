@@ -16,8 +16,17 @@ at `cb582e9` passes all ten selected-source workflows, including full native
 gates and the installed systemd rehearsal. Its distinct reviewed empty-Cashu
 source selector retains the default legacy requirement for both original and
 selected verifiers. All 26 protected orchestration regressions also pass locally
-without skips. A new two-configured-mint HTTP/financial composition case is
-implemented and under qualification; it is not covered by that checkpoint.
+without skips. The [two-configured-mint HTTP/financial composition](testing/cashu-two-mint-settlement-20261117.json)
+now passes normal/lost replies at `0f66d53`, with all ten selected-source workflows
+successful. Two original Strike receives deposit 396 sats before one synthetic
+feeding, with four sats of conversion fees, zero remaining custody and no
+transfer credit. The matched source/CI trees and artifact hashes are retained in
+that checkpoint. Installed Runtime, Android, live provider and physical acceptance
+remain open. The separate [native backup-copy helper](testing/cashu-copy-normalization-local-20261117.json)
+passes local main/WAL, row-ID/signed-byte and 21 refusal/interruption checks,
+strict Clippy and its CLI privacy test; fresh selected-source CI is pending.
+The [runbook](deployment/cashu-backup-collection.md) keeps writer quiescence,
+coordinated encrypted collection and funded recovery explicitly unfinished.
 
 Cashu operator controls update **2026-11-17**: the
 [protected planning/reconciliation checkpoint](testing/cashu-operator-controls-20261117.json)

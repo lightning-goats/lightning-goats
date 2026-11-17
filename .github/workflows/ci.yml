@@ -159,6 +159,18 @@ jobs:
         run: cargo clippy --locked --all-targets --all-features -- -D warnings
       - name: Test isolated wallet
         run: cargo test --locked --all-features
+      - name: Verify native normalization of private database copies
+        shell: bash
+        run: |
+          set -euo pipefail
+          CARGO_TARGET_DIR=target cargo build --locked --bin lightning-goats-cashu-statectl
+          python3 - <<'PYCODE' 2>&1 | tee "$RUNNER_TEMP/cashu-copy-normalization.json"
+          import hashlib, subprocess
+          from pathlib import Path
+          cli = Path('target/debug/lightning-goats-cashu-statectl').resolve(strict=True)
+          digest = hashlib.sha256(cli.read_bytes()).hexdigest()
+          subprocess.run(['sudo', 'unshare', '--net', '--', 'python3', '-B', '../../deploy/scripts/test-cashu-copy-normalization.py', '--cli', str(cli), '--cli-sha256', digest], check=True)
+          PYCODE
       - name: Verify offline reusable request preparation through the native CLI
         shell: bash
         run: |
@@ -183,6 +195,7 @@ jobs:
           path: |
             ${{ runner.temp }}/cashu-request-cli.json
             ${{ runner.temp }}/cashu-request-cli-long.json
+            ${{ runner.temp }}/cashu-copy-normalization.json
           if-no-files-found: error
           retention-days: 14
       - name: Install pinned parser-test Node

@@ -65,4 +65,5 @@ pub mod treasury_scheduler;
 
 pub mod treasury_split;
 
+pub mod backup_copy;
 pub mod operator_reconciliation;

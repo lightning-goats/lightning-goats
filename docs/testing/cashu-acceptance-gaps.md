@@ -44,8 +44,8 @@ offline Cashu-TS sender: zero-fee, fee-only, returned-change and repeated-reques
 modes, each with normal and lost melt replies. Original treasury IDs and credit
 remain stable; internal transfers create no extra contribution. Returned dust
 still needs a later one-sat native contribution in that particular fixture.
-Economically viable residual-change settlement, multi-mint financial composition,
-real providers, independent phone clients and physical acceptance remain open.
+The later residual-change and multi-mint checkpoints below extend this matrix.
+Real providers, independent phone clients and physical acceptance remain open.
 
 The operator confirmed a backed-up, new dedicated 12-word seed. The
 [offline seed-preparation script](../deployment/cashu-seed-provisioning.md)
@@ -76,7 +76,8 @@ pass on the new source-matched artifacts. CLI fixtures use empty/unfunded
 synthetic state, with systemctl mocked only for the core fixture. Funded native
 ledger and actual-CDK ownership tests provide their separate boundaries.
 Installed acceptance, held/policy and treasury controls, coordinated funded
-restore, multi-mint and economical change remain required.
+restore and independent client/provider acceptance remain required. Later
+checkpoints below qualify synthetic multi-mint and economical-change composition.
 
 Public Cashu development is now in [draft PR #139](https://github.com/lightning-goats/lightning-goats/pull/139).
 The missing published `rusqlite` lockfile discovered by clean-checkout CI is
@@ -96,13 +97,17 @@ empty-Cashu source variant now passes all ten selected-source workflows at
 `cb582e9`, including the installed native/systemd transaction
 ([evidence](cashu-upgrade-compatibility-20261117.json)).
 
-The new `--multi-mint` composition case is **under qualification**. It acquires
-250 net sats from a nutzap at one configured issuer and 150 net sats through
-ordinary HTTP at another. Independent issuer keys, keysets and CDK namespaces
-share one journal/writer. Both original treasury instructions must independently
-settle before one synthetic feeding; normal and lost-reply runs, replay and
-private health accounting are required. It claims no live mint, phone or
-multi-mint acceptance until selected-source execution passes.
+The `--multi-mint` composition case now passes normal and lost-reply execution
+at `0f66d53`, with all ten selected-source workflows successful
+([evidence](cashu-two-mint-settlement-20261117.json)). It acquires 250 net sats
+from a nutzap at one configured issuer and 150 net sats through ordinary HTTP at
+another. Independent issuer keys, keysets and CDK namespaces share one journal
+and writer. Both original Strike receives settle independently before one
+synthetic feeding. Health verifies 396 sats deposited, four sats of conversion
+fees, two sats of receive fees, zero remaining custody and no new transfer credit.
+Lost replies and consumed-credit replay preserve those totals. These synthetic
+providers and the offline SDK sender do not qualify installed Runtime, live
+mint, Android, relay, TLS or physical acceptance.
 
 | Required behavior / artifact | Established evidence | Required work still open |
 | --- | --- | --- |
@@ -112,14 +117,14 @@ multi-mint acceptance until selected-source execution passes.
 | Several distinct payments to one request; wrapper/relay replay | Acquisition/receipt overlap tests and exactly-once imports; the [eight-case financial matrix](cashu-final-composition-20261117.json) includes an offline SDK sender, repeated descriptor use and lost melt replies; [HTTP retries](cashu-http-retries-20261117.json) retain two source entries after 80 identical retries per payment | Independent sender applications, TLS/phone interoperability and live relay discovery/replay acceptance. |
 | Truthful asynchronous public outcomes | HTTP 202 follows authenticated durable admission and reports pending with a body-only status capability. The [positive HTTP/snapshot checkpoint](cashu-request-acceptance-20261116.json) and [retry checkpoint](cashu-http-retries-20261117.json) cover malformed-before-valid admission, two distinct payments, repeated delivery and paused-restart status | Independent sender status/capability interoperability and installed ingress/privacy acceptance. A pending response still does not claim acquisition or credit. |
 | DLEQ/P2PK, mint/keyset/amount/condition bounds | Locked library-backed validation and synthetic protocol tests | Final independent-client compatibility and approved live mint policy/capability evidence. |
-| Multiple configured mints and key rotation/removal | Configured registry, mint-scoped journals and historical binding tests; mint-scoped CDK databases and two-issuer collision/recovery regression now pass ([namespace evidence](cashu-namespace-health-20261116.json)) | End-to-end second-mint settlement composition, historical receiving-key/descriptor window administration, explicit legacy custody migration and deployed recovery. |
+| Multiple configured mints and key rotation/removal | Configured registry, mint-scoped journals and historical binding tests; mint-scoped CDK collision/recovery regression and [two-mint HTTP/financial composition](cashu-two-mint-settlement-20261117.json) pass normal/lost replies | Historical receiving-key/descriptor window administration, explicit legacy custody migration and deployed recovery; independent client/provider acceptance. |
 | Actual swap/melt recovery and ownership | Lost-reply, quote adoption, partial preparation, split and cleanup fixtures | Earlier preparation boundary recovery, full process/CDK-store restart coverage at all required boundaries, full coordinated restore. |
 | Atomic authenticated shared-credit import | Cross-UID lost-ack and consumed-credit replay tests; [full HTTP/receipt/treasury composition](cashu-final-composition-20261117.json) with original contribution IDs and no transfer credit | Final selected-source cross-UID regression and approved installed/provider acceptance. |
 | Mixed 600 LN + 250 nutzap + 150 Cashu | Actual CDK plus core composed financial fixtures; authenticated receipt and treasury sockets across distinct UIDs pass normal and lost-response fee-only modes ([evidence](cashu-combined-financial-ipc-20261116.json)) | Public HTTP normal/lost-reply fee-only composition now passes on matched artifacts ([evidence](cashu-http-financial-ipc-20261116.json)); independent sender/TLS and separately approved real-provider acceptance remain open. |
-| Mixed nonzero fees and returned change | Actual-CDK ownership/change, core source coverage and conservation checks pass in the [eight-case financial matrix](cashu-final-composition-20261117.json), including lost replies; private health independently checks the totals | [Economical residual settlement](cashu-residual-settlement-20261117.json) now passes normal/lost replies with two transfers and no native top-up. Multi-mint composition and real-provider acceptance remain open. The earlier returned-dust fixture alone does not establish this result. |
+| Mixed nonzero fees and returned change | Actual-CDK ownership/change, core source coverage and conservation checks pass in the [eight-case financial matrix](cashu-final-composition-20261117.json); [economical residual settlement](cashu-residual-settlement-20261117.json) and [two-mint composition](cashu-two-mint-settlement-20261117.json) pass normal/lost replies with health accounting and no transfer credit | Independent client/provider acceptance and complete funded restore remain open. The earlier returned-dust fixture alone does not establish economical settlement. |
 | Early/duplicate treasury webhook without donation credit | Core purpose-bound receive tests and combined lost-response fixture | Re-run with final selected source, fee/change and complete transport composition. |
 | Pending one mint, later sufficient Lightning; paused/unknown feeder | Financial plans, supersession, allocation and ledger-only feed fixtures | Composed multi-mint recovery, operator tooling and installed physical-boundary acceptance. |
-| Sweep races and durable proof reservations | Qualified age/balance/operator sweep fixtures, fair-mint admission, and protected core settlement preview/apply/replay with native funded and actual empty-custody CLI checks | Deployed scheduling/operator acceptance and complete multi-mint composition. |
+| Sweep races and durable proof reservations | Qualified age/balance/operator sweep fixtures, fair-mint admission, protected core settlement preview/apply/replay and normal/lost-reply two-mint composition | Deployed scheduling/operator acceptance and complete multi-mint recovery. |
 | Caps, retirement, excess custody and stable credit | Core financial/retirement and wallet conservation tests | Full selected-source cap/fee/change composition, private exposure health and old-policy recovery. |
 | Cashu must not create Strike payout authority prematurely | Reward provenance remains native-only; internal transfers create no donation grant | Optional Cashu-derived reward support stays explicitly disabled/unqualified. Enabling it requires its separate provenance acceptance. |
 | Isolated identity/key/signer boundaries | Real separate-UID receipt, signer and treasury fixtures; inactive unit syntax | Installed credentials/ownership/egress/systemd acceptance and final source-pinned signer checks. |
@@ -129,6 +134,13 @@ multi-mint acceptance until selected-source execution passes.
 | Protected operational commands and useful private health | Wallet config/status/request/announcement commands; private custody/fee/age/lag/identity diagnostics; protected financial release, core settlement planning and one-original-acquisition ownership check with explicit native/CLI qualification | Held/mint-policy administration, treasury reconciliation, coordinated backup/restore commands and installed operational acceptance remain incomplete. |
 | Coordinated backup inventory and rollback fences | Existing independent epoch/startup checks; old maintenance tool refuses Cashu state; an explicit recovery marker now fences wallet and signer startup before database access, with native verification pending | The offline verifier now checks hashes, private files, database integrity, expected core/wallet/signer registrations and current-registration receipt/acknowledgment agreement in both directions, plus retained treasury report agreement and exact ready mint-namespace inventory (14 synthetic tests). Writer quiescence, actual native-store snapshots, full treasury/CDK ownership reconciliation, wallet-only/core-only rollback, coordinated restore and historical-key recovery remain open. |
 | Inactive install/package, current docs and pinned dependencies | Inactive unit/edge examples; pinned CDK/SQLite vendor verification; initial November inventory | Full install/package/network/backup rehearsal and selected-commit CI. The operator skipped the security review on 2026-11-17; the scan was canceled before validation/completion and supplies no completed-review claim. |
+
+The [native copy-normalization primitive](cashu-copy-normalization-local-20261117.json)
+now passes local root/network-isolated main/WAL and interruption/refusal checks,
+including implicit row IDs and signed-byte preservation. It uses the pinned
+SQLite backup API on protected copies and retains incomplete evidence. Fresh
+selected-source CI is pending; [coordinated collection](../deployment/cashu-backup-collection.md),
+encryption, funded rollback and recovery-fence clearance remain unfinished.
 | Public November package and demo | Pre-November and Cashu starting references recorded; fixture evidence retained | Reviewable public commits/PR/tag, distribution license notices, current submission rules, compatibility matrix and honestly labeled recording. The checksum-verified inventory covers 462 entries from both lock graphs with no unresolved entries; it is not a linked-binary or distribution-notice inventory. |
 | Approved live pilot and production | No activation claimed | Operator-selected mints/keys/limits/fees/holding policy and explicit approval; real providers, independent clients, actual physical evidence and observation. |
 

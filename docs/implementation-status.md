@@ -34,7 +34,7 @@ The [runbook](deployment/cashu-backup-collection.md) keeps installed writer
 quiescence, complete credential coverage and funded recovery explicitly unfinished.
 
 The subsequent [coordinated collector](testing/cashu-coordinated-collector-ci-20261117.json)
-passes the selected-source core, wallet and combined CI jobs at `3bdf518`.
+passes all ten workflows at `3bdf518`.
 It requires all six writers to remain masked/stopped, retains correlated
 native/Cashu images, mint stores, declared key copies and exact artifacts, then streams an age-encrypted
 archive while retaining plaintext/incomplete evidence. The native key verifier
@@ -48,6 +48,14 @@ refusal before collection. Installed credential coverage,
 portable credential export/reprovisioning, historical descriptor completeness,
 funded rollback and external reconciliation remain open. No production key,
 service, real transfer or physical action was used by this work.
+
+The [funded rollback fixture](testing/cashu-funded-rollback-fences-20261117.json)
+passes at `fa15df3`. It exercises stale wallet and core copies after a lost
+melt response, 398 sats of independently verified synthetic Strike settlement,
+and a single simulated feeding. Both older images are refused by the startup
+fences. The same fixture records and replays the original wallet report through
+the scoped operator reconciliation function. This does not grant permission to
+clear a fence or resume from a restored checkpoint.
 
 Cashu operator controls update **2026-11-17**: the
 [protected planning/reconciliation checkpoint](testing/cashu-operator-controls-20261117.json)

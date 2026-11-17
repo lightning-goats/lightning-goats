@@ -134,12 +134,17 @@ mint, Android, relay, TLS or physical acceptance.
 | Protected operational commands and useful private health | Wallet config/status/request/announcement commands; private custody/fee/age/lag/identity diagnostics; protected financial release, core settlement planning and one-original-acquisition ownership check with explicit native/CLI qualification | Held/mint-policy administration, treasury reconciliation, coordinated backup/restore commands and installed operational acceptance remain incomplete. |
 | Coordinated backups and rollback fences | Actual native recovery fences and initialized combined inventory pass. The [coordinated collector](cashu-coordinated-collector-ci-20261117.json) passes native database/key checks, age roundtrip, original-byte preservation, four collector/six credential refusals and encryption size/timeout faults in selected-source CI. Service-status responses and the maintenance-lock path are mocked. | Installed writer quiescence and complete credential coverage, portable export/reprovisioning, treasury/CDK ownership reconciliation, wallet-only/core-only funded rollback, coordinated restore, historical-key administration and off-host recovery remain open. |
 
-The funded rollback fixture captures core and wallet images after the original
+The [funded rollback fixture](cashu-funded-rollback-fences-20261117.json) captures core and wallet images after the original
 invoice is bound but before the melt. It then loses the melt response, verifies
 the original Strike deposit and records one synthetic feeding. It compares
 wallet-only, core-only and coordinated stale combinations and exercises the
-production startup fences on the older images. The fixture's CI result is
-pending. Successful refusal leaves recovery and any fence clearance unqualified.
+production startup fences on the older images. At `fa15df3` it passes all ten
+workflows. The older wallet retains 400 sats in the CDK database. A later
+wallet report and Strike deposit show which original melt spent them. The
+wallet-only rollback fails retained history checks, while a stale core can
+still agree with either wallet generation. Every older image remains fenced.
+Installed recovery, external outcome reconciliation after restore and fence
+clearance remain open.
 | Inactive install/package, current docs and pinned dependencies | Inactive unit/edge examples; pinned CDK/SQLite vendor verification; initial November inventory | Full install/package/network/backup rehearsal and selected-commit CI. The operator skipped the security review on 2026-11-17; the scan was canceled before validation/completion and supplies no completed-review claim. |
 
 The [native copy-normalization primitive](cashu-copy-normalization-local-20261117.json)

@@ -1,12 +1,16 @@
 # Cashu backup collection — copy normalization
 
-The coordinated, encrypted production backup collector remains unfinished.
+The coordinated encrypted collector is implemented in source and under
+qualification. It is not installed or accepted for production recovery.
 `lightning-goats-cashu-statectl normalize-copy` is its first native primitive.
 The initial [local native checkpoint](../testing/cashu-copy-normalization-local-20261117.json)
 passes two positive and 21 refusal/interruption cases. The later
 [special-file correction](../testing/cashu-copy-special-files-20261117.json)
 passes two positive and 24 refusal/interruption cases, including marker/main/WAL
-FIFOs with three-second fixture deadlines; its selected-source CI is pending.
+FIFOs with three-second fixture deadlines. All ten selected-source workflows
+now pass at `7f8a2d7` ([CI evidence](../testing/cashu-copy-special-files-ci-20261117.json)).
+The website dependency-install failure was an unreachable Ubuntu mirror; its
+retry passed. The later coordinated collector is separate source.
 It opens only explicitly supplied private copies;
 it neither stops services nor loads wallet keys. Do not use it on installed state.
 The [recovery inventory](cashu-recovery-inventory.md) remains authoritative for
@@ -77,8 +81,96 @@ foreign-key/corruption refusal and interrupted-output retention. CI runs the
 actual selected native CLI. Synthetic fixtures do not establish production writer
 quiescence, coordinated encrypted collection or funded restore.
 
-The next collector must retain all native journals, the wallet journal and every
+The collector must retain all native journals, the wallet journal and every
 CDK namespace, both signer histories, historical keys/authentication, policies
 and exact artifacts; verify their cross-store bindings; and encrypt the private
 checkpoint. Wallet-only/core-only rollback and coordinated restore after external
 effects still require separate qualification before any recovery fence can clear.
+
+## Coordinated collection
+
+`collect-cashu-backup.py` is an authenticated-root operation. It requires all six
+services already masked/inactive with zero main/control PIDs, empty cgroups and
+no processes under their runtime UIDs. It checks these conditions repeatedly,
+holds the existing host maintenance lock and both Cashu writer locks, and binds
+original file identities/hashes and directory metadata across collection and
+encryption. It never stops, starts, masks or unmasks a service.
+
+The policy explicitly attests administrative exclusivity. This complements the
+observable service/UID/lock checks; it does not exclude another root administrator.
+All six runtime directories and each retained mint namespace are inventoried.
+Unknown files, aliases, special entries, changed originals, missing namespaces,
+rollback journals and incomplete native/key verification refuse. Existing recovery
+markers are retained; the collector never clears them.
+
+The [policy example](../../deploy/cashu/backup-collection.json.example) is
+deliberately invalid: exclusivity is false, UIDs are zero, paths/hashes need
+replacement and no encryption recipient is selected. A protected operator policy
+must name the actual six worker identities, all seven configurations, exact native
+and encryption artifacts, explicit additional files and portable signer-client
+key sources. Component, aggregate plaintext-plus-ciphertext and duration bounds
+are mandatory. These storage limits are unrelated to financial execution limits.
+
+Client key files contain 64 hexadecimal characters and optional LF. They must be
+private root-owned recovery sources. A systemd host-bound encrypted credential
+blob is **not** such a portable source. Export/reprovisioning and external bunker
+permissions need separate acceptance. `verify-recovery-keys PRIVATE_STAGE` uses
+the pinned curve library to compare both client keys with their configured public
+identities, reject shared/project identities, compare the receiving key, and
+recompute the wallet seed's immutable journal binding. Explicit historical keys
+are checked too; this does not establish historical descriptor-window completeness.
+
+Extra files must explicitly include other required application credentials,
+helper state, protected policies and supporting artifacts. Unknown files in the
+inventoried runtime/helper directories refuse. Complete installed credential
+coverage, portable export/reprovisioning and historical-key administration remain
+acceptance requirements; a short manually declared extras list does not close them.
+
+The root-owned capsule contains exactly `launch-cashu-backup.py`,
+`collect-cashu-backup.py`, `verify-cashu-backup.py`,
+`verify-cashu-combined-backup.py` and `TOOL.json`. The latter has version 1,
+the selected 40-character source commit and SHA256 for each of the four scripts.
+Authenticate the bootstrap file externally before interpreting it, then use the
+reviewed manifest hash with isolated Python:
+
+```text
+/usr/bin/python3 -I -S -B ROOT_CAPSULE/launch-cashu-backup.py TOOL_SHA256 POLICY POLICY_SHA256 NEW_PRIVATE_DESTINATION
+```
+
+This is an invocation contract, not an installation or activation instruction.
+The bootstrap validates root ownership, protected ancestry, exact file inventory,
+aliases/ACLs/capabilities and bounded, frozen source bytes before local imports.
+The policy itself must be root-private and match its separately supplied digest.
+
+The destination retains a private `plaintext` tree with raw main/WAL copies,
+standalone normalized images, the linked native/Cashu reviews, verified recovery
+keys, configurations and the exact selected programs. The same normalized core
+bytes enter both inventories by copying, never hardlinking. Only these disposable
+copies are opened through SQLite or the key verifier.
+
+Original SHM bytes are retained under a separate `.original` name. SQLite may
+rebuild its working cache; that cache must not replace the retained sidecar or
+invalidate the source-copy hash. The committed-WAL native fixture checks every
+recorded copy hash as well as the decrypted archive, after first reproducing this
+metadata mismatch. Source UID/GID/mode are retained for later reviewed recovery.
+
+The verified tree is streamed through the pinned `tar` and age 1.3.2 programs
+into `checkpoint.tar.age` using a plain `age1...` recipient. Ciphertext has a
+remaining-storage hard limit, and both pipeline processes have bounded lifetime.
+No private recovery identity is loaded by collection. On success, `COMPLETE.json`
+binds the ciphertext hash, policy and checkpoint; only this collector's own
+`INCOMPLETE` marker is removed. Failure retains raw copies, partial output and
+the incomplete marker. Existing destinations always refuse.
+
+Plaintext is retained for explicit operator handling. Collection does not certify
+possession of the age recovery key, off-host retention, external provider/physical
+outcomes, restore or resumption. Do not treat `COMPLETE.json` as permission to
+start restored workers. Wallet/core/coordinated funded rollback remains required.
+
+`prepare-cashu-backup-age.py` stages the exact official Linux amd64 release for
+fixtures, checking its published archive and executable hashes and retaining its
+LICENSE. It installs nothing. The expanded native fixture uses actual application
+schemas, the native copy/key helper, native correlation verification and an actual
+age decrypt/byte comparison. Service statuses and the maintenance-lock path are
+explicitly mocked there; `/proc` UID scans and file locks are actual. Its initialized
+empty journals do not establish funded restore or installed service acceptance.

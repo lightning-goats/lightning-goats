@@ -37,12 +37,20 @@ def main():
         option = name.replace('_', '-')
         parser.add_argument('--' + option + '-cli', type=Path)
         parser.add_argument('--' + option + '-sha256')
+    for name in ['collector_copy','age','age_keygen']:
+        option=name.replace('_','-')
+        parser.add_argument('--'+option+'-cli',type=Path)
+        parser.add_argument('--'+option+'-sha256')
     args = parser.parse_args()
     selected = [getattr(args, name + suffix) is not None
                 for name in extended_names for suffix in ['_cli', '_sha256']]
     if any(selected) and not all(selected):
         raise ValueError('combined native fixture requires all four additional selected executables')
     extended = all(selected)
+    collector_options=[getattr(args,name+suffix) is not None
+                       for name in ['collector_copy','age','age_keygen'] for suffix in ['_cli','_sha256']]
+    if any(collector_options) and (not all(collector_options) or not extended):
+        raise ValueError('collector fixture requires all native programs and encryption artifacts')
     if (os.geteuid() != 0
             or os.readlink('/proc/self/ns/net') == os.readlink('/proc/1/ns/net')):
         raise ValueError('requires root in a fresh network namespace')
@@ -92,7 +100,7 @@ def main():
             command = command_for(name, uid, arguments)
             result = subprocess.run(command, env={'PATH': '/usr/bin:/bin', **(environment or {})},
                                     stdin=subprocess.DEVNULL, capture_output=True,
-                                    text=True, timeout=30)
+                                    text=True, timeout=30, umask=0o077)
             if (result.returncode == 0) != success:
                 raise ValueError(name + ' native fixture command had unexpected outcome')
             return result
@@ -176,7 +184,7 @@ def main():
         process = subprocess.Popen(command_for('signer', signer_uid, ['run', signer_config]),
                                    env={'PATH': '/usr/bin:/bin', **signer_environment},
                                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                   stderr=subprocess.PIPE)
+                                   stderr=subprocess.PIPE, umask=0o077)
         try:
             deadline = time.monotonic() + 10
             while not (signer_run / 'control.sock').exists():
@@ -255,6 +263,12 @@ def main():
             combined_result = native_fixture['combine'](
                 root, snapshot, native_policy, statectl, args.statectl_sha256,
                 combined_module['verify'])
+        collector_result=None
+        if all(collector_options):
+            collector_fixture=runpy.run_path(str(source/'deploy/scripts/cashu-collector-fixture.py'))
+            collector_result=collector_fixture['qualify'](source,root,states,runtime_uids,binaries,
+                dict(core=config,wallet=wallet_config,signer=signer_config,**native_configurations),
+                native_policy,args)
         # Exercise refusal against the actual initialized schemas, not hand-made
         # substitutes. Restore each disposable byte image before the next case.
         def refused():
@@ -316,6 +330,7 @@ def main():
         print(json.dumps({'result': 'CASHU_EMPTY_NATIVE_BACKUP_VERIFIED',
                           'artifacts_sha256': hashes, 'inventory_result': result,
                           'combined_native_review': combined_result,
+                          'coordinated_collector': collector_result,
                           'distinct_runtime_uids': True, 'wallet_recovery_marker_refused': True,
                           'fenced_wallet_bytes_unchanged': True,
                           'core_recovery_marker_refused': True,

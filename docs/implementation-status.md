@@ -27,9 +27,27 @@ passes local main/WAL, row-ID/signed-byte and 21 refusal/interruption checks,
 strict Clippy and its CLI privacy test. The later
 [FIFO correction](testing/cashu-copy-special-files-20261117.json) prevents blocking
 before file-type validation and passes 24 refusal/interruption cases in isolated
-root fixtures; its selected-source CI is pending.
-The [runbook](deployment/cashu-backup-collection.md) keeps writer quiescence,
-coordinated encrypted collection and funded recovery explicitly unfinished.
+root fixtures. All ten [selected-source workflows](testing/cashu-copy-special-files-ci-20261117.json)
+now pass at `7f8a2d7`, including the installed systemd rehearsal; a browser
+dependency-download mirror failure passed on retry.
+The [runbook](deployment/cashu-backup-collection.md) keeps installed writer
+quiescence, complete credential coverage and funded recovery explicitly unfinished.
+
+The subsequent [coordinated collector](testing/cashu-coordinated-collector-local-20261117.json)
+is implemented and under qualification.
+It requires all six writers to remain masked/stopped, retains correlated
+native/Cashu images, mint stores, declared key copies and exact artifacts, then streams an age-encrypted
+archive while retaining plaintext/incomplete evidence. The native key verifier
+checks the seed binding and both distinct signer-client public identities.
+Local disposable-native composition passes encryption/decryption, committed WAL
+and retained-copy hashes, four collector refusals, six key-material refusals and
+two encryption fault cases; service-status responses and the host
+maintenance-lock path are mocked, with actual UID scans and native verification.
+Thirteen root-owned unit checks pass, including an actual isolated bootstrap
+refusal before collection. Exact-source CI, installed credential coverage,
+portable credential export/reprovisioning, historical descriptor completeness,
+funded rollback and external reconciliation remain open. No production key,
+service, real transfer or physical action was used by this work.
 
 Cashu operator controls update **2026-11-17**: the
 [protected planning/reconciliation checkpoint](testing/cashu-operator-controls-20261117.json)

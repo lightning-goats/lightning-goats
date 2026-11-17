@@ -33,6 +33,8 @@ jobs:
         run: python3 -W error::ResourceWarning -m unittest discover -s deploy/tests -p test_cashu_backup_inventory.py
       - name: Verify combined Cashu and native backup linkage
         run: python3 -m unittest discover -s deploy/tests -p test_cashu_combined_backup.py
+      - name: Verify root-owned collector filesystem and capsule checks
+        run: sudo unshare --net -- python3 -B -W error::ResourceWarning -m unittest discover -s deploy/tests -p test_cashu_collector.py -v
       - name: Verify exact-source Cashu license notice supplements
         run: python3 -m unittest discover -s deploy/tests -p test_cashu_notice_supplement.py
       - name: Verify Cashu archive permission notice inventory
@@ -227,6 +229,7 @@ jobs:
           python3 ../../deploy/scripts/select-cashu-test-artifact.py "$RUNNER_TEMP/wallet-test-artifacts.jsonl" Cargo.toml "$RUNNER_TEMP/wallet-test"
           cp target/debug/lightning-goats-cashud "$RUNNER_TEMP/wallet-cli"
           cp target/debug/lightning-goats-cashu-signerd "$RUNNER_TEMP/signer-cli"
+          cp target/debug/lightning-goats-cashu-statectl "$RUNNER_TEMP/copy-cli"
       - uses: actions/upload-artifact@v4
         with:
           name: cashu-wallet-native-${{ github.sha }}
@@ -234,6 +237,7 @@ jobs:
             ${{ runner.temp }}/wallet-test
             ${{ runner.temp }}/wallet-cli
             ${{ runner.temp }}/signer-cli
+            ${{ runner.temp }}/copy-cli
           if-no-files-found: error
           retention-days: 1
 
@@ -250,6 +254,8 @@ jobs:
         with:
           name: cashu-wallet-native-${{ github.sha }}
           path: ${{ runner.temp }}/cashu-wallet
+      - name: Prepare pinned official backup encryption fixture dependency
+        run: python3 deploy/scripts/prepare-cashu-backup-age.py "$RUNNER_TEMP/backup-age"
       - name: Verify empty combined native and Cashu recovery inventory
         shell: bash
         run: |
@@ -261,7 +267,9 @@ jobs:
           command = ['sudo', 'unshare', '--mount', '--net', '--', 'python3', 'deploy/scripts/test-cashu-private-run.py', '--', 'python3', 'deploy/scripts/test-cashu-native-backup.py']
           for name, path in [('core', root / 'cashu-core/core-cli'), ('wallet', root / 'cashu-wallet/wallet-cli'), ('signer', root / 'cashu-wallet/signer-cli'),
                              ('membership', root / 'cashu-core/membership-cli'), ('payout', root / 'cashu-core/payout-cli'),
-                             ('payout-signer', root / 'cashu-core/payout-signer-cli'), ('statectl', root / 'cashu-core/statectl-cli')]:
+                             ('payout-signer', root / 'cashu-core/payout-signer-cli'), ('statectl', root / 'cashu-core/statectl-cli'),
+                             ('collector-copy', root / 'cashu-wallet/copy-cli'), ('age', root / 'backup-age/age'),
+                             ('age-keygen', root / 'backup-age/age-keygen')]:
               command += ['--' + name + '-cli', str(path), '--' + name + '-sha256', hashlib.sha256(path.read_bytes()).hexdigest()]
           subprocess.run(command, check=True)
           PYCODE

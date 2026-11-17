@@ -48,7 +48,7 @@ fn identity(meta: &std::fs::Metadata) -> Identity {
         changed_ns: meta.ctime_nsec(),
     }
 }
-fn protected_directory(path: &Path) -> Result<()> {
+pub(crate) fn protected_directory(path: &Path) -> Result<()> {
     ensure!(
         path.is_absolute()
             && path
@@ -73,13 +73,13 @@ fn protected_directory(path: &Path) -> Result<()> {
     );
     Ok(())
 }
-struct Frozen {
-    file: File,
+pub(crate) struct Frozen {
+    pub(crate) file: File,
     identity: Identity,
     hash: String,
 }
 impl Frozen {
-    fn open(path: &Path, maximum: u64, empty: bool) -> Result<Self> {
+    pub(crate) fn open(path: &Path, maximum: u64, empty: bool) -> Result<Self> {
         let fd = rustix::fs::open(
             path,
             rustix::fs::OFlags::RDONLY
@@ -112,7 +112,12 @@ impl Frozen {
             hash,
         })
     }
-    fn unchanged(&mut self, path: &Path, maximum: u64, wal_owner_refresh: bool) -> Result<()> {
+    pub(crate) fn unchanged(
+        &mut self,
+        path: &Path,
+        maximum: u64,
+        wal_owner_refresh: bool,
+    ) -> Result<()> {
         let matches = |meta: &std::fs::Metadata| {
             let mut observed = identity(meta);
             if wal_owner_refresh {
@@ -140,9 +145,9 @@ fn digest(file: &mut File, maximum: u64) -> Result<String> {
     file.seek(SeekFrom::Start(0))?;
     let mut hash = Sha256::new();
     let mut count = 0u64;
-    let mut buffer = [0u8; 65536];
+    let mut buffer = zeroize::Zeroizing::new([0u8; 65536]);
     loop {
-        let read = file.read(&mut buffer)?;
+        let read = file.read(&mut buffer[..])?;
         if read == 0 {
             break;
         }

@@ -27,4 +27,14 @@ fn copy_helper_help_and_refusals_do_not_echo_private_arguments() {
         refused.stderr,
         b"Database copy normalization refused; preserve the incomplete private stage.\n"
     );
+    let keys = Command::new(program)
+        .args(["verify-recovery-keys", "/missing/private-key-fixture"])
+        .output()
+        .unwrap();
+    assert_eq!(keys.status.code(), Some(1));
+    assert!(keys.stdout.is_empty());
+    assert_eq!(
+        keys.stderr,
+        b"Recovery key verification refused; preserve the incomplete private stage.\n"
+    );
 }

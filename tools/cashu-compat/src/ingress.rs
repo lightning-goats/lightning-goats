@@ -1,6 +1,10 @@
 //! One bounded, authenticated private receiving connection. No mint calls here.
 use crate::{
-    intake::{Limits, PinnedKeys, nutzap_json, ordinary_json},
+    descriptor::RetiredDescriptor,
+    intake::{
+        DescriptorAcceptance, Limits, PinnedKeys, ValidatedContribution, nutzap_json,
+        ordinary_json_at,
+    },
     journal::{Admission, Journal},
     mint_policy::MintRegistry,
     writer_lock::WriterLock,
@@ -10,6 +14,7 @@ use cdk::nuts::PublicKey;
 use lightning_goats_cashu_receipt::ingress::{
     Disposition, MAX_FRAME_BYTES, Payload, Reply, Request,
 };
+use lightning_goats_cashu_receipt::receive_status::http_delivery_id;
 use std::{
     sync::{Arc, Mutex},
     time::Duration,
@@ -34,11 +39,31 @@ pub struct Intake<'a> {
     pub receiver: PublicKey,
     pub recipient: &'a str,
     pub descriptors: &'a [String],
+    pub retired_descriptors: &'a [RetiredDescriptor],
     pub public_request: Option<&'a crate::descriptor::Descriptor>,
     pub journal: Arc<Mutex<Journal>>,
     pub writer: &'a WriterLock,
 }
 impl Intake<'_> {
+    fn ordinary(&self, body: &[u8], source_ref: &str) -> Result<ValidatedContribution> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_secs();
+        ordinary_json_at(
+            body,
+            source_ref,
+            DescriptorAcceptance {
+                active: self.descriptors,
+                retired: self.retired_descriptors,
+                now,
+            },
+            self.registry,
+            self.keys,
+            self.limits,
+            self.receiver,
+        )
+    }
+
     /// Bind only through the repository's protected runtime-directory checks.
     /// Process one connection at a time; rejected peers/payloads do not stop intake.
     pub async fn serve(
@@ -153,32 +178,37 @@ impl Intake<'_> {
             status::AdmissionQuery::decode(bytes, self.wallet_instance, self.wallet_epoch)
         {
             ensure!(self.receive_cashu, "ordinary Cashu receiving disabled");
-            self.journal
-                .lock()
-                .map_err(|_| anyhow::anyhow!("wallet journal unavailable"))?
-                .require_epoch(self.wallet_epoch)?;
-            let contribution = ordinary_json(
-                query.body.as_bytes(),
-                &format!("http:{}", query.delivery_id),
-                self.descriptors,
-                self.registry,
-                self.keys,
-                self.limits,
-                self.receiver,
+            let body = query.body.as_bytes();
+            let is_content_id = query.delivery_id.get_version_num() == 8;
+            ensure!(
+                !is_content_id || query.delivery_id == http_delivery_id(body),
+                "invalid content-bound delivery ID"
             );
-            let result = match contribution {
-                // Validation occurs before admission or any mint request. Only
-                // this branch can truthfully reject the submitted payment.
-                Err(_) => status::AdmissionOutcome::Rejected,
-                Ok(contribution) => {
-                    let mut journal = self
-                        .journal
-                        .lock()
-                        .map_err(|_| anyhow::anyhow!("wallet journal unavailable"))?;
-                    journal.require_epoch(self.wallet_epoch)?;
-                    let id = match journal.admit(&contribution.intake())? {
+            let source_ref = format!("http:{}", query.delivery_id);
+            let mut journal = self
+                .journal
+                .lock()
+                .map_err(|_| anyhow::anyhow!("wallet journal unavailable"))?;
+            journal.require_epoch(self.wallet_epoch)?;
+            let existing = if is_content_id && body.len() <= self.limits.body_bytes {
+                journal.existing_http_delivery(&source_ref)?
+            } else {
+                None
+            };
+            // An exact, previously admitted HTTP POST can recover its status
+            // after a descriptor expires. Only new admissions use today's policy.
+            let id = match existing {
+                Some(id) => Some(id),
+                None => match self.ordinary(body, &source_ref) {
+                    Err(_) => None,
+                    Ok(contribution) => Some(match journal.admit(&contribution.intake())? {
                         Admission::New(id) | Admission::Duplicate(id) => id,
-                    };
+                    }),
+                },
+            };
+            let result = match id {
+                None => status::AdmissionOutcome::Rejected,
+                Some(id) => {
                     let capability = journal.receipt_capability(id)?;
                     let state = journal
                         .receipt_status(&capability)?
@@ -232,15 +262,12 @@ impl Intake<'_> {
         let contribution = match request.payload {
             Payload::Cashu(body) => {
                 ensure!(self.receive_cashu, "ordinary Cashu receiving disabled");
-                ordinary_json(
-                    body.as_bytes(),
-                    &format!("http:{}", request.delivery_id),
-                    self.descriptors,
-                    self.registry,
-                    self.keys,
-                    self.limits,
-                    self.receiver,
-                )?
+                ensure!(
+                    request.delivery_id.get_version_num() != 8
+                        || request.delivery_id == http_delivery_id(body.as_bytes()),
+                    "invalid content-bound delivery ID"
+                );
+                self.ordinary(body.as_bytes(), &format!("http:{}", request.delivery_id))?
             }
             Payload::Nutzap(body) => {
                 ensure!(self.receive_nutzap, "nutzap receiving disabled");
@@ -310,6 +337,7 @@ mod tests {
             receiver: cdk::nuts::SecretKey::from_slice(&[1; 32])?.public_key(),
             recipient: "",
             descriptors: &[],
+            retired_descriptors: &[],
             public_request: None,
             journal,
             writer: &writer,

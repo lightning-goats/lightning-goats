@@ -2,10 +2,23 @@
 #![forbid(unsafe_code)]
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 pub const MAX_STATUS_BYTES: usize = 1024;
 pub const MAX_ADMISSION_BYTES: usize = 1_048_576;
+
+/// Bind a public delivery alias to the exact bounded request bytes.
+/// A delivery ID is not a public status capability.
+pub fn http_delivery_id(body: &[u8]) -> Uuid {
+    let mut digest = Sha256::new();
+    digest.update(b"lightning-goats/cashu-http-delivery/v1\0");
+    digest.update(body);
+    let digest = digest.finalize();
+    let mut identity = [0_u8; 16];
+    identity.copy_from_slice(&digest[..16]);
+    uuid::Builder::from_custom_bytes(identity).into_uuid()
+}
 
 /// Private lookup capability. Deliberately no Debug/Display implementation.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]

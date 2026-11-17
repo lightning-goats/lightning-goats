@@ -1,5 +1,5 @@
 //! Reusable receive instructions only. A descriptor never contains spendable proofs.
-use crate::mint_policy::MintRegistry;
+use crate::mint_policy::{MintPolicy, MintRegistry};
 use anyhow::{Context, Result, ensure};
 use base64::{Engine, engine::general_purpose::URL_SAFE};
 use cdk::{
@@ -14,6 +14,63 @@ use std::str::FromStr;
 use url::Url;
 
 pub use lightning_goats_cashu_receipt::public_request::Encoding;
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RetiredDescriptor {
+    pub id: String,
+    pub endpoint: String,
+    pub retired_at: u64,
+    pub accept_before: u64,
+    pub mints: Vec<RetiredMint>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RetiredMint {
+    pub id: String,
+    pub advertised_url: String,
+    pub policy_version: String,
+}
+
+impl RetiredDescriptor {
+    pub(crate) fn verify(&self, receiver: PublicKey) -> Result<()> {
+        ensure!(
+            self.retired_at > 0
+                && self.retired_at < self.accept_before
+                && self.accept_before <= i64::MAX as u64
+                && (1..=16).contains(&self.mints.len()),
+            "invalid retired descriptor window or mint inventory"
+        );
+        let historical = MintRegistry::new(
+            self.mints
+                .iter()
+                .map(|mint| MintPolicy {
+                    id: mint.id.clone(),
+                    advertised_url: mint.advertised_url.clone(),
+                    policy_version: mint.policy_version.clone(),
+                    receive_cashu: true,
+                    receive_nutzap: false,
+                    bolt11_exit_qualified: true,
+                })
+                .collect(),
+        )?;
+        let original = Descriptor::prepare(&historical, &self.endpoint, receiver, Encoding::CreqA)?;
+        ensure!(
+            self.id == original.id(),
+            "retired descriptor policy differs"
+        );
+        Ok(())
+    }
+
+    pub(crate) fn accepts(&self, id: &str, mint: &MintPolicy, now: u64) -> bool {
+        self.id == id
+            && (self.retired_at..self.accept_before).contains(&now)
+            && self.mints.iter().any(|original| {
+                original.id == mint.id && original.advertised_url == mint.advertised_url
+            })
+    }
+}
 
 /// Immutable snapshot suitable for public display after operator-approved activation.
 pub struct Descriptor {
@@ -140,7 +197,6 @@ fn encode_amountless_creqa(request: &PaymentRequest) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mint_policy::MintPolicy;
     fn policy(id: &str) -> MintPolicy {
         MintPolicy {
             id: id.into(),

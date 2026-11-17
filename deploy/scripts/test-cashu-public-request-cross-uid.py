@@ -79,8 +79,8 @@ def main():
             "wallet_instance": str(uuid.uuid4()), "wallet_epoch": str(uuid.uuid4())}))
         (root / "bootstrap.json").chmod(0o644)
         socket = root / "run/intake.sock"
-        first_ready = None
-        for phase in ["initial", "paused"]:
+        retired_ready = None
+        for phase in ["initial", "retired", "paused"]:
             ready = root / "wallet/ready.json"
             ready.unlink(missing_ok=True)
             (root / "stop").unlink(missing_ok=True)
@@ -97,9 +97,9 @@ def main():
                         raise ValueError("wallet listener did not become ready")
                     time.sleep(0.05)
                 body = ready.read_bytes()
-                if first_ready is None:
-                    first_ready = body
-                elif body != first_ready:
+                if phase == "retired":
+                    retired_ready = body
+                elif phase == "paused" and body != retired_ready:
                     raise ValueError("restart changed configured public descriptor")
                 (root / "ready.json").write_bytes(body)
                 (root / "ready.json").chmod(0o644)
@@ -107,7 +107,7 @@ def main():
                 clients.append((core_uid, phase, f"PUBLIC_CORE_HTTP_SNAPSHOT_VERIFIED_{phase}"))
                 for uid, mode, marker in clients:
                     client = subprocess.run(command(uid, binaries[0], CORE_TEST, "--exact", "--ignored", "--nocapture"), env=dict(environment, LG_CASHU_PUBLIC_PHASE=mode), stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=15)
-                    if client.returncode or marker not in client.stdout or (mode != "rogue" and f"PUBLIC_HTTP_PENDING_STATUS_REPLAY_VERIFIED_{phase}" not in client.stdout) or (mode == "initial" and "PUBLIC_HTTP_80_IDENTICAL_RETRIES_PER_PAYMENT_VERIFIED" not in client.stdout):
+                    if client.returncode or marker not in client.stdout or (mode != "rogue" and f"PUBLIC_HTTP_PENDING_STATUS_REPLAY_VERIFIED_{phase}" not in client.stdout) or (mode == "initial" and "PUBLIC_HTTP_80_IDENTICAL_RETRIES_PER_PAYMENT_VERIFIED" not in client.stdout) or (mode == "retired" and "PUBLIC_HTTP_RETIRED_EXACT_RETRIES_VERIFIED" not in client.stdout):
                         raise ValueError("core fixture failed: " + (client.stdout + client.stderr)[-8192:])
                 (root / "stop").touch()
                 output, error = server.communicate(timeout=5)
@@ -123,6 +123,7 @@ def main():
         print(json.dumps({"result": "CASHU_PUBLIC_REQUEST_CROSS_UID_VERIFIED", "core_uid": core_uid,
             "wallet_uid": wallet_uid, "rogue_uid": rogue_uid, "acquisitions_created": 2, "intake_sources_retained": 2, "identical_http_retries_per_payment": 80, "acquired_or_credited": False, "status_survives_paused_restart": True, "http_and_snapshot": True,
             "quote_requests": 0, "melt_requests": 0, "paused_restart_hides_descriptor": True,
+            "exact_delivery_survives_retired_restart": True, "new_body_with_expired_id_refused": True,
             "artifacts_sha256": digests}, sort_keys=True))
 
 

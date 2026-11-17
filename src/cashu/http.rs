@@ -9,8 +9,9 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-use lightning_goats_cashu_receipt::receive_status::{AdmissionOutcome, Capability};
-use sha2::{Digest, Sha256};
+use lightning_goats_cashu_receipt::receive_status::{
+    AdmissionOutcome, Capability, http_delivery_id,
+};
 use std::sync::Arc;
 
 pub fn router(forwarder: Option<Arc<Forwarder>>) -> Router {
@@ -117,13 +118,7 @@ async fn deliver(
     // A sender may have lost every previous reply. Identical bounded bodies
     // must reuse their private delivery binding rather than consume one durable
     // source alias per HTTP attempt. This ID grants no status/credit authority.
-    let mut digest = Sha256::new();
-    digest.update(b"lightning-goats/cashu-http-delivery/v1\0");
-    digest.update(body.as_bytes());
-    let digest = digest.finalize();
-    let mut identity = [0_u8; 16];
-    identity.copy_from_slice(&digest[..16]);
-    let delivery_id = uuid::Builder::from_custom_bytes(identity).into_uuid();
+    let delivery_id = http_delivery_id(body.as_bytes());
     match forwarder.submit_with_status(delivery_id, body).await {
         Ok(reply) => match reply.result {
             AdmissionOutcome::Rejected => (

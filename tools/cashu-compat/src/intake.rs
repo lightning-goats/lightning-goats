@@ -2,6 +2,7 @@
 //! Successful validation is admission only; it never establishes acquired funds.
 
 use crate::{
+    descriptor::RetiredDescriptor,
     journal::{Transport, ValidatedIntake},
     mint_policy::{MintPolicy, MintRegistry},
 };
@@ -178,6 +179,36 @@ pub fn ordinary_json(
     limits: &Limits,
     receiver: PublicKey,
 ) -> Result<ValidatedContribution> {
+    ordinary_json_at(
+        body,
+        source_ref,
+        DescriptorAcceptance {
+            active: descriptors,
+            retired: &[],
+            now: 0,
+        },
+        registry,
+        keys,
+        limits,
+        receiver,
+    )
+}
+
+pub(crate) struct DescriptorAcceptance<'a> {
+    pub active: &'a [String],
+    pub retired: &'a [RetiredDescriptor],
+    pub now: u64,
+}
+
+pub(crate) fn ordinary_json_at(
+    body: &[u8],
+    source_ref: &str,
+    descriptors: DescriptorAcceptance<'_>,
+    registry: &MintRegistry,
+    keys: &PinnedKeys,
+    limits: &Limits,
+    receiver: PublicKey,
+) -> Result<ValidatedContribution> {
     limits.validate()?;
     ensure!(
         body.len() <= limits.body_bytes,
@@ -190,13 +221,17 @@ pub fn ordinary_json(
     let payload: PaymentRequestPayload =
         serde_json::from_slice(body).map_err(|_| anyhow::anyhow!("invalid Cashu payload"))?;
     ensure!(payload.unit == CurrencyUnit::Sat, "unsupported unit");
+    let policy = registry.accepting(&payload.mint.to_string(), false)?;
     if let Some(id) = payload.id {
         ensure!(
-            descriptors.contains(&id),
+            descriptors.active.contains(&id)
+                || descriptors
+                    .retired
+                    .iter()
+                    .any(|old| old.accepts(&id, policy, descriptors.now)),
             "receiving descriptor not accepted"
         );
     }
-    let policy = registry.accepting(&payload.mint.to_string(), false)?;
     validate_proofs(&payload.proofs, policy, keys, limits, receiver, false)?;
     Ok(ValidatedContribution {
         mint_id: policy.id.clone(),

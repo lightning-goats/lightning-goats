@@ -697,15 +697,53 @@ the public display bound. A changed endpoint, mint policy or key therefore needs
 a newly reviewed ID. Both supported encodings identify the same descriptor.
 Unknown fields, including a caller-supplied encoded `request`, are rejected.
 
-When ordinary receiving is disabled, no public descriptor is selected in prepared
-runtime state, even if this configuration is retained. Old admitted IDs can remain
-in `descriptors` for the operator-reviewed compatibility window; they are not all
-advertised as active QRs. Do not delete old keys or admitted work when changing the
-advertised descriptor. Retention/expiry administration remains pending. Read-only metadata transport
-to the core and its public HTTP/snapshot adapters are now implemented and under
-qualification; see the [overlay checkpoint](../testing/cashu-overlay-20261116.md).
-Selecting this field alone does not enable ordinary receiving. The frontend's synthetic
-browser qualification remains separate from backend integration and real scans.
+When ordinary receiving is disabled, prepared runtime state has no public
+descriptor. The core fetches the current selection for HTTP and overlay reads.
+See the [overlay checkpoint](../testing/cashu-overlay-20261116.md).
+
+### Retiring a published request
+
+When changing the public request, remove its former ID from `descriptors` and
+retain it under `retired_descriptors` with its original endpoint and original
+published mint list. Copy the mint ID, exact advertised URL and policy version
+from the reviewed prior configuration. Keep the original HTTPS path routed
+to the wallet during the compatibility window if the new request moves paths.
+
+```json
+{
+  "retired_descriptors": [
+    {
+      "id": "original-prepared-request-id",
+      "endpoint": "https://lightning-goats.example/api/v1/cashu",
+      "retired_at": 1794950000,
+      "accept_before": 1795036400,
+      "mints": [
+        {
+          "id": "example-mint",
+          "advertised_url": "https://mint.example/Bitcoin",
+          "policy_version": "receive-v1"
+        }
+      ]
+    }
+  ]
+}
+```
+
+Replace the illustrative ID, times and mint data with the reviewed values.
+The wallet regenerates the old ID from this historical policy and the current
+receiving key. A retired ID cannot also be in the active inventory. The
+compatibility window begins at `retired_at` and ends just before
+`accept_before`, in Unix seconds. Within it, the old ID can admit payments
+only from mints both advertised by that request and qualified and enabled by
+the current configuration. Receipts record the policy used at admission.
+
+An exact previously admitted HTTP body can retrieve its original status
+capability after retirement while the bounded intake route is open. An
+expired ID cannot admit a new body. The status route continues to accept
+existing capabilities. Retain admitted state and the applicable keys across
+rotation. This procedure covers request rotation with the same receiving
+key. Historical key rotation still requires separate implementation and
+qualification.
 
 ## Inactive Cashu edge include
 

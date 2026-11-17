@@ -450,3 +450,15 @@ separately qualify live provider reconciliation. Re-run the complete financial
 HTTP/receipt/treasury fixture on source-matched core and wallet test artifacts.
 Mint-policy updates, coordinated funded restore and installed/provider acceptance
 remain required.
+
+## Cashu retired request compatibility
+
+Rotate a reusable descriptor while retaining its exact old endpoint, mint
+scope, policy versions and receiving key. Validate the inclusive beginning
+and exclusive end of the approved window. Refuse a changed historical ID,
+endpoint, key or policy by regenerating the old request identity. An old ID
+cannot accept payment from a mint added later or a mint disabled for current
+receiving. A late new body must be refused. Replay the exact admitted HTTP
+body after expiry and verify its original status capability, one journal
+entry, and no new mint request. A changed body using that delivery ID must
+refuse. Verify that the current request continues to accept new payments.

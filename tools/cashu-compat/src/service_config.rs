@@ -34,6 +34,8 @@ pub struct Config {
     pub recipient: String,
     pub descriptors: Vec<String>,
     #[serde(default)]
+    pub retired_descriptors: Vec<crate::descriptor::RetiredDescriptor>,
+    #[serde(default)]
     pub public_request: Option<PublicRequestConfig>,
     pub mints: Vec<MintPolicy>,
     pub keysets: Vec<Keyset>,
@@ -216,7 +218,7 @@ impl Config {
         ensure!(
             self.mints.len() <= 16
                 && self.keysets.len() <= 128
-                && self.descriptors.len() <= 16
+                && self.descriptors.len() + self.retired_descriptors.len() <= 16
                 && self
                     .descriptors
                     .iter()
@@ -225,6 +227,14 @@ impl Config {
         );
         let registry = MintRegistry::new(self.mints.clone())?;
         let receiver = PublicKey::from_hex(&self.receiving_key)?;
+        let mut descriptor_ids = self.descriptors.iter().collect::<BTreeSet<_>>();
+        for retired in &self.retired_descriptors {
+            ensure!(
+                descriptor_ids.insert(&retired.id),
+                "retired descriptor still active or listed twice"
+            );
+            retired.verify(receiver)?;
+        }
         lightning_goats_nostr_event::validate_public_key(&self.recipient)?;
         ensure!(
             receiver.x_only_public_key().to_string() != self.recipient,
@@ -460,6 +470,64 @@ mod tests {
         let mut changed = value.clone();
         changed["public_request"]["request"] = json!(original.encoded());
         assert!(Config::decode(&serde_json::to_vec(&changed)?).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn retirement_binds_original_request_mint_policy_endpoint_and_receiver() -> Result<()> {
+        use crate::descriptor::Encoding;
+        let mut value = fixture();
+        let old_mint = json!({"id":"fixture","advertised_url":"https://mint.example/Bitcoin",
+            "policy_version":"receive-v1","receive_cashu":true,"receive_nutzap":false,"bolt11_exit_qualified":true});
+        value["mints"] = json!([old_mint]);
+        let endpoint = "https://lightning-goats.example/api/v1/cashu";
+        let old = Config::decode(&serde_json::to_vec(&value)?)?
+            .prepare_request(endpoint, Encoding::CreqA)?;
+        value["mints"][0]["policy_version"] = json!("receive-v2");
+        let current = Config::decode(&serde_json::to_vec(&value)?)?
+            .prepare_request(endpoint, Encoding::CreqB)?;
+        value["descriptors"] = json!([current.id()]);
+        value["public_request"] = json!({"endpoint":endpoint,"encoding":"creqB"});
+        value["retired_descriptors"] = json!([{
+            "id":old.id(),"endpoint":endpoint,"retired_at":100,"accept_before":200,
+            "mints":[{"id":"fixture","advertised_url":"https://mint.example/Bitcoin","policy_version":"receive-v1"}]
+        }]);
+        assert_eq!(
+            Config::decode(&serde_json::to_vec(&value)?)?.retired_descriptors[0].id,
+            old.id()
+        );
+        for (pointer, replacement) in [
+            ("/retired_descriptors/0/id", json!(current.id())),
+            (
+                "/retired_descriptors/0/endpoint",
+                json!("https://other.example/c"),
+            ),
+            ("/retired_descriptors/0/accept_before", json!(100)),
+            (
+                "/retired_descriptors/0/mints/0/policy_version",
+                json!("receive-v2"),
+            ),
+            (
+                "/retired_descriptors/0/mints/0/advertised_url",
+                json!("https://mint.example/bitcoin"),
+            ),
+            (
+                "/receiving_key",
+                json!(
+                    cdk::nuts::SecretKey::from_slice(&[7; 32])?
+                        .public_key()
+                        .to_hex()
+                ),
+            ),
+            ("/descriptors", json!([current.id(), old.id()])),
+        ] {
+            let mut changed = value.clone();
+            *changed.pointer_mut(pointer).unwrap() = replacement;
+            assert!(
+                Config::decode(&serde_json::to_vec(&changed)?).is_err(),
+                "{pointer}"
+            );
+        }
         Ok(())
     }
 

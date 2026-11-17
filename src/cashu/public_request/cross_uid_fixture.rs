@@ -27,7 +27,7 @@ async fn isolated_public_request_core_child() -> Result<()> {
     let root = PathBuf::from(std::env::var("LG_CASHU_PUBLIC_FIXTURE")?);
     let phase = std::env::var("LG_CASHU_PUBLIC_PHASE")?;
     ensure!(
-        ["initial", "paused", "rogue"].contains(&phase.as_str()),
+        ["initial", "retired", "paused", "rogue"].contains(&phase.as_str()),
         "invalid phase"
     );
     let ready: Ready = serde_json::from_slice(&std::fs::read(root.join("ready.json"))?)?;
@@ -55,10 +55,10 @@ async fn isolated_public_request_core_child() -> Result<()> {
             .is_err(),
         "stale epoch accepted"
     );
-    let expected = if phase == "initial" {
-        Some(ready.descriptor)
-    } else {
+    let expected = if phase == "paused" {
         None
+    } else {
+        Some(ready.descriptor)
     };
     ensure!(
         client.public_request().await? == expected,
@@ -113,7 +113,7 @@ async fn isolated_public_request_core_child() -> Result<()> {
     let expected_value = expected
         .map(public_value)
         .unwrap_or(serde_json::Value::Null);
-    if phase == "initial" {
+    if phase != "paused" {
         ensure!(
             response.status() == reqwest::StatusCode::OK,
             "public request unavailable"
@@ -197,6 +197,46 @@ async fn isolated_public_request_core_child() -> Result<()> {
         std::fs::write(&capability_file, serde_json::to_vec(&saved)?)?;
         println!("PUBLIC_HTTP_80_IDENTICAL_RETRIES_PER_PAYMENT_VERIFIED");
         saved
+    } else if phase == "retired" {
+        let capabilities: Vec<serde_json::Value> =
+            serde_json::from_slice(&std::fs::read(&capability_file)?)?;
+        ensure!(
+            capabilities.len() == ready.submissions.len(),
+            "missing original capabilities"
+        );
+        for (submission, capability) in ready.submissions.iter().zip(&capabilities) {
+            ensure!(
+                submission["id"] != expected_value["id"],
+                "request did not rotate"
+            );
+            let response = http
+                .post(format!("http://{address}/api/v1/cashu"))
+                .json(submission)
+                .send()
+                .await?;
+            ensure!(
+                response.status() == reqwest::StatusCode::ACCEPTED,
+                "expired replay lost admission"
+            );
+            ensure!(
+                response.json::<serde_json::Value>().await?
+                    == serde_json::json!({"status":"pending","capability":capability}),
+                "expired replay changed its receipt"
+            );
+        }
+        let mut changed = ready.submissions[0].clone();
+        changed["memo"] = serde_json::json!("different delivery body");
+        let response = http
+            .post(format!("http://{address}/api/v1/cashu"))
+            .json(&changed)
+            .send()
+            .await?;
+        ensure!(
+            response.status() == reqwest::StatusCode::BAD_REQUEST,
+            "expired request admitted a new body"
+        );
+        println!("PUBLIC_HTTP_RETIRED_EXACT_RETRIES_VERIFIED");
+        capabilities
     } else {
         let response = http
             .post(format!("http://{address}/api/v1/cashu"))

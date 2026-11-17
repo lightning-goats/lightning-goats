@@ -6,6 +6,18 @@ use rusqlite::OptionalExtension;
 use uuid::Uuid;
 
 impl Journal {
+    pub(crate) fn existing_http_delivery(&self, source_ref: &str) -> Result<Option<Uuid>> {
+        self.connection
+            .query_row(
+                "SELECT acquisition_id FROM intake_sources WHERE transport='cashu' AND source_ref=?",
+                [source_ref],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .map(|id| Uuid::parse_str(&id).map_err(Into::into))
+            .transpose()
+    }
+
     /// Called only after validated ordinary admission. A lost reply/retry returns
     /// the original capability even after acquisition and credit consumption.
     pub fn receipt_capability(&mut self, id: Uuid) -> Result<Capability> {

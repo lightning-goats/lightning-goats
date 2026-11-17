@@ -1967,6 +1967,160 @@ async fn prepared_treasury_case(scenario: TreasuryScenario) -> Result<()> {
 }
 
 #[tokio::test]
+async fn retired_descriptor_preserves_exact_admission_retry_after_its_window() -> Result<()> {
+    use crate::descriptor::{Descriptor, Encoding, RetiredDescriptor, RetiredMint};
+    use crate::ingress::Intake;
+    use lightning_goats_cashu_receipt::receive_status::{
+        AdmissionOutcome, AdmissionQuery, AdmissionReply, AdmitOperation, Status, http_delivery_id,
+    };
+    let harness = Harness::new(0)?;
+    let writer = WriterLock::acquire(harness.directory.path())?;
+    let journal = Arc::new(Mutex::new(Journal::open(
+        &harness.directory.path().join("journal.sqlite"),
+        harness.epoch,
+        8,
+    )?));
+    let original = harness.policy();
+    let receiver = harness.receiver.public_key();
+    let endpoint = "https://lightning-goats.example/api/v1/cashu";
+    let old = Descriptor::prepare(
+        &MintRegistry::new(vec![original.clone()])?,
+        endpoint,
+        receiver,
+        Encoding::CreqA,
+    )?;
+    let mut current = original.clone();
+    current.policy_version = "current-v2".into();
+    let other = MintPolicy {
+        id: "second".into(),
+        advertised_url: "https://second.example".into(),
+        ..current.clone()
+    };
+    let registry = MintRegistry::new(vec![current.clone(), other.clone()])?;
+    let current_descriptor = Descriptor::prepare(&registry, endpoint, receiver, Encoding::CreqA)?;
+    let active = [current_descriptor.id().to_owned()];
+    assert_ne!(old.id(), current_descriptor.id());
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs();
+    let retired = |accept_before| RetiredDescriptor {
+        id: old.id().into(),
+        endpoint: endpoint.into(),
+        retired_at: now - 60,
+        accept_before,
+        mints: vec![RetiredMint {
+            id: original.id.clone(),
+            advertised_url: original.advertised_url.clone(),
+            policy_version: original.policy_version.clone(),
+        }],
+    };
+    let within_window = [retired(now + 600)];
+    let expired = [retired(now)];
+    within_window[0].verify(receiver)?;
+    assert!(!within_window[0].accepts(old.id(), &current, now - 61));
+    assert!(within_window[0].accepts(old.id(), &current, now - 60));
+    assert!(within_window[0].accepts(old.id(), &current, now + 599));
+    assert!(!within_window[0].accepts(old.id(), &current, now + 600));
+    let mut keys = (*harness.keys).clone();
+    for (amount, key) in harness.mint.keyset.keys.iter() {
+        keys.insert(&other.id, harness.mint.keyset.id, u64::from(*amount), *key)?;
+    }
+    let mut intake = Intake {
+        core_uid: 1,
+        wallet_instance: Uuid::new_v4(),
+        wallet_epoch: harness.epoch,
+        receive_cashu: true,
+        receive_nutzap: false,
+        registry: &registry,
+        keys: &keys,
+        limits: &Limits {
+            body_bytes: 65536,
+            proof_count: 8,
+            receipt_sats: 10000,
+        },
+        receiver,
+        recipient: "",
+        descriptors: &active,
+        retired_descriptors: &within_window,
+        public_request: Some(&current_descriptor),
+        journal: journal.clone(),
+        writer: &writer,
+    };
+    let query = |descriptor, mint, label: &str| {
+        let body = json!({
+            "id": descriptor, "mint": mint, "unit": "sat",
+            "proofs": [harness.mint.issue(label.into())],
+        })
+        .to_string();
+        AdmissionQuery {
+            version: 1,
+            operation: AdmitOperation::OrdinaryAdmit,
+            wallet_instance: intake.wallet_instance,
+            wallet_epoch: harness.epoch,
+            delivery_id: http_delivery_id(body.as_bytes()),
+            body,
+        }
+    };
+    let reply = |intake: &Intake<'_>, query: &AdmissionQuery| -> Result<AdmissionOutcome> {
+        let response: AdmissionReply =
+            serde_json::from_slice(&intake.reply_frame(&serde_json::to_vec(query)?)?)?;
+        response.validate(query)?;
+        Ok(response.result)
+    };
+    let retired_submission = query(old.id(), original.advertised_url.as_str(), "before-cutoff");
+    let late_submission = query(old.id(), original.advertised_url.as_str(), "after-cutoff");
+    let other_mint = query(old.id(), other.advertised_url.as_str(), "never-listed");
+    let current_submission = query(
+        current_descriptor.id(),
+        other.advertised_url.as_str(),
+        "current-qr",
+    );
+    let AdmissionOutcome::Admitted {
+        capability,
+        status: Status::Pending,
+    } = reply(&intake, &retired_submission)?
+    else {
+        bail!("retired request was rejected within window")
+    };
+    assert!(matches!(
+        reply(&intake, &other_mint)?,
+        AdmissionOutcome::Rejected
+    ));
+    let mut disabled = current;
+    disabled.receive_cashu = false;
+    let disabled_registry = MintRegistry::new(vec![disabled, other])?;
+    intake.registry = &disabled_registry;
+    assert!(matches!(
+        reply(&intake, &late_submission)?,
+        AdmissionOutcome::Rejected
+    ));
+    intake.registry = &registry;
+    intake.retired_descriptors = &expired;
+    assert!(matches!(
+        reply(&intake, &late_submission)?,
+        AdmissionOutcome::Rejected
+    ));
+    let AdmissionOutcome::Admitted {
+        capability: retry,
+        status: Status::Pending,
+    } = reply(&intake, &retired_submission)?
+    else {
+        bail!("admitted request lost its retry status")
+    };
+    assert!(capability == retry);
+    let mut changed = late_submission;
+    changed.delivery_id = retired_submission.delivery_id;
+    assert!(reply(&intake, &changed).is_err());
+    assert!(matches!(
+        reply(&intake, &current_submission)?,
+        AdmissionOutcome::Admitted { .. }
+    ));
+    assert_eq!(journal.lock().unwrap().pending_operations(8)?.len(), 2);
+    assert_eq!(harness.mint.swap_attempts.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
+#[tokio::test]
 async fn private_intake_authenticates_before_read_and_deduplicates_across_transports() -> Result<()>
 {
     use lightning_goats_cashu_receipt::ingress::{Disposition, Payload, Request};
@@ -1996,6 +2150,7 @@ async fn private_intake_authenticates_before_read_and_deduplicates_across_transp
         receiver: harness.receiver.public_key(),
         recipient: &recipient,
         descriptors: &["reusable".into()],
+        retired_descriptors: &[],
         public_request: None,
         journal: journal.clone(),
         writer: &writer,

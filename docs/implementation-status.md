@@ -120,6 +120,13 @@ one swap submission and no receipt export during the recheck. The unfunded CLI
 fixture verifies that insufficient evidence preserves the eligible hold and
 another hold cause is rejected.
 
+Cashu request rotation now accepts an explicitly retired descriptor within a
+protected time window. Configuration regenerates its ID from the original
+endpoint and mint inventory using the current receiving key. Intake honors only
+the intersection of the advertised mint list and current qualified policy.
+The wallet tests verify expiry and the original status capability on a
+byte-identical retry. Historical receiving-key rotation remains open.
+
 Cashu operator controls update **2026-11-17**: the
 [protected planning/reconciliation checkpoint](testing/cashu-operator-controls-20261117.json)
 passes 650 core tests (12 ignored), 179 wallet tests (seven ignored), required

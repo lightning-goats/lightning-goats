@@ -207,6 +207,7 @@ impl Runtime {
             receiver: self.policy.receiver,
             recipient: &self.config.recipient,
             descriptors: &self.config.descriptors,
+            retired_descriptors: &self.config.retired_descriptors,
             public_request: self.policy.public_request.as_ref(),
             journal: self.journal.clone(),
             writer: &self.writer,

@@ -1,5 +1,6 @@
 //! Actual authenticated listener; synthetic public policy and empty private state.
 use super::*;
+use crate::descriptor::{Descriptor, RetiredMint};
 use lightning_goats_cashu_receipt::public_request::Encoding;
 use serde::Deserialize;
 use std::{collections::BTreeMap, path::PathBuf};
@@ -19,7 +20,7 @@ async fn isolated_public_request_wallet_child() -> Result<()> {
     let root = PathBuf::from(std::env::var("LG_CASHU_PUBLIC_FIXTURE")?);
     let phase = std::env::var("LG_CASHU_PUBLIC_PHASE")?;
     ensure!(
-        ["initial", "paused"].contains(&phase.as_str()),
+        ["initial", "retired", "paused"].contains(&phase.as_str()),
         "invalid phase"
     );
     let bootstrap: Bootstrap =
@@ -31,21 +32,41 @@ async fn isolated_public_request_wallet_child() -> Result<()> {
         bootstrap.wallet_epoch,
         64,
     )?));
-    let registry = MintRegistry::new(vec![crate::mint_policy::MintPolicy {
+    let mut mint = crate::mint_policy::MintPolicy {
         id: "fixture".into(),
         advertised_url: "https://mint.example".into(),
         policy_version: "fixture-v1".into(),
         receive_cashu: true,
         receive_nutzap: false,
         bolt11_exit_qualified: true,
-    }])?;
+    };
     let receiver = cdk::nuts::SecretKey::from_slice(&[3; 32])?.public_key();
-    let descriptor = crate::descriptor::Descriptor::prepare(
-        &registry,
-        "https://lightning-goats.example/api/v1/cashu",
+    let endpoint = "https://lightning-goats.example/api/v1/cashu";
+    let original = Descriptor::prepare(
+        &MintRegistry::new(vec![mint.clone()])?,
+        endpoint,
         receiver,
         Encoding::CreqA,
     )?;
+    let mut retired_descriptors = Vec::new();
+    if phase != "initial" {
+        let retired = RetiredDescriptor {
+            id: original.id().into(),
+            endpoint: endpoint.into(),
+            retired_at: 1,
+            accept_before: 2,
+            mints: vec![RetiredMint {
+                id: mint.id.clone(),
+                advertised_url: mint.advertised_url.clone(),
+                policy_version: mint.policy_version.clone(),
+            }],
+        };
+        retired.verify(receiver)?;
+        retired_descriptors.push(retired);
+        mint.policy_version = "fixture-v2".into();
+    }
+    let registry = MintRegistry::new(vec![mint])?;
+    let descriptor = Descriptor::prepare(&registry, endpoint, receiver, Encoding::CreqA)?;
     let ids = vec![descriptor.id().to_owned()];
     let mut keys = PinnedKeys::default();
     keys.insert(
@@ -61,7 +82,7 @@ async fn isolated_public_request_wallet_child() -> Result<()> {
                 .into_iter()
                 .map(|secret| {
                     serde_json::json!({
-                        "id":descriptor.id(), "mint":"https://mint.example", "unit":"sat",
+                        "id":original.id(), "mint":"https://mint.example", "unit":"sat",
                         "proofs":[crate::intake::tests::proof(secret.to_owned())]
                     })
                 })
@@ -79,7 +100,7 @@ async fn isolated_public_request_wallet_child() -> Result<()> {
         core_uid: bootstrap.core_uid,
         wallet_instance: bootstrap.wallet_instance,
         wallet_epoch: bootstrap.wallet_epoch,
-        receive_cashu: phase == "initial",
+        receive_cashu: phase != "paused",
         receive_nutzap: false,
         registry: &registry,
         keys: &keys,
@@ -87,6 +108,7 @@ async fn isolated_public_request_wallet_child() -> Result<()> {
         receiver,
         recipient: "",
         descriptors: &ids,
+        retired_descriptors: &retired_descriptors,
         public_request: Some(&descriptor),
         journal: journal.clone(),
         writer: &writer,

@@ -21,6 +21,12 @@ mod treasury_selection;
 pub mod treasury_split;
 pub use scheduling::Work;
 
+// Shared by ordinary Cashu and nutzap intake. Include held/exhausted work:
+// scheduling exhaustion does not establish ownership or release a proof claim.
+const MAX_PENDING_ACQUISITIONS: u64 = 1024;
+const MAX_PENDING_PROOF_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_INTAKE_SOURCES_PER_ACQUISITION: u64 = 64;
+
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS relay_scans (
     scope BLOB NOT NULL, relay TEXT NOT NULL, lane TEXT NOT NULL,
@@ -509,6 +515,18 @@ impl Journal {
             );
             Uuid::parse_str(&id)?
         } else {
+            let (pending, proof_bytes): (u64, u64) = tx.query_row(
+                "SELECT COUNT(*),COALESCE(SUM(length(c.proofs)),0) FROM acquisitions a JOIN acquisition_context c ON c.acquisition_id=a.id WHERE a.state!='credited'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )?;
+            ensure!(
+                pending < MAX_PENDING_ACQUISITIONS
+                    && proof_bytes
+                        .checked_add(u64::try_from(admitted_proofs.len())?)
+                        .is_some_and(|bytes| bytes <= MAX_PENDING_PROOF_BYTES),
+                "wallet intake backlog full; retry original submission later"
+            );
             let id = Uuid::new_v4();
             tx.execute("INSERT INTO acquisitions(id,mint_id,policy,transport,source_ref,proof_count,gross) VALUES(?,?,?,?,?,?,?)",
                 params![id.to_string(), intake.mint_id, intake.policy_version, intake.transport.as_str(), intake.source_ref, i64::try_from(proofs.len())?, gross])?;
@@ -531,6 +549,17 @@ impl Journal {
             previous.as_ref().is_none_or(|p| p == &id.to_string()),
             AdmissionConflict
         );
+        if previous.is_none() {
+            let sources: u64 = tx.query_row(
+                "SELECT COUNT(*) FROM intake_sources WHERE acquisition_id=?",
+                [id.to_string()],
+                |r| r.get(0),
+            )?;
+            ensure!(
+                sources < MAX_INTAKE_SOURCES_PER_ACQUISITION,
+                "wallet intake source limit reached; retry original submission"
+            );
+        }
         tx.execute("INSERT OR IGNORE INTO intake_sources(transport,source_ref,acquisition_id) VALUES(?,?,?)",
             params![intake.transport.as_str(), intake.source_ref, id.to_string()])?;
         tx.commit()?;
@@ -1054,6 +1083,136 @@ mod tests {
             Admission::New(id) => id,
             Admission::Duplicate(_) => panic!("expected new acquisition"),
         }
+    }
+
+    #[test]
+    fn intake_backpressure_survives_restart_and_preserves_original_retries() -> Result<()> {
+        let dir = crate::test_directory()?;
+        let path = dir.path().join("bounded.sqlite");
+        let epoch = Uuid::new_v4();
+        let mut journal = Journal::open(&path, epoch, 8)?;
+        let first_proofs = [proof("bounded-0")];
+        let first = new_id(journal.admit(&intake(&first_proofs, "source-0", Transport::Cashu))?);
+        for n in 1..MAX_PENDING_ACQUISITIONS {
+            journal.admit(&intake(
+                &[proof(&format!("bounded-{n}"))],
+                &format!("source-{n}"),
+                Transport::Cashu,
+            ))?;
+        }
+        // Held and exhausted work still consumes space and must count.
+        journal.hold(first, HoldReason::AmbiguousAcquisition)?;
+        drop(journal);
+        let mut journal = Journal::open(&path, epoch, 8)?;
+        let refused = [proof("bounded-overflow")];
+        assert!(
+            journal
+                .admit(&intake(&refused, "overflow", Transport::Nutzap))
+                .is_err()
+        );
+        assert_eq!(
+            journal.admit(&intake(&first_proofs, "source-0", Transport::Cashu))?,
+            Admission::Duplicate(first)
+        );
+        // Cross-transport replay remains the same acquisition at capacity.
+        assert_eq!(
+            journal.admit(&intake(&first_proofs, "relay-replay", Transport::Nutzap))?,
+            Admission::Duplicate(first)
+        );
+        for table in ["acquisitions", "acquisition_context", "proof_index"] {
+            let count: u64 = journal.connection.query_row(
+                &format!("SELECT COUNT(*) FROM {table}"),
+                [],
+                |r| r.get(0),
+            )?;
+            assert_eq!(count, MAX_PENDING_ACQUISITIONS);
+        }
+        let overflow_sources: u64 = journal.connection.query_row(
+            "SELECT COUNT(*) FROM intake_sources WHERE source_ref='overflow'",
+            [],
+            |r| r.get(0),
+        )?;
+        assert_eq!(overflow_sources, 0);
+        assert!(
+            journal.connection.query_row(
+                "SELECT COUNT(*) FROM acquisitions WHERE state='held_for_reconciliation'",
+                [],
+                |r| r.get::<_, u64>(0)
+            )? > 0
+        );
+        // Completing a different original frees one slot without removing its
+        // financial history or deduplication claim.
+        let completed: String = journal.connection.query_row(
+            "SELECT acquisition_id FROM intake_sources WHERE source_ref='source-1'",
+            [],
+            |r| r.get(0),
+        )?;
+        let completed = Uuid::parse_str(&completed)?;
+        journal.prepare(completed, b"fixture original swap")?;
+        journal.start_acquisition(completed)?;
+        journal.record_acquired(completed, 8, 0, b"fixture owned outputs")?;
+        journal.export_receipt(completed)?;
+        journal.acknowledge_credit(completed, b"fixture core acknowledgment")?;
+        assert!(matches!(
+            journal.admit(&intake(&refused, "overflow", Transport::Nutzap))?,
+            Admission::New(_)
+        ));
+        assert_eq!(
+            journal.admit(&intake(&[proof("bounded-1")], "source-1", Transport::Cashu))?,
+            Admission::Duplicate(completed)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn intake_proof_storage_and_replay_aliases_are_bounded() -> Result<()> {
+        let dir = crate::test_directory()?;
+        let mut journal = Journal::open(&dir.path().join("bytes.sqlite"), Uuid::new_v4(), 8)?;
+        let large_secret = "x".repeat(900_000);
+        let mut admitted = 0;
+        for n in 0..32 {
+            let proofs = [proof(&format!("{n}{large_secret}"))];
+            if journal
+                .admit(&intake(&proofs, &format!("large-{n}"), Transport::Cashu))
+                .is_err()
+            {
+                break;
+            }
+            admitted += 1;
+        }
+        assert!(admitted > 0 && admitted < 32);
+        let (count, bytes): (u64, u64) = journal.connection.query_row(
+            "SELECT COUNT(*),SUM(length(proofs)) FROM acquisition_context",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        assert_eq!(count, admitted);
+        assert!(bytes <= MAX_PENDING_PROOF_BYTES);
+
+        let proofs = [proof("alias-fixture")];
+        let id = new_id(journal.admit(&intake(&proofs, "alias-0", Transport::Cashu))?);
+        for n in 1..MAX_INTAKE_SOURCES_PER_ACQUISITION {
+            assert_eq!(
+                journal.admit(&intake(&proofs, &format!("alias-{n}"), Transport::Cashu))?,
+                Admission::Duplicate(id)
+            );
+        }
+        assert!(
+            journal
+                .admit(&intake(&proofs, "alias-overflow", Transport::Nutzap))
+                .is_err()
+        );
+        assert_eq!(
+            journal.admit(&intake(&proofs, "alias-0", Transport::Cashu))?,
+            Admission::Duplicate(id)
+        );
+        let count: u64 = journal.connection.query_row(
+            "SELECT COUNT(*) FROM intake_sources WHERE acquisition_id=?",
+            [id.to_string()],
+            |r| r.get(0),
+        )?;
+        assert_eq!(count, MAX_INTAKE_SOURCES_PER_ACQUISITION);
+        Ok(())
     }
 
     #[test]

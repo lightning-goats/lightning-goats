@@ -5,6 +5,16 @@ It does not redefine completion around passing local fixtures. Evidence is scope
 to its recorded source revision/hash; later edits require relevant requalification.
 The canonical summary remains [implementation status](../implementation-status.md).
 
+2026-11-17 intake checkpoint: shared Cashu/nutzap admission now bounds the
+uncredited backlog to 1024 acquisitions and 16 MiB of serialized input proofs,
+and retains at most 64 source aliases per acquisition. Full queues preserve
+existing retries; completed credits free capacity while preserving history.
+[Wallet qualification](cashu-intake-backpressure-20261117.json) passes 168 tests
+with seven explicitly ignored fixture entry points, formatting, strict Clippy,
+vendor verification and cached dependency audits. This does not resolve the
+separate mint-operation fence after rejected/ambiguous acquisition, provide a
+total database quota, or qualify production receiving.
+
 | Required behavior / artifact | Established evidence | Required work still open |
 | --- | --- | --- |
 | Existing native Lightning, NIP-57 and paid history | Core regression suites and historical live checkpoints; no production change in this workstream | Final selected-source regression and approved installed/provider acceptance. |
@@ -29,7 +39,7 @@ The canonical summary remains [implementation status](../implementation-status.m
 | Edge CORS, body limits and log privacy | Four real isolated nginx tests; application CORS/default-off tests | Installed CDN/WAF suppression, real browser-wallet cross-origin POST/OPTIONS, sender retry behavior and ingress abuse acceptance. |
 | Protected operational commands and useful private health | Wallet config/status/request/announcement commands; separate paused treasury controls | Protected financial-plan release with preview, approval and stopped-service checks is now integrated and under qualification; explicit root/CLI acceptance, constrained settlement/reconcile/held-policy/backup commands and custody/age/lag health remain incomplete. |
 | Coordinated backup inventory and rollback fences | Existing independent epoch/startup checks; old maintenance tool refuses Cashu state; an explicit recovery marker now fences wallet and signer startup before database access, with native verification pending | The offline verifier now checks hashes, private files, database integrity, expected core/wallet/signer registrations and current-registration receipt/acknowledgment agreement in both directions, plus retained treasury report agreement and exact ready mint-namespace inventory (14 synthetic tests). Writer quiescence, actual native-store snapshots, full treasury/CDK ownership reconciliation, wallet-only/core-only rollback, coordinated restore and historical-key recovery remain open. |
-| Inactive install/package, current docs and pinned dependencies | Inactive unit/edge examples; pinned CDK/SQLite vendor verification; initial November inventory | Full install/package/network/backup rehearsal, final security review and selected-commit CI. |
+| Inactive install/package, current docs and pinned dependencies | Inactive unit/edge examples; pinned CDK/SQLite vendor verification; initial November inventory | Full install/package/network/backup rehearsal and selected-commit CI. The operator skipped the security review on 2026-11-17; the scan was canceled before validation/completion and supplies no completed-review claim. |
 | Public November package and demo | Pre-November and Cashu starting references recorded; fixture evidence retained | Reviewable public commits/PR/tag, distribution license notices, current submission rules, compatibility matrix and honestly labeled recording. The checksum-verified inventory covers 462 entries from both lock graphs with no unresolved entries; it is not a linked-binary or distribution-notice inventory. |
 | Approved live pilot and production | No activation claimed | Operator-selected mints/keys/limits/fees/holding policy and explicit approval; real providers, independent clients, actual physical evidence and observation. |
 

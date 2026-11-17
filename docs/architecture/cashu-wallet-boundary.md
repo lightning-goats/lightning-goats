@@ -418,6 +418,18 @@ ordinary-Cashu payload variant. Wallet admission returns HTTP 202 with a coarse
 `accepted` status; it does not report acquired value or credited sats. Unavailable
 or refused wallet delivery returns a redacted 503. Bodies are never echoed.
 
+Shared journal admission also applies durable backpressure: at most 1024
+uncredited acquisitions and 16 MiB of their serialized input proofs may be
+retained before new work is refused. Held and exhausted operations count;
+restarting or disabling acquisition does not reset these bounds. The check and
+all proof/context/source inserts share one immediate SQLite transaction. Exact
+proof-set retries bypass this new-work budget and retain their acquisition ID.
+Each acquisition retains at most 64 transport/source aliases, with retries of
+already recorded aliases still allowed at that bound. Refusal is temporary
+unavailability (HTTP 503), never a claim that a mint has rejected or paid tokens.
+Credited history and proof claims remain retained; these queue limits are not a
+total database quota or a permission to delete unresolved financial state.
+
 Browser senders receive wildcard-origin CORS with only POST/OPTIONS and the
 content-type header permitted; credentials are not enabled. All route responses,
 including body-limit rejections, are no-store with no-referrer. This endpoint has

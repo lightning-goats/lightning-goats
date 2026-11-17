@@ -180,7 +180,7 @@ impl<T: Transport + Clone + 'static> Worker<T> {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn from_mint_stores(
+    pub(crate) fn from_mint_stores(
         journal: Arc<Mutex<Journal>>,
         databases: BTreeMap<String, Arc<dyn WalletDatabase<DatabaseError> + Send + Sync>>,
         writer: Arc<WriterLock>,

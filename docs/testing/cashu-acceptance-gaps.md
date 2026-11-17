@@ -91,10 +91,18 @@ sats of contribution credit, and permit one synthetic 1000-sat feeding with
 zero remaining custody and three sats each of receive/conversion fees. This
 does not test admission after the first melt or real providers. The deployment
 rehearsal now passes the strict contact comparison. It reaches a later historical
-payout-8 source-verifier failure on core schema 26. An explicit reviewed
-empty-Cashu source variant is implemented; selected-source native and installed
-qualification remain pending.
-Multi-mint financial composition and the rest of the full plan remain required.
+payout-8 source-verifier failure on core schema 26. The explicit reviewed
+empty-Cashu source variant now passes all ten selected-source workflows at
+`cb582e9`, including the installed native/systemd transaction
+([evidence](cashu-upgrade-compatibility-20261117.json)).
+
+The new `--multi-mint` composition case is **under qualification**. It acquires
+250 net sats from a nutzap at one configured issuer and 150 net sats through
+ordinary HTTP at another. Independent issuer keys, keysets and CDK namespaces
+share one journal/writer. Both original treasury instructions must independently
+settle before one synthetic feeding; normal and lost-reply runs, replay and
+private health accounting are required. It claims no live mint, phone or
+multi-mint acceptance until selected-source execution passes.
 
 | Required behavior / artifact | Established evidence | Required work still open |
 | --- | --- | --- |

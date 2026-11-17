@@ -22,6 +22,7 @@ import time
 
 CORE = 'strike::tests::cashu_treasury_tests::combined_fixture::combined_settlement_core_child'
 WALLET = 'acquisition::tests::core_settlement_fixture::combined_settlement_wallet_child'
+MULTI_MINT_WALLET = 'acquisition::tests::core_settlement_fixture::multi_mint::combined_multi_mint_wallet_child'
 
 
 def digest(path):
@@ -48,7 +49,10 @@ def main():
     parser.add_argument('--sender-node', type=Path, default=Path('/usr/bin/node'))
     parser.add_argument('--repeat-request', action='store_true', help='acquire two distinct ordinary payments to one descriptor before settlement')
     parser.add_argument('--settle-change', action='store_true', help='settle retained one-sat change together with a distinct 16-sat Cashu contribution through a second independently verified Strike receive')
+    parser.add_argument('--multi-mint', action='store_true', help='settle independently acquired contributions from two configured mint namespaces before one synthetic feeding')
     args = parser.parse_args()
+    if args.multi_mint and (not args.fees or not args.no_change or not args.http_intake or args.repeat_request or args.settle_change):
+        parser.error('--multi-mint requires its own --fees --no-change --http-intake mode')
     if args.settle_change and (not args.fees or args.no_change or args.repeat_request or not args.http_intake):
         parser.error('--settle-change requires --fees --http-intake, returned change, and its own mode')
     if args.repeat_request and not args.http_intake:
@@ -115,13 +119,14 @@ def main():
                'LG_CASHU_COMBINED_TREASURY_IPC':'1' if args.treasury_ipc else '0',
                'LG_CASHU_COMBINED_HTTP_INTAKE':'1' if args.http_intake else '0'}
         env['LG_CASHU_COMBINED_SETTLE_CHANGE'] = '1' if args.settle_change else '0'
+        env['LG_CASHU_COMBINED_MULTI_MINT'] = '1' if args.multi_mint else '0'
         env['LG_CASHU_COMBINED_REPEAT_REQUEST'] = '1' if args.repeat_request else '0'
         env.update(sender_environment)
         prefix = ['/usr/bin/setpriv', f'--reuid={identity}', f'--regid={identity}',
                   '--clear-groups', '--no-new-privs', '--']
         processes, logs, hashes = [], [], {}
         try:
-            for name, source, test in [('core', args.core_test, CORE), ('wallet', args.wallet_test, WALLET)]:
+            for name, source, test in [('core', args.core_test, CORE), ('wallet', args.wallet_test, MULTI_MINT_WALLET if args.multi_mint else WALLET)]:
                 uid = identity if name=='core' else wallet_uid
                 prefix = ['/usr/bin/setpriv',f'--reuid={uid}',f'--regid={ipc_gid}',
                           '--clear-groups','--no-new-privs','--']
@@ -156,10 +161,14 @@ def main():
                 raise ValueError('combined fixture failed')
             completion = (['COMBINED_CORE_TWO_SETTLEMENTS_ONE_SYNTHETIC_FEED', 'COMBINED_WALLET_THREE_ACQUISITIONS_TWO_MELTS']
                           if args.settle_change else ['COMBINED_CORE_ONE_SETTLEMENT_ONE_SYNTHETIC_FEED', 'COMBINED_WALLET_TWO_ACQUISITIONS_ONE_MELT'])
+            if args.multi_mint:
+                completion = ['COMBINED_CORE_TWO_SETTLEMENTS_ONE_SYNTHETIC_FEED', 'COMBINED_WALLET_TWO_MINTS_TWO_ACQUISITIONS_TWO_MELTS']
             for index, (log, marker) in enumerate(zip(logs, completion)):
                 log.seek(0)
                 output = log.read()
                 markers = [marker]
+                if args.multi_mint and index == 0:
+                    markers.append('COMBINED_CORE_TWO_MINTS_FINANCIAL_PLAN_VERIFIED')
                 if index == 1:
                     markers.append('COMBINED_WALLET_HEALTH_ACCOUNTING_VERIFIED')
                 if args.repeat_request:
@@ -208,6 +217,11 @@ def main():
                     treasury_deposit_sats=413, new_transfer_credit_sats=0, original_granted_credit_sats=1016,
                     receive_fees_sats=3, conversion_fee_sats=3, retained_change_sats=0,
                     supplemental_native_sats=0, settlement_operations=2)
+            if args.multi_mint:
+                expected = dict(credit_sats=0, contributions=3, synthetic_confirmed_feeds=1,
+                    treasury_deposit_sats=396, new_transfer_credit_sats=0, original_granted_credit_sats=1000,
+                    receive_fees_sats=2, conversion_fee_sats=4, retained_change_sats=0,
+                    supplemental_native_sats=0, settlement_operations=2, configured_mints=2)
             if result != expected:
                 raise ValueError('combined fixture result differs from expected conservation')
             print(json.dumps({'result': 'CASHU_COMBINED_SETTLEMENT_VERIFIED', 'artifacts_sha256': hashes,
@@ -215,7 +229,7 @@ def main():
                               'nonzero_fees': args.fees, 'returned_change': args.fees and not args.no_change,
                               'lost_melt_reply': args.lost_reply, 'strike_before_wallet_report': args.lost_reply,
                               'wallet_recovery_while_paused': args.lost_reply,
-                              'physical_actuation': False, 'distinct_uid_ipc': args.treasury_ipc, 'distinct_uid_receipt_ipc': args.receipt_ipc, 'treasury_ipc': args.treasury_ipc, 'http_intake': args.http_intake, 'tls_verified': False, 'independent_sender': False, 'cashu_ts_offline_sender': args.cashu_ts_sender, 'repeat_request': args.repeat_request, 'residual_change_settled': args.settle_change, 'sender_inventory': sender_inventory, 'sender_node_sha256': digest(root / 'sender-node') if args.cashu_ts_sender else None, 'sender_script_sha256': digest(root / 'sender.mjs') if args.cashu_ts_sender else None}, sort_keys=True))
+                              'physical_actuation': False, 'distinct_uid_ipc': args.treasury_ipc, 'distinct_uid_receipt_ipc': args.receipt_ipc, 'treasury_ipc': args.treasury_ipc, 'http_intake': args.http_intake, 'tls_verified': False, 'independent_sender': False, 'cashu_ts_offline_sender': args.cashu_ts_sender, 'repeat_request': args.repeat_request, 'residual_change_settled': args.settle_change, 'multiple_mints': args.multi_mint, 'sender_inventory': sender_inventory, 'sender_node_sha256': digest(root / 'sender-node') if args.cashu_ts_sender else None, 'sender_script_sha256': digest(root / 'sender.mjs') if args.cashu_ts_sender else None}, sort_keys=True))
         except Exception:
             for log in logs:
                 log.flush()

@@ -369,6 +369,13 @@ jobs:
               if result.returncode:
                   print(output.read_text()[-24000:], flush=True)
                   result.check_returncode()
+          for lost in [False, True]:
+              output = root / ('cashu-sdk-multi-mint' + ('-lost' if lost else '') + '.json')
+              with output.open('w') as stream:
+                  result = subprocess.run(command + ['--multi-mint'] + (['--lost-reply'] if lost else []), stdout=stream, stderr=subprocess.STDOUT)
+              if result.returncode:
+                  print(output.read_text()[-24000:], flush=True)
+                  result.check_returncode()
           PYCODE
       - uses: actions/upload-artifact@v4
         if: always()
@@ -381,6 +388,8 @@ jobs:
             ${{ runner.temp }}/cashu-sdk-sender-repeated-lost.json
             ${{ runner.temp }}/cashu-sdk-residual.json
             ${{ runner.temp }}/cashu-sdk-residual-lost.json
+            ${{ runner.temp }}/cashu-sdk-multi-mint.json
+            ${{ runner.temp }}/cashu-sdk-multi-mint-lost.json
             ${{ runner.temp }}/cashu-native-backup.json
             ${{ runner.temp }}/cashu-cross-uid.json
             ${{ runner.temp }}/cashu-signer-cross-uid.json

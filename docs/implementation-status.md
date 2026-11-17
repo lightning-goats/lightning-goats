@@ -11,11 +11,13 @@ recorded separately. The [two-settlement residual-change composition](testing/ca
 passes normal/lost-reply CI at `69ba9de`, with no transfer credit or native top-up.
 The strict empty-Cashu contact comparison passes the installed rehearsal at
 `42e9956`. A later historical payout-8 upgrade failed because its pinned old
-verifier cannot read core schema 26. A distinct reviewed empty-Cashu source
-selector and native payout-only comparison are now implemented for qualification;
-the default legacy path still requires both original and selected verifiers.
-The corrected retention regression at `b1487cf` passes core and wallet CI gates;
-complete deployment qualification remains open.
+verifier cannot read core schema 26. The [compatibility correction](testing/cashu-upgrade-compatibility-20261117.json)
+at `cb582e9` passes all ten selected-source workflows, including full native
+gates and the installed systemd rehearsal. Its distinct reviewed empty-Cashu
+source selector retains the default legacy requirement for both original and
+selected verifiers. All 26 protected orchestration regressions also pass locally
+without skips. A new two-configured-mint HTTP/financial composition case is
+implemented and under qualification; it is not covered by that checkpoint.
 
 Cashu operator controls update **2026-11-17**: the
 [protected planning/reconciliation checkpoint](testing/cashu-operator-controls-20261117.json)

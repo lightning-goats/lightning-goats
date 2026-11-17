@@ -5,6 +5,8 @@ use lightning_goats_cashu_receipt::treasury::{Destination, Issued};
 use serde::Deserialize;
 use std::path::Path;
 
+include!("multi_mint_settlement_fixture.rs");
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Bootstrap {

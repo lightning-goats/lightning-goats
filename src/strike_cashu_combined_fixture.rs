@@ -270,6 +270,7 @@ mod combined_fixture {
             "repeated request requires HTTP composition"
         );
         let settle_change = std::env::var("LG_CASHU_COMBINED_SETTLE_CHANGE").as_deref() == Ok("1");
+        let multi_mint = std::env::var("LG_CASHU_COMBINED_MULTI_MINT").as_deref() == Ok("1");
         ensure!(
             !settle_change || (http_intake && !repeat_request),
             "residual settlement requires ordinary HTTP and its own mode"
@@ -285,6 +286,16 @@ mod combined_fixture {
             2 + u64::from(repeat_request)
         } else {
             0
+        };
+        ensure!(
+            !multi_mint
+                || (http_intake && fees && !returned_change && !repeat_request && !settle_change),
+            "multi-mint composition requires its own HTTP fee-only mode"
+        );
+        let mint_ids = if multi_mint {
+            vec!["fixture-a", "fixture-b"]
+        } else {
+            vec!["fixture"]
         };
         let (directory, ledger) = ledger().await;
         ledger.initialize_reward_funding().await?;
@@ -305,13 +316,18 @@ mod combined_fixture {
                 credit_sats_per_24h: 1000,
                 maximum_custody_sats: 1000,
             },
-            approved: std::collections::BTreeMap::from([(
-                ("fixture".into(), "fixture-v1".into()),
-                MintImportLimit {
-                    maximum_gross_sats: 1000,
-                    maximum_net_sats: 1000,
-                },
-            )]),
+            approved: mint_ids
+                .iter()
+                .map(|id| {
+                    (
+                        (id.to_string(), "fixture-v1".into()),
+                        MintImportLimit {
+                            maximum_gross_sats: 1000,
+                            maximum_net_sats: 1000,
+                        },
+                    )
+                })
+                .collect(),
         });
         let pool = crate::sqlite::connect_existing_durable(
             &format!("sqlite://{}", directory.path().join("strike.db").display()),
@@ -330,23 +346,28 @@ mod combined_fixture {
                 credential_fingerprint: hex::encode(Sha256::digest(state.api_key.as_bytes())),
                 network: "bitcoin".into(),
             },
-            approved_mints: std::collections::BTreeMap::from([(
-                "fixture".into(),
-                MintLimits {
-                    minimum_deposit_sats: 1,
-                    maximum_deposit_sats: 400,
-                    maximum_input_sats: 400,
-                    maximum_fee_sats: conversion_fee_sats,
-                    maximum_in_flight_sats: 400,
-                },
-            )]),
+            approved_mints: mint_ids
+                .iter()
+                .map(|id| {
+                    (
+                        id.to_string(),
+                        MintLimits {
+                            minimum_deposit_sats: 1,
+                            maximum_deposit_sats: 400,
+                            maximum_input_sats: 400,
+                            maximum_fee_sats: conversion_fee_sats,
+                            maximum_in_flight_sats: 400,
+                        },
+                    )
+                })
+                .collect(),
             invoice_expiry_seconds: 300,
             limits: Limits {
                 minimum_deposit_sats: 1,
                 maximum_deposit_sats: 400,
                 maximum_input_sats: 400,
                 maximum_fee_sats: conversion_fee_sats,
-                operations_per_24h: 1 + u64::from(settle_change),
+                operations_per_24h: 1 + u64::from(settle_change || multi_mint),
                 input_sats_per_24h: 400 + 17 * u64::from(settle_change),
                 maximum_in_flight_sats: 400,
             },
@@ -365,12 +386,15 @@ mod combined_fixture {
                 receipts_per_24h: 10,
                 credit_sats_per_24h: 1000,
                 maximum_custody_sats: 1000,
-                approved: vec![Mint {
-                    mint_id: "fixture".into(),
-                    policy_version: "fixture-v1".into(),
-                    maximum_gross_sats: 1000,
-                    maximum_net_sats: 1000,
-                }],
+                approved: mint_ids
+                    .iter()
+                    .map(|id| Mint {
+                        mint_id: id.to_string(),
+                        policy_version: "fixture-v1".into(),
+                        maximum_gross_sats: 1000,
+                        maximum_net_sats: 1000,
+                    })
+                    .collect(),
                 deadline_seconds: 5,
                 connections_per_second: 64,
             };
@@ -493,15 +517,34 @@ mod combined_fixture {
                 .as_secs(),
         )?;
         assert_eq!(planner.tick(now).await?, Tick::Progress);
-        assert_eq!(planner.tick(now + 1).await?, Tick::Idle);
+        if !multi_mint {
+            assert_eq!(planner.tick(now + 1).await?, Tick::Idle);
+        }
         let id: String = sqlx::query_scalar("SELECT id FROM cashu_treasury_intents")
             .fetch_one(&pool)
             .await?;
         let intent = ledger.cashu_treasury_intent(id.parse()?).await?.unwrap();
         assert_eq!(
             intent.sources.len(),
-            receipt_count - usize::from(settle_change)
+            if multi_mint {
+                1
+            } else {
+                receipt_count - usize::from(settle_change)
+            }
         );
+        if multi_mint {
+            assert_eq!(intent.mint_id, "fixture-a");
+            assert_eq!(
+                (
+                    intent.input_sats,
+                    intent.deposit_sats,
+                    intent.maximum_fee_sats
+                ),
+                (250, 248, 2)
+            );
+            assert_eq!(receipts[0].data().mint_id, "fixture-a");
+            assert_eq!(receipts[1].data().mint_id, "fixture-b");
+        }
         assert_eq!(count(&pool, "feed_financial_treasury").await?, 1);
         state.description_hash = hex_digest(intent.digest()?);
         state.payment_hash = hex::encode(Sha256::digest([55u8; 32]));
@@ -514,7 +557,7 @@ mod combined_fixture {
             Sha256::digest([55u8; 32]).into(),
         );
         let provider_states = Arc::new(std::sync::Mutex::new(vec![state.clone()]));
-        if settle_change {
+        if settle_change || multi_mint {
             spawn_residual_provider(listener, provider_states.clone());
         } else {
             spawn_mock_on(listener, state.clone());
@@ -578,31 +621,52 @@ mod combined_fixture {
         assert_eq!(count(&pool, "settled_payments").await?, 1);
         assert_eq!(count(&pool, "event_log").await?, contribution_count);
         assert_eq!(ledger.feed_credit_sats().await?, initial_credit);
-        if settle_change {
-            assert!(returned_change, "residual mode requires returned change");
+        if settle_change || multi_mint {
+            assert!(
+                multi_mint || returned_change,
+                "residual mode requires returned change"
+            );
             assert!(ledger.begin_feed_attempt(1000).await?.is_none());
             let request = crate::cashu::treasury_sweep::Request {
                 id: Uuid::new_v4(),
                 mint_id: "fixture".into(),
                 maximum_input_sats: 17,
             };
-            let second = ledger
-                .plan_operator_cashu_settlement(&registration, &policy, &request, true)
-                .await?
-                .unwrap();
+            let second = if multi_mint {
+                ledger
+                    .plan_cashu_feed_treasury(&registration, &policy)
+                    .await?
+                    .unwrap()
+            } else {
+                ledger
+                    .plan_operator_cashu_settlement(&registration, &policy, &request, true)
+                    .await?
+                    .unwrap()
+            };
             assert_eq!(
                 (
                     second.input_sats,
                     second.deposit_sats,
                     second.maximum_fee_sats
                 ),
-                (17, 15, 2)
+                if multi_mint {
+                    (150, 148, 2)
+                } else {
+                    (17, 15, 2)
+                }
             );
-            assert_eq!(second.sources.len(), 2);
-            assert_eq!(second.sources.iter().map(|s| s.input_sats).sum::<u64>(), 17);
+            assert_eq!(second.sources.len(), if multi_mint { 1 } else { 2 });
+            assert_eq!(
+                second.sources.iter().map(|s| s.input_sats).sum::<u64>(),
+                if multi_mint { 150 } else { 17 }
+            );
             assert!(second.sources.iter().any(|s| s.acquisition_id
                 == receipts.last().unwrap().data().acquisition_id
-                && s.input_sats == 16));
+                && s.input_sats == if multi_mint { 150 } else { 16 }));
+            if multi_mint {
+                assert_eq!(second.mint_id, "fixture-b");
+                assert_eq!(count(&pool, "feed_financial_treasury").await?, 2);
+            }
             let mut state2 = state.clone();
             state2.receive_request_id = Uuid::new_v4();
             state2.receive_id = Uuid::new_v4();
@@ -670,13 +734,27 @@ mod combined_fixture {
             assert_eq!(count(&pool, "settled_payments").await?, 1);
             assert_eq!(count(&pool, "event_log").await?, contribution_count);
             assert_eq!(ledger.feed_credit_sats().await?, initial_credit);
-            let replay = ledger
-                .plan_operator_cashu_settlement(&registration, &policy, &request, true)
-                .await?
-                .unwrap();
-            assert!(replay == second);
+            if multi_mint {
+                assert!(
+                    ledger
+                        .plan_cashu_feed_treasury(&registration, &policy)
+                        .await?
+                        .is_none()
+                );
+            } else {
+                let replay = ledger
+                    .plan_operator_cashu_settlement(&registration, &policy, &request, true)
+                    .await?
+                    .unwrap();
+                assert!(replay == second);
+            }
             assert_eq!(count(&pool, "cashu_treasury_intents").await?, 2);
-            println!("COMBINED_CORE_RESIDUAL_CHANGE_SETTLED");
+            if settle_change {
+                println!("COMBINED_CORE_RESIDUAL_CHANGE_SETTLED");
+            }
+            if multi_mint {
+                println!("COMBINED_CORE_TWO_MINTS_FINANCIAL_PLAN_VERIFIED");
+            }
         } else if returned_change {
             // The retained one-sat change remains custody and original credit,
             // but is not yet settled coverage. Later native funding can proceed.
@@ -741,7 +819,11 @@ mod combined_fixture {
                 600
             }
         );
-        let result = if settle_change {
+        let result = if multi_mint {
+            json!({"credit_sats":0,"contributions":3,"synthetic_confirmed_feeds":1,"treasury_deposit_sats":396,
+                "new_transfer_credit_sats":0,"original_granted_credit_sats":1000,"receive_fees_sats":2,"conversion_fee_sats":4,
+                "retained_change_sats":0,"supplemental_native_sats":0,"settlement_operations":2,"configured_mints":2})
+        } else if settle_change {
             json!({"credit_sats":16,"contributions":4,"synthetic_confirmed_feeds":1,"treasury_deposit_sats":413,
                 "new_transfer_credit_sats":0,"original_granted_credit_sats":1016,"receive_fees_sats":3,"conversion_fee_sats":3,
                 "retained_change_sats":0,"supplemental_native_sats":0,"settlement_operations":2})
@@ -779,7 +861,7 @@ mod combined_fixture {
         if treasury_ipc {
             println!("COMBINED_CORE_FULL_FINANCIAL_IPC_VERIFIED");
         }
-        if settle_change {
+        if settle_change || multi_mint {
             println!("COMBINED_CORE_TWO_SETTLEMENTS_ONE_SYNTHETIC_FEED");
         } else {
             println!("COMBINED_CORE_ONE_SETTLEMENT_ONE_SYNTHETIC_FEED");

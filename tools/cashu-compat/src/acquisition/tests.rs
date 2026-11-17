@@ -471,6 +471,7 @@ impl Transport for FixtureMint {
 }
 
 struct Harness {
+    id: String,
     directory: tempfile::TempDir,
     mint: FixtureMint,
     keys: Arc<PinnedKeys>,
@@ -486,6 +487,7 @@ impl Harness {
             keys.insert("fixture", mint.keyset.id, u64::from(*amount), *key)?;
         }
         Ok(Self {
+            id: "fixture".into(),
             directory: crate::test_directory()?,
             mint,
             keys: Arc::new(keys),
@@ -496,8 +498,8 @@ impl Harness {
     }
     fn policy(&self) -> MintPolicy {
         MintPolicy {
-            id: "fixture".into(),
-            advertised_url: "https://fixture.example".into(),
+            id: self.id.clone(),
+            advertised_url: format!("https://{}.example", self.id),
             policy_version: "fixture-v1".into(),
             receive_cashu: true,
             receive_nutzap: true,

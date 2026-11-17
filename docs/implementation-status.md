@@ -7,11 +7,11 @@ has merged; the Cashu draft now targets main. Fresh CI exposed an omitted upstre
 `rusqlite` archive lockfile. Commit `c36df2c` retains the exact published bytes;
 a fresh Git export passes vendor verification and all 13 notice tests. Core and
 wallet CI gates now pass for that checkpoint; combined/other CI qualification is
-recorded separately. A new two-settlement retained-change composition case is
-implemented and awaiting selected-commit CI; it grants one distinct 16-sat Cashu
-contribution, combines it with retained one-sat change, and requires a second
-verified 15-sat Strike deposit before the original feeding can progress. No
-new live-provider, operator-seed installation or physical activation is claimed.
+recorded separately. The [two-settlement residual-change composition](testing/cashu-residual-settlement-20261117.json)
+passes normal/lost-reply CI at `69ba9de`, with no transfer credit or native top-up.
+Deployment qualification still fails the contact-upgrade comparison because the
+current binary adds schema 26; the strict empty-Cashu comparison fix is under
+qualification.
 
 Cashu operator controls update **2026-11-17**: the
 [protected planning/reconciliation checkpoint](testing/cashu-operator-controls-20261117.json)

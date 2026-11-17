@@ -232,6 +232,60 @@ async fn additive_contact_upgrade_retains_all_four_journals_and_refuses_row_or_d
 }
 
 #[tokio::test]
+async fn contact_upgrade_qualifies_empty_cashu_addition_and_refuses_custody_or_ddl() {
+    let root = tempfile::TempDir::new().unwrap();
+    let (p, _keep) = seed(root.path()).await;
+    let before = root.path().join("before");
+    let after = root.path().join("after");
+    copy_images(&p, &before);
+    copy_images(&p, &after);
+    let original = std::fs::read(before.join("core.db")).unwrap();
+    let original_wal = std::fs::read(before.join("core.db-wal")).ok();
+    let pool =
+        crate::sqlite::connect_durable(&format!("sqlite://{}", after.join("core.db").display()), 1)
+            .await
+            .unwrap();
+    database::migrate_core_through(&pool, 25).await.unwrap();
+    compare_images(&before, &after, &p).await.unwrap();
+    database::migrate_core_through(&pool, 26).await.unwrap();
+    compare_images(&before, &after, &p).await.unwrap();
+    sqlx::query("INSERT INTO cashu_import_clock VALUES(1,100)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(compare_images(&before, &after, &p).await.is_err());
+    sqlx::query("DELETE FROM cashu_import_clock")
+        .execute(&pool)
+        .await
+        .unwrap();
+    compare_images(&before, &after, &p).await.unwrap();
+    sqlx::query(
+        "CREATE TRIGGER unqualified_cashu AFTER INSERT ON cashu_import_clock BEGIN SELECT 1; END",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(compare_images(&before, &after, &p).await.is_err());
+    sqlx::query("DROP TRIGGER unqualified_cashu")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE ledger_entries SET delta_sats=delta_sats+1 WHERE id=1")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(compare_images(&before, &after, &p).await.is_err());
+    sqlx::query("UPDATE ledger_entries SET delta_sats=delta_sats-1 WHERE id=1")
+        .execute(&pool)
+        .await
+        .unwrap();
+    compare_images(&before, &after, &p).await.unwrap();
+    pool.close().await;
+    assert_eq!(std::fs::read(before.join("core.db")).unwrap(), original);
+    assert_eq!(std::fs::read(before.join("core.db-wal")).ok(), original_wal);
+}
+
+#[tokio::test]
 async fn contact_upgrade_refuses_unknown_checksums_or_current_source_as_schema_23() {
     let root = tempfile::TempDir::new().unwrap();
     let (p, _keep) = seed(root.path()).await;

@@ -81,11 +81,17 @@ restore, multi-mint and economical change remain required.
 Public Cashu development is now in [draft PR #139](https://github.com/lightning-goats/lightning-goats/pull/139).
 The missing published `rusqlite` lockfile discovered by clean-checkout CI is
 retained exactly at `c36df2c`; fresh-export vendor and 13 notice tests pass.
-The new `--settle-change` composition mode is implemented but **under qualification**:
-it combines retained one-sat change with a distinct 16-sat ordinary Cashu
-contribution, retains a second treasury identity, and checks a second independently
-verified Strike receive without new transfer credit or a native top-up. Its
-normal/lost-reply CI cases must pass before the economical-change row can close.
+The [economical residual-change composition](cashu-residual-settlement-20261117.json)
+now passes normal and lost-reply cases in selected-source CI at `69ba9de`.
+It combines retained one-sat change with a distinct 16-sat ordinary Cashu
+contribution admitted before the first conversion and excluded from its original
+plan. Two independently verified Strike receives total 413 sats, preserve 1016
+sats of contribution credit, and permit one synthetic 1000-sat feeding with
+16 credit left. The transfers add no donation or credit. Wallet health verifies
+zero remaining custody and three sats each of receive/conversion fees. This
+does not test admission after the first melt or real providers. The deployment
+rehearsal still fails the contact-upgrade schema comparison; its fix requires
+separate selected-source qualification.
 Multi-mint financial composition and the rest of the full plan remain required.
 
 | Required behavior / artifact | Established evidence | Required work still open |
@@ -100,7 +106,7 @@ Multi-mint financial composition and the rest of the full plan remain required.
 | Actual swap/melt recovery and ownership | Lost-reply, quote adoption, partial preparation, split and cleanup fixtures | Earlier preparation boundary recovery, full process/CDK-store restart coverage at all required boundaries, full coordinated restore. |
 | Atomic authenticated shared-credit import | Cross-UID lost-ack and consumed-credit replay tests; [full HTTP/receipt/treasury composition](cashu-final-composition-20261117.json) with original contribution IDs and no transfer credit | Final selected-source cross-UID regression and approved installed/provider acceptance. |
 | Mixed 600 LN + 250 nutzap + 150 Cashu | Actual CDK plus core composed financial fixtures; authenticated receipt and treasury sockets across distinct UIDs pass normal and lost-response fee-only modes ([evidence](cashu-combined-financial-ipc-20261116.json)) | Public HTTP normal/lost-reply fee-only composition now passes on matched artifacts ([evidence](cashu-http-financial-ipc-20261116.json)); independent sender/TLS and separately approved real-provider acceptance remain open. |
-| Mixed nonzero fees and returned change | Actual-CDK ownership/change, core source coverage and conservation checks pass in the [eight-case financial matrix](cashu-final-composition-20261117.json), including lost replies; private health independently checks the totals | Economically viable residual-change settlement and multi-mint financial composition. The returned-dust fixture needs a later native one-sat contribution and is not that acceptance. |
+| Mixed nonzero fees and returned change | Actual-CDK ownership/change, core source coverage and conservation checks pass in the [eight-case financial matrix](cashu-final-composition-20261117.json), including lost replies; private health independently checks the totals | [Economical residual settlement](cashu-residual-settlement-20261117.json) now passes normal/lost replies with two transfers and no native top-up. Multi-mint composition and real-provider acceptance remain open. The earlier returned-dust fixture alone does not establish this result. |
 | Early/duplicate treasury webhook without donation credit | Core purpose-bound receive tests and combined lost-response fixture | Re-run with final selected source, fee/change and complete transport composition. |
 | Pending one mint, later sufficient Lightning; paused/unknown feeder | Financial plans, supersession, allocation and ledger-only feed fixtures | Composed multi-mint recovery, operator tooling and installed physical-boundary acceptance. |
 | Sweep races and durable proof reservations | Qualified age/balance/operator sweep fixtures, fair-mint admission, and protected core settlement preview/apply/replay with native funded and actual empty-custody CLI checks | Deployed scheduling/operator acceptance and complete multi-mint composition. |

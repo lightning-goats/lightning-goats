@@ -47,6 +47,15 @@ still-unqualified maintenance coordinator.
 
 ## Verified schema maintenance
 
+The Cashu source also qualifies schema 23 to exact schema 26 through this
+comparison. Besides the contact and feeder-cap additions, it permits only the
+compiled Cashu schema with all twenty tables empty. It compares the original
+four journals, row IDs, migration history and schema definitions unchanged.
+Schema 25 remains supported; used Cashu state, unknown migrations and extra
+definitions refuse. This prepares a reviewed inactive extension; it supplies
+no Cashu activation, custody restore or historical-key recovery authority.
+The selected-source installed rehearsal remains required.
+
 The qualified nineteen-file tool generation selects `--contact-upgrade-maintenance`.
 Its installed rehearsal and actual VPS execution are recorded above; older
 eighteen-file preparations remain unchanged. Its operations are:

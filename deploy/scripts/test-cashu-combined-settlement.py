@@ -11,6 +11,7 @@ import argparse
 from contextlib import closing
 import grp
 import hashlib
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
@@ -20,7 +21,10 @@ import shutil
 import sqlite3
 import subprocess
 import tempfile
+from threading import Thread
 import time
+from urllib.parse import parse_qs, urlsplit
+import uuid
 
 CORE = 'strike::tests::cashu_treasury_tests::combined_fixture::combined_settlement_core_child'
 WALLET = 'acquisition::tests::core_settlement_fixture::combined_settlement_wallet_child'
@@ -35,7 +39,108 @@ def digest(path):
     return value.hexdigest()
 
 
-def verify_funded_rollback(root):
+def verify_strike_read(selection, core_cli):
+    issued = selection['issued']
+    origin = urlsplit(issued['intent']['destination']['origin'])
+    if origin.scheme != 'http' or origin.hostname != '127.0.0.1' or not origin.port:
+        raise ValueError('funded Strike fixture must use its original loopback listener')
+    sats = issued['intent']['deposit_sats']
+    amount = f'{sats // 100000000}.{sats % 100000000:08d}'
+    bolt11 = {'invoice': issued['invoice'], 'paymentHash': issued['payment_hash'],
+              'descriptionHash': selection['intent_digest']}
+    received = {'amount': amount, 'currency': 'BTC'}
+    original_request = f"/v1/receive-requests/{issued['receive_request_id']}"
+    calls = []
+    key = b'receive-only-test-key'
+
+    class Provider(BaseHTTPRequestHandler):
+        target = 'BTC'
+
+        def log_message(self, *args):
+            pass
+
+        def do_POST(self):
+            calls.append('POST ' + self.path)
+            self.send_error(405)
+
+        def do_GET(self):
+            calls.append(self.path)
+            if self.headers.get('Authorization') != 'Bearer ' + key.decode():
+                self.send_error(401)
+                return
+            url = urlsplit(self.path)
+            if self.path == original_request:
+                data = {'receiveRequestId': issued['receive_request_id'],
+                        'targetCurrency': self.target, 'bolt11': bolt11}
+            elif (url.path == original_request + '/receives'
+                  and parse_qs(url.query) == {'$receiveId': [selection['receive_id']], '$top': ['2']}):
+                data = {'items': [{'receiveId': selection['receive_id'], 'type': 'LIGHTNING',
+                                   'receiveRequestId': issued['receive_request_id'], 'state': 'COMPLETED',
+                                   'amountReceived': received, 'amountCredited': received,
+                                   'lightning': bolt11}]}
+            else:
+                self.send_error(404)
+                return
+            raw = json.dumps(data).encode()
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
+    write = runpy.run_path(str(Path(__file__).with_name('collect-cashu-backup.py')))['write']
+    with (tempfile.TemporaryDirectory(prefix='lg-restore-strike-', dir='/run') as temp,
+          ThreadingHTTPServer((origin.hostname, origin.port), Provider) as server):
+        thread = Thread(target=server.serve_forever)
+        thread.start()
+        try:
+            directory = Path(temp)
+            document, credential, wrong_key = (directory / name for name in ('selection', 'key', 'wrong-key'))
+            write(document, json.dumps(selection).encode())
+            write(credential, key)
+            write(wrong_key, b'wrong-synthetic-key')
+
+            def invoke(output, *, secret=credential, sha=None):
+                return subprocess.run([
+                    str(core_cli.resolve(strict=True)), '--config', str(directory / 'unused.toml'),
+                    'verify-restored-cashu-strike',
+                    '--selection', str(document), '--selection-sha256', sha or digest(document),
+                    '--strike-origin', origin.geturl(), '--credential', str(secret), '--output', str(output),
+                ], stdin=subprocess.DEVNULL, capture_output=True, timeout=25,
+                    env={'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'})
+
+            denied = directory / 'denied.json'
+            for rejected in (invoke(denied, secret=wrong_key), invoke(denied, sha='00' * 32)):
+                if (rejected.returncode != 1 or rejected.stdout
+                        or rejected.stderr != b'Error: restored Cashu Strike verification refused\n'):
+                    raise ValueError('restore Strike CLI did not refuse or redact failed selection')
+            if denied.exists() or calls:
+                raise ValueError('refused restore selection queried provider or wrote output')
+            Provider.target = 'USD'
+            wrong_target = invoke(denied)
+            if wrong_target.returncode != 1 or denied.exists() or calls != [original_request]:
+                raise ValueError('changed provider target passed the original receive check')
+            calls.clear()
+            Provider.target = 'BTC'
+            evidence = directory / 'verified.json'
+            result = invoke(evidence)
+            if (result.returncode != 0 or len(calls) != 2 or evidence.stat().st_mode & 0o777 != 0o600
+                    or json.loads(result.stdout)['resume_authorized'] is not False):
+                raise ValueError('actual read-only restore Strike CLI did not complete')
+            report = json.loads(evidence.read_bytes())
+            observation = report['observation']
+            if (report['selection_sha256'] != digest(document) or report['resume_authorized'] is not False
+                    or report['external_reconciliation_verified'] is not False
+                    or observation['receive_id'] != selection['receive_id']
+                    or observation['amount_msat'] != sats * 1000
+                    or observation['payment_hash'] != issued['payment_hash']):
+                raise ValueError('restore Strike evidence did not retain the original binding')
+        finally:
+            server.shutdown()
+            thread.join()
+
+
+def verify_funded_rollback(root, core_cli):
     """Compare real fixture checkpoints after the synthetic side effects."""
     core_dir, wallet_dir = root / 'core-private', root / 'wallet-private'
     old_core = core_dir / 'funded-before-melt/strike.db'
@@ -105,12 +210,29 @@ def verify_funded_rollback(root):
             and (old_wallet.parent / 'CASHU_RECOVERY_REQUIRED').is_file(),
             'restore fence was lost')
     review = runpy.run_path(str(Path(__file__).with_name('review-cashu-restore.py')))
-    budget = runpy.run_path(str(Path(__file__).with_name('collect-cashu-backup.py')))['Budget'](0, 30)
+    collector = runpy.run_path(str(Path(__file__).with_name('collect-cashu-backup.py')))
+    budget = collector['Budget'](0, 30)
     with (closing(review['open_database'](old_core, budget)) as previous_core,
           closing(review['open_database'](old_wallet, budget)) as previous_wallet,
           closing(review['open_database'](new_core, budget)) as reference_core,
           closing(review['open_database'](new_wallet, budget)) as reference_wallet):
         worklist = review['worklist'](previous_core, previous_wallet, reference_core, reference_wallet)
+        retained_receive = worklist['strike_receives']['items'][0]['reference']['receive_id']
+        checkpoint = str(uuid.uuid4())
+        selection = review['select_strike'](reference_core, checkpoint, '11' * 32,
+                                            original[0][0], None, collector['document'])
+        earlier = review['select_strike'](previous_core, checkpoint, '22' * 32,
+                                          original[0][0], retained_receive, collector['document'])
+        require(earlier['issued'] == selection['issued'] and earlier['receive_id'] == selection['receive_id'],
+                'original Strike read selection changed across the funded restart')
+        try:
+            review['select_strike'](reference_core, checkpoint, '11' * 32,
+                                    original[0][0], str(uuid.uuid4()), collector['document'])
+        except ValueError as error:
+            require(str(error) == 'requested receive differs from retained original',
+                    'wrong local receive refused for an unrelated reason')
+        else:
+            raise ValueError('wrong local receive passed the Strike selection')
     strike = worklist['strike_receives']['items']
     melt = worklist['mint_melts']['items']
     feeding = worklist['feeder_requests']['items']
@@ -124,6 +246,10 @@ def verify_funded_rollback(root):
             and feeding[0]['staged'] is None
             and feeding[0]['reference']['id'] == confirmed[0][0],
             'recovery worklist lost a later original provider or feeder reference')
+    before = {path: digest(path) for path in (old_core, new_core, old_wallet, new_wallet)}
+    verify_strike_read(earlier, core_cli)
+    require(all(digest(path) == expected_hash for path, expected_hash in before.items()),
+            'read-only restore Strike verification changed checkpoint bytes')
     return {
         'wallet_only_history_refused': True,
         'core_only_local_agreement_insufficient': True,
@@ -134,12 +260,14 @@ def verify_funded_rollback(root):
         'later_melt_deposit_and_feeding_retained': True,
         'fence_clearance_qualified': False,
         'later_original_references_listed': True,
+        'original_strike_receive_read_verified': True,
     }
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--core-test', type=Path, required=True)
+    parser.add_argument('--core-cli', type=Path, help='selected native restore verifier for funded rollback')
     parser.add_argument('--wallet-test', type=Path, required=True)
     parser.add_argument('--lost-reply', action='store_true', help='lose original melt response and verify Strike before paused wallet recovery')
     parser.add_argument('--fees', action='store_true', help='qualify receive fees, melt input fee and returned change conservation')
@@ -158,8 +286,8 @@ def main():
                         help='exercise funded restore fences around a lost melt reply')
     args = parser.parse_args()
     if args.funded_rollback and (not (args.http_intake and args.fees and args.no_change
-            and args.lost_reply) or args.multi_mint or args.repeat_request or args.settle_change):
-        parser.error('--funded-rollback requires its own HTTP fee-only lost-reply mode')
+            and args.lost_reply and args.core_cli) or args.multi_mint or args.repeat_request or args.settle_change):
+        parser.error('--funded-rollback requires its own HTTP fee-only lost-reply mode and --core-cli')
     if args.multi_mint and (not args.fees or not args.no_change or not args.http_intake or args.repeat_request or args.settle_change):
         parser.error('--multi-mint requires its own --fees --no-change --http-intake mode')
     if args.settle_change and (not args.fees or args.no_change or args.repeat_request or not args.http_intake):
@@ -337,7 +465,7 @@ def main():
             if result != expected:
                 raise ValueError('combined fixture result differs from expected conservation')
             if args.funded_rollback:
-                result['funded_rollback'] = verify_funded_rollback(root)
+                result['funded_rollback'] = verify_funded_rollback(root, args.core_cli)
                 result['funded_rollback']['scoped_reconciliation_recorded_and_replayed'] = True
             print(json.dumps({'result': 'CASHU_COMBINED_SETTLEMENT_VERIFIED', 'artifacts_sha256': hashes,
                               'financial_result': result, 'live_provider': False, 'wallet_health_verified': True,

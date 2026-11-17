@@ -241,3 +241,38 @@ Keep the report private. Each report records the selected stage receipt hashes
 and page parameters. If a category has a `next_after` UUID, run the same review
 with `--group CATEGORY --after UUID` to retrieve its next page. The command reads
 both stages without opening a live ledger and leaves all recovery fences in place.
+
+### Verify one original Strike settlement
+
+Select the exact intent from the fenced checkpoint that retains the original
+invoice. The selector binds the checkpoint receipt hash, invoice, original
+request UUID and intent digest in a private file. It uses the retained Strike
+receive UUID if present. If settlement happened after the checkpoint, supply
+the original provider receive UUID from separately retained evidence using
+`--receive-id`. A conflict with a retained receive UUID refuses selection.
+
+```sh
+/usr/bin/python3 -I -S -B ROOT_CAPSULE/launch-cashu-backup.py TOOL_SHA256 review \
+  STAGED_DIRECTORY STAGED_RECEIPT_SHA256 --strike-intent ORIGINAL_INTENT_UUID \
+  --output NEW_PRIVATE_SELECTION
+```
+
+Review the selection and record its SHA256. Use the selected native executable
+and the original scoped receive credential in a root-private file. Both the
+credential fingerprint and the selected Strike origin must match the intent.
+Use `--strike-origin` when reviewing an original request issued against an
+explicit nondefault provider origin.
+
+```sh
+lightning-goatsctl verify-restored-cashu-strike \
+  --selection PRIVATE_SELECTION --selection-sha256 SELECTION_SHA256 \
+  --credential PRIVATE_ORIGINAL_RECEIVE_CREDENTIAL --output NEW_PRIVATE_OBSERVATION
+```
+
+The native command verifies the signed invoice before contacting Strike. It
+reads the original receive request and completed receive. The BTC target,
+request and receive UUIDs, invoice, payment hash and amount must agree. It
+writes the single observation with its source hashes to a new private file.
+The command opens no database and creates no invoices, payments or feeder
+requests. Continued recovery requires independent mint and feeder evidence,
+and the observation leaves the recovery fences in place.

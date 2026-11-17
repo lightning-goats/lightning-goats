@@ -89,11 +89,11 @@ def qualify_restore(source, output_root, collected, identity, selected, store):
     if any(p.stat().st_mode & 0o111 for p in (destination / 'checkpoint-evidence/programs').iterdir()):
         raise ValueError('stager made an archived program executable')
 
-    def invoke_review(output):
+    def invoke_review(output, *options):
         return subprocess.run(
             ['/usr/bin/python3', '-I', '-S', '-B', str(capsule / 'launch-cashu-backup.py'),
              digest(manifest), 'review', str(destination), digest(destination / 'STAGED.json'),
-             '--output', str(output)],
+             '--output', str(output), *options],
             stdin=subprocess.DEVNULL, capture_output=True, timeout=120,
             env={'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'},
         )
@@ -109,6 +109,11 @@ def qualify_restore(source, output_root, collected, identity, selected, store):
             or report['reference_receipt_sha256'] is not None
             or report['selection'] != {'group': None, 'after': None, 'limit': 100}):
         raise ValueError('restore worklist omitted its exact source or page binding')
+    unknown_selection = output_root / 'unknown-strike-selection.json'
+    unknown = invoke_review(unknown_selection, '--strike-intent', '00000000-0000-4000-8000-000000000001')
+    if (unknown.returncode != 1 or unknown.stdout or unknown_selection.exists()
+            or unknown.stderr != b'Cashu restore review refused. Preserve the fenced checkpoint.\n'):
+        raise ValueError('authenticated restore launcher selected an absent Strike intent')
     # Mutate one disposable stage image after authentication. Review must
     # refuse changed bytes even though its STAGED receipt still matches.
     tampered_output = output_root / 'tampered-worklist.json'
@@ -140,6 +145,7 @@ def qualify_restore(source, output_root, collected, identity, selected, store):
             'refusal_cases': 3, 'archive_programs_executable': False,
             'offline_worklist_launcher_verified': True, 'worklist_tampered_image_refused': True,
             'worklist_source_and_page_bound': True,
+            'unknown_strike_selection_refused': True,
             'external_reconciliation_verified': False, 'resume_authorized': False}
 
 

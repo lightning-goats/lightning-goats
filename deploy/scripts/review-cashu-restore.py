@@ -72,6 +72,18 @@ CORE_TREASURY = """
       LEFT JOIN cashu_treasury_completions c ON c.intent_id=i.id
     ORDER BY i.id
 """
+STRIKE_SELECTION = """
+    SELECT i.intent_json,i.intent_digest,i.deposit_sats,u.receive_request_id,
+           u.payment_hash,r.payment_hash AS invoice_hash,r.invoice,r.amount_msat,
+           r.address_user,r.credit_pool,r.description_hash,d.receive_id,
+           d.payment_hash AS deposit_hash,d.deposit_sats AS verified_deposit_sats,o.stream_id
+      FROM cashu_treasury_intents i
+      JOIN cashu_treasury_issuances u ON u.intent_id=i.id
+      JOIN strike_receive_requests r ON r.receive_request_id=u.receive_request_id
+      JOIN overlay_identity o ON o.singleton=1
+      LEFT JOIN cashu_treasury_deposits d ON d.intent_id=i.id
+     WHERE i.id=?
+"""
 WALLET_TREASURY = """
     SELECT w.id, w.receive_id AS receive_request_id, w.payment_hash, w.state, q.quote_id,
            p.operation_id, r.intent_id IS NOT NULL AS report_retained
@@ -155,6 +167,35 @@ def require_event_prefix(staged, reference):
         raise ValueError('reference does not preserve the staged core event history')
 
 
+def select_strike(core, checkpoint, receipt_sha, intent_id, receive_id, decode):
+    row = core.execute(STRIKE_SELECTION, (intent_id,)).fetchone()
+    if (row is None or row['address_user'] != 'cashu_treasury' or row['credit_pool'] != 'cashu_treasury'
+            or row['payment_hash'] != row['invoice_hash'] or row['intent_digest'] != row['description_hash']
+            or row['amount_msat'] != row['deposit_sats'] * 1000):
+        raise ValueError('original treasury invoice is missing or contradicts its issuance')
+    retained = row['receive_id']
+    if retained is not None and (row['deposit_hash'] != row['payment_hash']
+                                 or row['verified_deposit_sats'] != row['deposit_sats']):
+        raise ValueError('retained Strike deposit contradicts original invoice')
+    if retained is not None and receive_id is not None and retained != receive_id:
+        raise ValueError('requested receive differs from retained original')
+    receive_id = retained or receive_id
+    if receive_id is None or str(uuid.UUID(receive_id)) != receive_id or not uuid.UUID(receive_id).int:
+        raise ValueError('an exact original provider receive ID is required')
+    intent = decode(row['intent_json'])
+    if (intent['id'] != intent_id or intent['deposit_sats'] != row['deposit_sats']
+            or intent['core_epoch'] != row['stream_id']):
+        raise ValueError('stored intent differs from original invoice binding')
+    return {
+        'version': 1, 'purpose': 'cashu_restore_strike_receive', 'checkpoint_id': checkpoint,
+        'staged_receipt_sha256': receipt_sha, 'receive_id': receive_id,
+        'intent_digest': row['intent_digest'], 'issued': {
+            'intent': intent, 'receive_request_id': row['receive_request_id'],
+            'payment_hash': row['payment_hash'], 'invoice': row['invoice'],
+        },
+    }
+
+
 def worklist(core, wallet, reference_core=None, reference_wallet=None, limit=100, group=None, after=''):
     def identity(c, w):
         return (c.execute('SELECT stream_id FROM overlay_identity WHERE singleton=1').fetchone()[0],
@@ -193,6 +234,10 @@ def worklist(core, wallet, reference_core=None, reference_wallet=None, limit=100
 def review(args, common):
     budget = common['Budget'](0, 300)
     checkpoint, core, wallet = open_images(args.staged, args.staged_sha256, common, budget)
+    if args.strike_intent is not None:
+        with closing(open_database(core, budget)) as core_db:
+            return select_strike(core_db, checkpoint, args.staged_sha256, args.strike_intent,
+                                 args.receive_id, common['document'])
     reference_id = None
     with closing(open_database(core, budget)) as core_db, closing(open_database(wallet, budget)) as wallet_db:
         if args.reference is None:
@@ -225,6 +270,8 @@ def main():
     parser.add_argument('--limit', type=int, default=100)
     parser.add_argument('--group', choices=GROUPS)
     parser.add_argument('--after', default='')
+    parser.add_argument('--strike-intent', type=uuid.UUID, help='select one original treasury invoice for provider verification')
+    parser.add_argument('--receive-id', type=uuid.UUID, help='original provider receive ID if it is absent from the stage')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     try:
@@ -232,6 +279,13 @@ def main():
         if (bool(args.reference) != bool(args.reference_sha256) or not 1 <= args.limit <= 1000
                 or (args.after and (args.group is None or str(uuid.UUID(args.after)) != args.after))):
             raise ValueError('invalid reference or review limit')
+        if (args.receive_id is not None and args.strike_intent is None
+                or args.strike_intent is not None
+                and (args.reference or args.group or args.after or args.limit != 100 or not args.strike_intent.int)):
+            raise ValueError('Strike selection requires one staged checkpoint and one intent')
+        if args.strike_intent is not None:
+            args.strike_intent = str(args.strike_intent)
+            args.receive_id = str(args.receive_id) if args.receive_id is not None else None
         common = runpy.run_path(str(HERE / 'collect-cashu-backup.py'))
         common['protected_directory'](args.output.parent, private=True)
         if (not args.output.is_absolute() or args.output.is_relative_to(args.staged)
@@ -240,9 +294,13 @@ def main():
         result = review(args, common)
         common['write_json'](args.output, result)
         common['sync'](args.output.parent)
-        print(json.dumps({'result': result['result'],
-                          'counts': {kind: batch['total'] for kind, batch in result['records'].items()},
-                          'resume_authorized': False}, sort_keys=True))
+        summary = {'resume_authorized': False}
+        if args.strike_intent is not None:
+            summary['result'] = 'CASHU_RESTORE_STRIKE_SELECTED'
+        else:
+            summary['result'] = result['result']
+            summary['counts'] = {kind: batch['total'] for kind, batch in result['records'].items()}
+        print(json.dumps(summary, sort_keys=True))
     except (ValueError, OSError, KeyError, TypeError, IndexError, sqlite3.Error):
         parser.exit(1, 'Cashu restore review refused. Preserve the fenced checkpoint.\n')
 

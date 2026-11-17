@@ -68,6 +68,11 @@ native state. The funded fixture now also exercises recovery of the original
 mint quote, Strike receive and feeder UUID from later reference evidence.
 [Selected-source CI evidence](testing/cashu-staged-restore-worklist-ci-20261117.json)
 records the authenticated archive and funded worklist results at `55fcc19`.
+The [single Strike receive verification](testing/cashu-restore-strike-local-20261117.json)
+now checks the original signed treasury invoice and completed receive through
+the native CLI with the original destination and credential scope. The funded
+loopback fixture verifies a 398-sat receive without changing checkpoint bytes.
+The authenticated encrypted restore launcher refuses an unknown intent.
 Installed recovery and live outcome verification remain open.
 
 Cashu operator controls update **2026-11-17**: the

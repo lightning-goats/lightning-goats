@@ -8,6 +8,7 @@ use std::{
 use uuid::Uuid;
 
 mod cashu_correlations;
+pub mod cashu_strike_review;
 mod cashu_upgrade;
 pub use cashu_correlations::CashuCorrelationReview;
 mod contact_upgrade;

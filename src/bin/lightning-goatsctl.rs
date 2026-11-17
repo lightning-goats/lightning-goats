@@ -24,6 +24,19 @@ struct Args {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Read one original Strike treasury receive selected from a fenced Cashu checkpoint.
+    VerifyRestoredCashuStrike {
+        #[arg(long)]
+        selection: PathBuf,
+        #[arg(long)]
+        selection_sha256: String,
+        #[arg(long)]
+        credential: PathBuf,
+        #[arg(long, default_value = "https://api.strike.me/")]
+        strike_origin: String,
+        #[arg(long)]
+        output: PathBuf,
+    },
     /// Check only a pre-CyberHerd core upgrade policy; no app config or database.
     CheckCoreUpgrade {
         #[arg(long)]
@@ -135,6 +148,42 @@ enum ReconcileOutcome {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+    if let Command::VerifyRestoredCashuStrike {
+        selection,
+        selection_sha256,
+        credential,
+        strike_origin,
+        output,
+    } = &args.command
+    {
+        #[cfg(unix)]
+        {
+            lightning_goats::state_maintenance::cashu_strike_review::verify(
+                selection,
+                selection_sha256,
+                credential,
+                strike_origin,
+                output,
+            )
+            .await
+            .map_err(|_| anyhow::anyhow!("restored Cashu Strike verification refused"))?;
+            println!(
+                "{{\"result\":\"CASHU_RESTORE_STRIKE_RECEIVE_VERIFIED\",\"resume_authorized\":false}}"
+            );
+            return Ok(());
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (
+                selection,
+                selection_sha256,
+                credential,
+                strike_origin,
+                output,
+            );
+            bail!("restored Cashu Strike verification requires Unix protected-file authority");
+        }
+    }
     #[cfg(not(unix))]
     if matches!(
         args.command,
@@ -361,6 +410,9 @@ async fn main() -> Result<()> {
     };
 
     match args.command {
+        Command::VerifyRestoredCashuStrike { .. } => {
+            unreachable!("handled before database initialization")
+        }
         Command::ReleaseFinancialPlan { .. } => {
             bail!("financial release must use the protected offline path")
         }

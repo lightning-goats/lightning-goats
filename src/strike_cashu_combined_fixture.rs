@@ -5,9 +5,9 @@ mod combined_fixture {
     use crate::cashu::treasury_worker::{Controls, Tick, Wallet, Worker};
     use anyhow::ensure;
     use lightning_goats_cashu_receipt::treasury_rpc::{Command, Phase, Reply, Request};
-    use std::path::{Path, PathBuf};
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
+    use std::path::{Path, PathBuf};
 
     // This test captures logical checkpoints at controlled points in the
     // fixture. The production collector uses the pinned SQLite backup API.
@@ -631,6 +631,11 @@ mod combined_fixture {
             Duration::from_secs(60),
         )?;
         assert_eq!(worker.tick(now + 2).await?, Tick::Progress);
+        if multi_mint {
+            assert_eq!(count(&pool, "cashu_treasury_issuances").await?, 1);
+            assert_eq!(count(&pool, "cashu_treasury_deposits").await?, 0);
+            snapshot(&pool, &private.join("mint-custody-core-before.db")).await?;
+        }
         if funded_rollback {
             let old = private.join("funded-before-melt");
             std::fs::create_dir(&old)?;

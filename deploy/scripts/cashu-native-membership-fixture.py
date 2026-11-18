@@ -1,4 +1,4 @@
-"""Disposable native CyberHerd journals for the empty combined-backup fixture.
+"""Disposable native CyberHerd journals for the combined-backup fixtures.
 
 Initialization commands only; disabled configuration and zero payout/signature
 budgets. Never supplies credentials, starts workers or touches host services.
@@ -149,6 +149,5 @@ def combine(root, snapshot, policy, statectl, statectl_sha256, verify):
     combined.write_bytes(original_envelope)
     verify(recovery, statectl, statectl_sha256)
     result['cashu_and_payout_signer_substitution_refused'] = True
-    result['empty_initialized_state_only'] = True
     result['funded_restore_qualified'] = False
     return result

@@ -364,6 +364,15 @@ jobs:
         run: |
           set -euo pipefail
           sudo unshare --net -- python3 deploy/scripts/test-cashu-combined-settlement.py --funded-rollback --http-intake --receipt-ipc --treasury-ipc --fees --no-change --lost-reply --core-test "$RUNNER_TEMP/cashu-core/core-test" --wallet-test "$RUNNER_TEMP/cashu-wallet/wallet-test" --core-cli "$RUNNER_TEMP/cashu-core/core-cli" 2>&1 | tee "$RUNNER_TEMP/cashu-funded-rollback.json"
+      - name: Install the encrypted funded two-mint rollback under systemd masks
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo --preserve-env=GITHUB_ACTIONS,GITHUB_RUN_ID unshare --net -- python3 deploy/scripts/test-cashu-combined-settlement.py \
+            --multi-mint --http-intake --receipt-ipc --treasury-ipc --fees --no-change --lost-reply \
+            --funded-install-inputs "$RUNNER_TEMP" --funded-install-systemd-masks \
+            --core-test "$RUNNER_TEMP/cashu-core/core-test" --wallet-test "$RUNNER_TEMP/cashu-wallet/wallet-test" \
+            2>&1 | tee "$RUNNER_TEMP/cashu-funded-installed.json"
       - uses: actions/setup-node@v4
         with:
           node-version: "22.23.1"
@@ -436,5 +445,6 @@ jobs:
             ${{ runner.temp }}/cashu-combined-http-financial.json
             ${{ runner.temp }}/cashu-combined-http-financial-lost-reply.json
             ${{ runner.temp }}/cashu-funded-rollback.json
+            ${{ runner.temp }}/cashu-funded-installed.json
           if-no-files-found: error
           retention-days: 14

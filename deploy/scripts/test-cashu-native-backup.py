@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Qualify an empty native recovery inventory in disposable, offline state.
+"""Qualify native encrypted recovery inventories in disposable, offline state.
 
-Actual CLIs initialize core, wallet/two mint stores and signer journals. This
-does not qualify a generic snapshot collector, funded restore, external outcome
-reconciliation, installed services or permission to clear a recovery fence.
+Use initialized state or the exact core and wallet snapshots of the funded
+two-mint test. This test never clears a recovery fence.
 """
 import argparse
 from contextlib import closing, ExitStack
@@ -14,7 +13,9 @@ import json
 import os
 from pathlib import Path
 import pwd
+import re
 import runpy
+import shutil
 import signal
 import sqlite3
 import subprocess
@@ -25,6 +26,46 @@ import uuid
 
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def copy_funded_inputs(source, core, wallet, core_uid, wallet_uid):
+    if source.resolve(strict=True) != source or not source.name.startswith('lg-cashu-combined-'):
+        raise ValueError('select a disposable synthetic settlement fixture')
+    snapshot = source / 'wallet-private/mint-custody-before'
+    ledger = source / 'core-private/mint-custody-core-before.db'
+
+    def copy(original, target, uid):
+        if original.resolve(strict=True) != original or not original.is_file():
+            raise ValueError('funded fixture requires regular canonical snapshots')
+        shutil.copyfile(original, target)
+        target.chmod(0o600)
+        os.chown(target, uid, uid)
+        if digest(original) != digest(target):
+            raise ValueError('funded image changed during preparation')
+
+    copy(ledger, core, core_uid)
+    copy(snapshot / 'acquisition.sqlite', wallet / 'acquisition.sqlite', wallet_uid)
+    copy(snapshot / 'wallet.sqlite', wallet / 'wallet.sqlite', wallet_uid)
+    receiver = json.loads((snapshot / 'receiving-key.json').read_bytes())
+    if not re.fullmatch(r'0[23][a-f0-9]{64}', receiver):
+        raise ValueError('invalid funded receiving fixture identity')
+    with closing(sqlite3.connect((wallet / 'acquisition.sqlite').as_uri() + '?mode=ro&immutable=1', uri=True)) as db:
+        registration = db.execute('SELECT instance FROM runtime_registration WHERE singleton=1').fetchall()
+        epochs = db.execute('SELECT epoch FROM wallet_epoch WHERE singleton=1').fetchall()
+        namespaces = dict(db.execute('SELECT mint_id,mint_url FROM cdk_mint_namespaces WHERE ready=1'))
+    if (len(registration) != 1 or len(epochs) != 1
+            or namespaces != {mint: f'https://{mint}.example' for mint in ('fixture-a', 'fixture-b')}):
+        raise ValueError('funded source registration or issuer fixture differs')
+    for mint in namespaces:
+        namespace = hashlib.sha256(b'lightning-goats/cdk-mint-store/v1\0' + mint.encode()).hexdigest()
+        name = 'mint-' + namespace + '.sqlite'
+        copy(snapshot / name, wallet / name, wallet_uid)
+    # This source is the fixed public synthetic seed/key used by the Rust
+    # fixture. The native collector rederives and verifies their binding.
+    lock = wallet / 'wallet-writer.lock'
+    lock.touch(mode=0o600, exist_ok=False)
+    os.chown(lock, wallet_uid, wallet_uid)
+    return registration[0][0], epochs[0][0], receiver, namespaces
 
 
 def main():
@@ -42,6 +83,7 @@ def main():
         parser.add_argument('--'+option+'-cli',type=Path)
         parser.add_argument('--'+option+'-sha256')
     parser.add_argument('--rotate-receiving-key', action='store_true')
+    parser.add_argument('--funded-fixture', type=Path, help='restore the disposable two-mint settlement checkpoints')
     parser.add_argument('--systemd-masks', action='store_true',
                         help='exercise the full collector against real masks on a disposable Actions runner')
     parser.add_argument('--systemd-package', nargs=3, metavar=('ARCHIVE', 'SOURCE', 'SHA256'),
@@ -58,6 +100,8 @@ def main():
         raise ValueError('collector fixture requires all native programs and encryption artifacts')
     if args.rotate_receiving_key and not all(collector_options):
         raise ValueError('key rotation requires the complete archive rehearsal')
+    if args.funded_fixture is not None and (not all(collector_options) or args.rotate_receiving_key):
+        raise ValueError('funded recovery requires the archive rehearsal with its original key')
     if args.systemd_package and extended:
         raise ValueError('systemd rehearsal uses only the three package executables')
     if args.systemd_masks and (not all(collector_options)
@@ -131,51 +175,61 @@ def main():
             raise ValueError('core fixture configuration anchor changed')
         config.write_text(template.replace(anchor, 'sqlite://' + str(ledger)))
         config.chmod(0o444)
-        call('core', core_uid, '--config', config, 'status')
-        with closing(sqlite3.connect(ledger)) as connection:
+        funded = args.funded_fixture is not None
+        if funded:
+            wallet_instance, wallet_epoch, receiver, namespaces = copy_funded_inputs(
+                args.funded_fixture, ledger, states['wallet'], core_uid, wallet_uid)
+        else:
+            call('core', core_uid, '--config', config, 'status')
+            wallet_instance, wallet_epoch = str(uuid.uuid4()), str(uuid.uuid4())
+            receiver = '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'
+            namespaces = {name: f'https://{name}.example' for name in ('first', 'second')}
+        uri = ledger.as_uri() + ('?mode=ro&immutable=1' if funded else '')
+        with closing(sqlite3.connect(uri, uri=True)) as connection:
             identity = connection.execute('SELECT stream_id FROM overlay_identity WHERE singleton=1').fetchone()
-            if identity is None:
+            if identity is None and not funded:
                 identity = (str(uuid.uuid4()),)
                 connection.execute('INSERT INTO overlay_identity VALUES(1,?)', identity)
                 connection.commit()
+        if identity is None:
+            raise ValueError('funded core checkpoint lacks its ledger identity')
         core_epoch = identity[0]
-        wallet_instance, wallet_epoch = str(uuid.uuid4()), str(uuid.uuid4())
-        receiver = '79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'
         owner = 'f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9'
         client = 'c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5'
-        mints = [{'id': name, 'advertised_url': f'https://{name}.example',
-                  'policy_version': 'offline-v1', 'receive_cashu': False,
+        mints = [{'id': name, 'advertised_url': url,
+                  'policy_version': 'fixture-v1' if funded else 'offline-v1', 'receive_cashu': False,
                   'receive_nutzap': False, 'bolt11_exit_qualified': True}
-                 for name in ['first', 'second']]
+                 for name, url in namespaces.items()]
         wallet_config = protected('wallet.json', {
             'version': 1, 'runtime_uid': wallet_uid, 'core_uid': core_uid, 'ipc_gid': wallet_uid,
             'wallet_instance': wallet_instance, 'wallet_epoch': wallet_epoch,
             'state_directory': str(states['wallet']),
             'intake_socket': str(root / 'wallet-run/intake.sock'),
-            'receiving_key': '02' + receiver, 'recipient': owner,
+            'receiving_key': receiver, 'recipient': owner,
             'descriptors': [], 'keysets': [], 'mints': mints,
             'body_bytes': 65536, 'proof_count': 64, 'receipt_sats': 10000,
             'deadline_seconds': 5, 'connections_per_second': 8,
         })
-        for name, data in [('wallet-seed.bin', bytes([42]) * 64),
-                           ('receiving-key.bin', bytes(31) + bytes([1]))]:
+        receiving_secret = bytes([1]) * 32 if funded else bytes(31) + bytes([1])
+        for name, data in [('wallet-seed.bin', bytes([42]) * 64), ('receiving-key.bin', receiving_secret)]:
             path = states['wallet'] / name
             path.write_bytes(data)
             path.chmod(0o600)
             os.chown(path, wallet_uid, wallet_uid)
-        call('wallet', wallet_uid, 'initialize', wallet_config)
+        if not funded:
+            call('wallet', wallet_uid, 'initialize', wallet_config)
         status = json.loads(call('wallet', wallet_uid, 'status', wallet_config).stdout)
         if status.get('recovery_required'):
             raise ValueError('fresh wallet unexpectedly requires recovery')
         if args.rotate_receiving_key:
-            original = '02' + receiver
-            receiver = 'e493dbf1c10d80f3581e4904930b1404cc6c13900ee0758474fa94abe8c4cd13'
-            rotated_key = states['wallet'] / ('receiving-key-02' + receiver + '.bin')
+            original = receiver
+            receiver = '02e493dbf1c10d80f3581e4904930b1404cc6c13900ee0758474fa94abe8c4cd13'
+            rotated_key = states['wallet'] / ('receiving-key-' + receiver + '.bin')
             rotated_key.write_bytes(bytes(31) + bytes([4]))
             rotated_key.chmod(0o600)
             os.chown(rotated_key, wallet_uid, wallet_uid)
             settings = json.loads(wallet_config.read_bytes())
-            settings.update(receiving_key_anchor=original, receiving_key='02' + receiver,
+            settings.update(receiving_key_anchor=original, receiving_key=receiver,
                             retained_receiving_keys=[{'public_key': original}])
             wallet_config.write_text(json.dumps(settings))
         helper = root / 'unused-nak'
@@ -200,7 +254,7 @@ def main():
             'state_directory': str(states['signer']), 'socket': str(root / 'signer-run/control.sock'),
             'policy': {'broker_instance': str(uuid.uuid4()), 'broker_epoch': str(uuid.uuid4()),
                        'wallet_instance': wallet_instance, 'wallet_epoch': wallet_epoch,
-                       'wallet_uid': wallet_uid, 'owner': owner, 'receiving_key': receiver,
+                       'wallet_uid': wallet_uid, 'owner': owner, 'receiving_key': receiver[2:],
                        'mints': [m['advertised_url'] for m in mints], 'relays': ['wss://relay.example']},
             'nak': {'binary': str(helper), 'binary_sha256': digest(helper),
                     'private_directory': str(root / 'unused-nak-state'),
@@ -298,6 +352,7 @@ def main():
             combined_result = native_fixture['combine'](
                 root, snapshot, native_policy, statectl, args.statectl_sha256,
                 combined_module['verify'])
+            combined_result['empty_initialized_state_only'] = not funded
         collector_result=None
         if all(collector_options):
             collector_fixture=runpy.run_path(str(source/'deploy/scripts/cashu-collector-fixture.py'))
@@ -362,7 +417,8 @@ def main():
         after_signer = {p.name: digest(p) for p in states['signer'].iterdir() if p.is_file()}
         if before_signer != after_signer:
             raise ValueError('fenced signer startup changed retained state')
-        print(json.dumps({'result': 'CASHU_EMPTY_NATIVE_BACKUP_VERIFIED',
+        print(json.dumps({'result': ('CASHU_FUNDED_NATIVE_INSTALL_VERIFIED' if funded
+                                     else 'CASHU_EMPTY_NATIVE_BACKUP_VERIFIED'),
                           'artifacts_sha256': hashes, 'inventory_result': result,
                           'combined_native_review': combined_result,
                           'coordinated_collector': collector_result,
@@ -375,7 +431,8 @@ def main():
                           'fenced_signer_bytes_unchanged': True,
                           'missing_key_refused': True, 'wrong_epoch_refused': True,
                           'missing_mint_namespace_refused': True,
-                          'empty_initialized_state_only': True, 'funded_restore_qualified': False,
+                          'empty_initialized_state_only': not funded, 'funded_restore_qualified': False,
+                          'funded_fenced_installation_verified': funded,
                           'external_reconciliation_verified': False, 'production_changes': False},
                          sort_keys=True))
 

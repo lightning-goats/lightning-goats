@@ -352,9 +352,44 @@ assert not os.access(ciphertext, os.R_OK)
             'systemd_loaded_separate_signer_clients': True, 'external_bunker_verified': False}
 
 
+def verify_funded_stage(stage, worklist, source, common):
+    def rows(database, query):
+        with closing(sqlite3.connect(database.as_uri() + '?mode=ro&immutable=1', uri=True)) as db:
+            return db.execute(query).fetchall()
+
+    core = stage / 'fenced-images/core/ledger.sqlite'
+    wallet = stage / 'fenced-images/wallet'
+    issuance = 'SELECT intent_id,receive_request_id,payment_hash FROM cashu_treasury_issuances'
+    original = rows(source / 'core-private/mint-custody-core-before.db', issuance)
+    if (len(original) != 1 or rows(core, issuance) != original
+            or rows(wallet / 'acquisition.sqlite', 'SELECT id,receive_id,payment_hash FROM treasury_instructions') != original
+            or rows(wallet / 'acquisition.sqlite', 'SELECT state FROM treasury_instructions') != [('bound',)]
+            or rows(core, 'SELECT COUNT(*) FROM cashu_receipt_inbox') != [(2,)]
+            or rows(core, 'SELECT COUNT(*) FROM cashu_treasury_deposits') != [(0,)]
+            or rows(core, 'SELECT COUNT(*) FROM feed_attempts') != [(0,)]):
+        raise ValueError('funded stage lost the imported receipts or original unsettled invoice')
+    amounts = {}
+    store_name = runpy.run_path(str(Path(__file__).with_name('review-cashu-restore.py')))['mint_store_name']
+    for mint, expected in (('fixture-a', 250), ('fixture-b', 150)):
+        amount = rows(wallet / store_name(mint, common), "SELECT SUM(amount) FROM proof WHERE state='UNSPENT'")
+        if amount != [(expected,)]:
+            raise ValueError('funded stage lost original mint custody')
+        amounts[mint] = expected
+    expected_counts = {'strike_receives': 1, 'mint_melts': 1, 'mint_splits': 0, 'feeder_requests': 0,
+                       'cashu_acquisitions': 0}
+    for group, count in expected_counts.items():
+        if worklist['records'][group]['total'] != count:
+            raise ValueError('funded stage worklist lost its unresolved original')
+    for group in ('strike_receives', 'mint_melts'):
+        if worklist['records'][group]['items'][0]['staged']['id'] != original[0][0]:
+            raise ValueError('funded stage worklist rebound the original intent')
+    return {'original_invoice_retained': True, 'credited_cashu_receipts_retained': 2, 'staged_custody_sats': amounts,
+            'original_pending_intent_in_authenticated_worklist': True}
+
+
 def qualify_restore(source, output_root, collected, identity, selected, store,
                     workers, binaries, configurations, native_roles, configured_keys, policy_path,
-                    common, systemd_masks):
+                    common, systemd_masks, funded_source):
     """Pass the real encrypted collector output through the isolated launcher."""
     scripts = source / 'deploy/scripts'
     capsule = output_root / 'restore-capsule'
@@ -437,17 +472,24 @@ def qualify_restore(source, output_root, collected, identity, selected, store,
             env={'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'},
         )
 
-    review_path = output_root / 'empty-restore-worklist.json'
+    review_path = output_root / 'restore-worklist.json'
     review = invoke_review(review_path)
-    if review.returncode or any(json.loads(review.stdout)['counts'].values()):
-        raise ValueError('empty staged checkpoint produced unexpected review work')
-    if review_path.stat().st_mode & 0o777 != 0o600:
-        raise ValueError('restore worklist is not private')
+    if review.returncode or review_path.stat().st_mode & 0o777 != 0o600:
+        raise ValueError('authenticated worklist did not review the sealed checkpoint privately')
     report = json.loads(review_path.read_bytes())
     if (report['version'] != 1 or report['staged_receipt_sha256'] != digest(destination / 'STAGED.json')
             or report['reference_receipt_sha256'] is not None
-            or report['selection'] != {'group': None, 'after': None, 'limit': 100}):
+            or report['selection'] != {'group': None, 'after': None, 'limit': 100}
+            or report['resume_authorized'] is not False):
         raise ValueError('restore worklist omitted its exact source or page binding')
+    if funded_source is not None:
+        observed = verify_funded_stage(destination, report, funded_source, common)
+        return {**observed, 'actual_authenticated_launcher': True, 'real_age_archive': True,
+                'staged_roles': len(roles), 'committed_wal_preserved': True, 'image_manifest_verified': True,
+                'fenced_installation': installation, 'restored_runtime_bytes_unchanged': True,
+                'external_reconciliation_verified': False, 'resume_authorized': False}
+    if any(json.loads(review.stdout)['counts'].values()):
+        raise ValueError('empty staged checkpoint produced unexpected review work')
     journal = destination / 'fenced-images/wallet/acquisition.sqlite'
     with closing(sqlite3.connect(journal.as_uri() + '?immutable=1&mode=ro', uri=True)) as db:
         mints = dict(db.execute('SELECT mint_id,mint_url FROM cdk_mint_namespaces ORDER BY mint_id'))
@@ -702,7 +744,7 @@ def qualify(source,root,states,uids,binaries,configurations,native_policy,args,c
     restore_result = qualify_restore(source, output_root, destination, identity, selected, store,
                                     workers, binaries, configurations, native_roles, configured_keys, policy_path,
                                     dict(module, GLOBAL_LOCK=globals_['GLOBAL_LOCK'], check_quiescence=checked_status),
-                                    args.systemd_masks)
+                                    args.systemd_masks, args.funded_fixture)
     key_stage=destination/'plaintext/recovery-material'
     key_negatives=0
     def key_check(success):
@@ -784,6 +826,6 @@ def qualify(source,root,states,uids,binaries,configurations,native_policy,args,c
         'native_key_material_refusal_cases':key_negatives,'client_credential_optional_lf_accepted':True,
         'encryption_output_limit_refused':True,'encryption_timeout_stub_refused':True,
         'maintenance_lock_path_is_disposable':True,'authenticated_launcher_executed':False,
-        'empty_native_state_only':True,'funded_restore_qualified':False,
+        'empty_native_state_only':args.funded_fixture is None,'funded_restore_qualified':False,
         'installed_or_live_acceptance':False,'production_or_physical_side_effects':False,
         'restore_staging': restore_result}

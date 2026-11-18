@@ -79,14 +79,28 @@ mod multi_mint {
         let writer = Arc::new(WriterLock::acquire(directory)?);
         let journal = Arc::new(Mutex::new(Journal::open(&path, epoch, 64)?));
         drop(crate::wallet::open_wallet_storage(directory).await?);
-        journal.lock().unwrap().require_cdk_namespaces(true)?;
+        {
+            let mut journal = journal.lock().unwrap();
+            journal.require_cdk_namespaces(true)?;
+            let mut binding = Sha256::new();
+            binding.update(b"lightning-goats-cashu-runtime-keys-v1\0");
+            binding.update(harnesses[0].seed);
+            binding.update(harnesses[0].receiver.public_key().to_bytes());
+            journal.runtime_registration(
+                bootstrap.wallet_instance,
+                &binding.finalize().into(),
+                true,
+            )?;
+        }
         let mut stores: BTreeMap<String, Arc<dyn WalletDatabase<DatabaseError> + Send + Sync>> =
             BTreeMap::new();
         let mut coordinators = Vec::new();
         for (h, policy) in harnesses.iter().zip(&policies) {
             let initialize = journal.lock().unwrap().prepare_cdk_namespace(policy)?;
             ensure!(initialize, "test wallet must be a fresh mint namespace");
-            let database = crate::wallet::open_mint_wallet_storage(directory, policy, &writer, initialize).await?;
+            let database =
+                crate::wallet::open_mint_wallet_storage(directory, policy, &writer, initialize)
+                    .await?;
             journal.lock().unwrap().complete_cdk_namespace(policy)?;
             stores.insert(policy.id.clone(), database.clone());
             let mint_url: MintUrl = policy.advertised_url.parse()?;
@@ -273,18 +287,9 @@ mod multi_mint {
             receipts.push(wire.data().clone());
         }
         drop(coordinators);
-        let checkpoint = Path::new(&std::env::var("LG_CASHU_COMBINED_PRIVATE")?).join("mint-custody-before");
-        std::fs::create_dir(&checkpoint)?;
-        std::fs::set_permissions(&checkpoint, std::fs::Permissions::from_mode(0o700))?;
-        snapshot_wallet_file(&path, &checkpoint.join("acquisition.sqlite"))?;
-        snapshot_wallet_file(&directory.join("wallet.sqlite"), &checkpoint.join("wallet.sqlite"))?;
-        let mint_images = harnesses.iter().map(|h| {
-            let hash = Sha256::digest(format!("lightning-goats/cdk-mint-store/v1\0{}", h.id));
-            let name = format!("mint-{}.sqlite", cdk::util::hex::encode(hash));
-            let image = checkpoint.join(&name);
-            snapshot_wallet_file(&directory.join(name), &image)?;
-            Ok(image)
-        }).collect::<Result<Vec<_>>>()?;
+        let checkpoint =
+            Path::new(&std::env::var("LG_CASHU_COMBINED_PRIVATE")?).join("mint-custody-before");
+        let mut mint_images = Vec::new();
         let bindings = harnesses
             .iter()
             .map(|h| {
@@ -361,6 +366,28 @@ mod multi_mint {
                 );
                 tokio::time::sleep(Duration::from_millis(25)).await;
             };
+            if round == 0 {
+                std::fs::create_dir(&checkpoint)?;
+                std::fs::set_permissions(&checkpoint, std::fs::Permissions::from_mode(0o700))?;
+                snapshot_wallet_file(&path, &checkpoint.join("acquisition.sqlite"))?;
+                snapshot_wallet_file(
+                    &directory.join("wallet.sqlite"),
+                    &checkpoint.join("wallet.sqlite"),
+                )?;
+                for mint in &harnesses {
+                    let hash =
+                        Sha256::digest(format!("lightning-goats/cdk-mint-store/v1\0{}", mint.id));
+                    let name = format!("mint-{}.sqlite", cdk::util::hex::encode(hash));
+                    let image = checkpoint.join(&name);
+                    snapshot_wallet_file(&directory.join(name), &image)?;
+                    mint_images.push(image);
+                }
+                publish(
+                    &checkpoint,
+                    "receiving-key.json",
+                    &h.receiver.public_key().to_string(),
+                )?;
+            }
             let observed_now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)?
                 .as_secs();

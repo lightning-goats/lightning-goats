@@ -561,5 +561,16 @@ UIDs. It verifies a retry after interruption, rejects a changed configuration
 and prior state, and confirms native startup refuses all six installed copies.
 The Actions job invokes the authenticated command with real masks to resume the
 interrupted attempt. It verifies that a process running under the wallet UID
-blocks installation even with every unit masked. Funded recovery still requires
-its own qualification.
+blocks installation even with every unit masked.
+
+The funded rehearsal starts with two acquisitions credited by the core. It
+captures both mint stores before the first melt, after the original Strike
+invoice is issued and bound. The same settlement fixture subsequently loses a
+melt reply and completes both original conversions. The older core and wallet
+snapshots then go through the coordinated collector, age encryption, the
+authenticated stager, and fenced installation under real systemd masks. The
+restored images must preserve the original pending invoice, both credited
+receipts, 250 and 150 sats of old local custody, and every startup fence.
+The older stage's worklist must still identify that original unsettled invoice.
+Full provider reconciliation of the installed checkpoint and safe resumption
+require additional evidence.

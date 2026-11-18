@@ -497,6 +497,34 @@ def verify_funded_rollback(root, core_cli):
     }
 
 
+def verify_funded_install(root, native_inputs, systemd_masks):
+    command = ['/usr/bin/python3', '-B', str(Path(__file__).with_name('test-cashu-native-backup.py')),
+               '--funded-fixture', str(root)]
+    if systemd_masks:
+        command.append('--systemd-masks')
+    files = {'core': 'cashu-core/core-cli', 'wallet': 'cashu-wallet/wallet-cli',
+             'signer': 'cashu-wallet/signer-cli', 'membership': 'cashu-core/membership-cli',
+             'payout': 'cashu-core/payout-cli', 'payout-signer': 'cashu-core/payout-signer-cli',
+             'statectl': 'cashu-core/statectl-cli', 'collector-copy': 'cashu-wallet/copy-cli',
+             'age': 'backup-age/age', 'age-keygen': 'backup-age/age-keygen'}
+    for name, relative in files.items():
+        path = (native_inputs / relative).resolve(strict=True)
+        command.extend(['--' + name + '-cli', str(path), '--' + name + '-sha256', digest(path)])
+    result = subprocess.run(command, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=300)
+    if result.returncode:
+        raise ValueError('disposable funded installation failed:\n' + result.stderr[-6000:])
+    report = json.loads(result.stdout)
+    collector = report['coordinated_collector']
+    restore = collector['restore_staging']
+    if (report['result'] != 'CASHU_FUNDED_NATIVE_INSTALL_VERIFIED'
+            or report['funded_fenced_installation_verified'] is not True
+            or collector['systemd_masks_verified'] is not systemd_masks
+            or restore['staged_custody_sats'] != {'fixture-a': 250, 'fixture-b': 150}
+            or restore['resume_authorized'] is not False):
+        raise ValueError('funded installation did not verify the required scope')
+    return report
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--core-test', type=Path, required=True)
@@ -517,12 +545,19 @@ def main():
     parser.add_argument('--multi-mint', action='store_true', help='settle independently acquired contributions from two configured mint namespaces before one synthetic feeding')
     parser.add_argument('--funded-rollback', action='store_true',
                         help='exercise funded restore fences around a lost melt reply')
+    parser.add_argument('--funded-install-inputs', type=Path,
+                        help='use the native CI artifacts to collect, stage and install the funded two-mint checkpoint')
+    parser.add_argument('--funded-install-systemd-masks', action='store_true',
+                        help='use real masks for funded installation on a disposable Actions runner')
     args = parser.parse_args()
     if args.funded_rollback and (not (args.http_intake and args.fees and args.no_change
             and args.lost_reply and args.core_cli) or args.multi_mint or args.repeat_request or args.settle_change):
         parser.error('--funded-rollback requires its own HTTP fee-only lost-reply mode and --core-cli')
     if args.multi_mint and (not args.fees or not args.no_change or not args.http_intake or args.repeat_request or args.settle_change):
         parser.error('--multi-mint requires its own --fees --no-change --http-intake mode')
+    if (args.funded_install_inputs is not None and not args.multi_mint
+            or args.funded_install_systemd_masks and args.funded_install_inputs is None):
+        parser.error('funded installation requires multi-mint mode and explicit native artifacts')
     if args.settle_change and (not args.fees or args.no_change or args.repeat_request or not args.http_intake):
         parser.error('--settle-change requires --fees --http-intake, returned change, and its own mode')
     if args.repeat_request and not args.http_intake:
@@ -701,6 +736,9 @@ def main():
                 raise ValueError('combined fixture result differs from expected conservation')
             if args.multi_mint:
                 result['funded_mint_custody'] = verify_funded_mint_batch(root)
+            if args.funded_install_inputs is not None:
+                result['funded_installed_restore'] = verify_funded_install(
+                    root, args.funded_install_inputs, args.funded_install_systemd_masks)
             if args.funded_rollback:
                 source = args.core_cli.resolve(strict=True)
                 if not source.is_file() or not 0 < source.stat().st_size <= 512 * 1024 * 1024:

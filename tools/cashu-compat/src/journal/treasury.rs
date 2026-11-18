@@ -1779,6 +1779,17 @@ mod tests {
                 params![acquisition.to_string(), b"[]".as_slice()],
             )?;
             locked.connection.execute("INSERT INTO treasury_source_holds(intent_id,acquisition_id,input_sats) VALUES(?,?,103)",params![issued.intent.id.to_string(),acquisition.to_string()])?;
+            let limits: custody::CustodyLimits = serde_json::from_value(serde_json::json!({
+                "maximum_total_sats":103,"maximum_per_mint_sats":{(binding.mint_id.clone()):103}
+            }))?;
+            limits.reserve(&locked.connection, &binding.mint_id, 101)?;
+            assert_eq!(
+                limits
+                    .reserve(&locked.connection, &binding.mint_id, 102)
+                    .unwrap_err()
+                    .downcast_ref(),
+                Some(&custody::AdmissionCapacity::Full),
+            );
             let receipt = locked.export_receipt(acquisition)?;
             let mut next = issued.clone();
             next.intent.id = Uuid::from_u128(901);

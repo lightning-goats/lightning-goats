@@ -83,6 +83,7 @@ fn check_scope(mut current: Value, mut candidate: Value) -> Result<()> {
         "descriptors",
         "retired_descriptors",
         "public_request",
+        "custody_limits",
     ] {
         current.remove(field);
         candidate.remove(field);
@@ -95,6 +96,14 @@ fn check_scope(mut current: Value, mut candidate: Value) -> Result<()> {
 }
 
 fn check_retention(current: &Config, candidate: &Config) -> Result<()> {
+    ensure!(
+        match (&current.custody_limits, &candidate.custody_limits) {
+            (Some(before), Some(after)) => before.retains_configured_limits(after),
+            (None, None) => true,
+            _ => false,
+        },
+        "mint policy must retain the total and existing mint custody limits"
+    );
     for old in &current.mints {
         ensure!(
             candidate

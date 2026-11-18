@@ -447,6 +447,17 @@ async fn combined_settlement_wallet_child() -> Result<()> {
         harness.open().await?
     };
     let delivery_journal = coordinator.journal.clone();
+    if !repeat_request && !settle_change {
+        // The first net receipt and second gross admission exactly fill the
+        // bound in fee mode. This includes the withheld receive fee until swap.
+        let maximum = 400 + u64::from(fees);
+        delivery_journal
+            .lock()
+            .unwrap()
+            .set_custody_limits(serde_json::from_value(json!({
+                "maximum_total_sats":maximum,"maximum_per_mint_sats":{"fixture":maximum}
+            }))?);
+    }
     if funded_rollback {
         // The fixture uses its own synthetic wallet registration. Retaining it
         // in both images lets reconciliation enforce the same identity check
@@ -693,6 +704,29 @@ async fn combined_settlement_wallet_child() -> Result<()> {
                     .all(|(old, cap)| old["id"] == payload["id"] && cap != &accepted["capability"]),
                 "distinct payments to one descriptor reused a capability"
             );
+            if edge_ca.is_none() && !repeat_request && !settle_change {
+                for (amount, expected) in [
+                    (8, reqwest::StatusCode::SERVICE_UNAVAILABLE),
+                    (512, reqwest::StatusCode::BAD_REQUEST),
+                ] {
+                    let payment = contribution(&harness, amount, false, usize::try_from(amount)?)?;
+                    let body = json!({"id":descriptor_id,"mint":harness.policy().advertised_url,"unit":"sat","proofs":payment.intake().proofs});
+                    let reply = http_client
+                        .post(format!("{origin}/api/v1/cashu"))
+                        .header("content-type", "application/json")
+                        .body(serde_json::to_vec(&body)?)
+                        .send()
+                        .await?;
+                    ensure!(
+                        reply.status() == expected
+                            && fixture_json_response(reply)
+                                .await?
+                                .get("capability")
+                                .is_none(),
+                        "HTTP custody refusal exposed a capability or changed its retry semantics"
+                    );
+                }
+            }
             http_replays.push((payload, accepted["capability"].clone()));
             let connection = rusqlite::Connection::open_with_flags(
                 harness.directory.path().join("journal.sqlite"),

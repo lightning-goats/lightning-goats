@@ -9,6 +9,7 @@ use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+pub mod custody;
 mod publication;
 pub mod publication_delivery;
 pub mod relay_scans;
@@ -362,6 +363,7 @@ pub enum Admission {
 pub struct Journal {
     connection: Connection,
     max_proofs: usize,
+    custody_limits: Option<custody::CustodyLimits>,
 }
 
 impl Journal {
@@ -426,7 +428,12 @@ impl Journal {
         Ok(Self {
             connection,
             max_proofs,
+            custody_limits: None,
         })
+    }
+
+    pub(crate) fn set_custody_limits(&mut self, limits: custody::CustodyLimits) {
+        self.custody_limits = Some(limits);
     }
 
     pub(crate) fn require_epoch(&self, expected: Uuid) -> Result<()> {
@@ -517,6 +524,19 @@ impl Journal {
             }
         }
         let is_duplicate = existing.is_some();
+        let previous: Option<String> = tx
+            .query_row(
+                "SELECT acquisition_id FROM intake_sources WHERE transport=? AND source_ref=?",
+                params![intake.transport.as_str(), intake.source_ref],
+                |r| r.get(0),
+            )
+            .optional()?;
+        ensure!(
+            previous
+                .as_ref()
+                .is_none_or(|p| existing.as_ref() == Some(p)),
+            AdmissionConflict
+        );
         let id = if let Some(id) = existing {
             let count: i64 = tx.query_row(
                 "SELECT proof_count FROM acquisitions WHERE id=?",
@@ -529,6 +549,9 @@ impl Journal {
             );
             Uuid::parse_str(&id)?
         } else {
+            if let Some(limits) = &self.custody_limits {
+                limits.reserve(&tx, intake.mint_id, u64::try_from(gross)?)?;
+            }
             let (pending, proof_bytes): (u64, u64) = tx.query_row(
                 "SELECT COUNT(*),COALESCE(SUM(length(c.proofs)),0) FROM acquisitions a JOIN acquisition_context c ON c.acquisition_id=a.id WHERE a.state!='credited'",
                 [],
@@ -539,7 +562,7 @@ impl Journal {
                     && proof_bytes
                         .checked_add(u64::try_from(admitted_proofs.len())?)
                         .is_some_and(|bytes| bytes <= MAX_PENDING_PROOF_BYTES),
-                "wallet intake backlog full; retry original submission later"
+                custody::AdmissionCapacity::Full
             );
             let id = Uuid::new_v4();
             tx.execute("INSERT INTO acquisitions(id,mint_id,policy,transport,source_ref,proof_count,gross) VALUES(?,?,?,?,?,?,?)",
@@ -556,17 +579,6 @@ impl Journal {
             }
             id
         };
-        let previous: Option<String> = tx
-            .query_row(
-                "SELECT acquisition_id FROM intake_sources WHERE transport=? AND source_ref=?",
-                params![intake.transport.as_str(), intake.source_ref],
-                |r| r.get(0),
-            )
-            .optional()?;
-        ensure!(
-            previous.as_ref().is_none_or(|p| p == &id.to_string()),
-            AdmissionConflict
-        );
         if previous.is_none() {
             let sources: u64 = tx.query_row(
                 "SELECT COUNT(*) FROM intake_sources WHERE acquisition_id=?",
@@ -575,7 +587,7 @@ impl Journal {
             )?;
             ensure!(
                 sources < MAX_INTAKE_SOURCES_PER_ACQUISITION,
-                "wallet intake source limit reached; retry original submission"
+                AdmissionConflict
             );
         }
         tx.execute("INSERT OR IGNORE INTO intake_sources(transport,source_ref,acquisition_id) VALUES(?,?,?)",
@@ -650,6 +662,14 @@ impl Journal {
             ensure!(previous == request, "operation material conflict");
         } else {
             ensure!(state == "validated", "operation cannot be prepared");
+            if let Some(limits) = &self.custody_limits {
+                let (mint, gross): (String, u64) = tx.query_row(
+                    "SELECT mint_id,gross FROM acquisitions WHERE id=?",
+                    [id.to_string()],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )?;
+                limits.check_fresh_swap(&tx, &mint, gross)?;
+            }
             tx.execute(
                 "UPDATE acquisitions SET request=?,state='acquisition_prepared' WHERE id=?",
                 params![request, id.to_string()],
@@ -1178,6 +1198,144 @@ mod tests {
             Admission::New(id) => id,
             Admission::Duplicate(_) => panic!("expected new acquisition"),
         }
+    }
+
+    #[test]
+    fn custody_is_reserved_atomically_across_mints_rails_and_restart() -> Result<()> {
+        use custody::AdmissionCapacity;
+        let directory = crate::test_directory()?;
+        let path = directory.path().join("custody.sqlite");
+        let epoch = Uuid::new_v4();
+        let limits: custody::CustodyLimits = serde_json::from_value(serde_json::json!({
+            "maximum_total_sats":20,"maximum_per_mint_sats":{"fixture-mint":12,"second":16}
+        }))?;
+        let mut journal = Journal::open(&path, epoch, 8)?;
+        journal.set_custody_limits(limits.clone());
+        let first_proofs = [proof("first")];
+        let first = new_id(journal.admit(&intake(&first_proofs, "first", Transport::Cashu))?);
+        let second_proofs = [proof("second")];
+        let mut second = intake(&second_proofs, "second", Transport::Nutzap);
+        assert_eq!(
+            journal.admit(&second).unwrap_err().downcast_ref(),
+            Some(&AdmissionCapacity::Full)
+        );
+        second.mint_id = "second";
+        let second = new_id(journal.admit(&second)?);
+        let mut small_proof = proof("third");
+        small_proof.amount = 5.into();
+        let third_proofs = [small_proof];
+        let mut third = intake(&third_proofs, "third", Transport::Cashu);
+        third.mint_id = "second";
+        assert_eq!(
+            journal.admit(&third).unwrap_err().downcast_ref(),
+            Some(&AdmissionCapacity::Full)
+        );
+        let overlarge = [proof("over-one"), proof("over-two")];
+        assert_eq!(
+            journal
+                .admit(&intake(&overlarge, "oversized", Transport::Cashu))
+                .unwrap_err()
+                .downcast_ref(),
+            Some(&AdmissionCapacity::TooLarge)
+        );
+        journal.prepare(first, b"first swap")?;
+        journal.start_acquisition(first)?;
+        journal.record_acquired(first, 7, 1, b"first owned evidence")?;
+        journal.hold(second, HoldReason::AmbiguousAcquisition)?;
+        drop(journal);
+
+        let mut journal = Journal::open(&path, epoch, 8)?;
+        journal.set_custody_limits(limits);
+        let third = new_id(journal.admit(&intake(&third_proofs, "third", Transport::Cashu))?);
+        assert_eq!(
+            journal.admit(&intake(&first_proofs, "original replay", Transport::Nutzap))?,
+            Admission::Duplicate(first)
+        );
+        let fourth = [proof("fourth")];
+        let mut fourth = intake(&fourth, "fourth", Transport::Cashu);
+        fourth.mint_id = "second";
+        assert_eq!(
+            journal.admit(&fourth).unwrap_err().downcast_ref(),
+            Some(&AdmissionCapacity::Full)
+        );
+        assert_eq!(journal.state(third)?, "validated");
+        for table in ["acquisitions", "proof_index", "acquisition_admission_times"] {
+            assert_eq!(
+                journal.connection.query_row(
+                    &format!("SELECT COUNT(*) FROM {table}"),
+                    [],
+                    |r| r.get::<_, u64>(0)
+                )?,
+                3
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn legacy_overflow_waits_without_charging_swap_attempts_or_losing_originals() -> Result<()> {
+        use custody::AdmissionCapacity;
+        let directory = crate::test_directory()?;
+        let path = directory.path().join("legacy.sqlite");
+        let epoch = Uuid::new_v4();
+        let mut journal = Journal::open(&path, epoch, 8)?;
+        let large = [proof("large-1"), proof("large-2")];
+        let large = new_id(journal.admit(&intake(&large, "large", Transport::Cashu))?);
+        let pending = [proof("small")];
+        let small = new_id(journal.admit(&intake(&pending, "small", Transport::Cashu))?);
+        let underway = [proof("original")];
+        let original = new_id(journal.admit(&intake(&underway, "original", Transport::Nutzap))?);
+        journal.prepare(original, b"original exact request")?;
+        journal.start_acquisition(original)?;
+        drop(journal);
+
+        let mut journal = Journal::open(&path, epoch, 8)?;
+        journal.set_custody_limits(custody::CustodyLimits::default());
+        assert_eq!(
+            journal.admit(&intake(&pending, "small", Transport::Cashu))?,
+            Admission::Duplicate(small)
+        );
+        assert!(
+            journal
+                .claim_acquisition_work(100, true, false, 1, 5)?
+                .is_none()
+        );
+        let work = journal
+            .claim_acquisition_work(100, true, true, 1, 5)?
+            .unwrap();
+        assert_eq!(work.id, original);
+        journal.prepare(original, b"original exact request")?;
+
+        journal.set_custody_limits(serde_json::from_value(serde_json::json!({
+            "maximum_total_sats":15,"maximum_per_mint_sats":{"fixture-mint":15}
+        }))?);
+        assert!(
+            journal
+                .claim_acquisition_work(200, true, false, 1, 5)?
+                .is_none()
+        );
+        assert_eq!(
+            journal
+                .prepare(large, b"unsubmitted")
+                .unwrap_err()
+                .downcast_ref(),
+            Some(&AdmissionCapacity::Full)
+        );
+        journal.record_acquired(original, 7, 1, b"original owned outputs")?;
+        let work = journal
+            .claim_acquisition_work(201, true, false, 1, 5)?
+            .unwrap();
+        assert_eq!(work.id, small);
+        journal.prepare(small, b"original small swap")?;
+        assert!(journal.prepared_request(large)?.is_none());
+        assert_eq!(
+            journal
+                .connection
+                .query_row("SELECT COUNT(*) FROM acquisition_schedule", [], |r| r
+                    .get::<_, u64>(0))?,
+            2
+        );
+        Ok(())
     }
 
     #[test]

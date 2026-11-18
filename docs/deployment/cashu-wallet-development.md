@@ -914,6 +914,29 @@ reporting remain unfinished. The updated recovery inventory specifies every
 retained store and its binding, including disabled/removed acceptance policies.
 No production schema, service or wallet has been changed by this source work.
 
+## Wallet custody limits
+
+Set `custody_limits.maximum_total_sats` and `custody_limits.maximum_per_mint_sats`
+in the protected wallet JSON before receiving. The second field is a map from
+configured mint IDs to positive sat limits at or below the total. Every mint
+enabled for either receiving rail needs a limit. An older configuration without
+this object can read and reconcile existing records and answer exact retries.
+Fresh admissions and previously unsubmitted swaps need explicit limits.
+
+The wallet reserves gross value for pending admissions and counts acquired net
+value, less journal-confirmed consumption and preparation fees. Returned change
+and unresolved swaps or melts continue to count. Both receiving rails use the
+same transaction and reservations survive restart. A full wallet returns a
+retryable response to ordinary Cashu and retains the relevant relay scan range
+while continuing the batch. A payment larger than a configured ceiling is
+rejected. Older queued admissions can acquire when their value fits, without
+charging attempts for work waiting on capacity. Existing swap recovery keeps
+its original request and permission gates.
+
+The core separately limits imported custody and independently verifies Strike
+settlement before any Cashu-funded feeding. A mint policy review may add a
+limit for a newly configured mint while retaining the total and existing limits.
+
 ## Operator selections recorded 2026-11-16
 
 The selected mint is exactly `https://mint.minibits.cash/Bitcoin` (including

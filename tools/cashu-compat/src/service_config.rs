@@ -70,6 +70,8 @@ pub struct Config {
     pub body_bytes: usize,
     pub proof_count: usize,
     pub receipt_sats: u64,
+    #[serde(default)]
+    pub custody_limits: Option<crate::journal::custody::CustodyLimits>,
     pub deadline_seconds: u64,
     pub connections_per_second: u32,
     #[serde(default)]
@@ -393,6 +395,9 @@ impl Config {
             !self.receive_nutzap || active_nutzap,
             "nutzap receiving has no qualified mint"
         );
+        if let Some(limits) = &self.custody_limits {
+            limits.validate(&self.mints)?;
+        }
         for mint in &self.mints {
             if mint.bolt11_exit_qualified
                 && ((self.receive_cashu && mint.receive_cashu)
@@ -401,6 +406,12 @@ impl Config {
                 ensure!(
                     qualified.contains(mint.id.as_str()),
                     "receiving mint has no pinned keys"
+                );
+                ensure!(
+                    self.custody_limits
+                        .as_ref()
+                        .is_none_or(|limits| limits.covers(&mint.id)),
+                    "receiving mint has no custody limit"
                 );
             }
         }

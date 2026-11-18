@@ -322,6 +322,7 @@ def rehearse(root, args):
         'state_directory': str(state), 'intake_socket': str(private_run / 'intake.sock'),
         'receive_nutzap': True, 'receiving_key': events['receiving_key'], 'recipient': events['recipient'],
         'descriptors': [], 'body_bytes': 65536, 'proof_count': 8, 'receipt_sats': 100,
+        'custody_limits': {'maximum_total_sats': 8, 'maximum_per_mint_sats': {'fixture': 8}},
         'deadline_seconds': 5, 'connections_per_second': 8,
         'mints': [{'id': 'fixture', 'advertised_url': events['mint'], 'policy_version': 'fixture-v1',
                    'receive_cashu': False, 'receive_nutzap': True, 'bolt11_exit_qualified': True}],

@@ -194,6 +194,7 @@ def main():
             keysets=[dict(mint_id='mint-a', id='00deadbeef123456', keys={
                 '8':'0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'})],
             body_bytes=65536, proof_count=64, receipt_sats=10000,
+            custody_limits=dict(maximum_total_sats=300, maximum_per_mint_sats={'mint-a': 200}),
             deadline_seconds=5, connections_per_second=8,
             treasury_intake=dict(socket=str(root/'ipc/treasury.sock'),core_epoch=core_epoch,
                 destination=dict(origin='https://strike.example/',account_id=str(uuid.uuid4()),
@@ -339,7 +340,8 @@ def main():
         mint_b = dict(mint_a, id='mint-b', advertised_url='https://second.example/Bitcoin')
         key_b = dict(config_value['keysets'][0], mint_id='mint-b')
         candidate = dict(config_value, mints=[dict(mint_a, receive_cashu=False), mint_b],
-                         keysets=[*config_value['keysets'], key_b])
+                         keysets=[*config_value['keysets'], key_b],
+                         custody_limits=dict(maximum_total_sats=300, maximum_per_mint_sats={'mint-a': 200, 'mint-b': 100}))
 
         def stage_candidate(value):
             candidate_file.write_text(json.dumps(value))
@@ -359,6 +361,9 @@ def main():
         for rejected in [
             dict(candidate, mints=[mint_b], keysets=[key_b]),
             dict(candidate, deadline_seconds=9),
+            dict(candidate, custody_limits=config_value['custody_limits']),
+            dict(candidate, custody_limits=dict(maximum_total_sats=301, maximum_per_mint_sats={'mint-a': 200, 'mint-b': 100})),
+            dict(candidate, custody_limits=dict(maximum_total_sats=300, maximum_per_mint_sats={'mint-a': 201, 'mint-b': 100})),
             dict(candidate, keysets=[key_b]),
             dict(candidate, mints=[dict(mint_a, advertised_url='https://changed.example'), mint_b]),
             dict(candidate, keysets=[dict(config_value['keysets'][0], keys={

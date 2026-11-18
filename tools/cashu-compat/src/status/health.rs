@@ -1,5 +1,5 @@
 //! Private journal accounting, not a live mint balance or payment authority.
-use crate::service_config::Config;
+use crate::{journal::custody::Custody, service_config::Config};
 use anyhow::{Result, ensure};
 use rusqlite::{Connection, params};
 use serde::Serialize;
@@ -52,42 +52,34 @@ pub struct Queue {
 
 impl Funds {
     pub(crate) fn read(db: &Connection, mint: Option<&str>, now: i64) -> Result<Self> {
-        let (unverified_input_sats, acquired_net_sats, receive_fee_sats): (u64,u64,u64) = db.query_row(
-            "SELECT COALESCE(SUM(CASE WHEN net IS NULL THEN gross ELSE 0 END),0),COALESCE(SUM(net),0),COALESCE(SUM(receive_fee),0) FROM acquisitions WHERE ?1 IS NULL OR mint_id=?1",
-            [mint], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
-        let consumed: u64 = db.query_row("SELECT COALESCE(SUM(r.input_sats-r.change_sats),0) FROM treasury_source_results r JOIN acquisitions a ON a.id=r.acquisition_id WHERE ?1 IS NULL OR a.mint_id=?1",[mint],|r|r.get(0))?;
+        let custody = Custody::read(db, mint)?;
         let reported_treasury_deposit_sats: u64 = db.query_row("SELECT COALESCE(SUM(json_extract(i.issued_json,'$.intent.deposit_sats')),0) FROM treasury_instructions i JOIN treasury_results r ON r.intent_id=i.id WHERE ?1 IS NULL OR json_extract(i.issued_json,'$.intent.mint_id')=?1",[mint],|r|r.get(0))?;
-        let (split_preparation_fee_sats, unsettled_preparation_fee_sats): (u64,u64) = db.query_row(
-            "SELECT COALESCE(SUM(s.fee_sats),0),COALESCE(SUM(CASE WHEN r.intent_id IS NULL THEN s.fee_sats ELSE 0 END),0) FROM treasury_split_results s JOIN treasury_instructions i ON i.id=s.intent_id LEFT JOIN treasury_results r ON r.intent_id=s.intent_id WHERE ?1 IS NULL OR json_extract(i.issued_json,'$.intent.mint_id')=?1",
-            [mint], |r| Ok((r.get(0)?,r.get(1)?)))?;
         let (pending_input_reserved_sats, ambiguous_submitted_input_sats): (u64,u64) = db.query_row(
             "SELECT COALESCE(SUM(h.input_sats),0),COALESCE(SUM(CASE WHEN i.state='submitted' THEN h.input_sats ELSE 0 END),0) FROM treasury_source_holds h JOIN treasury_instructions i ON i.id=h.intent_id JOIN acquisitions a ON a.id=h.acquisition_id WHERE i.state!='reconciled' AND (?1 IS NULL OR a.mint_id=?1)",
             [mint], |r|Ok((r.get(0)?,r.get(1)?)))?;
         let (operations_admitted_last_24h, input_admitted_last_24h_sats): (u64,u64) = db.query_row(
             "SELECT COUNT(*),COALESCE(SUM(a.input_sats),0) FROM treasury_execution_admissions a JOIN treasury_instructions i ON i.id=a.intent_id WHERE a.admitted_at>?2 AND a.admitted_at<=?3 AND (?1 IS NULL OR json_extract(i.issued_json,'$.intent.mint_id')=?1)",
             params![mint,now.saturating_sub(86400),now], |r|Ok((r.get(0)?,r.get(1)?)))?;
-        let journal_custody_sats = acquired_net_sats
-            .checked_sub(consumed)
-            .and_then(|v| v.checked_sub(unsettled_preparation_fee_sats))
-            .ok_or_else(|| anyhow::anyhow!("journal custody conservation mismatch"))?;
-        let completed_conversion_fee_sats = consumed
+        let completed_conversion_fee_sats = custody
+            .consumed_sats
             .checked_sub(reported_treasury_deposit_sats)
             .ok_or_else(|| anyhow::anyhow!("reported conversion conservation mismatch"))?;
-        let total_accounted_fee_sats = receive_fee_sats
+        let total_accounted_fee_sats = custody
+            .receive_fee_sats
             .checked_add(completed_conversion_fee_sats)
-            .and_then(|v| v.checked_add(unsettled_preparation_fee_sats))
+            .and_then(|v| v.checked_add(custody.unsettled_preparation_fee_sats))
             .ok_or_else(|| anyhow::anyhow!("fee health overflow"))?;
         Ok(Self {
-            unverified_input_sats,
-            acquired_net_sats,
-            journal_custody_sats,
+            unverified_input_sats: custody.unverified_input_sats,
+            acquired_net_sats: custody.acquired_net_sats,
+            journal_custody_sats: custody.retained_sats,
             pending_input_reserved_sats,
             ambiguous_submitted_input_sats,
             reported_treasury_deposit_sats,
-            receive_fee_sats,
+            receive_fee_sats: custody.receive_fee_sats,
             completed_conversion_fee_sats,
-            split_preparation_fee_sats,
-            unsettled_preparation_fee_sats,
+            split_preparation_fee_sats: custody.split_preparation_fee_sats,
+            unsettled_preparation_fee_sats: custody.unsettled_preparation_fee_sats,
             total_accounted_fee_sats,
             operations_admitted_last_24h,
             input_admitted_last_24h_sats,

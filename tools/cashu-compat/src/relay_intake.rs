@@ -2,6 +2,7 @@
 use crate::{
     journal::{
         AdmissionConflict,
+        custody::AdmissionCapacity,
         relay_scans::{Lane, Outcome, Registration},
     },
     relay::{Batch, Filter},
@@ -248,16 +249,18 @@ impl<'a> Worker<'a> {
                         match result {
                             Ok(_) => admitted += 1,
                             Err(error) if error.is::<AdmissionConflict>() => rejected += 1,
-                            Err(error) => return Err(error),
+                            Err(error) => match error.downcast_ref::<AdmissionCapacity>() {
+                                Some(AdmissionCapacity::Full) => processed_all = false,
+                                Some(AdmissionCapacity::TooLarge) => rejected += 1,
+                                None => return Err(error),
+                            },
                         }
                     }
                 }
                 tokio::task::yield_now().await;
             }
             complete = processed_all && batch.complete && !batch.saturated;
-            outcome = if !processed_all {
-                Outcome::Incomplete
-            } else if batch.saturated {
+            outcome = if batch.saturated {
                 Outcome::Saturated
             } else if complete {
                 Outcome::AdmittedComplete
@@ -312,6 +315,7 @@ pub(crate) mod tests {
             "mints":[{"id":"fixture","advertised_url":"https://mint.example","policy_version":"v1","receive_cashu":false,"receive_nutzap":true,"bolt11_exit_qualified":true}],
             "keysets":[{"mint_id":"fixture","id":"00deadbeef123456","keys":{"8":SecretKey::from_slice(&[7;32])?.public_key().to_hex()}}],
             "body_bytes":65536,"proof_count":8,"receipt_sats":100,
+            "custody_limits":{"maximum_total_sats":100,"maximum_per_mint_sats":{"fixture":100}},
             "deadline_seconds":5,"connections_per_second":8,
             "relay_intake":{"enabled":true,"relays":["wss://relay.example"],"historical_floor":0,"window_seconds":60,"overlap_seconds":5,"event_limit":16}
         }))?)
@@ -357,6 +361,66 @@ pub(crate) mod tests {
             .sign_schnorr_no_aux_rand(&Message::from_digest(hash), &key)
             .to_string();
         VerifiedEvent::from_json(&serde_json::to_string(&event)?)
+    }
+
+    #[tokio::test]
+    async fn full_relay_batch_retains_retry_range_and_admits_smaller_later_payment() -> Result<()> {
+        use serde_json::json;
+        let dir = crate::test_directory()?;
+        let runtime = runtime(dir.path()).await?;
+        runtime
+            .journal
+            .lock()
+            .unwrap()
+            .set_custody_limits(serde_json::from_value(json!({
+                "maximum_total_sats":16,"maximum_per_mint_sats":{"fixture":16}
+            }))?);
+        let first = crate::intake::tests::locked();
+        let distinct =
+            |nonce| crate::intake::tests::proof(first.secret.to_string().replace("fixture", nonce));
+        let two = [distinct("two-a"), distinct("two-b")];
+        let three = [
+            distinct("three-a"),
+            distinct("three-b"),
+            distinct("three-c"),
+        ];
+        let events = vec![
+            event(
+                &runtime.config,
+                std::slice::from_ref(&first),
+                "initial contribution",
+            )?,
+            event(&runtime.config, &three, "permanently too large")?,
+            event(&runtime.config, &two, "retry at next scan")?,
+            event(
+                &runtime.config,
+                &[distinct("later")],
+                "smaller contribution",
+            )?,
+            event(&runtime.config, &[first], "existing payment at capacity")?,
+        ];
+        let mut worker = Worker::new(&runtime)?;
+        assert_eq!(
+            worker
+                .tick_with(clock()?, |_, _| async {
+                    Ok(Batch {
+                        events,
+                        complete: true,
+                        saturated: false,
+                    })
+                })
+                .await?,
+            Tick::Scanned {
+                admitted: 3,
+                rejected: 1,
+                complete: false
+            }
+        );
+        assert_eq!(
+            runtime.journal.lock().unwrap().pending_operations(8)?.len(),
+            2
+        );
+        Ok(())
     }
 
     #[tokio::test]

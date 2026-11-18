@@ -60,11 +60,23 @@ impl Journal {
         let tx = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let row: Option<(String, String, String, u32)> = tx.query_row(
-            "SELECT a.id,a.mint_id,a.state,COALESCE(s.attempts,0) FROM acquisitions a LEFT JOIN acquisition_schedule s ON s.acquisition_id=a.id WHERE ((? AND a.state='validated') OR (? AND a.state IN ('acquisition_prepared','acquiring'))) AND COALESCE(s.attempts,0)<? AND COALESCE(s.next_attempt,0)<=? ORDER BY COALESCE(s.next_attempt,0),a.rowid LIMIT 1",
-            params![acquire,reconcile,maximum_attempts,now],
-            |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?)),
-        ).optional()?;
+        let swap_limits = match &self.custody_limits {
+            Some(limits) if acquire => Some(serde_json::to_string(&limits.swap_limits(&tx)?)?),
+            _ => None,
+        };
+        let row: Option<(String, String, String, u32)> = tx
+            .query_row(
+                "SELECT a.id,a.mint_id,a.state,COALESCE(s.attempts,0)
+             FROM acquisitions a LEFT JOIN acquisition_schedule s ON s.acquisition_id=a.id
+             WHERE ((?1 AND a.state='validated' AND (?5 IS NULL OR a.gross <= COALESCE(
+                 (SELECT value FROM json_each(?5) WHERE key=a.mint_id),0)))
+                 OR (?2 AND a.state IN ('acquisition_prepared','acquiring')))
+             AND COALESCE(s.attempts,0)<?3 AND COALESCE(s.next_attempt,0)<=?4
+             ORDER BY COALESCE(s.next_attempt,0),a.rowid LIMIT 1",
+                params![acquire, reconcile, maximum_attempts, now, swap_limits],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .optional()?;
         let Some((id, mint_id, state, attempts)) = row else {
             return Ok(None);
         };

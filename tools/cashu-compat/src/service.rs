@@ -100,6 +100,9 @@ impl Runtime {
             config.wallet_epoch,
             config.proof_count,
         )?;
+        // An older protected config may still recover existing operations and
+        // exact receipts. It grants no authority for new intake without limits.
+        journal.set_custody_limits(config.custody_limits.clone().unwrap_or_default());
         let binding = keys.binding();
         if !initialize {
             journal.runtime_registration(config.wallet_instance, &binding, false)?;
@@ -252,6 +255,15 @@ mod tests {
         Ok(())
     }
 
+    fn retained_fixture_journal(runtime: &Runtime) -> Result<Journal> {
+        // Seed data from before the runtime required a custody policy.
+        Journal::open(
+            &runtime.config.state_directory.join("acquisition.sqlite"),
+            runtime.config.wallet_epoch,
+            runtime.config.proof_count,
+        )
+    }
+
     #[tokio::test]
     async fn rotated_wallet_preserves_registration_and_requires_keys_for_queued_proofs()
     -> Result<()> {
@@ -300,7 +312,7 @@ mod tests {
             ])
             .to_string(),
         );
-        runtime.journal.lock().unwrap().admit(&ValidatedIntake {
+        retained_fixture_journal(&runtime)?.admit(&ValidatedIntake {
             mint_id: "fixture",
             policy_version: "v1",
             transport: Transport::Cashu,
@@ -527,7 +539,7 @@ mod tests {
         let config = configuration(directory.path(), Uuid::new_v4(), Uuid::new_v4())?;
         let runtime = Runtime::initialize(config).await?;
         let proofs = [crate::intake::tests::proof("private-health-input".into())];
-        runtime.journal.lock().unwrap().admit_at(
+        retained_fixture_journal(&runtime)?.admit_at(
             &ValidatedIntake {
                 mint_id: "historical",
                 policy_version: "v1",
@@ -566,11 +578,12 @@ mod tests {
         let config = configuration(directory.path(), Uuid::new_v4(), Uuid::new_v4())?;
         let runtime = Runtime::initialize(config).await?;
         let mut last = None;
+        let mut retained = retained_fixture_journal(&runtime)?;
         for index in 0..70 {
             let proofs = [crate::intake::tests::proof(format!(
                 "private-health-proof-{index}"
             ))];
-            last = Some(runtime.journal.lock().unwrap().admit_at(
+            last = Some(retained.admit_at(
                 &ValidatedIntake {
                     mint_id: &format!("mint-{index:03}"),
                     policy_version: "v1",
@@ -585,12 +598,9 @@ mod tests {
         let Some(crate::journal::Admission::New(id)) = last else {
             panic!("expected new receipt")
         };
-        {
-            let mut journal = runtime.journal.lock().unwrap();
-            journal.prepare(id, b"synthetic original swap")?;
-            journal.start_acquisition(id)?;
-            journal.record_acquired(id, 7, 1, b"synthetic owned outputs")?;
-        }
+        retained.prepare(id, b"synthetic original swap")?;
+        retained.start_acquisition(id)?;
+        retained.record_acquired(id, 7, 1, b"synthetic owned outputs")?;
         let status = crate::status::Status::read_at(&runtime.config, 200)?;
         assert_eq!(status.health.mints.len(), 64);
         assert!(status.health.mints_truncated);
@@ -630,7 +640,7 @@ mod tests {
         let proofs = [crate::intake::tests::proof("private-ack-proof".into())];
         let previous_core = Uuid::new_v4();
         let id = {
-            let mut journal = runtime.journal.lock().unwrap();
+            let mut journal = retained_fixture_journal(&runtime)?;
             let Admission::New(id) = journal.admit_at(
                 &ValidatedIntake {
                     mint_id: "fixture",
@@ -728,6 +738,7 @@ mod tests {
         assert!(!dir.path().join("acquisition.sqlite").exists());
         let runtime = Runtime::initialize(config).await?;
         let mut ids = Vec::new();
+        let mut retained = retained_fixture_journal(&runtime)?;
         for index in 0..65 {
             let proofs = vec![Proof::new(
                 8.into(),
@@ -735,7 +746,7 @@ mod tests {
                 Secret::new(format!("private-proof-secret-{index}")),
                 runtime.policy.receiver,
             )];
-            let admitted = runtime.journal.lock().unwrap().admit_at(
+            let admitted = retained.admit_at(
                 &ValidatedIntake {
                     mint_id: "fixture",
                     policy_version: "v1",
@@ -755,11 +766,7 @@ mod tests {
             .lock()
             .unwrap()
             .hold(ids[64], HoldReason::AmbiguousAcquisition)?;
-        runtime
-            .journal
-            .lock()
-            .unwrap()
-            .claim_acquisition_work(100, true, false, 1, 5)?;
+        retained.claim_acquisition_work(100, true, false, 1, 5)?;
         std::fs::rename(
             dir.path().join("wallet-seed.bin"),
             dir.path().join("seed-hidden"),

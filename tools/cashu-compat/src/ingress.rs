@@ -5,7 +5,7 @@ use crate::{
         DescriptorAcceptance, Limits, NutzapReceivers, PinnedKeys, ValidatedContribution,
         nutzap_json_at, ordinary_json_at,
     },
-    journal::{Admission, Journal},
+    journal::{Admission, Journal, custody::AdmissionCapacity},
     mint_policy::MintRegistry,
     writer_lock::WriterLock,
 };
@@ -202,9 +202,18 @@ impl Intake<'_> {
                 Some(id) => Some(id),
                 None => match self.ordinary(body, &source_ref) {
                     Err(_) => None,
-                    Ok(contribution) => Some(match journal.admit(&contribution.intake())? {
-                        Admission::New(id) | Admission::Duplicate(id) => id,
-                    }),
+                    Ok(contribution) => match journal.admit(&contribution.intake()) {
+                        Ok(Admission::New(id) | Admission::Duplicate(id)) => Some(id),
+                        Err(error)
+                            if error.downcast_ref::<AdmissionCapacity>()
+                                == Some(&AdmissionCapacity::TooLarge) =>
+                        {
+                            None
+                        }
+                        // Saturation is retryable and uses the existing HTTP 503
+                        // path. There is no admission or capability to return.
+                        Err(error) => return Err(error),
+                    },
                 },
             };
             let result = match id {

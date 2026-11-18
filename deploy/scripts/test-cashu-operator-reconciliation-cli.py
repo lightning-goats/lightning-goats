@@ -25,6 +25,7 @@ import uuid
 
 def installed_wallet_unit(root, config, binary, state, uid, cleanup):
     name = root.name
+    group = name + '-group'
     unit = f'{name}.service'
     unit_file = Path('/run/systemd/system') / unit
     systemd = runpy.run_path(str(Path(__file__).with_name('rehearse-systemd.py')))
@@ -34,9 +35,9 @@ def installed_wallet_unit(root, config, binary, state, uid, cleanup):
             ['systemctl', 'show', '--property=LoadState', '--value', '--', unit],
             check=False).stdout.strip() != 'not-found'):
         raise ValueError('mint policy fixture unit already exists')
-    command(['/usr/sbin/groupadd', '--gid', str(uid), name])
-    cleanup.callback(command, ['/usr/sbin/groupdel', name])
-    command(['/usr/sbin/useradd', '--uid', str(uid), '--gid', name, '--no-user-group',
+    command(['/usr/sbin/groupadd', '--gid', str(uid), group])
+    cleanup.callback(command, ['/usr/sbin/groupdel', group])
+    command(['/usr/sbin/useradd', '--uid', str(uid), '--gid', group, '--no-user-group',
              '--no-create-home', '--home-dir', '/nonexistent', '--shell', '/usr/sbin/nologin', name])
     cleanup.callback(command, ['/usr/sbin/userdel', name])
     ipc = root / 'ipc'
@@ -47,7 +48,7 @@ def installed_wallet_unit(root, config, binary, state, uid, cleanup):
 Description=Disposable Cashu mint policy wallet
 [Service]
 User={name}
-Group={name}
+Group={group}
 ExecStart={binary} run {config}
 PrivateNetwork=yes
 IPAddressDeny=any
@@ -532,7 +533,7 @@ def main():
         if (answer['state'] != 'held_for_reconciliation' or answer['acquisition_id'] != acquisition
                 or retained != expected_acquisitions or namespaces != expected_namespaces):
             raise ValueError('candidate restart changed the original work or namespace')
-        print(json.dumps(dict(result='CASHU_OPERATOR_RECONCILIATION_CLI_VERIFIED',cli_sha256=args.cli_sha256,
+        report = dict(result='CASHU_OPERATOR_RECONCILIATION_CLI_VERIFIED',cli_sha256=args.cli_sha256,
             runtime_uid=uid,synthetic_unfunded_retained_operation=True,pending_replay_unchanged=True,
             active_writer_and_restore_fence_refused=True,configuration_scope_and_permissions_refused=True,
             held_prepared_new_and_exported_states_refused=True,mint_contact=False,
@@ -544,7 +545,8 @@ def main():
             mint_policy_live_uid_locks_and_drift_refused=True,
             treasury_cleanup_scope_and_missing_original_refused=True,
             acquired_transition_qualified_here=False,workers_started=args.installed_systemd,
-            sql_definitions_rows_and_rowids_unchanged=True,schema_object_insertion_order_ignored=True),sort_keys=True))
+            sql_definitions_rows_and_rowids_unchanged=True,schema_object_insertion_order_ignored=True)
+    print(json.dumps(report, sort_keys=True))
 
 
 if __name__ == '__main__':

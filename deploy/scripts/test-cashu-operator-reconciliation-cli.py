@@ -329,7 +329,7 @@ def main():
             cleanup_approval.write_text(json.dumps(dict(cleanup, **updates)))
             cleanup_approval.chmod(0o444)
             failure = call(*cleanup_args, success=False).stderr
-            if 'treasury recovery '+expected not in failure:
+            if 'treasury reconciliation '+expected not in failure:
                 raise ValueError('unexpected scoped cleanup refusal')
         call('reconcile-treasury', str(config), str(cleanup_approval), success=False)
         if image() != held:

@@ -180,21 +180,21 @@ async fn execute(command: Command) -> Result<(), &'static str> {
         Command::Treasury(purpose, path, approval) => {
             use lightning_goats_cashu_compat::operator_treasury::Approval;
             let approval = Approval::load(&approval, purpose)
-                .map_err(|_| "treasury recovery approval rejected")?;
+                .map_err(|_| "treasury reconciliation approval rejected")?;
             let config = approval
                 .load_config(&path)
-                .map_err(|_| "treasury recovery configuration rejected")?;
+                .map_err(|_| "treasury reconciliation configuration rejected")?;
             let runtime = Runtime::open(config).await.map_err(
-                |_| "treasury recovery requires offline registered wallet state and matching keys",
+                |_| "treasury reconciliation requires offline registered wallet state and matching keys",
             )?;
             let result = approval
                 .execute(&runtime)
                 .await
-                .map_err(|_| "treasury recovery failed; original operation retained")?;
+                .map_err(|_| "treasury reconciliation failed; original operation retained")?;
             println!(
                 "{}",
                 serde_json::to_string(&result)
-                    .map_err(|_| "treasury recovery outcome encoding failed")?
+                    .map_err(|_| "treasury reconciliation outcome encoding failed")?
             );
         }
         Command::PrepareAnnouncement(path, id) => {

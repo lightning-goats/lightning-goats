@@ -71,6 +71,31 @@ class PilotConfig(unittest.TestCase):
             wallet['treasury_intake']['accept_new'], wallet['treasury_execution']['execute'],
         )))
 
+    def test_reviewed_nutzap_relays_bind_wallet_signer_and_publication_only(self):
+        base = self.core.replace(b'relays = ["wss://relay.example"]',
+                                 b'relays = ["wss://relay.example", "wss://other.example"]')
+        approved = ['wss://relay.example:443/']
+        files = TOOL['render'](base, dict(self.input, nutzap_relays=approved))
+        wallet, signer = (json.loads(files[name]) for name in ('wallet.json', 'signer.json'))
+        self.assertTrue(files['core.toml'].startswith(base))
+        self.assertEqual(wallet['relay_intake']['relays'], approved)
+        self.assertEqual(signer['policy']['relays'], approved)
+        self.assertEqual(signer['nak']['relays'], ['wss://signer-relay.example'])
+        self.assertEqual(wallet['publication_delivery']['base_relays'], approved)
+        self.assertEqual(wallet['publication_delivery']['discovery_relays'], approved)
+        self.assertFalse(wallet['publication_delivery']['announcements'])
+        self.assertFalse(wallet['publication_delivery']['redemptions'])
+        fallback = TOOL['render'](base, self.input)
+        self.assertEqual(files['core.toml'], fallback['core.toml'])
+        self.assertNotIn('publication_delivery', json.loads(fallback['wallet.json']))
+
+    def test_nutzap_subset_refuses_unknown_or_canonical_duplicate_relays(self):
+        for selected in ([], ['wss://unreviewed.example'], ['wss://relay.example/', 'wss://relay.example:443'],
+                         ['wss://relay.example/?credential=example'], ['wss://relay.example/?'],
+                         ['wss://relay.example/other']):
+            with self.subTest(selected=selected), self.assertRaises(ValueError):
+                TOOL['render'](self.core, dict(self.input, nutzap_relays=selected))
+
     def test_rejects_misbound_keys_identities_and_existing_cashu(self):
         for key, value in (
             ('signer_uid', self.input['wallet_uid']), ('client_pubkey', TWO),

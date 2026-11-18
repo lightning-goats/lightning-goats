@@ -49,13 +49,26 @@ def relay_set(values):
             raise ValueError('invalid configured relay')
         parts = urlsplit(value)
         if (parts.scheme != 'wss' or not parts.hostname or parts.port not in (None, 443)
-                or parts.username is not None or parts.query or parts.fragment):
+                or parts.username is not None or '?' in value or '#' in value):
             raise ValueError('approved relay must be WSS without login or query')
     return values
 
 
+def receive_relay_subset(selection, approved):
+    def identity(value):
+        parts = urlsplit(value)
+        return parts.hostname, parts.path or '/'
+
+    selected = relay_set(selection)
+    identities = {identity(relay) for relay in selected}
+    if len(identities) != len(selected) or not identities.issubset(map(identity, approved)):
+        raise ValueError('choose distinct Nutzap relays from the existing project list')
+    return selected
+
+
 def validate(inputs):
-    if not isinstance(inputs, dict) or set(inputs) != REQUIRED or type(inputs['version']) is not int or inputs['version'] != 1:
+    if (not isinstance(inputs, dict) or set(inputs) - {'nutzap_relays'} != REQUIRED
+            or type(inputs['version']) is not int or inputs['version'] != 1):
         raise ValueError('complete version-1 pilot bindings required')
     if not all(exact_id(inputs[key]) for key in (*EPOCHS, 'strike_account_id')) or len({inputs[key] for key in EPOCHS}) != len(EPOCHS):
         raise ValueError('distinct canonical registration UUIDs required')
@@ -128,6 +141,7 @@ def render(base, inputs, reviewed_request=None):
     owner = original['nostr']['bunker_pubkey']
     relays = relay_set(original['nostr']['relays'])
     bunker = relay_set(original['nostr'].get('bunker_relays', relays))
+    receive_relays = receive_relay_subset(inputs['nutzap_relays'], relays) if 'nutzap_relays' in inputs else relays
     receiver, client = inputs['receiving_key'], inputs['client_pubkey']
     if not hex_value(owner) or len({owner, receiver[2:], client}) != 3:
         raise ValueError('project, receiving and client public keys must be distinct')
@@ -160,10 +174,14 @@ def render(base, inputs, reviewed_request=None):
         wallet['descriptors'] = [preview['id']]
     wallet['receipt_delivery'] = dict(enabled=False, socket=RECEIPTS, core_epoch=inputs['core_epoch'],
                                       maximum_attempts=8, deadline_seconds=5)
-    wallet['relay_intake'] = dict(enabled=False, relays=relays, historical_floor=inputs['relay_since_unix'],
+    wallet['relay_intake'] = dict(enabled=False, relays=receive_relays, historical_floor=inputs['relay_since_unix'],
                                   window_seconds=3600, overlap_seconds=120, event_limit=64)
     wallet['publication_signing'] = dict(socket=SIGNER, signer_uid=inputs['signer_uid'], announcements=False,
                                           redemptions=False, maximum_attempts=8)
+    if 'nutzap_relays' in inputs:
+        wallet['publication_delivery'] = dict(announcements=False, redemptions=False,
+                                              base_relays=receive_relays, discovery_relays=receive_relays,
+                                              maximum_attempts=8)
     wallet['treasury_intake'] = dict(enabled=False, accept_new=False, socket=TREASURY,
                                       core_epoch=inputs['core_epoch'], destination=destination,
                                       policies={MINT_ID: POLICY_VERSION})
@@ -171,7 +189,7 @@ def render(base, inputs, reviewed_request=None):
     signer = dict(version=1, runtime_uid=inputs['signer_uid'], ipc_gid=inputs['signer_gid'],
                   state_directory='/var/lib/lightning-goats-cashu-signer', socket=SIGNER,
                   policy=dict(unit, broker_instance=inputs['broker_instance'], broker_epoch=inputs['broker_epoch'],
-                              owner=owner, receiving_key=receiver[2:], mints=[MINT], relays=relays),
+                              owner=owner, receiving_key=receiver[2:], mints=[MINT], relays=receive_relays),
                   nak=dict(binary='/usr/local/bin/nak-cashu-stdin', binary_sha256=inputs['helper_sha256'],
                            private_directory='/var/lib/lightning-goats-cashu-nak', owner=owner,
                            client_pubkey=client, relays=bunker, deadline_seconds=30))

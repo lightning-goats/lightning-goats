@@ -82,8 +82,17 @@ The binding file has these fields.
 | `strike_account_id`, `strike_credential_fingerprint` | The reviewed Strike destination account UUID and receive-only credential fingerprint |
 | `daily_credit_sats`, `minimum_deposit_sats`, `relay_since_unix` | Explicit rolling credit-sat limit, qualified minimum Strike deposit and starting NIP-61 observation time |
 | `mint_keysets` | Pinned Minibits sat records of the form `{"id":"…","keys":{"1":"…"}}`, copied from reviewed public mint evidence |
+| `nutzap_relays` (optional) | Nonempty reviewed subset of the existing core Nostr relay list |
 
-Use the exact existing Strike API origin and project relays. The pilot uses
+Use the existing Strike API origin and the project relay inventory. Select
+`nutzap_relays` using the native read-only relay probe. The selection binds
+Nutzap intake, the signer's announcement scope and the inactive Cashu
+publication settings. Ordinary messaging and bunker transport retain their
+existing relay configuration. Live publication still needs its own test.
+Omit the selection to use the original project relay list for Nutzap intake
+and signing without configuring publication delivery.
+
+The pilot uses
 `https://mint.minibits.cash/Bitcoin`, the 999-sat custody ceiling, the 5-sat
 per-conversion and 25-sat rolling fee ceilings, and a 1,800-second age trigger.
 It configures no fixed daily receipt or conversion count. Private keys, seed

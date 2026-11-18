@@ -13,6 +13,7 @@ import sqlite3
 import stat
 import tarfile
 import tempfile
+import tomllib
 import time
 import uuid
 
@@ -319,6 +320,7 @@ def rehearse_pilot_config(archive, root, command, binaries, uids, states, core_c
                     .replace('0' * 64, wallet['recipient']))
     epoch, broker, broker_epoch, account = [str(uuid.uuid4()) for _ in range(4)]
     bindings = root / 'pilot-bindings.json'
+    relay = tomllib.loads(base.read_text())['nostr']['relays'][0]
     bindings.write_text(json.dumps(dict(
         version=1, core_uid=uids['core'], wallet_uid=uids['wallet'], wallet_gid=uids['wallet'],
         signer_uid=uids['signer'], signer_gid=uids['signer'], core_epoch=epoch,
@@ -327,6 +329,7 @@ def rehearse_pilot_config(archive, root, command, binaries, uids, states, core_c
         client_pubkey=signing['nak']['client_pubkey'], helper_sha256=signing['nak']['binary_sha256'],
         strike_account_id=account, strike_credential_fingerprint='ab' * 32, daily_credit_sats=20000,
         minimum_deposit_sats=1, relay_since_unix=1_800_000_000,
+        nutzap_relays=[relay],
         mint_keysets=[dict(id='00deadbeef123456', keys={'1': wallet['receiving_key']})],
     )))
     review = root / 'pilot'
@@ -344,6 +347,14 @@ def rehearse_pilot_config(archive, root, command, binaries, uids, states, core_c
                       '--clear-groups', '--no-new-privs', '--', str(binaries[role])]
         arguments = ['--config', str(path), 'check-config'] if role == 'core' else ['check-config', str(path)]
         command([*invocation, *arguments])
+    examined_wallet = json.loads((review / 'wallet.json').read_bytes())
+    examined_signer = json.loads((review / 'signer.json').read_bytes())
+    delivery = examined_wallet['publication_delivery']
+    if ([relay] != examined_wallet['relay_intake']['relays']
+            or [relay] != examined_signer['policy']['relays']
+            or [relay] != delivery['base_relays'] or [relay] != delivery['discovery_relays']
+            or any(delivery[key] is not False for key in ('announcements', 'redemptions'))):
+        raise ValueError('inactive Nutzap relay bindings do not agree across the native roles')
     malformed = review / 'malformed-core.toml'
     malformed.write_text((review / 'core.toml').read_text()
                          .replace('import_enabled = false', 'import_enabled = "off"'))
@@ -389,7 +400,7 @@ def rehearse_pilot_config(archive, root, command, binaries, uids, states, core_c
             raise ValueError('wallet accepted descriptor from another endpoint')
     return dict(checked_roles=['core', 'wallet', 'signer'], absent_core_database_preserved=True,
                 malformed_core_config_refused=True, activation_authorized=False,
-                reviewed_requests_reproduced=['creqA', 'creqB'])
+                reviewed_requests_reproduced=['creqA', 'creqB'], nutzap_relay_scope_consistent=True)
 
 
 def rehearse(selection, binaries, hashes, uids, states, wallet_config, signer_config,

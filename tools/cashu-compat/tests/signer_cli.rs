@@ -7,11 +7,12 @@ fn signer_cli_never_echoes_private_paths_and_requires_an_explicit_mode() {
     assert!(
         String::from_utf8(help.stdout)
             .unwrap()
-            .contains("check-config|initialize|run")
+            .contains("check-config|check-credential|initialize|run|recovery-paused")
     );
     for args in [
         vec![],
         vec!["pay", "invoice"],
+        vec!["check-credential"],
         vec!["run"],
         vec!["run", "path", "extra"],
     ] {
@@ -25,7 +26,13 @@ fn signer_cli_never_echoes_private_paths_and_requires_an_explicit_mode() {
             Some(2)
         );
     }
-    for mode in ["check-config", "initialize", "run"] {
+    for mode in [
+        "check-config",
+        "check-credential",
+        "initialize",
+        "run",
+        "recovery-paused",
+    ] {
         let output = Command::new(executable)
             .args([mode, "/missing/private-client-secret"])
             .output()

@@ -4,6 +4,8 @@ use crate::{
     intake::PinnedKeys,
     journal::Journal,
     operation_gate::{OperationGate, TreasuryPolicy},
+    treasury::ClaimedPreparation,
+    treasury_scheduler::Execution,
     writer_lock::WriterLock,
 };
 use anyhow::{Context as _, Result, ensure};
@@ -16,6 +18,11 @@ use cdk_http_client::Transport;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 mod split;
+
+enum PreparationMode<'a> {
+    Fresh,
+    Recover(Option<&'a Execution>),
+}
 
 pub struct Executor<T: Transport> {
     wallet: Wallet,
@@ -158,22 +165,38 @@ impl<T: Transport + Clone + 'static> Executor<T> {
         self.recover_preparation_with_policy(id, None).await
     }
 
-    /// With execution enabled, an exact quote-only checkpoint can complete its
-    /// original local proof reservation. No preparation path submits a melt.
+    /// With execution enabled, an exact retained claim can complete its local
+    /// quote and proof reservations. Melt submission is a separate stage.
     pub(crate) async fn recover_preparation_with_policy(
         &self,
         id: Uuid,
-        execution: Option<&crate::treasury_scheduler::Execution>,
+        execution: Option<&Execution>,
     ) -> Result<Uuid> {
         let _lease = self.gate.arm_treasury(id)?;
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
             .as_secs();
-        let (original, ys) = self
+        let claim = self
             .journal
             .lock()
             .map_err(|_| anyhow::anyhow!("wallet journal unavailable"))?
             .claimed_treasury_preparation(&self.policy.binding, id, now)?;
+        self.finish_preparation(id, claim, PreparationMode::Recover(execution), now)
+            .await
+    }
+
+    async fn finish_preparation(
+        &self,
+        id: Uuid,
+        claim: ClaimedPreparation,
+        mode: PreparationMode<'_>,
+        now: u64,
+    ) -> Result<Uuid> {
+        let ClaimedPreparation {
+            operation: claimed_operation,
+            quote: original,
+            ys,
+        } = claim;
         ensure!(
             original.mint_url.as_ref() == Some(&self.policy.mint.advertised_url.parse()?),
             "claimed quote belongs to another configured mint"
@@ -183,12 +206,23 @@ impl<T: Transport + Clone + 'static> Executor<T> {
             .get_melt_quote(&original.id)
             .await?
             .ok_or_else(|| anyhow::anyhow!("original CDK quote missing"))?;
-        let operation: Uuid = quote
+        let quote_owner = quote
             .used_by_operation
             .as_deref()
-            .ok_or_else(|| anyhow::anyhow!("original CDK operation not retained"))?
-            .parse()?;
-        ensure!(!operation.is_nil(), "invalid original CDK operation");
+            .map(Uuid::parse_str)
+            .transpose()?;
+        let operation = claimed_operation
+            .or(quote_owner)
+            .context("original CDK operation not retained")?;
+        let operation_id = operation.to_string();
+        ensure!(
+            !operation.is_nil()
+                && quote
+                    .used_by_operation
+                    .as_deref()
+                    .is_none_or(|owner| owner == operation_id),
+            "CDK quote is owned by a different operation"
+        );
         let mut terms = quote.clone();
         terms.used_by_operation = None;
         terms.version = original.version;
@@ -202,24 +236,37 @@ impl<T: Transport + Clone + 'static> Executor<T> {
         }
         let stored = self.database.get_proofs_by_ys(ys.clone()).await?;
         let reserved = self.database.get_reserved_proofs(&operation).await?;
-        let reservation_policy = if saga.is_none() && reserved.is_empty() {
-            let execution = execution
-                .filter(|policy| policy.execute)
-                .context("original CDK proof reservation requires treasury execution")?;
+        let needs_reservation = saga.is_none() && reserved.is_empty();
+        ensure!(
+            quote_owner.is_some() || needs_reservation,
+            "unowned CDK quote has evidence of prior preparation"
+        );
+        let reservation_policy = if needs_reservation {
+            let execution = match mode {
+                PreparationMode::Fresh => None,
+                PreparationMode::Recover(execution) => Some(
+                    execution
+                        .filter(|policy| policy.execute)
+                        .context("original CDK proof reservation requires treasury execution")?,
+                ),
+            };
             validate_held_proofs(&stored, &ys, &original, State::Unspent, None)?;
-            Some(execution)
+            execution
         } else {
             validate_held_proofs(&stored, &ys, &original, State::Reserved, Some(operation))?;
             validate_held_proofs(&reserved, &ys, &original, State::Reserved, Some(operation))?;
             None
         };
-        let quotes = self.database.get_melt_quotes().await?;
-        ensure!(
-            quotes.iter().all(|q| q.used_by_operation.as_deref()
-                != Some(operation.to_string().as_str())
-                || q.id == original.id),
-            "original operation owns an unrelated quote"
-        );
+        if matches!(mode, PreparationMode::Recover(_)) {
+            let quotes = self.database.get_melt_quotes().await?;
+            ensure!(
+                quotes
+                    .iter()
+                    .all(|q| q.used_by_operation.as_deref() != Some(&operation_id)
+                        || q.id == original.id),
+                "original operation owns an unrelated quote"
+            );
+        }
         // Use CDK's fee arithmetic on mint-scoped, already stored metadata.
         // Wallet::get_proofs_fee may refresh metadata over the network.
         let keysets = self
@@ -274,7 +321,12 @@ impl<T: Transport + Clone + 'static> Executor<T> {
                     )?;
                 }
             }
-            if reservation_policy.is_some() {
+            if quote_owner.is_none() {
+                self.database
+                    .reserve_melt_quote(&original.id, &operation)
+                    .await?;
+            }
+            if needs_reservation {
                 self.database.reserve_proofs(ys.clone(), &operation).await?;
                 let reserved = self.database.get_reserved_proofs(&operation).await?;
                 validate_held_proofs(&reserved, &ys, &original, State::Reserved, Some(operation))?;
@@ -323,55 +375,24 @@ impl<T: Transport + Clone + 'static> Executor<T> {
     /// Persist preparation without submitting; resume uses this same identity.
     pub async fn prepare_reserved(&self, id: Uuid) -> Result<Uuid> {
         let _lease = self.gate.arm_treasury(id)?;
-        let prepared = self.prepare_reserved_inner(id).await?;
-        Ok(prepared.operation_id())
-    }
-
-    async fn prepare_reserved_inner(&self, id: Uuid) -> Result<cdk::wallet::PreparedMelt<'_>> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
             .as_secs();
-        let (quote, ys) = self
+        let claim = self
             .journal
             .lock()
             .map_err(|_| anyhow::anyhow!("wallet journal unavailable"))?
             .claim_treasury_preparation(&self.policy.binding, id, now)?;
-        let stored = self.database.get_proofs_by_ys(ys.clone()).await?;
-        validate_held_proofs(&stored, &ys, &quote, State::Unspent, None)?;
-        let prepared = self
-            .wallet
-            .prepare_melt_proofs(
-                &quote.id,
-                stored.into_iter().map(|p| p.proof).collect(),
-                Default::default(),
-            )
+        self.finish_preparation(id, claim, PreparationMode::Fresh, now)
             .await
-            .map_err(|_| {
-                anyhow::anyhow!("treasury preparation requires original-operation recovery")
-            })?;
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)?
-            .as_secs();
-        self.journal
-            .lock()
-            .map_err(|_| anyhow::anyhow!("wallet journal unavailable"))?
-            .bind_prepared_treasury_melt(&self.policy.binding, id, &prepared, now)?;
-        Ok(prepared)
     }
 
     /// Prepare the exact held proofs and submit once, without an implicit swap.
     /// Success is only transport completion, not verified treasury settlement.
     /// Every error/cancellation requires reconciliation of this same intent.
     pub async fn submit_reserved(&self, id: Uuid) -> Result<()> {
-        let _lease = self.gate.arm_treasury(id)?;
-        let prepared = self.prepare_reserved_inner(id).await?;
-        prepared
-            .confirm_with_options(MeltConfirmOptions::skip_swap())
-            .await
-            .map(|_| ())
-            .map_err(|_| {
-                anyhow::anyhow!("treasury submission requires original-operation reconciliation")
-            })
+        self.prepare_reserved(id).await?;
+        self.resume_prepared(id).await
     }
 }
 

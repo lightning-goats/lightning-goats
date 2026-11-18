@@ -1654,20 +1654,23 @@ mod tests {
         quote.fee_reserve = 0u64.into();
         f.journal
             .bind_treasury_quote(&f.binding, &mint, f.issued.intent.id, &quote, 1000)?;
-        let (_, held) =
-            f.journal
-                .claim_treasury_preparation(&f.binding, f.issued.intent.id, 1000)?;
+        let claim = f
+            .journal
+            .claim_treasury_preparation(&f.binding, f.issued.intent.id, 1000)?;
         assert_eq!(
-            held.iter()
+            claim
+                .ys
+                .iter()
                 .map(|y| y.to_hex())
                 .collect::<std::collections::BTreeSet<_>>(),
             selected_ys
         );
-        let (_, recovered) =
+        let recovered =
             f.journal
                 .claimed_treasury_preparation(&f.binding, f.issued.intent.id, 1000)?;
-        assert_eq!(held, recovered);
-        let operation = Uuid::from_u128(777);
+        assert_eq!(claim.ys, recovered.ys);
+        assert_eq!(claim.operation, recovered.operation);
+        let operation = claim.operation.unwrap();
         assert!(
             f.journal
                 .bind_treasury_preparation_evidence(
@@ -1682,6 +1685,19 @@ mod tests {
                 .is_err()
         );
         assert_eq!(count(&f.journal, "treasury_prepared")?, 0);
+        assert!(
+            f.journal
+                .bind_treasury_preparation_evidence(
+                    &f.binding,
+                    f.issued.intent.id,
+                    Uuid::new_v4(),
+                    &quote,
+                    0,
+                    &melt_proofs,
+                    1000
+                )
+                .is_err()
+        );
         f.journal.bind_treasury_preparation_evidence(
             &f.binding,
             f.issued.intent.id,

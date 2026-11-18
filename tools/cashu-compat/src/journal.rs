@@ -144,6 +144,14 @@ CREATE TABLE IF NOT EXISTS treasury_execution_admissions (
 CREATE TABLE IF NOT EXISTS treasury_preparation_claims (
     intent_id TEXT PRIMARY KEY REFERENCES treasury_instructions(id)
 );
+CREATE TABLE IF NOT EXISTS treasury_preparation_operations (
+    intent_id TEXT PRIMARY KEY REFERENCES treasury_preparation_claims(intent_id),
+    operation_id TEXT NOT NULL UNIQUE
+);
+CREATE TRIGGER IF NOT EXISTS treasury_preparation_operation_no_update
+ BEFORE UPDATE ON treasury_preparation_operations BEGIN SELECT RAISE(ABORT,'retained treasury preparation operation'); END;
+CREATE TRIGGER IF NOT EXISTS treasury_preparation_operation_no_delete
+ BEFORE DELETE ON treasury_preparation_operations BEGIN SELECT RAISE(ABORT,'retained treasury preparation operation'); END;
 CREATE TABLE IF NOT EXISTS treasury_prepared (
     intent_id TEXT PRIMARY KEY REFERENCES treasury_instructions(id),
     operation_id TEXT NOT NULL UNIQUE, prepared_json BLOB NOT NULL

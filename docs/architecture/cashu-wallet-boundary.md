@@ -344,16 +344,17 @@ requires no existing operation owner even if the row is labelled unspent.
 Duplicate/missing/substituted rows or stale ownership retain the original claim
 and cannot authorize submission.
 
-Preparation recovery loads the original claim, quote and proof holds under the
-writer lease, then resolves the operation from CDK's locked quote. An exact
-reservation can be bound with execution paused. With execution enabled, an
-exact quote-only checkpoint can reserve the complete unspent and unowned set
-locally under the retained operation. The wallet uses locally retained
+Preparation assigns and retains the operation UUID with the journal claim before
+any CDK reservation. Under the writer lease, recovery checks that UUID against
+the original quote and proof holds. Historical claims resolve the operation
+from an existing CDK quote owner. An exact reservation can be bound with
+execution paused. With execution enabled, recovery can complete the original
+quote and proof reservations under the retained operation. The wallet uses locally retained
 mint-scoped fees and the original budget, and can recreate a missing
 `ProofsReserved` saga under that same UUID. The owned-output validator checks
 the source allocation before recovery mutates the CDK store. Melt submission
 remains a separately scheduled step that uses that operation and the original
-quote. Partial ownership, an unknown quote owner, expired terms, or an advanced
+quote. Partial ownership, an absent operation identity, expired terms, or an advanced
 or conflicting saga leave the claim held.
 
 Whole-proof treasury selection now derives its candidates from journaled owned

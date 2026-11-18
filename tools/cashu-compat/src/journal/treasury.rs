@@ -341,14 +341,13 @@ impl Journal {
 }
 
 impl Journal {
-    /// Claim one CDK preparation attempt before it can reserve proofs/create a
-    /// saga. A failed/canceled preparation requires recovery, never a new saga.
-    pub fn claim_treasury_preparation(
+    /// Claim one operation UUID before CDK can reserve a quote or proof.
+    pub(crate) fn claim_treasury_preparation(
         &mut self,
         binding: &TreasuryBinding,
         id: Uuid,
         now: u64,
-    ) -> Result<(cdk::wallet::MeltQuote, Vec<cdk::nuts::PublicKey>)> {
+    ) -> Result<crate::treasury::ClaimedPreparation> {
         let issued = self.treasury_instruction(binding, id)?;
         binding.validate_new_invoice(&issued, now)?;
         let tx = self
@@ -393,8 +392,17 @@ impl Journal {
             "INSERT INTO treasury_preparation_claims(intent_id) VALUES(?)",
             [id.to_string()],
         )?;
+        let operation = Uuid::new_v4();
+        tx.execute(
+            "INSERT INTO treasury_preparation_operations(intent_id,operation_id) VALUES(?,?)",
+            params![id.to_string(), operation.to_string()],
+        )?;
         tx.commit()?;
-        Ok((quote, ys))
+        Ok(crate::treasury::ClaimedPreparation {
+            operation: Some(operation),
+            quote,
+            ys,
+        })
     }
 
     /// Read the retained pre-CDK claim without allocating another preparation.
@@ -403,7 +411,7 @@ impl Journal {
         binding: &TreasuryBinding,
         id: Uuid,
         now: u64,
-    ) -> Result<(cdk::wallet::MeltQuote, Vec<cdk::nuts::PublicKey>)> {
+    ) -> Result<crate::treasury::ClaimedPreparation> {
         let issued = self.treasury_instruction(binding, id)?;
         binding.validate_new_invoice(&issued, now)?;
         let bytes: Vec<u8> = self.connection.query_row(
@@ -428,12 +436,14 @@ impl Journal {
             !ys.is_empty() && ys.len() <= self.max_proofs,
             "invalid original proof holds"
         );
-        Ok((
+        Ok(crate::treasury::ClaimedPreparation {
+            operation: claimed_preparation_operation(&self.connection, id)?,
             quote,
-            ys.into_iter()
+            ys: ys
+                .into_iter()
                 .map(|y| y.parse())
                 .collect::<Result<Vec<_>, _>>()?,
-        ))
+        })
     }
 
     /// Load the original prepared identity only before a final request exists.
@@ -464,6 +474,8 @@ impl Journal {
             version == 1
                 && intent == id
                 && !operation.is_nil()
+                && claimed_preparation_operation(&self.connection, id)?
+                    .is_none_or(|claimed| claimed == operation)
                 && quote.id == quote_id
                 && quote.request == issued.invoice
                 && quote.expiry > now
@@ -559,6 +571,10 @@ impl Journal {
         let tx = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        ensure!(
+            claimed_preparation_operation(&tx, id)?.is_none_or(|claimed| claimed == operation),
+            "CDK preparation differs from retained operation"
+        );
         let quote_bytes: Vec<u8> = tx.query_row(
             "SELECT quote_json FROM treasury_quotes WHERE intent_id=?",
             [id.to_string()],
@@ -651,6 +667,26 @@ impl Journal {
     }
 }
 
+fn claimed_preparation_operation(connection: &Connection, id: Uuid) -> Result<Option<Uuid>> {
+    let saved: Option<String> = connection
+        .query_row(
+            "SELECT operation_id FROM treasury_preparation_operations WHERE intent_id=?",
+            [id.to_string()],
+            |row| row.get(0),
+        )
+        .optional()?;
+    saved
+        .map(|encoded| {
+            let operation = Uuid::parse_str(&encoded)?;
+            ensure!(
+                !operation.is_nil() && encoded == operation.to_string(),
+                "invalid retained preparation operation"
+            );
+            Ok(operation)
+        })
+        .transpose()
+}
+
 impl Journal {
     /// Freeze private spend material before transport submission. Replays only
     /// compare retained bytes; they do not grant permission to send them again.
@@ -685,7 +721,12 @@ impl Journal {
             std::collections::BTreeSet<String>,
         ) = serde_json::from_slice(&prepared_bytes)?;
         ensure!(
-            version == 1 && intent == id && operation == saga.id && &quote_id == request.quote_id(),
+            version == 1
+                && intent == id
+                && operation == saga.id
+                && &quote_id == request.quote_id()
+                && claimed_preparation_operation(&tx, id)?
+                    .is_none_or(|claimed| claimed == operation),
             "melt differs from prepared operation"
         );
         let derivation =

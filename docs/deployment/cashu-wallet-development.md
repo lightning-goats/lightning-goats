@@ -427,20 +427,18 @@ quote. The [quote-adoption qualification](../testing/cashu-quote-adoption-202611
 checks conflict refusal and restart recovery in both normal and lost-reply
 workflows. Direct executor callers do not receive this scheduler preflight.
 
-CDK reserves the quote, writes reserved proofs and creates its saga in separate
-steps. Recovery can reconstruct a missing saga when the original quote owner
-and complete original proof reservations are retained. If CDK committed only the
-quote owner, the worker may complete the exact proof reservation under that same
-operation UUID with treasury execution enabled. It verifies that each selected
-proof is still unspent and unowned, that the operation owns no other quote or
-proof, and that the original source allocation and fee budget still agree. The
-reservation is atomic in the CDK store. Paused recovery can bind an already
-complete reservation and has its own retry budget. A pause cannot exhaust the
-retry budget for completing a reservation after execution resumes. Partial
-ownership, a conflicting saga, or an unknown
-operation UUID keeps the original work held. Preparation recovery leaves the
-actual melt submission to the next authorized stage. Completed quote history
-does not limit recovery. See the [partial-preparation qualification](../testing/cashu-partial-preparation-20261116.json)
+Fresh preparation retains its operation UUID in the wallet journal before
+CDK reserves the quote, reserves proofs or creates its saga. With treasury
+execution enabled, recovery can complete an interrupted quote or proof
+reservation under that UUID. It checks the exact original quote, every selected
+proof and its ownership, the original source allocation and retained fee
+budget. The CDK proof reservation is atomic. Paused recovery can bind a complete
+reservation and has its own retry budget. The next authorized stage submits the
+melt. Historical claims can still recover with an original owner recorded in
+the CDK quote. Historical claims without either identity, partial ownership and
+conflicting local records remain held. The recovery worklist includes newly
+claimed operation IDs before CDK creates the saga. See the
+[partial-preparation qualification](../testing/cashu-partial-preparation-20261116.json)
 for the original reservation, conflict and 1,025-quote history fixtures.
 
 After financial reconciliation, a separate retryable cleanup stage retires only

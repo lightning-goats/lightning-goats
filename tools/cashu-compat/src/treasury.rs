@@ -67,6 +67,13 @@ impl TreasuryBinding {
     }
 }
 
+/// Journal claim taken before CDK quote/proof reservation.
+pub(crate) struct ClaimedPreparation {
+    pub operation: Option<Uuid>,
+    pub quote: cdk::wallet::MeltQuote,
+    pub ys: Vec<cdk::nuts::PublicKey>,
+}
+
 /// Private restart context for a bound, never-submitted CDK preparation.
 pub(crate) struct PreparedContext {
     pub operation: Uuid,

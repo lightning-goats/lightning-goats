@@ -104,11 +104,13 @@ STRIKE_SELECTION = """
 """
 WALLET_TREASURY = """
     SELECT w.id, w.receive_id AS receive_request_id, w.payment_hash, w.state, q.quote_id,
-           p.operation_id, r.intent_id IS NOT NULL AS report_retained
+           p.operation_id, {claim} AS claimed_operation,
+           r.intent_id IS NOT NULL AS report_retained
       FROM treasury_instructions w
       LEFT JOIN treasury_quotes q ON q.intent_id=w.id
       LEFT JOIN treasury_prepared p ON p.intent_id=w.id
       LEFT JOIN treasury_results r ON r.intent_id=w.id
+      {claim_join}
     ORDER BY w.id
 """
 MINT_SELECTION = """
@@ -161,6 +163,24 @@ def same(left, right, fields):
     if left and right and any(left[field] != right[field] for field in fields
                              if left[field] is not None and right[field] is not None):
         raise ValueError('immutable original operation identity differs')
+
+
+def wallet_treasury_rows(db):
+    has_claims = db.execute("""
+        SELECT 1 FROM sqlite_schema WHERE type='table' AND name='treasury_preparation_operations'
+    """).fetchone()
+    sql = WALLET_TREASURY.format(
+        claim='c.operation_id' if has_claims else 'NULL',
+        claim_join='LEFT JOIN treasury_preparation_operations c ON c.intent_id=w.id' if has_claims else '',
+    )
+    for row in db.execute(sql):
+        operation = dict(row)
+        claimed = operation.pop('claimed_operation')
+        if claimed is not None:
+            if operation['operation_id'] not in (None, claimed):
+                raise ValueError('prepared operation differs from the original wallet claim')
+            operation['operation_id'] = claimed
+        yield operation
 
 
 def financial_plans(db):
@@ -395,9 +415,11 @@ def worklist(core, wallet, reference_core=None, reference_wallet=None, limit=100
                                 ('mint_id', 'intent_digest', 'expected_deposit_sats',
                                  'receive_request_id', 'payment_hash', 'receive_id', 'deposit_sats'),
                                 lambda row: row is not None and not row['completed']),
-        'mint_melts': lambda: diff(wallet, reference_wallet, WALLET_TREASURY,
-                           ('receive_request_id', 'payment_hash', 'quote_id', 'operation_id'),
-                           lambda row: row is not None and not row['report_retained']),
+        'mint_melts': lambda: compare_rows(
+            wallet_treasury_rows(wallet), wallet_treasury_rows(reference_wallet) if reference_wallet is not None else None,
+            ('receive_request_id', 'payment_hash', 'quote_id', 'operation_id'),
+            lambda row: row is not None and not row['report_retained'], limit, after,
+            count_missing=count_missing),
         'mint_splits': lambda: diff(wallet, reference_wallet, WALLET_SPLITS,
                             ('split_id', 'mint_id', 'cdk_operation', 'submitted_at',
                              'submitted_request_digest'),

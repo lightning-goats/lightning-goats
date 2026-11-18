@@ -1167,6 +1167,11 @@ async fn treasury_executor_recovers_original_cdk_preparation_after_journal_bind_
 }
 
 #[tokio::test]
+async fn treasury_executor_recovers_claim_before_cdk_quote_reservation() -> Result<()> {
+    prepared_treasury_case(TreasuryScenario::ExecutorClaimOnly).await
+}
+
+#[tokio::test]
 async fn treasury_worker_progresses_acquired_funds_and_never_resubmits_after_timeout() -> Result<()>
 {
     prepared_treasury_case(TreasuryScenario::Scheduled).await
@@ -1184,6 +1189,7 @@ enum TreasuryScenario {
     ExecutorClaimedProof,
     ExecutorPrepared,
     ExecutorUnbound,
+    ExecutorClaimOnly,
     Scheduled,
 }
 
@@ -1280,6 +1286,7 @@ async fn prepared_treasury_case(scenario: TreasuryScenario) -> Result<()> {
             | TreasuryScenario::ExecutorClaimedProof
             | TreasuryScenario::ExecutorPrepared
             | TreasuryScenario::ExecutorUnbound
+            | TreasuryScenario::ExecutorClaimOnly
             | TreasuryScenario::Scheduled
     ) {
         *harness.mint.quote_reply.lock().unwrap() = Some(json!({
@@ -1397,7 +1404,34 @@ async fn prepared_treasury_case(scenario: TreasuryScenario) -> Result<()> {
         let unavailable = missing || claimed;
         let expected_melts = usize::from(!unavailable);
         let unbound = matches!(scenario, TreasuryScenario::ExecutorUnbound);
-        let prepared_operation = if unbound {
+        let claim_only = matches!(scenario, TreasuryScenario::ExecutorClaimOnly);
+        let prepared_operation = if claim_only {
+            let cdk = rusqlite::Connection::open(harness.directory.path().join("wallet.sqlite"))?;
+            cdk.execute_batch(
+                "CREATE TRIGGER refuse_quote_owner BEFORE UPDATE OF used_by_operation ON melt_quote
+                 BEGIN SELECT RAISE(ABORT, 'fixture interrupted before CDK reservation'); END;",
+            )?;
+            assert!(executor.prepare_reserved(issued.intent.id).await.is_err());
+            cdk.execute_batch("DROP TRIGGER refuse_quote_owner;")?;
+            let db = rusqlite::Connection::open(&path)?;
+            let saved: String = db.query_row(
+                "SELECT operation_id FROM treasury_preparation_operations WHERE intent_id=?",
+                [issued.intent.id.to_string()],
+                |row| row.get(0),
+            )?;
+            let operation = Uuid::parse_str(&saved)?;
+            assert!(
+                database
+                    .get_melt_quote(&quote.id)
+                    .await?
+                    .unwrap()
+                    .used_by_operation
+                    .is_none()
+            );
+            assert!(database.get_reserved_proofs(&operation).await?.is_empty());
+            assert!(database.get_saga(&operation).await?.is_none());
+            Some(operation)
+        } else if unbound {
             assert!(
                 executor
                     .recover_preparation(issued.intent.id)
@@ -1413,6 +1447,8 @@ async fn prepared_treasury_case(scenario: TreasuryScenario) -> Result<()> {
             assert_eq!(count, 0);
             assert_eq!(harness.mint.melt_attempts.load(Ordering::SeqCst), 0);
             let retained = database.get_melt_quote(&quote.id).await?.unwrap();
+            // Exercise an upgraded historical claim with an existing CDK owner.
+            db.execute_batch("DROP TABLE treasury_preparation_operations;")?;
             Some(retained.used_by_operation.unwrap().parse::<Uuid>()?)
         } else if matches!(scenario, TreasuryScenario::ExecutorPrepared) {
             let operation = executor.prepare_reserved(issued.intent.id).await?;
@@ -1452,6 +1488,44 @@ async fn prepared_treasury_case(scenario: TreasuryScenario) -> Result<()> {
             65536,
         )?;
         if let Some(operation) = prepared_operation {
+            if claim_only {
+                use crate::treasury_scheduler::{Execution, Tick, Worker};
+                let execution = Execution {
+                    execute: true,
+                    reconcile: true,
+                    maximum_attempts: 1,
+                    maximum_input_sats: 8,
+                    maximum_fee_sats: 1,
+                    operations_per_24h: 1,
+                    input_sats_per_24h: 8,
+                    fee_sats_per_24h: Some(1),
+                    maximum_in_flight_sats: 8,
+                    ..Default::default()
+                };
+                assert!(
+                    executor
+                        .recover_preparation(issued.intent.id)
+                        .await
+                        .is_err()
+                );
+                assert!(executor.prepare_reserved(issued.intent.id).await.is_err());
+                let worker = Worker::from_parts(
+                    journal.clone(),
+                    database.clone(),
+                    writer.clone(),
+                    harness.keys.clone(),
+                    vec![(policy.clone(), harness.mint.clone())],
+                    execution,
+                    std::time::Duration::from_secs(2),
+                    65536,
+                )?;
+                assert_eq!(worker.tick(now as i64).await?, Tick::Progress);
+                let retained = database.get_melt_quote(&quote.id).await?.unwrap();
+                assert_eq!(retained.used_by_operation, Some(operation.to_string()));
+                assert_eq!(database.get_saga(&operation).await?.unwrap().id, operation);
+                assert_eq!(harness.mint.quote_attempts.load(Ordering::SeqCst), 1);
+                assert_eq!(harness.mint.melt_attempts.load(Ordering::SeqCst), 0);
+            }
             if unbound {
                 use cdk::wallet::types::{MeltSagaState, WalletSagaState};
                 // A later-stage saga is not evidence of an unsubmitted preparation.

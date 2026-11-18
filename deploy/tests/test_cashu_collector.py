@@ -26,6 +26,33 @@ INSTALL=runpy.run_path(str(SOURCE/'install-cashu-restore.py'))
 
 
 class RecoveryWorklistTests(unittest.TestCase):
+    def test_melt_worklist_keeps_operation_from_before_quote_reservation(self):
+        read_melts = REVIEW['wallet_treasury_rows']
+        compare = REVIEW['compare_rows']
+        operation = '10000000-0000-4000-8000-000000000001'
+        with closing(sqlite3.connect(':memory:')) as wallet:
+            wallet.row_factory = sqlite3.Row
+            wallet.executescript("""
+                CREATE TABLE treasury_instructions(id, receive_id, payment_hash, state);
+                CREATE TABLE treasury_quotes(intent_id, quote_id);
+                CREATE TABLE treasury_prepared(intent_id, operation_id);
+                CREATE TABLE treasury_results(intent_id);
+                INSERT INTO treasury_instructions VALUES('intent','original','hash','bound');
+                INSERT INTO treasury_quotes VALUES('intent','quote');
+            """)
+            historical = list(read_melts(wallet))[0]
+            self.assertIsNone(historical['operation_id'])
+            wallet.execute('CREATE TABLE treasury_preparation_operations(intent_id, operation_id)')
+            wallet.execute("INSERT INTO treasury_preparation_operations VALUES('intent',?)", (operation,))
+            claimed = list(read_melts(wallet))[0]
+            self.assertEqual(claimed['operation_id'], operation)
+            compare(iter([historical]), iter([claimed]), ('operation_id',), lambda _: False, 1)
+            wallet.execute("INSERT INTO treasury_prepared VALUES('intent',?)", (operation,))
+            self.assertEqual(list(read_melts(wallet))[0], claimed)
+            wallet.execute("UPDATE treasury_prepared SET operation_id='conflicting'")
+            with self.assertRaisesRegex(ValueError, 'differs from the original wallet claim'):
+                list(read_melts(wallet))
+
     def test_fenced_advance_checks_the_reference_outcomes(self):
         custody = {'stale_local_unspent_sats': 0, 'mint_unresolved_sats': 0, 'mint_unspent_held_sats': 0,
                    'mint_unspent_sats': 16}

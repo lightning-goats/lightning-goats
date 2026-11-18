@@ -606,8 +606,14 @@ impl Journal {
     }
 
     pub(crate) fn require_queued_receivers(&self, keys: &crate::service_keys::Keys) -> Result<()> {
-        let mut rows = self
-            .connection
+        Self::verify_queued_receivers(&self.connection, keys)
+    }
+
+    pub(crate) fn verify_queued_receivers(
+        connection: &Connection,
+        keys: &crate::service_keys::Keys,
+    ) -> Result<()> {
+        let mut rows = connection
             .prepare("SELECT c.proofs FROM acquisitions a LEFT JOIN acquisition_context c ON c.acquisition_id=a.id WHERE a.state='validated'")?;
         let pending = rows.query_map([], |row| row.get::<_, Vec<u8>>(0))?;
         for material in pending {

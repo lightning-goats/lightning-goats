@@ -288,6 +288,10 @@ def stage(args, common, tool_identity):
             with closing(common['Frozen'](source, 0, 1024**3, budget)) as frozen:
                 copied = frozen.copy(images / role / name)
             image_records[role].append({'name': str(name), **copied})
+        if role in ('wallet', 'cashu_signer'):
+            lock = 'wallet-writer.lock'
+            common['write'](images / role / lock, b'')
+            image_records[role].append({'name': lock, 'sha256': common['sha'](b''), 'bytes': 0})
         common['sync'](images / role)
     for directory in sorted((p for p in plain.rglob('*') if p.is_dir()), reverse=True):
         common['sync'](directory)

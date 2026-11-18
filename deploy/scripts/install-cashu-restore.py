@@ -52,7 +52,8 @@ def verify_directory(state, worker, members, common, budget, names=None):
     for name, member in members.items():
         path = state / name
         private_attributes(path)
-        with closing(common['Frozen'](path, worker['uid'], GIB, budget, gid=worker['gid'])) as installed:
+        with closing(common['Frozen'](path, worker['uid'], GIB, budget, gid=worker['gid'],
+                                      empty=name == 'wallet-writer.lock')) as installed:
             if (installed.digest, installed.expected[6], stat.S_IMODE(installed.expected[4])) != (
                     member['sha256'], member['bytes'], 0o600):
                 raise ValueError('existing target differs from the exact fenced installation')
@@ -63,7 +64,7 @@ def copy_role(source, destination, members, worker, common, budget):
     destination.chmod(0o700)
     private_attributes(destination)
     for name, expected in members.items():
-        with closing(common['Frozen'](source / name, 0, GIB, budget)) as frozen:
+        with closing(common['Frozen'](source / name, 0, GIB, budget, empty=name == 'wallet-writer.lock')) as frozen:
             if frozen.copy(destination / name) != expected:
                 raise ValueError('staged image changed while preparing installation')
         path = destination / name

@@ -3,20 +3,28 @@ use crate::service_config::Config;
 use anyhow::{Result, ensure};
 use rusqlite::{Connection, OpenFlags, params};
 use serde::Serialize;
-use std::{collections::BTreeMap, os::unix::fs::MetadataExt, time::Duration};
+use std::{collections::BTreeMap, os::unix::fs::MetadataExt, path::Path, time::Duration};
 use uuid::Uuid;
 mod health;
 pub use health::{Funds, Health, MintFunds, Queue};
+mod recovery;
+pub use recovery::{PausedRecovery, RecoveryReadiness};
 
 const DETAIL_LIMIT: usize = 64;
 
 pub(crate) fn open_readonly_journal(config: &Config) -> Result<Connection> {
-    let path = config.state_directory.join("acquisition.sqlite");
-    let metadata = std::fs::symlink_metadata(&path)?;
+    open_private_readonly_store(
+        &config.state_directory.join("acquisition.sqlite"),
+        config.runtime_uid,
+    )
+}
+
+fn open_private_readonly_store(path: &Path, runtime_uid: u32) -> Result<Connection> {
+    let metadata = std::fs::symlink_metadata(path)?;
     ensure!(
         metadata.is_file()
             && metadata.nlink() == 1
-            && metadata.uid() == config.runtime_uid
+            && metadata.uid() == runtime_uid
             && metadata.mode() & 0o077 == 0,
         "read-only operation requires a private regular journal"
     );
@@ -29,6 +37,26 @@ pub(crate) fn open_readonly_journal(config: &Config) -> Result<Connection> {
     connection.busy_timeout(Duration::from_secs(1))?;
     connection.pragma_update(None, "query_only", true)?;
     Ok(connection)
+}
+
+pub(crate) fn require_bound_wallet(
+    db: &Connection,
+    config: &Config,
+    keys: &crate::service_keys::Keys,
+) -> Result<()> {
+    let (epoch, instance, key_binding, layout): (String, String, Vec<u8>, i64) = db.query_row(
+        "SELECT e.epoch,r.instance,r.key_binding,s.version FROM wallet_epoch e CROSS JOIN runtime_registration r CROSS JOIN cdk_storage_layout s WHERE e.singleton=1 AND r.singleton=1 AND s.singleton=1",
+        [],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+    )?;
+    ensure!(
+        epoch == config.wallet_epoch.to_string()
+            && instance == config.wallet_instance.to_string()
+            && key_binding == keys.binding()
+            && layout == 1,
+        "wallet state differs from the reviewed registration"
+    );
+    Ok(())
 }
 #[derive(Serialize)]
 pub struct Status {

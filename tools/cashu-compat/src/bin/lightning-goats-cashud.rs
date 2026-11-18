@@ -2,11 +2,11 @@
 #![forbid(unsafe_code)]
 use lightning_goats_cashu_compat::{
     descriptor::Encoding, operator_treasury::Purpose, service::Runtime, service_config::Config,
-    writer_lock::RecoveryRequired,
+    status::PausedRecovery, writer_lock::RecoveryRequired,
 };
 use std::{ffi::OsString, path::PathBuf, process::ExitCode};
 
-const USAGE: &str = "Usage: lightning-goats-cashud <check-config|initialize|run|status> <config.json>\n\
+const USAGE: &str = "Usage: lightning-goats-cashud <check-config|initialize|run|status|recovery-paused> <config.json>\n\
        lightning-goats-cashud reconcile-acquisition <config.json> <approval.json>\n\
        lightning-goats-cashud reconcile-treasury <config.json> <approval.json>\n\
        lightning-goats-cashud cleanup-treasury <config.json> <approval.json>\n\
@@ -17,6 +17,7 @@ check-config  Validate protected configuration without opening wallet state or k
 initialize    Explicitly initialize empty wallet databases using provisioned keys.\n\
 run           Open existing wallet state; serve private intake and configured acquisition.\n\
 status        Read bounded private journal status without loading keys or changing work.\n\
+recovery-paused  Verify existing keys and stores, report readiness and hold the writer lock.\n\
 reconcile-acquisition  Check one approved original acquisition; no swap/melt replay.\n\
 reconcile-treasury  Check one original submitted melt and retain its wallet report.\n\
 cleanup-treasury  Verify and clean up one previously reported melt.\n\
@@ -33,6 +34,7 @@ enum Command {
     Initialize(PathBuf),
     Run(PathBuf),
     Status(PathBuf),
+    RecoveryPaused(PathBuf),
     ReconcileAcquisition(PathBuf, PathBuf),
     Treasury(Purpose, PathBuf, PathBuf),
     ReviewMintPolicy(PathBuf, PathBuf),
@@ -110,8 +112,19 @@ fn parse(args: Vec<OsString>) -> Result<Command, ()> {
         Some("initialize") => Ok(Command::Initialize(path)),
         Some("run") => Ok(Command::Run(path)),
         Some("status") => Ok(Command::Status(path)),
+        Some("recovery-paused") => Ok(Command::RecoveryPaused(path)),
         _ => Err(()),
     }
+}
+
+fn shutdown() -> Result<impl Future<Output = ()>, &'static str> {
+    let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .map_err(|_| "wallet termination handler unavailable")?;
+    let mut interrupt = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
+        .map_err(|_| "wallet interrupt handler unavailable")?;
+    Ok(async move {
+        tokio::select! { _ = terminate.recv() => {}, _ = interrupt.recv() => {} }
+    })
 }
 
 async fn execute(command: Command) -> Result<(), &'static str> {
@@ -141,6 +154,26 @@ async fn execute(command: Command) -> Result<(), &'static str> {
                 "{}",
                 serde_json::to_string(&status).map_err(|_| "wallet status encoding failed")?
             );
+        }
+        Command::RecoveryPaused(path) => {
+            let config = Config::load(&path).map_err(|_| "wallet configuration rejected")?;
+            let stop = shutdown()?;
+            let recovery = PausedRecovery::open(&config).map_err(|error| {
+                if error.is::<RecoveryRequired>() {
+                    RecoveryRequired::MESSAGE
+                } else {
+                    "paused wallet recovery rejected; inspect the retained keys, stores and writer"
+                }
+            })?;
+            println!(
+                "{}",
+                serde_json::to_string(&recovery.readiness)
+                    .map_err(|_| "wallet recovery readiness encoding failed")?
+            );
+            std::io::Write::flush(&mut std::io::stdout())
+                .map_err(|_| "wallet recovery readiness output unavailable")?;
+            stop.await;
+            drop(recovery);
         }
         Command::ReconcileAcquisition(path, approval) => {
             let decision =
@@ -209,12 +242,7 @@ async fn execute(command: Command) -> Result<(), &'static str> {
         }
         Command::Run(path) => {
             let config = Config::load(&path).map_err(|_| "wallet configuration rejected")?;
-            let mut terminate =
-                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-                    .map_err(|_| "wallet termination handler unavailable")?;
-            let mut interrupt =
-                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
-                    .map_err(|_| "wallet interrupt handler unavailable")?;
+            let stop = shutdown()?;
             let runtime = Runtime::open(config).await.map_err(|error| {
                 if error.is::<RecoveryRequired>() {
                     RecoveryRequired::MESSAGE
@@ -222,9 +250,7 @@ async fn execute(command: Command) -> Result<(), &'static str> {
                     "wallet startup rejected; configuration, keys and retained state require inspection"
                 }
             })?;
-            runtime.serve(async move {
-                tokio::select! { _ = terminate.recv() => {}, _ = interrupt.recv() => {} }
-            }).await.map_err(|_| "wallet service stopped after an internal error; retained state requires inspection")?;
+            runtime.serve(stop).await.map_err(|_| "wallet service stopped after an internal error; retained state requires inspection")?;
         }
     }
     Ok(())
@@ -318,6 +344,10 @@ mod tests {
             Ok(Command::Run("/fixture/config.json".into()))
         );
         assert_eq!(
+            parse(args(&["recovery-paused", "/fixture/config.json"])),
+            Ok(Command::RecoveryPaused("/fixture/config.json".into()))
+        );
+        assert_eq!(
             parse(args(&["check-config", "/fixture/config.json"])),
             Ok(Command::Check("/fixture/config.json".into()))
         );
@@ -328,6 +358,8 @@ mod tests {
         for values in [
             vec![],
             vec!["run"],
+            vec!["recovery-paused"],
+            vec!["recovery-paused", "file", "run"],
             vec!["reconcile-acquisition", "file"],
             vec!["reconcile-acquisition", "file", ""],
             vec!["reconcile-acquisition", "file", "approval", "--clear-hold"],

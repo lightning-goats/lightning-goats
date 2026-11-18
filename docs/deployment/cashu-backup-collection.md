@@ -632,7 +632,7 @@ checkpoint. It interrupts once after retaining an older directory and once
 after publishing a later image. The same command completes the switch and
 keeps the previous six images available in protected storage.
 
-### Paused core readiness
+### Paused core and wallet readiness
 
 The core daemon can serve read-only recovery status on the configured loopback
 listener. Use the flag on a disposable, verified recovery copy under the
@@ -651,6 +651,24 @@ The daemon skips provider credentials, payment and WebSocket routes, all
 financial workers, receipt sockets, Nostr, and the feeder gateway. The flag
 does not grant authority to clear a marker or resume financial processing.
 
+The wallet has a matching mode under its dedicated runtime identity:
+
+```sh
+lightning-goats-cashud recovery-paused WALLET_CONFIG
+```
+
+It honors the recovery marker and holds the existing wallet writer lock.
+It verifies the wallet identity, epoch, seed and receiving keys, plus the
+retained mint-to-store bindings. It reads journal custody and deposit totals
+without running database migrations or starting listeners and workers. The
+mode prints one JSON readiness record and holds the lock until SIGINT or
+SIGTERM. The reported totals come from the recovered journal.
+
+Newly staged wallet and Cashu signer images include private empty lock files
+bound into the staging manifest. The stager creates these files for the
+replacement installation. Stage the original archive again with the current
+capsule when an earlier staged wallet lacks its lock file.
+
 The funded restart fixture clones the installed later core, wallet and Cashu
 signer images into disposable role directories. It starts the actual three
 binaries twice under separate UIDs in a loopback-only namespace. The core
@@ -658,13 +676,16 @@ uses paused recovery with a canary configuration that enables Cashu intake
 and configures receipt import. The test starts the core without credentials,
 probes for rejected effectful HTTP routes, checks that the receipt socket
 stays absent, and confirms neither loopback provider receives a connection.
-The paused wallet disables acquisition, credit delivery, treasury, and
-publication. The three CyberHerd workers refuse their disabled settings.
+The wallet uses its paused mode with acquisition, receipt delivery and
+treasury enabled in the test configuration. The test verifies writer
+exclusion, checks that intake and treasury sockets stay absent, and tests
+refusal of a missing lock, missing mint store, and mismatched seed. The three
+CyberHerd workers refuse their disabled settings.
 Each cycle must preserve 16 sats of available feed credit, 16 sats of wallet
 custody, completed Strike deposits totaling 396 sats, and the original
-simulated feeding. The test checks the installed core's fence before starting
-the copies and confirms all six installed role images still match the fenced
-reference afterward.
+simulated feeding. The test compares durable wallet bytes, checks both the
+core and wallet fences before starting copies, and confirms all six installed
+role images still match the fenced reference afterward.
 
 Removal of an installed recovery fence, startup using installed policies and
 credentials, and live provider acceptance still require separate qualification.

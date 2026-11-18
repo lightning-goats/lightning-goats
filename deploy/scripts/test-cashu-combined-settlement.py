@@ -531,7 +531,9 @@ def verify_funded_install(root, native_inputs, systemd_masks):
             or restart['paused_core_sats'] != 16 or restart['paused_wallet_sats'] != 16
             or not all(restart[key] is True for key in ('core_started_without_credentials',
                 'core_effectful_routes_absent', 'core_backend_connections_absent', 'core_fence_honored',
-                'core_receipt_socket_absent'))
+                'core_receipt_socket_absent', 'wallet_fence_honored', 'wallet_writer_held',
+                'wallet_intake_sockets_absent', 'wallet_wrong_or_missing_artifacts_refused',
+                'wallet_durable_bytes_unchanged'))
             or restart['installed_fences_cleared'] is not False
             or restart['resume_authorized'] is not False
             or restore['resume_authorized'] is not False):

@@ -80,6 +80,29 @@ pub async fn open_wallet_storage(
     Ok(Arc::new(cdk_sqlite::WalletSqliteDatabase::new(path).await?))
 }
 
+pub(crate) fn mint_store_filename(mint_id: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let hash = Sha256::digest(format!("lightning-goats/cdk-mint-store/v1\0{mint_id}"));
+    format!("mint-{}.sqlite", cdk::util::hex::encode(hash))
+}
+
+pub(crate) fn require_mint_store_binding(
+    connection: &rusqlite::Connection,
+    mint_id: &str,
+    mint_url: &str,
+) -> Result<()> {
+    let retained: (String, String) = connection.query_row(
+        "SELECT mint_id,mint_url FROM lg_mint_namespace WHERE singleton=1",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    anyhow::ensure!(
+        (retained.0.as_str(), retained.1.as_str()) == (mint_id, mint_url),
+        "mint storage namespace binding changed"
+    );
+    Ok(())
+}
+
 /// A CDK proof store belongs to exactly one configured mint. CDK's proof primary
 /// key is Y, so sharing this store across issuers can overwrite a pending proof.
 /// The common application writer/journal remain the cross-mint authority.
@@ -90,11 +113,8 @@ pub async fn open_mint_wallet_storage(
     initialize: bool,
 ) -> Result<Arc<cdk_sqlite::WalletSqliteDatabase>> {
     use anyhow::ensure;
-    use sha2::{Digest, Sha256};
     crate::private_ipc::private_state(directory)?;
-    let hash = Sha256::digest(format!("lightning-goats/cdk-mint-store/v1\0{}", policy.id));
-    let name = format!("mint-{}.sqlite", cdk::util::hex::encode(hash));
-    let path = directory.join(name);
+    let path = directory.join(mint_store_filename(&policy.id));
     match std::fs::symlink_metadata(&path) {
         Ok(meta) => ensure!(
             !initialize && meta.is_file() && meta.len() > 0,
@@ -132,15 +152,7 @@ pub async fn open_mint_wallet_storage(
             )?;
         }
         let tx = connection.transaction()?;
-        let retained: (String, String) = tx.query_row(
-            "SELECT mint_id,mint_url FROM lg_mint_namespace WHERE singleton=1",
-            [],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )?;
-        ensure!(
-            retained == (policy.id.clone(), policy.advertised_url.clone()),
-            "mint storage namespace binding changed"
-        );
+        require_mint_store_binding(&tx, &policy.id, &policy.advertised_url)?;
         tx.commit()?;
     }
     Ok(Arc::new(cdk_sqlite::WalletSqliteDatabase::new(path).await?))

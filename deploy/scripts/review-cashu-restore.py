@@ -61,7 +61,10 @@ def open_images(stage, expected, common, budget, *, wallet_inventory=False):
             if len(path.parts) != 1 or path.name in names:
                 raise ValueError('staged file name is not unique and local')
             names.add(path.name)
-            with closing(common['Frozen'](directory / path, 0, 1024**3, budget)) as file:
+            lock = path.name == 'wallet-writer.lock'
+            if lock and (role not in ('wallet', 'cashu_signer') or member['bytes'] != 0):
+                raise ValueError('unexpected staged writer lock')
+            with closing(common['Frozen'](directory / path, 0, 1024**3, budget, empty=lock)) as file:
                 if file.digest != member['sha256'] or file.expected[6] != member['bytes']:
                     raise ValueError('staged image changed since verification')
                 if role == 'wallet' and wallet_inventory:

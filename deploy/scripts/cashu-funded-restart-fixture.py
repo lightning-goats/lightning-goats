@@ -1,5 +1,7 @@
 """Rehearse startup and restart from a disposable copy of the advanced checkpoint."""
 from contextlib import closing, contextmanager
+import fcntl
+import hashlib
 import http.client
 import json
 import os
@@ -19,11 +21,10 @@ CORE_TABLES = (
     'cashu_treasury_issuances', 'cashu_treasury_deposits', 'cashu_treasury_completions', 'message_outbox',
 )
 WALLET_TABLES = ('acquisitions', 'treasury_instructions', 'treasury_results', 'treasury_cdk_cleanup')
-PAUSED = (
+ENABLED_IN_WALLET_CONFIG = (
     'acquisition_enabled', 'reconciliation_enabled', 'receipt_delivery_enabled',
     'treasury_intake_enabled', 'treasury_admission_enabled', 'treasury_execution_enabled',
-    'treasury_split_execution_enabled', 'treasury_reconciliation_enabled', 'relay_intake_enabled',
-    'publication_signing_enabled', 'publication_delivery_enabled',
+    'treasury_reconciliation_enabled',
 )
 CLEAN_ENV = {'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'}
 PAYMENT_AND_PRESENTATION_ROUTES = (
@@ -104,6 +105,15 @@ def unix_listener(path):
     return True
 
 
+def require_writer_held(lock):
+    with lock.open('rb') as contender:
+        try:
+            fcntl.flock(contender, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return
+        raise ValueError('paused wallet failed to hold its existing writer exclusion')
+
+
 @contextmanager
 def runtime(command, ready, log, stop, environment=None):
     with log.open('w+') as output:
@@ -157,6 +167,15 @@ def rehearse(root, workers, binaries, configurations, core_daemon):
     if fenced.returncode != 1 or b'requires explicit external reconciliation' not in fenced.stderr:
         raise ValueError('paused recovery started despite the installed core fence')
 
+    def refuse_wallet(config, reason):
+        refused = subprocess.run(
+            as_runtime(workers['wallet'], binaries['wallet'], 'recovery-paused', config),
+            stdin=subprocess.DEVNULL, capture_output=True, timeout=10, env=CLEAN_ENV)
+        if refused.returncode != 1 or refused.stdout or reason not in refused.stderr:
+            raise ValueError('paused wallet accepted a nonready recovery image')
+
+    refuse_wallet(configurations['wallet'], b'Cashu recovery requires explicit reconciliation')
+
     # Keep feeding-enabled canary settings and configure ordinary Cashu and
     # receipt ingress. Paused recovery must ignore their runtime authority.
     with socket.socket() as listener_port, socket.socket() as outbound_probe:
@@ -179,14 +198,48 @@ def rehearse(root, workers, binaries, configurations, core_daemon):
             if original.count(old) != 1:
                 raise ValueError('ambiguous synthetic core configuration')
             original = original.replace(old, new)
-        wallet_socket = private_directory(root / 'w', workers['wallet'], 0o710) / 'intake.sock'
-        wallet = json.loads(configurations['wallet'].read_bytes())
-        wallet.update(state_directory=str(dirs['wallet']), intake_socket=str(wallet_socket))
-        wallet_config = config_file(root / 'wallet.json', json.dumps(wallet))
-
         receipt_socket = private_directory(root / 'c', workers['core'], 0o710) / 'receipts.sock'
         [(core_epoch,)] = rows(dirs['core'] / 'ledger.sqlite', {
             'epoch': 'SELECT stream_id FROM overlay_identity WHERE singleton=1'})['epoch']
+        wallet_run = private_directory(root / 'w', workers['wallet'], 0o710)
+        wallet_socket, treasury_socket = wallet_run / 'intake.sock', wallet_run / 'treasury.sock'
+        wallet = json.loads(configurations['wallet'].read_bytes())
+        wallet.update(state_directory=str(dirs['wallet']), intake_socket=str(wallet_socket),
+                      execution={'acquire': True, 'reconcile': True, 'maximum_attempts': 2},
+                      receipt_delivery={'enabled': True, 'socket': str(receipt_socket),
+                                        'core_epoch': core_epoch, 'maximum_attempts': 2, 'deadline_seconds': 5},
+                      treasury_intake={'enabled': True, 'accept_new': True, 'socket': str(treasury_socket),
+                                       'core_epoch': core_epoch, 'policies': {'fixture-a': 'fixture-v1'},
+                                       'destination': {'origin': f'http://127.0.0.1:{outbound_port}/',
+                                                       'account_id': core_epoch, 'network': 'bitcoin',
+                                                       'credential_fingerprint': 'ab' * 32}},
+                      treasury_execution={'execute': True, 'reconcile': True, 'maximum_attempts': 2,
+                                          'maximum_input_sats': 100, 'maximum_in_flight_sats': 100,
+                                          'operations_per_24h': 2, 'input_sats_per_24h': 200})
+        wallet_config = config_file(root / 'wallet.json', json.dumps(wallet))
+        wallet_state = dirs['wallet']
+        lock = wallet_state / 'wallet-writer.lock'
+        wallet_log = root / 'wallet.log'
+        startup = b'paused wallet recovery rejected'
+        for path in (lock, next(wallet_state.glob('mint-*.sqlite'))):
+            retained = root / 'retained-wallet-artifact'
+            path.rename(retained)
+            try:
+                refuse_wallet(wallet_config, startup)
+                if path.exists():
+                    raise ValueError('paused wallet recreated a missing lock or mint store')
+            finally:
+                retained.rename(path)
+        seed = wallet_state / 'wallet-seed.bin'
+        original_seed = seed.read_bytes()
+        try:
+            seed.write_bytes(bytes(64))
+            refuse_wallet(wallet_config, startup)
+        finally:
+            seed.write_bytes(original_seed)
+        wallet_bytes = {path: hashlib.sha256(path.read_bytes()).hexdigest()
+                        for path in wallet_state.iterdir()
+                        if not path.name.endswith(('-wal', '-shm'))}
         registration = f'''
 wallet_uid = {wallet['runtime_uid']}
 wallet_instance = "{wallet['wallet_instance']}"
@@ -226,8 +279,8 @@ connections_per_second = 8
                           stop),
                   runtime(as_runtime(workers['cashu_signer'], binaries['signer'], 'run', signer_config),
                           lambda: unix_listener(signer_socket), root / 'signer.log', signal.SIGTERM, signer_env),
-                  runtime(as_runtime(workers['wallet'], binaries['wallet'], 'run', wallet_config),
-                          lambda: unix_listener(wallet_socket), root / 'wallet.log', signal.SIGTERM)):
+                  runtime(as_runtime(workers['wallet'], binaries['wallet'], 'recovery-paused', wallet_config),
+                          lambda: wallet_log.read_text().endswith('\n'), wallet_log, stop)):
                 core = http_json(port, '/api/v1/status')
                 if core != {'mode': 'recovery-paused', 'feed_credit_sats': 16, 'unresolved_feed_attempt': None}:
                     raise ValueError('restored core did not preserve its paused state and available credit')
@@ -239,13 +292,25 @@ connections_per_second = 8
                 status = json.loads(subprocess.check_output(
                     as_runtime(workers['wallet'], binaries['wallet'], 'status', wallet_config),
                     stdin=subprocess.DEVNULL, timeout=10, env=CLEAN_ENV))
+                readiness = json.loads(wallet_log.read_bytes())
+                if readiness != {'mode': 'recovery-paused', 'wallet_instance': wallet['wallet_instance'],
+                                 'wallet_epoch': wallet['wallet_epoch'], 'mint_namespaces': 2,
+                                 'journal_custody_sats': 16, 'reported_treasury_deposit_sats': 396,
+                                 'resume_authorized': False}:
+                    raise ValueError('paused wallet readiness differs from the funded registration')
+                require_writer_held(lock)
+                if any(os.path.lexists(path) for path in (wallet_socket, treasury_socket, receipt_socket)):
+                    raise ValueError('paused recovery exposed an intake, treasury or receipt socket')
                 funds = status['health']['totals']
                 if (not status['registration_matches'] or status['recovery_required']
                         or len(status['mint_namespaces']) != 2 or status['incomplete_mint_namespaces']
                         or funds['journal_custody_sats'] != 16 or funds['reported_treasury_deposit_sats'] != 396
-                        or any(status[flag] is not False for flag in PAUSED)):
-                    raise ValueError('restored wallet did not preserve its paused policy and funded custody')
-            if (before != financial_state(dirs) or os.path.lexists(receipt_socket)
+                        or any(status[flag] is not True for flag in ENABLED_IN_WALLET_CONFIG)):
+                    raise ValueError('paused wallet did not preserve its enabled configuration and funded custody')
+            if (before != financial_state(dirs)
+                    or any(hashlib.sha256(path.read_bytes()).hexdigest() != expected
+                           for path, expected in wallet_bytes.items())
+                    or any(os.path.lexists(path) for path in (wallet_socket, treasury_socket, receipt_socket))
                     or select.select([outbound_probe], [], [], 0)[0]):
                 raise ValueError('paused restart changed retained financial history or mint state')
     return {'native_start_stop_cycles': 2, 'paused_core_sats': 16, 'paused_wallet_sats': 16,
@@ -254,4 +319,6 @@ connections_per_second = 8
             'core_started_without_credentials': True, 'core_effectful_routes_absent': True,
             'core_backend_connections_absent': True, 'core_fence_honored': True,
             'core_receipt_socket_absent': True,
+            'wallet_fence_honored': True, 'wallet_writer_held': True, 'wallet_intake_sockets_absent': True,
+            'wallet_wrong_or_missing_artifacts_refused': True, 'wallet_durable_bytes_unchanged': True,
             'installed_fences_cleared': False, 'resume_authorized': False}

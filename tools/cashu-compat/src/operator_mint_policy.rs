@@ -2,7 +2,7 @@
 use crate::{
     journal::cdk_storage::verify_mint_namespaces,
     service_config::{Config, read_protected},
-    status::open_readonly_journal,
+    status::{open_readonly_journal, require_bound_wallet},
     writer_lock::WriterLock,
 };
 use anyhow::{Result, ensure};
@@ -142,18 +142,7 @@ pub fn review(current_path: &Path, candidate_path: &Path) -> Result<Review> {
     let keys = current.load_keys()?;
     let db = open_readonly_journal(&current)?;
     db.pragma_update(None, "trusted_schema", false)?;
-    let (epoch, instance, key_binding, layout): (String, String, Vec<u8>, i64) = db.query_row(
-        "SELECT e.epoch,r.instance,r.key_binding,s.version FROM wallet_epoch e CROSS JOIN runtime_registration r CROSS JOIN cdk_storage_layout s WHERE e.singleton=1 AND r.singleton=1 AND s.singleton=1",
-        [],
-        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
-    )?;
-    ensure!(
-        epoch == current.wallet_epoch.to_string()
-            && instance == current.wallet_instance.to_string()
-            && key_binding == keys.binding()
-            && layout == 1,
-        "wallet state differs from the reviewed registration"
-    );
+    require_bound_wallet(&db, &current, &keys)?;
     let retained = verify_mint_namespaces(&db, &candidate.mints)?;
     let mut mints = Vec::new();
     for mint in candidate.mints {

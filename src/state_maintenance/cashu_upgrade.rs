@@ -75,7 +75,7 @@ pub(super) async fn private_catalog(version: i64) -> Result<BTreeMap<String, Def
 
 pub(super) async fn compare_images(before: &Path, after: &Path, policy: &Policy) -> Result<()> {
     database::inspect_schema_25(before, policy).await?;
-    let (_, version) = database::inspect_inactive_cashu(after, policy, false).await?;
+    let (_, version) = database::inspect_upgrade_copy(after, policy, 26, false).await?;
     let expected_private = private_catalog(version).await?;
     for role in Role::ALL {
         let old = rows::open_named(before, &role.file()).await?;

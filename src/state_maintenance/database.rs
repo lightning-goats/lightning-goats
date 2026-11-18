@@ -6,7 +6,7 @@ use sqlx::{
     Row as _, SqlitePool,
     sqlite::{SqliteConnectOptions, SqlitePoolOptions},
 };
-use std::{collections::BTreeMap, path::Path};
+use std::{collections::BTreeMap, ops::RangeInclusive, path::Path};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -50,25 +50,15 @@ pub(super) async fn inspect_cashu_correlations(
     directory: &Path,
     policy: &Policy,
 ) -> Result<Report> {
-    if let Ok(report) = inspect_version(
+    Ok(inspect_versions(
         directory,
         policy,
-        CURRENT_CORE_SCHEMA,
+        26..=CURRENT_CORE_SCHEMA,
         false,
         ReviewScope::CashuCorrelationsOnly,
     )
-    .await
-    {
-        return Ok(report);
-    }
-    inspect_version(
-        directory,
-        policy,
-        26,
-        false,
-        ReviewScope::CashuCorrelationsOnly,
-    )
-    .await
+    .await?
+    .0)
 }
 pub(super) async fn inspect_schema_25(directory: &Path, policy: &Policy) -> Result<Report> {
     inspect_version(
@@ -131,54 +121,30 @@ async fn inspect_inclusive_fees(
     policy: &Policy,
     before_fees: bool,
 ) -> Result<Report> {
-    if let Ok(report) = inspect_version(
-        directory,
-        policy,
-        25,
-        before_fees,
-        ReviewScope::OrdinaryMaintenance,
-    )
-    .await
-    {
-        return Ok(report);
-    }
-    // A payout-only upgrade may also preserve a current core with the exact
-    // inactive extension. This is not a coordinated Cashu-custody backup.
-    Ok(inspect_inactive_cashu(directory, policy, before_fees)
+    Ok(inspect_upgrade_copy(directory, policy, 25, before_fees)
         .await?
         .0)
 }
 
-pub(super) async fn inspect_inactive_cashu(
+pub(super) async fn inspect_upgrade_copy(
     directory: &Path,
     policy: &Policy,
+    oldest: i64,
     before_fees: bool,
 ) -> Result<(Report, i64)> {
-    let current = inspect_version(
+    let (report, version) = inspect_versions(
         directory,
         policy,
-        CURRENT_CORE_SCHEMA,
+        oldest..=CURRENT_CORE_SCHEMA,
         before_fees,
         ReviewScope::OrdinaryMaintenance,
     )
-    .await;
-    let (report, version) = match current {
-        Ok(report) => (report, CURRENT_CORE_SCHEMA),
-        Err(_) => (
-            inspect_version(
-                directory,
-                policy,
-                26,
-                before_fees,
-                ReviewScope::OrdinaryMaintenance,
-            )
-            .await?,
-            26,
-        ),
-    };
-    for table in super::cashu_upgrade::tables_for_core(version) {
-        if report.rows[&Role::Core].get(table) != Some(&0) {
-            bail!("maintenance requires empty inactive Cashu tables");
+    .await?;
+    if version >= 26 {
+        for table in super::cashu_upgrade::tables_for_core(version) {
+            if report.rows[&Role::Core].get(table) != Some(&0) {
+                bail!("maintenance requires empty inactive Cashu tables");
+            }
         }
     }
     Ok((report, version))
@@ -190,8 +156,27 @@ async fn inspect_version(
     before_fees: bool,
     scope: ReviewScope,
 ) -> Result<Report> {
+    Ok(inspect_versions(
+        directory,
+        policy,
+        core_version..=core_version,
+        before_fees,
+        scope,
+    )
+    .await?
+    .0)
+}
+
+async fn inspect_versions(
+    directory: &Path,
+    policy: &Policy,
+    versions: RangeInclusive<i64>,
+    before_fees: bool,
+    scope: ReviewScope,
+) -> Result<(Report, i64)> {
     let mut pools = BTreeMap::new();
     let mut rows = BTreeMap::new();
+    let mut core_version = *versions.end();
     for role in Role::ALL {
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
@@ -230,6 +215,16 @@ async fn inspect_version(
                 .is_some()
         {
             bail!("journal integrity or foreign keys failed");
+        }
+        if role == Role::Core && versions.start() != versions.end() {
+            // Select a supported schema before running its exact migration and
+            // journal checks. A correlation failure must retain its cause.
+            core_version = sqlx::query_scalar("SELECT MAX(version) FROM _sqlx_migrations")
+                .fetch_one(&pool)
+                .await?;
+            if !versions.contains(&core_version) {
+                bail!("maintenance requires a supported core schema");
+            }
         }
         if core_version != CURRENT_CORE_SCHEMA && role == Role::Core {
             require_core_prefix(&pool, core_version).await?;
@@ -273,7 +268,7 @@ async fn inspect_version(
     for pool in pools.into_values() {
         pool.close().await;
     }
-    report
+    Ok((report?, core_version))
 }
 
 async fn report(

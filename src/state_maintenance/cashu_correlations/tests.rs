@@ -183,6 +183,31 @@ async fn frozen_cashu_journals_preserve_native_correlations_without_restore_auth
     assert!(operator.stage_restore(&bundle, &restore).await.is_err());
     assert!(!restore.exists());
 
+    // Review a historical copy with the same populated Cashu receipt.
+    let legacy = root.path().join("legacy");
+    files::new_private_directory(&legacy).unwrap();
+    for role in Role::ALL {
+        std::fs::copy(bundle.join(role.file()), legacy.join(role.file())).unwrap();
+    }
+    let legacy_core = legacy.join(Role::Core.file());
+    let pool = crate::sqlite::connect_durable(&format!("sqlite://{}", legacy_core.display()), 1)
+        .await
+        .unwrap();
+    sqlx::raw_sql(
+        "DROP TABLE cashu_treasury_fee_observations;
+         DELETE FROM _sqlx_migrations WHERE version=27;",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+    let legacy_review = database::inspect_cashu_correlations(&legacy, &policy)
+        .await
+        .unwrap();
+    assert_eq!(legacy_review.rows[&Role::Core]["cashu_receipt_inbox"], 1);
+    assert!(!legacy_review.rows[&Role::Core].contains_key("cashu_treasury_fee_observations"));
+    assert!(!legacy_review.resume_authorized);
+
     // Every malformed scope must fail before creating a report.
     let original = serde_json::to_value(&input).unwrap();
     for case in 0..8 {

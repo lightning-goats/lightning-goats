@@ -95,6 +95,12 @@ impl Config {
         );
         crate::private_ipc::private_state(&self.state_directory)
     }
+    /// Verify the client credential and helper without opening the journal or spawning the helper.
+    pub fn check_credential(&self) -> Result<()> {
+        self.require_identity()?;
+        self.nak.verify_local_client(&load_client_credential()?)
+    }
+
     /// Creates only the explicitly registered journal; never contacts the bunker.
     pub fn initialize(self) -> Result<()> {
         self.require_identity()?;
@@ -125,8 +131,7 @@ impl Config {
         )?;
         journal.pragma_update(None, "trusted_schema", false)?;
         let signing_requests = self.policy.verify_recovered_journal(&journal)?;
-        self.nak
-            .verify_recovered_client(&load_client_credential()?)?;
+        self.nak.verify_local_client(&load_client_credential()?)?;
         check_paused_recovery_marker(&self.state_directory, "cashu_signer")?;
         Ok(PausedRecovery {
             _writer: writer,

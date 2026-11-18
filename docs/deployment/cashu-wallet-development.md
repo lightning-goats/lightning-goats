@@ -146,10 +146,8 @@ These fields do not certify that a relay possesses or returned every matching ev
 ## Separate Cashu signing broker
 
 `lightning-goats-cashu-signerd` is a separate executable in the same wallet crate.
-Its commands are `check-config <config.json>`, `initialize <config.json>` and
-`run <config.json>`. Build with `--bin lightning-goats-cashu-signerd`. No systemd
-unit or credential is installed by that build. Production activation remains on
-HOLD; this entry point does not authorize public receiving announcements.
+Build with `--bin lightning-goats-cashu-signerd`. Production activation remains on
+HOLD.
 
 The bounded JSON configuration has these fields (unknown fields are rejected):
 
@@ -175,9 +173,17 @@ files, creates only the immutable broker registration, and does not require a
 helper or credential. It never replaces existing state. `run` requires existing
 registered state, the pinned protected helper and provisioned helper state.
 
-Only `run` reads `CREDENTIALS_DIRECTORY/cashu-nostr-client`. Provision this via
-systemd `LoadCredential=cashu-nostr-client:<protected-source>` when a separately
-reviewed unit is ready. The file is exactly 64 hexadecimal characters with one
+`check-credential <config.json>` is an offline check for the dedicated runtime UID.
+It uses the same mounted client credential, protected helper path and helper
+digest as signer startup. It requires the provisioned signer and helper state
+directories. The check opens no journal, starts no helper or listener, and
+returns only a fixed success or failure message. It can run in a one-shot
+sandbox with the reviewed unit's encrypted credential binding and IP denial.
+Remote bunker authorization and signing permissions require separate evidence.
+
+The signer reads `CREDENTIALS_DIRECTORY/cashu-nostr-client` for the credential
+check, runtime and paused recovery. Use systemd's `LoadCredentialEncrypted` with
+the reviewed protected source. The file is exactly 64 hexadecimal characters with one
 optional LF and contains a dedicated NIP-46 client key, **not the project nsec or
 a Cashu receiving key**. The loader rejects symlinks, hardlinks, nonregular files,
 excess bytes, group/other permissions and unprotected directory ancestry. The

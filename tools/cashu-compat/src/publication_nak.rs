@@ -64,7 +64,7 @@ impl Config {
         self.digest_and_state()
     }
     /// Qualify local files and credential binding without retaining a client.
-    pub(crate) fn verify_recovered_client(&self, client_key: &str) -> Result<()> {
+    pub(crate) fn verify_local_client(&self, client_key: &str) -> Result<()> {
         self.validate()?;
         self.runtime_files()?;
         self.verify_client_identity(client_key)

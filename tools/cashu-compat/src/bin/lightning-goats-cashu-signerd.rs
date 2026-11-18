@@ -2,12 +2,13 @@
 #![forbid(unsafe_code)]
 use lightning_goats_cashu_compat::{signing_service::Config, writer_lock::RecoveryRequired};
 use std::{ffi::OsString, path::Path, process::ExitCode};
-const USAGE: &str = "Usage: lightning-goats-cashu-signerd <check-config|initialize|run|recovery-paused> <config.json>\n\
+const USAGE: &str = "Usage: lightning-goats-cashu-signerd <check-config|check-credential|initialize|run|recovery-paused> <config.json>\n\
 check-config  Validate protected configuration without state, credentials or network.\n\
+check-credential  Verify the runtime UID, mounted client credential and pinned helper offline.\n\
 initialize    Explicitly initialize an empty broker journal; no signing or key generation.\n\
 run           Open existing state and serve the registered wallet on a private Unix socket.\n\
 recovery-paused  Verify existing signer state and client credential, then hold the writer lock.\n\
-Signing permissions default off. Run loads only the systemd cashu-nostr-client\n\
+Signing permissions default off. Credential checks and runtime load only the systemd cashu-nostr-client\n\
 credential, a dedicated NIP-46 client key, never the project Nostr private key.";
 async fn execute(args: &[OsString]) -> Result<(), (u8, &'static str)> {
     if args.len() == 1 && (args[0] == "--help" || args[0] == "-h") {
@@ -18,7 +19,7 @@ async fn execute(args: &[OsString]) -> Result<(), (u8, &'static str)> {
         || args[1].is_empty()
         || !matches!(
             args[0].to_str(),
-            Some("check-config" | "initialize" | "run" | "recovery-paused")
+            Some("check-config" | "check-credential" | "initialize" | "run" | "recovery-paused")
         )
     {
         return Err((2, USAGE));
@@ -28,6 +29,12 @@ async fn execute(args: &[OsString]) -> Result<(), (u8, &'static str)> {
     match args[0].to_str() {
         Some("check-config") => {
             println!("Signer configuration valid; state and credentials not opened.")
+        }
+        Some("check-credential") => {
+            config
+                .check_credential()
+                .map_err(|_| (1, "signer local credential or helper binding rejected"))?;
+            println!("Signer local credential and helper binding verified.");
         }
         Some("initialize") => {
             config.initialize().map_err(|_| {

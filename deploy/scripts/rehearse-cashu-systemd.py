@@ -19,6 +19,8 @@ SIGNER = 'lightning-goats-cashu-signerd'
 FENCE = 'CASHU_RECOVERY_REQUIRED'
 ROTATED_RECEIVER = '02e493dbf1c10d80f3581e4904930b1404cc6c13900ee0758474fa94abe8c4cd13'
 PROBE = '''
+import hashlib
+import json
 import os
 from pathlib import Path
 import socket
@@ -52,6 +54,26 @@ try:
 except (PermissionError, TimeoutError):
     pass
 subprocess.run([binary, 'check-config', config], check=True)
+if role == 'signer':
+    helper = json.loads(Path(config).read_text())['nak']['private_directory']
+    def local_state():
+        return {str(path): hashlib.sha256(path.read_bytes()).hexdigest()
+                for folder in (state, helper) for path in Path(folder).iterdir() if path.is_file()}
+    original = local_state()
+    result = subprocess.run([binary, 'check-credential', config], capture_output=True, text=True, check=True)
+    assert result.stdout.strip() == 'Signer local credential and helper binding verified.'
+    without_credential = {key: value for key, value in os.environ.items() if key != 'CREDENTIALS_DIRECTORY'}
+    for candidate, environment in (
+        (config, without_credential),
+        (Path(config).with_name('wrong-client.json'), os.environ),
+        (Path(config).with_name('wrong-helper.json'), os.environ),
+    ):
+        subprocess.run([binary, 'check-config', candidate], env=environment, check=True)
+        refusal = subprocess.run([binary, 'check-credential', candidate], env=environment,
+                                 capture_output=True, text=True)
+        assert refusal.returncode == 1 and not refusal.stdout
+        assert refusal.stderr.strip() == 'signer local credential or helper binding rejected'
+    assert local_state() == original
 print('sandbox probe passed')
 '''
 
@@ -188,6 +210,14 @@ def rehearse(selection, binaries, hashes, uids, states, wallet_config, signer_co
             configs[role] = root / f'{role}.json'
             configs[role].write_text(json.dumps(value))
             configs[role].chmod(0o444)
+        for name, field, wrong in (
+            ('wrong-client.json', 'client_pubkey', '2f8bde4d1a07209355b4a7250a5c5128e88b84bddc619ab7cba8d569b240efe4'),
+            ('wrong-helper.json', 'binary_sha256', '0' * 64),
+        ):
+            original = settings['signer']
+            candidate = root / name
+            candidate.write_text(json.dumps({**original, 'nak': {**original['nak'], field: wrong}}))
+            candidate.chmod(0o444)
 
         listener = cleanup.enter_context(socket.socket())
         listener.bind(('127.0.0.1', 0))
@@ -338,6 +368,10 @@ def rehearse(selection, binaries, hashes, uids, states, wallet_config, signer_co
 
     return dict(result='CASHU_RELEASE_SYSTEMD_VERIFIED', source_commit=source,
                 archive_sha256=checksum, encrypted_signer_credential=True,
+                offline_signer_credential_check={'correct_mount_accepted': True,
+                                                 'missing_and_wrong_client_refused': True,
+                                                 'wrong_helper_digest_refused': True,
+                                                 'journal_and_helper_state_preserved': True},
                 repeated_start_and_stop=True, distinct_runtime_uids=True,
                 loopback_ip_denied_by_systemd=True, installed_fences_preserved=True,
                 receiving_key_rotation={'wallet_anchor_and_namespace_unchanged': True,

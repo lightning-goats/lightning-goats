@@ -1412,7 +1412,7 @@ async fn prepared_treasury_case(scenario: TreasuryScenario) -> Result<()> {
                 .unwrap();
             assert_eq!(report.intent_id, issued.intent.id);
             assert_eq!(report.quote_id, quote.id);
-            assert_eq!(report.sources, issued.intent.allocate_result(1, 0)?);
+            assert!(report.sources == issued.intent.allocate_result(1, 0)?);
             drop(journal);
 
             harness.mint.fail_check_once.store(true, Ordering::SeqCst);

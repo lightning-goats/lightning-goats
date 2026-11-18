@@ -47,6 +47,15 @@ pub(crate) fn check_recovery_marker(directory: &Path) -> Result<()> {
     }
 }
 
+pub(crate) fn check_paused_recovery_marker(directory: &Path, role: &str) -> Result<()> {
+    if crate::private_ipc::allows_paused_recovery(&directory.join("CASHU_RECOVERY_REQUIRED"), role)?
+    {
+        Ok(())
+    } else {
+        Err(RecoveryRequired.into())
+    }
+}
+
 pub struct WriterLock {
     _file: File,
     active: ActiveOperation,
@@ -85,8 +94,21 @@ impl WriterLock {
     /// Take the ordinary writer lease for a read-only review of existing state.
     /// An absent or substituted lock file requires normal provisioning first.
     pub(crate) fn lock_existing(directory: &Path) -> Result<File> {
+        Self::lock_existing_checked(directory, check_recovery_marker)
+    }
+
+    pub(crate) fn lock_paused_recovery(directory: &Path, role: &str) -> Result<File> {
+        Self::lock_existing_checked(directory, |directory| {
+            check_paused_recovery_marker(directory, role)
+        })
+    }
+
+    fn lock_existing_checked(
+        directory: &Path,
+        check_marker: impl Fn(&Path) -> Result<()>,
+    ) -> Result<File> {
         crate::private_ipc::private_state(directory)?;
-        check_recovery_marker(directory)?;
+        check_marker(directory)?;
         let path = directory.join("wallet-writer.lock");
         let file = File::from(rustix::fs::open(
             &path,
@@ -108,7 +130,7 @@ impl WriterLock {
             current.ino() == info.ino() && current.dev() == info.dev(),
             "wallet writer lock changed"
         );
-        check_recovery_marker(directory)?;
+        check_marker(directory)?;
         Ok(file)
     }
 

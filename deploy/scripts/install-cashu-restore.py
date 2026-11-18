@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install or advance a verified checkpoint with every recovery fence intact."""
+"""Install, advance or prepare paused recovery with every runtime fenced."""
 import argparse
 import base64
 from contextlib import ExitStack, closing
@@ -28,6 +28,7 @@ HOST_CREDENTIAL = bytes.fromhex('5a1c6a86df9d4096b1d5a65e0862f19a')
 HOST_KEY = Path('/var/lib/systemd/credential.secret')
 HOST_KEY_APP_ID = 'd3acecba0dad4cdfb8c9381528936c58'
 CLEAN_ENV = {'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'}
+PAUSED_ROLES = ('core', 'wallet', 'cashu_signer')
 
 
 def private_attributes(path):
@@ -247,6 +248,96 @@ def prepare_parking(directory, intent, common, budget):
     common['sync'](directory.parent)
 
 
+def paused_label(role, approval_sha):
+    return f'LG_CASHU_PAUSED_RECOVERY_V1-{role}-{approval_sha}'
+
+
+def paused_approval(args, freeze, common):
+    path, expected = args.paused_approval
+    if not re.fullmatch('[0-9a-f]{64}', expected):
+        raise ValueError('independently reviewed paused recovery approval required')
+    lease = freeze(path, 4096, secret=True)
+    lease.file.seek(0)
+    approval = common['document'](lease.file.read(4096))
+    required = {'version': 1, 'purpose': 'cashu-paused-recovery',
+                'previous_stage_sha256': args.advance_from[1], 'stage_sha256': args.stage_sha256,
+                'policy_sha256': args.policy_sha256, 'evidence_sha256': args.advance_evidence[1]}
+    if lease.digest != expected or approval != required or type(approval['version']) is not int:
+        raise ValueError('paused recovery approval differs from the selected operation')
+    return expected
+
+
+def verify_paused_marker(path, label, worker, expected, common, budget):
+    private_attributes(path)
+    initial = path.lstat()
+    if stat.S_ISLNK(initial.st_mode):
+        if ((initial.st_uid, initial.st_gid, initial.st_nlink) != (0, 0, 1)
+                or os.readlink(path) != label or common['identity'](path.lstat()) != common['identity'](initial)):
+            raise ValueError('paused recovery marker differs from the approved operation')
+        return True
+    with closing(common['Frozen'](path, worker['uid'], 128, budget, gid=worker['gid'])) as marker:
+        if ((marker.digest, marker.expected[6], stat.S_IMODE(marker.expected[4]))
+                != (expected['sha256'], expected['bytes'], 0o600)):
+            raise ValueError('original recovery marker differs from the selected checkpoint')
+    return False
+
+
+def change_paused_gate(args, receipt, states, workers, members, parking, old_members,
+                       common, budget, guard, approval_sha, after_publish):
+    def verify():
+        found = {}
+        for role, state in states.items():
+            park, intent = parking[role]
+            if not parked_state(park, intent, common, budget):
+                raise ValueError('paused recovery requires all earlier images retained')
+            verify_directory(park / 'fenced-state', workers[role], old_members[role], common, budget)
+            if role not in PAUSED_ROLES:
+                verify_directory(state, workers[role], members[role], common, budget)
+                continue
+            if state.stat().st_dev != state.parent.stat().st_dev or os.path.ismount(state):
+                raise ValueError('paused marker replacement requires a shared protected filesystem')
+            name = REVIEW['recovery_marker'](role)
+            found[role] = verify_paused_marker(state / name, paused_label(role, approval_sha),
+                                               workers[role], members[role][name], common, budget)
+            verify_directory(state, workers[role],
+                             {key: value for key, value in members[role].items() if key != name},
+                             common, budget, names=target_inventory(state, workers[role], common) - {name})
+        return found
+
+    guard()
+    ready = verify()
+    prepare = args.paused_gate == 'prepare'
+    hard_marker = (receipt['checkpoint_id'] + '\n').encode()
+    for role in PAUSED_ROLES:
+        if ready[role] == prepare:
+            continue
+        state, worker = states[role], workers[role]
+        label = paused_label(role, approval_sha)
+        name = REVIEW['recovery_marker'](role)
+        with tempfile.TemporaryDirectory(prefix='.lg-cashu-marker-', dir=state.parent) as temporary:
+            successor = Path(temporary) / 'marker'
+            if prepare:
+                successor.symlink_to(label)
+                os.chown(successor, 0, 0, follow_symlinks=False)
+            else:
+                common['write'](successor, hard_marker)
+                with successor.open('rb') as marker:
+                    os.fchown(marker.fileno(), worker['uid'], worker['gid'])
+                    os.fsync(marker.fileno())
+            common['sync'](successor.parent)
+            guard()
+            if verify_paused_marker(state / name, label, worker, members[role][name], common, budget) != ready[role]:
+                raise ValueError('recovery marker changed before atomic replacement')
+            # Both forms occupy the same path. Normal startup rejects either form.
+            os.replace(successor, state / name)
+            common['sync'](state)
+            common['sync'](successor.parent)
+            after_publish(role)
+    guard()
+    if verify() != dict.fromkeys(PAUSED_ROLES, prepare):
+        raise ValueError('paused gate did not reach its approved disposition')
+
+
 def install(args, common, tool_identity, *, after_publish=lambda _: None, after_archive=lambda _: None):
     if os.geteuid() != 0:
         raise ValueError('root is required for restored runtime ownership')
@@ -262,6 +353,10 @@ def install(args, common, tool_identity, *, after_publish=lambda _: None, after_
     advance_from, advance_evidence = getattr(args, 'advance_from', None), getattr(args, 'advance_evidence', None)
     if bool(advance_from) != bool(advance_evidence):
         raise ValueError('advancement requires an exact installed stage and paired evidence')
+    paused_gate = getattr(args, 'paused_gate', None)
+    if (bool(paused_gate) != bool(getattr(args, 'paused_approval', None))
+            or (paused_gate and (paused_gate not in ('prepare', 'restore') or not advance_from or credential_store))):
+        raise ValueError('paused marker changes require only an installed advancement and exact approval')
     receipt, manifest, collection, original, members = install_stage(
         stage, args.stage_sha256, args.policy_sha256, common, budget)
     checkpoint = receipt['checkpoint_id']
@@ -312,6 +407,20 @@ def install(args, common, tool_identity, *, after_publish=lambda _: None, after_
             for role, state in states.items():
                 parking[role] = parking_record(state, role, old, receipt, old_sha, args.stage_sha256,
                                                 args.policy_sha256, evidence_sha)
+        if paused_gate:
+            approval_sha = paused_approval(args, freeze, common)
+
+            def gate_guard():
+                guard()
+                for item in tracked:
+                    item.check()
+
+            change_paused_gate(args, receipt, states, workers, members, parking, old_members,
+                               common, budget, gate_guard, approval_sha, after_publish)
+            return {'result': 'CASHU_PAUSED_GATE_PREPARED' if paused_gate == 'prepare' else 'CASHU_HARD_FENCES_RESTORED',
+                    'version': 1, 'checkpoint_id': checkpoint, 'stage_sha256': args.stage_sha256,
+                    'approval_sha256': approval_sha, 'roles': sorted(PAUSED_ROLES),
+                    'resume_authorized': False, 'services_changed': False}
         credentials = {}
         if credential_store is not None:
             if receipt['keys_verified'] is not True or collection['key_verification']['signer_clients_verified'] != 2:
@@ -427,6 +536,8 @@ def main():
                         help='reprovision both archived signer clients in this existing root-private systemd store')
     parser.add_argument('--advance-from', nargs=2, metavar=('STAGED_DIRECTORY', 'RECEIPT_SHA256'))
     parser.add_argument('--advance-evidence', nargs=2, metavar=('MANIFEST', 'SHA256'))
+    parser.add_argument('--paused-gate', choices=('prepare', 'restore'))
+    parser.add_argument('--paused-approval', nargs=2, metavar=('APPROVAL', 'SHA256'))
     args = parser.parse_args()
     try:
         common = runpy.run_path(str(HERE / 'collect-cashu-backup.py'))

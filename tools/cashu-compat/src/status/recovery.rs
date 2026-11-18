@@ -4,7 +4,7 @@ use crate::{
     journal::{Journal, cdk_storage::verify_mint_namespaces},
     service_config::Config,
     wallet::{mint_store_filename, require_mint_store_binding},
-    writer_lock::{WriterLock, check_recovery_marker},
+    writer_lock::{WriterLock, check_paused_recovery_marker},
 };
 use anyhow::{Result, ensure};
 use serde::Serialize;
@@ -33,8 +33,8 @@ impl PausedRecovery {
     pub fn open(config: &Config) -> Result<Self> {
         ensure!(rusqlite::version() == "3.54.1", "unqualified SQLite engine");
         config.require_runtime_identity()?;
-        let writer = WriterLock::lock_existing(&config.state_directory)?;
-        let keys = config.load_keys()?;
+        let writer = WriterLock::lock_paused_recovery(&config.state_directory, "wallet")?;
+        let keys = config.load_paused_recovery_keys()?;
         let journal = open_readonly_journal(config)?;
         journal.pragma_update(None, "trusted_schema", false)?;
         require_bound_wallet(&journal, config, &keys)?;
@@ -77,7 +77,7 @@ impl PausedRecovery {
                 .as_secs(),
         )?;
         let funds = Funds::read(&journal, None, now)?;
-        check_recovery_marker(&config.state_directory)?;
+        check_paused_recovery_marker(&config.state_directory, "wallet")?;
         Ok(Self {
             _writer: writer,
             readiness: RecoveryReadiness {

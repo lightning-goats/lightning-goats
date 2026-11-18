@@ -153,9 +153,22 @@ impl Config {
     /// Startup-only key loading, after offline policy and runtime identity checks.
     /// Offline configuration validation deliberately does not require live keys.
     pub fn load_keys(&self) -> Result<crate::service_keys::Keys> {
+        self.load_checked_keys(crate::writer_lock::check_recovery_marker)
+    }
+
+    pub(crate) fn load_paused_recovery_keys(&self) -> Result<crate::service_keys::Keys> {
+        self.load_checked_keys(|directory| {
+            crate::writer_lock::check_paused_recovery_marker(directory, "wallet")
+        })
+    }
+
+    fn load_checked_keys(
+        &self,
+        check_marker: impl Fn(&Path) -> Result<()>,
+    ) -> Result<crate::service_keys::Keys> {
         let prepared = self.prepare()?;
         self.require_runtime_identity()?;
-        crate::writer_lock::check_recovery_marker(&self.state_directory)?;
+        check_marker(&self.state_directory)?;
         crate::service_keys::Keys::load_configured(
             &self.state_directory,
             prepared.receiver,

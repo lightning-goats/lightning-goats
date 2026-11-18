@@ -518,6 +518,7 @@ def verify_funded_install(root, native_inputs, systemd_masks):
     collector = report['coordinated_collector']
     restore = collector['restore_staging']
     restart = restore['fenced_advancement']['paused_restart']
+    gate = restore['fenced_advancement']['paused_gate']
     if (report['result'] != 'CASHU_FUNDED_NATIVE_INSTALL_VERIFIED'
             or report['funded_fenced_installation_verified'] is not True
             or collector['systemd_masks_verified'] is not systemd_masks
@@ -535,7 +536,11 @@ def verify_funded_install(root, native_inputs, systemd_masks):
                 'wallet_intake_sockets_absent', 'wallet_wrong_or_missing_artifacts_refused',
                 'wallet_durable_bytes_unchanged', 'signer_credential_verified', 'signer_writer_held',
                 'signer_fence_honored', 'signer_refused_missing_or_wrong_binding', 'signer_socket_absent',
-                'signer_helper_never_ran_during_restart'))
+                'signer_helper_never_ran_during_restart', 'paused_markers_honored',
+                'unprivileged_paused_marker_refused'))
+            or not all(gate[key] is True for key in ('prepare_and_restore_interruption_recovered',
+                'different_approval_refused', 'original_markers_restored'))
+            or gate['authenticated_cli_with_actual_masks'] is not systemd_masks
             or restart['signer_requests_retained'] != 1
             or restart['signer_loaded_archived_systemd_credential'] is not systemd_masks
             or restart['installed_fences_cleared'] is not False

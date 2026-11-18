@@ -98,7 +98,13 @@ pub(crate) async fn connect_recovery_read_only(database_url: &str) -> Result<Sql
     let configured = durable_options(database_url)?;
     let file = configured.get_filename();
     #[cfg(unix)]
-    check_recovery_marker(file)?;
+    {
+        let parent = file.parent().context("database parent is missing")?;
+        let marker = parent.join(crate::state_maintenance::RECOVERY_MARKER);
+        if !crate::private_ipc::allows_paused_recovery(&marker, "core")? {
+            bail!("restored journal requires explicit external reconciliation before startup");
+        }
+    }
     if !std::fs::symlink_metadata(file)
         .context("recovery requires an existing ledger file")?
         .is_file()

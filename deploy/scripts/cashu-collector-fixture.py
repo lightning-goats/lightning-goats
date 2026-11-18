@@ -398,6 +398,92 @@ def verify_funded_stage(stage, worklist, source, common):
             'original_pending_intent_in_authenticated_worklist': True}
 
 
+@contextmanager
+def exercise_paused_gate(install, invoke, args, common, tool, workers, output, real_masks):
+    approval = output / 'paused-approval.json'
+    common['write_json'](approval, {'version': 1, 'purpose': 'cashu-paused-recovery',
+                                   'previous_stage_sha256': args.advance_from[1],
+                                   'stage_sha256': args.stage_sha256, 'policy_sha256': args.policy_sha256,
+                                   'evidence_sha256': args.advance_evidence[1]})
+    choice = (str(approval), digest(approval))
+    prepare = Namespace(**{**vars(args), 'signer_credential_store': None,
+                           'paused_gate': 'prepare', 'paused_approval': choice})
+    restore = Namespace(**{**vars(prepare), 'paused_gate': 'restore'})
+    markers = {role: Path(workers[role]['state']) / ('CYBERHERD_RECOVERY_REQUIRED' if role == 'core'
+                                                    else 'CASHU_RECOVERY_REQUIRED')
+               for role in ('core', 'wallet', 'cashu_signer')}
+    originals = {role: marker.read_bytes() for role, marker in markers.items()}
+
+    def verify(paused):
+        for role, marker in markers.items():
+            if role in paused:
+                label = f'LG_CASHU_PAUSED_RECOVERY_V1-{role}-{choice[1]}'
+                metadata = marker.lstat()
+                if (not marker.is_symlink() or os.readlink(marker) != label
+                        or (metadata.st_uid, metadata.st_gid, metadata.st_nlink) != (0, 0, 1)):
+                    raise ValueError('paused gate differs from the approved root-owned marker')
+            elif (marker.is_symlink() or marker.read_bytes() != originals[role]
+                    or marker.stat().st_uid != workers[role]['uid']):
+                raise ValueError('original hard marker was not restored exactly')
+
+    def interrupt(role):
+        if role != 'core':
+            raise ValueError('first marker replacement changed an unexpected role')
+        raise InterruptedError('fixture stopped after durable marker replacement')
+
+    def interrupted(candidate, expected):
+        try:
+            install(candidate, common, tool, after_publish=interrupt)
+        except InterruptedError:
+            verify(expected)
+        else:
+            raise ValueError('paused gate did not interrupt after its first role')
+
+    def refused(candidate, fragment):
+        try:
+            install(candidate, common, tool)
+        except ValueError as error:
+            if fragment not in str(error):
+                raise
+        else:
+            raise ValueError('paused gate accepted an unmatched approval or live writer')
+
+    def complete(candidate, expected):
+        if real_masks:
+            completed = invoke(candidate)
+            if completed.returncode:
+                raise ValueError('authenticated paused gate command refused the real masked fixture')
+            result = json.loads(completed.stdout)
+        else:
+            result = install(candidate, common, tool)
+        if (result['result'] != expected or result['approval_sha256'] != choice[1]
+                or result['roles'] != sorted(markers) or result['resume_authorized'] or result['services_changed']):
+            raise ValueError('paused gate returned an unexpected scope')
+
+    refused(Namespace(**{**vars(prepare), 'paused_approval': (choice[0], '00' * 32)}), 'approval differs')
+    interrupted(prepare, {'core'})
+    amended = output / 'same-paused-approval-different-digest.json'
+    common['write'](amended, approval.read_bytes() + b'\n')
+    refused(Namespace(**{**vars(prepare), 'paused_approval': (str(amended), digest(amended))}),
+            'marker differs from the approved operation')
+    verify({'core'})
+    complete(restore, 'CASHU_HARD_FENCES_RESTORED')
+    verify(set())
+    if real_masks:
+        with active_process(workers['wallet']):
+            refused(prepare, 'runtime UID still has a process')
+    complete(prepare, 'CASHU_PAUSED_GATE_PREPARED')
+    complete(prepare, 'CASHU_PAUSED_GATE_PREPARED')
+    verify(set(markers))
+    try:
+        yield
+    finally:
+        interrupted(restore, {'wallet', 'cashu_signer'})
+        complete(restore, 'CASHU_HARD_FENCES_RESTORED')
+        complete(restore, 'CASHU_HARD_FENCES_RESTORED')
+        verify(set())
+
+
 def qualify_advance(capsule, bootstrap, stage, reference, output, policy_path, common,
                     workers, binaries, configurations, roles, systemd_masks):
     manifest = output / 'provider-review/funded-restore-manifest.json'
@@ -414,6 +500,16 @@ def qualify_advance(capsule, bootstrap, stage, reference, output, policy_path, c
     advanced = output / 'advanced-fenced-runtime'
     for directory in (saved, advanced):
         directory.mkdir(mode=0o700)
+
+    def invoke(candidate):
+        command = ['/usr/bin/python3', '-I', '-S', '-B', str(capsule / 'launch-cashu-backup.py'), bootstrap,
+                   'install-fenced', str(reference), candidate.stage_sha256, str(policy_path), candidate.policy_sha256,
+                   '--advance-from', *candidate.advance_from, '--advance-evidence', *candidate.advance_evidence]
+        if candidate.signer_credential_store is not None:
+            command += ['--signer-credential-store', str(candidate.signer_credential_store)]
+        if getattr(candidate, 'paused_gate', None):
+            command += ['--paused-gate', candidate.paused_gate, '--paused-approval', *candidate.paused_approval]
+        return subprocess.run(command, stdin=subprocess.DEVNULL, capture_output=True, timeout=120)
 
     def refused(candidate, expected, **overrides):
         try:
@@ -470,12 +566,7 @@ def qualify_advance(capsule, bootstrap, stage, reference, output, policy_path, c
             raise ValueError('test did not interrupt the first durable publication')
 
         if systemd_masks:
-            outcome = subprocess.run(
-                ['/usr/bin/python3', '-I', '-S', '-B', str(capsule / 'launch-cashu-backup.py'), bootstrap,
-                 'install-fenced', str(reference), args.stage_sha256, str(policy_path), args.policy_sha256,
-                 '--advance-from', *args.advance_from, '--advance-evidence', *args.advance_evidence,
-                 '--signer-credential-store', str(credential_store)],
-                stdin=subprocess.DEVNULL, capture_output=True, timeout=120)
+            outcome = invoke(args)
             if outcome.returncode:
                 raise ValueError('authenticated advancement refused the partially published masked fixture')
             result = json.loads(outcome.stdout)
@@ -501,7 +592,8 @@ def qualify_advance(capsule, bootstrap, stage, reference, output, policy_path, c
         rehearse = runpy.run_path(str(Path(__file__).with_name('cashu-funded-restart-fixture.py')))['rehearse']
         worker = workers['cashu_signer']
         signer_client = reference / 'checkpoint-evidence/recovery-material/cashu-client.hex'
-        with (signer_fixture_account(worker, output.parent, 'cashu_signer') if systemd_masks else nullcontext()) as account:
+        with (exercise_paused_gate(install, invoke, args, common, tool, workers, output, systemd_masks),
+              (signer_fixture_account(worker, output.parent, 'cashu_signer') if systemd_masks else nullcontext()) as account):
             encrypted = (credential_store / 'lg-cashu-nostr-client', *account) if systemd_masks else None
             paused_restart = rehearse(output.parent / 'restart', workers, binaries, configurations,
                                       binaries['core_daemon'], signer_client, encrypted)
@@ -518,6 +610,9 @@ def qualify_advance(capsule, bootstrap, stage, reference, output, policy_path, c
     return {'recovery_fences_verified': verified, 'older_files_retained': True, 'archive_interrupt_recovered': True,
             'publish_interrupt_recovered': True, 'changed_evidence_retry_refused': True, 'exact_retry_verified': True,
             'authenticated_cli_retry_with_actual_masks': systemd_masks,
+            'paused_gate': {'prepare_and_restore_interruption_recovered': True,
+                            'different_approval_refused': True, 'original_markers_restored': True,
+                            'authenticated_cli_with_actual_masks': systemd_masks},
             'paused_restart': paused_restart, 'resume_authorized': False}
 
 

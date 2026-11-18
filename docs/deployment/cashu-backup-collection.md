@@ -570,6 +570,46 @@ Keep the units masked and retry with the same stage, policy, and manifest
 digests. A different operation or unexpected installed image is refused.
 Service activation and resumption authorization need separate verification.
 
+### Prepare the installed checkpoint for paused recovery
+
+After a verified advancement, keep all six units masked. Have the operator
+review a root-private approval that binds the same stages, policy, and paired
+evidence. Record the approval file's SHA256 separately.
+
+```json
+{
+  "version": 1,
+  "purpose": "cashu-paused-recovery",
+  "previous_stage_sha256": "OLDER_RECEIPT_SHA256",
+  "stage_sha256": "LATER_RECEIPT_SHA256",
+  "policy_sha256": "POLICY_SHA256",
+  "evidence_sha256": "PAIRED_EVIDENCE_SHA256"
+}
+```
+
+```sh
+/usr/bin/python3 -I -S -B ROOT_CAPSULE/launch-cashu-backup.py TOOL_SHA256 install-fenced \
+  LATER_STAGE LATER_RECEIPT_SHA256 POLICY POLICY_SHA256 \
+  --advance-from OLDER_STAGE OLDER_RECEIPT_SHA256 \
+  --advance-evidence PAIRED_EVIDENCE PAIRED_EVIDENCE_SHA256 \
+  --paused-gate prepare --paused-approval APPROVAL APPROVAL_SHA256
+```
+
+The capsule rechecks reconciliation, all six installed images, and the
+retained older copies. It atomically replaces the core, wallet, and Cashu
+signer markers with root-owned symbolic links at the same paths. The paused
+programs interpret the link text as authorization for that role. Ordinary
+startup still rejects the marker. CyberHerd's three markers retain their
+original form throughout. The capsule starts no services and reports
+`resume_authorized: false`.
+
+Use the same approval and replace `prepare` with `restore` to put the exact
+hard markers back. Keep the units masked and the role processes stopped
+through both commands. An interruption can leave a mix of prepared and
+hard markers. Resume either direction with the original digests. The
+command refuses an unexpected image or a marker bound to another approval.
+Restore the hard markers before collecting another checkpoint.
+
 ### Reprovision the two archived signer clients
 
 On a qualified recovery host, add `--signer-credential-store /etc/credstore.encrypted`
@@ -636,7 +676,7 @@ keeps the previous six images available in protected storage.
 
 The core daemon can serve read-only recovery status on the configured loopback
 listener. Use the flag on a disposable, verified recovery copy under the
-runtime identity:
+runtime identity.
 
 ```sh
 lightning-goatsd --recovery-paused --config RECOVERY_CONFIG
@@ -682,8 +722,11 @@ bound into the staging manifest. The stager creates these files for the
 replacement installation. Stage the original archive again with the current
 capsule when an earlier staged wallet lacks its lock file.
 
-The funded restart fixture clones the installed later core, wallet and Cashu
-signer images into disposable role directories. It starts the actual three
+The funded fixture interrupts both marker transitions, verifies exact retry
+and reversal, and refuses a different approval. It exercises ordinary
+startup refusal with the paused markers present. It clones the installed
+later core, wallet, and Cashu signer images with their authorized markers
+into disposable role directories. It starts the actual three
 binaries twice under separate UIDs in a loopback-only namespace. The core
 uses paused recovery with a canary configuration that enables Cashu intake
 and configures receipt import. The test starts the core without credentials,
@@ -702,7 +745,7 @@ Each cycle must preserve 16 sats of available feed credit, 16 sats of wallet
 custody, completed Strike deposits totaling 396 sats, and the original
 simulated feeding. The test compares durable wallet and signer bytes, checks
 the core, wallet, and signer fences before starting copies, and confirms all
-six installed role images still match the fenced reference afterward.
+six installed role images match the original fenced reference after reversal.
 
 Removal of an installed recovery fence, startup using installed policies and
 credentials, and live provider acceptance still require separate qualification.

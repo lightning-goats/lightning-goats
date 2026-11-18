@@ -147,15 +147,17 @@ def runtime(command, ready, log, stop, environment=None, unit=None):
 
 def rehearse(root, workers, binaries, configurations, core_daemon, archived_signer_client, encrypted_signer):
     # This helper runs inside the verified loopback-only native backup fixture.
-    # Only clone files from the exact installed later image. Leave its fences intact.
+    # Copy the exact installed later image and its paused authorization markers.
     root.mkdir(mode=0o711)
     roles = ('core', 'wallet', 'cashu_signer')
     dirs = {role: private_directory(root / role, workers[role]) for role in roles}
     for role, state in dirs.items():
         for source in Path(workers[role]['state']).iterdir():
-            if source.name in ('CYBERHERD_RECOVERY_REQUIRED', 'CASHU_RECOVERY_REQUIRED'):
-                continue
             target = state / source.name
+            if source.name in ('CYBERHERD_RECOVERY_REQUIRED', 'CASHU_RECOVERY_REQUIRED'):
+                target.symlink_to(os.readlink(source))
+                os.chown(target, 0, 0, follow_symlinks=False)
+                continue
             shutil.copyfile(source, target)
             target.chmod(0o600)
             os.chown(target, workers[role]['uid'], workers[role]['gid'])
@@ -165,19 +167,19 @@ def rehearse(root, workers, binaries, configurations, core_daemon, archived_sign
         raise ValueError('restart fixture lacks the funded later-stage history')
 
     fenced = subprocess.run(
-        as_runtime(workers['core'], core_daemon, '--recovery-paused', '--config', configurations['core']),
+        as_runtime(workers['core'], core_daemon, '--config', configurations['core']),
         stdin=subprocess.DEVNULL, capture_output=True, timeout=10, env=CLEAN_ENV)
     if fenced.returncode != 1 or b'requires explicit external reconciliation' not in fenced.stderr:
-        raise ValueError('paused recovery started despite the installed core fence')
+        raise ValueError('ordinary core started despite the installed paused gate')
 
-    def refuse_wallet(config, reason):
+    def refuse_wallet(config, reason, mode='recovery-paused'):
         refused = subprocess.run(
-            as_runtime(workers['wallet'], binaries['wallet'], 'recovery-paused', config),
+            as_runtime(workers['wallet'], binaries['wallet'], mode, config),
             stdin=subprocess.DEVNULL, capture_output=True, timeout=10, env=CLEAN_ENV)
         if refused.returncode != 1 or refused.stdout or reason not in refused.stderr:
             raise ValueError('paused wallet accepted a nonready recovery image')
 
-    refuse_wallet(configurations['wallet'], b'Cashu recovery requires explicit reconciliation')
+    refuse_wallet(configurations['wallet'], b'Cashu recovery requires explicit reconciliation', mode='run')
 
     # Keep feeding-enabled canary settings and configure ordinary Cashu and
     # receipt ingress. Paused recovery must ignore their runtime authority.
@@ -224,6 +226,12 @@ def rehearse(root, workers, binaries, configurations, core_daemon, archived_sign
         lock = wallet_state / 'wallet-writer.lock'
         wallet_log = root / 'wallet.log'
         startup = b'paused wallet recovery rejected'
+        wallet_marker = wallet_state / 'CASHU_RECOVERY_REQUIRED'
+        os.chown(wallet_marker, workers['wallet']['uid'], workers['wallet']['gid'], follow_symlinks=False)
+        try:
+            refuse_wallet(wallet_config, b'Cashu recovery requires explicit reconciliation')
+        finally:
+            os.chown(wallet_marker, 0, 0, follow_symlinks=False)
         for path in (lock, next(wallet_state.glob('mint-*.sqlite'))):
             retained = root / 'retained-wallet-artifact'
             path.rename(retained)
@@ -242,7 +250,7 @@ def rehearse(root, workers, binaries, configurations, core_daemon, archived_sign
             seed.write_bytes(original_seed)
         wallet_bytes = {path: hashlib.sha256(path.read_bytes()).hexdigest()
                         for path in wallet_state.iterdir()
-                        if not path.name.endswith(('-wal', '-shm'))}
+                        if not path.name.endswith(('-wal', '-shm')) and path != wallet_marker}
         registration = f'''
 wallet_uid = {wallet['runtime_uid']}
 wallet_instance = "{wallet['wallet_instance']}"
@@ -276,15 +284,15 @@ connections_per_second = 8
         signer_journal = dirs['cashu_signer'] / 'cashu-signing.sqlite'
         helper_invocations = Path(signer['nak']['private_directory']) / 'invocations'
 
-        def refuse_signer(configuration, reason, config_env=None):
-            result = subprocess.run(as_runtime(signer_worker, binaries['signer'], 'recovery-paused', configuration),
+        def refuse_signer(configuration, reason, config_env=None, mode='recovery-paused'):
+            result = subprocess.run(as_runtime(signer_worker, binaries['signer'], mode, configuration),
                                     stdin=subprocess.DEVNULL, capture_output=True, timeout=10,
                                     env={**CLEAN_ENV, **(config_env or {})})
             if result.returncode != 1 or result.stdout or reason not in result.stderr:
                 raise ValueError('paused signer accepted a nonready recovery image')
 
         startup = b'signer startup rejected'
-        refuse_signer(configurations['signer'], b'Cashu recovery requires explicit reconciliation')
+        refuse_signer(configurations['signer'], b'Cashu recovery requires explicit reconciliation', mode='run')
         refuse_signer(signer_config, startup)
         wrong = credentials(root / 'wrong-signer-creds', signer_worker, {'cashu-nostr-client': '0' * 63 + '5'})
         refuse_signer(signer_config, startup, wrong)
@@ -355,7 +363,7 @@ connections_per_second = 8
                 if any(os.path.lexists(path) for path in sockets):
                     raise ValueError('paused recovery exposed an effectful socket')
                 funds = status['health']['totals']
-                if (not status['registration_matches'] or status['recovery_required']
+                if (not status['registration_matches'] or not status['recovery_required']
                         or len(status['mint_namespaces']) != 2 or status['incomplete_mint_namespaces']
                         or funds['journal_custody_sats'] != 16 or funds['reported_treasury_deposit_sats'] != 396
                         or any(status[flag] is not True for flag in ENABLED_IN_WALLET_CONFIG)):
@@ -380,4 +388,5 @@ connections_per_second = 8
             'signer_fence_honored': True, 'signer_refused_missing_or_wrong_binding': True,
             'signer_socket_absent': True, 'signer_helper_never_ran_during_restart': True,
             'signer_loaded_archived_systemd_credential': encrypted_signer is not None,
+            'paused_markers_honored': True, 'unprivileged_paused_marker_refused': True,
             'installed_fences_cleared': False, 'resume_authorized': False}

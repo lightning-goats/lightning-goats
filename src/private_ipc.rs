@@ -48,6 +48,38 @@ pub fn protected_config(path: &Path) -> Result<()> {
     }
     Ok(())
 }
+
+/// A root-created symbolic fence can permit only the explicitly paused
+/// runtime. Its target is an authorization label and is never followed.
+pub(crate) fn allows_paused_recovery(path: &Path, role: &str) -> Result<bool> {
+    let meta = match std::fs::symlink_metadata(path) {
+        Ok(meta) => meta,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(true),
+        Err(error) => return Err(error.into()),
+    };
+    if !meta.is_symlink() || meta.uid() != 0 || meta.gid() != 0 || meta.nlink() != 1 {
+        return Ok(false);
+    }
+    let label = std::fs::read_link(path)?;
+    let prefix = format!("LG_CASHU_PAUSED_RECOVERY_V1-{role}-");
+    let expected = label.to_str().and_then(|label| label.strip_prefix(&prefix));
+    let current = std::fs::symlink_metadata(path)?;
+    Ok(meta.dev() == current.dev()
+        && meta.ino() == current.ino()
+        && meta.ctime() == current.ctime()
+        && meta.ctime_nsec() == current.ctime_nsec()
+        && current.is_symlink()
+        && current.uid() == 0
+        && current.gid() == 0
+        && current.nlink() == 1
+        && expected.is_some_and(|hash| {
+            hash.len() == 64
+                && hash
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        }))
+}
+
 pub fn private_state(path: &Path) -> Result<()> {
     let meta = std::fs::symlink_metadata(path)?;
     if uid()? == 0

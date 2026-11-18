@@ -3,7 +3,7 @@ use crate::{
     publication_broker::{Broker, Policy},
     publication_nak::{self, Nak},
     status::open_private_readonly_store,
-    writer_lock::{WriterLock, check_recovery_marker},
+    writer_lock::{WriterLock, check_paused_recovery_marker, check_recovery_marker},
 };
 use anyhow::{Result, ensure};
 use rustix::fs::{self as posix, Mode, OFlags, StatVfsMountFlags};
@@ -118,7 +118,7 @@ impl Config {
     pub fn open_paused_recovery(&self) -> Result<PausedRecovery> {
         self.require_identity()?;
         ensure!(rusqlite::version() == "3.54.1", "unqualified SQLite engine");
-        let writer = WriterLock::lock_existing(&self.state_directory)?;
+        let writer = WriterLock::lock_paused_recovery(&self.state_directory, "cashu_signer")?;
         let journal = open_private_readonly_store(
             &self.state_directory.join("cashu-signing.sqlite"),
             self.runtime_uid,
@@ -127,7 +127,7 @@ impl Config {
         let signing_requests = self.policy.verify_recovered_journal(&journal)?;
         self.nak
             .verify_recovered_client(&load_client_credential()?)?;
-        check_recovery_marker(&self.state_directory)?;
+        check_paused_recovery_marker(&self.state_directory, "cashu_signer")?;
         Ok(PausedRecovery {
             _writer: writer,
             readiness: RecoveryReadiness {

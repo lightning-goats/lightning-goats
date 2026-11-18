@@ -67,9 +67,10 @@ fixtures. Funded checkpoint installation and reconciliation remain separate.
 Use the authenticated root-owned VPS upgrade tool closure with the paired core
 release and CyberHerd review archives from the same verified source commit.
 Pass their independently verified SHA-256 digests. A Cashu upgrade preserves
-the original configuration and the original active service set. The Cashu
-wallet and broker must be absent or persistently masked. The initial core
-configuration must have no Cashu policy.
+the original configuration, including protected systemd drop-ins for existing
+roles, and the original active service set. The Cashu wallet and broker must
+be absent or persistently masked. The initial core configuration must have no
+Cashu policy.
 
 The launcher accepts these Cashu operations:
 

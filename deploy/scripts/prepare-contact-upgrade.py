@@ -49,6 +49,10 @@ def retained_roles(states):
                  if states[role]['ActiveState'] == 'active')
 
 
+def retained_role_dropins():
+    return S.role_dropins(preserve_existing=UPGRADE_KIND == 'cashu')
+
+
 def require_inactive_cashu():
     identities = {}
     for unit in ('lightning-goats-cashu.service', 'lightning-goats-cashu-signer.service'):
@@ -184,7 +188,7 @@ def baseline(*, current_schema=False):
             C.protected(path)
             files[str(path)] = TX.fingerprint(path)
     # Hidden role-specific overrides are part of the frozen inventory as well.
-    dropins = S.role_dropins()
+    dropins = retained_role_dropins()
     files.update(dropins)
     Q.no_role_processes({role: identities[role] for role in ('payout', 'signer')
                          if states[role]['ActiveState'] != 'active'})

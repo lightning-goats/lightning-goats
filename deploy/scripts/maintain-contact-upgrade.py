@@ -209,8 +209,8 @@ def stable(m, r, masked=False, installed=False):
             or groups & {'root', 'sudo', 'wheel', 'admin', 'docker', 'lxd', 'disk'}):
         raise ValueError('core runtime identity changed')
     Q.I.require_no_sudo('lightning-goats')
-    if S.role_dropins() != {name: fp for name, fp in files.items()
-                            if Path(name).parent.name in {role + '.service.d' for role in Q.ROLES}}:
+    if P.retained_role_dropins() != {name: fp for name, fp in files.items()
+                                     if Path(name).parent.name in {role + '.service.d' for role in Q.ROLES}}:
         raise ValueError('hidden role override set changed')
     hidden = {}
     for unit in (C.UNIT_NAME, 'service'):

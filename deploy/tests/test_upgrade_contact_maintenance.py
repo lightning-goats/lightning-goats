@@ -126,7 +126,7 @@ class ContactMaintenanceFiles(unittest.TestCase):
                    (U, 'verified_tool_identity', lambda: {'source': 'contact-maintenance-fixture'}),
                    (U.C, 'root', lambda: None), (U.C, 'status', self.status), (U.C, 'command', self.command),
                    (U.Q, 'no_role_processes', lambda identities: None),
-                   (U.Q.I, 'require_no_sudo', lambda name: None), (U.S, 'role_dropins', lambda: {}),
+                   (U.Q.I, 'require_no_sudo', lambda name: None), (U.S, 'role_dropins', lambda **kwargs: {}),
                    (U.Q.I, 'check_identities', lambda: {U.P.ROLE_NAMES[role]: value for role, value in self.identity.items() if role != 'core'}),
                    (U.C.pwd, 'getpwnam', lambda name: types.SimpleNamespace(pw_name='lightning-goats', pw_uid=50001, pw_gid=50001, pw_shell='/usr/sbin/nologin')),
                    (U.C.grp, 'getgrgid', lambda gid: types.SimpleNamespace(gr_name='lightning-goats' if gid == 50001 else 'fixture')),

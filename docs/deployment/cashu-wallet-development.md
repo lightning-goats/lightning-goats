@@ -114,8 +114,13 @@ The native relay fixture runs the wallet daemon against a private TLS WebSocket
 relay. It verifies certificate trust and hostname checks, validates the
 recipient and mint subscription, and interrupts delivery before `EOSE`.
 After restart, the wallet associates a new signed event carrying the same
-proof with the original acquisition. Acquisition and credit export are
-disabled in this fixture.
+proof with the original acquisition. The fixture takes that retained
+admission through the real CDK wallet with a synthetic mint, then sends
+its receipt to the native core receiver under a separate UID. It verifies
+one 8-sat swap, a 1-sat receive fee, and a single 7-sat credit with the
+original event and author. After dropping the first acknowledgment,
+the restarted wallet recovers the original receipt without another swap.
+Another signed relay replay after acknowledgment keeps the original credit.
 
 Private status includes at most 128 retained relay lane records, with scope,
 relay URL (query omitted), discovery cursor/horizon/width, outcome and retry time.

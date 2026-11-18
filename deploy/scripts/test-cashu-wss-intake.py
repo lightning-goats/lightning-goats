@@ -19,7 +19,11 @@ import tempfile
 import time
 import uuid
 
-SENDER = 'relay_intake::tests::isolated_wss_sender'
+WALLET_TESTS = 'acquisition::tests::wss_receipt_fixture::'
+SENDER = WALLET_TESTS + 'isolated_wss_sender'
+WALLET_RECEIPT = WALLET_TESTS + 'isolated_wss_receipt_wallet'
+CORE_RECEIPT = 'cashu::receipt_server::cross_uid_fixture::isolated_receipt_server_child'
+RECEIPT_ROWS = 'SELECT receipt_digest,receipt_json,net_sats,original_feed_credit_sats FROM cashu_receipt_inbox'
 ADDRESS = '93.184.216.34'
 HOST = 'relay.nutzap-fixture.example'
 UNTRUSTED = 'untrusted.nutzap-fixture.example'
@@ -136,14 +140,15 @@ def answer(listener, context, events, phase):
         with stream:
             if phase in ('untrusted', 'wrong-host'):
                 raise ValueError(f'{phase} certificate unexpectedly authenticated')
-            proof = events['first'] if phase == 'interrupted' else events['replay']
+            event_name = {'interrupted': 'first', 'replay': 'replay', 'after-credit': 'after_credit'}
+            proof = events[event_name[phase]]
             token = subscription(stream, events['recipient'], events['mint'], proof['created_at'])
             if phase == 'replay':
                 send(stream, ['EVENT', token, {**events['first'], 'sig': '00' * 64}])
                 send(stream, ['EVENT', str(uuid.uuid4()), events['first']])
             send(stream, ['EVENT', token, proof])
             send(stream, ['EVENT', token, proof])
-            if phase == 'replay':
+            if phase != 'interrupted':
                 send(stream, ['EOSE', token])
             stream.sendall(b'\x88\x02\x03\xe8')
 
@@ -174,15 +179,92 @@ def rows(database, sql, *bindings):
         return db.execute(sql, bindings).fetchall()
 
 
-def require_scan(database, relay, outcome, admitted, process):
+def require_scan(database, relay, outcome, admitted, process, source=None):
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline and process.poll() is None:
         results = rows(database, 'SELECT s.outcome,r.admitted,r.rejected FROM relay_scans s '
                        'JOIN relay_scan_results r USING(scope,relay,lane) WHERE s.relay=?', relay)
-        if (outcome, admitted, 0) in results:
+        if ((outcome, admitted, 0) in results and
+                (source is None or rows(database, 'SELECT 1 FROM intake_sources WHERE source_ref=?', source))):
             return
         time.sleep(0.025)
     raise ValueError('wallet did not durably record the expected relay outcome')
+
+
+def verify_core_receipt(root, command, binaries, settings, events, operation, sender_env):
+    core, test = binaries
+    core_uid, wallet_uid = settings['core_uid'], settings['runtime_uid']
+    state, socket_directory = root / 'core', root / 'core-run'
+    for directory, mode in ((state, 0o700), (socket_directory, 0o710)):
+        directory.mkdir(mode=mode)
+        directory.chmod(mode)
+        os.chown(directory, core_uid, wallet_uid)
+    socket_path = socket_directory / 'receipts.sock'
+    endpoint = root / 'core.json'
+    endpoint.write_text(json.dumps({
+        'socket': str(socket_path), 'ipc_gid': wallet_uid, 'wallet_uid': wallet_uid,
+        'wallet_instance': settings['wallet_instance'], 'wallet_epoch': settings['wallet_epoch'],
+        'core_epoch': str(uuid.uuid4()), 'import_enabled': True, 'receipts_per_24h': 10,
+        'credit_sats_per_24h': 100, 'maximum_custody_sats': 100,
+        'approved': [{'mint_id': 'fixture', 'policy_version': 'fixture-v1',
+                      'maximum_gross_sats': 100, 'maximum_net_sats': 100}],
+        'deadline_seconds': 3, 'connections_per_second': 64,
+    }))
+    endpoint.chmod(0o644)
+    fixture = {**ENV, 'LG_CASHU_IPC_FIXTURE': str(root)}
+    core_command = command(core_uid, core, '--exact', CORE_RECEIPT, '--ignored', '--nocapture', gid=wallet_uid)
+    wallet_command = command(wallet_uid, test, '--exact', WALLET_RECEIPT, '--ignored', '--nocapture')
+    wallet_env = {**sender_env, 'LG_CASHU_WSS_ACQUISITION': operation}
+    wallet_db = root / 'state/acquisition.sqlite'
+    core_db = state / 'core.sqlite'
+    ready = state / 'ready.json'
+    with subprocess.Popen(core_command, env=fixture, stdin=subprocess.DEVNULL,
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as server:
+        try:
+            deadline = time.monotonic() + 10
+            while not (ready.exists() and socket_path.is_socket()):
+                if server.poll() is not None or time.monotonic() >= deadline:
+                    raise ValueError('native core receipt fixture did not become ready')
+                time.sleep(0.025)
+            client = root / 'client.json'
+            shutil.copyfile(ready, client)
+            client.chmod(0o644)
+            sent = run(wallet_command, env={**wallet_env, 'LG_CASHU_WSS_PHASE': 'acquire'})
+            if 'CASHU_WSS_CDK_SWAP_SENT_WITHOUT_READING_ACK' not in sent:
+                raise ValueError('wallet fixture did not execute the original CDK swap')
+            deadline = time.monotonic() + 8
+            committed = rows(core_db, RECEIPT_ROWS)
+            while not committed and server.poll() is None and time.monotonic() < deadline:
+                time.sleep(0.025)
+                committed = rows(core_db, RECEIPT_ROWS)
+            if (len(committed) != 1 or rows(wallet_db, 'SELECT state,core_ack FROM acquisitions') !=
+                    [('credit_export_pending', None)]):
+                raise ValueError('lost acknowledgment was not observed after the durable core commit')
+            _, encoded, net, credit = committed[0]
+            receipt = json.loads(encoded)
+            provenance = (receipt['acquisition_id'], receipt['wallet_instance'], receipt['wallet_epoch'],
+                          receipt['transport'], receipt['source_ref'], receipt['source_author'],
+                          receipt['gross_sats'], receipt['receive_fee_sats'], receipt['net_sats'])
+            if (provenance != (operation, settings['wallet_instance'], settings['wallet_epoch'], 'nutzap',
+                               events['first']['id'], events['first']['pubkey'], 8, 1, 7)
+                    or (net, credit) != (7, 7)):
+                raise ValueError('core credited different NutZap identity or amounts')
+            replay = run(wallet_command, env={**wallet_env, 'LG_CASHU_WSS_PHASE': 'replay'})
+            if ('CASHU_WSS_RECEIPT_REPLAY_WITHOUT_SECOND_SWAP' not in replay
+                    or rows(core_db, RECEIPT_ROWS) != committed):
+                raise ValueError('receipt replay changed the original core result')
+            (root / 'stop').touch()
+            output, error = server.communicate(timeout=5)
+            if server.returncode or 'CASHU_CORE_CROSS_UID_ONE_CREDIT_VERIFIED' not in output:
+                raise ValueError('native core receipt acceptance failed: ' + error[-1200:])
+        finally:
+            if server.poll() is None:
+                server.kill()
+                server.communicate(timeout=5)
+    if (rows(core_db, "SELECT COUNT(*) FROM event_log WHERE event_type='payment_received'") != [(1,)]
+            or rows(core_db, 'SELECT COUNT(*) FROM feed_attempts') != [(0,)]):
+        raise ValueError('core retained an unexpected payment or feeder history')
+    return committed
 
 
 def selected(path, target):
@@ -205,13 +287,15 @@ def rehearse(root, args):
     used.update(map(int, run(['/usr/bin/ps', '-e', '-o', 'uid=']).split()))
     wallet_uid, sender_uid, core_uid = [uid for uid in range(61000, 65000) if uid not in used][:3]
 
-    def command(uid, binary, *options):
-        return ['/usr/bin/setpriv', f'--reuid={uid}', f'--regid={uid}', '--clear-groups',
+    def command(uid, binary, *options, gid=None):
+        return ['/usr/bin/setpriv', f'--reuid={uid}', f'--regid={gid if gid is not None else uid}', '--clear-groups',
                 '--no-new-privs', '--', str(binary), *map(str, options)]
 
-    wallet, test = root / 'cashud', root / 'wallet-test'
-    artifacts = {'wallet': selected(args.wallet, wallet), 'sender_fixture': selected(args.wallet_test, test)}
-    sender_env = {**ENV, 'LG_CASHU_WSS_HOST_NETNS': os.readlink('/proc/1/ns/net')}
+    wallet, test, core = root / 'cashud', root / 'wallet-test', root / 'core-test'
+    artifacts = {'wallet': selected(args.wallet, wallet), 'wallet_fixture': selected(args.wallet_test, test),
+                 'core_fixture': selected(args.core_test, core)}
+    sender_env = {**ENV, 'LG_CASHU_WSS_HOST_NETNS': os.readlink('/proc/1/ns/net'),
+                  'LG_CASHU_WSS_FIXTURE': str(root)}
     lines = run(command(sender_uid, test, '--exact', SENDER, '--ignored', '--nocapture'), env=sender_env).splitlines()
     marker = 'CASHU_WSS_FIXTURE '
     payloads = [line.partition(marker)[2] for line in lines if marker in line]
@@ -241,7 +325,7 @@ def rehearse(root, args):
         'deadline_seconds': 5, 'connections_per_second': 8,
         'mints': [{'id': 'fixture', 'advertised_url': events['mint'], 'policy_version': 'fixture-v1',
                    'receive_cashu': False, 'receive_nutzap': True, 'bolt11_exit_qualified': True}],
-        'keysets': [{'mint_id': 'fixture', 'id': '00deadbeef123456', 'keys': {'8': events['mint_key']}}],
+        'keysets': [{'mint_id': 'fixture', **events['keyset']}],
         'relay_intake': {'enabled': True, 'relays': [f'wss://{HOST}'], 'historical_floor': events['first']['created_at'],
                          'window_seconds': 60, 'overlap_seconds': 5, 'event_limit': 16},
     }
@@ -253,9 +337,12 @@ def rehearse(root, args):
         ('wrong-host', WRONG, authority, 'incomplete', 0),
         ('interrupted', HOST, authority, 'incomplete', 1),
         ('replay', HOST, authority, 'complete', 1),
+        ('after-credit', HOST, authority, 'complete', 1),
     )
     original = None
     for phase, host, trust, outcome, admitted in phases:
+        if phase == 'after-credit':
+            credited = verify_core_receipt(root, command, (core, test), settings, events, operation, sender_env)
         relay = f'wss://{host}'
         lookup = run(command(wallet_uid, '/usr/bin/getent', 'ahostsv4', host))
         if {line.split()[0] for line in lookup.splitlines()} != {ADDRESS}:
@@ -273,7 +360,8 @@ def rehearse(root, args):
                     answer(listener, context, events, phase)
                 except TimeoutError as failure:
                     raise ValueError(f'{phase} did not finish its expected relay connection') from failure
-                require_scan(database, relay, outcome, admitted, process)
+                source = events['after_credit']['id'] if phase == 'after-credit' else None
+                require_scan(database, relay, outcome, admitted, process, source)
         history = rows(database, 'SELECT a.id,a.transport,a.source_ref,a.gross,a.state,a.net,c.source_author '
                        'FROM acquisitions a JOIN acquisition_context c ON c.acquisition_id=a.id')
         if phase == 'interrupted':
@@ -283,19 +371,29 @@ def rehearse(root, args):
             original = history
         elif (phase == 'replay' and history != original) or (not admitted and history):
             raise ValueError(f'{phase} produced unexpected wallet admissions')
+        elif phase == 'after-credit':
+            [(original_id, transport, event_id, gross, _, _, author)] = original
+            if history != [(original_id, transport, event_id, gross, 'credited', 7, author)]:
+                raise ValueError('relay replay after credit changed the retained wallet admission')
+            if rows(root / 'core/core.sqlite', RECEIPT_ROWS) != credited:
+                raise ValueError('relay replay after credit changed original core accounting')
     aliases = rows(database, 'SELECT transport, source_ref, acquisition_id FROM intake_sources ORDER BY source_ref')
-    if aliases != sorted(('nutzap', event['id'], operation) for event in [events['first'], events['replay']]):
-        raise ValueError('restarted wallet did not bind both event IDs to the same acquisition')
+    if aliases != sorted(('nutzap', events[label]['id'], operation) for label in ('first', 'replay', 'after_credit')):
+        raise ValueError('restarted wallet did not bind all event IDs to the same acquisition')
     return {'result': 'CASHU_NATIVE_WSS_INTAKE_VERIFIED', 'artifacts_sha256': artifacts,
             'real_tls_websocket': True, 'untrusted_certificate_refused': True, 'wrong_hostname_refused': True,
             'interrupted_batch_retains_admission': True, 'restart_replay_same_acquisition': True,
-            'acquisitions': 1, 'event_aliases': 2, 'mint_acquisition_enabled': False, 'external_network': False}
+            'acquisitions': 1, 'event_aliases': 3, 'external_network': False,
+            'cdk_swaps': 1, 'gross_sats': 8, 'receive_fee_sats': 1, 'credited_sats': 7, 'payment_events': 1,
+            'native_relay_mint_acquisition_enabled': False,
+            'synthetic_mint': True, 'core_acknowledgment_replayed': True, 'no_repeat_credit_after_relay_replay': True}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--wallet', type=Path, required=True)
     parser.add_argument('--wallet-test', type=Path, required=True)
+    parser.add_argument('--core-test', type=Path, required=True)
     args = parser.parse_args()
     isolated_network()
     with tempfile.TemporaryDirectory(prefix='lg-wss-intake-', dir='/run') as temporary:

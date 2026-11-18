@@ -530,37 +530,15 @@ impl Harness {
             self.epoch,
             8,
         )?));
-        let mint_url: MintUrl = self.policy().advertised_url.parse()?;
-        let gate = OperationGate::new(self.mint.clone(), journal.clone(), writer, 65536)?
-            .with_wallet_database(database.clone())
-            .with_key_policy("fixture".into(), self.keys.clone());
-        let client = CustomHttpClient::with_transport(mint_url.clone(), gate.clone(), None);
-        let wallet = WalletBuilder::new()
-            .mint_url(mint_url.clone())
-            .unit(CurrencyUnit::Sat)
-            .localstore(database.clone())
-            .seed(self.seed)
-            .client(client)
-            .without_rate_limiting()
-            .use_http_subscription()
-            .build()?;
-        Ok(Coordinator {
-            wallet,
+        fixture_coordinator(
+            &self.seed,
+            self.policy().advertised_url.parse()?,
+            self.mint.clone(),
             database,
-            gate,
             journal,
-            keys: self.keys.clone(),
-            seed: &self.seed,
-            mint_id: "fixture".into(),
-            mint_url,
-            permissions: Permissions {
-                admission: true,
-                acquisition: true,
-                receipt_export: true,
-                original_swap_replay: true,
-            },
-            maximum_receive_fee_sats: 1,
-        })
+            writer,
+            self.keys.clone(),
+        )
     }
     fn ordinary(&self, proof: Proof, source: &str) -> Result<ValidatedContribution> {
         let body = serde_json::to_vec(
@@ -628,6 +606,47 @@ impl Harness {
         self.mint
             .issue(json!(["P2PK",{"nonce":"fixture-nonce","data":key.to_string()}]).to_string())
     }
+}
+
+fn fixture_coordinator(
+    seed: &[u8; 64],
+    mint_url: MintUrl,
+    mint: FixtureMint,
+    database: Arc<dyn WalletDatabase<DatabaseError> + Send + Sync>,
+    journal: Arc<Mutex<Journal>>,
+    writer: Arc<WriterLock>,
+    keys: Arc<PinnedKeys>,
+) -> Result<Coordinator<'_, FixtureMint>> {
+    let gate = OperationGate::new(mint, journal.clone(), writer, 65536)?
+        .with_wallet_database(database.clone())
+        .with_key_policy("fixture".into(), keys.clone());
+    let client = CustomHttpClient::with_transport(mint_url.clone(), gate.clone(), None);
+    let wallet = WalletBuilder::new()
+        .mint_url(mint_url.clone())
+        .unit(CurrencyUnit::Sat)
+        .localstore(database.clone())
+        .seed(*seed)
+        .client(client)
+        .without_rate_limiting()
+        .use_http_subscription()
+        .build()?;
+    Ok(Coordinator {
+        wallet,
+        database,
+        gate,
+        journal,
+        keys,
+        seed,
+        mint_id: "fixture".into(),
+        mint_url,
+        permissions: Permissions {
+            admission: true,
+            acquisition: true,
+            receipt_export: true,
+            original_swap_replay: true,
+        },
+        maximum_receive_fee_sats: 1,
+    })
 }
 fn new_id(admission: Admission) -> Uuid {
     match admission {
@@ -2431,6 +2450,7 @@ async fn private_intake_authenticates_before_read_and_deduplicates_across_transp
 
 mod core_settlement_fixture;
 mod split_tests;
+mod wss_receipt_fixture;
 
 mod multi_mint;
 

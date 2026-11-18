@@ -435,12 +435,16 @@ For `lightning-goats-cashud reconcile-acquisition`, qualify the protected exact
 configuration and wallet/mint/acquisition binding, time/review limits, exclusive
 writer lock and restore fence. New, prepared, exported and credited states
 must refuse this procedure. An ownership hold is eligible only with an explicit
-held-work approval and the original `acquiring` / `missing_owned_outputs`
-journal history. Use actual CDK-owned output tests to prove that fresh mint-state
+held-work approval and the original `acquiring` journal history. Bind the exact
+hold reason, with older approvals scoped to `missing_owned_outputs`. Use
+actual CDK-owned output tests to prove that fresh mint-state
 verification can complete only the original receive, without another swap/melt
 or receipt export. Missing derivations and unavailable or incomplete responses
 must preserve active holds. A successful recheck must preserve the original
-request, hold history, and exactly-once output attribution.
+request, hold history, and exactly-once output attribution. Verify that a hold
+recorded before submission preserves proof claims while disjoint payments at
+the same mint can proceed. Missing evidence for an acquiring hold or an
+unfinished CDK saga must retain the mint's original recovery fence.
 
 Run `deploy/scripts/test-cashu-operator-reconciliation-cli.py` with the selected
 wallet executable/hash through the private-run helper in fresh mount/network

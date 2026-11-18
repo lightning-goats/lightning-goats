@@ -212,24 +212,28 @@ impl<T: Transport + 'static> Coordinator<'_, T> {
     /// Read-only mint checks can reconcile outputs already persisted by CDK,
     /// including after a response/acknowledgment was lost. No replay occurs here.
     pub async fn reconcile_owned(&self, id: Uuid) -> Result<Progress> {
-        self.check_owned(id, false).await
+        self.check_owned(id, None).await
     }
 
     /// Explicit operator recheck of a hold raised while verifying original outputs.
     /// Returning acquired here never exports a receipt, even if the worker can.
-    pub(crate) async fn recheck_held_ownership(&self, id: Uuid) -> Result<Progress> {
-        self.check_owned(id, true).await
+    pub(crate) async fn recheck_held_ownership(
+        &self,
+        id: Uuid,
+        reason: HoldReason,
+    ) -> Result<Progress> {
+        self.check_owned(id, Some(reason)).await
     }
 
-    async fn check_owned(&self, id: Uuid, recheck_hold: bool) -> Result<Progress> {
-        if recheck_hold {
+    async fn check_owned(&self, id: Uuid, held_reason: Option<HoldReason>) -> Result<Progress> {
+        if let Some(reason) = held_reason {
             let journal = self
                 .journal
                 .lock()
                 .map_err(|_| anyhow::anyhow!("wallet journal unavailable"))?;
             ensure!(
                 journal.mint_id(id)? == self.mint_id
-                    && journal.has_recheckable_ownership_hold(id)?,
+                    && journal.has_recheckable_ownership_hold(id, reason)?,
                 "operation has no eligible ownership hold for this mint"
             );
             match journal.state(id)?.as_str() {
@@ -240,7 +244,7 @@ impl<T: Transport + 'static> Coordinator<'_, T> {
         } else if let Some(progress) = self.ready(id)? {
             return Ok(progress);
         }
-        let unresolved = if recheck_hold {
+        let unresolved = if held_reason.is_some() {
             Progress::Held(id)
         } else {
             Progress::Pending(id)
@@ -288,14 +292,14 @@ impl<T: Transport + 'static> Coordinator<'_, T> {
                 &owned,
                 &states,
             ) {
-                Ok(acquired) => acquired.commit(&mut journal, recheck_hold)?,
+                Ok(acquired) => acquired.commit(&mut journal, held_reason)?,
                 Err(_) => {
                     journal.hold(id, HoldReason::MissingOwnedOutputs)?;
                     return Ok(Progress::Held(id));
                 }
             }
         }
-        if recheck_hold {
+        if held_reason.is_some() {
             return Ok(Progress::Acquired(id));
         }
         Ok(self.ready(id)?.unwrap_or(Progress::Acquired(id)))

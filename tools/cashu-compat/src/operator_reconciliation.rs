@@ -1,7 +1,7 @@
 //! One protected, original acquisition ownership check. No swap/melt replay authority.
 use crate::{
     acquisition::{Coordinator, Permissions, Progress, Settings},
-    journal::Journal,
+    journal::{HoldReason, Journal},
     service::Runtime,
     service_config::Config,
 };
@@ -28,6 +28,8 @@ pub struct Approval {
     pub reviewed_ownership_check: bool,
     #[serde(default)]
     pub reviewed_held_ownership_check: bool,
+    #[serde(default)]
+    pub held_reason: Option<HoldReason>,
     pub approved_at: u64,
     pub expires_at: u64,
 }
@@ -70,6 +72,7 @@ impl Approval {
                 && !self.wallet_epoch.is_nil()
                 && !self.acquisition_id.is_nil()
                 && self.reviewed_ownership_check
+                && (self.reviewed_held_ownership_check || self.held_reason.is_none())
                 && !self.mint_id.is_empty()
                 && self.mint_id.len() <= 128
                 && !self.mint_id.chars().any(char::is_control)
@@ -128,9 +131,9 @@ impl Approval {
             "ownership approval acquisition mint mismatch"
         );
         let state = journal.state(self.acquisition_id)?;
-        let eligible = if self.reviewed_held_ownership_check {
+        let eligible = if let Some(reason) = self.approved_hold() {
             matches!(state.as_str(), "held_for_reconciliation" | "acquired")
-                && journal.has_recheckable_ownership_hold(self.acquisition_id)?
+                && journal.has_recheckable_ownership_hold(self.acquisition_id, reason)?
         } else {
             matches!(state.as_str(), "acquiring" | "acquired")
         };
@@ -139,6 +142,11 @@ impl Approval {
             "acquisition state requires a different recovery procedure"
         );
         Ok(())
+    }
+
+    fn approved_hold(&self) -> Option<HoldReason> {
+        self.reviewed_held_ownership_check
+            .then_some(self.held_reason.unwrap_or(HoldReason::MissingOwnedOutputs))
     }
 
     /// Runtime owns the existing exclusive writer lease and startup/epoch fences.
@@ -185,9 +193,9 @@ impl Approval {
         let progress = tokio::time::timeout(
             Duration::from_secs(runtime.config.deadline_seconds),
             async {
-                if self.reviewed_held_ownership_check {
+                if let Some(reason) = self.approved_hold() {
                     coordinator
-                        .recheck_held_ownership(self.acquisition_id)
+                        .recheck_held_ownership(self.acquisition_id, reason)
                         .await
                 } else {
                     coordinator.reconcile_owned(self.acquisition_id).await
@@ -342,6 +350,11 @@ mod tests {
         assert!(approval.require_target(&journal).is_err());
         approval.reviewed_held_ownership_check = true;
         assert!(approval.require_target(&journal).is_err());
+        approval.held_reason = Some(HoldReason::AmbiguousAcquisition);
+        approval.validate_at(100)?;
+        approval.require_target(&journal)?;
+        approval.reviewed_held_ownership_check = false;
+        assert!(approval.validate_at(100).is_err());
         assert_eq!(
             journal.state(approval.acquisition_id)?,
             "held_for_reconciliation"

@@ -1,5 +1,8 @@
 //! Verify acquired outputs from frozen CDK derivation material, not status labels.
-use crate::{intake::PinnedKeys, journal::Journal};
+use crate::{
+    intake::PinnedKeys,
+    journal::{HoldReason, Journal},
+};
 use anyhow::{Result, ensure};
 use cdk::{
     Amount,
@@ -177,14 +180,18 @@ pub struct OwnedAcquisition {
     outputs: Vec<(String, String, u64)>,
 }
 impl OwnedAcquisition {
-    pub(crate) fn commit(self, journal: &mut Journal, recheck_hold: bool) -> Result<()> {
+    pub(crate) fn commit(
+        self,
+        journal: &mut Journal,
+        held_reason: Option<HoldReason>,
+    ) -> Result<()> {
         journal.record_acquired_outputs(
             self.acquisition_id,
             self.net,
             self.fee,
             &self.evidence,
             &self.outputs,
-            recheck_hold,
+            held_reason,
         )
     }
 }
@@ -549,7 +556,7 @@ mod tests {
             &[info],
             &states,
         )?
-        .commit(&mut journal, false)?;
+        .commit(&mut journal, None)?;
         let receipt = journal.export_receipt(id)?;
         assert_eq!(receipt.net_sats, 8);
         assert_eq!(receipt.receive_fee_sats, 0);

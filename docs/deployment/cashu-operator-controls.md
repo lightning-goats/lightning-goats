@@ -245,22 +245,30 @@ material or unavailable mint state remains pending; invalid ownership remains
 held. No swap, melt, quote, original-saga replay or receipt export is authorized.
 The separately controlled receipt worker can later import a proven acquisition.
 
-Set `reviewed_held_ownership_check` to `true` to recheck a hold with reason
-`missing_owned_outputs` raised while the original acquisition was `acquiring`.
+Set `reviewed_held_ownership_check` to `true` to recheck a hold raised while
+the original acquisition was `acquiring`. Set `held_reason` to the exact
+reason from private wallet status. Supported reasons are
+`missing_owned_outputs`, `ambiguous_acquisition`, `invalid_mint_response`
+and `conservation_mismatch`. Existing approvals without `held_reason` remain
+scoped to `missing_owned_outputs`.
 This scope retains the hold until the original signed outputs pass the full
 ownership, attribution and conservation checks. On success, one journal
 transaction records the output attribution and advances that acquisition to
 `acquired`. The original hold reason and request remain in the journal.
 The same approval can be retried while the recovered acquisition is `acquired`.
-Other hold reasons and operations already exported or credited require separate
-reconciliation. Keep `CASHU_RECOVERY_REQUIRED` in place on restored state.
+Holds raised before submission or after acquisition and operations already
+exported or credited require separate reconciliation. A hold recorded before
+submission retains its proof claims and stays held. Later disjoint payments
+at that mint can proceed when the journal has no evidence of submission for
+the held operation and the mint-scoped CDK store has no unfinished saga.
+Keep `CASHU_RECOVERY_REQUIRED` in place on restored state.
 Private `status` prioritizes active holds and shows their coarse causes.
 
 The actual CLI fixture uses a disposable unfunded retained acquisition with no
 output derivation, so its successful result is truthfully pending. It checks
 exact approval scope, failed permissions/configuration, replay, active-writer
 and restore fences and refusal to touch other acquisition states. The fixture
-also rechecks an eligible hold without enough evidence and leaves it unchanged.
+also rechecks eligible holds without enough evidence and leaves them unchanged.
 A funded CDK fixture drops part of a state response, restarts while the
 acquisition is held, and rechecks the original outputs before the receipt worker
 exports once. The mint executes one swap throughout.

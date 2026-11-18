@@ -436,8 +436,28 @@ def main():
             db.commit()
         held = image()
         call(*arguments, success=False)
-        if image() != held:
-            raise ValueError('out-of-scope hold was changed')
+        for changed in [dict(decision, held_reason='ambiguous_acquisition'),
+                        dict(decision, reviewed_held_ownership_check=True, held_reason='invalid_mint_response'),
+                        dict(decision, reviewed_held_ownership_check=True, held_reason='unknown')]:
+            save(changed)
+            call(*arguments, success=False)
+        save(dict(decision, reviewed_held_ownership_check=True, held_reason='ambiguous_acquisition'))
+        outcome = json.loads(call(*arguments).stdout)
+        if (outcome['state'] != 'held_for_reconciliation' or outcome['acquisition_id'] != acquisition
+                or outcome['swap_or_melt_submitted'] or outcome['receipt_exported'] or image() != held):
+            raise ValueError('explicit hold check exceeded the retained ownership scope')
+        for original_stage in ('acquisition_prepared', 'acquired'):
+            with closing(sqlite3.connect(database)) as db:
+                db.execute('UPDATE operation_holds SET previous_state=? WHERE acquisition_id=?',
+                           [original_stage, acquisition])
+                db.commit()
+            outside_scope = image()
+            call(*arguments, success=False)
+            if image() != outside_scope:
+                raise ValueError('out-of-scope hold was changed')
+        with closing(sqlite3.connect(database)) as db:
+            db.execute("UPDATE operation_holds SET previous_state='acquiring' WHERE acquisition_id=?", [acquisition])
+            db.commit()
         cleanup_approval = root/'cleanup-approval.json'
         treasury_cleanup = dict(version=1, purpose='cleanup_original_treasury_melt', wallet_instance=instance,
             wallet_epoch=epoch, core_epoch=core_epoch, intent_id=str(uuid.uuid4()), mint_id='mint-a',
@@ -537,7 +557,7 @@ def main():
             runtime_uid=uid,synthetic_unfunded_retained_operation=True,pending_replay_unchanged=True,
             active_writer_and_restore_fence_refused=True,configuration_scope_and_permissions_refused=True,
             held_prepared_new_and_exported_states_refused=True,mint_contact=False,
-            eligible_reviewed_hold_preserved_without_evidence=True,other_hold_reason_refused=True,
+            eligible_reviewed_hold_preserved_without_evidence=True,exact_hold_reason_binding_verified=True,
             mint_policy_review_preserved_original=True, mint_policy_candidate_restart_verified=True,
             mint_policy_protected_install_and_retry_verified=True,
             mint_policy_systemctl_mocked=not args.installed_systemd,

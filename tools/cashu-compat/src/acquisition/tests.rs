@@ -770,6 +770,45 @@ async fn missing_recovery_material_still_fences_new_mint_work() -> Result<()> {
 }
 
 #[tokio::test]
+async fn pre_submission_hold_preserves_claims_without_blocking_disjoint_mint_work() -> Result<()> {
+    let harness = Harness::new(0)?;
+    let mut coordinator = harness.open().await?;
+    let held = harness.ordinary(
+        harness.mint.issue("held-before-submit".into()),
+        "held-before-submit",
+    )?;
+    let first = new_id(coordinator.admit(&held)?);
+    {
+        let mut journal = coordinator.journal.lock().unwrap();
+        journal.prepare(first, b"retained pre-submission fixture request")?;
+        journal.hold(first, HoldReason::AmbiguousAcquisition)?;
+    }
+    let second = new_id(coordinator.admit(&harness.ordinary(
+        harness.mint.issue("disjoint-after-hold".into()),
+        "disjoint-after-hold",
+    )?)?);
+    let received = receipt(coordinator.acquire_new(second, &harness.receiver).await?);
+    assert_eq!(received.acquisition_id, second);
+    assert_eq!(received.net_sats, 8);
+    assert_eq!(coordinator.admit(&held)?, Admission::Duplicate(first));
+    assert!(
+        coordinator
+            .recheck_held_ownership(first, HoldReason::AmbiguousAcquisition)
+            .await
+            .is_err()
+    );
+    let mut journal = coordinator.journal.lock().unwrap();
+    assert_eq!(journal.state(first)?, "held_for_reconciliation");
+    assert_eq!(
+        journal.prepared_request(first)?,
+        Some(b"retained pre-submission fixture request".to_vec())
+    );
+    assert!(journal.export_receipt(first).is_err());
+    assert_eq!(harness.mint.swap_attempts.load(Ordering::SeqCst), 1);
+    Ok(())
+}
+
+#[tokio::test]
 async fn ordinary_and_nutzap_use_real_cdk_and_one_reusable_descriptor() -> Result<()> {
     let harness = Harness::new(0)?;
     let mut coordinator = harness.open().await?;
@@ -1051,6 +1090,22 @@ async fn completed_transaction_without_owned_outputs_never_exports_credit() -> R
 
 #[tokio::test]
 async fn reviewed_hold_rechecks_original_outputs_without_resubmission_or_export() -> Result<()> {
+    reviewed_hold_case(HoldReason::MissingOwnedOutputs, true).await
+}
+
+#[tokio::test]
+async fn reviewed_other_holds_require_the_exact_original_reason_and_ownership() -> Result<()> {
+    for reason in [
+        HoldReason::AmbiguousAcquisition,
+        HoldReason::InvalidMintResponse,
+        HoldReason::ConservationMismatch,
+    ] {
+        reviewed_hold_case(reason, false).await?;
+    }
+    Ok(())
+}
+
+async fn reviewed_hold_case(reason: HoldReason, hold_from_incomplete_reply: bool) -> Result<()> {
     let harness = Harness::new(125)?;
     let (id, request) = {
         let mut coordinator = harness.open().await?;
@@ -1058,14 +1113,25 @@ async fn reviewed_hold_rechecks_original_outputs_without_resubmission_or_export(
             harness.mint.issue("held-ownership".into()),
             "http-hold-recheck",
         )?)?);
-        harness
-            .mint
-            .incomplete_check_once
-            .store(true, Ordering::SeqCst);
-        assert!(matches!(
-            coordinator.acquire_new(id, &harness.receiver).await?,
-            Progress::Held(held) if held == id
-        ));
+        if hold_from_incomplete_reply {
+            harness
+                .mint
+                .incomplete_check_once
+                .store(true, Ordering::SeqCst);
+            assert!(matches!(
+                coordinator.acquire_new(id, &harness.receiver).await?,
+                Progress::Held(held) if held == id
+            ));
+        } else {
+            harness.mint.fail_check_once.store(true, Ordering::SeqCst);
+            assert!(matches!(
+                coordinator.acquire_new(id, &harness.receiver).await?,
+                Progress::Pending(pending) if pending == id
+            ));
+            let mut journal = coordinator.journal.lock().unwrap();
+            assert_eq!(journal.state(id)?, "acquiring");
+            journal.hold(id, reason)?;
+        }
         let request = coordinator
             .journal
             .lock()
@@ -1076,32 +1142,43 @@ async fn reviewed_hold_rechecks_original_outputs_without_resubmission_or_export(
     };
     let mut coordinator = harness.open().await?;
     assert!(matches!(coordinator.recover_original(id).await?, Progress::Held(held) if held == id));
+    let wrong_reason = if hold_from_incomplete_reply {
+        HoldReason::AmbiguousAcquisition
+    } else {
+        HoldReason::MissingOwnedOutputs
+    };
+    assert!(
+        coordinator
+            .recheck_held_ownership(id, wrong_reason)
+            .await
+            .is_err()
+    );
     harness.mint.fail_check_once.store(true, Ordering::SeqCst);
     assert!(
-        matches!(coordinator.recheck_held_ownership(id).await?, Progress::Held(held) if held == id)
+        matches!(coordinator.recheck_held_ownership(id, reason).await?, Progress::Held(held) if held == id)
     );
     harness
         .mint
         .incomplete_check_once
         .store(true, Ordering::SeqCst);
     assert!(
-        matches!(coordinator.recheck_held_ownership(id).await?, Progress::Held(held) if held == id)
+        matches!(coordinator.recheck_held_ownership(id, reason).await?, Progress::Held(held) if held == id)
     );
     {
         let stored = coordinator.journal.lock().unwrap();
         assert_eq!(stored.state(id)?, "held_for_reconciliation");
-        assert!(stored.has_recheckable_ownership_hold(id)?);
+        assert!(stored.has_recheckable_ownership_hold(id, reason)?);
     }
 
     for _ in 0..2 {
         assert!(
-            matches!(coordinator.recheck_held_ownership(id).await?, Progress::Acquired(acquired) if acquired == id)
+            matches!(coordinator.recheck_held_ownership(id, reason).await?, Progress::Acquired(acquired) if acquired == id)
         );
     }
     {
         let stored = coordinator.journal.lock().unwrap();
         assert_eq!(stored.state(id)?, "acquired");
-        assert!(stored.has_recheckable_ownership_hold(id)?);
+        assert!(stored.has_recheckable_ownership_hold(id, reason)?);
         assert_eq!(stored.prepared_request(id)?, Some(request));
     }
     assert_eq!(harness.mint.swap_attempts.load(Ordering::SeqCst), 1);
@@ -1111,7 +1188,12 @@ async fn reviewed_hold_rechecks_original_outputs_without_resubmission_or_export(
     assert_eq!(exported.acquisition_id, id);
     assert_eq!(exported.net_sats, 7);
     assert_eq!(exported.receive_fee_sats, 1);
-    assert!(coordinator.recheck_held_ownership(id).await.is_err());
+    assert!(
+        coordinator
+            .recheck_held_ownership(id, reason)
+            .await
+            .is_err()
+    );
     Ok(())
 }
 

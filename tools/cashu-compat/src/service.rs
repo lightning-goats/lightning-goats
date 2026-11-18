@@ -864,6 +864,12 @@ mod tests {
         assert_eq!(status.state_counts.get("validated"), Some(&64));
         assert_eq!(status.state_counts.get("held_for_reconciliation"), Some(&1));
         assert_eq!(status.exhausted_acquisitions, 1);
+        assert!(
+            !status
+                .operations
+                .iter()
+                .any(|op| op.acquisition_inspection_only)
+        );
         assert_eq!(status.health.queue.oldest_pending_age_seconds, Some(19900));
         assert_eq!(status.health.queue.scheduled_lag_seconds, Some(19890));
         assert_eq!(status.health.queue.pending_age_unknown, 0);

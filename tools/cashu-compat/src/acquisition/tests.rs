@@ -1013,6 +1013,14 @@ async fn lost_mint_reply_restarts_and_restores_without_a_second_execution() -> R
             coordinator
                 .admit(&harness.ordinary(harness.mint.issue("lost-reply".into()), "http-lost")?)?,
         );
+        let work = coordinator
+            .journal
+            .lock()
+            .unwrap()
+            .claim_acquisition_work(100, true, false, 1, 5)?
+            .unwrap();
+        assert_eq!(work.id, id);
+        assert!(!work.inspection_only);
         assert!(matches!(
             coordinator.acquire_new(id, &harness.receiver).await?,
             Progress::Pending(_)
@@ -1021,6 +1029,19 @@ async fn lost_mint_reply_restarts_and_restores_without_a_second_execution() -> R
     };
     harness.mint.cache_enabled.store(false, Ordering::SeqCst);
     let mut coordinator = harness.open().await?;
+    let work = coordinator
+        .journal
+        .lock()
+        .unwrap()
+        .claim_acquisition_work(110, false, true, 1, 5)?
+        .unwrap();
+    assert_eq!(work.id, id);
+    assert!(work.inspection_only);
+    assert!(matches!(
+        coordinator.reconcile_scheduled(id, work.inspection_only).await?,
+        Progress::Pending(found) if found == id
+    ));
+    assert_eq!(harness.mint.swap_attempts.load(Ordering::SeqCst), 1);
     let waiting = new_id(coordinator.admit(&harness.ordinary(
         harness.mint.issue("waiting-for-ambiguous".into()),
         "waiting",
@@ -1048,6 +1069,94 @@ async fn lost_mint_reply_restarts_and_restores_without_a_second_execution() -> R
         8
     );
     assert_eq!(harness.mint.executions.load(Ordering::SeqCst), 2);
+    Ok(())
+}
+
+#[tokio::test]
+async fn exhausted_attempts_keep_inspecting_original_outputs_after_restart() -> Result<()> {
+    let harness = Harness::new(125)?;
+    let id = {
+        let mut coordinator = harness.open().await?;
+        let id = new_id(coordinator.admit(&harness.ordinary(
+            harness.mint.issue("owned-during-outage".into()),
+            "owned-during-outage",
+        )?)?);
+        let work = coordinator
+            .journal
+            .lock()
+            .unwrap()
+            .claim_acquisition_work(100, true, true, 1, 5)?
+            .unwrap();
+        assert_eq!(work.id, id);
+        harness.mint.fail_check_once.store(true, Ordering::SeqCst);
+        assert!(matches!(
+            coordinator.acquire_new(id, &harness.receiver).await?,
+            Progress::Pending(found) if found == id
+        ));
+        id
+    };
+    let mut coordinator = harness.open().await?;
+    coordinator.set_permissions(Permissions {
+        original_swap_replay: true,
+        ..Permissions::default()
+    });
+    let work = {
+        let mut journal = coordinator.journal.lock().unwrap();
+        assert_eq!(journal.state(id)?, "acquiring");
+        assert!(
+            journal
+                .claim_acquisition_work(109, true, true, 1, 5)?
+                .is_none()
+        );
+        assert!(
+            journal
+                .claim_acquisition_work(110, true, false, 1, 5)?
+                .is_none()
+        );
+        assert!(
+            journal
+                .ready_acquisition_work(110, true, true, 1, Some(&[]))?
+                .is_empty()
+        );
+        journal
+            .claim_acquisition_work(110, false, true, 1, 5)?
+            .unwrap()
+    };
+    assert_eq!(work.id, id);
+    assert!(work.inspection_only);
+    harness.mint.fail_check_once.store(true, Ordering::SeqCst);
+    assert!(matches!(
+        coordinator.reconcile_scheduled(work.id, work.inspection_only).await?,
+        Progress::Pending(found) if found == id
+    ));
+    let next_work = {
+        let mut journal = coordinator.journal.lock().unwrap();
+        assert!(
+            journal
+                .claim_acquisition_work(414, true, true, 1, 5)?
+                .is_none()
+        );
+        assert!(!journal.charge_acquisition_work(&work, 415, 5)?);
+        journal
+            .claim_acquisition_work(415, false, true, 1, 5)?
+            .unwrap()
+    };
+    assert_eq!(next_work.id, id);
+    assert!(next_work.inspection_only);
+    assert!(matches!(
+        coordinator.reconcile_scheduled(next_work.id, next_work.inspection_only).await?,
+        Progress::Acquired(found) if found == id
+    ));
+    let journal = coordinator.journal.lock().unwrap();
+    assert_eq!(journal.state(id)?, "acquired");
+    assert!(
+        journal
+            .ready_acquisition_work(720, true, true, 1, None)?
+            .is_empty()
+    );
+    assert_eq!(harness.mint.swap_attempts.load(Ordering::SeqCst), 1);
+    assert_eq!(harness.mint.executions.load(Ordering::SeqCst), 1);
+    assert_eq!(harness.mint.melt_attempts.load(Ordering::SeqCst), 0);
     Ok(())
 }
 

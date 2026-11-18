@@ -124,6 +124,7 @@ pub struct Operation {
     pub hold_reason: Option<String>,
     pub acquisition_attempts: u32,
     pub acquisition_next_attempt: Option<i64>,
+    pub acquisition_inspection_only: bool,
     pub delivery_attempts: u32,
     pub delivery_next_attempt: Option<i64>,
 }
@@ -241,16 +242,33 @@ impl Status {
         let exhausted_deliveries = tx.query_row("SELECT COUNT(*) FROM acquisitions a JOIN receipt_delivery_schedule s ON s.acquisition_id=a.id WHERE a.state IN ('acquired','credit_export_pending') AND ?>0 AND s.attempts>=?",params![delivery_budget,delivery_budget],|r|r.get(0))?;
         let mut operations = Vec::new();
         {
-            let mut query = tx.prepare("SELECT a.id,a.mint_id,a.state,h.reason,COALESCE(s.attempts,0),s.next_attempt,COALESCE(d.attempts,0),d.next_attempt FROM acquisitions a LEFT JOIN operation_holds h ON h.acquisition_id=a.id AND a.state='held_for_reconciliation' LEFT JOIN acquisition_schedule s ON s.acquisition_id=a.id LEFT JOIN receipt_delivery_schedule d ON d.acquisition_id=a.id WHERE a.state!='credited' ORDER BY CASE WHEN a.state='held_for_reconciliation' THEN 0 ELSE 1 END,a.rowid LIMIT ?")?;
+            let mut query = tx.prepare("SELECT a.id,a.mint_id,a.state,h.reason,COALESCE(s.attempts,0),s.next_attempt,COALESCE(d.attempts,0),d.next_attempt,
+                a.state='acquiring' AND a.request IS NOT NULL AND EXISTS(
+                    SELECT 1 FROM swap_derivations sd WHERE sd.acquisition_id=a.id)
+                FROM acquisitions a LEFT JOIN operation_holds h ON h.acquisition_id=a.id AND a.state='held_for_reconciliation'
+                LEFT JOIN acquisition_schedule s ON s.acquisition_id=a.id LEFT JOIN receipt_delivery_schedule d ON d.acquisition_id=a.id
+                WHERE a.state!='credited' ORDER BY CASE WHEN a.state='held_for_reconciliation' THEN 0 ELSE 1 END,a.rowid LIMIT ?")?;
             let mut rows = query.query([i64::try_from(DETAIL_LIMIT)?])?;
             while let Some(row) = rows.next()? {
+                let mint_id: String = row.get(1)?;
+                let attempts = row.get(4)?;
+                let has_frozen_request: bool = row.get(8)?;
+                let acquisition_inspection_only = config.execution.reconcile
+                    && config.execution.maximum_attempts > 0
+                    && attempts >= config.execution.maximum_attempts
+                    && has_frozen_request
+                    && config
+                        .mints
+                        .iter()
+                        .any(|m| m.id == mint_id && m.bolt11_exit_qualified);
                 operations.push(Operation {
                     acquisition_id: Uuid::parse_str(&row.get::<_, String>(0)?)?,
-                    mint_id: row.get(1)?,
+                    mint_id,
                     state: row.get(2)?,
                     hold_reason: row.get(3)?,
-                    acquisition_attempts: row.get(4)?,
+                    acquisition_attempts: attempts,
                     acquisition_next_attempt: row.get(5)?,
+                    acquisition_inspection_only,
                     delivery_attempts: row.get(6)?,
                     delivery_next_attempt: row.get(7)?,
                 });

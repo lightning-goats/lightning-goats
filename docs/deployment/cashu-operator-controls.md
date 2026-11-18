@@ -265,7 +265,14 @@ The acquisition worker preserves the retry budget of payments waiting on
 that local recovery check. It can continue eligible work at another configured
 mint in the same tick. A fresh attempt is recorded durably before the mint
 request, with the existing custody limits checked again. Earlier recorded
-attempts retain their original counts.
+attempts retain their original counts. When that budget is exhausted,
+scheduled reconciliation can still check ownership for an `acquiring`
+operation with a frozen original swap and output derivation. These checks
+require reconciliation to be enabled for a configured mint and run at least
+five minutes apart. They can verify the original signed outputs already in
+the wallet, with no swap replay, receipt export or change to the attempt
+count. Private status shows `acquisition_inspection_only` and the next due
+time for those operations.
 Keep `CASHU_RECOVERY_REQUIRED` in place on restored state.
 Private `status` prioritizes active holds and shows their coarse causes.
 

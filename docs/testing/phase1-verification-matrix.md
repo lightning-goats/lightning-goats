@@ -450,6 +450,12 @@ retain their attempt budgets across ticks and restart. The worker must
 still select ready work from another configured mint. Unconfigured mints
 retain their scheduled history. Once the fence clears, charge one durable
 attempt before the fresh mint request.
+Exhaust an acquisition's retry budget after the original request is frozen.
+With reconciliation enabled, verify that read-only checks continue on the
+persisted schedule across restart. Simulate an unavailable mint-state response
+and then verify the original signed outputs. Preserve the attempt count and
+confirm there is no replay even when original replay is enabled. Verify that
+an expired scheduling selection cannot advance the new schedule.
 
 Run `deploy/scripts/test-cashu-operator-reconciliation-cli.py` with the selected
 wallet executable/hash through the private-run helper in fresh mount/network

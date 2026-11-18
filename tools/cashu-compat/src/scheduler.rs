@@ -161,10 +161,10 @@ impl<'a> Worker<'a> {
                             self.runtime.keys.signing_key(lock)
                         })
                         .await
-                } else if config.execution.original_swap_replay {
-                    coordinator.recover_original(work.id).await
                 } else {
-                    coordinator.reconcile_owned(work.id).await
+                    coordinator
+                        .reconcile_scheduled(work.id, work.inspection_only)
+                        .await
                 }
             })
             .await;

@@ -4,7 +4,9 @@ pub struct Work {
     pub id: Uuid,
     pub mint_id: String,
     pub state: String,
+    pub(crate) inspection_only: bool,
     attempts: u32,
+    due: i64,
 }
 
 impl Journal {
@@ -42,7 +44,7 @@ impl Journal {
         tx.commit()?;
         Ok(Some(parsed))
     }
-    /// Charge a durable attempt before external work. Exhaustion never releases proofs.
+    /// Advance the durable schedule before external work. Exhaustion never releases proofs.
     pub fn claim_acquisition_work(
         &mut self,
         now: i64,
@@ -95,6 +97,7 @@ impl Journal {
             "WITH eligible AS (
                  SELECT a.id,a.mint_id,a.state,COALESCE(s.attempts,0) AS attempts,
                         COALESCE(s.next_attempt,0) AS due,a.rowid AS position,
+                        COALESCE(s.attempts,0)>=?3 AS inspection_only,
                         ROW_NUMBER() OVER (
                             PARTITION BY a.mint_id,a.state='validated'
                             ORDER BY COALESCE(s.next_attempt,0),a.rowid) AS rank
@@ -103,9 +106,13 @@ impl Journal {
                    AND ((?1 AND a.state='validated' AND (?5 IS NULL OR a.gross <= COALESCE(
                            (SELECT value FROM json_each(?5) WHERE key=a.mint_id),0)))
                         OR (?2 AND a.state IN ('acquisition_prepared','acquiring')))
-                   AND COALESCE(s.attempts,0)<?3 AND COALESCE(s.next_attempt,0)<=?4
+                   AND (COALESCE(s.attempts,0)<?3 OR (
+                       a.state='acquiring' AND a.request IS NOT NULL
+                       AND EXISTS(SELECT 1 FROM swap_derivations d WHERE d.acquisition_id=a.id)))
+                   AND COALESCE(s.next_attempt,0)<=?4
              )
-             SELECT id,mint_id,state,attempts FROM eligible WHERE rank=1 ORDER BY due,position",
+             SELECT id,mint_id,state,attempts,due,inspection_only
+             FROM eligible WHERE rank=1 ORDER BY due,position",
         )?;
         let rows = statement.query_map(
             params![
@@ -122,16 +129,20 @@ impl Journal {
                     row.get(1)?,
                     row.get(2)?,
                     row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
                 ))
             },
         )?;
         rows.map(|row| {
-            let (id, mint_id, state, attempts) = row?;
+            let (id, mint_id, state, attempts, due, inspection_only) = row?;
             Ok(Work {
                 id: Uuid::parse_str(&id)?,
                 mint_id,
                 state,
+                inspection_only,
                 attempts,
+                due,
             })
         })
         .collect()
@@ -148,7 +159,10 @@ impl Journal {
             now >= 0 && (1..=60).contains(&deadline_seconds),
             "invalid acquisition scheduling bounds"
         );
-        let backoff = (5_i64 << work.attempts.min(10)).min(3600);
+        let mut backoff = (5_i64 << work.attempts.min(10)).min(3600);
+        if work.inspection_only {
+            backoff = backoff.max(300);
+        }
         let next = now
             .checked_add(i64::try_from(deadline_seconds)?)
             .and_then(|v| v.checked_add(backoff))
@@ -159,8 +173,11 @@ impl Journal {
         let gross: Option<u64> = tx.query_row(
             "SELECT a.gross FROM acquisitions a LEFT JOIN acquisition_schedule s ON s.acquisition_id=a.id
              WHERE a.id=? AND a.mint_id=? AND a.state=?
-               AND COALESCE(s.attempts,0)=? AND COALESCE(s.next_attempt,0)<=?",
-            params![work.id.to_string(), work.mint_id, work.state, work.attempts, now],
+               AND COALESCE(s.attempts,0)=? AND COALESCE(s.next_attempt,0)=?
+               AND COALESCE(s.next_attempt,0)<=?
+               AND (NOT ? OR (a.request IS NOT NULL AND EXISTS(
+                   SELECT 1 FROM swap_derivations d WHERE d.acquisition_id=a.id)))",
+            params![work.id.to_string(), work.mint_id, work.state, work.attempts, work.due, now, work.inspection_only],
             |row| row.get(0),
         ).optional()?;
         let Some(gross) = gross else {
@@ -179,7 +196,7 @@ impl Journal {
         }
         tx.execute(
             "INSERT INTO acquisition_schedule(acquisition_id,attempts,next_attempt) VALUES(?,?,?) ON CONFLICT(acquisition_id) DO UPDATE SET attempts=excluded.attempts,next_attempt=excluded.next_attempt",
-            params![work.id.to_string(),work.attempts+1,next],
+            params![work.id.to_string(),work.attempts+u32::from(!work.inspection_only),next],
         )?;
         tx.commit()?;
         Ok(true)

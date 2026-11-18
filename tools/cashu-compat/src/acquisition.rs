@@ -241,6 +241,18 @@ impl<T: Transport + 'static> Coordinator<'_, T> {
         self.check_owned(id, None).await
     }
 
+    pub(crate) async fn reconcile_scheduled(
+        &mut self,
+        id: Uuid,
+        inspection_only: bool,
+    ) -> Result<Progress> {
+        if self.permissions.original_swap_replay && !inspection_only {
+            self.recover_original(id).await
+        } else {
+            self.reconcile_owned(id).await
+        }
+    }
+
     /// Explicit operator recheck of a hold raised while verifying original outputs.
     /// Returning acquired here never exports a receipt, even if the worker can.
     pub(crate) async fn recheck_held_ownership(

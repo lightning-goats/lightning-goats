@@ -5,8 +5,9 @@ Requires root in a fresh loopback-only network namespace and explicitly selected
 native test artifacts. Baseline modes use a shared disposable non-root identity.
 Optional receipt/treasury modes exercise production socket adapters across
 separate UIDs; HTTP mode adds actual public admission. The HTTPS edge also uses
-the packaged nginx routes and the pinned Cashu-TS sender. Providers remain
-synthetic and physical confirmation is simulated in every mode.
+the packaged nginx routes and the pinned Cashu-TS sender, optionally through
+ModSecurity and CRS. Providers remain synthetic and physical confirmation is
+simulated in every mode.
 """
 import argparse
 from contextlib import ExitStack, closing, contextmanager
@@ -18,6 +19,7 @@ import json
 import os
 from pathlib import Path
 import pwd
+import re
 import runpy
 import shutil
 import socket
@@ -36,7 +38,7 @@ MULTI_MINT_WALLET = 'acquisition::tests::core_settlement_fixture::multi_mint::co
 
 
 @contextmanager
-def https_edge(root, bootstrap, core):
+def https_edge(root, bootstrap, core, waf_paths):
     directory = root / 'https-edge'
     directory.mkdir(mode=0o755)
     authority, authority_key = directory / 'ca.pem', directory / 'ca.key'
@@ -80,7 +82,29 @@ def https_edge(root, bootstrap, core):
     shutil.copyfile(snippet, directory / 'cashu-routes.conf')
     config = directory / 'nginx.conf'
     access = directory / 'access.log'
+    waf_load, waf_server, waf_result = '', '', None
+    if waf_paths:
+        crs, module = (path.resolve(strict=True) for path in waf_paths)
+        setup = crs / 'crs-setup.conf.example'
+        if not module.is_file() or not setup.is_file() or not any((crs / 'rules').glob('*.conf')):
+            raise ValueError('trusted installed ModSecurity module and CRS are required')
+        if any(not re.fullmatch(r'/[A-Za-z0-9_./+-]+', str(path)) for path in (crs, module)):
+            raise ValueError('ModSecurity fixture requires simple absolute paths')
+        waf_source = source.parent / 'waf/lightning-goats.conf.example'
+        waf = directory / 'waf.conf'
+        temporary = directory / 'waf-tmp'
+        temporary.mkdir()
+        waf.write_text(waf_source.read_text().replace('@CRS@', str(crs)).replace('@TMP@', str(temporary)))
+        policy_dir = directory / 'cashu-token-waf.d'
+        policy_dir.mkdir()
+        policy = source / 'lightning-goats-cashu-modsecurity.conf.example'
+        shutil.copyfile(policy, policy_dir / '10-modsecurity.conf')
+        waf_load = f'load_module {module};'
+        waf_server = f'modsecurity on; modsecurity_rules_file {waf};'
+        waf_result = {'module_sha256': digest(module), 'waf_config_template_sha256': digest(waf_source),
+                      'token_route_settings_sha256': digest(policy), 'crs_setup_sha256': digest(setup)}
     config.write_text(f'''
+{waf_load}
 daemon off;
 worker_processes 1;
 pid {directory}/nginx.pid;
@@ -98,6 +122,7 @@ http {{
         listen 127.0.0.1:{port} ssl;
         ssl_certificate {certificate};
         ssl_certificate_key {key};
+        {waf_server}
         include {directory}/cashu-routes.conf;
         location = /edge-ready {{ return 204; }}
         location / {{ return 404; }}
@@ -132,7 +157,14 @@ http {{
                         raise ValueError('unexpected HTTPS certificate authentication')
             except ssl.SSLCertVerificationError:
                 pass
-        yield f'https://127.0.0.1:{port}', authority, access, snippet, shared
+        if waf_result is not None:
+            with closing(HTTPSConnection('127.0.0.1', port, timeout=2, context=trusted,
+                                         source_address=('127.0.0.2', 0))) as check:
+                check.request('OPTIONS', '/api/v1/cashu', headers={'X-Lightning-Goats-Waf-Probe': 'blocked'})
+                if check.getresponse().status != 403:
+                    raise ValueError('Cashu HTTPS edge did not enforce ModSecurity')
+            waf_result['deterministic_block_verified'] = True
+        yield f'https://127.0.0.1:{port}', authority, access, snippet, shared, waf_result
     finally:
         process.terminate()
         try:
@@ -685,6 +717,8 @@ def main():
     parser.add_argument('--treasury-ipc', action='store_true', help='require receipt IPC and use authenticated treasury Retain/Status for instructions and reports')
     parser.add_argument('--http-intake', action='store_true', help='send ordinary contribution through real HTTP and authenticated wallet intake')
     parser.add_argument('--https-edge', action='store_true', help='send one SDK Cashu payment through the packaged nginx routes with verified TLS')
+    parser.add_argument('--modsecurity', nargs=2, type=Path, metavar=('CRS_DIR', 'MODULE'),
+                        help='with --https-edge, load trusted installed CRS and ModSecurity in enforcement mode')
     parser.add_argument('--cashu-ts-sender', action='store_true', help='use pinned Cashu-TS offline wallet selection and a separate Node test sender process')
     parser.add_argument('--sender-installation', type=Path)
     parser.add_argument('--sender-files-sha256')
@@ -715,6 +749,8 @@ def main():
         parser.error('--cashu-ts-sender requires --http-intake and pinned prepared dependencies')
     if args.https_edge and (not args.cashu_ts_sender or args.repeat_request or args.multi_mint or args.settle_change):
         parser.error('--https-edge requires one ordinary payment through --cashu-ts-sender')
+    if args.modsecurity and not args.https_edge:
+        parser.error('--modsecurity requires --https-edge')
     if args.http_intake and not args.treasury_ipc:
         parser.error('--http-intake requires --treasury-ipc')
     if args.treasury_ipc and not args.receipt_ipc:
@@ -792,8 +828,9 @@ def main():
                           '--clear-groups','--no-new-privs','--']
                 child_env = dict(env)
                 if name == 'wallet' and args.https_edge:
-                    edge = resources.enter_context(https_edge(root, exchange / 'bootstrap.json', processes[0]))
-                    origin, authority, _, _, _ = edge
+                    edge = resources.enter_context(https_edge(root, exchange / 'bootstrap.json',
+                                                              processes[0], args.modsecurity))
+                    origin, authority, _, _, _, _ = edge
                     child_env['LG_CASHU_COMBINED_EDGE_ORIGIN'] = origin
                     child_env['LG_CASHU_COMBINED_EDGE_CA'] = str(authority)
                 if args.receipt_ipc:
@@ -924,7 +961,7 @@ def main():
                 result['funded_rollback']['scoped_cleanup_verified_after_evidence_refusals_and_checkpoint_failure'] = True
             edge_result = None
             if edge is not None:
-                _, _, access, snippet, shared = edge
+                _, _, access, snippet, shared, waf_result = edge
                 access_log = access.read_bytes()
                 error_log = access.with_name('error.log').read_bytes()
                 if b'/edge-ready' not in access_log or any(b'/api/v1/cashu' in log for log in (access_log, error_log)):
@@ -933,6 +970,8 @@ def main():
                                'untrusted_certificate_refused': True, 'wrong_hostname_refused': True,
                                'cross_origin_preflight': True, 'durable_status_replayed_over_tls': True,
                                'cashu_local_logs_suppressed': True}
+                if waf_result is not None:
+                    edge_result['modsecurity'] = waf_result
             print(json.dumps({'result': 'CASHU_COMBINED_SETTLEMENT_VERIFIED', 'artifacts_sha256': hashes,
                               'financial_result': result, 'live_provider': False, 'wallet_health_verified': True,
                               'nonzero_fees': args.fees, 'returned_change': args.fees and not args.no_change,

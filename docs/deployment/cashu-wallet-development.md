@@ -1032,8 +1032,13 @@ The hosted `cashu-sdk-https-edge.json` fixture connects the pinned Cashu-TS
 sender to the actual wallet and core through the packaged nginx routes. It
 checks TLS trust and hostname validation, CORS preflight, stable admission
 after a lost reply, credited status after settlement and local log suppression.
-The mint, Strike and feeder responses are simulated. External WAF behavior and
-live client interoperability require separate acceptance.
+Add `--modsecurity CRS_DIR MODULE` to the composed fixture's `--https-edge`
+invocation to use trusted installed CRS and the matching nginx module in the
+disposable network namespace. It loads the packaged Cashu request limit,
+checks an actual WAF refusal, and then runs the SDK admission, retry and
+settlement path through the same edge. The mint, Strike and feeder responses
+are simulated. External WAF behavior and live client interoperability require
+separate acceptance.
 
 ### Inactive sender-status edge addition
 

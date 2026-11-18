@@ -95,6 +95,116 @@ fn assert_restored_wallet_fenced(directory: &Path) -> Result<()> {
     Ok(())
 }
 
+async fn verify_original_treasury_cleanup(
+    recovery: &crate::treasury_recovery::Recovery<'_, FixtureMint>,
+    path: &Path,
+    epoch: Uuid,
+    report: &lightning_goats_cashu_receipt::treasury::MeltData,
+) -> Result<()> {
+    let id = report.intent_id;
+    let digest = report.operation_evidence_digest.as_str();
+    let context = recovery
+        .journal
+        .lock()
+        .unwrap()
+        .treasury_cleanup_context(recovery.binding, id, Some(digest))?
+        .ok_or_else(|| anyhow::anyhow!("fixture cleanup was already recorded"))?;
+    let operation = context.recovery.derivation.cdk_operation;
+    let input_points = context
+        .request
+        .inputs()
+        .iter()
+        .map(|p| p.y())
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    assert!(recovery.database.get_saga(&operation).await?.is_some());
+    assert_eq!(
+        recovery
+            .database
+            .get_proofs_by_ys(input_points.clone())
+            .await?
+            .len(),
+        input_points.len()
+    );
+
+    recovery
+        .transport
+        .fail_check_once
+        .store(true, Ordering::SeqCst);
+    assert!(recovery.cleanup(id, Some(&"ff".repeat(32))).await.is_err());
+    assert!(recovery.transport.fail_check_once.load(Ordering::SeqCst));
+    assert!(recovery.cleanup(id, Some(digest)).await.is_err());
+    assert!(!recovery.transport.fail_check_once.load(Ordering::SeqCst));
+    recovery
+        .transport
+        .incomplete_check_once
+        .store(true, Ordering::SeqCst);
+    assert!(recovery.cleanup(id, Some(digest)).await.is_err());
+    assert!(recovery.database.get_saga(&operation).await?.is_some());
+    assert_eq!(
+        recovery
+            .database
+            .get_proofs_by_ys(input_points.clone())
+            .await?
+            .len(),
+        input_points.len()
+    );
+    assert!(
+        recovery
+            .journal
+            .lock()
+            .unwrap()
+            .treasury_cleanup_context(recovery.binding, id, Some(digest))?
+            .is_some()
+    );
+
+    let fault = rusqlite::Connection::open(path)?;
+    fault.execute_batch(
+        "CREATE TRIGGER fixture_pause_cleanup BEFORE INSERT ON treasury_cdk_cleanup
+         BEGIN SELECT RAISE(ABORT, 'synthetic interrupted checkpoint'); END;",
+    )?;
+    assert!(recovery.cleanup(id, Some(digest)).await.is_err());
+    assert!(recovery.database.get_saga(&operation).await?.is_none());
+    assert!(
+        recovery
+            .database
+            .get_proofs_by_ys(input_points)
+            .await?
+            .is_empty()
+    );
+    assert!(
+        recovery
+            .journal
+            .lock()
+            .unwrap()
+            .treasury_cleanup_context(recovery.binding, id, Some(digest))?
+            .is_some()
+    );
+    fault.execute_batch("DROP TRIGGER fixture_pause_cleanup")?;
+    drop(fault);
+    assert!(recovery.cleanup(id, Some(digest)).await?);
+    let retained = Journal::open(path, epoch, 64)?;
+    assert!(retained.treasury_melt_report(recovery.binding, id)? == *report);
+    assert!(
+        retained
+            .treasury_cleanup_context(recovery.binding, id, Some(digest))?
+            .is_none()
+    );
+    recovery
+        .transport
+        .fail_check_once
+        .store(true, Ordering::SeqCst);
+    assert!(recovery.cleanup(id, Some(&"ff".repeat(32))).await.is_err());
+    assert!(!recovery.cleanup(id, Some(digest)).await?);
+    assert!(
+        recovery
+            .transport
+            .fail_check_once
+            .swap(false, Ordering::SeqCst)
+    );
+    println!("COMBINED_WALLET_ORIGINAL_TREASURY_CLEANUP_VERIFIED");
+    Ok(())
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Bootstrap {
@@ -728,6 +838,13 @@ async fn combined_settlement_wallet_child() -> Result<()> {
                 .is_err(),
             "one-operation reconciliation accepted a merely bound instruction"
         );
+        assert!(
+            operator_recovery
+                .cleanup(issued.intent.id, Some(&"ff".repeat(32)))
+                .await
+                .is_err(),
+            "cleanup accepted a merely bound instruction"
+        );
     }
     let mut execution = Execution {
         execute: true,
@@ -1187,6 +1304,8 @@ async fn combined_settlement_wallet_child() -> Result<()> {
         assert_eq!(later["resume_authorized"], false);
         assert_eq!(harness.mint.melt_attempts.load(Ordering::SeqCst), 1);
         println!("COMBINED_WALLET_STALE_UNSPENT_CUSTODY_VERIFIED");
+        verify_original_treasury_cleanup(&operator_recovery, &path, harness.epoch, &report).await?;
+        assert_eq!(harness.mint.melt_attempts.load(Ordering::SeqCst), 1);
     }
     println!("COMBINED_WALLET_HEALTH_ACCOUNTING_VERIFIED");
     if settle_change {

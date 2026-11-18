@@ -331,7 +331,7 @@ impl<T: Transport + Clone + 'static> Worker<T> {
                     .is_some());
             }
             Action::Reconcile => return Ok(recovery.reconcile(work.id).await?.is_some()),
-            Action::Cleanup => return recovery.cleanup(work.id).await,
+            Action::Cleanup => return recovery.cleanup(work.id, None).await.map(|_| true),
             action => {
                 let executor = context
                     .executor

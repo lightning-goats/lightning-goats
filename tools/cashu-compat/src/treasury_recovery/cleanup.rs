@@ -7,7 +7,8 @@ use cdk::{
 use std::collections::BTreeSet;
 
 impl<T: Transport> Recovery<'_, T> {
-    pub async fn cleanup(&self, id: Uuid) -> Result<bool> {
+    /// Returns true only when this invocation records the cleanup checkpoint.
+    pub async fn cleanup(&self, id: Uuid, approved_evidence_digest: Option<&str>) -> Result<bool> {
         let active = self.writer.coordinator();
         {
             let mut current = active
@@ -24,9 +25,9 @@ impl<T: Transport> Recovery<'_, T> {
             .journal
             .lock()
             .map_err(|_| anyhow::anyhow!("wallet journal unavailable"))?
-            .treasury_cleanup_context(self.binding, id)?;
+            .treasury_cleanup_context(self.binding, id, approved_evidence_digest)?;
         let Some(context) = context else {
-            return Ok(true);
+            return Ok(false);
         };
         let original = &context.recovery;
         let operation = original.derivation.cdk_operation;

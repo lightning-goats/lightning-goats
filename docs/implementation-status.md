@@ -152,6 +152,15 @@ verifies an identical retry. Its systemd status responses are simulated. The
 [operator runbook](deployment/cashu-operator-controls.md) covers the review and
 its activation boundaries.
 
+The wallet can clean up one previously reported melt while new execution is
+paused. The protected `cleanup-treasury` approval binds the retained report
+digest and original operation. The funded fixture refuses incomplete spent
+evidence, interrupts the checkpoint after the CDK changes, and completes
+cleanup once on retry. The earlier backup comparison still covers the retained
+CDK records before cleanup. The same fixture verifies one 398-sat synthetic
+Strike deposit and one simulated feed. The native CLI fixture covers refusal
+of invalid approvals and a missing original operation.
+
 Cashu operator controls update **2026-11-17**: the
 [protected planning/reconciliation checkpoint](testing/cashu-operator-controls-20261117.json)
 passes 650 core tests (12 ignored), 179 wallet tests (seven ignored), required

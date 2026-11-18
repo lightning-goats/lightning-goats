@@ -592,6 +592,7 @@ def main():
                     markers.append('COMBINED_WALLET_HEALTH_ACCOUNTING_VERIFIED')
                     if args.funded_rollback:
                         markers.append('COMBINED_WALLET_ORIGINAL_TREASURY_RECONCILIATION_VERIFIED')
+                        markers.append('COMBINED_WALLET_ORIGINAL_TREASURY_CLEANUP_VERIFIED')
                         markers.append('COMBINED_WALLET_STALE_UNSPENT_CUSTODY_VERIFIED')
                 if args.repeat_request:
                     markers.append(['COMBINED_CORE_REUSABLE_REQUEST_TWO_PAYMENTS_VERIFIED','COMBINED_WALLET_REUSABLE_REQUEST_TWO_PAYMENTS_VERIFIED'][index])
@@ -660,6 +661,7 @@ def main():
                     raise ValueError('staged core CLI differs from selected artifact')
                 result['funded_rollback'] = verify_funded_rollback(root, core_cli)
                 result['funded_rollback']['scoped_reconciliation_recorded_and_replayed'] = True
+                result['funded_rollback']['scoped_cleanup_verified_after_evidence_refusals_and_checkpoint_failure'] = True
             print(json.dumps({'result': 'CASHU_COMBINED_SETTLEMENT_VERIFIED', 'artifacts_sha256': hashes,
                               'financial_result': result, 'live_provider': False, 'wallet_health_verified': True,
                               'nonzero_fees': args.fees, 'returned_change': args.fees and not args.no_change,

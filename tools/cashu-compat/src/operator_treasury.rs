@@ -1,29 +1,39 @@
 //! Recover one original treasury melt from the registered wallet.
 use crate::{
-    service::Runtime, service_config::Config, transport::MintTransport, treasury_recovery::Recovery,
+    service::Runtime,
+    service_config::{Config, read_protected},
+    transport::MintTransport,
+    treasury_recovery::Recovery,
 };
 use anyhow::{Result, ensure};
 use cdk_http_client::Transport;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
-    io::Read,
     path::Path,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use uuid::Uuid;
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum Purpose {
+    ReconcileOriginalTreasuryMelt,
+    CleanupOriginalTreasuryMelt,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Approval {
     version: u8,
-    purpose: String,
+    purpose: Purpose,
     wallet_instance: Uuid,
     wallet_epoch: Uuid,
     core_epoch: Uuid,
     intent_id: Uuid,
     mint_id: String,
     config_sha256: String,
+    operation_evidence_digest: Option<String>,
     approved_at: u64,
     expires_at: u64,
 }
@@ -34,6 +44,8 @@ pub(crate) enum State {
     Pending,
     ReportRecorded,
     ReportAlreadyRetained,
+    CleanupRecorded,
+    CleanupAlreadyRetained,
 }
 
 #[derive(Serialize)]
@@ -41,29 +53,23 @@ pub struct Outcome {
     intent_id: Uuid,
     mint_id: String,
     state: State,
+    operation_evidence_digest: Option<String>,
     workers_started: bool,
     payment_submitted: bool,
     strike_settlement_verified: bool,
     cleanup_attempted: bool,
 }
 
-fn read_protected(path: &Path, limit: u64) -> Result<Vec<u8>> {
-    crate::private_ipc::protected_config(path)?;
-    let mut bytes = Vec::new();
-    std::fs::File::open(path)?
-        .take(limit + 1)
-        .read_to_end(&mut bytes)?;
-    ensure!(
-        !bytes.is_empty() && bytes.len() as u64 <= limit,
-        "invalid protected document size"
-    );
-    Ok(bytes)
-}
-
 impl Approval {
-    pub fn load(path: &Path) -> Result<Self> {
-        let value: Self = serde_json::from_slice(&read_protected(path, 4096)?)
+    pub fn load(path: &Path, expected: Purpose) -> Result<Self> {
+        let bytes = read_protected(path)?;
+        ensure!(bytes.len() <= 4096, "treasury approval exceeds size bound");
+        let value: Self = serde_json::from_slice(&bytes)
             .map_err(|_| anyhow::anyhow!("invalid treasury reconciliation approval"))?;
+        ensure!(
+            value.purpose == expected,
+            "treasury approval purpose differs"
+        );
         value.require_current()?;
         Ok(value)
     }
@@ -72,7 +78,17 @@ impl Approval {
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
         ensure!(
             self.version == 1
-                && self.purpose == "reconcile_original_treasury_melt"
+                && match self.purpose {
+                    Purpose::ReconcileOriginalTreasuryMelt =>
+                        self.operation_evidence_digest.is_none(),
+                    Purpose::CleanupOriginalTreasuryMelt => self
+                        .operation_evidence_digest
+                        .as_ref()
+                        .is_some_and(|digest| lightning_goats_nostr_event::validate_hex(
+                            digest, 32
+                        )
+                        .is_ok()),
+                }
                 && !self.wallet_instance.is_nil()
                 && !self.wallet_epoch.is_nil()
                 && !self.core_epoch.is_nil()
@@ -91,7 +107,7 @@ impl Approval {
     }
 
     pub fn load_config(&self, path: &Path) -> Result<Config> {
-        let bytes = read_protected(path, 65536)?;
+        let bytes = read_protected(path)?;
         ensure!(
             hex::encode(Sha256::digest(&bytes)) == self.config_sha256,
             "wallet configuration differs from treasury reconciliation approval"
@@ -115,7 +131,7 @@ impl Approval {
         Ok(())
     }
 
-    pub async fn reconcile(&self, runtime: &Runtime) -> Result<Outcome> {
+    pub async fn execute(&self, runtime: &Runtime) -> Result<Outcome> {
         let config = &runtime.config;
         self.require_scope(config)?;
         let binding = config
@@ -147,16 +163,39 @@ impl Approval {
             seed: &runtime.keys.seed,
         };
         self.require_current()?;
-        let state =
-            tokio::time::timeout(deadline, reconcile_original(&recovery, self.intent_id)).await??;
+        let state = tokio::time::timeout(deadline, async {
+            Ok::<_, anyhow::Error>(if let Some(digest) = &self.operation_evidence_digest {
+                if recovery.cleanup(self.intent_id, Some(digest)).await? {
+                    State::CleanupRecorded
+                } else {
+                    State::CleanupAlreadyRetained
+                }
+            } else {
+                reconcile_original(&recovery, self.intent_id).await?
+            })
+        })
+        .await??;
+        let operation_evidence_digest = if state == State::Pending {
+            None
+        } else {
+            Some(
+                runtime
+                    .journal
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("wallet journal unavailable"))?
+                    .treasury_melt_report(&binding, self.intent_id)?
+                    .operation_evidence_digest,
+            )
+        };
         Ok(Outcome {
             intent_id: self.intent_id,
             mint_id: self.mint_id.clone(),
+            cleanup_attempted: state == State::CleanupRecorded,
             state,
+            operation_evidence_digest,
             workers_started: false,
             payment_submitted: false,
             strike_settlement_verified: false,
-            cleanup_attempted: false,
         })
     }
 }

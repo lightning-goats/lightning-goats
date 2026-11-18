@@ -1,13 +1,15 @@
 //! Separate wallet process. No implicit initialization, key generation or public listener.
 #![forbid(unsafe_code)]
 use lightning_goats_cashu_compat::{
-    descriptor::Encoding, service::Runtime, service_config::Config, writer_lock::RecoveryRequired,
+    descriptor::Encoding, operator_treasury::Purpose, service::Runtime, service_config::Config,
+    writer_lock::RecoveryRequired,
 };
 use std::{ffi::OsString, path::PathBuf, process::ExitCode};
 
 const USAGE: &str = "Usage: lightning-goats-cashud <check-config|initialize|run|status> <config.json>\n\
        lightning-goats-cashud reconcile-acquisition <config.json> <approval.json>\n\
        lightning-goats-cashud reconcile-treasury <config.json> <approval.json>\n\
+       lightning-goats-cashud cleanup-treasury <config.json> <approval.json>\n\
        lightning-goats-cashud review-mint-policy <current.json> <candidate.json>\n\
        lightning-goats-cashud prepare-announcement <config.json> <operation-uuid>\n\
        lightning-goats-cashud prepare-request <config.json> <https-endpoint> <creqA|creqB>\n\
@@ -17,6 +19,7 @@ run           Open existing wallet state; serve private intake and configured ac
 status        Read bounded private journal status without loading keys or changing work.\n\
 reconcile-acquisition  Check one approved original acquisition; no swap/melt replay.\n\
 reconcile-treasury  Check one original submitted melt and retain its wallet report.\n\
+cleanup-treasury  Verify and clean up one previously reported melt.\n\
 review-mint-policy  Review a protected mint-only change against the stopped wallet.\n\
 prepare-announcement  Offline: retain and preview configured kind 10019; no workers started.\n\
 prepare-request  Offline: preview a reusable request; no keys, state or network opened.\n\
@@ -31,7 +34,7 @@ enum Command {
     Run(PathBuf),
     Status(PathBuf),
     ReconcileAcquisition(PathBuf, PathBuf),
-    ReconcileTreasury(PathBuf, PathBuf),
+    Treasury(Purpose, PathBuf, PathBuf),
     ReviewMintPolicy(PathBuf, PathBuf),
     PrepareAnnouncement(PathBuf, uuid::Uuid),
     PrepareRequest(PathBuf, String, Encoding),
@@ -51,15 +54,19 @@ fn parse(args: Vec<OsString>) -> Result<Command, ()> {
             PathBuf::from(&args[2]),
         ));
     }
-    if args.len() == 3
-        && args[0] == "reconcile-treasury"
-        && !args[1].is_empty()
-        && !args[2].is_empty()
-    {
-        return Ok(Command::ReconcileTreasury(
-            PathBuf::from(&args[1]),
-            PathBuf::from(&args[2]),
-        ));
+    if args.len() == 3 && !args[1].is_empty() && !args[2].is_empty() {
+        let purpose = match args[0].to_str() {
+            Some("reconcile-treasury") => Some(Purpose::ReconcileOriginalTreasuryMelt),
+            Some("cleanup-treasury") => Some(Purpose::CleanupOriginalTreasuryMelt),
+            _ => None,
+        };
+        if let Some(purpose) = purpose {
+            return Ok(Command::Treasury(
+                purpose,
+                PathBuf::from(&args[1]),
+                PathBuf::from(&args[2]),
+            ));
+        }
     }
     if args.len() == 3
         && args[0] == "reconcile-acquisition"
@@ -170,22 +177,24 @@ async fn execute(command: Command) -> Result<(), &'static str> {
                 serde_json::to_string(&review).map_err(|_| "mint policy review encoding failed")?
             );
         }
-        Command::ReconcileTreasury(path, approval) => {
+        Command::Treasury(purpose, path, approval) => {
             use lightning_goats_cashu_compat::operator_treasury::Approval;
-            let approval = Approval::load(&approval)
-                .map_err(|_| "treasury reconciliation approval rejected")?;
+            let approval = Approval::load(&approval, purpose)
+                .map_err(|_| "treasury recovery approval rejected")?;
             let config = approval
                 .load_config(&path)
-                .map_err(|_| "treasury reconciliation configuration rejected")?;
-            let runtime = Runtime::open(config).await.map_err(|_| "treasury reconciliation requires offline registered wallet state and matching keys")?;
+                .map_err(|_| "treasury recovery configuration rejected")?;
+            let runtime = Runtime::open(config).await.map_err(
+                |_| "treasury recovery requires offline registered wallet state and matching keys",
+            )?;
             let result = approval
-                .reconcile(&runtime)
+                .execute(&runtime)
                 .await
-                .map_err(|_| "treasury reconciliation failed; original operation retained")?;
+                .map_err(|_| "treasury recovery failed; original operation retained")?;
             println!(
                 "{}",
                 serde_json::to_string(&result)
-                    .map_err(|_| "treasury reconciliation outcome encoding failed")?
+                    .map_err(|_| "treasury recovery outcome encoding failed")?
             );
         }
         Command::PrepareAnnouncement(path, id) => {
@@ -248,18 +257,24 @@ mod tests {
     #[test]
     fn commands_require_explicit_mode_and_exact_arguments() {
         assert_eq!(parse(args(&["--help"])), Ok(Command::Help));
-        assert_eq!(
-            parse(args(&[
-                "reconcile-treasury",
-                "/fixture/config.json",
-                "/fixture/approval.json"
-            ])),
-            Ok(Command::ReconcileTreasury(
-                "/fixture/config.json".into(),
-                "/fixture/approval.json".into()
-            ))
-        );
-        assert!(parse(args(&["reconcile-treasury", "/fixture/config.json"])).is_err());
+        for (name, purpose) in [
+            ("reconcile-treasury", Purpose::ReconcileOriginalTreasuryMelt),
+            ("cleanup-treasury", Purpose::CleanupOriginalTreasuryMelt),
+        ] {
+            assert_eq!(
+                parse(args(&[
+                    name,
+                    "/fixture/config.json",
+                    "/fixture/approval.json"
+                ])),
+                Ok(Command::Treasury(
+                    purpose,
+                    "/fixture/config.json".into(),
+                    "/fixture/approval.json".into()
+                ))
+            );
+            assert!(parse(args(&[name, "/fixture/config.json"])).is_err());
+        }
         for (name, encoding) in [("creqA", Encoding::CreqA), ("creqB", Encoding::CreqB)] {
             assert_eq!(
                 parse(args(&[

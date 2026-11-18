@@ -495,3 +495,16 @@ with a fixture and test processes and locks directly. After a native restart,
 verify the original held request and both namespace registrations. The retained
 issuer test must refuse the original URL and its trailing-slash spelling under
 a new internal ID.
+
+## Original Cashu treasury cleanup
+
+Use the funded lost-melt-reply fixture with new wallet execution paused.
+Retain the original wallet report after the independent synthetic Strike
+verification. Refuse an unrelated report digest without contacting the mint,
+and leave the original CDK inputs and saga intact after unavailable or
+incomplete spent-state evidence. Interrupt the checkpoint after the validated
+local CDK updates and retry the same operation. Verify the exact report is
+preserved and the completed retry performs no mint lookup. Keep the original
+single melt submission, Strike deposit and simulated feeder confirmation.
+Use the native CLI fixture to check review-purpose, digest, exact config and
+missing-original refusals.

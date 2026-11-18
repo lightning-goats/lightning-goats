@@ -106,7 +106,7 @@ lookup, preimage validation and change ownership checks as the wallet's recovery
 worker. An already retained report can be returned from the journal without a
 mint request. A bound instruction with no recorded submission is refused.
 
-The root-owned approval JSON contains these exact fields:
+The root-owned reconciliation approval JSON contains these fields:
 
 - `version` is `1`, and `purpose` is `"reconcile_original_treasury_melt"`.
 - `wallet_instance`, `wallet_epoch`, `core_epoch` and `intent_id` are UUIDs
@@ -118,12 +118,26 @@ The root-owned approval JSON contains these exact fields:
 
 An unpaid or pending quote produces `pending`. A proven paid quote produces
 `report_recorded`, and an exact retry produces `report_already_retained`.
-Transport and evidence errors retain the original operation for investigation.
-This command performs only the report stage. CDK cleanup and independent Strike
-verification are separate steps. The command creates no invoice, submits no
-payment and starts no services or workers. A restored wallet remains fenced.
-The funded lost-reply fixture exercises the report stage and exact replay with
-the synthetic mint. Installed acceptance remains open.
+Both report outcomes include the original `operation_evidence_digest`. Transport
+and evidence errors retain the original operation for investigation.
+
+Use `lightning-goats-cashud cleanup-treasury CONFIG APPROVAL` for the CDK
+cleanup stage. Create a separate approval with the same wallet, core, config,
+mint and intent bindings. Set `purpose` to `"cleanup_original_treasury_melt"`
+and include the report's exact lowercase `operation_evidence_digest`. The
+command requires the original completed report and fresh mint evidence that
+every corresponding input is spent. It removes those inputs and the original
+CDK saga, records the paid quote, and checkpoints cleanup. An exact retry
+returns `cleanup_already_retained` from the journal without another mint call.
+An unavailable or incomplete proof-state read preserves the original work.
+
+These commands perform wallet recovery. Core must independently verify the
+original Strike receive before crediting it. The commands run with the wallet
+stopped, leave restored wallets fenced, and access the mint only for original
+operation evidence. The funded lost-reply fixture covers both stages,
+including refusal of mismatched, missing and incomplete evidence. It also
+interrupts cleanup after the CDK changes and verifies that the original
+operation can finish on retry. Installed acceptance remains open.
 
 
 ## Original acquisition ownership check

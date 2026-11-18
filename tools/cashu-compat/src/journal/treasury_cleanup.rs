@@ -14,12 +14,21 @@ impl Journal {
         &self,
         binding: &TreasuryBinding,
         id: Uuid,
+        approved_evidence_digest: Option<&str>,
     ) -> Result<Option<Context>> {
+        let completed = self
+            .completed_treasury_report(binding, id)?
+            .ok_or_else(|| anyhow::anyhow!("cleanup requires completed financial report"))?;
         ensure!(
-            self.completed_treasury_report(binding, id)?.is_some(),
-            "cleanup requires completed financial report"
+            approved_evidence_digest
+                .is_none_or(|digest| digest == completed.operation_evidence_digest),
+            "cleanup approval differs from retained melt evidence"
         );
         let recovery = self.treasury_recovery_context(binding, id)?;
+        ensure!(
+            completed.quote_id == recovery.quote.id,
+            "cleanup report quote differs from the original melt"
+        );
         let (report,paid,request):(Vec<u8>,Vec<u8>,Vec<u8>)=self.connection.query_row(
             "SELECT r.report,r.paid_evidence,m.request FROM treasury_results r JOIN treasury_melt_requests m ON m.intent_id=r.intent_id WHERE r.intent_id=? AND length(r.report)<=65536 AND length(r.paid_evidence)<=1048576 AND length(m.request)<=1048576",
             [id.to_string()],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;

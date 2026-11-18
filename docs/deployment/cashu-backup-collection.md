@@ -654,8 +654,45 @@ If interrupted, keep the state fenced and retry with the same stage and policy
 digests. The result lists the two verified signer roles without disclosing keys.
 
 Validate the installed unit bindings and bunker permissions before signing
-acceptance. Strike, webhook, and other independently managed credentials have
-their own recovery requirements.
+acceptance.
+
+### Verify separately provisioned Strike credentials
+
+Provision the three existing named systemd credentials independently for the
+recovery host. The verifier uses the shipped unit bindings:
+
+| Unit credential name | File in the selected encrypted store |
+| --- | --- |
+| `strike-api-key` | `lightning-goats-strike-api-key` |
+| `strike-webhook-secret` | `lightning-goats-strike-webhook-secret` |
+| `strike-payout-api-key` | `cyberherd-strike-payout` |
+
+Take the webhook secret's SHA256 from the original protected Strike webhook
+configuration or its independently retained provisioning record. Use the
+credential's UTF-8 value after trimming surrounding whitespace, as the runtime
+does. Record the exact approval digest separately. The approval file and
+credential store must be root-private. An example binding:
+
+```json
+{
+  "version": 1,
+  "purpose": "cashu-strike-credential-verification",
+  "stage_sha256": "STAGED_RECEIPT_SHA256",
+  "policy_sha256": "POLICY_SHA256",
+  "webhook_secret_sha256": "ORIGINAL_WEBHOOK_SECRET_SHA256"
+}
+```
+
+Add `--verify-strike-credentials /etc/credstore.encrypted APPROVAL APPROVAL_SHA256`
+to `install-fenced` or to an exact retry. The installer checks all three
+credentials before publishing any new files. It verifies the host encryption
+and unit credential name of each, binds the receive and payout keys to the
+fingerprints in the exact installed core and payout policies, and verifies the
+webhook binding. The three credentials must be distinct. The check preserves
+their ciphertexts and reports only the credential names. The keys and webhook
+secret stay in their existing systemd store and out of the Cashu archive.
+Provider-side permissions, live webhook delivery, and recovery resumption
+still require their existing acceptance steps.
 
 The encrypted fixture rehearses installation using six disposable runtime
 UIDs. It verifies a retry after interruption, rejects a changed configuration

@@ -369,9 +369,15 @@ def main():
         native_configurations, native_policy = {}, None
         if extended:
             native_fixture = runpy.run_path(str(source / 'deploy/scripts/cashu-native-membership-fixture.py'))
+            payout_fingerprint = 'aa' * 32
+            if args.rotate_receiving_key:
+                fixture = runpy.run_path(str(source / 'deploy/scripts/cashu-collector-fixture.py'))
+                fixture['configure_strike_fixture'](config, wallet_uid, wallet_instance, wallet_epoch, core_epoch)
+                call('core', core_uid, '--config', config, 'status')
+                payout_fingerprint = hashlib.sha256(fixture['STRIKE_FIXTURE']['strike-payout-api-key']).hexdigest()
             native_configurations, native_policy = native_fixture['prepare'](
                 source, root, states, runtime_uids, call, core_epoch, owner,
-                '2f8bde4d1a07209355b4a7250a5c5128e88b84bddc619ab7cba8d569b240efe4')
+                '2f8bde4d1a07209355b4a7250a5c5128e88b84bddc619ab7cba8d569b240efe4', payout_fingerprint)
             statectl = root / 'statectl'
             selected_statectl = args.statectl_cli.resolve(strict=True)
             combined_module = runpy.run_path(str(source / 'deploy/scripts/verify-cashu-combined-backup.py'))

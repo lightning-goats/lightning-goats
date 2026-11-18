@@ -596,6 +596,54 @@ class CollectorTests(unittest.TestCase):
         with self.assertRaises(ValueError):self.frozen(p)
         with self.assertRaises(ValueError):self.budget.add(1024*1024+1)
 
+    def test_strike_credential_verification_matches_archived_scope_without_rewriting(self):
+        verify = INSTALL['verify_strike_credentials']
+        tool = INSTALL['systemd_credential']
+        env = tool.__globals__['CLEAN_ENV']
+        store = self.root / 'strike-store'
+        store.mkdir(mode=0o700)
+        credentials = INSTALL['STRIKE_CREDENTIALS']
+        raw = {name: ('synthetic-' + name).encode() for name in credentials}
+        hashes = {name: MODULE['sha'](value) for name, value in raw.items()}
+        configs = {'core': {'cashu_treasury': {'policy': {'destination': {
+            'credential_fingerprint': hashes['strike-api-key']}}}},
+            'payout': {'policy': {'scope': {'provider': {
+                'credential_fingerprint': hashes['strike-payout-api-key']}}}}}
+        stage_sha, policy_sha = '22' * 32, '33' * 32
+        approval = {'version': 1, 'purpose': 'cashu-strike-credential-verification',
+                    'stage_sha256': stage_sha, 'policy_sha256': policy_sha,
+                    'webhook_secret_sha256': hashes['strike-webhook-secret']}
+
+        def check(stage=stage_sha, selected=approval):
+            with ExitStack() as stack:
+                def freeze(path, maximum, secret):
+                    return stack.enter_context(closing(MODULE['Frozen'](path, 0, maximum, self.budget, secret=secret)))
+                return verify(store, selected, stage, policy_sha, configs, MODULE, self.budget, freeze)
+
+        host_key = self.root / 'fixture-strike-host-key'
+        with patch.dict(env, SYSTEMD_CREDENTIAL_SECRET=str(host_key)):
+            subprocess.run(['/usr/bin/systemd-creds', 'setup'], check=True,
+                           stdin=subprocess.DEVNULL, capture_output=True, timeout=5, env=env)
+            for name, filename in credentials.items():
+                MODULE['write'](store / filename, tool('encrypt', name, raw[name] + b'\n', self.budget))
+            original = {path: path.read_bytes() for path in store.iterdir()}
+            self.assertEqual(check(), sorted(credentials))
+            with self.assertRaisesRegex(ValueError, 'exact separate Strike'):
+                check(stage='44' * 32)
+            with self.assertRaisesRegex(ValueError, 'exact separate Strike'):
+                check(selected={**approval, 'webhook_secret_sha256': hashes['strike-api-key']})
+            payout = store / credentials['strike-payout-api-key']
+            receive = store / credentials['strike-api-key']
+            payout.write_bytes(tool('encrypt', 'strike-payout-api-key', raw['strike-api-key'], self.budget))
+            with self.assertRaisesRegex(ValueError, 'differs from selected binding'):
+                check()
+            payout.write_bytes(original[receive])
+            with self.assertRaises(ValueError):
+                check()
+            payout.write_bytes(original[payout])
+            self.assertEqual(check(), sorted(credentials))
+            self.assertEqual({path: path.read_bytes() for path in store.iterdir()}, original)
+
     def test_expired_deadline_refuses(self):
         self.budget.deadline=0
         with self.assertRaises(ValueError):self.budget.remaining()

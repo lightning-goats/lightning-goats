@@ -18,7 +18,7 @@ def checksum(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def prepare(source, root, states, uids, call, core_epoch, owner, client):
+def prepare(source, root, states, uids, call, core_epoch, owner, client, payout_fingerprint='aa' * 32):
     zero = '0' * 64
     account = str(uuid.uuid4())
     configurations = {}
@@ -40,7 +40,7 @@ def prepare(source, root, states, uids, call, core_epoch, owner, client):
             'epoch = "00000000-0000-0000-0000-000000000000"': f'epoch = "{core_epoch}"',
             'account_id = "00000000-0000-0000-0000-000000000000"': f'account_id = "{account}"',
             f'owner = "{zero}"': f'owner = "{owner}"',
-            f'credential_fingerprint = "{zero}"': 'credential_fingerprint = "' + 'aa' * 32 + '"',
+            f'credential_fingerprint = "{zero}"': f'credential_fingerprint = "{payout_fingerprint}"',
         },
         'payout_signer': {
             '"/var/lib/cyberherd-signer"': json.dumps(str(states['payout_signer'])),
@@ -67,7 +67,7 @@ def prepare(source, root, states, uids, call, core_epoch, owner, client):
         configurations[name] = path
     policy = {'version': 1, 'owner': owner, 'epoch': core_epoch,
               'provider': {'environment': 'strike-production', 'account_id': account,
-                           'credential_fingerprint': 'aa' * 32},
+                           'credential_fingerprint': payout_fingerprint},
               'max_component_bytes': 128 * 1024 * 1024, 'components': {}}
     for role, name, filename in [('core', 'core', 'ledger.sqlite'),
                                  ('membership', 'membership', 'cyberherd.db'),

@@ -15,6 +15,40 @@ import types
 from unittest.mock import patch
 
 
+STRIKE_FIXTURE = {'strike-api-key': b'fixture-only-strike-receive',
+                  'strike-webhook-secret': b'fixture-only-strike-webhook',
+                  'strike-payout-api-key': b'fixture-only-strike-payout'}
+
+
+def configure_strike_fixture(config, wallet_uid, wallet_instance, wallet_epoch, core_epoch):
+    scope = hashlib.sha256(STRIKE_FIXTURE['strike-api-key']).hexdigest()
+    with config.open('a') as stream:
+        stream.write(f'''
+
+[cashu_receipts]
+socket = "/run/fixture-core/receipts.sock"
+ipc_gid = {wallet_uid}
+wallet_uid = {wallet_uid}
+wallet_instance = "{wallet_instance}"
+wallet_epoch = "{wallet_epoch}"
+core_epoch = "{core_epoch}"
+deadline_seconds = 5
+connections_per_second = 1
+
+[cashu_treasury]
+socket = "/run/fixture-wallet/treasury.sock"
+deadline_seconds = 5
+[cashu_treasury.policy]
+version = "inactive-strike-recovery-fixture"
+invoice_expiry_seconds = 300
+[cashu_treasury.policy.destination]
+origin = "https://api.strike.me/"
+account_id = "{core_epoch}"
+credential_fingerprint = "{scope}"
+network = "bitcoin"
+''')
+
+
 def digest(path):
     h=hashlib.sha256()
     with path.open('rb') as source:
@@ -231,6 +265,9 @@ def qualify_install(capsule, bootstrap, stage, output_root, policy_path, common,
             extra.unlink()
         if systemd_masks:
             signer_clients = qualify_signer_clients(install, invoke, args, common, tool, workers, output_root)
+        strike_credentials = False
+        if systemd_masks and '[cashu_treasury.policy.destination]' in configurations['core'].read_text():
+            strike_credentials = qualify_strike_credentials(invoke, args, common, output_root)
         verified = verify_restored_runtime_fences(stage, output_root.parent, workers, binaries, configurations, roles)
     finally:
         for role, worker in workers.items():
@@ -245,12 +282,45 @@ def qualify_install(capsule, bootstrap, stage, output_root, policy_path, common,
             'existing_live_image_refused': True, 'active_writer_refused': True,
             'existing_empty_target_supported': True, 'changed_installed_config_refused': True,
             'authenticated_launch_wrong_digest_refused': True,
-            'authenticated_cli_retry_with_actual_masks': systemd_masks, 'signer_clients': signer_clients}
+            'authenticated_cli_retry_with_actual_masks': systemd_masks, 'signer_clients': signer_clients,
+            'strike_credential_bindings_verified': strike_credentials}
 
 
 def signer_systemd_command(*command, check=True):
     return subprocess.run(command, check=check, stdin=subprocess.DEVNULL, capture_output=True,
                           timeout=30, env={'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'})
+
+
+def qualify_strike_credentials(invoke, args, common, output_root):
+    install = runpy.run_path(str(Path(__file__).resolve().parent / 'install-cashu-restore.py'))
+    store = output_root / 'disposable-strike-credentials'
+    store.mkdir(mode=0o700)
+    budget = common['Budget'](4096, 30)
+    paths = install['STRIKE_CREDENTIALS']
+    for name, filename in paths.items():
+        encoded = install['systemd_credential']('encrypt', name, STRIKE_FIXTURE[name] + b'\n', budget)
+        common['write'](store / filename, encoded)
+    staged_strike = {'version': 1, 'purpose': 'cashu-strike-credential-verification',
+                     'stage_sha256': args.stage_sha256, 'policy_sha256': args.policy_sha256,
+                     'webhook_secret_sha256': hashlib.sha256(STRIKE_FIXTURE['strike-webhook-secret']).hexdigest()}
+    approval = output_root / 'strike-credential-binding.json'
+    common['write_json'](approval, staged_strike)
+    flags = ('--verify-strike-credentials', str(store), str(approval))
+    original = {p: digest(p) for p in store.iterdir()}
+    refused = b'Cashu fenced installation refused. Preserve the checkpoint and any installed fences.\n'
+    wrong = invoke(args.stage_sha256, *flags, 'ab' * 32)
+    if wrong.returncode != 1 or wrong.stdout or wrong.stderr != refused:
+        raise ValueError('installer accepted an unselected Strike credential approval')
+    result = invoke(args.stage_sha256, *flags, digest(approval))
+    if result.returncode:
+        raise ValueError('installer refused the exact synthetic Strike bindings')
+    proof = json.loads(result.stdout)
+    if (proof['strike_credential_bindings_verified'] != sorted(paths) or proof['resume_authorized']
+            or proof['services_changed'] or set(store.iterdir()) != set(original)
+            or any(digest(path) != expected for path, expected in original.items())
+            or any(value in result.stdout or value in result.stderr for value in STRIKE_FIXTURE.values())):
+        raise ValueError('Strike verification changed credentials, granted authority, or leaked credential values')
+    return True
 
 
 @contextmanager

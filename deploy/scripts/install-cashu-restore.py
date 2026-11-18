@@ -13,6 +13,7 @@ import sqlite3
 import stat
 import subprocess
 import tempfile
+import tomllib
 
 
 HERE = Path(__file__).resolve().parent
@@ -21,6 +22,11 @@ GIB = 1024**3
 SIGNER_CLIENTS = {
     'cashu_signer': ('cashu_client_source', 'cashu-client.hex', 'cashu-nostr-client', 'lg-cashu-nostr-client'),
     'signer': ('payout_client_source', 'payout-client.hex', 'nostr-client-key', 'cyberherd-signer-client'),
+}
+STRIKE_CREDENTIALS = {
+    'strike-api-key': 'lightning-goats-strike-api-key',
+    'strike-webhook-secret': 'lightning-goats-strike-webhook-secret',
+    'strike-payout-api-key': 'cyberherd-strike-payout',
 }
 # CRED_AES256_GCM_BY_HOST in systemd's creds-util.h. Reject null-key
 # envelopes even on versions that do not offer systemd-creds --refuse-null.
@@ -87,7 +93,7 @@ def systemd_credential(operation, name, data, budget, *, allow_refusal=False):
     if result.returncode and allow_refusal and not result.stdout:
         return None
     if result.returncode or not 0 < len(result.stdout) <= 4096:
-        raise ValueError('systemd signer credential operation refused')
+        raise ValueError('systemd credential operation refused')
     return result.stdout
 
 
@@ -111,18 +117,53 @@ def check_credential_store(store, common):
         private_attributes(path)
 
 
-def signer_plaintext(name, encrypted, budget):
+def named_host_plaintext(name, encrypted, budget):
     decoded = base64.b64decode(b''.join(encrypted.split()), validate=True)
     if not decoded.startswith(HOST_CREDENTIAL):
-        raise ValueError('host-encrypted signer credential required')
+        raise ValueError('host-encrypted credential required')
     plaintext = systemd_credential('decrypt', name, encrypted, budget)
-    if not re.fullmatch(rb'[0-9a-fA-F]{64}\n?', plaintext):
-        raise ValueError('invalid portable signer client')
     # systemd also accepts unnamed envelopes when --name is supplied.
     if systemd_credential('decrypt', 'lg-cashu-restore-name-probe', encrypted,
                           budget, allow_refusal=True) is not None:
-        raise ValueError('signer credential is missing its unit credential name')
+        raise ValueError('credential is missing its unit credential name')
     return plaintext
+
+
+def signer_plaintext(name, encrypted, budget):
+    plaintext = named_host_plaintext(name, encrypted, budget)
+    if not re.fullmatch(rb'[0-9a-fA-F]{64}\n?', plaintext):
+        raise ValueError('invalid portable signer client')
+    return plaintext
+
+
+def verify_strike_credentials(store, approval, stage_sha, policy_sha, configs, common, budget, freeze):
+    check_credential_store(store, common)
+    expected = {
+        'strike-api-key': configs['core']['cashu_treasury']['policy']['destination']['credential_fingerprint'],
+        'strike-webhook-secret': approval.get('webhook_secret_sha256'),
+        'strike-payout-api-key': configs['payout']['policy']['scope']['provider']['credential_fingerprint'],
+    }
+    if (approval != {'version': 1, 'purpose': 'cashu-strike-credential-verification',
+                     'stage_sha256': stage_sha, 'policy_sha256': policy_sha,
+                     'webhook_secret_sha256': expected['strike-webhook-secret']}
+            or type(approval['version']) is not int
+            or any(not isinstance(value, str) or not re.fullmatch('[0-9a-f]{64}', value)
+                   for value in expected.values())
+            or len(set(expected.values())) != len(expected)):
+        raise ValueError('exact separate Strike and webhook credential bindings required')
+    for name, filename in STRIKE_CREDENTIALS.items():
+        path = store / filename
+        private_attributes(path)
+        source = freeze(path, 8192, secret=True)
+        if source.expected[3] != 0:
+            raise ValueError('Strike credential must have root group')
+        source.file.seek(0)
+        plaintext = named_host_plaintext(name, source.file.read(8192), budget).decode().strip()
+        if (not plaintext or re.search(r'[\x00-\x1f\x7f-\x9f]', plaintext)
+                or not hmac.compare_digest(common['sha'](plaintext.encode()), expected[name])):
+            raise ValueError('Strike credential differs from selected binding')
+        source.check()
+    return sorted(STRIKE_CREDENTIALS)
 
 
 def prepare_signer_clients(store, stage, originals, policy, common, budget, stack):
@@ -359,12 +400,14 @@ def install(args, common, tool_identity, *, after_publish=lambda _: None, after_
     states = {role: Path(worker['state']) for role, worker in workers.items()}
     stage = args.stage
     credential_store = args.signer_credential_store
+    strike_verification = getattr(args, 'verify_strike_credentials', None)
     advance_from, advance_evidence = getattr(args, 'advance_from', None), getattr(args, 'advance_evidence', None)
     if bool(advance_from) != bool(advance_evidence):
         raise ValueError('advancement requires an exact installed stage and paired evidence')
     paused_gate = getattr(args, 'paused_gate', None)
     if (bool(paused_gate) != bool(getattr(args, 'paused_approval', None))
-            or (paused_gate and (paused_gate not in ('prepare', 'restore') or not advance_from or credential_store))):
+            or (paused_gate and (paused_gate not in ('prepare', 'restore') or not advance_from
+                                or credential_store or strike_verification))):
         raise ValueError('paused marker changes require only an installed advancement and exact approval')
     receipt, manifest, collection, original, members = install_stage(
         stage, args.stage_sha256, args.policy_sha256, common, budget)
@@ -391,8 +434,13 @@ def install(args, common, tool_identity, *, after_publish=lambda _: None, after_
                 raise ValueError('installed config or executable differs from the selected collection')
             return file
 
+        configs = {}
         for role, field in common['CONFIG_FIELDS'].items():
-            verify_original(policy[field], f'{role}-config', 65536)
+            config = verify_original(policy[field], f'{role}-config', 65536)
+            if strike_verification and role in ('core', 'payout'):
+                config.file.seek(0)
+                configs[role] = tomllib.loads(config.file.read(65536).decode())
+                config.check()
         for role, artifact in policy['runtime_artifacts'].items():
             binary = verify_original(artifact['path'], f'programs/runtime-{role}', 512 * 1024**2)
             private_attributes(binary.path)
@@ -430,13 +478,25 @@ def install(args, common, tool_identity, *, after_publish=lambda _: None, after_
                     'version': 1, 'checkpoint_id': checkpoint, 'stage_sha256': args.stage_sha256,
                     'approval_sha256': approval_sha, 'roles': sorted(PAUSED_ROLES),
                     'resume_authorized': False, 'services_changed': False}
-        credentials = {}
-        if credential_store is not None:
-            if receipt['keys_verified'] is not True or collection['key_verification']['signer_clients_verified'] != 2:
-                raise ValueError('verified stage must bind both original signer clients')
+        credentials, verified_strike = {}, []
+        if credential_store is not None or strike_verification:
             private_attributes(HOST_KEY)
             host_key = freeze(HOST_KEY, 65536, secret=True)
             ensure_existing_host_key(host_key, budget)
+        if strike_verification:
+            strike_store, approval_path, approval_sha = strike_verification
+            approval_file = freeze(approval_path, 4096, secret=True)
+            if approval_file.digest != approval_sha:
+                raise ValueError('independently selected Strike credential verification required')
+            approval_file.file.seek(0)
+            approval = common['document'](approval_file.file.read(4096))
+            approval_file.check()
+            verified_strike = verify_strike_credentials(Path(strike_store), approval, args.stage_sha256,
+                                                        args.policy_sha256, configs, common, budget, freeze)
+            host_key.check()
+        if credential_store is not None:
+            if receipt['keys_verified'] is not True or collection['key_verification']['signer_clients_verified'] != 2:
+                raise ValueError('verified stage must bind both original signer clients')
             credentials = prepare_signer_clients(credential_store, stage, original, policy, common, budget, stack)
         prepared = {}
         empty = {}
@@ -525,6 +585,7 @@ def install(args, common, tool_identity, *, after_publish=lambda _: None, after_
                 'policy_sha256': args.policy_sha256, 'tool': tool_identity,
                 'roles': sorted(states), 'already_installed': sorted(complete),
                 'signer_clients_verified': sorted(credentials),
+                'strike_credential_bindings_verified': verified_strike,
                 'external_reconciliation_verified': False, 'resume_authorized': False,
                 'services_changed': False}
         if advance_from:
@@ -543,6 +604,8 @@ def main():
         parser.add_argument(name + '_sha256')
     parser.add_argument('--signer-credential-store', type=Path,
                         help='reprovision both archived signer clients in this existing root-private systemd store')
+    parser.add_argument('--verify-strike-credentials', nargs=3, metavar=('STORE', 'APPROVAL', 'SHA256'),
+                        help='verify independently provisioned Strike credentials against the selected stage')
     parser.add_argument('--advance-from', nargs=2, metavar=('STAGED_DIRECTORY', 'RECEIPT_SHA256'))
     parser.add_argument('--advance-evidence', nargs=2, metavar=('MANIFEST', 'SHA256'))
     parser.add_argument('--paused-gate', choices=('prepare', 'restore'))

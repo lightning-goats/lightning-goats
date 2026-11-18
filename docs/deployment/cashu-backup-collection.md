@@ -473,6 +473,14 @@ report retains per-mint results, aggregate sat totals and the time range of
 the observations. These are separate reads made during that range. The
 report preserves every fence and keeps resumption unauthorized.
 
+The funded two-mint rehearsal compares native observations from the original
+synthetic issuers after their melts. The pre-melt checkpoints still list
+250 sats and 150 sats as unspent. The comparison identifies all 400 sats as
+spent and preserves the original checkpoint bytes. The same checks run after
+a lost melt reply. This exercises custody comparison on funded snapshots in
+the separate-UID test environment. The encrypted installation rehearsal uses
+empty journals.
+
 ## Install the fenced images on a recovery host
 
 Use the exact recovered configuration, runtime UIDs and GIDs, and independently

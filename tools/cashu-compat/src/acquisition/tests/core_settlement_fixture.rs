@@ -12,27 +12,27 @@ fn snapshot_funded_wallet(source: &Path, destination: &Path) -> Result<()> {
     std::fs::create_dir(destination)?;
     std::fs::set_permissions(destination, std::fs::Permissions::from_mode(0o700))?;
     for name in ["journal.sqlite", "wallet.sqlite"] {
-        let input = rusqlite::Connection::open_with_flags(
-            source.join(name),
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-        )?;
-        let mut output = rusqlite::Connection::open(destination.join(name))?;
-        let result = rusqlite::backup::Backup::new(&input, &mut output)?.step(-1)?;
-        ensure!(
-            matches!(result, rusqlite::backup::StepResult::Done),
-            "funded checkpoint backup did not finish"
-        );
-        let mode: String = output.query_row("PRAGMA journal_mode=DELETE", [], |r| r.get(0))?;
-        ensure!(
-            mode == "delete",
-            "funded checkpoint requires main-only images"
-        );
-        drop(output);
-        std::fs::set_permissions(
-            destination.join(name),
-            std::fs::Permissions::from_mode(0o600),
-        )?;
+        snapshot_wallet_file(&source.join(name), &destination.join(name))?;
     }
+    Ok(())
+}
+
+fn snapshot_wallet_file(source: &Path, target: &Path) -> Result<()> {
+    let input =
+        rusqlite::Connection::open_with_flags(source, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let mut output = rusqlite::Connection::open(target)?;
+    let result = rusqlite::backup::Backup::new(&input, &mut output)?.step(-1)?;
+    ensure!(
+        matches!(result, rusqlite::backup::StepResult::Done),
+        "funded checkpoint backup did not finish"
+    );
+    let mode: String = output.query_row("PRAGMA journal_mode=DELETE", [], |r| r.get(0))?;
+    ensure!(
+        mode == "delete",
+        "funded checkpoint requires main-only images"
+    );
+    drop(output);
+    std::fs::set_permissions(target, std::fs::Permissions::from_mode(0o600))?;
     Ok(())
 }
 
@@ -57,16 +57,20 @@ async fn observe_checkpoint_custody(
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     ensure!(proofs.len() <= 128, "custody fixture exceeds one page");
-    let selection: crate::restore_mint::CustodySelection =
-        serde_json::from_value(serde_json::json!({
-            "version":1, "purpose":"cashu_restore_mint_custody", "checkpoint_id":Uuid::from_u128(1),
-            "staged_receipt_sha256":"11".repeat(32),
-            "mint_store_sha256":hex_digest(Sha256::digest(&original).into()),
-            "mint_id":policy.id, "mint_url":policy.advertised_url, "total_candidates":proofs.len(),
-            "after_y":null, "next_after_y":null, "proofs":proofs,
-        }))?;
+    let mut selection = serde_json::json!({
+        "version":1, "purpose":"cashu_restore_mint_custody", "checkpoint_id":Uuid::from_u128(1),
+        "staged_receipt_sha256":"11".repeat(32),
+        "mint_store_sha256":hex_digest(Sha256::digest(&original).into()),
+        "mint_id":policy.id, "mint_url":policy.advertised_url, "total_candidates":proofs.len(),
+        "after_y":null, "next_after_y":null, "proofs":proofs,
+    });
+    selection.sort_all_objects();
+    let mut canonical = serde_json::to_vec(&selection)?;
+    canonical.push(b'\n');
+    let selection: crate::restore_mint::CustodySelection = serde_json::from_value(selection)?;
+    let digest = hex_digest(Sha256::digest(&canonical).into());
     let result = selection
-        .observe(&policy.advertised_url.parse()?, &"22".repeat(32), transport)
+        .observe(&policy.advertised_url.parse()?, &digest, transport)
         .await?;
     ensure!(
         std::fs::read(path)? == original,

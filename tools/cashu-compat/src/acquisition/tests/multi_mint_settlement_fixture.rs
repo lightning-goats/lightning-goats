@@ -4,6 +4,7 @@ mod multi_mint {
     use crate::treasury_scheduler::{Execution, Worker};
     use cdk::cdk_database::{Error as DatabaseError, WalletDatabase};
     use rusqlite::OptionalExtension as _;
+    use sha2::{Digest, Sha256};
     use std::time::Duration;
 
     #[tokio::test]
@@ -77,12 +78,16 @@ mod multi_mint {
         let epoch = bootstrap.wallet_epoch;
         let writer = Arc::new(WriterLock::acquire(directory)?);
         let journal = Arc::new(Mutex::new(Journal::open(&path, epoch, 64)?));
+        drop(crate::wallet::open_wallet_storage(directory).await?);
+        journal.lock().unwrap().require_cdk_namespaces(true)?;
         let mut stores: BTreeMap<String, Arc<dyn WalletDatabase<DatabaseError> + Send + Sync>> =
             BTreeMap::new();
         let mut coordinators = Vec::new();
         for (h, policy) in harnesses.iter().zip(&policies) {
-            let database =
-                crate::wallet::open_mint_wallet_storage(directory, policy, &writer, true).await?;
+            let initialize = journal.lock().unwrap().prepare_cdk_namespace(policy)?;
+            ensure!(initialize, "test wallet must be a fresh mint namespace");
+            let database = crate::wallet::open_mint_wallet_storage(directory, policy, &writer, initialize).await?;
+            journal.lock().unwrap().complete_cdk_namespace(policy)?;
             stores.insert(policy.id.clone(), database.clone());
             let mint_url: MintUrl = policy.advertised_url.parse()?;
             let gate = OperationGate::new(h.mint.clone(), journal.clone(), writer.clone(), 65536)?
@@ -268,6 +273,18 @@ mod multi_mint {
             receipts.push(wire.data().clone());
         }
         drop(coordinators);
+        let checkpoint = Path::new(&std::env::var("LG_CASHU_COMBINED_PRIVATE")?).join("mint-custody-before");
+        std::fs::create_dir(&checkpoint)?;
+        std::fs::set_permissions(&checkpoint, std::fs::Permissions::from_mode(0o700))?;
+        snapshot_wallet_file(&path, &checkpoint.join("acquisition.sqlite"))?;
+        snapshot_wallet_file(&directory.join("wallet.sqlite"), &checkpoint.join("wallet.sqlite"))?;
+        let mint_images = harnesses.iter().map(|h| {
+            let hash = Sha256::digest(format!("lightning-goats/cdk-mint-store/v1\0{}", h.id));
+            let name = format!("mint-{}.sqlite", cdk::util::hex::encode(hash));
+            let image = checkpoint.join(&name);
+            snapshot_wallet_file(&directory.join(name), &image)?;
+            Ok(image)
+        }).collect::<Result<Vec<_>>>()?;
         let bindings = harnesses
             .iter()
             .map(|h| {
@@ -531,6 +548,15 @@ mod multi_mint {
         for h in &harnesses {
             assert_eq!(h.mint.executions.load(Ordering::SeqCst), 1);
             assert_eq!(h.mint.melt_attempts.load(Ordering::SeqCst), 1);
+        }
+        for (index, (h, image)) in harnesses.iter().zip(&mint_images).enumerate() {
+            let observation = observe_checkpoint_custody(image, &h.policy(), &h.mint).await?;
+            let original_sats = if index == 0 { 250 } else { 150 };
+            assert_eq!(observation["stale_local_unspent_sats"], original_sats);
+            assert_eq!(observation["mint_spent_sats"], original_sats);
+            assert_eq!(observation["mint_unspent_sats"], 0);
+            assert_eq!(h.mint.melt_attempts.load(Ordering::SeqCst), 1);
+            publish(&checkpoint, &format!("custody-{}.json", h.id), &observation)?;
         }
         intake_server.abort();
         treasury_server.abort();

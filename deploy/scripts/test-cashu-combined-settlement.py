@@ -304,6 +304,43 @@ def verify_combined_observation_review(paths, strike, mint, feeder, common, budg
                 raise ValueError('combined review accepted altered rehashed evidence')
 
 
+def verify_funded_mint_batch(root):
+    """Compare native mint observations against both pre-melt CDK snapshots."""
+    common = runpy.run_path(str(Path(__file__).with_name('collect-cashu-backup.py')))
+    comparison = runpy.run_path(str(Path(__file__).with_name('reconcile-cashu-restore.py')))
+    review = comparison['REVIEW']
+    original = root / 'wallet-private' / 'mint-custody-before'
+    stage_sha, checkpoint = '11' * 32, str(uuid.UUID(int=1))
+    expected = {'fixture-a': 250, 'fixture-b': 150}
+    image_names = ['acquisition.sqlite', 'wallet.sqlite',
+                   *(review['mint_store_name'](mint, common) for mint in expected)]
+    with tempfile.TemporaryDirectory(prefix='lg-two-mint-custody-', dir='/run') as temporary:
+        evidence = Path(temporary)
+        files, observations = {}, {}
+        for name in image_names:
+            destination = evidence / name
+            shutil.copyfile(original / name, destination)
+            destination.chmod(0o600)
+            files[name] = digest(destination)
+        for mint in expected:
+            name = f'custody-{mint}.json'
+            data = (original / name).read_bytes()
+            common['write'](evidence / name, data)
+            observations[mint] = [{'file': name, 'sha256': common['sha'](data)}]
+        report = comparison['compare_custody_all'](
+            {'staged_receipt_sha256': stage_sha, 'mints': observations},
+            evidence, {stage_sha: (checkpoint, None, None)}, (evidence / 'acquisition.sqlite', files),
+            common, common['Budget'](0, 30))
+        if (report['mint_namespaces_compared'] != 2
+                or {mint: item['stale_local_unspent_sats'] for mint, item in report['mints'].items()} != expected
+                or report['mint_spent_sats'] != 400 or report['mint_unspent_sats'] != 0
+                or report['mint_unresolved_sats'] != 0
+                or any(digest(evidence / name) != checksum for name, checksum in files.items())):
+            raise ValueError('mint batch lost the actual funded checkpoint, spent proofs, or issuer binding')
+    return {'mint_namespaces_compared': 2, 'mint_spent_sats': 400,
+            'stale_local_unspent_sats': 400, 'snapshot_bytes_unchanged': True}
+
+
 def verify_funded_rollback(root, core_cli):
     """Compare real fixture checkpoints after the synthetic side effects."""
     core_dir, wallet_dir = root / 'core-private', root / 'wallet-private'
@@ -647,6 +684,8 @@ def main():
                     supplemental_native_sats=0, settlement_operations=2, configured_mints=2)
             if result != expected:
                 raise ValueError('combined fixture result differs from expected conservation')
+            if args.multi_mint:
+                result['funded_mint_custody'] = verify_funded_mint_batch(root)
             if args.funded_rollback:
                 source = args.core_cli.resolve(strict=True)
                 if not source.is_file() or not 0 < source.stat().st_size <= 512 * 1024 * 1024:

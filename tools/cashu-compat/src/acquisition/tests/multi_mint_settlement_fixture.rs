@@ -327,7 +327,7 @@ mod multi_mint {
                 let (payload, accepted) = if sdk {
                     fixture_sdk_sender(&json!({"origin":origin,"descriptor_id":descriptor_id,
                         "mint":harnesses[index].policy().advertised_url,"keyset":harnesses[index].mint.keyset,
-                        "gross_sats":amount+1,"proofs":input.intake().proofs})).await?
+                        "gross_sats":amount+1,"proofs":input.intake().proofs}), None).await?
                 } else {
                     let response = http
                         .post(format!("{origin}/api/v1/cashu"))

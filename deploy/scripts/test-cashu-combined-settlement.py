@@ -4,13 +4,15 @@
 Requires root in a fresh loopback-only network namespace and explicitly selected
 native test artifacts. Baseline modes use a shared disposable non-root identity.
 Optional receipt/treasury modes exercise production socket adapters across
-separate UIDs; HTTP mode adds actual public admission. Providers remain synthetic
-and physical confirmation is simulated in every mode.
+separate UIDs; HTTP mode adds actual public admission. The HTTPS edge also uses
+the packaged nginx routes and the pinned Cashu-TS sender. Providers remain
+synthetic and physical confirmation is simulated in every mode.
 """
 import argparse
-from contextlib import closing
+from contextlib import ExitStack, closing, contextmanager
 import grp
 import hashlib
+from http.client import HTTPSConnection
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -18,7 +20,9 @@ from pathlib import Path
 import pwd
 import runpy
 import shutil
+import socket
 import sqlite3
+import ssl
 import subprocess
 import tempfile
 from threading import Thread
@@ -29,6 +33,113 @@ import uuid
 CORE = 'strike::tests::cashu_treasury_tests::combined_fixture::combined_settlement_core_child'
 WALLET = 'acquisition::tests::core_settlement_fixture::combined_settlement_wallet_child'
 MULTI_MINT_WALLET = 'acquisition::tests::core_settlement_fixture::multi_mint::combined_multi_mint_wallet_child'
+
+
+@contextmanager
+def https_edge(root, bootstrap, core):
+    directory = root / 'https-edge'
+    directory.mkdir(mode=0o755)
+    authority, authority_key = directory / 'ca.pem', directory / 'ca.key'
+    certificate, key = directory / 'server.pem', directory / 'server.key'
+    request, extensions = directory / 'server.csr', directory / 'server.ext'
+
+    def openssl(*args):
+        subprocess.run(['/usr/bin/openssl', *map(str, args)], capture_output=True, check=True, timeout=10)
+
+    openssl('req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256', '-nodes',
+            '-days', '1', '-subj', '/CN=Disposable Cashu HTTPS CA', '-keyout', authority_key,
+            '-out', authority, '-addext', 'basicConstraints=critical,CA:TRUE',
+            '-addext', 'keyUsage=critical,keyCertSign,cRLSign')
+    openssl('req', '-new', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256', '-nodes',
+            '-subj', '/CN=127.0.0.1', '-keyout', key, '-out', request)
+    extensions.write_text('subjectAltName=IP:127.0.0.1\nbasicConstraints=critical,CA:FALSE\n'
+                          'keyUsage=critical,digitalSignature\nextendedKeyUsage=serverAuth\n'
+                          'authorityKeyIdentifier=keyid,issuer\nsubjectKeyIdentifier=hash\n')
+    openssl('x509', '-req', '-days', '1', '-in', request, '-CA', authority, '-CAkey', authority_key,
+            '-set_serial', '1', '-extfile', extensions, '-out', certificate)
+    authority.chmod(0o444)
+    deadline = time.monotonic() + 15
+    while not bootstrap.exists():
+        if core.poll() is not None or time.monotonic() >= deadline:
+            raise ValueError('core did not publish the private loopback backend')
+        time.sleep(0.05)
+    upstream = urlsplit(json.loads(bootstrap.read_bytes())['http_origin'])
+    if upstream.scheme != 'http' or not upstream.port or upstream.netloc != f'127.0.0.1:{upstream.port}':
+        raise ValueError('HTTPS fixture backend must be its isolated core listener')
+    with socket.socket() as listener:
+        listener.bind(('127.0.0.1', 0))
+        port = listener.getsockname()[1]
+
+    source = Path(__file__).resolve().parents[1] / 'nginx'
+    snippet = source / 'lightning-goats-cashu.conf.example'
+    shared = source / 'lightning-goats-http.conf.example'
+    http_context = shared.read_text()
+    if http_context.count('127.0.0.1:8787') != 1:
+        raise ValueError('expected one packaged nginx core upstream')
+    (directory / 'http.conf').write_text(http_context.replace('127.0.0.1:8787', upstream.netloc))
+    shutil.copyfile(snippet, directory / 'cashu-routes.conf')
+    config = directory / 'nginx.conf'
+    access = directory / 'access.log'
+    config.write_text(f'''
+daemon off;
+worker_processes 1;
+pid {directory}/nginx.pid;
+error_log {directory}/error.log;
+events {{ worker_connections 64; }}
+http {{
+    access_log {access};
+    client_body_temp_path {directory}/body;
+    proxy_temp_path {directory}/proxy;
+    fastcgi_temp_path {directory}/fastcgi;
+    uwsgi_temp_path {directory}/uwsgi;
+    scgi_temp_path {directory}/scgi;
+    include {directory}/http.conf;
+    server {{
+        listen 127.0.0.1:{port} ssl;
+        ssl_certificate {certificate};
+        ssl_certificate_key {key};
+        include {directory}/cashu-routes.conf;
+        location = /edge-ready {{ return 204; }}
+        location / {{ return 404; }}
+    }}
+}}
+''')
+    nginx = shutil.which('nginx')
+    if nginx is None:
+        raise ValueError('nginx is required for the Cashu HTTPS fixture')
+    command = [nginx, '-p', str(directory), '-c', str(config)]
+    subprocess.run(command + ['-t'], capture_output=True, check=True, timeout=10)
+    process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        trusted = ssl.create_default_context(cafile=str(authority))
+        for _ in range(50):
+            if process.poll() is not None:
+                raise ValueError('Cashu HTTPS edge did not start')
+            try:
+                with closing(HTTPSConnection('127.0.0.1', port, timeout=2, context=trusted)) as check:
+                    check.request('GET', '/edge-ready')
+                    if check.getresponse().status != 204:
+                        raise ValueError('unexpected readiness response')
+                    break
+            except ConnectionRefusedError:
+                time.sleep(0.1)
+        else:
+            raise ValueError('Cashu HTTPS edge readiness deadline')
+        for context, hostname in [(ssl.create_default_context(), '127.0.0.1'), (trusted, 'wrong.example')]:
+            try:
+                with socket.create_connection(('127.0.0.1', port), timeout=2) as connection:
+                    with context.wrap_socket(connection, server_hostname=hostname):
+                        raise ValueError('unexpected HTTPS certificate authentication')
+            except ssl.SSLCertVerificationError:
+                pass
+        yield f'https://127.0.0.1:{port}', authority, access, snippet, shared
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
 
 
 def digest(path):
@@ -573,6 +684,7 @@ def main():
     parser.add_argument('--receipt-ipc', action='store_true', help='use distinct runtime UIDs and real receipt delivery; treasury remains file-coordinated')
     parser.add_argument('--treasury-ipc', action='store_true', help='require receipt IPC and use authenticated treasury Retain/Status for instructions and reports')
     parser.add_argument('--http-intake', action='store_true', help='send ordinary contribution through real HTTP and authenticated wallet intake')
+    parser.add_argument('--https-edge', action='store_true', help='send one SDK Cashu payment through the packaged nginx routes with verified TLS')
     parser.add_argument('--cashu-ts-sender', action='store_true', help='use pinned Cashu-TS offline wallet selection and a separate Node test sender process')
     parser.add_argument('--sender-installation', type=Path)
     parser.add_argument('--sender-files-sha256')
@@ -601,6 +713,8 @@ def main():
         parser.error('--repeat-request requires --http-intake')
     if args.cashu_ts_sender and (not args.http_intake or args.sender_installation is None or not args.sender_files_sha256):
         parser.error('--cashu-ts-sender requires --http-intake and pinned prepared dependencies')
+    if args.https_edge and (not args.cashu_ts_sender or args.repeat_request or args.multi_mint or args.settle_change):
+        parser.error('--https-edge requires one ordinary payment through --cashu-ts-sender')
     if args.http_intake and not args.treasury_ipc:
         parser.error('--http-intake requires --treasury-ipc')
     if args.treasury_ipc and not args.receipt_ipc:
@@ -619,7 +733,7 @@ def main():
     identity = available[0]
     wallet_uid = available[1] if args.receipt_ipc else identity
     ipc_gid = available[2] if args.receipt_ipc else identity
-    with tempfile.TemporaryDirectory(prefix='lg-cashu-combined-') as temporary:
+    with tempfile.TemporaryDirectory(prefix='lg-cashu-combined-') as temporary, ExitStack() as resources:
         root = Path(temporary)
         root.chmod(0o711)
         exchange = root / 'exchange'
@@ -670,12 +784,18 @@ def main():
         prefix = ['/usr/bin/setpriv', f'--reuid={identity}', f'--regid={identity}',
                   '--clear-groups', '--no-new-privs', '--']
         processes, logs, hashes = [], [], {}
+        edge = None
         try:
             for name, source, test in [('core', args.core_test, CORE), ('wallet', args.wallet_test, MULTI_MINT_WALLET if args.multi_mint else WALLET)]:
                 uid = identity if name=='core' else wallet_uid
                 prefix = ['/usr/bin/setpriv',f'--reuid={uid}',f'--regid={ipc_gid}',
                           '--clear-groups','--no-new-privs','--']
                 child_env = dict(env)
+                if name == 'wallet' and args.https_edge:
+                    edge = resources.enter_context(https_edge(root, exchange / 'bootstrap.json', processes[0]))
+                    origin, authority, _, _, _ = edge
+                    child_env['LG_CASHU_COMBINED_EDGE_ORIGIN'] = origin
+                    child_env['LG_CASHU_COMBINED_EDGE_CA'] = str(authority)
                 if args.receipt_ipc:
                     child_env['LG_CASHU_COMBINED_PRIVATE']=str(root/(name+'-private'))
                     child_env['TMPDIR']=str(root/(name+'-private'))
@@ -730,6 +850,8 @@ def main():
                     markers.append(['COMBINED_CORE_REUSABLE_REQUEST_TWO_PAYMENTS_VERIFIED','COMBINED_WALLET_REUSABLE_REQUEST_TWO_PAYMENTS_VERIFIED'][index])
                 if args.cashu_ts_sender and index == 1:
                     markers.append('COMBINED_WALLET_CASHU_TS_SENDER_VERIFIED')
+                    if args.https_edge:
+                        markers.append('COMBINED_WALLET_CASHU_HTTPS_EDGE_VERIFIED')
                 if args.http_intake:
                     markers.append(['COMBINED_CORE_PUBLIC_HTTP_FINANCIAL_IPC_VERIFIED','COMBINED_WALLET_PUBLIC_HTTP_FINANCIAL_IPC_VERIFIED'][index])
                 if args.treasury_ipc:
@@ -800,12 +922,23 @@ def main():
                 result['funded_rollback'] = verify_funded_rollback(root, core_cli)
                 result['funded_rollback']['scoped_reconciliation_recorded_and_replayed'] = True
                 result['funded_rollback']['scoped_cleanup_verified_after_evidence_refusals_and_checkpoint_failure'] = True
+            edge_result = None
+            if edge is not None:
+                _, _, access, snippet, shared = edge
+                access_log = access.read_bytes()
+                error_log = access.with_name('error.log').read_bytes()
+                if b'/edge-ready' not in access_log or any(b'/api/v1/cashu' in log for log in (access_log, error_log)):
+                    raise ValueError('Cashu HTTPS log suppression failed')
+                edge_result = {'nginx_cashu_routes_sha256': digest(snippet), 'nginx_http_context_sha256': digest(shared),
+                               'untrusted_certificate_refused': True, 'wrong_hostname_refused': True,
+                               'cross_origin_preflight': True, 'durable_status_replayed_over_tls': True,
+                               'cashu_local_logs_suppressed': True}
             print(json.dumps({'result': 'CASHU_COMBINED_SETTLEMENT_VERIFIED', 'artifacts_sha256': hashes,
                               'financial_result': result, 'live_provider': False, 'wallet_health_verified': True,
                               'nonzero_fees': args.fees, 'returned_change': args.fees and not args.no_change,
                               'lost_melt_reply': args.lost_reply, 'strike_before_wallet_report': args.lost_reply,
                               'wallet_recovery_while_paused': args.lost_reply,
-                              'physical_actuation': False, 'distinct_uid_ipc': args.treasury_ipc, 'distinct_uid_receipt_ipc': args.receipt_ipc, 'treasury_ipc': args.treasury_ipc, 'http_intake': args.http_intake, 'tls_verified': False, 'independent_sender': False, 'cashu_ts_offline_sender': args.cashu_ts_sender, 'repeat_request': args.repeat_request, 'residual_change_settled': args.settle_change, 'multiple_mints': args.multi_mint, 'sender_inventory': sender_inventory, 'sender_node_sha256': digest(root / 'sender-node') if args.cashu_ts_sender else None, 'sender_script_sha256': digest(root / 'sender.mjs') if args.cashu_ts_sender else None}, sort_keys=True))
+                              'physical_actuation': False, 'distinct_uid_ipc': args.treasury_ipc, 'distinct_uid_receipt_ipc': args.receipt_ipc, 'treasury_ipc': args.treasury_ipc, 'http_intake': args.http_intake, 'tls_verified': edge_result is not None, 'https_edge': edge_result, 'independent_sender': False, 'cashu_ts_offline_sender': args.cashu_ts_sender, 'repeat_request': args.repeat_request, 'residual_change_settled': args.settle_change, 'multiple_mints': args.multi_mint, 'sender_inventory': sender_inventory, 'sender_node_sha256': digest(root / 'sender-node') if args.cashu_ts_sender else None, 'sender_script_sha256': digest(root / 'sender.mjs') if args.cashu_ts_sender else None}, sort_keys=True))
         except Exception:
             for log in logs:
                 log.flush()

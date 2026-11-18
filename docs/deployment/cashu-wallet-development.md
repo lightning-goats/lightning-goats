@@ -824,8 +824,12 @@ response bodies, URL arguments, audit captures, analytics and debug capture for
 these routes while retaining request bounds and attack blocking. The include
 cannot configure an external provider's logging policy. Run real browser-wallet
 OPTIONS/POST acceptance through that reviewed edge before public receiving.
-The fixture verifies local nginx logging and routing only; it does not establish
-external WAF behavior or live client interoperability.
+The hosted `cashu-sdk-https-edge.json` fixture connects the pinned Cashu-TS
+sender to the actual wallet and core through the packaged nginx routes. It
+checks TLS trust and hostname validation, CORS preflight, stable admission
+after a lost reply, credited status after settlement and local log suppression.
+The mint, Strike and feeder responses are simulated. External WAF behavior and
+live client interoperability require separate acceptance.
 
 ### Inactive sender-status edge addition
 

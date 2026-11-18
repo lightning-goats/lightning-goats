@@ -387,6 +387,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22.23.1"
+      - name: Install disposable Cashu HTTPS edge dependencies
+        run: sudo apt-get update && sudo apt-get install -y nginx openssl
       - name: Verify pinned Cashu-TS offline sender through composed HTTP settlement
         shell: bash
         run: |
@@ -399,6 +401,12 @@ jobs:
           installation = root / 'cashu-ts-sender'
           manifest = hashlib.sha256((installation / 'package-files.json').read_bytes()).hexdigest()
           command = ['sudo', 'unshare', '--net', '--', 'python3', 'deploy/scripts/test-cashu-combined-settlement.py', '--http-intake', '--receipt-ipc', '--treasury-ipc', '--fees', '--no-change', '--cashu-ts-sender', '--sender-installation', str(installation), '--sender-files-sha256', manifest, '--sender-node', shutil.which('node'), '--core-test', str(root / 'cashu-core/core-test'), '--wallet-test', str(root / 'cashu-wallet/wallet-test')]
+          output = root / 'cashu-sdk-https-edge.json'
+          with output.open('w') as stream:
+              result = subprocess.run(command + ['--https-edge', '--lost-reply'], stdout=stream, stderr=subprocess.STDOUT)
+          if result.returncode:
+              print(output.read_text()[-24000:], flush=True)
+              result.check_returncode()
           for repeated in [False, True]:
               for lost in [False, True]:
                   suffix = ('-repeated' if repeated else '') + ('-lost' if lost else '')
@@ -430,6 +438,7 @@ jobs:
         with:
           name: cashu-cross-uid-${{ github.sha }}
           path: |
+            ${{ runner.temp }}/cashu-sdk-https-edge.json
             ${{ runner.temp }}/cashu-sdk-sender.json
             ${{ runner.temp }}/cashu-sdk-sender-lost.json
             ${{ runner.temp }}/cashu-sdk-sender-repeated.json

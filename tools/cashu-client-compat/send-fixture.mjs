@@ -11,7 +11,9 @@ try {
     assert(Buffer.byteLength(raw)<=65536);
     const input=JSON.parse(raw);
     const origin=new URL(input.origin);
-    assert.equal(origin.protocol,'http:');
+    const verifiedTls=origin.protocol==='https:';
+    assert.equal(verifiedTls,Boolean(process.env.NODE_EXTRA_CA_CERTS));
+    assert(['http:','https:'].includes(origin.protocol));
     assert.equal(origin.hostname,'127.0.0.1');
     assert.equal(origin.pathname,'/');
     assert.equal(origin.search,'');
@@ -29,6 +31,7 @@ try {
     const {PaymentRequest,Wallet,JSONInt,sumProofs}=await import(pathToFileURL(resolve(packageRoot,'lib/cashu-ts.es.js')));
     const metadataResponse=await fetch(origin.origin+'/api/v1/cashu/request');
     assert.equal(metadataResponse.status,200);
+    assert.equal(metadataResponse.headers.get('cache-control'),'no-store');
     const metadata=await metadataResponse.json();
     const request=PaymentRequest.fromEncodedRequest(metadata.request);
     assert.equal(request.id,input.descriptor_id);
@@ -39,8 +42,10 @@ try {
     assert(request.mints.includes(input.mint));
     const transport=request.getTransport('post');
     assert(transport && new URL(transport.target).protocol==='https:');
-    // Only this isolated fixture maps the advertised HTTPS route to loopback.
-    // No TLS or real sender-application acceptance is claimed.
+    const endpoint=origin.origin+'/api/v1/cashu';
+    if (verifiedTls) {
+        assert.equal(transport.target,endpoint);
+    }
     const wallet=new Wallet(input.mint,{unit:'sat'});
     wallet.loadMintFromCache({name:'synthetic fixture only',nuts:{}},
         {mintUrl:input.mint,keysets:[input.keyset]});
@@ -50,13 +55,14 @@ try {
     assert.equal(sumProofs(selected.send).toString(),String(input.gross_sats));
     const payload={id:request.id,mint:input.mint,unit:request.unit,proofs:selected.send};
     const body=JSONInt.stringify(payload);
-    const endpoint=origin.origin+'/api/v1/cashu';
     const preflight=await fetch(endpoint,{method:'OPTIONS',headers:{
         origin:'https://sender.example','access-control-request-method':'POST',
         'access-control-request-headers':'content-type',
     }});
     assert.equal(preflight.status,204);
     assert.equal(preflight.headers.get('access-control-allow-origin'),'*');
+    assert(preflight.headers.get('access-control-allow-methods').split(/,\s*/).includes('POST'));
+    assert(preflight.headers.get('access-control-allow-headers').split(/,\s*/).includes('content-type'));
     const submit=()=>fetch(endpoint,{method:'POST',
         headers:{'content-type':'application/json',origin:'https://sender.example'},body});
     const lost=await submit();
@@ -74,7 +80,7 @@ try {
     assert.deepEqual(await again.json(),accepted);
     // Private stdout pipe to the native fixture; never log proofs/capabilities.
     process.stdout.write(JSONInt.stringify({payload,accepted,library:'@cashu/cashu-ts',
-        version:'4.7.2',offline_send:true,lost_admission_reply_retried:true}));
+        version:'4.7.2',offline_send:true,lost_admission_reply_retried:true,verified_tls:verifiedTls}));
 } catch {
     process.stderr.write('Cashu-TS synthetic sender fixture rejected.\n');
     process.exitCode=1;

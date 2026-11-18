@@ -233,7 +233,7 @@ async fn fixture_json_response(response: reqwest::Response) -> Result<Value> {
     Ok(serde_json::from_slice(&body)?)
 }
 
-async fn fixture_sdk_sender(input: &Value) -> Result<(Value, Value)> {
+async fn fixture_sdk_sender(input: &Value, edge_ca: Option<&Path>) -> Result<(Value, Value)> {
     use tokio::io::AsyncWriteExt;
     let node = std::env::var_os("LG_CASHU_COMBINED_SENDER_NODE")
         .ok_or_else(|| anyhow::anyhow!("SDK sender node missing"))?;
@@ -248,6 +248,7 @@ async fn fixture_sdk_sender(input: &Value) -> Result<(Value, Value)> {
         .arg(installation)
         .env_clear()
         .env("PATH", "/usr/bin:/bin")
+        .envs(edge_ca.map(|ca| ("NODE_EXTRA_CA_CERTS", ca)))
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -270,7 +271,8 @@ async fn fixture_sdk_sender(input: &Value) -> Result<(Value, Value)> {
         result["library"] == "@cashu/cashu-ts"
             && result["version"] == "4.7.2"
             && result["offline_send"] == true
-            && result["lost_admission_reply_retried"] == true,
+            && result["lost_admission_reply_retried"] == true
+            && result["verified_tls"] == edge_ca.is_some(),
         "SDK sender evidence missing"
     );
     Ok((result["payload"].clone(), result["accepted"].clone()))
@@ -462,16 +464,46 @@ async fn combined_settlement_wallet_child() -> Result<()> {
     }
     let mut descriptor_id = String::new();
     let mut http_replays: Vec<(Value, Value)> = Vec::new();
-    let http_client = reqwest::Client::builder()
+    let edge_origin = std::env::var("LG_CASHU_COMBINED_EDGE_ORIGIN").ok();
+    let edge_ca = std::env::var_os("LG_CASHU_COMBINED_EDGE_CA").map(std::path::PathBuf::from);
+    ensure!(
+        edge_origin.is_some() == edge_ca.is_some(),
+        "HTTPS edge configuration incomplete"
+    );
+    let http_origin = edge_origin.as_ref().or(bootstrap.http_origin.as_ref());
+    let mut http_client = reqwest::Client::builder()
         .no_proxy()
-        .timeout(std::time::Duration::from_secs(5))
-        .build()?;
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(std::time::Duration::from_secs(5));
+    if let Some((origin, ca)) = edge_origin.as_ref().zip(edge_ca.as_ref()) {
+        let url = url::Url::parse(origin)?;
+        ensure!(
+            sdk_sender
+                && !repeat_request
+                && !settle_change
+                && url.scheme() == "https"
+                && url.host_str() == Some("127.0.0.1")
+                && url.port().is_some()
+                && origin == &url.origin().ascii_serialization(),
+            "invalid fixture HTTPS origin"
+        );
+        http_client = http_client
+            .https_only(true)
+            .tls_built_in_root_certs(false)
+            .add_root_certificate(reqwest::Certificate::from_pem(&std::fs::read(ca)?)?);
+    }
+    let http_client = http_client.build()?;
     let intake_server = if http_intake {
         let policy = harness.policy();
         let registry = MintRegistry::new(vec![policy.clone()])?;
         let descriptor = crate::descriptor::Descriptor::prepare(
             &registry,
-            "https://lightning-goats.example/api/v1/cashu",
+            &format!(
+                "{}/api/v1/cashu",
+                edge_origin
+                    .as_deref()
+                    .unwrap_or("https://lightning-goats.example")
+            ),
             harness.receiver.public_key(),
             crate::descriptor::Encoding::CreqA,
         )?;
@@ -561,10 +593,7 @@ async fn combined_settlement_wallet_child() -> Result<()> {
     for (payment_index, (amount, nutzap)) in payments.into_iter().enumerate() {
         let input = contribution(&harness, amount + u64::from(fees), nutzap, payment_index)?;
         let id = if http_intake && !nutzap {
-            let origin = bootstrap
-                .http_origin
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("HTTP origin missing"))?;
+            let origin = http_origin.ok_or_else(|| anyhow::anyhow!("HTTP origin missing"))?;
             let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
             loop {
                 let ready = http_client
@@ -601,11 +630,19 @@ async fn combined_settlement_wallet_child() -> Result<()> {
             );
             let intake = input.intake();
             let (payload, accepted) = if sdk_sender {
-                let result = fixture_sdk_sender(&json!({
-                    "origin": origin, "descriptor_id": descriptor_id,
-                    "mint": harness.policy().advertised_url, "keyset": harness.mint.keyset,
-                    "gross_sats": amount + u64::from(fees), "proofs": intake.proofs,
-                }))
+                if edge_ca.is_some() {
+                    // Replenish the packaged nginx zone after the malformed request.
+                    // The SDK's preflight and three POSTs use all four burst slots.
+                    tokio::time::sleep(std::time::Duration::from_millis(5250)).await;
+                }
+                let result = fixture_sdk_sender(
+                    &json!({
+                        "origin": origin, "descriptor_id": descriptor_id,
+                        "mint": harness.policy().advertised_url, "keyset": harness.mint.keyset,
+                        "gross_sats": amount + u64::from(fees), "proofs": intake.proofs,
+                    }),
+                    edge_ca.as_deref(),
+                )
                 .await?;
                 ensure!(
                     result.0["id"] == descriptor_id
@@ -1180,18 +1217,31 @@ async fn combined_settlement_wallet_child() -> Result<()> {
                 .await?;
         }
         for (payload, capability) in &http_replays {
-            let origin = bootstrap.http_origin.as_ref().unwrap();
+            let origin = http_origin.unwrap();
             let status = http_client
                 .post(format!("{origin}/api/v1/cashu/status"))
                 .header("content-type", "application/json")
+                .header("origin", "https://sender.example")
                 .body(serde_json::to_vec(&json!({"capability":capability}))?)
                 .send()
                 .await?;
             ensure!(
                 status.status() == reqwest::StatusCode::OK
+                    && status
+                        .headers()
+                        .get("access-control-allow-origin")
+                        .is_some_and(|v| v == "*")
+                    && status
+                        .headers()
+                        .get("cache-control")
+                        .is_some_and(|v| v == "no-store")
                     && fixture_json_response(status).await? == json!({"status":"credited"}),
                 "HTTP status lost durable credit"
             );
+            if edge_ca.is_some() {
+                // Wait for one slot in the packaged 12-requests-per-minute zone.
+                tokio::time::sleep(std::time::Duration::from_millis(5250)).await;
+            }
             let replay = http_client
                 .post(format!("{origin}/api/v1/cashu"))
                 .header("content-type", "application/json")
@@ -1209,6 +1259,9 @@ async fn combined_settlement_wallet_child() -> Result<()> {
                 receipt_count
             );
             println!("COMBINED_WALLET_PUBLIC_HTTP_FINANCIAL_IPC_VERIFIED");
+            if edge_ca.is_some() {
+                println!("COMBINED_WALLET_CASHU_HTTPS_EDGE_VERIFIED");
+            }
         }
         publish(
             &root,

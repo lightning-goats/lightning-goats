@@ -1011,9 +1011,9 @@ def qualify(source,root,states,uids,binaries,configurations,native_policy,args,c
         records = {item['path']: item for item in collection['originals']}
         for field, archived, _, _ in install['SIGNER_CLIENTS'].values():
             name = 'recovery-material/' + archived
-            original = Path(inputs[field])
-            if (records[name]['source'] != str(original)
-                    or records[name]['source_sha256'] != digest(original)
+            source_credential = Path(inputs[field])
+            if (records[name]['source'] != str(source_credential)
+                    or records[name]['source_sha256'] != digest(source_credential)
                     or (destination / 'plaintext' / name).read_bytes() != signer_secrets[archived]):
                 raise ValueError('host-bound signer export lost the original identity or binding')
     restored=root/'collector-decrypted.tar'

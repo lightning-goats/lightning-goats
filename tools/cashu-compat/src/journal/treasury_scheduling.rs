@@ -77,9 +77,9 @@ impl Journal {
             Some(limit) if policy.execute => Some(limit.saturating_sub(daily_fees(&tx, now)?)),
             _ => None,
         };
-        let row: Option<(String,String,String,u32)> = tx.query_row(
+        let row: Option<(String, String, String, u32, bool)> = tx.query_row(
             "WITH work AS (
-                SELECT i.id,i.rowid AS ordering,json_extract(i.issued_json,'$.intent.mint_id') AS mint_id,
+                SELECT i.id,i.rowid AS ordering,i.state,json_extract(i.issued_json,'$.intent.mint_id') AS mint_id,
                     json_extract(i.issued_json,'$.intent.maximum_fee_sats') AS maximum_fee_sats,
                     CASE
                       WHEN i.state='reconciled' THEN 'cleanup'
@@ -103,19 +103,28 @@ impl Journal {
                     END AS action
                 FROM treasury_instructions i
                 WHERE i.state!='reconciled' OR NOT EXISTS(SELECT 1 FROM treasury_cdk_cleanup c WHERE c.intent_id=i.id)
+            ), scheduled AS (
+                SELECT w.*,COALESCE(s.attempts,0) AS attempts,COALESCE(s.next_attempt,0) AS due,
+                    (w.action='cleanup' OR (w.action='reconcile' AND w.state='submitted')
+                    OR (w.action='recover_split' AND EXISTS(
+                        SELECT 1 FROM treasury_split_submissions x WHERE x.intent_id=w.id
+                    ))) AS continue_recovery
+                FROM work w LEFT JOIN treasury_work_schedule s ON s.intent_id=w.id AND s.action=w.action
             )
-            SELECT w.id,w.mint_id,w.action,COALESCE(s.attempts,0)
-            FROM work w LEFT JOIN treasury_work_schedule s ON s.intent_id=w.id AND s.action=w.action
+            SELECT w.id,w.mint_id,w.action,w.attempts,w.continue_recovery
+            FROM scheduled w
             WHERE ((?1 AND w.action IN ('reserve','quote','prepare','submit','select_split'))
                 OR (?1 AND ?2 AND w.action='split')
                 OR (?3 AND w.action IN ('recover_quote','recover_preparation','resume_preparation','recover_split','reconcile','cleanup')))
               AND (w.action IN ('recover_quote','recover_preparation','resume_preparation','recover_split','reconcile','cleanup')
                 OR EXISTS(SELECT 1 FROM treasury_execution_admissions a WHERE a.intent_id=w.id)
                 OR w.maximum_fee_sats<=?6)
-            AND COALESCE(s.attempts,0)<?4 AND COALESCE(s.next_attempt,0)<=?5 ORDER BY COALESCE(s.next_attempt,0),w.ordering LIMIT 1",
-            params![policy.execute,policy.split.enabled,policy.reconcile,policy.maximum_attempts,now,fee_remaining], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)),
+              AND (w.attempts<?4 OR w.continue_recovery) AND w.due<=?5
+            ORDER BY w.due,w.ordering LIMIT 1",
+            params![policy.execute,policy.split.enabled,policy.reconcile,policy.maximum_attempts,now,fee_remaining],
+            |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?)),
         ).optional()?;
-        let Some((id, mint_id, action, attempts)) = row else {
+        let Some((id, mint_id, action, attempts, continue_recovery)) = row else {
             return Ok(None);
         };
         let work = Work {
@@ -123,13 +132,19 @@ impl Journal {
             mint_id,
             action: Action::parse(&action)?,
         };
-        let delay = (5_i64 << attempts.min(10)).min(3600);
+        let next_attempts = attempts.saturating_add(1);
+        let minimum_delay = if continue_recovery && next_attempts >= policy.maximum_attempts {
+            300
+        } else {
+            5
+        };
+        let delay = (5_i64 << attempts.min(10)).clamp(minimum_delay, 3600);
         let next = now
             .checked_add(i64::try_from(deadline)?)
             .and_then(|v| v.checked_add(delay))
             .ok_or_else(|| anyhow::anyhow!("treasury schedule overflow"))?;
         tx.execute("INSERT INTO treasury_work_schedule(intent_id,action,attempts,next_attempt) VALUES(?,?,?,?) ON CONFLICT(intent_id,action) DO UPDATE SET attempts=excluded.attempts,next_attempt=excluded.next_attempt",
-            params![id,action,attempts+1,next])?;
+            params![id,action,next_attempts,next])?;
         tx.commit()?;
         Ok(Some(work))
     }
@@ -497,6 +512,25 @@ mod tests {
         );
         // A frozen request already prevents another submit, even before its claim committed.
         assert!(journal.claim_treasury_work(1000, &policy(), 2)?.is_none());
+        assert_eq!(
+            journal
+                .claim_treasury_work(1007, &paused, 2)?
+                .unwrap()
+                .action,
+            Action::Reconcile
+        );
+        assert!(journal.claim_treasury_work(10000, &paused, 2)?.is_none());
+        journal.connection.execute(
+            "UPDATE treasury_instructions SET state='submitted' WHERE id=?",
+            [issued.intent.id.to_string()],
+        )?;
+        assert_eq!(
+            journal
+                .claim_treasury_work(10000, &paused, 2)?
+                .unwrap()
+                .action,
+            Action::Reconcile
+        );
         Ok(())
     }
 }

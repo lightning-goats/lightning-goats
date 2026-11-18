@@ -1194,6 +1194,7 @@ enum TreasuryScenario {
 }
 
 async fn prepared_treasury_case(scenario: TreasuryScenario) -> Result<()> {
+    use sha2::{Digest as _, Sha256};
     let real_transport = !matches!(scenario, TreasuryScenario::PreparedOnly);
     let harness = Harness::new(0)?;
     let mut coordinator = harness.open().await?;
@@ -1229,6 +1230,16 @@ async fn prepared_treasury_case(scenario: TreasuryScenario) -> Result<()> {
         300,
         "ab",
     );
+    if matches!(scenario, TreasuryScenario::Scheduled) {
+        issued.payment_hash = cdk::util::hex::encode(Sha256::digest([0x37u8; 32]));
+        issued.invoice = crate::treasury::tests::signed_invoice_payment_hash(
+            cdk::lightning_invoice::Currency::Bitcoin,
+            7000,
+            now,
+            300,
+            &issued.payment_hash,
+        );
+    }
     let proofs = coordinator.wallet.get_unspent_proofs().await?;
     let mut ys = proofs
         .iter()
@@ -1355,22 +1366,76 @@ async fn prepared_treasury_case(scenario: TreasuryScenario) -> Result<()> {
             let worker = make_worker(paused.clone())?;
             assert_eq!(worker.tick(now as i64 + 3).await?, Tick::Idle);
             drop(worker);
+            let mut paid = harness.mint.quote_reply.lock().unwrap().clone().unwrap();
+            paid["state"] = "PAID".into();
+            paid["payment_preimage"] = "37".repeat(32).into();
+            paid["change"] = json!([]);
+            *harness.mint.melt_paid_reply.lock().unwrap() = Some(paid);
+            harness
+                .mint
+                .consume_melt_reserve
+                .store(true, Ordering::SeqCst);
+            harness.mint.lose_melt_reply.store(true, Ordering::SeqCst);
+            harness
+                .mint
+                .melt_status_unavailable
+                .store(true, Ordering::SeqCst);
             let worker = make_worker(execution)?;
             assert_eq!(worker.tick(now as i64 + 4).await?, Tick::RetryRetained);
             assert_eq!(harness.mint.melt_attempts.load(Ordering::SeqCst), 1);
+            assert!(harness.mint.melt_settled.load(Ordering::SeqCst));
             drop(worker);
-            let worker = make_worker(paused)?;
+            let worker = make_worker(paused.clone())?;
             assert_eq!(worker.tick(now as i64 + 5).await?, Tick::RetryRetained);
             assert_eq!(worker.tick(now as i64 + 6).await?, Tick::Idle);
             assert_eq!(worker.tick(now as i64 + 12).await?, Tick::RetryRetained);
             assert_eq!(worker.tick(now as i64 + 100).await?, Tick::Idle);
+            drop(worker);
+            let db = rusqlite::Connection::open(&path)?;
+            let (attempts, due): (u32, i64) = db.query_row(
+                "SELECT attempts,next_attempt FROM treasury_work_schedule WHERE intent_id=? AND action='reconcile'",
+                [issued.intent.id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+            assert_eq!((attempts, due), (2, now as i64 + 314));
+            assert!(due > quote.expiry as i64);
+            harness
+                .mint
+                .melt_status_unavailable
+                .store(false, Ordering::SeqCst);
+            let worker = make_worker(paused.clone())?;
+            assert_eq!(worker.tick(due - 1).await?, Tick::Idle);
+            assert_eq!(worker.tick(due).await?, Tick::Progress);
+            let journal = Journal::open(&path, harness.epoch, 8)?;
+            let report = journal
+                .completed_treasury_report(&binding, issued.intent.id)?
+                .unwrap();
+            assert_eq!(report.intent_id, issued.intent.id);
+            assert_eq!(report.quote_id, quote.id);
+            assert_eq!(report.sources, issued.intent.allocate_result(1, 0)?);
+            drop(journal);
+
+            harness.mint.fail_check_once.store(true, Ordering::SeqCst);
+            assert_eq!(worker.tick(due + 1).await?, Tick::RetryRetained);
+            harness.mint.fail_check_once.store(true, Ordering::SeqCst);
+            assert_eq!(worker.tick(due + 8).await?, Tick::RetryRetained);
+            drop(worker);
+            let worker = make_worker(paused)?;
+            assert_eq!(worker.tick(due + 309).await?, Tick::Idle);
+            assert_eq!(worker.tick(due + 310).await?, Tick::Progress);
+            assert_eq!(worker.tick(due + 10000).await?, Tick::Idle);
+            let cleanups: i64 = db.query_row(
+                "SELECT COUNT(*) FROM treasury_cdk_cleanup WHERE intent_id=?",
+                [issued.intent.id.to_string()],
+                |row| row.get(0),
+            )?;
+            assert_eq!(cleanups, 1);
             assert_eq!(harness.mint.quote_attempts.load(Ordering::SeqCst), 1);
             assert_eq!(harness.mint.melt_attempts.load(Ordering::SeqCst), 1);
-            let db = rusqlite::Connection::open(&path)?;
             let (state, admissions, charged): (String,u64,u64) = db.query_row(
                 "SELECT (SELECT state FROM treasury_instructions WHERE id=?),COUNT(*),COALESCE(SUM(input_sats),0) FROM treasury_execution_admissions",
                 [issued.intent.id.to_string()], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
-            assert_eq!(state, "submitted");
+            assert_eq!(state, "reconciled");
             assert_eq!((admissions, charged), (1, 8));
             return Ok(());
         }

@@ -388,9 +388,15 @@ CDK preparation evidence retain the operation for review.
 
 The supervised worker selects actions from durable state. It records a bounded
 attempt before work, with per-intent/per-stage exponential backoff (five seconds
-to one hour, plus the operation deadline). A frozen melt request always selects
-reconciliation, never a second submission. Exhausted attempts retain the original
-operation; restarting does not reset them. Other due instructions can progress.
+to one hour, plus the operation deadline). Fresh execution and local preparation
+use the finite attempt budget. A frozen melt request always selects
+reconciliation. Once submission is recorded, the wallet keeps checking the
+original melt or split after the usual retry budget is consumed. Cleanup of an
+already reconciled melt also keeps retrying. These stages back off to at least
+five minutes plus the deadline after reaching the budget. They stop when the
+corresponding report, split result, or cleanup checkpoint is retained. Restart
+preserves the intent, attempt history and schedule. Other due instructions can
+progress during the backoff.
 
 Wallet admission charges the full original input once per intent, conservatively,
 against rolling 24-hour operation/input limits and unresolved in-flight input.

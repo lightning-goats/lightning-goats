@@ -591,8 +591,22 @@ async fn worker_case(
     );
     drop(worker);
     paused.split.enabled = false;
-    let worker = make_worker(paused.clone())?;
-    assert_eq!(worker.tick(now as i64 + 19).await?, Tick::Progress); // recover only original
+    let mut split_recovery = paused.clone();
+    let recover_at = if lost_reply {
+        split_recovery.maximum_attempts = 1;
+        let fixture = rusqlite::Connection::open(&path)?;
+        fixture.execute(
+            "INSERT INTO treasury_work_schedule(intent_id,action,attempts,next_attempt)
+             VALUES(?,'recover_split',1,?)",
+            rusqlite::params![issued.intent.id.to_string(), now + 20],
+        )?;
+        now as i64 + 20
+    } else {
+        now as i64 + 19
+    };
+    let worker = make_worker(split_recovery)?;
+    assert_eq!(worker.tick(recover_at - 1).await?, Tick::Idle);
+    assert_eq!(worker.tick(recover_at).await?, Tick::Progress); // recover only original
     assert_eq!(worker.tick(now as i64 + 20).await?, Tick::Idle); // selection/spending remains paused
     drop(worker);
     let worker = make_worker(execution.clone())?;

@@ -158,8 +158,10 @@ def verify_strike_credentials(store, approval, stage_sha, policy_sha, configs, c
         if source.expected[3] != 0:
             raise ValueError('Strike credential must have root group')
         source.file.seek(0)
-        plaintext = named_host_plaintext(name, source.file.read(8192), budget).decode().strip()
-        if (not plaintext or re.search(r'[\x00-\x1f\x7f-\x9f]', plaintext)
+        raw = named_host_plaintext(name, source.file.read(8192), budget).decode()
+        plaintext = raw.strip()
+        # Python strips four ASCII separators that Rust's trim preserves.
+        if (not plaintext or re.search(r'[\x1c-\x1f]', raw) or re.search(r'[\x00-\x1f\x7f-\x9f]', plaintext)
                 or not hmac.compare_digest(common['sha'](plaintext.encode()), expected[name])):
             raise ValueError('Strike credential differs from selected binding')
         source.check()

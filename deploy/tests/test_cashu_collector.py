@@ -640,6 +640,10 @@ class CollectorTests(unittest.TestCase):
             payout.write_bytes(original[receive])
             with self.assertRaises(ValueError):
                 check()
+            payout.write_bytes(tool('encrypt', 'strike-payout-api-key', b'\x1c' + raw['strike-payout-api-key'],
+                                    self.budget))
+            with self.assertRaisesRegex(ValueError, 'differs from selected binding'):
+                check()
             payout.write_bytes(original[payout])
             self.assertEqual(check(), sorted(credentials))
             self.assertEqual({path: path.read_bytes() for path in store.iterdir()}, original)

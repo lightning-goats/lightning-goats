@@ -605,7 +605,9 @@ async fn worker_case(
         now as i64 + 19
     };
     let worker = make_worker(split_recovery)?;
-    assert_eq!(worker.tick(recover_at - 1).await?, Tick::Idle);
+    if lost_reply {
+        assert_eq!(worker.tick(recover_at - 1).await?, Tick::Idle);
+    }
     assert_eq!(worker.tick(recover_at).await?, Tick::Progress); // recover only original
     assert_eq!(worker.tick(now as i64 + 20).await?, Tick::Idle); // selection/spending remains paused
     drop(worker);

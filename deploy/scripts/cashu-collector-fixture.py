@@ -332,13 +332,14 @@ assert not os.access(ciphertext, os.R_OK)
             unit = worker['unit'].removesuffix('.service') + '-credential-probe.service'
             suffix = output_root.parent.name.removeprefix('lg-native-backup-')
             account = f'lgc-{suffix}-{role[0]}'
-            run('/usr/sbin/groupadd', '--gid', str(worker['gid']), account)
-            cleanup.callback(run, '/usr/sbin/groupdel', account)
-            run('/usr/sbin/useradd', '--uid', str(worker['uid']), '--gid', account, '--no-user-group',
+            group = account + '-group'
+            run('/usr/sbin/groupadd', '--gid', str(worker['gid']), group)
+            cleanup.callback(run, '/usr/sbin/groupdel', group)
+            run('/usr/sbin/useradd', '--uid', str(worker['uid']), '--gid', group, '--no-user-group',
                 '--no-create-home', '--home-dir', '/nonexistent', '--shell', '/usr/sbin/nologin', account)
             cleanup.callback(run, '/usr/sbin/userdel', account)
             result = run('/usr/bin/systemd-run', '--quiet', '--wait', '--collect', '--unit=' + unit,
-                         '--property=User=' + account, '--property=Group=' + account,
+                         '--property=User=' + account, '--property=Group=' + group,
                          '--property=LoadCredentialEncrypted=' + name + ':' + str(ciphertext),
                          '--property=PrivateNetwork=yes', '--property=NoNewPrivileges=yes',
                          '--property=StandardOutput=null', '--property=StandardError=null', '--',

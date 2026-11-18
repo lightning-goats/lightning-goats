@@ -55,14 +55,23 @@ def snapshot(path):
             for file in path.iterdir() if file.is_file()}
 
 
-def ready(process, endpoint, log):
+def diagnostics(command, process, log):
+    status = command(['systemctl', 'show', process.unit,
+                      '--property=LoadState,Result,ExecStartPre,ExecMainCode,ExecMainStatus,ActiveState'],
+                     check=False).stdout
+    journal = command(['journalctl', '--unit', process.unit, '--no-pager', '--output=cat', '-n', '20'],
+                      check=False).stdout
+    return '\n'.join((status[-1800:], journal[-3000:], log.read_text()[-2000:]))
+
+
+def ready(command, process, endpoint, log):
     for _ in range(100):
         if endpoint.is_socket() and process.properties().get('ActiveState') == 'active':
             return
         if process.poll() is not None:
             break
         time.sleep(0.1)
-    raise ValueError(f'{process.unit} did not start: {log.read_text()[-1600:]}')
+    raise ValueError(f'{process.unit} did not start:\n{diagnostics(command, process, log)}')
 
 
 def rehearse(selection, binaries, hashes, uids, states, wallet_config, signer_config,
@@ -181,11 +190,13 @@ def rehearse(selection, binaries, hashes, uids, states, wallet_config, signer_co
             if phase == 'fenced':
                 properties = [(key, value) for key, value in properties if key != 'Restart']
                 properties += [('Restart', 'no'), ('CollectMode', 'inactive')]
-            result = command(['systemd-run', '--quiet', '--unit', unit,
+            result = command(['systemd-run', '--unit', unit,
                               *[f'--property={k}={v}' for k, v in properties], '--',
                               str(installed[role]), 'run', str(configs[role])], check=False)
             if result.returncode and phase != 'fenced':
-                raise ValueError(f'{role} sandbox failed: {result.stderr[-1000:]} {logs[role].read_text()[-1600:]}')
+                raise ValueError(f'{role} sandbox launch exited {result.returncode}: '
+                                 f'{(result.stdout + result.stderr)[-1400:]}\n'
+                                 f'{diagnostics(command, process, logs[role])}')
             return process
 
         for phase in ('fresh', 'restart'):
@@ -193,7 +204,7 @@ def rehearse(selection, binaries, hashes, uids, states, wallet_config, signer_co
             for role in roles:
                 logs[role].write_text('')
                 process = launch(role, phase)
-                ready(process, endpoints[role], logs[role])
+                ready(command, process, endpoints[role], logs[role])
                 if 'sandbox probe passed' not in logs[role].read_text():
                     raise ValueError('service did not pass installed sandbox checks')
                 runtime = Path(f'/proc/{process.pid}/status').read_text()
@@ -217,7 +228,8 @@ def rehearse(selection, binaries, hashes, uids, states, wallet_config, signer_co
             log = logs[role].read_text()
             if (stopped != 1 or endpoints[role].exists() or 'sandbox probe passed' not in log
                     or 'Cashu recovery requires explicit reconciliation' not in log):
-                raise ValueError(f'{role} ignored its installed recovery fence: {log[-1600:]}')
+                raise ValueError(f'{role} recovery fence rehearsal failed:\n'
+                                 f'{diagnostics(command, process, logs[role])}')
             if before != snapshot(state_dirs[role]):
                 raise ValueError('fenced installed start changed retained state')
 

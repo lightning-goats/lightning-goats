@@ -1821,4 +1821,4 @@ mod hold_tests {
 
 mod receive_status;
 
-mod cdk_storage;
+pub(crate) mod cdk_storage;

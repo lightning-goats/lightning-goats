@@ -82,6 +82,36 @@ pub(crate) fn private_state_file(path: &Path) -> Result<File> {
 }
 
 impl WriterLock {
+    /// Take the ordinary writer lease for a read-only review of existing state.
+    /// An absent or substituted lock file requires normal provisioning first.
+    pub(crate) fn lock_existing(directory: &Path) -> Result<File> {
+        crate::private_ipc::private_state(directory)?;
+        check_recovery_marker(directory)?;
+        let path = directory.join("wallet-writer.lock");
+        let file = File::from(rustix::fs::open(
+            &path,
+            OFlags::RDWR | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+            Mode::empty(),
+        )?);
+        let info = file.metadata()?;
+        ensure!(
+            info.is_file()
+                && info.nlink() == 1
+                && info.uid() == rustix::process::geteuid().as_raw()
+                && info.mode() & 0o077 == 0,
+            "unsafe wallet writer lock"
+        );
+        rustix::fs::flock(&file, FlockOperation::NonBlockingLockExclusive)
+            .map_err(|_| anyhow::anyhow!("wallet writer already active"))?;
+        let current = std::fs::symlink_metadata(path)?;
+        ensure!(
+            current.ino() == info.ino() && current.dev() == info.dev(),
+            "wallet writer lock changed"
+        );
+        check_recovery_marker(directory)?;
+        Ok(file)
+    }
+
     pub(crate) fn coordinator(&self) -> ActiveOperation {
         self.active.clone()
     }

@@ -477,3 +477,14 @@ Run the authenticated archive rehearsal with `--rotate-receiving-key`. Verify
 the original and new files against the checkpoint and native key verifier,
 reject a replaced copied key, and check the recovered filename and bytes before
 running the six fenced native commands.
+
+## Cashu mint policy review
+
+Review a protected candidate that pauses a mint with held work and introduces
+a separately named issuer. Match both config digests, the wallet registration,
+the original held count and the two proposed admission settings. Refuse an
+active writer, restore fence, changed recovery keys or mint URL, removed mint
+or unrelated configuration change. The review leaves financial rows intact.
+In a disposable restart, apply the exact reviewed bytes and verify the original
+held request and both namespace registrations. The retained issuer test must
+refuse the original URL and its trailing-slash spelling under a new internal ID.

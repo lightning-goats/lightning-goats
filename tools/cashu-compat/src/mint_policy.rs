@@ -26,7 +26,7 @@ pub struct MintRegistry {
     by_url: BTreeMap<String, MintPolicy>,
 }
 
-fn canonical_url(value: &str) -> Result<String> {
+pub(crate) fn canonical_url(value: &str) -> Result<String> {
     ensure!(
         value.len() <= 2048 && !value.contains('\\'),
         "invalid mint URL"

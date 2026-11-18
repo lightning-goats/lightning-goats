@@ -35,6 +35,13 @@ impl Limits {
 #[derive(Default, Clone)]
 pub struct PinnedKeys(BTreeMap<(String, String, u64), PublicKey>);
 impl PinnedKeys {
+    pub(crate) fn preserves(&self, previous: &Self) -> bool {
+        previous
+            .0
+            .iter()
+            .all(|(identity, key)| self.0.get(identity) == Some(key))
+    }
+
     pub(crate) fn key(&self, mint: &str, keyset: cdk::nuts::Id, amount: u64) -> Result<PublicKey> {
         self.0
             .get(&(mint.to_owned(), keyset.to_string(), amount))

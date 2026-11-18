@@ -1,8 +1,50 @@
 //! Durable CDK namespaces. A pending namespace never becomes a blank restart.
 use super::*;
-use crate::mint_policy::MintPolicy;
+use crate::mint_policy::{MintPolicy, canonical_url};
+
+/// Retired stores remain part of the issuer registry. A different internal ID
+/// must never give that issuer a new proof-claim or derivation namespace.
+pub(crate) fn verify_mint_namespaces(
+    connection: &Connection,
+    policies: &[MintPolicy],
+) -> Result<BTreeMap<String, String>> {
+    let mut query = connection
+        .prepare("SELECT mint_id,mint_url,ready FROM cdk_mint_namespaces ORDER BY mint_id")?;
+    let rows = query.query_map([], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, bool>(2)?,
+        ))
+    })?;
+    let mut retained = BTreeMap::new();
+    let mut issuers = BTreeMap::new();
+    for row in rows {
+        let (id, url, ready) = row?;
+        ensure!(
+            ready && issuers.insert(canonical_url(&url)?, id.clone()).is_none(),
+            "incomplete or conflicting retained mint namespaces"
+        );
+        retained.insert(id, url);
+    }
+    for policy in policies {
+        ensure!(
+            retained
+                .get(&policy.id)
+                .is_none_or(|url| url == &policy.advertised_url)
+                && issuers
+                    .get(&canonical_url(&policy.advertised_url)?)
+                    .is_none_or(|id| id == &policy.id),
+            "configured mint conflicts with retained issuer identity"
+        );
+    }
+    Ok(retained)
+}
 
 impl Journal {
+    pub(crate) fn verify_mint_namespaces(&self, policies: &[MintPolicy]) -> Result<()> {
+        verify_mint_namespaces(&self.connection, policies).map(|_| ())
+    }
     pub(crate) fn require_cdk_namespaces(&mut self, legacy_cdk_empty: bool) -> Result<()> {
         let tx = self
             .connection
@@ -73,6 +115,15 @@ impl Journal {
             tx.commit()?;
             return Ok(false);
         }
+        let already_registered: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM cdk_mint_namespaces WHERE rtrim(mint_url,'/')=?)",
+            [canonical_url(&policy.advertised_url)?],
+            |row| row.get(0),
+        )?;
+        ensure!(
+            !already_registered,
+            "mint issuer already has a retained namespace"
+        );
         tx.execute(
             "INSERT INTO cdk_mint_namespaces VALUES(?,?,0)",
             params![policy.id, policy.advertised_url],
@@ -139,6 +190,41 @@ mod tests {
                 .connection
                 .execute("UPDATE cdk_mint_namespaces SET ready=0", [])
                 .is_err()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn retired_issuer_cannot_reappear_under_a_different_internal_id() -> Result<()> {
+        let directory = crate::test_directory()?;
+        let path = directory.path().join("journal.sqlite");
+        let epoch = Uuid::new_v4();
+        let original = policy();
+        let mut journal = Journal::open(&path, epoch, 16)?;
+        journal.require_cdk_namespaces(true)?;
+        assert!(journal.prepare_cdk_namespace(&original)?);
+        journal.complete_cdk_namespace(&original)?;
+        drop(journal);
+
+        let mut journal = Journal::open(&path, epoch, 16)?;
+        journal.verify_mint_namespaces(&[])?;
+        for url in ["https://first.example", "https://first.example/"] {
+            let replacement = MintPolicy {
+                id: "renamed".into(),
+                advertised_url: url.into(),
+                ..original.clone()
+            };
+            assert!(
+                journal
+                    .verify_mint_namespaces(std::slice::from_ref(&replacement))
+                    .is_err()
+            );
+            assert!(journal.prepare_cdk_namespace(&replacement).is_err());
+        }
+        let retained = verify_mint_namespaces(&journal.connection, &[original.clone()])?;
+        assert_eq!(
+            retained,
+            BTreeMap::from([(original.id, original.advertised_url)])
         );
         Ok(())
     }

@@ -9,6 +9,27 @@ mod health;
 pub use health::{Funds, Health, MintFunds, Queue};
 
 const DETAIL_LIMIT: usize = 64;
+
+pub(crate) fn open_readonly_journal(config: &Config) -> Result<Connection> {
+    let path = config.state_directory.join("acquisition.sqlite");
+    let metadata = std::fs::symlink_metadata(&path)?;
+    ensure!(
+        metadata.is_file()
+            && metadata.nlink() == 1
+            && metadata.uid() == config.runtime_uid
+            && metadata.mode() & 0o077 == 0,
+        "read-only operation requires a private regular journal"
+    );
+    let connection = Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY
+            | OpenFlags::SQLITE_OPEN_NO_MUTEX
+            | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+    )?;
+    connection.busy_timeout(Duration::from_secs(1))?;
+    connection.pragma_update(None, "query_only", true)?;
+    Ok(connection)
+}
 #[derive(Serialize)]
 pub struct Status {
     pub wallet_instance: Uuid,
@@ -102,23 +123,7 @@ impl Status {
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
                 Err(error) => return Err(error.into()),
             };
-        let path = config.state_directory.join("acquisition.sqlite");
-        let metadata = std::fs::symlink_metadata(&path)?;
-        ensure!(
-            metadata.is_file()
-                && metadata.nlink() == 1
-                && metadata.uid() == config.runtime_uid
-                && metadata.mode() & 0o077 == 0,
-            "status requires a private regular journal"
-        );
-        let mut connection = Connection::open_with_flags(
-            path,
-            OpenFlags::SQLITE_OPEN_READ_ONLY
-                | OpenFlags::SQLITE_OPEN_NO_MUTEX
-                | OpenFlags::SQLITE_OPEN_NOFOLLOW,
-        )?;
-        connection.busy_timeout(Duration::from_secs(1))?;
-        connection.pragma_update(None, "query_only", true)?;
+        let mut connection = open_readonly_journal(config)?;
         let tx = connection.transaction()?;
         let epoch: String = tx.query_row(
             "SELECT epoch FROM wallet_epoch WHERE singleton=1",

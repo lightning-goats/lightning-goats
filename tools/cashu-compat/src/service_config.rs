@@ -9,11 +9,35 @@ use serde::Deserialize;
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::Read,
+    os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
 };
 use uuid::Uuid;
 
 const MAX_CONFIG_BYTES: usize = 65_536;
+
+pub(crate) fn read_protected(path: &Path) -> Result<Vec<u8>> {
+    crate::private_ipc::protected_config(path)?;
+    use rustix::fs::{Mode, OFlags};
+    let file = std::fs::File::from(rustix::fs::open(
+        path,
+        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK,
+        Mode::empty(),
+    )?);
+    let metadata = file.metadata()?;
+    ensure!(
+        metadata.is_file() && metadata.uid() == 0 && metadata.mode() & 0o022 == 0,
+        "invalid protected wallet configuration"
+    );
+    let mut bytes = Vec::new();
+    file.take((MAX_CONFIG_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)?;
+    ensure!(
+        !bytes.is_empty() && bytes.len() <= MAX_CONFIG_BYTES,
+        "wallet configuration exceeds bound"
+    );
+    Ok(bytes)
+}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -106,12 +130,7 @@ pub struct Prepared {
 }
 impl Config {
     pub fn load(path: &Path) -> Result<Self> {
-        crate::private_ipc::protected_config(path)?;
-        let mut bytes = Vec::new();
-        std::fs::File::open(path)?
-            .take((MAX_CONFIG_BYTES + 1) as u64)
-            .read_to_end(&mut bytes)?;
-        Self::decode(&bytes)
+        Self::decode(&read_protected(path)?)
     }
     pub fn decode(bytes: &[u8]) -> Result<Self> {
         ensure!(

@@ -135,6 +135,7 @@ impl Runtime {
             rows == 0
         };
         journal.require_cdk_namespaces(legacy_empty)?;
+        journal.verify_mint_namespaces(&config.mints)?;
         let mut mint_databases = std::collections::BTreeMap::new();
         for mint in &config.mints {
             let create = journal.prepare_cdk_namespace(mint)?;

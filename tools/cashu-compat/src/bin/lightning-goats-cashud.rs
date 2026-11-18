@@ -8,6 +8,7 @@ use std::{ffi::OsString, path::PathBuf, process::ExitCode};
 const USAGE: &str = "Usage: lightning-goats-cashud <check-config|initialize|run|status> <config.json>\n\
        lightning-goats-cashud reconcile-acquisition <config.json> <approval.json>\n\
        lightning-goats-cashud reconcile-treasury <config.json> <approval.json>\n\
+       lightning-goats-cashud review-mint-policy <current.json> <candidate.json>\n\
        lightning-goats-cashud prepare-announcement <config.json> <operation-uuid>\n\
        lightning-goats-cashud prepare-request <config.json> <https-endpoint> <creqA|creqB>\n\
 check-config  Validate protected configuration without opening wallet state or keys.\n\
@@ -16,6 +17,7 @@ run           Open existing wallet state; serve private intake and configured ac
 status        Read bounded private journal status without loading keys or changing work.\n\
 reconcile-acquisition  Check one approved original acquisition; no swap/melt replay.\n\
 reconcile-treasury  Check one original submitted melt and retain its wallet report.\n\
+review-mint-policy  Review a protected mint-only change against the stopped wallet.\n\
 prepare-announcement  Offline: retain and preview configured kind 10019; no workers started.\n\
 prepare-request  Offline: preview a reusable request; no keys, state or network opened.\n\
 Receiving, relay intake, acquisition, receipt delivery and treasury execution default off.\n\
@@ -30,6 +32,7 @@ enum Command {
     Status(PathBuf),
     ReconcileAcquisition(PathBuf, PathBuf),
     ReconcileTreasury(PathBuf, PathBuf),
+    ReviewMintPolicy(PathBuf, PathBuf),
     PrepareAnnouncement(PathBuf, uuid::Uuid),
     PrepareRequest(PathBuf, String, Encoding),
 }
@@ -37,6 +40,16 @@ enum Command {
 fn parse(args: Vec<OsString>) -> Result<Command, ()> {
     if args.len() == 1 && (args[0] == "--help" || args[0] == "-h") {
         return Ok(Command::Help);
+    }
+    if args.len() == 3
+        && args[0] == "review-mint-policy"
+        && !args[1].is_empty()
+        && !args[2].is_empty()
+    {
+        return Ok(Command::ReviewMintPolicy(
+            PathBuf::from(&args[1]),
+            PathBuf::from(&args[2]),
+        ));
     }
     if args.len() == 3
         && args[0] == "reconcile-treasury"
@@ -148,6 +161,14 @@ async fn execute(command: Command) -> Result<(), &'static str> {
             )?;
             drop(runtime);
             println!("Wallet databases initialized; no service started.");
+        }
+        Command::ReviewMintPolicy(current, candidate) => {
+            let review = lightning_goats_cashu_compat::operator_mint_policy::review(&current, &candidate)
+                .map_err(|_| "mint policy review rejected; check configuration scope and retained wallet state")?;
+            println!(
+                "{}",
+                serde_json::to_string(&review).map_err(|_| "mint policy review encoding failed")?
+            );
         }
         Command::ReconcileTreasury(path, approval) => {
             use lightning_goats_cashu_compat::operator_treasury::Approval;

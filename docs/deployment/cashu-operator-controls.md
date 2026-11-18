@@ -197,6 +197,43 @@ A funded CDK fixture drops part of a state response, restarts while the
 acquisition is held, and rechecks the original outputs before the receipt worker
 exports once. The mint executes one swap throughout.
 
+## Mint policy review
+
+Create a root-owned protected candidate from the current wallet configuration.
+Use stable internal mint IDs and exact advertised URLs. To retire a mint from
+receiving, set its `receive_cashu` and `receive_nutzap` flags to false. Keep its
+configured identity, namespace and pinned keysets for retained custody and
+original operations. Existing mint URLs and previously pinned denomination
+keys must survive the update. An issuer retains its ID even when its namespace
+is absent from the current config. The wallet refuses a new ID for that URL.
+
+Run the review as the stopped wallet's runtime user:
+
+```sh
+sudo -u lightning-goats-cashu /usr/local/bin/lightning-goats-cashud \
+  review-mint-policy /etc/lightning-goats-cashu/config.json \
+  /etc/lightning-goats-cashu/mint-candidate.json
+```
+
+The reviewer holds the existing writer lock, checks the recovery fence and the
+wallet's key and epoch registration, and reads the journal without running
+migrations. It reports the exact config hashes, proposed rail flags, retained
+namespace status, uncredited acquisitions and open treasury instructions for
+each candidate mint. Review those counts alongside the wallet's private status
+for current custody. The receipt describes a candidate, with `applied:false`.
+
+The mint policy review permits changing mint and keyset inventories and their
+descriptor IDs. Use the current request endpoint and move a replaced QR to a
+reviewed retirement window, or revoke it. The candidate can pause dependent
+receive and publication switches. Existing spend, signer, wallet registration
+and broader runtime settings must remain identical. Review core receipt-policy
+acceptance before enabling admission under a new mint policy version.
+
+Use the existing protected configuration deployment procedure for the exact
+candidate hash after operator approval. The native fixture installs the
+candidate in a disposable wallet and verifies that restarting creates only the
+new mint namespace while retaining the original held acquisition.
+
 ```sh
 sudo unshare --mount --net -- python3 deploy/scripts/test-cashu-private-run.py -- \
   python3 deploy/scripts/test-cashu-operator-reconciliation-cli.py \

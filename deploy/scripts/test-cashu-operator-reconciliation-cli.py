@@ -59,10 +59,13 @@ def main():
             intake_socket=str(root/'ipc/intake.sock'),
             receiving_key='0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798',
             recipient='f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9',
-            descriptors=[], keysets=[], body_bytes=65536, proof_count=64, receipt_sats=10000,
+            descriptors=['synthetic-review-id'], receive_cashu=True,
+            keysets=[dict(mint_id='mint-a', id='00deadbeef123456', keys={
+                '8':'0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'})],
+            body_bytes=65536, proof_count=64, receipt_sats=10000,
             deadline_seconds=5, connections_per_second=8,
             mints=[dict(id='mint-a',advertised_url='https://mint.example/Bitcoin',policy_version='v1',
-                receive_cashu=False,receive_nutzap=False,bolt11_exit_qualified=True)])
+                receive_cashu=True,receive_nutzap=False,bolt11_exit_qualified=True)])
         config.write_text(json.dumps(config_value))
         config.chmod(0o444)
         config_bytes = config.read_bytes()
@@ -175,11 +178,69 @@ def main():
         call(*arguments, success=False)
         if image() != held:
             raise ValueError('out-of-scope hold was changed')
+        candidate_file = root/'mint-candidate.json'
+        mint_a = config_value['mints'][0]
+        mint_b = dict(mint_a, id='mint-b', advertised_url='https://second.example/Bitcoin')
+        key_b = dict(config_value['keysets'][0], mint_id='mint-b')
+        candidate = dict(config_value, mints=[dict(mint_a, receive_cashu=False), mint_b],
+                         keysets=[*config_value['keysets'], key_b])
+
+        def stage_candidate(value):
+            candidate_file.write_text(json.dumps(value))
+            candidate_file.chmod(0o444)
+            return candidate_file.read_bytes()
+
+        review_args = ['review-mint-policy', str(config), str(candidate_file)]
+        next_bytes = stage_candidate(candidate)
+        review = json.loads(call(*review_args).stdout)
+        mints = {entry['mint_id']: entry for entry in review['mints']}
+        if (review['applied'] or review['current_sha256'] != hashlib.sha256(config_bytes).hexdigest()
+                or review['candidate_sha256'] != hashlib.sha256(next_bytes).hexdigest()
+                or mints['mint-a']['receive_cashu'] or mints['mint-a']['uncredited_acquisitions'] != 1
+                or not mints['mint-a']['retained_namespace'] or not mints['mint-b']['receive_cashu']
+                or mints['mint-b']['retained_namespace'] or image() != held):
+            raise ValueError('mint policy review lost pending state or exact candidate binding')
+        for rejected in [
+            dict(candidate, mints=[mint_b], keysets=[key_b]),
+            dict(candidate, deadline_seconds=9),
+            dict(candidate, keysets=[key_b]),
+            dict(candidate, mints=[dict(mint_a, advertised_url='https://changed.example'), mint_b]),
+            dict(candidate, keysets=[dict(config_value['keysets'][0], keys={
+                '8':'02c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5'}), key_b]),
+        ]:
+            stage_candidate(rejected)
+            call(*review_args, success=False)
+        next_bytes = stage_candidate(candidate)
+        with (state/'wallet-writer.lock').open('rb') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            call(*review_args, success=False)
+        marker.write_text('synthetic recovery fence')
+        call(*review_args, success=False)
+        marker.unlink()
+        if image() != held or config.read_bytes() != config_bytes:
+            raise ValueError('mint policy refusal changed original state or configuration')
+
+        # Exercise the reviewed candidate with the original exact acquisition
+        # in a disposable restart. Root installs only the reviewed bytes here.
+        os.replace(candidate_file, config)
+        with closing(sqlite3.connect(database)) as db:
+            db.execute("UPDATE operation_holds SET reason='missing_owned_outputs' WHERE acquisition_id=?", [acquisition])
+            db.commit()
+        save(dict(decision, config_sha256=hashlib.sha256(next_bytes).hexdigest(), reviewed_held_ownership_check=True))
+        answer = json.loads(call(*arguments).stdout)
+        with closing(sqlite3.connect(database)) as db:
+            retained = db.execute("SELECT id,mint_id,state,request FROM acquisitions").fetchall()
+            namespaces = db.execute("SELECT mint_id,ready FROM cdk_mint_namespaces ORDER BY mint_id").fetchall()
+        if (answer['state'] != 'held_for_reconciliation' or answer['acquisition_id'] != acquisition
+                or retained != [(acquisition, 'mint-a', 'held_for_reconciliation', b'synthetic unfunded retained request')]
+                or namespaces != [('mint-a', 1), ('mint-b', 1)]):
+            raise ValueError('candidate restart changed the original work or namespace')
         print(json.dumps(dict(result='CASHU_OPERATOR_RECONCILIATION_CLI_VERIFIED',cli_sha256=args.cli_sha256,
             runtime_uid=uid,synthetic_unfunded_retained_operation=True,pending_replay_unchanged=True,
             active_writer_and_restore_fence_refused=True,configuration_scope_and_permissions_refused=True,
             held_prepared_new_and_exported_states_refused=True,mint_contact=False,
             eligible_reviewed_hold_preserved_without_evidence=True,other_hold_reason_refused=True,
+            mint_policy_review_preserved_original=True, mint_policy_candidate_restart_verified=True,
             acquired_transition_qualified_here=False,workers_started=False,
             sql_definitions_rows_and_rowids_unchanged=True,schema_object_insertion_order_ignored=True),sort_keys=True))
 

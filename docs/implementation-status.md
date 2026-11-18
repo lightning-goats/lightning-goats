@@ -140,6 +140,15 @@ the startup fence. The encrypted archive rehearsal verifies a rotated wallet's
 original anchor and new key file, rejects a substituted new key, and preserves
 both files during fenced native startup under separate UIDs.
 
+The protected `review-mint-policy` command checks a candidate against the
+current configuration and closed wallet. It preserves issuer identities,
+pinned keys, recovery policy, and previously advertised requests. A disposable
+native restart verifies that retiring an issuer and adding another leaves the
+original held acquisition and its mint namespace intact. The review reports
+the two exact configuration digests for a separate privileged install. The
+[operator runbook](deployment/cashu-operator-controls.md) covers the review and
+its activation boundaries.
+
 Cashu operator controls update **2026-11-17**: the
 [protected planning/reconciliation checkpoint](testing/cashu-operator-controls-20261117.json)
 passes 650 core tests (12 ignored), 179 wallet tests (seven ignored), required

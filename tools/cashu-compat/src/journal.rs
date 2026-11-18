@@ -164,6 +164,15 @@ CREATE TABLE IF NOT EXISTS treasury_results (
     intent_id TEXT PRIMARY KEY REFERENCES treasury_melt_requests(intent_id),
     report BLOB NOT NULL, paid_evidence BLOB NOT NULL
 );
+CREATE TABLE IF NOT EXISTS treasury_fee_completions (
+    intent_id TEXT PRIMARY KEY REFERENCES treasury_results(intent_id),
+    completed_at INTEGER NOT NULL CHECK(completed_at>=0),
+    fee_sats INTEGER NOT NULL CHECK(fee_sats>=0)
+);
+CREATE TRIGGER IF NOT EXISTS treasury_fee_completions_no_update
+ BEFORE UPDATE ON treasury_fee_completions BEGIN SELECT RAISE(ABORT,'retained treasury fee'); END;
+CREATE TRIGGER IF NOT EXISTS treasury_fee_completions_no_delete
+ BEFORE DELETE ON treasury_fee_completions BEGIN SELECT RAISE(ABORT,'retained treasury fee'); END;
 CREATE TABLE IF NOT EXISTS treasury_change_outputs (
     mint_id TEXT NOT NULL, y TEXT NOT NULL, c TEXT NOT NULL,
     amount INTEGER NOT NULL CHECK(amount>0),
@@ -424,6 +433,18 @@ impl Journal {
             epoch == expected_epoch.to_string(),
             "wallet epoch mismatch; reconcile before startup"
         );
+        // Older reports have no wallet completion timestamp. Charge their
+        // frozen maximum for one window from the first writer upgrade.
+        tx.execute(
+            "INSERT INTO treasury_fee_completions(intent_id,completed_at,fee_sats)
+             SELECT r.intent_id,
+                    MAX(unixepoch(),COALESCE((SELECT MAX(admitted_at) FROM treasury_execution_admissions),0),
+                        COALESCE((SELECT MAX(completed_at) FROM treasury_fee_completions),0)),
+                    json_extract(i.issued_json,'$.intent.maximum_fee_sats')
+             FROM treasury_results r JOIN treasury_instructions i ON i.id=r.intent_id
+             WHERE NOT EXISTS(SELECT 1 FROM treasury_fee_completions c WHERE c.intent_id=r.intent_id)",
+            [],
+        )?;
         tx.commit()?;
         Ok(Self {
             connection,

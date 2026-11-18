@@ -144,6 +144,8 @@ mod cashu_treasury_tests {
                     maximum_fee_sats: 10,
                     operations_per_24h: 100,
                     input_sats_per_24h: 20000,
+                    unlimited_input_sats_per_24h: false,
+                    fee_sats_per_24h: Some(10000),
                     maximum_in_flight_sats: 20000,
                 },
             };

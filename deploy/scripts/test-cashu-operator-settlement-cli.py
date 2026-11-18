@@ -81,6 +81,7 @@ minimum_deposit_sats = 1
 maximum_deposit_sats = 1000
 maximum_input_sats = 1000
 maximum_fee_sats = 10
+fee_sats_per_24h = 100
 operations_per_24h = 10
 input_sats_per_24h = 2000
 maximum_in_flight_sats = 1000

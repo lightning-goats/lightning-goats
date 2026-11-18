@@ -928,7 +928,13 @@ async fn combined_settlement_wallet_child() -> Result<()> {
         maximum_input_sats: 400,
         maximum_fee_sats: conversion_fee_sats,
         operations_per_24h: 1 + u64::from(settle_change),
-        input_sats_per_24h: 400 + 17 * u64::from(settle_change),
+        input_sats_per_24h: 0,
+        unlimited_input_sats_per_24h: true,
+        fee_sats_per_24h: Some(if settle_change {
+            3
+        } else {
+            conversion_fee_sats
+        }),
         maximum_in_flight_sats: 400,
         split: Default::default(),
     };

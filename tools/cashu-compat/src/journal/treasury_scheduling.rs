@@ -1,6 +1,7 @@
 //! Persisted stage claims and independent wallet execution admission budgets.
 use super::*;
 use crate::{treasury::TreasuryBinding, treasury_scheduler::Execution};
+use anyhow::Context;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
@@ -70,9 +71,16 @@ impl Journal {
         let tx = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let fee_remaining = match policy.fee_sats_per_24h {
+            Some(limit) if policy.execute => Some(limit.saturating_sub(daily_fees(&tx, now)?)),
+            _ => None,
+        };
         let row: Option<(String,String,String,u32)> = tx.query_row(
-            "WITH work AS (SELECT i.id,i.rowid AS ordering,json_extract(i.issued_json,'$.intent.mint_id') AS mint_id,CASE WHEN i.state='reconciled' THEN 'cleanup' WHEN i.state='submitted' OR EXISTS(SELECT 1 FROM treasury_melt_requests r WHERE r.intent_id=i.id) THEN 'reconcile' WHEN i.state='prepared' THEN 'submit' WHEN EXISTS(SELECT 1 FROM treasury_preparation_claims c WHERE c.intent_id=i.id) THEN 'recover_preparation' WHEN EXISTS(SELECT 1 FROM treasury_split_results r WHERE r.intent_id=i.id) AND NOT EXISTS(SELECT 1 FROM treasury_proof_selections p WHERE p.intent_id=i.id) THEN 'select_split' WHEN NOT EXISTS(SELECT 1 FROM treasury_split_results r WHERE r.intent_id=i.id) AND (EXISTS(SELECT 1 FROM treasury_split_execution_claims c WHERE c.intent_id=i.id) OR EXISTS(SELECT 1 FROM treasury_split_requests r WHERE r.intent_id=i.id)) THEN 'recover_split' WHEN EXISTS(SELECT 1 FROM treasury_quotes q WHERE q.intent_id=i.id) AND EXISTS(SELECT 1 FROM treasury_split_reservations r WHERE r.intent_id=i.id) AND NOT EXISTS(SELECT 1 FROM treasury_split_results r WHERE r.intent_id=i.id) THEN 'split' WHEN EXISTS(SELECT 1 FROM treasury_quotes q WHERE q.intent_id=i.id) THEN 'prepare' WHEN EXISTS(SELECT 1 FROM treasury_quote_requests q WHERE q.intent_id=i.id) THEN 'recover_quote' WHEN EXISTS(SELECT 1 FROM treasury_proof_selections p WHERE p.intent_id=i.id) OR EXISTS(SELECT 1 FROM treasury_split_reservations r WHERE r.intent_id=i.id) THEN 'quote' ELSE 'reserve' END AS action FROM treasury_instructions i WHERE i.state!='reconciled' OR NOT EXISTS(SELECT 1 FROM treasury_cdk_cleanup c WHERE c.intent_id=i.id)) SELECT w.id,w.mint_id,w.action,COALESCE(s.attempts,0) FROM work w LEFT JOIN treasury_work_schedule s ON s.intent_id=w.id AND s.action=w.action WHERE ((?1 AND w.action IN ('reserve','quote','prepare','submit','select_split')) OR (?1 AND ?2 AND w.action='split') OR (?3 AND w.action IN ('recover_quote','recover_preparation','recover_split','reconcile','cleanup'))) AND COALESCE(s.attempts,0)<?4 AND COALESCE(s.next_attempt,0)<=?5 ORDER BY COALESCE(s.next_attempt,0),w.ordering LIMIT 1",
-            params![policy.execute,policy.split.enabled,policy.reconcile,policy.maximum_attempts,now], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)),
+            "WITH work AS (SELECT i.id,i.rowid AS ordering,json_extract(i.issued_json,'$.intent.mint_id') AS mint_id,json_extract(i.issued_json,'$.intent.maximum_fee_sats') AS maximum_fee_sats,CASE WHEN i.state='reconciled' THEN 'cleanup' WHEN i.state='submitted' OR EXISTS(SELECT 1 FROM treasury_melt_requests r WHERE r.intent_id=i.id) THEN 'reconcile' WHEN i.state='prepared' THEN 'submit' WHEN EXISTS(SELECT 1 FROM treasury_preparation_claims c WHERE c.intent_id=i.id) THEN 'recover_preparation' WHEN EXISTS(SELECT 1 FROM treasury_split_results r WHERE r.intent_id=i.id) AND NOT EXISTS(SELECT 1 FROM treasury_proof_selections p WHERE p.intent_id=i.id) THEN 'select_split' WHEN NOT EXISTS(SELECT 1 FROM treasury_split_results r WHERE r.intent_id=i.id) AND (EXISTS(SELECT 1 FROM treasury_split_execution_claims c WHERE c.intent_id=i.id) OR EXISTS(SELECT 1 FROM treasury_split_requests r WHERE r.intent_id=i.id)) THEN 'recover_split' WHEN EXISTS(SELECT 1 FROM treasury_quotes q WHERE q.intent_id=i.id) AND EXISTS(SELECT 1 FROM treasury_split_reservations r WHERE r.intent_id=i.id) AND NOT EXISTS(SELECT 1 FROM treasury_split_results r WHERE r.intent_id=i.id) THEN 'split' WHEN EXISTS(SELECT 1 FROM treasury_quotes q WHERE q.intent_id=i.id) THEN 'prepare' WHEN EXISTS(SELECT 1 FROM treasury_quote_requests q WHERE q.intent_id=i.id) THEN 'recover_quote' WHEN EXISTS(SELECT 1 FROM treasury_proof_selections p WHERE p.intent_id=i.id) OR EXISTS(SELECT 1 FROM treasury_split_reservations r WHERE r.intent_id=i.id) THEN 'quote' ELSE 'reserve' END AS action FROM treasury_instructions i WHERE i.state!='reconciled' OR NOT EXISTS(SELECT 1 FROM treasury_cdk_cleanup c WHERE c.intent_id=i.id)) SELECT w.id,w.mint_id,w.action,COALESCE(s.attempts,0) FROM work w LEFT JOIN treasury_work_schedule s ON s.intent_id=w.id AND s.action=w.action WHERE ((?1 AND w.action IN ('reserve','quote','prepare','submit','select_split')) OR (?1 AND ?2 AND w.action='split') OR (?3 AND w.action IN ('recover_quote','recover_preparation','recover_split','reconcile','cleanup'))) AND (w.action IN ('recover_quote','recover_preparation','recover_split','reconcile','cleanup')
+                OR EXISTS(SELECT 1 FROM treasury_execution_admissions a WHERE a.intent_id=w.id)
+                OR w.maximum_fee_sats<=?6)
+            AND COALESCE(s.attempts,0)<?4 AND COALESCE(s.next_attempt,0)<=?5 ORDER BY COALESCE(s.next_attempt,0),w.ordering LIMIT 1",
+            params![policy.execute,policy.split.enabled,policy.reconcile,policy.maximum_attempts,now,fee_remaining], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)),
         ).optional()?;
         let Some((id, mint_id, action, attempts)) = row else {
             return Ok(None);
@@ -114,15 +122,13 @@ impl Journal {
         let tx = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let latest: Option<i64> = tx.query_row(
-            "SELECT MAX(admitted_at) FROM treasury_execution_admissions",
+        let latest: i64 = tx.query_row(
+            "SELECT MAX(COALESCE((SELECT MAX(admitted_at) FROM treasury_execution_admissions),0),
+                        COALESCE((SELECT MAX(completed_at) FROM treasury_fee_completions),0))",
             [],
             |r| r.get(0),
         )?;
-        ensure!(
-            latest.is_none_or(|time| now >= time),
-            "treasury execution clock rolled back"
-        );
+        ensure!(now >= latest, "treasury execution clock rolled back");
         let existing: Option<u64> = tx
             .query_row(
                 "SELECT input_sats FROM treasury_execution_admissions WHERE intent_id=?",
@@ -140,20 +146,43 @@ impl Journal {
         }
         let (count,total): (u64,u64) = tx.query_row("SELECT COUNT(*),COALESCE(SUM(input_sats),0) FROM treasury_execution_admissions WHERE admitted_at>?", [now.saturating_sub(86400)], |r| Ok((r.get(0)?,r.get(1)?)))?;
         let in_flight: u64 = tx.query_row("SELECT COALESCE(SUM(a.input_sats),0) FROM treasury_execution_admissions a JOIN treasury_instructions i ON i.id=a.intent_id WHERE i.state!='reconciled'", [], |r| r.get(0))?;
+        let total_fee = daily_fees(&tx, now)?;
+        let fee_limit = policy
+            .fee_sats_per_24h
+            .context("wallet treasury daily fee limit missing")?;
         ensure!(
             count < policy.operations_per_24h
-                && total
-                    .checked_add(issued.intent.input_sats)
-                    .is_some_and(|v| v <= policy.input_sats_per_24h)
+                && (policy.unlimited_input_sats_per_24h
+                    || total
+                        .checked_add(issued.intent.input_sats)
+                        .is_some_and(|v| v <= policy.input_sats_per_24h))
                 && in_flight
                     .checked_add(issued.intent.input_sats)
                     .is_some_and(|v| v <= policy.maximum_in_flight_sats),
             "treasury wallet admission budget exhausted"
         );
+        ensure!(
+            issued.intent.maximum_fee_sats <= fee_limit.saturating_sub(total_fee),
+            "wallet treasury daily fee budget exhausted"
+        );
         tx.execute("INSERT INTO treasury_execution_admissions(intent_id,admitted_at,input_sats) VALUES(?,?,?)",params![id.to_string(),now,issued.intent.input_sats])?;
         tx.commit()?;
         Ok(())
     }
+}
+
+pub(super) fn daily_fees(db: &Connection, now: i64) -> Result<u64> {
+    Ok(db.query_row(
+        "SELECT COALESCE(SUM(COALESCE(c.fee_sats,json_extract(i.issued_json,'$.intent.maximum_fee_sats'))),0)
+         FROM treasury_instructions i LEFT JOIN treasury_fee_completions c ON c.intent_id=i.id
+         WHERE (c.intent_id IS NOT NULL
+             OR EXISTS(SELECT 1 FROM treasury_execution_admissions a WHERE a.intent_id=i.id)
+             OR EXISTS(SELECT 1 FROM treasury_melt_requests m WHERE m.intent_id=i.id)
+             OR EXISTS(SELECT 1 FROM treasury_split_requests s WHERE s.intent_id=i.id))
+           AND (c.intent_id IS NULL OR c.completed_at>=?)",
+        [now.saturating_sub(86_400)],
+        |r| r.get(0),
+    )?)
 }
 
 #[cfg(test)]
@@ -169,6 +198,8 @@ mod tests {
             maximum_fee_sats: 1,
             operations_per_24h: 1,
             input_sats_per_24h: 101,
+            unlimited_input_sats_per_24h: false,
+            fee_sats_per_24h: Some(2),
             maximum_in_flight_sats: 101,
         }
     }
@@ -207,7 +238,7 @@ mod tests {
                 .authorize_treasury_execution(&binding, issued.intent.id, &policy(), 1001)
                 .is_err()
         );
-        for constraint in 0..3 {
+        for constraint in 0..4 {
             let mut limit = policy();
             limit.operations_per_24h = 2;
             limit.input_sats_per_24h = 202;
@@ -215,7 +246,8 @@ mod tests {
             match constraint {
                 0 => limit.operations_per_24h = 1,
                 1 => limit.input_sats_per_24h = 101,
-                _ => limit.maximum_in_flight_sats = 101,
+                2 => limit.maximum_in_flight_sats = 101,
+                _ => limit.fee_sats_per_24h = Some(1),
             }
             assert!(
                 journal
@@ -264,12 +296,50 @@ mod tests {
         );
         let mut raised = policy();
         raised.maximum_in_flight_sats = 202;
+        raised.fee_sats_per_24h = Some(1);
+        assert_eq!(daily_fees(&journal.connection, tomorrow as i64 + 1)?, 1);
+        assert!(
+            journal
+                .authorize_treasury_execution(&binding, fresh.intent.id, &raised, tomorrow as i64)
+                .unwrap_err()
+                .to_string()
+                .contains("daily fee budget exhausted")
+        );
+        raised.fee_sats_per_24h = Some(2);
         journal.authorize_treasury_execution(
             &binding,
             fresh.intent.id,
             &raised,
             tomorrow as i64,
         )?;
+        Ok(())
+    }
+
+    #[test]
+    fn fee_pressure_leaves_fresh_treasury_work_unclaimed() -> Result<()> {
+        let (binding, issued) = crate::treasury::tests::fixture();
+        let dir = crate::test_directory()?;
+        let mut journal = Journal::open(&dir.path().join("fees.sqlite"), binding.wallet_epoch, 8)?;
+        let other = second(&issued, 1000);
+        for instruction in [&issued, &other] {
+            journal.bind_treasury_instruction(&binding, instruction, 1000)?;
+        }
+        let mut cap = policy();
+        cap.fee_sats_per_24h = None;
+        assert!(journal.claim_treasury_work(1000, &cap, 2)?.is_none());
+        cap.fee_sats_per_24h = Some(1);
+        journal.authorize_treasury_execution(&binding, issued.intent.id, &cap, 1000)?;
+        assert_eq!(
+            journal.claim_treasury_work(1000, &cap, 2)?.unwrap().id,
+            issued.intent.id
+        );
+        assert!(journal.claim_treasury_work(1000, &cap, 2)?.is_none());
+        let attempts: u64 = journal.connection.query_row(
+            "SELECT COUNT(*) FROM treasury_work_schedule WHERE intent_id=?",
+            [other.intent.id.to_string()],
+            |r| r.get(0),
+        )?;
+        assert_eq!(attempts, 0);
         Ok(())
     }
     #[test]

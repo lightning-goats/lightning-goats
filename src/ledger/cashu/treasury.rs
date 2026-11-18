@@ -288,7 +288,10 @@ impl LedgerStore {
             );
             false
         } else {
-            sqlx::query("INSERT INTO cashu_treasury_deposits(intent_id,receive_id,payment_hash,deposit_sats,evidence_json,verified_at) VALUES(?,?,?,?,?,unixepoch())")
+            sqlx::query("INSERT INTO cashu_treasury_deposits(intent_id,receive_id,payment_hash,deposit_sats,evidence_json,verified_at)
+                         VALUES(?,?,?,?,?,MAX(unixepoch(),
+                             COALESCE((SELECT last_seen FROM cashu_treasury_clock WHERE singleton=1),0),
+                             COALESCE((SELECT MAX(verified_at) FROM cashu_treasury_deposits),0)))")
                 .bind(intent.id.to_string()).bind(receive.receive_id.to_string()).bind(&issued.payment_hash)
                 .bind(to_i64(intent.deposit_sats,"verified treasury deposit")?).bind(encoded).execute(&mut *tx).await?;
             true
@@ -460,14 +463,21 @@ pub(super) async fn reserve_in_transaction(
             && input
                 <= policy
                     .limits
-                    .input_sats_per_24h
-                    .saturating_sub(to_u64(usage.try_get("sats")?, "treasury rate sats")?)
+                    .daily_input_remaining(to_u64(usage.try_get("sats")?, "treasury rate sats")?)
             && input
                 <= policy
                     .limits
                     .maximum_in_flight_sats
                     .saturating_sub(to_u64(pending, "treasury in-flight sats")?),
         "treasury rate/exposure exhausted"
+    );
+    let daily_fee_limit = policy
+        .limits
+        .fee_sats_per_24h
+        .context("treasury daily fee limit missing")?;
+    ensure!(
+        intent.maximum_fee_sats <= daily_fee_remaining(tx, now, daily_fee_limit).await?,
+        "treasury daily fee budget exhausted"
     );
     for source in &intent.sources {
         ensure!(
@@ -496,6 +506,31 @@ pub(super) async fn reserve_in_transaction(
     sqlx::query("INSERT INTO cashu_treasury_clock VALUES(1,?) ON CONFLICT(singleton) DO UPDATE SET last_seen=excluded.last_seen")
             .bind(now).execute(&mut **tx).await?;
     Ok(intent)
+}
+
+/// Pending intents can still charge their maximum, even across the boundary.
+/// Count a completed fee from the independently observed Strike deposit.
+pub(super) async fn daily_fee_remaining(
+    tx: &mut Transaction<'_, Sqlite>,
+    now: i64,
+    limit: u64,
+) -> Result<u64> {
+    let used: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(CASE WHEN c.intent_id IS NULL OR d.intent_id IS NULL THEN
+             CASE WHEN json_type(i.intent_json,'$.maximum_fee_sats')='integer'
+                   AND json_extract(i.intent_json,'$.maximum_fee_sats') BETWEEN 0 AND i.input_sats-i.deposit_sats
+                  THEN json_extract(i.intent_json,'$.maximum_fee_sats')
+                  ELSE i.input_sats-i.deposit_sats END
+             ELSE c.fee_sats END),0)
+         FROM cashu_treasury_intents i
+         LEFT JOIN cashu_treasury_completions c ON c.intent_id=i.id
+         LEFT JOIN cashu_treasury_deposits d ON d.intent_id=i.id
+         WHERE c.intent_id IS NULL OR d.intent_id IS NULL OR MAX(i.created_at,d.verified_at)>=?",
+    )
+    .bind(now.saturating_sub(86_400))
+    .fetch_one(&mut **tx)
+    .await?;
+    Ok(limit.saturating_sub(to_u64(used, "treasury rolling fees")?))
 }
 
 pub(super) async fn available_custody(

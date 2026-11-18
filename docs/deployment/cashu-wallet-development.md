@@ -362,6 +362,7 @@ production limits:
   "maximum_fee_sats": 100,
   "operations_per_24h": 10,
   "input_sats_per_24h": 50000,
+  "fee_sats_per_24h": 250,
   "maximum_in_flight_sats": 10000,
   "split": {
     "enabled": false,
@@ -576,10 +577,25 @@ protected treasury bindings. `policy.enabled` is the independent spending gate;
 `issue` and `deliver` both require `inspect`. Enabling spending also requires
 explicit positive global and per-mint limits. `policy.limits` accepts
 `minimum_deposit_sats`, `maximum_deposit_sats`, `maximum_input_sats`,
-`maximum_fee_sats`, `operations_per_24h`, `input_sats_per_24h`, and
-`maximum_in_flight_sats`. Each `policy.approved_mints.<mint-id>` accepts the same
-fields except the two daily budgets. Unspecified limits default to zero. No
-example production allowance is granted here.
+`maximum_fee_sats`, `operations_per_24h`, `input_sats_per_24h`,
+`unlimited_input_sats_per_24h`, `fee_sats_per_24h`, and `maximum_in_flight_sats`.
+The daily limits apply across mints. Set `fee_sats_per_24h` explicitly on the
+core and wallet before new treasury work. Zero permits only fee-free intents.
+An omitted fee ceiling prevents fresh authorizations and preserves original
+reconciliation. Set `unlimited_input_sats_per_24h` with a zero or omitted
+`input_sats_per_24h` to remove the daily volume ceiling. The operation count,
+per-transfer limits and outstanding exposure still apply.
+
+An unresolved intent reserves its entire authorized fee across time windows.
+The core replaces the reservation with the recorded fee after independently
+verifying the original Strike receive and authenticating the wallet result.
+It counts the fee for 24 hours from the receive verification time, bounded by
+the original intent time. The wallet counts the recorded fee for 24 hours
+from local reconciliation. Legacy wallet results without a retained time
+reserve their maximum for one window from the first writer upgrade. Budget
+pressure leaves fresh work waiting without creating a smaller invoice or
+charging wallet attempts. Fees include the authorized preparation split and
+melt costs. Donation acquisition fees have their own per-acquisition limit.
 
 The daemon supervises this worker alongside receipt import and the existing
 Strike recovery worker. Startup construction does not contact the wallet or mint.

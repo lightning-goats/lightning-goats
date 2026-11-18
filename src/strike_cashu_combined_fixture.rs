@@ -404,7 +404,11 @@ mod combined_fixture {
                 maximum_input_sats: 400,
                 maximum_fee_sats: conversion_fee_sats,
                 operations_per_24h: 1 + u64::from(settle_change || multi_mint),
-                input_sats_per_24h: 400 + 17 * u64::from(settle_change),
+                input_sats_per_24h: 0,
+                unlimited_input_sats_per_24h: true,
+                // The first residual-mode intent reserves two but spends one.
+                // The second can fit only after the verified fee replaces it.
+                fee_sats_per_24h: Some(if settle_change { 3 } else { conversion_fee_sats * (1 + u64::from(multi_mint)) }),
                 maximum_in_flight_sats: 400,
             },
         });

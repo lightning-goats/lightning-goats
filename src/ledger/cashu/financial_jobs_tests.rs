@@ -27,6 +27,8 @@ fn feed_treasury_policy() -> crate::cashu::treasury::Policy {
             maximum_fee_sats: 10,
             operations_per_24h: 100,
             input_sats_per_24h: 20000,
+            unlimited_input_sats_per_24h: false,
+            fee_sats_per_24h: Some(1000),
             maximum_in_flight_sats: 20000,
         },
     }
@@ -146,25 +148,48 @@ async fn financial_job_planning_skips_a_mint_with_no_exposure_capacity() {
     let mut policy = feed_treasury_policy();
     let other = policy.approved_mints["mint-a"].clone();
     policy.approved_mints.insert("mint-b".into(), other);
+    policy.limits.input_sats_per_24h = 0;
+    policy.limits.unlimited_input_sats_per_24h = true;
+    policy.limits.fee_sats_per_24h = Some(19);
     policy
         .approved_mints
         .get_mut("mint-a")
         .unwrap()
         .maximum_in_flight_sats = 100;
-    store
+    let original_plan = crate::ledger::TreasuryPlan {
+        id: Uuid::new_v4(),
+        mint_id: "mint-a".into(),
+        sources: vec![(ledger, 100)],
+        deposit_sats: 90,
+        maximum_fee_sats: 10,
+    };
+    let original = store
         .reserve_cashu_treasury(
             &registration,
             &policy,
-            &crate::ledger::TreasuryPlan {
-                id: Uuid::new_v4(),
-                mint_id: "mint-a".into(),
-                sources: vec![(ledger, 100)],
-                deposit_sats: 90,
-                maximum_fee_sats: 10,
-            },
+            &original_plan,
         )
         .await
         .unwrap();
+    // Nine sats remain. Waiting must not freeze a lower-fee invoice.
+    assert!(store.plan_cashu_feed_treasury(&registration, &policy).await.unwrap().is_none());
+    let ledger_b: i64 = sqlx::query_scalar("SELECT ledger_entry_id FROM cashu_receipt_inbox WHERE acquisition_id=?")
+        .bind(b.data().acquisition_id.to_string()).fetch_one(&store.pool).await.unwrap();
+    let blocked = crate::ledger::TreasuryPlan {
+        id: Uuid::new_v4(), mint_id: "mint-b".into(), sources: vec![(ledger_b, 200)],
+        deposit_sats: 190, maximum_fee_sats: 10,
+    };
+    assert!(store.reserve_cashu_treasury(&registration, &policy, &blocked).await.err().unwrap()
+        .to_string().contains("daily fee budget exhausted"));
+    assert_eq!(count(&store, "cashu_treasury_intents").await, 1);
+    let mut tx = store.pool.begin().await.unwrap();
+    let created: i64 = sqlx::query_scalar("SELECT created_at FROM cashu_treasury_intents WHERE id=?")
+        .bind(original.id.to_string()).fetch_one(&mut *tx).await.unwrap();
+    assert_eq!(super::treasury::daily_fee_remaining(&mut tx, created + 86_401, 19).await.unwrap(), 9);
+    tx.rollback().await.unwrap();
+    policy.limits.fee_sats_per_24h = None;
+    assert!(store.reserve_cashu_treasury(&registration, &policy, &original_plan).await.unwrap() == original);
+    policy.limits.fee_sats_per_24h = Some(20);
     let planned = store
         .plan_cashu_feed_treasury(&registration, &policy)
         .await

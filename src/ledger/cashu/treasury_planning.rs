@@ -1,6 +1,6 @@
 //! Shared bounded admission for feed settlement and treasury sweeps.
 use super::super::to_u64;
-use super::treasury::{TreasuryPlan, reserve_in_transaction};
+use super::treasury::{TreasuryPlan, daily_fee_remaining, reserve_in_transaction};
 use crate::cashu::{receipt_authority::ReceiptPolicy, treasury::Policy};
 use anyhow::{Context, Result};
 use lightning_goats_cashu_receipt::treasury::{Intent, MAX_SOURCES};
@@ -13,6 +13,9 @@ pub(super) async fn reserve_first(
     policy: &Policy,
     by_mint: BTreeMap<String, Vec<(i64, u64)>>,
 ) -> Result<Option<Intent>> {
+    let Some(daily_fee_limit) = policy.limits.fee_sats_per_24h else {
+        return Ok(None);
+    };
     let now: i64 = sqlx::query_scalar("SELECT unixepoch()")
         .fetch_one(&mut **tx)
         .await?;
@@ -31,9 +34,9 @@ pub(super) async fn reserve_first(
         .min(
             policy
                 .limits
-                .input_sats_per_24h
-                .saturating_sub(to_u64(daily.try_get("sats")?, "treasury daily amount")?),
+                .daily_input_remaining(to_u64(daily.try_get("sats")?, "treasury daily amount")?),
         );
+    let fees_available = daily_fee_remaining(tx, now, daily_fee_limit).await?;
     let mut ordered = Vec::new();
     for (mint_id, parts) in by_mint {
         if !policy.approved_mints.contains_key(&mint_id) {
@@ -59,7 +62,10 @@ pub(super) async fn reserve_first(
             .saturating_sub(to_u64(mint_pending, "mint in-flight amount")?);
         let limits = &policy.limits;
         let minimum = limits.minimum_deposit_sats.max(mint.minimum_deposit_sats);
-        let fee_ceiling = limits.maximum_fee_sats.min(mint.maximum_fee_sats);
+        let fee_ceiling = limits
+            .maximum_fee_sats
+            .min(mint.maximum_fee_sats)
+            .min(daily_fee_limit);
         let maximum = limits
             .maximum_input_sats
             .min(mint.maximum_input_sats)
@@ -88,6 +94,9 @@ pub(super) async fn reserve_first(
             continue;
         }
         let fee = fee_ceiling.min(total - minimum);
+        if fee > fees_available {
+            continue;
+        }
         let request = TreasuryPlan {
             id: Uuid::new_v4(),
             mint_id,

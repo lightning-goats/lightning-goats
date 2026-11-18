@@ -1332,6 +1332,8 @@ async fn prepared_treasury_case(scenario: TreasuryScenario) -> Result<()> {
                 maximum_fee_sats: 1,
                 operations_per_24h: 1,
                 input_sats_per_24h: 8,
+                unlimited_input_sats_per_24h: false,
+                fee_sats_per_24h: Some(1),
                 maximum_in_flight_sats: 8,
             };
             let worker = make_worker(execution.clone())?;

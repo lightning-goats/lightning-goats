@@ -505,6 +505,8 @@ mod multi_mint {
                 maximum_fee_sats: 2,
                 operations_per_24h: 2,
                 input_sats_per_24h: 400,
+                unlimited_input_sats_per_24h: false,
+                fee_sats_per_24h: Some(4),
                 maximum_in_flight_sats: 400,
                 split: Default::default(),
             };

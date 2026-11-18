@@ -554,6 +554,8 @@ async fn worker_case(
         maximum_fee_sats: 2,
         operations_per_24h: 1,
         input_sats_per_24h: 5,
+        unlimited_input_sats_per_24h: false,
+        fee_sats_per_24h: Some(2),
         maximum_in_flight_sats: 5,
         split: Default::default(),
     };

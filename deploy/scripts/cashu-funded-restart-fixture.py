@@ -397,7 +397,8 @@ def rehearse(root, workers, binaries, configurations, core_daemon, archived_sign
                                                        'credential_fingerprint': 'ab' * 32}},
                       treasury_execution={'execute': True, 'reconcile': True, 'maximum_attempts': 2,
                                           'maximum_input_sats': 100, 'maximum_in_flight_sats': 100,
-                                          'operations_per_24h': 2, 'input_sats_per_24h': 200})
+                                          'operations_per_24h': 2, 'input_sats_per_24h': 200,
+                                          'fee_sats_per_24h': 0})
         wallet_config = config_file(root / 'wallet.json', json.dumps(wallet))
         wallet_state = dirs['wallet']
         lock = wallet_state / 'wallet-writer.lock'

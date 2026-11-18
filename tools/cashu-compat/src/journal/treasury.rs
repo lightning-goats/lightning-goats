@@ -1013,6 +1013,12 @@ impl Journal {
             "INSERT INTO treasury_results(intent_id,report,paid_evidence) VALUES(?,?,?)",
             params![id.to_string(), serde_json::to_vec(&report)?, paid_bytes],
         )?;
+        tx.execute(
+            "INSERT INTO treasury_fee_completions(intent_id,completed_at,fee_sats)
+             VALUES(?,MAX(unixepoch(),COALESCE((SELECT MAX(admitted_at) FROM treasury_execution_admissions),0),
+                          COALESCE((SELECT MAX(completed_at) FROM treasury_fee_completions),0)),?)",
+            params![id.to_string(), fee],
+        )?;
         for (source, result) in issued.intent.sources.iter().zip(&report.sources) {
             tx.execute("INSERT INTO treasury_source_results(intent_id,acquisition_id,input_sats,change_sats) VALUES(?,?,?,?)",params![id.to_string(),source.acquisition_id.to_string(),result.input_sats,result.change_sats])?;
         }
@@ -1844,6 +1850,20 @@ mod tests {
         assert_eq!(report.sources[0].change_sats, if nonzero { 2 } else { 0 });
         drop(journal);
         let journal = Journal::open(&path, binding.wallet_epoch, 128)?;
+        let (time, fee): (i64, u64) = journal.connection.query_row(
+            "SELECT completed_at,fee_sats FROM treasury_fee_completions WHERE intent_id=?",
+            [issued.intent.id.to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(fee, 1);
+        assert_eq!(
+            crate::journal::treasury_scheduling::daily_fees(&journal.connection, time + 86_400)?,
+            1
+        );
+        assert_eq!(
+            crate::journal::treasury_scheduling::daily_fees(&journal.connection, time + 86_401)?,
+            0
+        );
         let recovery = journal.treasury_recovery_context(&binding, issued.intent.id)?;
         assert_eq!(recovery.derivation.cdk_operation, Uuid::from_u128(900));
         assert_eq!(

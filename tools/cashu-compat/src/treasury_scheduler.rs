@@ -42,6 +42,10 @@ pub struct Execution {
     #[serde(default)]
     pub input_sats_per_24h: u64,
     #[serde(default)]
+    pub unlimited_input_sats_per_24h: bool,
+    #[serde(default)]
+    pub fee_sats_per_24h: Option<u64>,
+    #[serde(default)]
     pub maximum_in_flight_sats: u64,
 }
 impl Execution {
@@ -69,9 +73,16 @@ impl Execution {
             !self.execute
                 || (self.maximum_input_sats > 0
                     && self.operations_per_24h > 0
-                    && self.input_sats_per_24h > 0
+                    && (self.input_sats_per_24h > 0 || self.unlimited_input_sats_per_24h)
                     && self.maximum_in_flight_sats > 0),
             "treasury execution requires explicit financial limits"
+        );
+        ensure!(
+            (!self.unlimited_input_sats_per_24h || self.input_sats_per_24h == 0)
+                && self
+                    .fee_sats_per_24h
+                    .is_none_or(|fee| fee <= i64::MAX as u64),
+            "invalid treasury daily input or fee limits"
         );
         Ok(())
     }

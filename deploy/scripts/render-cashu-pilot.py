@@ -97,7 +97,30 @@ def append_core(base, groups, approved):
     return b''.join(parts)
 
 
-def render(base, inputs):
+def descriptor_selection(endpoint, preview):
+    fields = {'version', 'id', 'request', 'encoding', 'status', 'service_started', 'descriptor_registered'}
+    if (not isinstance(preview, dict) or set(preview) != fields
+            or type(preview['version']) is not int or preview['version'] != 1
+            or preview['status'] != 'prepared' or preview['service_started'] is not False
+            or preview['descriptor_registered'] is not False
+            or not isinstance(preview['id'], str)
+            or re.fullmatch(r'lg1-[0-9a-f]{32}', preview['id']) is None):
+        raise ValueError('expected the offline first-wallet request preview')
+    encoding, request = preview['encoding'], preview['request']
+    if encoding not in ('creqA', 'creqB') or not isinstance(request, str) or len(request) > 2048:
+        raise ValueError('invalid request encoding or length')
+    pattern = r'creqA[A-Za-z0-9_-]+={0,2}' if encoding == 'creqA' else r'CREQB1[023456789ACDEFGHJKLMNPQRSTUVWXYZ]+'
+    if re.fullmatch(pattern, request) is None:
+        raise ValueError('invalid request payload')
+    parts = urlsplit(endpoint)
+    if (len(endpoint.encode()) > 256 or any(c.isspace() or c in '\\' for c in endpoint)
+            or parts.scheme != 'https' or not parts.hostname or parts.username is not None
+            or parts.query or parts.fragment):
+        raise ValueError('invalid public HTTPS request endpoint')
+    return {'endpoint': endpoint, 'encoding': encoding}
+
+
+def render(base, inputs, reviewed_request=None):
     validate(inputs)
     original = tomllib.loads(base.decode())
     if set(original) & {'cashu', 'cashu_receipts', 'cashu_treasury'}:
@@ -131,6 +154,10 @@ def render(base, inputs):
                   mints=[dict(id=MINT_ID, advertised_url=MINT, policy_version=POLICY_VERSION,
                               receive_cashu=True, receive_nutzap=True, bolt11_exit_qualified=True)],
                   keysets=[dict(keyset, mint_id=MINT_ID) for keyset in inputs['mint_keysets']])
+    if reviewed_request is not None:
+        endpoint, preview = reviewed_request
+        wallet['public_request'] = descriptor_selection(endpoint, preview)
+        wallet['descriptors'] = [preview['id']]
     wallet['receipt_delivery'] = dict(enabled=False, socket=RECEIPTS, core_epoch=inputs['core_epoch'],
                                       maximum_attempts=8, deadline_seconds=5)
     wallet['relay_intake'] = dict(enabled=False, relays=relays, historical_floor=inputs['relay_since_unix'],
@@ -189,14 +216,23 @@ def main():
     parser.add_argument('core_config', type=Path)
     parser.add_argument('bindings', type=Path)
     parser.add_argument('destination', type=Path)
+    parser.add_argument('--reviewed-request', nargs=2, metavar=('HTTPS_ENDPOINT', 'PREVIEW_JSON'),
+                        help='select an offline request preview while keeping receiving disabled')
     args = parser.parse_args()
     try:
         base = read(args.core_config, 131072)
         bindings = read(args.bindings, 65536)
-        files = render(base, json.loads(bindings))
+        reviewed_request = None
+        if args.reviewed_request is not None:
+            endpoint, path = args.reviewed_request
+            preview = read(Path(path), 4096)
+            reviewed_request = (endpoint, json.loads(preview))
+        files = render(base, json.loads(bindings), reviewed_request)
         receipt = dict(version=1, base_sha256=hashlib.sha256(base).hexdigest(),
                        bindings_sha256=hashlib.sha256(bindings).hexdigest(), activation_authorized=False,
                        files={name: hashlib.sha256(content).hexdigest() for name, content in files.items()})
+        if reviewed_request is not None:
+            receipt['request_preview_sha256'] = hashlib.sha256(preview).hexdigest()
         files['REVIEW.json'] = (json.dumps(receipt, sort_keys=True, indent=2) + '\n').encode()
         args.destination.mkdir(mode=0o700)
         for name, content in files.items():

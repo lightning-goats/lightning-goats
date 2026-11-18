@@ -110,6 +110,24 @@ descriptor from the bound wallet configuration before enabling HTTP intake.
 Provider reachability, key permissions, activation and phone acceptance remain
 separate observations.
 
+To record the selected request in an inactive review, first generate its preview
+with the selected native wallet binary using the exact private wallet
+configuration, public HTTPS endpoint and chosen encoding. Pass that
+`prepare-request` JSON and the same endpoint when rendering a fresh review.
+
+```sh
+python3 -I -S -B deploy/scripts/render-cashu-pilot.py CORE_CONFIG BINDINGS REVIEW \
+  --reviewed-request HTTPS_ENDPOINT PREVIEW_JSON
+```
+
+The output registers the descriptor ID, selects the endpoint and encoding, and
+records the original preview digest in `REVIEW.json`. Receiving stays off.
+Run the native wallet validator on the newly rendered file and repeat
+`prepare-request` against it. Require the same ID, encoding and case-sensitive
+payload, with `descriptor_registered` now true. Native validation binds the ID
+to the actual mint, receiving key and endpoint. This completes the inactive
+review stage while phone and provider acceptance remain pending.
+
 ## Core and wallet Unix sockets
 
 Install these two root-owned files together during the approved Cashu core

@@ -353,8 +353,43 @@ def rehearse_pilot_config(archive, root, command, binaries, uids, states, core_c
                         '--config', str(malformed), 'check-config'], check=False)
     if not rejected.returncode or 'core configuration rejected' not in rejected.stderr or missing.exists():
         raise ValueError('offline core validator accepted invalid policy or opened the database')
+    wallet_command = ['/usr/bin/setpriv', f'--reuid={uids["wallet"]}', f'--regid={uids["wallet"]}',
+                      '--clear-groups', '--no-new-privs', '--', str(binaries['wallet'])]
+    endpoint = 'https://goats.example/api/v1/cashu'
+    for encoding in ('creqA', 'creqB'):
+        preview = root / f'{encoding}.json'
+        unregistered = command([*wallet_command, 'prepare-request', str(review / 'wallet.json'),
+                                endpoint, encoding]).stdout
+        preview.write_text(unregistered)
+        selection = root / f'pilot-{encoding}'
+        command(['/usr/bin/python3', '-I', '-S', '-B', str(renderer), str(base), str(bindings),
+                 str(selection), '--reviewed-request', endpoint, str(preview)])
+        proof = json.loads((selection / 'REVIEW.json').read_bytes())
+        if (proof['activation_authorized'] is not False
+                or proof['request_preview_sha256'] != hashlib.sha256(preview.read_bytes()).hexdigest()):
+            raise ValueError('request review did not retain the inactive preview binding')
+        selection.chmod(0o755)
+        selected_wallet = selection / 'wallet.json'
+        selected_wallet.chmod(0o444)
+        config = json.loads(selected_wallet.read_bytes())
+        if config['receive_cashu'] or config['receive_nutzap']:
+            raise ValueError('reviewed request enabled a receiving path')
+        command([*wallet_command, 'check-config', str(selected_wallet)])
+        registered = json.loads(command([*wallet_command, 'prepare-request', str(selected_wallet),
+                                         endpoint, encoding]).stdout)
+        expected = json.loads(unregistered)
+        expected['descriptor_registered'] = True
+        if registered != expected:
+            raise ValueError('wallet did not reproduce the original request')
+        changed_endpoint = selection / 'wallet-changed-endpoint.json'
+        config['public_request']['endpoint'] = endpoint + '/wrong'
+        changed_endpoint.write_text(json.dumps(config))
+        changed_endpoint.chmod(0o444)
+        if command([*wallet_command, 'check-config', str(changed_endpoint)], check=False).returncode == 0:
+            raise ValueError('wallet accepted descriptor from another endpoint')
     return dict(checked_roles=['core', 'wallet', 'signer'], absent_core_database_preserved=True,
-                malformed_core_config_refused=True, activation_authorized=False)
+                malformed_core_config_refused=True, activation_authorized=False,
+                reviewed_requests_reproduced=['creqA', 'creqB'])
 
 
 def rehearse(selection, binaries, hashes, uids, states, wallet_config, signer_config,

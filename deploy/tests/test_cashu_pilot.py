@@ -81,3 +81,32 @@ class PilotConfig(unittest.TestCase):
                 TOOL['render'](self.core, dict(self.input, **{key: value}))
         with self.assertRaises(ValueError):
             TOOL['render'](self.core + b'\n[cashu]\nreceive_cashu = false\n', self.input)
+
+    def test_request_selection_keeps_receiving_disabled(self):
+        endpoint = 'https://goats.example/api/v1/cashu'
+        for encoding, request in (('creqA', 'creqAAb_CD'), ('creqB', 'CREQB1QPZR')):
+            preview = dict(version=1, id='lg1-' + 'ab' * 16, request=request, encoding=encoding,
+                           status='prepared', service_started=False, descriptor_registered=False)
+            with self.subTest(encoding=encoding):
+                files = TOOL['render'](self.core, self.input, (endpoint, preview))
+                wallet = json.loads(files['wallet.json'])
+                self.assertEqual(wallet['descriptors'], [preview['id']])
+                self.assertEqual(wallet['public_request'], {'endpoint': endpoint, 'encoding': encoding})
+                self.assertFalse(wallet['receive_cashu'])
+                self.assertFalse(wallet['receive_nutzap'])
+                self.assertFalse(tomllib.loads(files['core.toml'].decode())['cashu']['receive_cashu'])
+                self.assertNotIn(request.encode(), files['wallet.json'])
+
+    def test_request_selection_refuses_invalid_or_live_previews(self):
+        endpoint = 'https://goats.example/api/v1/cashu'
+        preview = dict(version=1, id='lg1-' + 'ab' * 16, request='creqAAb_CD', encoding='creqA',
+                       status='prepared', service_started=False, descriptor_registered=False)
+        for changes in ({'service_started': True}, {'descriptor_registered': True},
+                        {'id': 'invalid'}, {'request': 'cashuAAb_CD'},
+                        {'encoding': 'creqB'}, {'version': True}):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                TOOL['render'](self.core, self.input, (endpoint, dict(preview, **changes)))
+        for invalid in ('http://goats.example', 'https://user@goats.example',
+                        endpoint + '?query=1', endpoint + '#fragment'):
+            with self.subTest(endpoint=invalid), self.assertRaises(ValueError):
+                TOOL['render'](self.core, self.input, (invalid, preview))

@@ -305,6 +305,58 @@ maximum_net_sats = 10
                 kernel_peer_denial_with_group_access=True)
 
 
+def rehearse_pilot_config(archive, root, command, binaries, uids, states, core_config,
+                          wallet_config, signer_config):
+    with tarfile.open(archive, 'r:gz') as package:
+        renderer = root / 'render-cashu-pilot.py'
+        renderer.write_bytes(package.extractfile('deploy/scripts/render-cashu-pilot.py').read())
+    base = root / 'config-base.toml'
+    missing = root / 'offline-check-must-not-create.sqlite'
+    wallet = json.loads(wallet_config.read_bytes())
+    signing = json.loads(signer_config.read_bytes())
+    base.write_text(core_config.read_text()
+                    .replace(str(states['core'] / 'ledger.sqlite'), str(missing))
+                    .replace('0' * 64, wallet['recipient']))
+    epoch, broker, broker_epoch, account = [str(uuid.uuid4()) for _ in range(4)]
+    bindings = root / 'pilot-bindings.json'
+    bindings.write_text(json.dumps(dict(
+        version=1, core_uid=uids['core'], wallet_uid=uids['wallet'], wallet_gid=uids['wallet'],
+        signer_uid=uids['signer'], signer_gid=uids['signer'], core_epoch=epoch,
+        wallet_instance=wallet['wallet_instance'], wallet_epoch=wallet['wallet_epoch'],
+        broker_instance=broker, broker_epoch=broker_epoch, receiving_key=wallet['receiving_key'],
+        client_pubkey=signing['nak']['client_pubkey'], helper_sha256=signing['nak']['binary_sha256'],
+        strike_account_id=account, strike_credential_fingerprint='ab' * 32, daily_credit_sats=20000,
+        minimum_deposit_sats=1, relay_since_unix=1_800_000_000,
+        mint_keysets=[dict(id='00deadbeef123456', keys={'1': wallet['receiving_key']})],
+    )))
+    review = root / 'pilot'
+    command(['/usr/bin/python3', '-I', '-S', '-B', str(renderer), str(base), str(bindings), str(review)])
+    proof = json.loads((review / 'REVIEW.json').read_bytes())
+    if proof['activation_authorized'] is not False:
+        raise ValueError('offline configuration rendered a live authorization')
+    review.chmod(0o755)
+    for role, filename in [('core', 'core.toml'), ('wallet', 'wallet.json'), ('signer', 'signer.json')]:
+        path = review / filename
+        if hashlib.sha256(path.read_bytes()).hexdigest() != proof['files'][filename]:
+            raise ValueError('rendered configuration differs from its review')
+        path.chmod(0o444)
+        invocation = ['/usr/bin/setpriv', f'--reuid={uids[role]}', f'--regid={uids[role]}',
+                      '--clear-groups', '--no-new-privs', '--', str(binaries[role])]
+        arguments = ['--config', str(path), 'check-config'] if role == 'core' else ['check-config', str(path)]
+        command([*invocation, *arguments])
+    malformed = review / 'malformed-core.toml'
+    malformed.write_text((review / 'core.toml').read_text()
+                         .replace('import_enabled = false', 'import_enabled = "off"'))
+    malformed.chmod(0o444)
+    rejected = command(['/usr/bin/setpriv', f'--reuid={uids["core"]}', f'--regid={uids["core"]}',
+                        '--clear-groups', '--no-new-privs', '--', str(binaries['core']),
+                        '--config', str(malformed), 'check-config'], check=False)
+    if not rejected.returncode or 'core configuration rejected' not in rejected.stderr or missing.exists():
+        raise ValueError('offline core validator accepted invalid policy or opened the database')
+    return dict(checked_roles=['core', 'wallet', 'signer'], absent_core_database_preserved=True,
+                malformed_core_config_refused=True, activation_authorized=False)
+
+
 def rehearse(selection, binaries, hashes, uids, states, wallet_config, signer_config,
              helper, helper_state, credential, request_announcement, core_config):
     if os.environ.get('GITHUB_ACTIONS') != 'true' or not os.environ.get('GITHUB_RUN_ID', '').isdigit():
@@ -380,6 +432,8 @@ def rehearse(selection, binaries, hashes, uids, states, wallet_config, signer_co
         accounts['core'] = core_account
         receipts = rehearse_receipt_socket(archive, root, cleanup, systemd, accounts, uids,
                                           states['core'], core_config, wallet_config)
+        pilot = rehearse_pilot_config(archive, root, command, binaries, uids, states, core_config,
+                                      wallet_config, signer_config)
         helper_dir = root / 'nak'
         shutil.copytree(helper_state, helper_dir)
         os.chown(helper_dir, uids['signer'], uids['signer'])
@@ -566,6 +620,7 @@ def rehearse(selection, binaries, hashes, uids, states, wallet_config, signer_co
                 repeated_start_and_stop=True, distinct_runtime_uids=True,
                 loopback_ip_denied_by_systemd=True, installed_fences_preserved=True,
                 core_receipt_socket=receipts,
+                inactive_pilot_configuration=pilot,
                 receiving_key_rotation={'wallet_anchor_and_namespace_unchanged': True,
                                         'missing_and_wrong_key_refused': True,
                                         'signer_original_request_unchanged': True,

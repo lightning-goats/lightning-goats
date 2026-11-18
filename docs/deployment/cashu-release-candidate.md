@@ -62,6 +62,54 @@ with IP denied even to a listening loopback socket. A fenced restart must open n
 IPC listener and preserve the retained state. The job uses newly initialized empty
 fixtures. Funded checkpoint installation and reconciliation remain separate.
 
+## Render the inactive Minibits configuration
+
+Use the packaged `deploy/scripts/render-cashu-pilot.py` with the current core
+TOML, a private JSON file containing the reviewed bindings, and a new private
+review directory. The renderer preserves the original core bytes and appends
+only the three Cashu configuration sections. It produces a core, wallet and
+signer configuration plus a SHA-256 review record. All Cashu service controls
+are off. Keep this review separate from installed configuration.
+
+The binding file has these fields.
+
+| Fields | Reviewed values |
+| --- | --- |
+| `version` | `1` |
+| `core_uid`, `wallet_uid`, `wallet_gid`, `signer_uid`, `signer_gid` | Actual dedicated numeric UIDs and the two Cashu IPC GIDs |
+| `core_epoch`, `wallet_instance`, `wallet_epoch`, `broker_instance`, `broker_epoch` | Retained core epoch and the reviewed wallet and signer registration UUIDs |
+| `receiving_key`, `client_pubkey`, `helper_sha256` | Reviewed compressed receiving public key, dedicated x-only signer public key and exact installed signer helper digest |
+| `strike_account_id`, `strike_credential_fingerprint` | The reviewed Strike destination account UUID and receive-only credential fingerprint |
+| `daily_credit_sats`, `minimum_deposit_sats`, `relay_since_unix` | Explicit rolling credit-sat limit, qualified minimum Strike deposit and starting NIP-61 observation time |
+| `mint_keysets` | Pinned Minibits sat records of the form `{"id":"…","keys":{"1":"…"}}`, copied from reviewed public mint evidence |
+
+Use the exact existing Strike API origin and project relays. The pilot uses
+`https://mint.minibits.cash/Bitcoin`, the 999-sat custody ceiling, the 5-sat
+per-conversion and 25-sat rolling fee ceilings, and a 1,800-second age trigger.
+It configures no fixed daily receipt or conversion count. Private keys, seed
+bytes and raw Strike credentials are not inputs.
+
+```sh
+python3 -I -S -B deploy/scripts/render-cashu-pilot.py CORE_CONFIG BINDINGS REVIEW
+```
+
+Validate the exact reviewed files with the selected native programs under the
+actual service identities. The validators require root-owned protected paths.
+Use the normal private configuration placement for each account.
+
+```sh
+lightning-goatsctl --config REVIEW/core.toml check-config
+lightning-goats-cashud check-config REVIEW/wallet.json
+lightning-goats-cashu-signerd check-config REVIEW/signer.json
+```
+
+The core `check-config` command parses startup settings without opening or
+migrating the database. These checks do not load wallet keys, load the signer
+credential, contact Strike or publish. Generate and review the reusable
+descriptor from the bound wallet configuration before enabling HTTP intake.
+Provider reachability, key permissions, activation and phone acceptance remain
+separate observations.
+
 ## Core and wallet Unix sockets
 
 Install these two root-owned files together during the approved Cashu core

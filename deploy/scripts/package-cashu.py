@@ -50,6 +50,7 @@ PAYLOAD = (
     )),
     'deploy/scripts/add-cashu-seed.py', 'deploy/scripts/prepare-cashu-backup-age.py',
     'deploy/scripts/render-cashu-egress.py',
+    'deploy/scripts/render-cashu-pilot.py',
 )
 SHA = re.compile(r'[0-9a-f]{64}')
 RELEASE_ID = re.compile(r'[0-9a-f]{40}')

@@ -24,6 +24,8 @@ struct Args {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Validate protected daemon settings offline, without opening its database or credentials.
+    CheckConfig,
     /// Read the gateway status of one original feeder UUID from a fenced Cashu checkpoint.
     ObserveRestoredCashuFeeder {
         #[arg(long)]
@@ -173,6 +175,18 @@ enum ReconcileOutcome {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+    if matches!(args.command, Command::CheckConfig) {
+        #[cfg(unix)]
+        {
+            lightning_goats::payout::cost_recovery::require_protected_configuration(&args.config)?;
+            AppConfig::load(&args.config)
+                .map_err(|_| anyhow::anyhow!("core configuration rejected"))?;
+            println!("Core configuration valid; database and credentials not opened.");
+            return Ok(());
+        }
+        #[cfg(not(unix))]
+        bail!("offline core configuration validation requires Unix protected-file authority");
+    }
     if let Command::ObserveRestoredCashuFeeder {
         selection,
         selection_sha256,
@@ -645,7 +659,8 @@ async fn main() -> Result<()> {
         },
         Command::PlanCashuSettlement { .. }
         | Command::ReconcileCashuSettlement { .. }
-        | Command::InspectCashuSettlement { .. } => {
+        | Command::InspectCashuSettlement { .. }
+        | Command::CheckConfig => {
             unreachable!("handled before database initialization")
         }
         Command::Status => {

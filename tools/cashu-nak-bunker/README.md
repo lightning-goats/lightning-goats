@@ -14,12 +14,17 @@ Ordinary clients continue to use nak's existing authorization.
 [NIP-46](https://github.com/nostr-protocol/nips/blob/master/46.md)
 
 ```sh
-python3 tools/cashu-nak-bunker/build.py --build-directory /absolute/private/build-directory
+python3 tools/cashu-nak-bunker/build.py --static --build-directory /absolute/private/build-directory
 ```
 
 The build verifies the upstream archives and patch, compares Go vet findings
 against the pinned unpatched source, and tests the authorization boundary and
 its signed responses. It produces `nak-cashu-bunker` and `build-result.json`.
+The static Linux x86-64 build uses `musl-gcc`, checking the executable for
+interpreter and shared-library dependencies. CI starts it in an empty
+filesystem with no shared libraries. The ordinary build remains available
+for households whose host meets its dynamic library requirements.
+
 The wire test exercises the candidate with synthetic keys over an isolated
 loopback relay, including an ordinary authorized client and an unknown client.
 

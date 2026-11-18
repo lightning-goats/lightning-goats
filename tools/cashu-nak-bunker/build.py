@@ -14,6 +14,7 @@ import tempfile
 
 PACKAGE = Path(__file__).resolve().parent
 CLIENT_BUILD = PACKAGE.with_name('cashu-nak-stdin')
+MUSL_CC = '/usr/bin/musl-gcc'
 
 
 def diagnostics(result):
@@ -30,10 +31,19 @@ def diagnostics(result):
     return findings
 
 
+def require_static_elf(program):
+    result = subprocess.check_output(['/usr/bin/readelf', '-W', '-l', '-d', str(program)], text=True)
+    if re.search(r'^\s*(?:INTERP\b|0x[0-9a-f]+\s+\(NEEDED\))', result, re.MULTILINE):
+        raise ValueError('the portable candidate still requires a dynamic loader or library')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--build-directory', required=True, type=Path)
+    parser.add_argument('--static', action='store_true', help='link the Linux x86-64 candidate with musl')
     args = parser.parse_args()
+    if args.static and not Path(MUSL_CC).is_file():
+        parser.error('--static requires /usr/bin/musl-gcc')
     root = args.build_directory.resolve()
     root.mkdir(parents=True, exist_ok=True)
     output = root / 'nak-cashu-bunker'
@@ -69,12 +79,18 @@ def main():
                        'GOCACHE': str(root / 'cache'), 'GOMODCACHE': str(root / 'modules'),
                        'GOPATH': str(root / 'gopath'), 'GOTMPDIR': str(work),
                        'GOPROXY': 'https://proxy.golang.org', 'GOSUMDB': 'sum.golang.org'}
+        target_flags = []
+        static_flags = ''
+        if args.static:
+            environment['CC'] = MUSL_CC
+            target_flags = ['-tags=netgo,osusergo']
+            static_flags = ' -linkmode=external -extldflags=-static'
 
         def run(*arguments):
             subprocess.run([go, *arguments], cwd=source, env=environment, check=True)
 
         def vet(label):
-            result = subprocess.run([go, 'vet', '-mod=readonly', '-p=2', '.'],
+            result = subprocess.run([go, 'vet', '-mod=readonly', '-p=2', *target_flags, '.'],
                                     cwd=source, env=environment, capture_output=True, text=True)
             (root / (label + '-go-vet.log')).write_text(result.stdout + result.stderr)
             return diagnostics(result)
@@ -91,11 +107,18 @@ def main():
             raise ValueError('gofmt is required for scoped Go sources')
         if vet('scoped') != baseline:
             raise ValueError('Go vet findings changed from the pinned upstream source')
-        run('test', '-vet=off', '-mod=readonly', '-p=2', '-run', '^TestCashuSigningScope$', '.')
-        run('build', '-mod=readonly', '-p=2', '-trimpath', '-buildvcs=false',
-            '-ldflags=-s -w -X main.version=' + manifest['version'], '-o', str(output), '.')
+        test_link = ['-ldflags=' + static_flags.strip()] if static_flags else []
+        run('test', '-vet=off', '-mod=readonly', '-p=2', *target_flags, *test_link,
+            '-run', '^TestCashuSigningScope$', '.')
+        run('build', '-mod=readonly', '-p=2', '-trimpath', '-buildvcs=false', *target_flags,
+            '-ldflags=-s -w -X main.version=' + manifest['version'] + static_flags, '-o', str(output), '.')
+        if args.static:
+            require_static_elf(output)
         result = {**manifest, 'go_version': sdk['go_version'], 'go_archive_sha256': sdk['go_archive_sha256'],
                   'program_sha256': digest(output), 'scope_inputs': {name: digest(PACKAGE / name) for name in files},
+                  'target': 'linux-amd64', 'linkage': 'static-musl' if args.static else 'dynamic',
+                  'build_metadata': subprocess.check_output([go, 'version', '-m', str(output)],
+                                                            env=environment, text=True),
                   'unchanged_upstream_vet_findings': sum(baseline.values()), 'installed': False}
         (root / 'build-result.json').write_text(json.dumps(result, indent=2, sort_keys=True) + '\n')
         print(json.dumps(result, sort_keys=True))

@@ -89,6 +89,19 @@ class OverlayBrowserTests(unittest.TestCase):
                 decoded = zxingcpp.read_barcode(image)
                 self.assertIsNotNone(decoded)
                 self.assertEqual(decoded.text, request["request"])
+                lightning = self.page.locator("#qr-code").bounding_box()
+                cashu = self.page.locator("#cashu-image").bounding_box()
+                lightning_label = self.page.locator("#lightning-label")
+                cashu_label = self.page.locator("#cashu-code span")
+                for code, label, name in [(lightning, lightning_label, "Lightning"),
+                                          (cashu, cashu_label, "Cashu")]:
+                    self.assertTrue(label.is_visible())
+                    self.assertEqual(label.inner_text(), name)
+                    self.assertGreaterEqual(label.bounding_box()["y"], code["y"] + code["height"] - 0.01)
+                self.assertAlmostEqual(cashu["x"] + cashu["width"],
+                                       lightning["x"] + lightning["width"], places=2)
+                lightning_label_box = lightning_label.bounding_box()
+                self.assertGreater(cashu["y"], lightning_label_box["y"] + lightning_label_box["height"])
                 boxes = self.page.locator("#cashu-code, #top-left-container, #qr-code, #feeding-state").evaluate_all("nodes => nodes.map(n => { const r=n.getBoundingClientRect(); return {x:r.x,y:r.y,right:r.right,bottom:r.bottom}; })")
                 for index, a in enumerate(boxes):
                     for b in boxes[index+1:]:
@@ -114,7 +127,7 @@ class OverlayBrowserTests(unittest.TestCase):
     def test_two_qrs_cards_long_status_and_payment_effects_do_not_collide(self):
         fixture = request_fixtures()["creqA"]
         def separated():
-            boxes = self.page.locator("#cashu-code, #top-left-container, #qr-code, #lightning-label, #feeding-state, #accordion-container, #sats-received-overlay, #feeder-triggered, #bottom-container").evaluate_all("nodes => nodes.filter(n=>n.getClientRects().length).map(n => {const r=n.getBoundingClientRect(); return {id:n.id,x:r.x,y:r.y,right:r.right,bottom:r.bottom};})")
+            boxes = self.page.locator("#cashu-code, #top-left-container, #qr-code, #lightning-label, #connection, #feeding-state, #accordion-container, #sats-received-overlay, #feeder-triggered, #bottom-container").evaluate_all("nodes => nodes.filter(n=>n.getClientRects().length).map(n => {const r=n.getBoundingClientRect(); return {id:n.id,x:r.x,y:r.y,right:r.right,bottom:r.bottom};})")
             for i, a in enumerate(boxes):
                 self.assertGreaterEqual(a["x"], 0, a)
                 self.assertGreaterEqual(a["y"], 0, a)
@@ -123,6 +136,7 @@ class OverlayBrowserTests(unittest.TestCase):
                 for b in boxes[i+1:]:
                     self.assertTrue(a["right"] <= b["x"] or b["right"] <= a["x"] or a["bottom"] <= b["y"] or b["bottom"] <= a["y"], (a,b))
         for width, height in [(1920,1080),(1280,720)]:
+            self.status_payload.update(mode="shadow", unresolved_feed_attempt=None)
             self.page.set_viewport_size({"width":width,"height":height})
             self.page.emulate_media(reduced_motion="reduce")
             self.page.goto("https://lightning-goats.com/overlay.html?fit=1")
@@ -146,6 +160,11 @@ class OverlayBrowserTests(unittest.TestCase):
             self.send({"type":"informational","seq":4,"message":"Dexter Rowan Cosmo Newton Nova"})
             self.page.clock.run_for(30)
             self.assertEqual(self.page.locator(".accordion-item").count(),5)
+            separated()
+            self.status_payload.update(mode="active", unresolved_feed_attempt="pending-fixture")
+            self.page.clock.fast_forward(11000)
+            self.page.wait_for_function("document.getElementById('feeding-state').dataset.state === 'pending'")
+            self.assertTrue(self.page.locator("#cashu-code").is_visible())
             separated()
         self.assertEqual(self.errors, [])
 

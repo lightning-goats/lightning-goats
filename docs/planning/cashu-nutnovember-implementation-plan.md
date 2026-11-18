@@ -12,9 +12,9 @@
 
 Build a lightweight, headless Lightning Goats Cashu wallet using external mints. Accept **ordinary Cashu payments and NIP-61 nutzaps**, alongside the existing Strike-backed Lightning payments. All three contribute to the same durable, sats-denominated `herd` feeder-credit pool. When feeding becomes eligible, convert the necessary Cashu holdings into Lightning payments to Strike before physical dispatch. These transfers must never generate another contribution or another credit grant.
 
-Keep the current Lightning LNURL QR in the upper-right corner. Add a reusable Cashu payment-request QR in the upper-left corner. Move the existing upper-left credit/status/BTC-price strip to the top center. Preserve the rest of the established artwork and presentation, making only the layout adjustments needed to avoid collisions.
+Keep the current Lightning LNURL QR in the upper-right corner. Add a reusable Cashu payment-request QR directly below it, aligned to the right edge. Move the existing upper-left credit/status/BTC-price strip to the top center. Preserve the rest of the established artwork and presentation, making only the layout adjustments needed to avoid collisions.
 
-This is the dated, narrow Cashu exception to older documents deferring alternative payment providers and automated conversions. It supersedes earlier Cashu planning suggestions to support nutzaps only, use a single hard-coded mint, require manual-only withdrawals, stack both QRs on the right, replace the Lightning QR with a payment-page QR, or depend on a combined QR format. It does not resume Monero, replace Strike, change Square entitlements, or authorize unrelated redesigns. Preserve existing CyberHerd work, current opt-outs, live financial limits, and all paid history. Read [AGENTS.md](../../AGENTS.md), the [delivery roadmap](delivery-roadmap.md), and [implementation status](../implementation-status.md).
+This is the dated, narrow Cashu exception to older documents deferring alternative payment providers and automated conversions. It supersedes earlier Cashu planning suggestions to support nutzaps only, use a single hard-coded mint, require manual-only withdrawals, replace the Lightning QR with a payment-page QR, or depend on a combined QR format. It does not resume Monero, replace Strike, change Square entitlements, or authorize unrelated redesigns. Preserve existing CyberHerd work, current opt-outs, live financial limits, and all paid history. Read [AGENTS.md](../../AGENTS.md), the [delivery roadmap](delivery-roadmap.md), and [implementation status](../implementation-status.md).
 
 The operator requested this scoped implementation handoff. Production keys, mint selection, spending/exposure limits, real payments, public receiving announcements, live service activation, schema upgrades, and physical feeding remain explicit operator-controlled steps. Missing production values must not prevent isolated implementation and testing. When placing this document in the repository, link it from `docs/README.md` and add a dated Cashu exception to `docs/planning/delivery-roadmap.md`, preserving all unrelated instructions.
 
@@ -218,10 +218,11 @@ Use existing payment/goat-fact and confirmed-feeding presentation. Add a transpo
 The layout decision is final for this milestone:
 
 ```text
-upper left                 top center                         upper right
-[CASHU request QR]     [credit/status | BTC price | change]   [existing LIGHTNING QR]
+                           top center                         upper right
+                      [credit/status | BTC price | change]   [existing LIGHTNING QR]
+                                                              [CASHU request QR]
 
-[goat / CyberHerd cards placed clear of both QR exclusion zones]
+[goat / CyberHerd cards placed clear of the payment QR column]
 
                      existing stream / effects
 
@@ -236,9 +237,9 @@ The operator supplied this existing clickable Lightning URI; retain it as a regr
 lightning:LNURL1DP68GURN8GHJ7MRFVA58GMNFDENJ6EM0V968XTNRDAKJ7TNHV4KXCTTTDEHHWM30D3H82UNVWQHKSETJVSLH78D5
 ```
 
-Add independent Cashu QR/data/label elements with immutable display snapshots and a safe absent/disabled state. Labels are `Cashu` and `Lightning`; do not label ordinary Cashu requests as nutzaps. No third QR, cycling between methods, or forced payment-page navigation. A short shared caption is optional only if it remains legible and does not obscure the scene.
+Add independent Cashu QR/data/label elements with immutable display snapshots and a safe absent/disabled state. Show the `Lightning` and `Cashu` labels directly below their respective codes. No third QR, cycling between methods, or forced payment-page navigation. A short shared caption is optional only if it remains legible and does not obscure the scene.
 
-Preserve the fixed 1920x1080 composition and `?fit=1` scaling. Bound the center strip between QR exclusion zones. The current card host begins near the upper-left; reposition it below the Cashu block or in another reserved non-overlapping zone. Test all goat cards, the actual three-member CyberHerd roster, connection labels, paused/unknown banners, long status text, and payment/feed effects together. Do not hide cards, disable banners, shrink text excessively, or change artwork to conceal overlap.
+Preserve the fixed 1920x1080 composition and `?fit=1` scaling. Keep the center strip clear of the right-side payment QR column. Keep the goat and CyberHerd cards clear of both the QRs and central notices. Test all goat cards, the actual three-member CyberHerd roster, connection labels, paused/unknown banners, long status text, and payment/feed effects together. Do not hide cards, disable banners, shrink text excessively, or change artwork to conceal overlap.
 
 Size the Cashu code from its actual encoded module count and scan results. Keep a proper quiet zone, sharp integer-module rendering where practical, adequate contrast, and no logo over the new QR initially. Do not force it into 180px merely because that is the existing Lightning size. Verify both QR payloads after browser rendering and video downscaling, including 1080p and a 720p stream rendition. Record actual phone/wallet scan results separately from automated decode tests.
 
@@ -267,7 +268,7 @@ Do not change production DNS, household network topology, OpenHAB rules, keys, o
 | 2 — both intake paths | Reusable NUT-18 HTTP receiving plus NIP-61 intake/discovery/redemption signaling using one engine. | Ordinary payment and independent-client nutzap each acquired once; cross-transport replay rejected. |
 | 3 — core contribution adapter | Authenticated receipt import, Cashu provenance, shared cap/progress/events, new financial states. | Exactly one grant across IPC retries, mixed-rail contributions, and preserved Lightning history. |
 | 4 — settlement and feed gate | Purpose-bound Strike invoices, melt/change reconciliation, source coverage, eligible-lot selection, fallback sweeps. | Verified deposits without new credit; mixed feeding progresses; mint failure does not block settled-only feeding. |
-| 5 — overlay and edge | Cashu upper-left, status strip top-center, Lightning upper-right; cards/banners repositioned; CORS/WAF and safe public state. | Browser geometry/decode tests and real scan matrix. |
+| 5 — overlay and edge | Cashu below Lightning in the upper-right, status strip top-center, cards and banners clear of both QRs; CORS/WAF and safe public state. | Browser geometry/decode tests and real scan matrix. |
 | 6 — operational qualification | Additive migration/restore tests, inactive install, risk-focused integration, optional gated Cashu-derived reward provenance. | Source-pinned acceptance matrix and operator-ready deployment runbook; feature states explicit. |
 | 7 — approved pilot and submission | Only after approval: configure keys/mints/limits, announce receiving, conduct bounded real acceptance, capture demo and submission evidence. | Truthful live results distinct from fixtures; tagged November contribution. |
 

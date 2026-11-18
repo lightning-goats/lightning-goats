@@ -109,7 +109,7 @@ async fn strip_empty_cashu_fixture(
     Ok(())
 }
 
-async fn strip_empty_contact_schema(uid: u32) -> Result<()> {
+async fn strip_fixture_schema(uid: u32, cashu_only: bool) -> Result<()> {
     if std::env::var_os("CREDENTIALS_DIRECTORY").is_some() {
         bail!("synthetic schema fixture must not load credentials");
     }
@@ -160,10 +160,17 @@ async fn strip_empty_contact_schema(uid: u32) -> Result<()> {
         .fetch_one(&pool)
         .await?;
     let synthetic: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM settled_payments WHERE source='strike' AND source_id='TEST-ONLY-original-receipt' AND amount_msat=2340000").fetch_one(&pool).await?;
-    let signed: Vec<String> =
+    let signed: Vec<String> = if cashu_only {
+        // Later disposable stages can retain more outbox rows. The original
+        // signed witness still has to be present.
+        sqlx::query_scalar("SELECT signed_event_json FROM message_outbox WHERE json_extract(signed_event_json,'$.content') LIKE 'TEST ONLY: retain exact original signed bytes;%' LIMIT 2")
+            .fetch_all(&pool)
+            .await?
+    } else {
         sqlx::query_scalar("SELECT signed_event_json FROM message_outbox LIMIT 2")
             .fetch_all(&pool)
-            .await?;
+            .await?
+    };
     if payments != 1 || synthetic != 1 || signed.len() != 1 {
         bail!("only the existing synthetic paid/signed fixture may be transformed");
     }
@@ -177,6 +184,16 @@ async fn strip_empty_contact_schema(uid: u32) -> Result<()> {
     }
     let mut transaction = pool.begin().await?;
     strip_empty_cashu_fixture(&mut transaction).await?;
+    if cashu_only {
+        transaction.commit().await?;
+        pool.close().await;
+        println!(
+            "{}",
+            serde_json::json!({"synthetic":true,"schema":25,
+                 "only_unused_cashu_removed":true,"production_supported":false})
+        );
+        return Ok(());
+    }
     for table in [
         "message_outbox_suppressions",
         "feeding_announcement_sources",
@@ -405,7 +422,9 @@ async fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let uid = isolated_fixture()?;
     if args == ["--strip-empty-contact-schema"] {
-        strip_empty_contact_schema(uid).await
+        strip_fixture_schema(uid, false).await
+    } else if args == ["--strip-empty-cashu-schema"] {
+        strip_fixture_schema(uid, true).await
     } else if args == ["--strip-empty-inclusive-fee-schema"] {
         strip_empty_inclusive_fee_schema(uid).await
     } else if args == ["--diagnose-installed-export"] {

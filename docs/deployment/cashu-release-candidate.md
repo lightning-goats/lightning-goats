@@ -61,3 +61,31 @@ and a host-encrypted synthetic signer credential. Both must start and stop twice
 with IP denied even to a listening loopback socket. A fenced restart must open no
 IPC listener and preserve the retained state. The job uses newly initialized empty
 fixtures. Funded checkpoint installation and reconciliation remain separate.
+
+## Add the inactive Cashu schema to an existing core
+
+Use the authenticated root-owned VPS upgrade tool closure with the paired core
+release and CyberHerd review archives from the same verified source commit.
+Pass their independently verified SHA-256 digests. A Cashu upgrade preserves
+the original configuration and the original active service set. The Cashu
+wallet and broker must be absent or persistently masked. The initial core
+configuration must have no Cashu policy.
+
+The launcher accepts these Cashu operations:
+
+```text
+--cashu-core-prepare CORE_ARCHIVE REVIEW_ARCHIVE SOURCE CORE_SHA256 REVIEW_SHA256 REVIEW_PATH
+--cashu-core-maintenance plan REVIEW_PATH EXECUTION_PATH --review-sha256 PREPARED_SHA256
+--cashu-core-maintenance apply EXECUTION_PATH --exclusive-maintenance
+--cashu-core-maintenance resume EXECUTION_PATH --approve-resumption
+```
+
+Preparation and planning preserve the running services. Application stops and
+masks the four journal writers, takes a fresh native schema-25 snapshot, and
+migrates a separate clone under the original runtime UID with networking
+isolated. The native comparison requires unchanged original rows, row IDs,
+schemas and signed bytes, plus the compiled empty Cashu schema. Application
+then installs the selected programs, migrates the fenced original and repeats
+the native comparison. An interrupted migration retains its evidence and stays
+fenced. Resumption verifies the same comparison and restores only the original
+active roles in service dependency order, keeping the Cashu units inactive.

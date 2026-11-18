@@ -130,6 +130,12 @@ def main():
     elif arguments[:1] == ['--current-core-maintenance']:
         operation = 'maintain-contact-upgrade.py'
         arguments = ['--current-schema', *arguments[1:]]
+    elif arguments[:1] == ['--cashu-core-prepare']:
+        operation = 'prepare-contact-upgrade.py'
+        arguments = ['--cashu', *arguments[1:]]
+    elif arguments[:1] == ['--cashu-core-maintenance']:
+        operation = 'maintain-contact-upgrade.py'
+        arguments = ['--cashu', *arguments[1:]]
     elif arguments[:1] == ['--contact-upgrade-prepare']:
         operation = 'prepare-contact-upgrade.py'
         arguments = arguments[1:]

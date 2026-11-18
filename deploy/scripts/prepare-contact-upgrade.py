@@ -44,17 +44,50 @@ ROLE_NAMES = {'core': 'lightning-goats-receive', 'membership': 'cyberherd',
               'payout': 'cyberherd-payout', 'signer': 'cyberherd-signer'}
 
 
+def retained_roles(states):
+    return tuple(role for role in ('core', 'signer', 'membership', 'payout')
+                 if states[role]['ActiveState'] == 'active')
+
+
+def require_inactive_cashu():
+    identities = {}
+    for unit in ('lightning-goats-cashu.service', 'lightning-goats-cashu-signer.service'):
+        value = C.status(unit)
+        mask = Path('/etc/systemd/system') / unit
+        safely_absent = value['LoadState'] == 'not-found'
+        masked = (value['LoadState'] == 'masked' and value['UnitFileState'] == 'masked'
+                  and mask.is_symlink() and mask.lstat().st_uid == mask.lstat().st_gid == 0
+                  and os.readlink(mask) == '/dev/null')
+        if (not (safely_absent or masked) or value['ActiveState'] != 'inactive'
+                or value['MainPID'] != '0'):
+            raise ValueError('Cashu wallet and signer must be absent or persistently masked')
+        name = unit.removesuffix('.service')
+        try:
+            user = C.pwd.getpwnam(name)
+        except KeyError:
+            continue
+        if user.pw_uid == 0:
+            raise ValueError('Cashu runtime UID must be non-root')
+        identities[name] = {'uid': user.pw_uid}
+    if identities:
+        Q.no_role_processes(identities)
+
+
 def configuration_boundary(core, member, payout, signer, policy, *, current_schema=False):
     """Preserve the existing overlay stage, zero budgets and public identities."""
+    cashu = UPGRADE_KIND == 'cashu'
+    if cashu and (current_schema or any(key in core for key in ('cashu', 'cashu_receipts', 'cashu_treasury'))):
+        raise ValueError('Cashu upgrade requires the original configuration without Cashu policy')
     if UPGRADE_KIND == 'feeder-cap' and (current_schema or core.get('service', {}).get('mode') != 'shadow'
             or core.get('contact') is not None):
         raise ValueError('feeder-cap upgrade requires the explicitly contained shadow service without contact')
     bridge = core.get('core_bridge', {})
     reward = bridge.get('reward_policy', {})
     messages = member.get('messaging', {})
-    if ((not current_schema and core.get('contact') is not None)
-            or core['database']['url'] != 'sqlite://' + str(C.DATABASE)
-            or member.get('enabled') is not True or member.get('rewards') is not None
+    if core['database']['url'] != 'sqlite://' + str(C.DATABASE) or member.get('enabled') is not True:
+        raise ValueError('original database and membership configuration required')
+    if not cashu and ((not current_schema and core.get('contact') is not None)
+            or member.get('rewards') is not None
             or member.get('payout_bridge') is not None or messages.get('signer') is not None
             or messages.get('lifecycle') is not False
             or bridge.get('payout_execution_enabled') is not False
@@ -66,7 +99,7 @@ def configuration_boundary(core, member, payout, signer, policy, *, current_sche
     limits += [(payout['policy'], name) for name in ('member_percent_ceiling', 'max_sats_per_feed', 'max_sats_per_24h', 'max_fee_sats')]
     limits += [({'max_net_sats': payout['policy'].get('max_net_sats', 0)}, 'max_net_sats')]
     limits += [(signer['policy'], name) for name in ('max_net_sats', 'max_new_per_hour')]
-    if any(type(section.get(name)) is not int or section[name] != 0 for section, name in limits):
+    if not cashu and any(type(section.get(name)) is not int or section[name] != 0 for section, name in limits):
         raise ValueError('all existing financial and signing ceilings must remain zero')
     owner = policy['owner']
     if (not re.fullmatch('[0-9a-f]{64}', owner)
@@ -77,7 +110,7 @@ def configuration_boundary(core, member, payout, signer, policy, *, current_sche
             or payout['policy']['scope']['owner'] != owner
             or payout['policy']['scope']['provider'] != policy['provider']):
         raise ValueError('original owner, epoch, peer or provider scope differs')
-    if current_schema and core.get('contact') is not None:
+    if (current_schema or cashu) and core.get('contact') is not None:
         contact = core['contact']
         if (not isinstance(contact, dict) or set(contact) != {'recipient', 'inbox_relays'}
                 or contact['recipient'] != owner or not isinstance(contact['inbox_relays'], list)
@@ -88,6 +121,9 @@ def configuration_boundary(core, member, payout, signer, policy, *, current_sche
 
 
 def baseline(*, current_schema=False):
+    cashu = UPGRADE_KIND == 'cashu'
+    if cashu:
+        require_inactive_cashu()
     C.protected(S.MAINTENANCE, private=True)
     runtime = Q.I.check_identities()
     core_user = C.pwd.getpwnam('lightning-goats')
@@ -120,14 +156,19 @@ def baseline(*, current_schema=False):
             raise ValueError('original four-journal path, unit or owner differs')
         value = C.status(name + '.service')
         states[role] = value
-        if role in ('core', 'membership'):
+        if role in ('core', 'membership') or (cashu and value['ActiveState'] == 'active'):
             user = 'lightning-goats' if role == 'core' else name
             if (value['LoadState'] != 'loaded' or value['ActiveState'] != 'active'
                     or value['SubState'] != 'running' or value['NeedDaemonReload'] != 'no'
                     or not value['MainPID'].isdecimal() or int(value['MainPID']) < 2
                     or value['User'] != user or value['Group'] not in ('', C.grp.getgrgid(identities[role]['gid']).gr_name)):
-                raise ValueError('existing core and membership must be running under their original identities')
-            program = programs['lightning-goatsd' if role == 'core' else 'cyberherdd']
+                raise ValueError('running services must use their original identities')
+            if cashu and role != 'core':
+                mask = Path('/etc/systemd/system') / (name + '.service')
+                if (mask.exists() or mask.is_symlink()
+                        or value['FragmentPath'] != str(Q.UNITS / (name + '.service'))):
+                    raise ValueError('running non-core service must use its protected vendor unit')
+            program = programs['lightning-goatsd' if role == 'core' else Q.ROLES[name][0]]
             if hashlib.sha256(Path('/proc', value['MainPID'], 'exe').read_bytes()).hexdigest() != files[str(program)]['sha256']:
                 raise ValueError('running process differs from the protected installed program')
             paths = [Path(value['FragmentPath']), *(Path(v) for v in value['DropInPaths'].split())]
@@ -145,7 +186,8 @@ def baseline(*, current_schema=False):
     # Hidden role-specific overrides are part of the frozen inventory as well.
     dropins = S.role_dropins()
     files.update(dropins)
-    Q.no_role_processes({role: identities[role] for role in ('payout', 'signer')})
+    Q.no_role_processes({role: identities[role] for role in ('payout', 'signer')
+                         if states[role]['ActiveState'] != 'active'})
     return {'identities': identities, 'states': states, 'files': files, 'policy': policy}
 
 
@@ -192,7 +234,8 @@ def prepare(archive, review_archive, source, digest, review_digest, directory, *
             or re.fullmatch('[0-9a-f]{40}', source) is None):
         raise ValueError('new direct protected upgrade-base child and full source required')
     original = baseline(current_schema=current_schema)
-    contact_enabled = current_schema and tomllib.loads(C.CONFIG.read_text()).get('contact') is not None
+    contact_enabled = ((current_schema or UPGRADE_KIND == 'cashu')
+                       and tomllib.loads(C.CONFIG.read_text()).get('contact') is not None)
     directory.mkdir(mode=0o700)
     TX.sync_directory(directory.parent)
     C.write_json(directory / 'INCOMPLETE', {'services_changed': False})
@@ -251,14 +294,17 @@ def prepare(archive, review_archive, source, digest, review_digest, directory, *
 def main():
     global UPGRADE_KIND
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--feeder-cap', action='store_true', help='exact contained schema-24 to 25 feeder-cap upgrade')
-    parser.add_argument('--current-schema', action='store_true', help='program-only patch; preserve current schema and configuration')
+    kinds = parser.add_mutually_exclusive_group()
+    kinds.add_argument('--feeder-cap', action='store_true', help='exact contained schema-24 to 25 feeder-cap upgrade')
+    kinds.add_argument('--cashu', action='store_true', help='inactive Cashu schema addition preserving current configuration')
+    kinds.add_argument('--current-schema', action='store_true', help='program-only patch; preserve current schema and configuration')
     for name in ('archive', 'review_archive', 'source', 'sha256', 'review_sha256', 'directory'):
         parser.add_argument(name, type=Path if name in ('archive', 'review_archive', 'directory') else str)
     args = parser.parse_args()
     if args.feeder_cap:
-        if args.current_schema: raise ValueError('upgrade kinds cannot be combined')
         UPGRADE_KIND = 'feeder-cap'
+    elif args.cashu:
+        UPGRADE_KIND = 'cashu'
     result = prepare(args.archive, args.review_archive, args.source, args.sha256, args.review_sha256,
                      args.directory, current_schema=args.current_schema)
     print(__import__('json').dumps(result, sort_keys=True))

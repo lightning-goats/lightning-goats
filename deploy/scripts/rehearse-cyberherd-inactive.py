@@ -939,6 +939,58 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
             assert os.readlink('/proc/' + pid + '/ns/net') == os.readlink('/proc/self/ns/net')
             assert hashlib.sha256(Path('/proc', pid, 'exe').read_bytes()).hexdigest() == hashlib.sha256(Path('/usr/local/bin', program).read_bytes()).hexdigest()
         assert counts['post'] == 0
+        # Rehearse the Cashu core upgrade from the inactive schema-25
+        # extension boundary with the now-active original four services.
+        cashu_roles = ('lightning-goats-receive', 'cyberherd-signer', 'cyberherd', 'cyberherd-payout')
+        active_configs = {path: Path(path).read_bytes() for path in original if path.endswith('.toml')}
+        for role in reversed(cashu_roles):
+            run('/usr/bin/systemctl', 'stop', role + '.service')
+        for role in cashu_roles:
+            assert run('/usr/bin/systemctl', 'show', role + '.service', '-p', 'MainPID', '--value').strip() == '0'
+        cashu_source = json.loads(run('/usr/bin/setpriv', '--reuid=' + str(runtime.pw_uid),
+            '--regid=' + str(runtime.pw_gid), '--clear-groups', '--inh-caps=-all',
+            '--ambient-caps=-all', '--bounding-set=-all', '--no-new-privs',
+            str(fixture), '--strip-empty-cashu-schema'))
+        assert cashu_source == {'synthetic': True, 'schema': 25, 'only_unused_cashu_removed': True,
+                                'production_supported': False}
+        shutil.copyfile(fixture, program)
+        program.chmod(0o755)
+        for role in cashu_roles:
+            run('/usr/bin/systemctl', 'start', role + '.service')
+        w.await_ready(old_core_ready, 'harmless schema-25 core stand-in')
+        w.await_ready(lambda: signer_socket.is_socket(), 'existing signer before Cashu maintenance')
+        cashu_review = base / 'ci-cashu-core-review'
+        cashu_execution = base / 'ci-cashu-core-execution'
+        cashu_prepared = json.loads(run(*launcher, '--cashu-core-prepare', str(core_archive), str(review_archive),
+            source_commit, hashlib.sha256(core_archive.read_bytes()).hexdigest(),
+            hashlib.sha256(review_archive.read_bytes()).hexdigest(), str(cashu_review)))
+        assert cashu_prepared['contact_enabled'] is True and cashu_prepared['services_changed'] is False
+        cashu_sha = hashlib.sha256((cashu_review / 'PREPARED.json').read_bytes()).hexdigest()
+        run(*launcher, '--cashu-core-maintenance', 'plan', str(cashu_review), str(cashu_execution),
+            '--review-sha256', cashu_sha)
+        cashu_upgraded = json.loads(run(*launcher, '--cashu-core-maintenance', 'apply',
+                                        str(cashu_execution), '--exclusive-maintenance'))
+        assert cashu_upgraded == {'upgraded': True, 'four_journal_backup_verified': True,
+            'clone_compared': True, 'live_migration_compared': True, 'services_started': False,
+            'contact_enabled': True}
+        for role in cashu_roles:
+            assert run('/usr/bin/systemctl', 'show', role + '.service', '-p',
+                       'UnitFileState', '--value').strip() == 'masked'
+            assert run('/usr/bin/systemctl', 'show', role + '.service', '-p', 'MainPID', '--value').strip() == '0'
+        cashu_resumed = json.loads(run(*launcher, '--cashu-core-maintenance', 'resume',
+                                       str(cashu_execution), '--approve-resumption'))
+        assert cashu_resumed == {'core_running': True, 'membership_running': True,
+            'contact_enabled': True, 'payouts_enabled': True,
+            'resumed_roles': ['core', 'signer', 'membership', 'payout']}
+        w.await_ready(lambda: signer_socket.is_socket(), 'original signer after Cashu maintenance')
+        assert all(run('/usr/bin/systemctl', 'is-active', role + '.service') == 'active\n' for role in cashu_roles)
+        assert {path: Path(path).read_bytes() for path in active_configs} == active_configs
+        cashu_reference = json.loads((cashu_execution / 'backup/MANIFEST.json').read_text())['report']['rows']
+        cashu_migrated = json.loads((cashu_execution / 'migrated/MANIFEST.json').read_text())['report']['rows']
+        additions = cashu_migrated['core'].keys() - cashu_reference['core'].keys()
+        assert len(additions) == 22 and all(cashu_migrated['core'][table] == 0 for table in additions)
+        assert all(cashu_reference[role] == cashu_migrated[role] for role in ('membership', 'payout', 'signer'))
+        assert counts['post'] == 0
         finished = True
         return {'accepted': True, 'old_core_was_harmless_elf_standin': True,
                 'actual_native_schema_23_backup': True, 'actual_runtime_uid_clone_migration': True,
@@ -992,6 +1044,10 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
                     'different_program_builds_used': False, 'provider_operations': 0,
                     'gateway_post_count': counts['post'], 'public_network_used': False, 'live_host_qualified': False},
                 'installed_initial_reward_cutover': cutoff_evidence,
+                'installed_cashu_core_upgrade': {'actual_schema_25_source': True,
+                    'empty_cashu_tables_added': len(additions), 'all_four_writers_stopped_and_masked': True,
+                    'same_four_roles_resumed': True, 'active_configs_preserved': True,
+                    'clone_and_live_native_comparisons': True, 'gateway_post_count': counts['post']},
                 'installed_first_financial_configuration': {'accepted': True,
                     'actual_completed_program_upgrade_consumed': True, 'actual_four_native_candidate_parsers': True,
                     'actual_stored_allocation_bound': True, 'fresh_four_journal_backup_verified': True,

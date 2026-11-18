@@ -456,6 +456,11 @@ persisted schedule across restart. Simulate an unavailable mint-state response
 and then verify the original signed outputs. Preserve the attempt count and
 confirm there is no replay even when original replay is enabled. Verify that
 an expired scheduling selection cannot advance the new schedule.
+Use a funded mint fixture that commits the swap and loses the reply before
+CDK stores its outputs. Expire the response cache, reject unavailable or
+invalid restores, then recover the exact NUT-09 signatures. Interrupt after the
+proofs are saved and verify restart completes the same local transaction
+without an extra swap, a second signature restore, or early receipt export.
 
 Run `deploy/scripts/test-cashu-operator-reconciliation-cli.py` with the selected
 wallet executable/hash through the private-run helper in fresh mount/network

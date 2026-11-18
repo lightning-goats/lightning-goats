@@ -237,12 +237,15 @@ keys/state. Normal startup registration, namespace and restore fences still appl
 An active wallet process retains its exclusive lock and prevents this command.
 
 The default scope accepts `acquiring` work and idempotent already-`acquired` retries.
-For acquiring work, reconciliation derives the original output identities,
-requires their existing CDK proof records and queries fresh mint states through
-the pinned transport. Existing cryptographic and conservation checks must prove
-ownership before the journal transitions to `acquired`. Missing recovery/output
-material or unavailable mint state remains pending; invalid ownership remains
-held. No swap, melt, quote, original-saga replay or receipt export is authorized.
+For acquiring work, reconciliation derives the original output identities and
+queries fresh mint states through the pinned transport. If the wallet lost the
+original signed outputs, it requests their saved signatures through NUT-09.
+The restore path checks the original receive transaction, exact blinded
+outputs, pinned mint signatures, spent inputs and unspent outputs before it
+saves proofs and completes the original local transaction. The application
+journal then records `acquired`. Unavailable or invalid evidence leaves the
+operation unresolved. This command grants read-only mint access for the
+approved acquisition.
 The separately controlled receipt worker can later import a proven acquisition.
 
 Set `reviewed_held_ownership_check` to `true` to recheck a hold raised while
@@ -269,10 +272,10 @@ attempts retain their original counts. When that budget is exhausted,
 scheduled reconciliation can still check ownership for an `acquiring`
 operation with a frozen original swap and output derivation. These checks
 require reconciliation to be enabled for a configured mint and run at least
-five minutes apart. They can verify the original signed outputs already in
-the wallet, with no swap replay, receipt export or change to the attempt
-count. Private status shows `acquisition_inspection_only` and the next due
-time for those operations.
+five minutes apart. They can verify outputs already saved or recover the
+original mint signatures through the same read-only process. The recorded
+attempt count stays at the exhausted budget. Private status shows
+`acquisition_inspection_only` and the next due time for those operations.
 Keep `CASHU_RECOVERY_REQUIRED` in place on restored state.
 Private `status` prioritizes active holds and shows their coarse causes.
 

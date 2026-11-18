@@ -198,7 +198,9 @@ impl Approval {
                         .recheck_held_ownership(self.acquisition_id, reason)
                         .await
                 } else {
-                    coordinator.reconcile_owned(self.acquisition_id).await
+                    coordinator
+                        .reconcile_original_outputs(self.acquisition_id)
+                        .await
                 }
             },
         )

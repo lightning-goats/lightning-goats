@@ -10,6 +10,7 @@ use std::{
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Authority {
     Acquisition(u64),
+    AcquisitionRecovery,
     Treasury,
     TreasuryRecovery,
     Split,

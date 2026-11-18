@@ -45,6 +45,9 @@ struct FixtureMint {
     keyset: KeySet,
     state: Arc<Mutex<IssuerState>>,
     lose_reply: Arc<AtomicBool>,
+    fail_restore_once: Arc<AtomicBool>,
+    invalid_restore_once: Arc<AtomicBool>,
+    restore_attempts: Arc<AtomicUsize>,
     fail_check_once: Arc<AtomicBool>,
     incomplete_check_once: Arc<AtomicBool>,
     swap_attempts: Arc<AtomicUsize>,
@@ -97,6 +100,9 @@ impl FixtureMint {
             keyset,
             state: Arc::new(Mutex::new(IssuerState::default())),
             lose_reply: Arc::new(AtomicBool::new(false)),
+            fail_restore_once: Default::default(),
+            invalid_restore_once: Default::default(),
+            restore_attempts: Default::default(),
             fail_check_once: Arc::new(AtomicBool::new(false)),
             incomplete_check_once: Arc::new(AtomicBool::new(false)),
             swap_attempts: Arc::new(AtomicUsize::new(0)),
@@ -448,6 +454,12 @@ impl Transport for FixtureMint {
                 self.settle_melt(decode(payload)?)?
             }
             "/v1/restore" => {
+                self.restore_attempts.fetch_add(1, Ordering::SeqCst);
+                if self.fail_restore_once.swap(false, Ordering::SeqCst) {
+                    return Err(HttpError::Connection(
+                        "synthetic restore unavailable".into(),
+                    ));
+                }
                 let request: RestoreRequest = decode(payload)?;
                 let state = self.state.lock().unwrap();
                 let mut outputs = Vec::new();
@@ -459,6 +471,11 @@ impl Transport for FixtureMint {
                         outputs.push(output);
                         signatures.push(signature.clone());
                     }
+                }
+                if self.invalid_restore_once.swap(false, Ordering::SeqCst)
+                    && let Some(first) = signatures.first_mut()
+                {
+                    first.dleq = None;
                 }
                 serde_json::to_value(RestoreResponse {
                     outputs,
@@ -1029,6 +1046,7 @@ async fn lost_mint_reply_restarts_and_restores_without_a_second_execution() -> R
     };
     harness.mint.cache_enabled.store(false, Ordering::SeqCst);
     let mut coordinator = harness.open().await?;
+    harness.mint.fail_restore_once.store(true, Ordering::SeqCst);
     let work = coordinator
         .journal
         .lock()
@@ -1057,11 +1075,118 @@ async fn lost_mint_reply_restarts_and_restores_without_a_second_execution() -> R
         coordinator.acquire_new(waiting, &harness.receiver).await?,
         Progress::Pending(_)
     ));
-    let recovered = receipt(coordinator.recover_original(id).await?);
+    let work = coordinator
+        .journal
+        .lock()
+        .unwrap()
+        .claim_acquisition_work(415, false, true, 1, 5)?
+        .unwrap();
+    harness
+        .mint
+        .invalid_restore_once
+        .store(true, Ordering::SeqCst);
+    assert!(
+        coordinator
+            .reconcile_scheduled(id, work.inspection_only)
+            .await
+            .is_err()
+    );
+    assert_eq!(coordinator.journal.lock().unwrap().state(id)?, "acquiring");
+    let binding = coordinator.journal.lock().unwrap().derivation(id)?;
+    assert!(
+        coordinator
+            .database
+            .get_proofs_by_ys(binding.output_ys(&harness.seed)?)
+            .await?
+            .is_empty()
+    );
+    assert!(
+        coordinator
+            .database
+            .get_saga(&binding.cdk_operation)
+            .await?
+            .is_some()
+    );
+    drop(coordinator);
+
+    let mut coordinator = harness.open().await?;
+    coordinator.set_permissions(Permissions::default());
+    let work = coordinator
+        .journal
+        .lock()
+        .unwrap()
+        .claim_acquisition_work(720, false, true, 1, 5)?
+        .unwrap();
+    assert_eq!(work.id, id);
+    assert!(work.inspection_only);
+    let fault = rusqlite::Connection::open(harness.directory.path().join("wallet.sqlite"))?;
+    fault.execute_batch(
+        "CREATE TRIGGER refuse_receive_completion BEFORE UPDATE OF status ON transactions
+         WHEN NEW.status='completed'
+         BEGIN SELECT RAISE(ABORT, 'synthetic interruption after restored proof persistence'); END;",
+    )?;
+    assert!(
+        coordinator
+            .reconcile_scheduled(id, work.inspection_only)
+            .await
+            .is_err()
+    );
+    assert_eq!(coordinator.journal.lock().unwrap().state(id)?, "acquiring");
+    assert_eq!(
+        coordinator
+            .database
+            .get_proofs_by_ys(binding.output_ys(&harness.seed)?)
+            .await?
+            .len(),
+        binding.outputs.len()
+    );
+    assert!(
+        coordinator
+            .database
+            .get_saga(&binding.cdk_operation)
+            .await?
+            .is_some()
+    );
+    fault.execute_batch("DROP TRIGGER refuse_receive_completion")?;
+    drop(fault);
+    drop(coordinator);
+
+    let mut coordinator = harness.open().await?;
+    coordinator.set_permissions(Permissions::default());
+    let work = coordinator
+        .journal
+        .lock()
+        .unwrap()
+        .claim_acquisition_work(1025, false, true, 1, 5)?
+        .unwrap();
+    assert_eq!(work.id, id);
+    assert!(matches!(
+        coordinator.reconcile_scheduled(id, work.inspection_only).await?,
+        Progress::Acquired(found) if found == id
+    ));
+    assert!(
+        coordinator
+            .database
+            .get_saga(&binding.cdk_operation)
+            .await?
+            .is_none()
+    );
+    assert_eq!(coordinator.journal.lock().unwrap().state(id)?, "acquired");
+    assert_eq!(harness.mint.swap_attempts.load(Ordering::SeqCst), 1);
+    assert_eq!(harness.mint.restore_attempts.load(Ordering::SeqCst), 3);
+    assert_eq!(harness.mint.melt_attempts.load(Ordering::SeqCst), 0);
+
+    coordinator.set_permissions(Permissions {
+        admission: true,
+        acquisition: true,
+        receipt_export: true,
+        ..Permissions::default()
+    });
+    let recovered = receipt(coordinator.reconcile_original_outputs(id).await?);
     assert_eq!(recovered.net_sats, 8);
     assert_eq!(harness.mint.executions.load(Ordering::SeqCst), 1);
     assert_eq!(
-        receipt(coordinator.recover_original(id).await?).acquisition_id,
+        receipt(coordinator.reconcile_original_outputs(id).await?).acquisition_id,
         id
     );
     assert_eq!(

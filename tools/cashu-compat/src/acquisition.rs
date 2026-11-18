@@ -1,5 +1,7 @@
 //! One serialized acquisition coordinator for ordinary Cashu and NIP-61 inputs.
 //! No core-ledger, Strike, Nostr signer or physical gateway authority lives here.
+mod recovery;
+
 use crate::{
     intake::{PinnedKeys, ValidatedContribution},
     journal::{Admission, HoldReason, Journal, Receipt},
@@ -246,10 +248,14 @@ impl<T: Transport + 'static> Coordinator<'_, T> {
         id: Uuid,
         inspection_only: bool,
     ) -> Result<Progress> {
-        if self.permissions.original_swap_replay && !inspection_only {
+        let progress = self.reconcile_original_outputs(id).await?;
+        if matches!(progress, Progress::Pending(_))
+            && self.permissions.original_swap_replay
+            && !inspection_only
+        {
             self.recover_original(id).await
         } else {
-            self.reconcile_owned(id).await
+            Ok(progress)
         }
     }
 

@@ -343,6 +343,20 @@ impl<T: Transport> OperationGate<T> {
         self.arm_with_recovery_fence(id, recover_original, maximum_receive_fee_sats, false)
     }
 
+    /// Serialize read-only mint recovery and local proof persistence with other wallet work.
+    pub(crate) fn arm_acquisition_recovery(&self, id: Uuid) -> Result<OperationLease> {
+        let mut active = self.active.lock().map_err(|_| refused())?;
+        ensure!(active.is_none(), "another wallet operation is active");
+        *active = Some(Operation {
+            id,
+            authority: Authority::AcquisitionRecovery,
+        });
+        Ok(OperationLease {
+            active: self.active.clone(),
+            id,
+        })
+    }
+
     /// CDK may have compensated a rejected receive while our original recovery
     /// record remains. New, disjoint inputs may proceed only after CDK cleanup
     /// and with every retained output counter range durably reserved.

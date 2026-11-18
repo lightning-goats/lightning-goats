@@ -10,7 +10,7 @@ use crate::{
     service_config,
 };
 use anyhow::{Result, ensure};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeSet,
@@ -102,6 +102,93 @@ fn scope(config: &service_config::Config, relay: &Config) -> Result<[u8; 32]> {
     Ok(hash.finalize().into())
 }
 
+fn nutzap_mints(config: &service_config::Config) -> Vec<String> {
+    config
+        .mints
+        .iter()
+        .filter(|mint| mint.receive_nutzap && mint.bolt11_exit_qualified)
+        .map(|mint| mint.advertised_url.clone())
+        .collect()
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ProbeOutcome {
+    Complete,
+    Incomplete,
+    Saturated,
+    Unavailable,
+}
+
+#[derive(Serialize)]
+struct RelayProbe {
+    relay: String,
+    outcome: ProbeOutcome,
+    verified_events: usize,
+}
+
+#[derive(Serialize)]
+pub struct ProbeReport {
+    version: u8,
+    since: u64,
+    until: u64,
+    limit: u16,
+    relays: Vec<RelayProbe>,
+}
+
+/// Observe a bounded recent subscription without opening a wallet or writing a cursor.
+pub async fn probe(config: &service_config::Config, now: u64) -> Result<ProbeReport> {
+    let relays = config
+        .relay_intake
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("no configured receive relays"))?;
+    relays.validate(config.receive_nutzap)?;
+    let filter = Filter {
+        recipient: config.recipient.clone(),
+        mints: nutzap_mints(config),
+        since: now.saturating_sub(300),
+        until: now,
+        limit: 4,
+    };
+    filter.validate()?;
+    let targets = relays
+        .relays
+        .iter()
+        .map(|value| {
+            let url = crate::relay::validate_relay(value)?;
+            ensure!(
+                url.query().is_none(),
+                "public relay probe requires URLs without query parameters"
+            );
+            Ok(url.to_string())
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let observations = futures_util::future::join_all(targets.into_iter().map(|relay| {
+        let filter = &filter;
+        async move {
+            let (outcome, verified_events) = match crate::relay::query(&relay, filter).await {
+                Ok(batch) if batch.saturated => (ProbeOutcome::Saturated, batch.events.len()),
+                Ok(batch) if batch.complete => (ProbeOutcome::Complete, batch.events.len()),
+                Ok(batch) => (ProbeOutcome::Incomplete, batch.events.len()),
+                Err(_) => (ProbeOutcome::Unavailable, 0),
+            };
+            RelayProbe {
+                relay,
+                outcome,
+                verified_events,
+            }
+        }
+    }))
+    .await;
+    Ok(ProbeReport {
+        version: 1,
+        since: filter.since,
+        until: filter.until,
+        limit: filter.limit,
+        relays: observations,
+    })
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum Tick {
     Idle,
@@ -137,13 +224,7 @@ impl<'a> Worker<'a> {
                         overlap: config.overlap_seconds,
                     });
                 }
-                mints = runtime
-                    .config
-                    .mints
-                    .iter()
-                    .filter(|m| m.receive_nutzap && m.bolt11_exit_qualified)
-                    .map(|m| m.advertised_url.clone())
-                    .collect();
+                mints = nutzap_mints(&runtime.config);
                 limit = config.event_limit;
                 Filter {
                     recipient: runtime.config.recipient.clone(),

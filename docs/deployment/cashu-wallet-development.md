@@ -22,6 +22,7 @@ requires an explicit operation UUID:
 | `--help` | Print the command contract; no wallet state access. |
 | `check-config <path>` | Validate bounded root-owned protected JSON and policy; no keys, databases, listener or mint request. |
 | `probe-mint <path> <mint-id>` | Verify public capabilities and pinned keysets over the wallet's native HTTPS transport using only GET requests. |
+| `probe-relays <path>` | Read configured public NIP-61 receive relays with a bounded recent subscription. Opens no wallet state or keys. |
 | `initialize <path>` | Under the registered non-admin runtime UID, load existing private keys, require absent database files/sidecars, and create registered wallet databases. Does not start intake or acquisition. |
 | `status <path>` | Read a private, bounded JSON journal summary under the registered runtime UID, without loading keys or acquiring the writer lock. |
 | `run <path>` | Under the registered runtime UID, require existing registered databases and keys, then run private intake, optional treasury admission/status, and configured acquisition, receipt, relay, signing and publication workers. Never initialize missing databases. |
@@ -142,6 +143,16 @@ financial totals; admitted includes exact duplicates. A `pending` outcome may be
 an active request or an interrupted request awaiting its durable lease. A saturated
 single-second historical window remains unresolved while recent samples continue.
 These fields do not certify that a relay possesses or returned every matching event.
+
+Before enabling relay intake, run `lightning-goats-cashud probe-relays
+/protected/wallet.json` using the reviewed relay and mint configuration. It uses
+the native WSS transport and the project recipient and mint filters over the
+last five minutes, with at most four verified events per relay. It works with
+receiving disabled and a missing wallet directory. The report contains a
+count and a completion outcome per relay. A completed subscription shows the
+relay returned `EOSE`. It can be empty. Partial, saturated and unavailable
+queries have distinct outcomes. The probe does not publish an event, retain
+proofs or advance a cursor.
 
 ## Separate Cashu signing broker
 

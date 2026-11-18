@@ -77,7 +77,7 @@ def read_exact(reader, count):
     return value
 
 
-def subscription(stream, recipient, mint, created_at):
+def subscription(stream, recipient, mint, created_at, limit=16):
     with stream.makefile('rb') as reader:
         if reader.readline(1024) != b'GET / HTTP/1.1\r\n':
             raise ValueError('unexpected relay upgrade route')
@@ -113,7 +113,7 @@ def subscription(stream, recipient, mint, created_at):
     label, request_id, selectors = request
     if (label != 'REQ' or str(uuid.UUID(request_id)) != request_id
             or selectors['kinds'] != [9321] or selectors['#p'] != [recipient]
-            or selectors['#u'] != [mint] or selectors['limit'] != 16
+            or selectors['#u'] != [mint] or selectors['limit'] != limit
             or not selectors['since'] <= created_at <= selectors['until']):
         raise ValueError('wallet sent an unexpected subscription')
     return request_id
@@ -140,15 +140,17 @@ def answer(listener, context, events, phase):
         with stream:
             if phase in ('untrusted', 'wrong-host'):
                 raise ValueError(f'{phase} certificate unexpectedly authenticated')
-            event_name = {'interrupted': 'first', 'replay': 'replay', 'after-credit': 'after_credit'}
+            event_name = {'interrupted': 'first', 'replay': 'replay', 'after-credit': 'after_credit',
+                          'probe-complete': 'first', 'probe-incomplete': 'first'}
             proof = events[event_name[phase]]
-            token = subscription(stream, events['recipient'], events['mint'], proof['created_at'])
+            token = subscription(stream, events['recipient'], events['mint'], proof['created_at'],
+                                 limit=4 if phase.startswith('probe-') else 16)
             if phase == 'replay':
                 send(stream, ['EVENT', token, {**events['first'], 'sig': '00' * 64}])
                 send(stream, ['EVENT', str(uuid.uuid4()), events['first']])
             send(stream, ['EVENT', token, proof])
             send(stream, ['EVENT', token, proof])
-            if phase != 'interrupted':
+            if phase not in ('interrupted', 'probe-incomplete'):
                 send(stream, ['EOSE', token])
             stream.sendall(b'\x88\x02\x03\xe8')
 
@@ -267,6 +269,41 @@ def verify_core_receipt(root, command, binaries, settings, events, operation, se
     return committed
 
 
+def verify_read_only_probe(root, command, wallet_uid, wallet, settings, events, authority, context):
+    state = root / 'uninitialized-probe-state'
+    config = root / 'probe-wallet.json'
+    config.write_text(json.dumps({
+        **settings, 'state_directory': str(state), 'receive_nutzap': False,
+        'relay_intake': {**settings['relay_intake'], 'enabled': False},
+    }))
+    config.chmod(0o644)
+    env = {**ENV, 'SSL_CERT_FILE': str(authority), 'SSL_CERT_DIR': str(root / 'empty')}
+    for expected in ('complete', 'incomplete'):
+        with socket.socket() as listener:
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            listener.bind((ADDRESS, 443))
+            listener.listen(1)
+            listener.settimeout(10)
+            with subprocess.Popen(command(wallet_uid, wallet, 'probe-relays', config),
+                                  env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE, text=True) as process:
+                try:
+                    answer(listener, context, events, 'probe-' + expected)
+                    output, _ = process.communicate(timeout=10)
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                        process.communicate(timeout=5)
+        if process.returncode or state.exists():
+            raise ValueError('offline probe failed or opened wallet state')
+        report = json.loads(output)
+        if (report['version'] != 1 or report['limit'] != 4
+                or report['until'] - report['since'] != 300
+                or report['relays'] != [{'relay': f'wss://{HOST}/', 'outcome': expected, 'verified_events': 1}]
+                or events['first']['id'] in output or events['first']['pubkey'] in output):
+            raise ValueError('relay probe did not retain its bounded and private report')
+
+
 def selected(path, target):
     path = path.resolve(strict=True)
     if not path.is_file() or not 0 < path.stat().st_size <= 512 * 1024**2:
@@ -330,6 +367,7 @@ def rehearse(root, args):
         'relay_intake': {'enabled': True, 'relays': [f'wss://{HOST}'], 'historical_floor': events['first']['created_at'],
                          'window_seconds': 60, 'overlap_seconds': 5, 'event_limit': 16},
     }
+    verify_read_only_probe(root, command, wallet_uid, wallet, settings, events, authority, context)
     config.write_text(json.dumps(settings))
     run(command(wallet_uid, wallet, 'initialize', config))
     database = state / 'acquisition.sqlite'
@@ -383,6 +421,7 @@ def rehearse(root, args):
         raise ValueError('restarted wallet did not bind all event IDs to the same acquisition')
     return {'result': 'CASHU_NATIVE_WSS_INTAKE_VERIFIED', 'artifacts_sha256': artifacts,
             'real_tls_websocket': True, 'untrusted_certificate_refused': True, 'wrong_hostname_refused': True,
+            'probe_without_wallet_state': True, 'probe_reports_complete_and_incomplete': True,
             'interrupted_batch_retains_admission': True, 'restart_replay_same_acquisition': True,
             'acquisitions': 1, 'event_aliases': 3, 'external_network': False,
             'cdk_swaps': 1, 'gross_sats': 8, 'receive_fee_sats': 1, 'credited_sats': 7, 'payment_events': 1,

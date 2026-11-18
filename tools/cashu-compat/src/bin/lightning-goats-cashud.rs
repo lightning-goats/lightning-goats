@@ -12,6 +12,7 @@ const USAGE: &str = "Usage: lightning-goats-cashud <check-config|initialize|run|
        lightning-goats-cashud cleanup-treasury <config.json> <approval.json>\n\
        lightning-goats-cashud review-mint-policy <current.json> <candidate.json>\n\
        lightning-goats-cashud probe-mint <config.json> <mint-id>\n\
+       lightning-goats-cashud probe-relays <config.json>\n\
        lightning-goats-cashud prepare-announcement <config.json> <operation-uuid>\n\
        lightning-goats-cashud prepare-request <config.json> <https-endpoint> <creqA|creqB>\n\
 check-config  Validate protected configuration without opening wallet state or keys.\n\
@@ -24,6 +25,7 @@ reconcile-treasury  Check one original submitted melt and retain its wallet repo
 cleanup-treasury  Verify and clean up one previously reported melt.\n\
 review-mint-policy  Review a protected mint-only change against the stopped wallet.\n\
 probe-mint    Check public mint capabilities and pinned keys by HTTPS GET.\n\
+probe-relays  Observe a short public Nutzap subscription without opening wallet state.\n\
 prepare-announcement  Offline: retain and preview configured kind 10019; no workers started.\n\
 prepare-request  Offline: preview a reusable request; no keys, state or network opened.\n\
 Receiving, relay intake, acquisition, receipt delivery and treasury execution default off.\n\
@@ -41,6 +43,7 @@ enum Command {
     Treasury(Purpose, PathBuf, PathBuf),
     ReviewMintPolicy(PathBuf, PathBuf),
     ProbeMint(PathBuf, String),
+    ProbeRelays(PathBuf),
     PrepareAnnouncement(PathBuf, uuid::Uuid),
     PrepareRequest(PathBuf, String, Encoding),
 }
@@ -122,6 +125,7 @@ fn parse(args: Vec<OsString>) -> Result<Command, ()> {
         Some("initialize") => Ok(Command::Initialize(path)),
         Some("run") => Ok(Command::Run(path)),
         Some("status") => Ok(Command::Status(path)),
+        Some("probe-relays") => Ok(Command::ProbeRelays(path)),
         Some("recovery-paused") => Ok(Command::RecoveryPaused(path)),
         _ => Err(()),
     }
@@ -152,6 +156,20 @@ async fn execute(command: Command) -> Result<(), &'static str> {
             println!(
                 "{}",
                 serde_json::to_string(&report).map_err(|_| "mint probe report encoding failed")?
+            );
+        }
+        Command::ProbeRelays(path) => {
+            let config = Config::load(&path).map_err(|_| "wallet configuration rejected")?;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|_| "wallet clock unavailable")?
+                .as_secs();
+            let report = lightning_goats_cashu_compat::relay_intake::probe(&config, now)
+                .await
+                .map_err(|_| "public relay probe rejected; inspect the configured relays and mint policies")?;
+            println!(
+                "{}",
+                serde_json::to_string(&report).map_err(|_| "relay probe report encoding failed")?
             );
         }
         Command::PrepareRequest(path, endpoint, encoding) => {
@@ -382,6 +400,10 @@ mod tests {
             parse(args(&["initialize", "/fixture/config.json"])),
             Ok(Command::Initialize("/fixture/config.json".into()))
         );
+        assert_eq!(
+            parse(args(&["probe-relays", "/fixture/config.json"])),
+            Ok(Command::ProbeRelays("/fixture/config.json".into()))
+        );
         for values in [
             vec![],
             vec!["run"],
@@ -393,6 +415,7 @@ mod tests {
             vec!["initialize", ""],
             vec!["probe-mint", "file"],
             vec!["probe-mint", "file", ""],
+            vec!["probe-relays", "file", "wss://other.example"],
             vec!["--help", "extra"],
             vec!["run", "file", "extra"],
             vec!["pay", "invoice"],

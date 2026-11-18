@@ -196,6 +196,35 @@ credential directory/file must be root- or runtime-owned; parent directories
 must be root-owned and not group/other writable. The derived client public key
 must match `nak.client_pubkey` and differ from the project owner.
 
+Use the authenticated VPS upgrade launcher for the dedicated credential once
+credential preparation is approved. Keep the wallet and signer masked. Pass
+the existing Nostr client public keys with repeated `--reserved-pubkey` flags
+to keep the Cashu client separate from those roles.
+
+```sh
+sudo /usr/bin/python3 -I -S -B "$launcher" "$tool_sha256" \
+  --cashu-signer-client prepare "$review_directory" \
+  --project-pubkey "$project_pubkey" --reserved-pubkey "$core_client_pubkey" \
+  --prepare-client-key
+```
+
+The directory must be a private direct child of
+`/var/lib/lightning-goats-upgrades`. The launcher stages host-encrypted
+ciphertext and returns the client public key and review digest. Use that public
+key in `nak.client_pubkey` and in the household bunker's `--cashu-client`
+scope. After approval of the reviewed credential, install the exact ciphertext
+on the same host:
+
+```sh
+sudo /usr/bin/python3 -I -S -B "$launcher" "$tool_sha256" \
+  --cashu-signer-client install "$review_directory" \
+  --review-sha256 "$review_sha256" --install-reviewed-key
+```
+
+The launcher only installs the encrypted credential source. The unit stays
+masked, and the offline credential and remote bunker checks remain separate
+steps.
+
 The service uses fixed self-encryption and typed 10019/7376 signing operations.
 It does not publish to relays directly, expose arbitrary signing, generate keys,
 initialize missing state during `run`, or hold wallet seed/proof custody. SIGTERM

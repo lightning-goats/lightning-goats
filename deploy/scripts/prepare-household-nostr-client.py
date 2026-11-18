@@ -34,28 +34,34 @@ def run(args, *, data=None, environment=None):
     return result.stdout
 
 
-def prepare(target=TARGET):
+def prepare(target=TARGET, *, credential_name='nostr-client-key', forbidden=(), create=True):
     if os.geteuid() != 0:
         raise ValueError('run as root')
     os.umask(0o077)
     protected(NAK)
     if hashlib.sha256(NAK.read_bytes()).hexdigest() != DIGEST:
         raise ValueError('pinned nak digest mismatch')
-    protected(STORE, directory=True)
-    with tempfile.TemporaryDirectory(prefix='.nostr-client-', dir=STORE) as temporary:
+    store = target.parent
+    if re.fullmatch('[a-z0-9-]{1,64}', credential_name) is None:
+        raise ValueError('invalid systemd credential name')
+    credential_option = '--name=' + credential_name
+    protected(store, directory=True)
+    with tempfile.TemporaryDirectory(prefix='.nostr-client-', dir=store) as temporary:
         temporary = Path(temporary)
         clean_env = {'PATH': '/usr/bin:/bin', 'NO_COLOR': '1'}
         created = not target.exists() and not target.is_symlink()
         if created:
+            if not create:
+                raise ValueError('existing encrypted client credential required')
             key = run([str(NAK), '--config-path', str(temporary / 'cache'),
                        'key', 'generate'], environment=clean_env).strip()
             if not re.fullmatch(rb'[0-9a-f]{64}', key):
                 raise ValueError('nak generated an invalid client key')
             encrypted = temporary / 'encrypted'
             run(['systemd-creds', 'encrypt', '--with-key=host',
-                 '--name=nostr-client-key', '-', str(encrypted)], data=key + b'\n')
+                 credential_option, '-', str(encrypted)], data=key + b'\n')
             encrypted.chmod(0o600)
-            checked = run(['systemd-creds', 'decrypt', '--name=nostr-client-key',
+            checked = run(['systemd-creds', 'decrypt', credential_option,
                            str(encrypted), '-']).strip()
             if checked != key:
                 raise ValueError('encrypted credential readback mismatch')
@@ -63,7 +69,7 @@ def prepare(target=TARGET):
             metadata = protected(target)
             if stat.S_IMODE(metadata.st_mode) != 0o600:
                 raise ValueError('existing client credential must be mode 0600')
-            key = run(['systemd-creds', 'decrypt', '--name=nostr-client-key',
+            key = run(['systemd-creds', 'decrypt', credential_option,
                        str(target), '-']).strip()
         if not re.fullmatch(rb'[0-9a-f]{64}', key):
             raise ValueError('client credential is not a valid hex private key')
@@ -72,6 +78,8 @@ def prepare(target=TARGET):
                      environment=clean_env).strip().decode()
         if not re.fullmatch(r'[0-9a-f]{64}', public):
             raise ValueError('invalid client public key')
+        if public in forbidden:
+            raise ValueError('client public key overlaps a reserved role')
         if created:
             # Exclusive installation: a concurrent existing key is never replaced.
             descriptor = os.open(encrypted, os.O_RDONLY | os.O_NOFOLLOW)
@@ -86,7 +94,7 @@ def prepare(target=TARGET):
                   'credential': str(target), 'services_changed': False,
                   'events_published': 0}
     # Sync after task-owned temporary links/cache have also been removed.
-    descriptor = os.open(STORE, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    descriptor = os.open(store, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
         os.fsync(descriptor)
     finally:

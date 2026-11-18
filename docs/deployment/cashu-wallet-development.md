@@ -904,6 +904,42 @@ existing capabilities. Retain admitted state and the applicable keys across
 rotation. When changing the receiving key, include the old compressed public
 key as `receiving_key` on each retired descriptor that used it.
 
+### Provisioning the first wallet seed and receiving key
+
+With approval to prepare the first wallet, use the authenticated VPS launcher
+while the Cashu services are masked and the wallet state directory is absent.
+Use the dedicated operator-staged seed file. The launcher requires the
+operator's private 64-byte `wallet-seed.bin` produced by the seed tool. It
+generates a dedicated secp256k1 receiving key using the pinned local nak. Pass
+any existing client public keys with repeated `--reserved-pubkey` flags.
+
+```sh
+sudo /usr/bin/python3 -I -S -B "$launcher" "$tool_sha256" \
+  --cashu-wallet-keys prepare "$wallet_key_review" \
+  --seed-source "$seed_file" --seed-user "$seed_user" \
+  --project-pubkey "$project_pubkey" --prepare-wallet-keys
+```
+
+Keep the review in a private direct child of
+`/var/lib/lightning-goats-upgrades`. Preparation seals the pair in same-host
+systemd encryption and returns the compressed receiving public key and a
+review digest. Use the compressed key in the wallet config and its x-only form
+in signer policy. After installation approval, publish the exact reviewed pair.
+
+```sh
+sudo /usr/bin/python3 -I -S -B "$launcher" "$tool_sha256" \
+  --cashu-wallet-keys install "$wallet_key_review" \
+  --review-sha256 "$wallet_key_review_sha256" --install-reviewed-wallet-keys
+```
+
+Installation creates the private `/var/lib/lightning-goats-cashu` directory
+with the two raw key files in one publication. A retry accepts the same pair
+while the directory contains only those keys. A pre-existing wallet with
+journals is handled through the separate recovery or rotation procedures.
+Keep both services masked while validating configuration and before the
+separate journal initialization step. Back up the receiving key through the
+coordinated encrypted backup workflow before accepting nutzaps.
+
 ### Rotating a receiving key
 
 Keep the existing `wallet-seed.bin` and `receiving-key.bin` in place. The

@@ -18,6 +18,7 @@ FILES = (
     'prepare-cyberherd-payout-key.py',
     'prepare-cyberherd-nostr-clients.py', 'prepare-household-nostr-client.py',
     'prepare-cashu-signer-client.py',
+    'prepare-cashu-wallet-keys.py',
     'qualify-cyberherd-installed.py',
     'qualify-cyberherd-workers.py',
     'stage-cyberherd-overlay.py',

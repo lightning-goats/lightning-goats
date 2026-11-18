@@ -64,6 +64,8 @@ class ToolLaunchTests(unittest.TestCase):
             self.assertIn('--core-client-pubkey', run(ok=True).stdout)
             command[6:] = ['--cashu-signer-client', 'install', '--help']
             self.assertIn('--review-sha256', run(ok=True).stdout)
+            command[6:] = ['--cashu-wallet-keys', 'prepare', '--help']
+            self.assertIn('--seed-source', run(ok=True).stdout)
             command[6:] = ['--cyberherd-qualify', '--help']
             self.assertIn('--probe-disabled-roles', run(ok=True).stdout)
             command[6:] = ['--cyberherd-workers', '--help']

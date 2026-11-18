@@ -432,6 +432,47 @@ Mint-reported unspent value is an observation of those points. Continue to
 verify ownership, old and newly discovered operations, database history, and
 external accounting before any restore or resumption decision.
 
+### Compare custody across the entire wallet checkpoint
+
+Inventory the selected checkpoint before gathering custody evidence. This
+includes every retained mint namespace, including empty namespaces and mints
+with receiving disabled. The shared legacy CDK store must have no retained
+proofs or wallet operations.
+
+```sh
+/usr/bin/python3 -I -S -B ROOT_CAPSULE/launch-cashu-backup.py TOOL_SHA256 review \
+  STAGED_DIRECTORY STAGED_RECEIPT_SHA256 --custody-inventory \
+  --output NEW_PRIVATE_CUSTODY_INVENTORY
+```
+
+Generate selections and native observation files for each namespace in that
+inventory using the preceding commands. Include the observation for an empty
+namespace. Its native observer succeeds without a mint request. Supply the
+complete ordered set of observation files per mint to `reconcile` using the
+`custody_all` field in place of `custody`.
+
+```json
+{
+  "version": 1,
+  "treasury": null,
+  "feeder": null,
+  "custody_all": {
+    "staged_receipt_sha256": "STAGED_RECEIPT_SHA256",
+    "mints": {
+      "first-mint": [{"file": "first-page-1.json", "sha256": "FIRST_OBSERVATION_SHA256"}],
+      "second-mint": [{"file": "second-page-1.json", "sha256": "SECOND_OBSERVATION_SHA256"}]
+    }
+  }
+}
+```
+
+The comparison independently derives the complete mint set from the selected
+wallet journal and verified images. It refuses omitted namespaces, unknown
+stores, incomplete initialization, and missing or mismatched pages. The
+report retains per-mint results, aggregate sat totals and the time range of
+the observations. These are separate reads made during that range. The
+report preserves every fence and keeps resumption unauthorized.
+
 ## Install the fenced images on a recovery host
 
 Use the exact recovered configuration, runtime UIDs and GIDs, and independently

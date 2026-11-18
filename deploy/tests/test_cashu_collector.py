@@ -49,6 +49,9 @@ class RecoveryWorklistTests(unittest.TestCase):
             store.execute("UPDATE proof SET mint_url='https://foreign.example' WHERE y=?", (points[129],))
             with self.assertRaisesRegex(ValueError, 'original sat mint namespace'):
                 page(store, 'mint-name', url, 'fixture-checkpoint', '11' * 32, '22' * 32)
+            store.execute("UPDATE proof SET mint_url=?,unit=NULL WHERE state='UNSPENT'", (url,))
+            with self.assertRaisesRegex(ValueError, 'original sat mint namespace'):
+                page(store, 'mint-name', url, 'fixture-checkpoint', '11' * 32, '22' * 32)
 
     def test_recovery_keeps_missing_later_id_and_pages_after_original_id(self):
         older = [{'id': 'a', 'receive_id': None}, {'id': 'b', 'receive_id': 'strike-b'}]
@@ -193,12 +196,14 @@ class CollectorTests(unittest.TestCase):
 
     def test_custody_comparison_requires_every_page_in_checkpoint_order(self):
         mint, url, stage = 'mint-name', 'https://mint.example/Bitcoin', '11' * 32
+        retired, retired_url = 'retired-mint', 'https://retired.example'
         checkpoint = '10000000-0000-4000-8000-000000000001'
         journal = self.root / 'acquisition.sqlite'
         path = self.root / REVIEW['mint_store_name'](mint, MODULE)
         with closing(sqlite3.connect(journal)) as db:
+            db.executescript('CREATE TABLE cdk_storage_layout(singleton,version); INSERT INTO cdk_storage_layout VALUES(1,1);')
             db.execute('CREATE TABLE cdk_mint_namespaces(mint_id,mint_url,ready)')
-            db.execute('INSERT INTO cdk_mint_namespaces VALUES(?,?,1)', (mint,url))
+            db.executemany('INSERT INTO cdk_mint_namespaces VALUES(?,?,1)', [(mint,url), (retired,retired_url)])
             db.commit()
         with closing(sqlite3.connect(path)) as db:
             db.execute('CREATE TABLE lg_mint_namespace(singleton,mint_id,mint_url)')
@@ -239,6 +244,56 @@ class CollectorTests(unittest.TestCase):
             compare(observations[:1])
         with self.assertRaisesRegex(ValueError, 'exact retained original selection'):
             compare(observations[::-1])
+
+        second = self.root / REVIEW['mint_store_name'](retired, MODULE)
+        with closing(sqlite3.connect(second)) as db:
+            db.executescript('CREATE TABLE lg_mint_namespace(singleton,mint_id,mint_url);'
+                             'CREATE TABLE proof(y BLOB PRIMARY KEY,amount INTEGER,state TEXT,mint_url TEXT,unit TEXT);')
+            db.execute('INSERT INTO lg_mint_namespace VALUES(1,?,?)', (retired, retired_url))
+            db.execute('INSERT INTO proof VALUES(?,16,?,?,?)', (b'\x03' + bytes(32), 'UNSPENT', retired_url, 'sat'))
+            db.commit()
+        legacy = self.root / 'wallet.sqlite'
+        with closing(sqlite3.connect(legacy)) as db:
+            db.executescript('CREATE TABLE proof(y); CREATE TABLE wallet_sagas(id);')
+        for database in (legacy, second):
+            database.chmod(0o600)
+        files = {file.name: MODULE['sha'](file.read_bytes()) for file in (journal, legacy, path, second)}
+        with REVIEW['open_custody_store'](journal, retired, files[second.name], MODULE, self.budget) as (db, original):
+            page = REVIEW['custody_page'](db, retired, original, checkpoint, stage, files[second.name])
+        retired_report = {**page, **RECONCILE['NO_AUTHORITY'], 'result': RECONCILE['RESULTS']['custody'],
+                          'selection_sha256': MODULE['sha'](MODULE['json_bytes'](page)), 'queried_mint': True,
+                          'observed_at': 130, 'proofs': [{**p, 'mint_state': 'UNSPENT'} for p in page['proofs']],
+                          'mint_unspent_sats': 16, 'mint_spent_sats': 0, 'mint_unresolved_sats': 0,
+                          'stale_local_unspent_sats': 0}
+        raw = MODULE['json_bytes'](retired_report)
+        observation = {'file': self.source('retired.json', raw).name, 'sha256': MODULE['sha'](raw)}
+
+        def compare_all(entries, source=None):
+            return RECONCILE['compare_custody_all']({'staged_receipt_sha256': stage, 'mints': entries},
+                self.root, {stage: (checkpoint, None, None)}, (journal, files if source is None else source),
+                MODULE, self.budget)
+
+        entries = {mint: observations, retired: [observation]}
+        report = compare_all(entries)
+        self.assertEqual(report['mint_namespaces_compared'], 2)
+        self.assertEqual(report['selected_count'], 130)
+        self.assertEqual(report['mint_unspent_sats'], 16)
+        self.assertEqual(report['stale_local_unspent_sats'], 128)
+        self.assertEqual(report['mint_unresolved_sats'], 1)
+        self.assertEqual((report['observed_from'], report['observed_through']), (123, 130))
+        with self.assertRaisesRegex(ValueError, 'cover every retained mint'):
+            compare_all({mint: observations})
+        with self.assertRaisesRegex(ValueError, 'exact retained original selection'):
+            compare_all({mint: observations, retired: observations})
+        with self.assertRaisesRegex(ValueError, 'unbound mint store'):
+            compare_all(entries, {**files, 'mint-unknown.sqlite': '00' * 32})
+        with self.assertRaisesRegex(ValueError, 'missing, duplicate or unfinished retained mint namespace'):
+            compare_all(entries, {key: value for key, value in files.items() if key != second.name})
+        with closing(sqlite3.connect(legacy)) as db:
+            db.execute('INSERT INTO proof VALUES(1)')
+            db.commit()
+        with self.assertRaisesRegex(ValueError, 'legacy shared-store custody requires reconciliation'):
+            compare_all(entries, {**files, legacy.name: MODULE['sha'](legacy.read_bytes())})
 
     def source(self,name='input',raw=b'disposable bytes',mode=0o600):
         p=self.root/name;p.write_bytes(raw);p.chmod(mode);return p

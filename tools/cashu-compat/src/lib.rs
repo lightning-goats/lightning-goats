@@ -7,6 +7,7 @@ pub mod journal;
 pub mod melt_derivation;
 pub mod melt_reconciliation;
 pub mod mint_policy;
+pub mod mint_probe;
 pub mod operation_gate;
 pub mod ownership;
 pub mod restore_mint;

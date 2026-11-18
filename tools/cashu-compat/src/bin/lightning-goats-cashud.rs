@@ -11,6 +11,7 @@ const USAGE: &str = "Usage: lightning-goats-cashud <check-config|initialize|run|
        lightning-goats-cashud reconcile-treasury <config.json> <approval.json>\n\
        lightning-goats-cashud cleanup-treasury <config.json> <approval.json>\n\
        lightning-goats-cashud review-mint-policy <current.json> <candidate.json>\n\
+       lightning-goats-cashud probe-mint <config.json> <mint-id>\n\
        lightning-goats-cashud prepare-announcement <config.json> <operation-uuid>\n\
        lightning-goats-cashud prepare-request <config.json> <https-endpoint> <creqA|creqB>\n\
 check-config  Validate protected configuration without opening wallet state or keys.\n\
@@ -22,6 +23,7 @@ reconcile-acquisition  Check one approved original acquisition; no swap/melt rep
 reconcile-treasury  Check one original submitted melt and retain its wallet report.\n\
 cleanup-treasury  Verify and clean up one previously reported melt.\n\
 review-mint-policy  Review a protected mint-only change against the stopped wallet.\n\
+probe-mint    Check public mint capabilities and pinned keys by HTTPS GET.\n\
 prepare-announcement  Offline: retain and preview configured kind 10019; no workers started.\n\
 prepare-request  Offline: preview a reusable request; no keys, state or network opened.\n\
 Receiving, relay intake, acquisition, receipt delivery and treasury execution default off.\n\
@@ -38,6 +40,7 @@ enum Command {
     ReconcileAcquisition(PathBuf, PathBuf),
     Treasury(Purpose, PathBuf, PathBuf),
     ReviewMintPolicy(PathBuf, PathBuf),
+    ProbeMint(PathBuf, String),
     PrepareAnnouncement(PathBuf, uuid::Uuid),
     PrepareRequest(PathBuf, String, Encoding),
 }
@@ -45,6 +48,13 @@ enum Command {
 fn parse(args: Vec<OsString>) -> Result<Command, ()> {
     if args.len() == 1 && (args[0] == "--help" || args[0] == "-h") {
         return Ok(Command::Help);
+    }
+    if args.len() == 3 && args[0] == "probe-mint" && !args[1].is_empty() {
+        let id = args[2].to_str().ok_or(())?;
+        if id.is_empty() || id.len() > 128 {
+            return Err(());
+        }
+        return Ok(Command::ProbeMint(PathBuf::from(&args[1]), id.into()));
     }
     if args.len() == 3
         && args[0] == "review-mint-policy"
@@ -133,6 +143,16 @@ async fn execute(command: Command) -> Result<(), &'static str> {
         Command::Check(path) => {
             Config::load(&path).map_err(|_| "wallet configuration rejected")?;
             println!("Wallet configuration valid; state and keys not opened.");
+        }
+        Command::ProbeMint(path, id) => {
+            let config = Config::load(&path).map_err(|_| "wallet configuration rejected")?;
+            let report = lightning_goats_cashu_compat::mint_probe::probe(&config, &id)
+                .await
+                .map_err(|_| "public mint probe rejected; inspect HTTPS, advertised capabilities and pinned keysets")?;
+            println!(
+                "{}",
+                serde_json::to_string(&report).map_err(|_| "mint probe report encoding failed")?
+            );
         }
         Command::PrepareRequest(path, endpoint, encoding) => {
             let config = Config::load(&path).map_err(|_| "wallet configuration rejected")?;
@@ -352,6 +372,13 @@ mod tests {
             Ok(Command::Check("/fixture/config.json".into()))
         );
         assert_eq!(
+            parse(args(&["probe-mint", "/fixture/config.json", "minibits"])),
+            Ok(Command::ProbeMint(
+                "/fixture/config.json".into(),
+                "minibits".into()
+            ))
+        );
+        assert_eq!(
             parse(args(&["initialize", "/fixture/config.json"])),
             Ok(Command::Initialize("/fixture/config.json".into()))
         );
@@ -364,6 +391,8 @@ mod tests {
             vec!["reconcile-acquisition", "file", ""],
             vec!["reconcile-acquisition", "file", "approval", "--clear-hold"],
             vec!["initialize", ""],
+            vec!["probe-mint", "file"],
+            vec!["probe-mint", "file", ""],
             vec!["--help", "extra"],
             vec!["run", "file", "extra"],
             vec!["pay", "invoice"],

@@ -21,6 +21,7 @@ requires an explicit operation UUID:
 | --- | --- |
 | `--help` | Print the command contract; no wallet state access. |
 | `check-config <path>` | Validate bounded root-owned protected JSON and policy; no keys, databases, listener or mint request. |
+| `probe-mint <path> <mint-id>` | Verify public capabilities and pinned keysets over the wallet's native HTTPS transport using only GET requests. |
 | `initialize <path>` | Under the registered non-admin runtime UID, load existing private keys, require absent database files/sidecars, and create registered wallet databases. Does not start intake or acquisition. |
 | `status <path>` | Read a private, bounded JSON journal summary under the registered runtime UID, without loading keys or acquiring the writer lock. |
 | `run <path>` | Under the registered runtime UID, require existing registered databases and keys, then run private intake, optional treasury admission/status, and configured acquisition, receipt, relay, signing and publication workers. Never initialize missing databases. |
@@ -913,10 +914,10 @@ No production schema, service or wallet has been changed by this source work.
 
 The selected mint is exactly `https://mint.minibits.cash/Bitcoin` (including
 path/case). The operator already uses Minibits on Android for ordinary Cashu.
-Amethyst v1.21.0 is the candidate for Android NIP-61 testing, based on its
+The operator reported Minibits build `eefdfb9e0` and Amethyst v1.21.0 for
+Android testing. Amethyst advertises NIP-61 in its
 [official supported-feature list](https://github.com/vitorpamplona/amethyst/blob/v1.21.0/README.md).
-Actual installed client versions and end-to-end compatibility remain to be
-recorded; no client installation is part of this selection.
+End-to-end compatibility on the phone is still pending.
 
 Operator direction requires Cashu settlement into the existing Strike Lightning
 wallet as part of the feeding flow, independently verified before dispatch.
@@ -926,14 +927,20 @@ No extra mint, age-based sweep policy, exposure/fee limits or live activation ha
 been approved by this selection.
 
 [Public Minibits discovery](../testing/cashu-minibits-public-discovery-20261116.json)
-records read-only info/keysets/keys, advertised CDK0.18.3, sat Lightning melt,
-P2PK/DLEQ and recovery/cache capabilities. Advertisement is not funded mint
-qualification. No invoice, swap, melt, service change or physical action was
-requested. The operator-facing checklist is
+records public capability and keyset discovery. Run
+`lightning-goats-cashud probe-mint /protected/wallet.json minibits` to check the
+mint from a deployment candidate. The command reports the advertised sat BOLT11
+melt limits and checks the advertised proof-state, recovery, P2PK and DLEQ
+capabilities. It verifies the ID, fee metadata and pinned public keys for each
+configured keyset. It fails if
+an active sat keyset is unpinned or the inventory changes during the check. It
+uses only public HTTPS endpoints and opens no keys or wallet state. Funded swap,
+melt and Android wallet tests are separate acceptance steps. See the checklist at
 `/home/linuxuser/lightning-goats/CASHU-GO-LIVE-INPUTS.txt`.
 
-The operator will create a new, separate Nostr identity for nutzap testing in
-Amethyst. Acceptance records need only its public npub and installed app version.
+The operator provided the public npub of the separate Nostr identity for NutZap
+testing in Amethyst. Acceptance records need only the public npub and installed
+app version.
 This does not authorize sharing/reusing the Lightning Goats signer identity.
 The phone/signer retains the private key; a remote-signer bunker connection is
 needed only if that test identity is held in a remote signer.

@@ -192,6 +192,15 @@ jobs:
         with:
           name: cashu-review-${{ github.sha }}
           path: ${{ runner.temp }}/cashu-review
+      - name: Exercise the Cashu egress policy in disposable namespaces
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v nft >/dev/null; then
+            sudo --preserve-env=GITHUB_ACTIONS,RUNNER_OS bash deploy/scripts/configure-ci-apt-mirrors.sh
+            sudo apt-get update && sudo apt-get install -y nftables
+          fi
+          sudo unshare --net -- env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin python3 -B deploy/nftables/test-cashu-egress.py | tee "$RUNNER_TEMP/CASHU-EGRESS.json"
       - name: Rehearse installed Cashu startup, isolation and recovery fencing
         shell: bash
         run: |
@@ -213,13 +222,14 @@ jobs:
             --wallet-cli "$fixture/lightning-goats-cashud" --wallet-sha256 "$(sha256sum "$fixture/lightning-goats-cashud" | cut -d ' ' -f 1)" \
             --signer-cli "$fixture/lightning-goats-cashu-signerd" --signer-sha256 "$(sha256sum "$fixture/lightning-goats-cashu-signerd" | cut -d ' ' -f 1)" \
             --systemd-package "$archive" "$GITHUB_SHA" "$checksum" | tee "$RUNNER_TEMP/CASHU-SYSTEMD.json"
-          (cd "$RUNNER_TEMP" && sha256sum CASHU-SYSTEMD.json CASHU-CREDENTIAL-STORE.json > CASHU-SYSTEMD-SHA256SUMS)
+          (cd "$RUNNER_TEMP" && sha256sum CASHU-SYSTEMD.json CASHU-CREDENTIAL-STORE.json CASHU-EGRESS.json > CASHU-SYSTEMD-SHA256SUMS)
       - uses: actions/upload-artifact@v4
         with:
           name: cashu-systemd-${{ github.sha }}
           path: |
             ${{ runner.temp }}/CASHU-SYSTEMD.json
             ${{ runner.temp }}/CASHU-CREDENTIAL-STORE.json
+            ${{ runner.temp }}/CASHU-EGRESS.json
             ${{ runner.temp }}/CASHU-SYSTEMD-SHA256SUMS
           if-no-files-found: error
           retention-days: 14

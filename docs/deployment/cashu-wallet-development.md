@@ -696,9 +696,40 @@ policy. Before live startup, prepare and test a reviewed override and host egres
 rules for selected public mint/relay endpoints and the exact resolver. Preserve
 IPv4/IPv6 denial of household/WireGuard/private/link-local/metadata routes; test
 DNS rebinding and redirects through the application's existing mint adapter.
-Do not remove the deny rule merely to make a startup test pass. Confirm systemd's
-IP filtering is supported/enforced on the target host; absence of a diagnostic
-is not network-containment evidence.
+Keep the base deny rule. Confirm systemd enforces IP filtering on the target
+host with positive and negative socket checks.
+
+The release includes an offline renderer for exact endpoint addresses. Use the
+actual numeric wallet and signer UIDs, the approved host uplink, the actual
+resolver addresses and the reviewed DNS answers for each role. The wallet list
+contains the configured mint and any approved WSS relay addresses. The signer
+list contains only the approved bunker relay addresses. Repeat the address
+options for each approved IPv4 or IPv6 answer. The resolver option also accepts
+the exact loopback address of a local stub.
+
+```sh
+python3 -I -S -B deploy/scripts/render-cashu-egress.py REVIEW_DIRECTORY \
+  --wallet-uid WALLET_UID --signer-uid SIGNER_UID --uplink UPLINK_NAME \
+  --resolver RESOLVER_IP --wallet-https MINT_IP --wallet-https WALLET_RELAY_IP \
+  --signer-https BUNKER_RELAY_IP
+```
+
+The three files form one candidate. The systemd drop-ins extend the base
+`IPAddressDeny=any` with exact addresses. `cashu-egress.nft` restricts those
+runtime UIDs to TCP 443 on the selected uplink and TCP/UDP 53 to each listed
+resolver. Loopback DNS uses only the named stub. A role with no HTTPS endpoint
+gets no network allowances. Other runtime UIDs and Unix IPC are outside this
+table. The renderer performs no DNS, firewall, service or provider operations.
+
+Review routes as well as addresses. A DNS change outside the reviewed set
+fails closed until the policy is updated. Sender relay discovery can also
+produce addresses outside the current wallet list. Delivery to those targets
+remains queued and requires an approved route. Mint TLS and path checks and
+the WSS relay validation still run inside the application. The hosted
+disposable egress test exercises actual nftables over isolated links with
+IPv4, IPv6 and DNS, and verifies a denial when a pinned address is routed
+over a different interface. Target installation and live operation remain
+separate steps under the production hold.
 
 Installed acceptance still requires real unit startup under the selected UID,
 positive/negative Unix peer access, denied state/secret reads, egress containment,

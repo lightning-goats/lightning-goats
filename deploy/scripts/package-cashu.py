@@ -47,6 +47,7 @@ PAYLOAD = (
         'cosmo', 'dexter', 'lightning', 'lightninggoatslogo1', 'newton', 'nova', 'rowan',
     )),
     'deploy/scripts/add-cashu-seed.py', 'deploy/scripts/prepare-cashu-backup-age.py',
+    'deploy/scripts/render-cashu-egress.py',
 )
 SHA = re.compile(r'[0-9a-f]{64}')
 RELEASE_ID = re.compile(r'[0-9a-f]{40}')

@@ -261,6 +261,11 @@ exported or credited require separate reconciliation. A hold recorded before
 submission retains its proof claims and stays held. Later disjoint payments
 at that mint can proceed when the journal has no evidence of submission for
 the held operation and the mint-scoped CDK store has no unfinished saga.
+The acquisition worker preserves the retry budget of payments waiting on
+that local recovery check. It can continue eligible work at another configured
+mint in the same tick. A fresh attempt is recorded durably before the mint
+request, with the existing custody limits checked again. Earlier recorded
+attempts retain their original counts.
 Keep `CASHU_RECOVERY_REQUIRED` in place on restored state.
 Private `status` prioritizes active holds and shows their coarse causes.
 

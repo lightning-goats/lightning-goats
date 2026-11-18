@@ -781,13 +781,42 @@ async fn pre_submission_hold_preserves_claims_without_blocking_disjoint_mint_wor
     {
         let mut journal = coordinator.journal.lock().unwrap();
         journal.prepare(first, b"retained pre-submission fixture request")?;
-        journal.hold(first, HoldReason::AmbiguousAcquisition)?;
     }
     let second = new_id(coordinator.admit(&harness.ordinary(
         harness.mint.issue("disjoint-after-hold".into()),
         "disjoint-after-hold",
     )?)?);
-    let received = receipt(coordinator.acquire_new(second, &harness.receiver).await?);
+    assert!(coordinator.prepare_new_acquisition(second).await.is_err());
+    let work = {
+        let mut journal = coordinator.journal.lock().unwrap();
+        journal.hold(first, HoldReason::AmbiguousAcquisition)?;
+        journal
+            .ready_acquisition_work(100, true, false, 1, Some(&["fixture"]))?
+            .into_iter()
+            .next()
+            .unwrap()
+    };
+    assert_eq!(work.id, second);
+    let prepared = coordinator.prepare_new_acquisition(second).await?.unwrap();
+    assert!(
+        coordinator
+            .journal
+            .lock()
+            .unwrap()
+            .charge_acquisition_work(&work, 100, 5)?
+    );
+    assert!(
+        !coordinator
+            .journal
+            .lock()
+            .unwrap()
+            .charge_acquisition_work(&work, 100, 5)?
+    );
+    let received = receipt(
+        coordinator
+            .submit_prepared_acquisition(prepared, |_| Ok(&harness.receiver))
+            .await?,
+    );
     assert_eq!(received.acquisition_id, second);
     assert_eq!(received.net_sats, 8);
     assert_eq!(coordinator.admit(&held)?, Admission::Duplicate(first));

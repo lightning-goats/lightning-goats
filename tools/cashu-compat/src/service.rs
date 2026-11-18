@@ -1036,6 +1036,110 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn scheduler_preserves_fenced_and_unconfigured_mint_attempts_across_restart() -> Result<()>
+    {
+        use crate::{
+            journal::{Admission, HoldReason, Transport, ValidatedIntake},
+            mint_policy::MintPolicy,
+            scheduler::{Tick, Worker},
+        };
+        use cdk::{nuts::Proof, secret::Secret};
+        let directory = crate::test_directory()?;
+        keys(directory.path())?;
+        let instance = Uuid::new_v4();
+        let epoch = Uuid::new_v4();
+        let make_config = || -> Result<Config> {
+            let mut config = configuration(directory.path(), instance, epoch)?;
+            config.execution.acquire = true;
+            config.execution.reconcile = true;
+            config.execution.maximum_attempts = 1;
+            config.mints = ["mint-a", "mint-b"]
+                .into_iter()
+                .map(|id| MintPolicy {
+                    id: id.into(),
+                    advertised_url: format!("https://{id}.example"),
+                    policy_version: "v1".into(),
+                    receive_cashu: false,
+                    receive_nutzap: false,
+                    bolt11_exit_qualified: true,
+                })
+                .collect();
+            config.custody_limits = Some(serde_json::from_value(serde_json::json!({
+                "maximum_total_sats": 100, "maximum_per_mint_sats": {"mint-a": 40, "mint-b": 40},
+            }))?);
+            Ok(config)
+        };
+        let runtime = Runtime::initialize(make_config()?).await?;
+        let (unconfigured, original, waiting, independent) = {
+            let mut journal = retained_fixture_journal(&runtime)?;
+            let mut retain = |mint: &str, name: &str| -> Result<Uuid> {
+                let proof = Proof::new(
+                    8.into(),
+                    "00deadbeef123456".parse()?,
+                    Secret::new(format!("synthetic-{name}")),
+                    runtime.policy.receiver,
+                );
+                match journal.admit(&ValidatedIntake {
+                    mint_id: mint,
+                    policy_version: "v1",
+                    transport: Transport::Cashu,
+                    source_ref: name,
+                    source_author: None,
+                    proofs: &[proof],
+                })? {
+                    Admission::New(id) => Ok(id),
+                    _ => anyhow::bail!("expected new synthetic work"),
+                }
+            };
+            let ids = (
+                retain("removed-mint", "unconfigured")?,
+                retain("mint-a", "original")?,
+                retain("mint-a", "waiting")?,
+                retain("mint-b", "independent")?,
+            );
+            journal.prepare(ids.1, b"original retained before submission")?;
+            assert!(
+                journal
+                    .claim_acquisition_work(90, false, true, 1, 5)?
+                    .is_some_and(|work| work.id == ids.1)
+            );
+            journal.prepare(ids.3, b"other mint original with no retained outputs")?;
+            journal.start_acquisition(ids.3)?;
+            ids
+        };
+        let db = rusqlite::Connection::open(directory.path().join("acquisition.sqlite"))?;
+        let attempts = |id: Uuid| -> Result<u32> {
+            Ok(db.query_row(
+                "SELECT COALESCE((SELECT attempts FROM acquisition_schedule WHERE acquisition_id=?),0)",
+                [id.to_string()], |row| row.get(0),
+            )?)
+        };
+        let mut worker = Worker::new(&runtime)?;
+        assert_eq!(worker.tick(100).await?, Tick::RetryRetained);
+        for now in [200, 300] {
+            assert_eq!(worker.tick(now).await?, Tick::Idle);
+            assert_eq!(attempts(waiting)?, 0);
+            assert_eq!(attempts(independent)?, 1);
+            assert_eq!(attempts(unconfigured)?, 0);
+        }
+        drop(worker);
+        drop(runtime);
+        let runtime = Runtime::open(make_config()?).await?;
+        let mut worker = Worker::new(&runtime)?;
+        assert_eq!(worker.tick(400).await?, Tick::Idle);
+        assert_eq!(attempts(waiting)?, 0);
+        let mut journal = runtime.journal.lock().unwrap();
+        journal.hold(original, HoldReason::AmbiguousAcquisition)?;
+        assert_eq!(
+            journal.ready_acquisition_work(401, true, true, 1, Some(&["mint-a", "mint-b"]))?[0].id,
+            waiting
+        );
+        assert_eq!(attempts(waiting)?, 0);
+        assert_eq!(attempts(unconfigured)?, 0);
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn startup_requires_explicit_initialization_and_preserves_registration_on_restart()
     -> Result<()> {
         let dir = crate::test_directory()?;

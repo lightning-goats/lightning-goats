@@ -45,7 +45,6 @@ pub enum Tick {
     Idle,
     Progress,
     RetryRetained,
-    UnconfiguredMint,
 }
 
 pub struct Worker<'a> {
@@ -106,46 +105,78 @@ impl<'a> Worker<'a> {
         })
     }
 
-    /// One durable claim, at most one operation, and no new attempt after timeout.
+    /// At most one durable attempt. A local recovery fence leaves the attempt
+    /// budget untouched and allows a candidate from a different mint to run.
     pub async fn tick(&mut self, now: i64) -> Result<Tick> {
         let config = &self.runtime.config;
-        let work = self
+        let started = tokio::time::Instant::now();
+        let configured: Vec<_> = self.coordinators.keys().map(String::as_str).collect();
+        let candidates = self
             .runtime
             .journal
             .lock()
             .map_err(|_| anyhow::anyhow!("wallet journal unavailable"))?
-            .claim_acquisition_work(
+            .ready_acquisition_work(
                 now,
                 config.execution.acquire,
                 config.execution.reconcile,
                 config.execution.maximum_attempts,
-                config.deadline_seconds,
+                Some(&configured),
             )?;
-        let Some(work) = work else {
-            return Ok(Tick::Idle);
-        };
-        let Some(coordinator) = self.coordinators.get_mut(&work.mint_id) else {
-            return Ok(Tick::UnconfiguredMint);
-        };
-        let result = tokio::time::timeout(Duration::from_secs(config.deadline_seconds), async {
-            if work.state == "validated" {
-                coordinator
-                    .acquire_with_receivers(work.id, |lock| self.runtime.keys.signing_key(lock))
-                    .await
-            } else if config.execution.original_swap_replay {
-                coordinator.recover_original(work.id).await
+        for work in candidates {
+            let coordinator = self
+                .coordinators
+                .get_mut(&work.mint_id)
+                .ok_or_else(|| anyhow::anyhow!("configured acquisition coordinator missing"))?;
+            let deadline =
+                tokio::time::Instant::now() + Duration::from_secs(config.deadline_seconds);
+            let prepared = if work.state == "validated" {
+                let Ok(Ok(Some(prepared))) =
+                    tokio::time::timeout_at(deadline, coordinator.prepare_new_acquisition(work.id))
+                        .await
+                else {
+                    continue;
+                };
+                Some(prepared)
             } else {
-                coordinator.reconcile_owned(work.id).await
+                None
+            };
+            let attempt_at = now
+                .checked_add(i64::try_from(started.elapsed().as_secs())?)
+                .ok_or_else(|| anyhow::anyhow!("acquisition schedule overflow"))?;
+            if tokio::time::Instant::now() >= deadline
+                || !self
+                    .runtime
+                    .journal
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("wallet journal unavailable"))?
+                    .charge_acquisition_work(&work, attempt_at, config.deadline_seconds)?
+            {
+                continue;
             }
-        })
-        .await;
-        Ok(match result {
-            Ok(Ok(
-                crate::acquisition::Progress::Acquired(_)
-                | crate::acquisition::Progress::Receipt(_),
-            )) => Tick::Progress,
-            _ => Tick::RetryRetained,
-        })
+            let result = tokio::time::timeout_at(deadline, async {
+                if let Some(prepared) = prepared {
+                    coordinator
+                        .submit_prepared_acquisition(prepared, |lock| {
+                            self.runtime.keys.signing_key(lock)
+                        })
+                        .await
+                } else if config.execution.original_swap_replay {
+                    coordinator.recover_original(work.id).await
+                } else {
+                    coordinator.reconcile_owned(work.id).await
+                }
+            })
+            .await;
+            return Ok(match result {
+                Ok(Ok(
+                    crate::acquisition::Progress::Acquired(_)
+                    | crate::acquisition::Progress::Receipt(_),
+                )) => Tick::Progress,
+                _ => Tick::RetryRetained,
+            });
+        }
+        Ok(Tick::Idle)
     }
 }
 

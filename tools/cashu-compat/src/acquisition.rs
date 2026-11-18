@@ -4,7 +4,7 @@ use crate::{
     intake::{PinnedKeys, ValidatedContribution},
     journal::{Admission, HoldReason, Journal, Receipt},
     mint_policy::MintPolicy,
-    operation_gate::OperationGate,
+    operation_gate::{OperationGate, OperationLease},
     ownership::verify_owned_outputs,
     transport::MintTransport,
     writer_lock::WriterLock,
@@ -42,6 +42,11 @@ pub enum Progress {
     Held(Uuid),
     Acquired(Uuid),
     Receipt(Box<Receipt>),
+}
+
+pub(crate) struct PreparedAcquisition {
+    id: Uuid,
+    _lease: OperationLease,
 }
 
 /// Seed ownership/zeroization belongs to protected configuration; this type only borrows it.
@@ -161,6 +166,18 @@ impl<T: Transport + 'static> Coordinator<'_, T> {
         if let Some(progress) = self.ready(id)? {
             return Ok(progress);
         }
+        let Some(prepared) = self.prepare_new_acquisition(id).await? else {
+            return Ok(Progress::Pending(id));
+        };
+        self.submit_prepared_acquisition(prepared, key_for).await
+    }
+
+    /// Local mint and wallet checks. The lease prevents another operation
+    /// from changing the checked recovery state before the scheduled attempt.
+    pub(crate) async fn prepare_new_acquisition(
+        &self,
+        id: Uuid,
+    ) -> Result<Option<PreparedAcquisition>> {
         ensure!(self.permissions.acquisition, "Cashu acquisition disabled");
         let state = self
             .journal
@@ -168,13 +185,26 @@ impl<T: Transport + 'static> Coordinator<'_, T> {
             .map_err(|_| anyhow::anyhow!("wallet journal unavailable"))?
             .state(id)?;
         if state != "validated" {
-            return Ok(Progress::Pending(id));
+            return Ok(None);
         }
         // Existing CDK work must be reconciled, even if a crash preceded the app hook.
         let sagas = self.database.get_incomplete_sagas().await?;
         if sagas.iter().any(|saga| saga.mint_url == self.mint_url) {
-            return Ok(Progress::Pending(id));
+            return Ok(None);
         }
+        let lease = self
+            .gate
+            .arm_new_acquisition(id, self.maximum_receive_fee_sats)
+            .await?;
+        Ok(Some(PreparedAcquisition { id, _lease: lease }))
+    }
+
+    pub(crate) async fn submit_prepared_acquisition<'key>(
+        &mut self,
+        prepared: PreparedAcquisition,
+        key_for: impl Fn(PublicKey) -> Result<&'key SecretKey>,
+    ) -> Result<Progress> {
+        let id = prepared.id;
         let proofs = self
             .journal
             .lock()
@@ -189,10 +219,6 @@ impl<T: Transport + 'static> Coordinator<'_, T> {
                 }
             }
         }
-        let _lease = self
-            .gate
-            .arm_new_acquisition(id, self.maximum_receive_fee_sats)
-            .await?;
         let options = ReceiveOptions {
             p2pk_signing_keys: signing_keys,
             ..Default::default()

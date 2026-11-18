@@ -445,6 +445,11 @@ request, hold history, and exactly-once output attribution. Verify that a hold
 recorded before submission preserves proof claims while disjoint payments at
 the same mint can proceed. Missing evidence for an acquiring hold or an
 unfinished CDK saga must retain the mint's original recovery fence.
+While a mint is locally fenced, verify that later payments at that mint
+retain their attempt budgets across ticks and restart. The worker must
+still select ready work from another configured mint. Unconfigured mints
+retain their scheduled history. Once the fence clears, charge one durable
+attempt before the fresh mint request.
 
 Run `deploy/scripts/test-cashu-operator-reconciliation-cli.py` with the selected
 wallet executable/hash through the private-run helper in fresh mount/network

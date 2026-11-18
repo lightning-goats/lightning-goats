@@ -110,6 +110,13 @@ receiving key or pinned-key inventory change creates a new discovery scope;
 previous acquisitions and proof claims remain durable. The reader cannot acquire
 or credit funds; those require their independently configured workers.
 
+The native relay fixture runs the wallet daemon against a private TLS WebSocket
+relay. It verifies certificate trust and hostname checks, validates the
+recipient and mint subscription, and interrupts delivery before `EOSE`.
+After restart, the wallet associates a new signed event carrying the same
+proof with the original acquisition. Acquisition and credit export are
+disabled in this fixture.
+
 Private status includes at most 128 retained relay lane records, with scope,
 relay URL (query omitted), discovery cursor/horizon/width, outcome and retry time.
 `last_admitted` and `last_rejected` count the last finished scan, not lifetime

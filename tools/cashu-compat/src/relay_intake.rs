@@ -358,6 +358,49 @@ pub(crate) mod tests {
             .to_string();
         VerifiedEvent::from_json(&serde_json::to_string(&event)?)
     }
+
+    #[test]
+    #[ignore = "requires the isolated native wallet WSS fixture"]
+    fn isolated_wss_sender() -> Result<()> {
+        let host_namespace = std::env::var_os("LG_CASHU_WSS_HOST_NETNS")
+            .ok_or_else(|| anyhow::anyhow!("fixture host namespace is required"))?;
+        ensure!(
+            std::fs::read_link("/proc/self/ns/net")?.as_os_str() != host_namespace
+                && std::fs::read_to_string("/proc/net/dev")?
+                    .lines()
+                    .skip(2)
+                    .all(|line| line.trim_start().starts_with("lo:")),
+            "synthetic sender requires a private network namespace"
+        );
+        let config = config(Path::new("/run/lg-nutzap-fixture"))?;
+        let intent = crate::publication::Intent::announcement(&config, clock()?.try_into()?)?;
+        let announcement = intent.verify_signed(
+            None,
+            &crate::publication::tests::sign(intent.unsigned(None)?)?,
+        )?;
+        let lock = announcement
+            .singleton_tag("pubkey", true)?
+            .ok_or_else(|| anyhow::anyhow!("fixture announcement omitted a lock"))?;
+        let proof = crate::intake::tests::proof(
+            serde_json::json!(["P2PK",{"nonce":"0123456789abcdef0123456789abcdef","data":lock,"tags":[]}])
+                .to_string(),
+        );
+        let first = event(&config, std::slice::from_ref(&proof), "first delivery")?;
+        let replay = event(&config, &[proof], "same proof in a new event")?;
+        println!(
+            "CASHU_WSS_FIXTURE {}",
+            serde_json::json!({
+                "recipient": config.recipient,
+                "receiving_key": config.receiving_key,
+                "mint": &config.mints[0].advertised_url,
+                "first": first.event(),
+                "replay": replay.event(),
+                "mint_key": SecretKey::from_slice(&[7; 32])?.public_key().to_hex(),
+            })
+        );
+        Ok(())
+    }
+
     #[tokio::test]
     async fn rejects_bad_events_and_overlap_without_blocking_later_proofs_or_replay() -> Result<()>
     {

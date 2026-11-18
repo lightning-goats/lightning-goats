@@ -94,6 +94,19 @@ remain separate required work.
 
 ## Original treasury melt reconciliation
 
+Use `lightning-goatsctl inspect-cashu-settlement --intent INTENT_UUID` as the
+core ledger owner to inspect the same intent shown in private wallet status.
+The command opens the configured private ledger read-only and works while the
+core runs. It reports the retained Strike receive identifiers, verified deposit
+time, wallet report presence, settlement totals and retry schedule. A linked feeding
+plan reports whether its exact pending allocation is covered, or the original
+feeder request and its retained status if already dispatched. A covered plan
+still goes through the separate feeder readiness and dispatch checks.
+
+The output contains no invoice, payment hash, credential or proof material.
+It reads a single journal snapshot and contacts neither Strike nor the wallet.
+The installed recovery fence still governs access to a restored ledger.
+
 Core verifies the original Strike receive against the retained treasury intent,
 destination and signed invoice. A single authoritative receive-request lookup
 must confirm the BTC target. The completed receive must match the original

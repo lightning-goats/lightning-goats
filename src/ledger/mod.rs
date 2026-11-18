@@ -4,7 +4,7 @@ mod cashu;
 #[cfg(unix)]
 pub(crate) use cashu::TreasurySettlementState;
 #[cfg(unix)]
-pub use cashu::{CashuImportResult, TreasuryPlan};
+pub use cashu::{CashuImportResult, CashuSettlementStatus, FinancialPlanStatus, TreasuryPlan};
 mod credit;
 mod quotes;
 pub use credit::{

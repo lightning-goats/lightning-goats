@@ -11,6 +11,18 @@ pub(super) enum Selection {
     Ready(Uuid, Vec<(i64, u64)>),
 }
 
+// Cashu coverage requires both the independently verified Strike deposit and
+// the authenticated wallet result. Returned change is not covered and actual
+// feed debits consume coverage once.
+const SOURCE_COVERAGE: &str = "SELECT l.ledger_id,l.remaining_sats,
+    CASE WHEN c.ledger_entry_id IS NULL THEN l.remaining_sats
+         ELSE MIN(l.remaining_sats,MAX(0,
+           (SELECT COALESCE(SUM(r.input_sats-r.change_sats),0) FROM cashu_treasury_source_results r
+            JOIN cashu_treasury_completions t ON t.intent_id=r.intent_id WHERE r.ledger_id=l.ledger_id)
+           -(SELECT COALESCE(SUM(p.sats),0) FROM feed_reward_funding_parts p WHERE p.ledger_id=l.ledger_id)))
+    END AS eligible_sats
+    FROM reward_funding_lots l LEFT JOIN cashu_receipt_inbox c ON c.ledger_entry_id=l.ledger_id";
+
 pub(super) async fn select(tx: &mut Transaction<'_, Sqlite>, threshold: u64) -> Result<Selection> {
     let cashu: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM cashu_receipt_inbox)")
         .fetch_one(&mut **tx)
@@ -22,11 +34,12 @@ pub(super) async fn select(tx: &mut Transaction<'_, Sqlite>, threshold: u64) -> 
         super::reward_funding::prepare(tx).await?,
         "Cashu source history is not initialized"
     );
-    // Cashu coverage requires both the independently verified Strike deposit
-    // and the authenticated owned-change result. Returned change is not covered.
-    // Prior actual debits consume that coverage once; unsettled lots are skipped.
-    let rows = sqlx::query("SELECT * FROM (SELECT l.ledger_id,l.remaining_sats,CASE WHEN c.ledger_entry_id IS NULL THEN l.remaining_sats ELSE MIN(l.remaining_sats,MAX(0,(SELECT COALESCE(SUM(r.input_sats-r.change_sats),0) FROM cashu_treasury_source_results r JOIN cashu_treasury_completions t ON t.intent_id=r.intent_id WHERE r.ledger_id=l.ledger_id)-(SELECT COALESCE(SUM(p.sats),0) FROM feed_reward_funding_parts p WHERE p.ledger_id=l.ledger_id))) END AS eligible_sats FROM reward_funding_lots l LEFT JOIN cashu_receipt_inbox c ON c.ledger_entry_id=l.ledger_id WHERE l.remaining_sats>0) ORDER BY CASE WHEN eligible_sats>0 THEN 0 ELSE 1 END,ledger_id LIMIT 4096")
-        .fetch_all(&mut **tx).await?;
+    let rows = sqlx::query(&format!(
+        "{SOURCE_COVERAGE} WHERE l.remaining_sats>0
+         ORDER BY CASE WHEN eligible_sats>0 THEN 0 ELSE 1 END,l.ledger_id LIMIT 4096"
+    ))
+    .fetch_all(&mut **tx)
+    .await?;
     let mut lots = Vec::new();
     for row in rows {
         lots.push(financial::Lot {
@@ -39,6 +52,8 @@ pub(super) async fn select(tx: &mut Transaction<'_, Sqlite>, threshold: u64) -> 
 }
 
 mod financial;
+#[cfg(unix)]
+pub(super) use financial::pending_allocation;
 
 pub(super) async fn freeze(
     tx: &mut Transaction<'_, Sqlite>,

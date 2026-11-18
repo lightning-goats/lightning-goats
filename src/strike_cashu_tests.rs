@@ -845,6 +845,70 @@ mod cashu_treasury_tests {
     }
 
     #[tokio::test]
+    async fn private_cashu_status_tracks_original_evidence_and_feeder_state() -> Result<()> {
+        let f = Fixture::with_planning(&[8], 992, 7, 1, |_| {}, Some(false)).await;
+        let url = format!("sqlite://{}", f._directory.path().join("strike.db").display());
+        let reader = LedgerStore::connect_recovery_read_only(&url).await?;
+        assert!(reader.inspect_cashu_settlement(Uuid::nil()).await.is_err());
+        assert!(reader.inspect_cashu_settlement(Uuid::new_v4()).await.is_err());
+        let original = reader.inspect_cashu_settlement(f.intent.id).await?;
+        assert!(!original.issuance_claimed);
+        assert!(original.receive_request_id.is_none());
+        assert_eq!(
+            original.linked_feed_plan.as_ref().unwrap().pending_sources_covered,
+            Some(false)
+        );
+
+        f.issue().await;
+        assert_eq!(
+            f.runtime.reconcile_and_credit(&f.ledger, &f.event()).await?,
+            SettlementOutcome::TreasurySettlementAccepted
+        );
+        let partial = reader.inspect_cashu_settlement(f.intent.id).await?;
+        assert!(partial.issuance_claimed);
+        assert_eq!(partial.receive_request_id, Some(f.state.receive_request_id));
+        assert_eq!(partial.verified_receive_id, Some(f.state.receive_id));
+        assert!(partial.strike_deposit_verified_at.is_some());
+        assert!(!partial.wallet_report_retained);
+        assert!(!partial.settlement_complete);
+        assert_eq!(
+            partial.linked_feed_plan.unwrap().pending_sources_covered,
+            Some(false)
+        );
+
+        f.ledger.record_cashu_melt_result(&f.registration, &f.report(1, 0)).await?;
+        let settled = reader.inspect_cashu_settlement(f.intent.id).await?;
+        assert!(settled.wallet_report_retained);
+        assert!(settled.settlement_complete);
+        assert_eq!(settled.settled_fee_sats, Some(1));
+        assert_eq!(settled.settled_change_sats, Some(0));
+        let plan = settled.linked_feed_plan.as_ref().unwrap();
+        assert_eq!(plan.id, original.linked_feed_plan.unwrap().id);
+        assert_eq!(plan.threshold_sats, 1000);
+        assert_eq!(plan.pending_sources_covered, Some(true));
+        assert!(plan.feeder_request_id.is_none());
+        let json = serde_json::to_string(&settled)?;
+        for private in [&f.state.invoice, &f.state.payment_hash, &f.state.description_hash] {
+            assert!(!json.contains(private));
+        }
+        assert_eq!(f.count("feed_attempts").await, 0);
+        assert_eq!(f.ledger.feed_credit_sats().await?, 1000);
+
+        let request = f.ledger.begin_feed_attempt(1000).await?.context("expected funded plan")?;
+        let dispatched = reader.inspect_cashu_settlement(f.intent.id).await?.linked_feed_plan.unwrap();
+        assert_eq!(dispatched.id, plan.id);
+        assert_eq!(dispatched.state, "dispatched");
+        assert_eq!(dispatched.pending_sources_covered, None);
+        assert_eq!(dispatched.feeder_request_id, Some(request));
+        assert_eq!(dispatched.feeder_status.as_deref(), Some("intent_committed"));
+        f.ledger.confirm_feed_attempt(request).await?;
+        let confirmed = reader.inspect_cashu_settlement(f.intent.id).await?.linked_feed_plan.unwrap();
+        assert_eq!(confirmed.feeder_status.as_deref(), Some("confirmed"));
+        assert_eq!(f.ledger.feed_credit_sats().await?, 0);
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn core_treasury_pause_preserves_delivery_budget_and_expiry_uses_only_status() -> Result<()> {
         use crate::cashu::treasury_worker::{Controls, Tick, Worker};
         for expired in [false, true] {

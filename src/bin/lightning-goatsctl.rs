@@ -155,6 +155,11 @@ enum Command {
         #[arg(long)]
         apply: bool,
     },
+    /// Inspect retained evidence and the linked feeding plan for an original Cashu settlement.
+    InspectCashuSettlement {
+        #[arg(long)]
+        intent: Uuid,
+    },
     /// Print the current durable feed-credit accounting state.
     Status,
 }
@@ -343,6 +348,25 @@ async fn main() -> Result<()> {
         {
             let _ = (approval, writers_stopped, apply);
             bail!("original settlement recovery requires Unix protected-file authority");
+        }
+    }
+    if let Command::InspectCashuSettlement { intent } = &args.command {
+        #[cfg(unix)]
+        {
+            lightning_goats::payout::cost_recovery::require_protected_configuration(&args.config)?;
+            let config = AppConfig::load(&args.config)?;
+            lightning_goats::payout::cost_recovery::existing_private_database(
+                &config.database.url,
+            )?;
+            let ledger = LedgerStore::connect_recovery_read_only(&config.database.url).await?;
+            let status = ledger.inspect_cashu_settlement(*intent).await?;
+            println!("{}", serde_json::to_string(&status)?);
+            return Ok(());
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = intent;
+            bail!("Cashu settlement inspection requires Unix protected-file authority");
         }
     }
     if let Command::PlanCashuSettlement {
@@ -619,7 +643,9 @@ async fn main() -> Result<()> {
                 println!("reconciled feed attempt {id} as not physically fed");
             }
         },
-        Command::PlanCashuSettlement { .. } | Command::ReconcileCashuSettlement { .. } => {
+        Command::PlanCashuSettlement { .. }
+        | Command::ReconcileCashuSettlement { .. }
+        | Command::InspectCashuSettlement { .. } => {
             unreachable!("handled before database initialization")
         }
         Command::Status => {

@@ -13,9 +13,11 @@ mod sweep_jobs;
 mod treasury;
 mod treasury_planning;
 mod treasury_scheduling;
+mod treasury_status;
 pub use treasury::TreasuryPlan;
 #[cfg(unix)]
 pub(crate) use treasury::TreasurySettlementState;
+pub use treasury_status::{CashuSettlementStatus, FinancialPlanStatus};
 
 /// The immutable original acknowledgment, including on a retry after spending.
 pub use lightning_goats_cashu_receipt::acknowledgment::ImportResult as CashuImportResult;

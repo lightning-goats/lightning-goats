@@ -17,6 +17,7 @@ import sqlite3
 import subprocess
 import tempfile
 import time
+import tomllib
 import uuid
 
 
@@ -208,11 +209,53 @@ maximum_in_flight_sats = 1000
                       for table in ['cashu_sweep_requests','cashu_treasury_intents','feed_attempts','ledger_entries']}
         if counts != dict(cashu_sweep_requests=1,cashu_treasury_intents=0,feed_attempts=0,ledger_entries=0):
             raise ValueError('unexpected financial mutations')
+
+        # An unissued synthetic intent exercises the CLI parser and readonly
+        # snapshot without creating wallet holdings, an invoice or a feeder plan.
+        destination = tomllib.loads(config_text)['cashu_treasury']['policy']['destination']
+        intent = dict(version=1, purpose='cashu_treasury_settlement', id=str(uuid.uuid4()),
+                      core_epoch=epoch, wallet_instance=instance, wallet_epoch=wallet_epoch,
+                      mint_id='mint-a', treasury_policy='operator-fixture-v1', destination=destination,
+                      input_sats=8, deposit_sats=7, maximum_fee_sats=1, invoice_expiry_seconds=300,
+                      sources=[dict(ledger_id=1, acquisition_id=str(uuid.uuid4()),
+                                    receipt_digest='ab'*32, input_sats=8)])
+        encoded = json.dumps(intent, separators=(',', ':'))
+        digest = hashlib.sha256(
+            ('["lightning-goats/cashu-treasury/v1",' + encoded + ']').encode()
+        ).hexdigest()
+        with closing(sqlite3.connect(database)) as db:
+            db.execute('INSERT INTO cashu_treasury_intents VALUES(?,?,?,?,?,?,?)',
+                       [intent['id'], digest, encoded, 'mint-a', 8, 7, now])
+            db.commit()
+        before_inspection = image()
+        inspect = ['inspect-cashu-settlement', '--intent', intent['id']]
+        status.write_text(stopped.replace('ActiveState=inactive','ActiveState=active'))
+        result = call(*inspect)
+        inspected = json.loads(result.stdout)
+        if (inspected['intent_id'] != intent['id'] or inspected['core_epoch'] != epoch
+                or inspected['issuance_claimed'] or inspected['settlement_complete']
+                or inspected['linked_feed_plan'] is not None or digest in result.stdout
+                or destination['credential_fingerprint'] in result.stdout):
+            raise ValueError('native readonly settlement status differs from its retained evidence')
+        call('inspect-cashu-settlement', '--intent', str(uuid.uuid4()), success=False)
+        config.chmod(0o660)
+        call(*inspect, success=False)
+        config.chmod(0o640)
+        database.chmod(0o640)
+        call(*inspect, success=False)
+        database.chmod(0o600)
+        marker.write_text('disposable recovery fence')
+        call(*inspect, success=False)
+        marker.unlink()
+        if image() != before_inspection:
+            raise ValueError('readonly inspection or a refusal changed the ledger')
         print(json.dumps(dict(result='CASHU_OPERATOR_SETTLEMENT_CLI_VERIFIED',cli_sha256=args.cli_sha256,
             runtime_uid=uid,preview_unchanged=True,active_service_refused=True,
             approval_config_and_scope_refused=True,one_request_retained=True,retry_unchanged=True,
             missing_core_epoch_not_initialized=True,
             original_settlement_scope_missing_intent_and_fence_refused=True,
+            original_settlement_read_only_while_core_active=True,
+            original_settlement_private_files_and_fence_refused=True,
             synthetic_empty_custody=True,synthetic_systemctl=True,installed_systemd_acceptance=False,
             provider_request=False,physical_actuation=False),sort_keys=True))
 

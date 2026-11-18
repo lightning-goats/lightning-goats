@@ -214,6 +214,17 @@ mod tests {
                     .is_err()
             );
         }
+        value["policy"]["limits"]["unlimited_operations_per_24h"] = json!(true);
+        assert!(
+            serde_json::from_value::<Config>(value.clone())?
+                .validate(Some(&receipts), None)
+                .is_err()
+        );
+        value["policy"]["limits"]
+            .as_object_mut()
+            .unwrap()
+            .remove("operations_per_24h");
+        serde_json::from_value::<Config>(value.clone())?.validate(Some(&receipts), None)?;
         value["arbitrary_pay"] = json!(true);
         assert!(serde_json::from_value::<Config>(value).is_err());
         Ok(())

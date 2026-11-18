@@ -204,7 +204,7 @@ impl Journal {
             .fee_sats_per_24h
             .context("wallet treasury daily fee limit missing")?;
         ensure!(
-            count < policy.operations_per_24h
+            (policy.unlimited_operations_per_24h || count < policy.operations_per_24h)
                 && (policy.unlimited_input_sats_per_24h
                     || total
                         .checked_add(issued.intent.input_sats)
@@ -250,6 +250,7 @@ mod tests {
             maximum_input_sats: 101,
             maximum_fee_sats: 1,
             operations_per_24h: 1,
+            unlimited_operations_per_24h: false,
             input_sats_per_24h: 101,
             unlimited_input_sats_per_24h: false,
             fee_sats_per_24h: Some(2),
@@ -378,6 +379,10 @@ mod tests {
             journal.bind_treasury_instruction(&binding, instruction, 1000)?;
         }
         let mut cap = policy();
+        cap.operations_per_24h = 0;
+        cap.unlimited_operations_per_24h = true;
+        cap.input_sats_per_24h = 202;
+        cap.maximum_in_flight_sats = 202;
         cap.fee_sats_per_24h = None;
         assert!(journal.claim_treasury_work(1000, &cap, 2)?.is_none());
         cap.fee_sats_per_24h = Some(1);

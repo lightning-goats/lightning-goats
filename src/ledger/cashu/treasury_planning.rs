@@ -21,7 +21,9 @@ pub(super) async fn reserve_first(
         .await?;
     let daily = sqlx::query("SELECT COUNT(*) AS count,COALESCE(SUM(input_sats),0) AS sats FROM cashu_treasury_intents WHERE created_at>=?")
             .bind(now.saturating_sub(86_400)).fetch_one(&mut **tx).await?;
-    if to_u64(daily.try_get("count")?, "treasury daily count")? >= policy.limits.operations_per_24h
+    if !policy
+        .limits
+        .daily_operation_allowed(to_u64(daily.try_get("count")?, "treasury daily count")?)
     {
         return Ok(None);
     }

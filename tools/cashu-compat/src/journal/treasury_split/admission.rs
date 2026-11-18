@@ -7,13 +7,16 @@ pub struct AdmissionPolicy {
     pub enabled: bool,
     pub limits: Limits,
     pub operations_per_24h: u64,
+    pub unlimited_operations_per_24h: bool,
     pub input_sats_per_24h: u64,
     pub maximum_in_flight_sats: u64,
 }
 impl AdmissionPolicy {
     pub fn validate(&self) -> Result<()> {
         ensure!(
-            self.operations_per_24h <= 10_000 && self.limits.maximum_outputs <= 1024,
+            self.operations_per_24h <= 10_000
+                && (!self.unlimited_operations_per_24h || self.operations_per_24h == 0)
+                && self.limits.maximum_outputs <= 1024,
             "invalid split admission count bounds"
         );
         for value in [
@@ -31,7 +34,7 @@ impl AdmissionPolicy {
             !self.enabled
                 || (self.limits.maximum_input_sats > 0
                     && self.limits.maximum_outputs > 0
-                    && self.operations_per_24h > 0
+                    && (self.operations_per_24h > 0 || self.unlimited_operations_per_24h)
                     && self.input_sats_per_24h > 0
                     && self.maximum_in_flight_sats > 0),
             "split execution requires explicit exposure limits"
@@ -114,7 +117,7 @@ impl Journal {
         let (count,total):(u64,u64)=tx.query_row("SELECT COUNT(*),COALESCE(SUM(input_sats),0) FROM treasury_split_admissions WHERE admitted_at>?",[now.saturating_sub(86400)],|r|Ok((r.get(0)?,r.get(1)?)))?;
         let in_flight:u64=tx.query_row("SELECT COALESCE(SUM(a.input_sats),0) FROM treasury_split_admissions a WHERE NOT EXISTS(SELECT 1 FROM treasury_split_results r WHERE r.intent_id=a.intent_id)",[],|r|r.get(0))?;
         ensure!(
-            count < policy.operations_per_24h
+            (policy.unlimited_operations_per_24h || count < policy.operations_per_24h)
                 && total
                     .checked_add(input)
                     .is_some_and(|v| v <= policy.input_sats_per_24h)
@@ -139,6 +142,7 @@ mod tests {
             enabled: true,
             limits: limits(),
             operations_per_24h: 1,
+            unlimited_operations_per_24h: false,
             input_sats_per_24h: 128,
             maximum_in_flight_sats: 128,
         }
@@ -271,6 +275,16 @@ mod tests {
             f.journal
                 .authorize_treasury_split(&f.binding, f.issued.intent.id, &no_fee, 1003)
                 .is_err()
+        );
+        let mut open_count = policy();
+        open_count.unlimited_operations_per_24h = true;
+        assert!(open_count.validate().is_err());
+        open_count.operations_per_24h = 0;
+        open_count.input_sats_per_24h = 256;
+        open_count.maximum_in_flight_sats = 256;
+        assert!(
+            f.journal
+                .authorize_treasury_split(&f.binding, second, &open_count, 1003)?
         );
         Ok(())
     }

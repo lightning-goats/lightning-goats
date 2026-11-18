@@ -504,6 +504,7 @@ mod multi_mint {
                 maximum_input_sats: 400,
                 maximum_fee_sats: 2,
                 operations_per_24h: 2,
+                unlimited_operations_per_24h: false,
                 input_sats_per_24h: 400,
                 unlimited_input_sats_per_24h: false,
                 fee_sats_per_24h: Some(4),

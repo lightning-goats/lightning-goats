@@ -408,7 +408,8 @@ mod combined_fixture {
                 maximum_deposit_sats: 400,
                 maximum_input_sats: 400,
                 maximum_fee_sats: conversion_fee_sats,
-                operations_per_24h: 1 + u64::from(settle_change || multi_mint),
+                operations_per_24h: 0,
+                unlimited_operations_per_24h: true,
                 input_sats_per_24h: 0,
                 unlimited_input_sats_per_24h: true,
                 // The first residual-mode intent reserves two but spends one.

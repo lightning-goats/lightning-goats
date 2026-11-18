@@ -17,6 +17,7 @@ pub struct Limits {
     pub maximum_input_sats: u64,
     pub maximum_fee_sats: u64,
     pub operations_per_24h: u64,
+    pub unlimited_operations_per_24h: bool,
     pub input_sats_per_24h: u64,
     pub unlimited_input_sats_per_24h: bool,
     pub fee_sats_per_24h: Option<u64>,
@@ -62,6 +63,7 @@ impl Policy {
         let l = &self.limits;
         ensure!(
             l.operations_per_24h <= 10_000
+                && (!l.unlimited_operations_per_24h || l.operations_per_24h == 0)
                 && l.input_sats_per_24h <= i64::MAX as u64
                 && (!l.unlimited_input_sats_per_24h || l.input_sats_per_24h == 0)
                 && l.fee_sats_per_24h.is_none_or(|fee| fee <= i64::MAX as u64),
@@ -78,7 +80,7 @@ impl Policy {
         ensure!(
             !self.enabled
                 || (!self.approved_mints.is_empty()
-                    && l.operations_per_24h > 0
+                    && (l.operations_per_24h > 0 || l.unlimited_operations_per_24h)
                     && (l.input_sats_per_24h > 0 || l.unlimited_input_sats_per_24h)),
             "enabled treasury requires explicit admission limits"
         );
@@ -120,7 +122,6 @@ impl Policy {
             limits.minimum_deposit_sats,
             limits.maximum_deposit_sats,
             limits.maximum_input_sats,
-            limits.operations_per_24h,
             limits.maximum_in_flight_sats,
         ] {
             ensure!(
@@ -150,6 +151,10 @@ impl Policy {
 }
 
 impl Limits {
+    pub(crate) fn daily_operation_allowed(&self, count: u64) -> bool {
+        self.unlimited_operations_per_24h || count < self.operations_per_24h
+    }
+
     pub(crate) fn daily_input_remaining(&self, used: u64) -> u64 {
         if self.unlimited_input_sats_per_24h {
             u64::MAX

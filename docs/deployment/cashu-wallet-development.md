@@ -596,14 +596,20 @@ protected treasury bindings. `policy.enabled` is the independent spending gate;
 `issue` and `deliver` both require `inspect`. Enabling spending also requires
 explicit positive global and per-mint limits. `policy.limits` accepts
 `minimum_deposit_sats`, `maximum_deposit_sats`, `maximum_input_sats`,
-`maximum_fee_sats`, `operations_per_24h`, `input_sats_per_24h`,
+`maximum_fee_sats`, `operations_per_24h`, `unlimited_operations_per_24h`, `input_sats_per_24h`,
 `unlimited_input_sats_per_24h`, `fee_sats_per_24h`, and `maximum_in_flight_sats`.
 The daily limits apply across mints. Set `fee_sats_per_24h` explicitly on the
 core and wallet before new treasury work. Zero permits only fee-free intents.
 An omitted fee ceiling prevents fresh authorizations and preserves original
 reconciliation. Set `unlimited_input_sats_per_24h` with a zero or omitted
-`input_sats_per_24h` to remove the daily volume ceiling. The operation count,
-per-transfer limits and outstanding exposure still apply.
+`input_sats_per_24h` to remove the daily volume ceiling. Set
+`unlimited_operations_per_24h = true` on both core treasury limits and wallet
+treasury execution, with `operations_per_24h` omitted or zero, to run without a
+daily conversion count ceiling. Its existing fee, per-transfer and outstanding
+exposure budgets still apply. If enabled, wallet proof splitting takes the same
+explicit count setting under `treasury_execution.split` and applies its own
+whole-proof exposure limits. Donor intake and the feeder keep their own admission
+and safety controls.
 
 An unresolved intent reserves its entire authorized fee across time windows.
 The core replaces the reservation with the recorded fee after independently

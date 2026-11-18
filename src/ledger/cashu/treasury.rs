@@ -487,7 +487,9 @@ pub(super) async fn reserve_in_transaction(
         "mint treasury exposure exhausted"
     );
     ensure!(
-        to_u64(usage.try_get("count")?, "treasury rate count")? < policy.limits.operations_per_24h
+        policy
+            .limits
+            .daily_operation_allowed(to_u64(usage.try_get("count")?, "treasury rate count")?)
             && input
                 <= policy
                     .limits

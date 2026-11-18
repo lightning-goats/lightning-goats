@@ -170,6 +170,7 @@ async fn split_case(
         enabled: true,
         limits,
         operations_per_24h: 1,
+        unlimited_operations_per_24h: false,
         input_sats_per_24h: 16,
         maximum_in_flight_sats: 16,
     };
@@ -553,6 +554,7 @@ async fn worker_case(
         maximum_input_sats: 5,
         maximum_fee_sats: 2,
         operations_per_24h: 1,
+        unlimited_operations_per_24h: false,
         input_sats_per_24h: 5,
         unlimited_input_sats_per_24h: false,
         fee_sats_per_24h: Some(2),

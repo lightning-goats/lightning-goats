@@ -26,6 +26,7 @@ fn feed_treasury_policy() -> crate::cashu::treasury::Policy {
             maximum_input_sats: 10000,
             maximum_fee_sats: 10,
             operations_per_24h: 100,
+            unlimited_operations_per_24h: false,
             input_sats_per_24h: 20000,
             unlimited_input_sats_per_24h: false,
             fee_sats_per_24h: Some(1000),
@@ -148,6 +149,8 @@ async fn financial_job_planning_skips_a_mint_with_no_exposure_capacity() {
     let mut policy = feed_treasury_policy();
     let other = policy.approved_mints["mint-a"].clone();
     policy.approved_mints.insert("mint-b".into(), other);
+    policy.limits.operations_per_24h = 0;
+    policy.limits.unlimited_operations_per_24h = true;
     policy.limits.input_sats_per_24h = 0;
     policy.limits.unlimited_input_sats_per_24h = true;
     policy.limits.fee_sats_per_24h = Some(19);

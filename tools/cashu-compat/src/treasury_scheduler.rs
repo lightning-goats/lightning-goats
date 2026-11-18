@@ -40,6 +40,8 @@ pub struct Execution {
     #[serde(default)]
     pub operations_per_24h: u64,
     #[serde(default)]
+    pub unlimited_operations_per_24h: bool,
+    #[serde(default)]
     pub input_sats_per_24h: u64,
     #[serde(default)]
     pub unlimited_input_sats_per_24h: bool,
@@ -54,6 +56,7 @@ impl Execution {
         ensure!(
             self.maximum_attempts <= 10_000
                 && self.operations_per_24h <= 10_000
+                && (!self.unlimited_operations_per_24h || self.operations_per_24h == 0)
                 && (!(self.execute || self.reconcile) || self.maximum_attempts > 0),
             "invalid treasury attempt/admission budget"
         );
@@ -72,7 +75,7 @@ impl Execution {
         ensure!(
             !self.execute
                 || (self.maximum_input_sats > 0
-                    && self.operations_per_24h > 0
+                    && (self.operations_per_24h > 0 || self.unlimited_operations_per_24h)
                     && (self.input_sats_per_24h > 0 || self.unlimited_input_sats_per_24h)
                     && self.maximum_in_flight_sats > 0),
             "treasury execution requires explicit financial limits"
@@ -432,6 +435,12 @@ mod tests {
         }
         serde_json::from_str::<Execution>(r#"{"reconcile":true,"maximum_attempts":2}"#)?
             .validate()?;
+        let mut open_count: Execution = serde_json::from_str(
+            r#"{"execute":true,"reconcile":true,"maximum_attempts":1,"maximum_input_sats":8,"unlimited_operations_per_24h":true,"input_sats_per_24h":8,"maximum_in_flight_sats":8,"fee_sats_per_24h":25}"#,
+        )?;
+        open_count.validate()?;
+        open_count.operations_per_24h = 1;
+        assert!(open_count.validate().is_err());
         assert!(serde_json::from_str::<Execution>(r#"{"arbitrary_melt":true}"#).is_err());
         Ok(())
     }

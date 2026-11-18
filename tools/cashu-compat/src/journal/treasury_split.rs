@@ -1199,6 +1199,7 @@ mod tests {
             enabled: true,
             limits: limits(),
             operations_per_24h: 1,
+            unlimited_operations_per_24h: false,
             input_sats_per_24h: 128,
             maximum_in_flight_sats: 128,
         };

@@ -927,7 +927,8 @@ async fn combined_settlement_wallet_child() -> Result<()> {
         maximum_attempts: 4,
         maximum_input_sats: 400,
         maximum_fee_sats: conversion_fee_sats,
-        operations_per_24h: 1 + u64::from(settle_change),
+        operations_per_24h: 0,
+        unlimited_operations_per_24h: true,
         input_sats_per_24h: 0,
         unlimited_input_sats_per_24h: true,
         fee_sats_per_24h: Some(if settle_change {

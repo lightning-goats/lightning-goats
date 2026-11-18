@@ -462,6 +462,12 @@ invalid restores, then recover the exact NUT-09 signatures. Interrupt after the
 proofs are saved and verify restart completes the same local transaction
 without an extra swap, a second signature restore, or early receipt export.
 
+With the core and wallet using the explicit unlimited daily conversion-count
+setting, settle multiple transfers inside one rolling day and preserve the
+exact fee reservations, in-flight exposure and no-duplicate-credit checks.
+Verify that existing positive daily count caps are still enforced and that
+configurations specifying both a positive cap and unlimited count fail.
+
 Run `deploy/scripts/test-cashu-operator-reconciliation-cli.py` with the selected
 wallet executable/hash through the private-run helper in fresh mount/network
 namespaces. Its synthetic unfunded cases cover exact CLI authority and unchanged

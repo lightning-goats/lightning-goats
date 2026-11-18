@@ -36,6 +36,8 @@ PAYLOAD = (
     'LICENSE', 'Cargo.toml', 'tools/cashu-compat/Cargo.toml', *LOCKS, INVENTORY,
     'deploy/config.receive.toml.example', 'deploy/systemd/lightning-goats-cashu.service.example',
     'deploy/systemd/lightning-goats-cashu-signer.service.example',
+    'deploy/systemd/lightning-goats-receive.service.d/80-cashu-receipts.conf.example',
+    'deploy/tmpfiles.d/lightning-goats-cashu-receipts.conf.example',
     'deploy/nginx/lightning-goats-cashu.conf.example', 'deploy/cashu/backup-collection.json.example',
     'docs/deployment/cashu-wallet-development.md', 'docs/deployment/cashu-backup-collection.md',
     'docs/deployment/cashu-operator-controls.md', 'docs/deployment/cashu-seed-provisioning.md',

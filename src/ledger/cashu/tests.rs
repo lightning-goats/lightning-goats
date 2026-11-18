@@ -19,6 +19,7 @@ async fn fixture() -> (tempfile::TempDir, String, LedgerStore, ReceiptPolicy) {
         import_enabled: true,
         limits: ImportLimits {
             receipts_per_24h: 10,
+            unlimited_receipts_per_24h: false,
             credit_sats_per_24h: 20000,
             maximum_custody_sats: 20000,
         },
@@ -485,6 +486,104 @@ async fn core_rate_budgets_serialize_distinct_acquisitions_and_zero_defaults_den
             .is_err()
     );
     assert_eq!(first.feed_credit_sats().await.unwrap(), 200);
+}
+
+#[tokio::test]
+async fn explicit_unlimited_receipt_count_preserves_exposure_limits_and_exact_replays() {
+    let (_dir, _url, store, mut policy) = fixture().await;
+    policy.limits.receipts_per_24h = 1;
+    policy.limits.credit_sats_per_24h = 600;
+    policy.limits.maximum_custody_sats = 400;
+    let first = wire(&policy, 200);
+    let second = wire(&policy, 200);
+    let ack = store
+        .import_cashu_receipt(&policy, &authenticated(&policy, &first))
+        .await
+        .unwrap();
+    assert!(
+        store
+            .import_cashu_receipt(&policy, &authenticated(&policy, &second))
+            .await
+            .is_err()
+    );
+    policy.limits.receipts_per_24h = 0;
+    policy.limits.unlimited_receipts_per_24h = true;
+    store
+        .import_cashu_receipt(&policy, &authenticated(&policy, &second))
+        .await
+        .unwrap();
+    let third = wire(&policy, 200);
+    assert!(
+        store
+            .import_cashu_receipt(&policy, &authenticated(&policy, &third))
+            .await
+            .is_err()
+    );
+    let replay = store
+        .import_cashu_receipt(&policy, &authenticated(&policy, &first))
+        .await
+        .unwrap();
+    assert_eq!(replay, ack);
+    assert_eq!(store.feed_credit_sats().await.unwrap(), 400);
+    assert_eq!(count(&store, "cashu_receipt_inbox").await, 2);
+}
+
+#[tokio::test]
+async fn receipt_credit_and_replay_accept_the_original_advisory_feeding_snapshot() {
+    use crate::{config::RuntimeMode, gateway::FeederSafety};
+
+    let (_dir, url, store, policy) = fixture().await;
+    store
+        .update_feeding_presentation(1000, RuntimeMode::Shadow, None)
+        .await
+        .unwrap();
+    let wire = wire(&policy, 200);
+    let receipt = authenticated(&policy, &wire);
+    let original = store.import_cashu_receipt(&policy, &receipt).await.unwrap();
+    let event = store.events_after(0, 1).await.unwrap().remove(0);
+    let payload: serde_json::Value = serde_json::from_str(&event.payload_json).unwrap();
+    assert_eq!(payload["feeding"]["reason"], "mode_disabled");
+    drop(store);
+
+    let reopened = LedgerStore::connect(&url).await.unwrap();
+    reopened
+        .update_feeding_presentation(
+            1000,
+            RuntimeMode::Canary,
+            Some(FeederSafety {
+                remote_enabled: true,
+                override_enabled: false,
+            }),
+        )
+        .await
+        .unwrap();
+    let replay = reopened
+        .import_cashu_receipt(&policy, &receipt)
+        .await
+        .unwrap();
+    assert_eq!(replay, original);
+    assert_eq!(
+        reopened.events_after(0, 1).await.unwrap()[0].payload_json,
+        event.payload_json
+    );
+    assert_eq!(reopened.feed_credit_sats().await.unwrap(), 200);
+    assert_eq!(count(&reopened, "event_log").await, 1);
+    assert_eq!(count(&reopened, "cashu_receipt_inbox").await, 1);
+
+    let mut edited = payload;
+    edited["amount_sats"] = serde_json::json!(201);
+    sqlx::query("UPDATE event_log SET payload_json=?")
+        .bind(edited.to_string())
+        .execute(&reopened.pool)
+        .await
+        .unwrap();
+    assert!(
+        reopened
+            .import_cashu_receipt(&policy, &receipt)
+            .await
+            .is_err()
+    );
+    assert_eq!(reopened.feed_credit_sats().await.unwrap(), 200);
 }
 
 include!("financial_jobs_tests.rs");

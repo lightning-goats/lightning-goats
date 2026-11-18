@@ -43,6 +43,7 @@ pub struct ReceiptPolicy {
 #[derive(Default)]
 pub struct ImportLimits {
     pub receipts_per_24h: u64,
+    pub unlimited_receipts_per_24h: bool,
     pub credit_sats_per_24h: u64,
     pub maximum_custody_sats: u64,
 }
@@ -198,6 +199,7 @@ mod tests {
             import_enabled: true,
             limits: ImportLimits {
                 receipts_per_24h: 10,
+                unlimited_receipts_per_24h: false,
                 credit_sats_per_24h: 100,
                 maximum_custody_sats: 100,
             },

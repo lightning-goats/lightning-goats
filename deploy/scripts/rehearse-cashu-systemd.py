@@ -1,21 +1,28 @@
 """Start verified Cashu release binaries in disposable systemd sandboxes."""
 from contextlib import ExitStack, closing
+import grp
 import hashlib
 import json
 import os
 from pathlib import Path
+import pwd
 import runpy
 import shutil
 import socket
 import sqlite3
+import stat
 import tarfile
 import tempfile
 import time
+import uuid
 
 
 SCRIPTS = Path(__file__).resolve().parent
 WALLET = 'lightning-goats-cashud'
 SIGNER = 'lightning-goats-cashu-signerd'
+RECEIPT_DROP_IN = 'deploy/systemd/lightning-goats-receive.service.d/80-cashu-receipts.conf.example'
+RECEIPT_DIRECTORY = 'deploy/tmpfiles.d/lightning-goats-cashu-receipts.conf.example'
+RECEIPT_PATH = '/run/lightning-goats-cashu-receipts'
 FENCE = 'CASHU_RECOVERY_REQUIRED'
 ROTATED_RECEIVER = '02e493dbf1c10d80f3581e4904930b1404cc6c13900ee0758474fa94abe8c4cd13'
 PROBE = '''
@@ -77,6 +84,40 @@ if role == 'signer':
 print('sandbox probe passed')
 '''
 
+RECEIPT_PROBE = r'''
+import json, socket, struct, sys
+from pathlib import Path
+
+path, request, core_uid, expectation = sys.argv[1:]
+with socket.socket(socket.AF_UNIX) as stream:
+    stream.settimeout(5)
+    try:
+        stream.connect(path)
+    except PermissionError:
+        assert expectation == 'filesystem-denied'
+        raise SystemExit(0)
+    assert expectation != 'filesystem-denied'
+    credentials = stream.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize('3i'))
+    assert struct.unpack('3i', credentials)[1] == int(core_uid)
+    body = Path(request).read_bytes()
+    try:
+        stream.sendall(struct.pack('!I', len(body)) + body)
+        with stream.makefile('rb') as response:
+            size = response.read(4)
+            if expectation == 'peer-denied':
+                assert size == b''
+            else:
+                assert len(size) == 4
+                size = struct.unpack('!I', size)[0]
+                assert 0 < size <= 4096
+                ack = json.loads(response.read(size))
+                assert ack['result']['acquisition_id'] == json.loads(body)['acquisition_id']
+                assert ack['result']['net_sats'] == json.loads(body)['net_sats']
+                print(json.dumps(ack, sort_keys=True))
+    except (BrokenPipeError, ConnectionResetError):
+        assert expectation == 'peer-denied'
+'''
+
 
 def snapshot(path):
     return {file.name: hashlib.sha256(file.read_bytes()).hexdigest()
@@ -123,8 +164,149 @@ def inspect_signer(directory):
                 db.execute('SELECT id,request,attempts,signed_event FROM requests ORDER BY id').fetchall())
 
 
+def rehearse_receipt_socket(archive, root, cleanup, systemd, accounts, uids,
+                            core_state, core_config, wallet_config):
+    command = systemd['command']
+    runtime = Path('/run') / (root.name + '-receipts')
+    if os.path.lexists(runtime):
+        raise ValueError('unexpected preexisting receipt directory')
+    cleanup.callback(systemd['remove_directory'], runtime)
+    groups = {role: grp.getgrgid(pwd.getpwnam(user).pw_gid) for role, user in accounts.items()}
+    core_user = accounts['core']
+    wallet_group, wallet_gid = groups['wallet'].gr_name, groups['wallet'].gr_gid
+    with tarfile.open(archive, 'r:gz') as package:
+        tmpfiles = root / 'receipt-tmpfiles.conf'
+        tmpfiles.write_text(package.extractfile(RECEIPT_DIRECTORY).read().decode()
+                            .replace(RECEIPT_PATH, str(runtime))
+                            .replace('lightning-goats lg-cashu-ipc', f'{core_user} {wallet_group}'))
+        fragment = root / 'receipt-drop-in.conf'
+        fragment.write_bytes(package.extractfile(RECEIPT_DROP_IN).read())
+        core = root / 'lightning-goatsd'
+        with core.open('xb') as output, package.extractfile('lightning-goatsd') as binary:
+            shutil.copyfileobj(binary, output)
+        core.chmod(0o555)
+    command(['systemd-tmpfiles', '--create', f'--prefix={runtime}', str(tmpfiles)])
+    metadata = runtime.stat()
+    if (metadata.st_uid, metadata.st_gid, stat.S_IMODE(metadata.st_mode)) != (uids['core'], wallet_gid, 0o750):
+        raise ValueError('packaged core receipt directory has unexpected ownership or access')
+    properties = [(key, value.replace(RECEIPT_PATH, str(runtime)).replace('lg-cashu-ipc', wallet_group))
+                  for key, value in systemd['service_properties'](fragment)]
+    if ('SupplementaryGroups', wallet_group) not in properties or ('ReadWritePaths', str(runtime)) not in properties:
+        raise ValueError('packaged core receipt permissions are incomplete')
+
+    state = root / 'core-receipt-state'
+    state.mkdir(mode=0o700)
+    ledger = state / 'ledger.sqlite'
+    original = (core_state / 'ledger.sqlite').as_uri() + '?mode=ro'
+    with closing(sqlite3.connect(original, uri=True)) as source, closing(sqlite3.connect(ledger)) as connection:
+        source.backup(connection)
+        [(epoch,)] = connection.execute('SELECT stream_id FROM overlay_identity').fetchall()
+        if connection.execute('SELECT COUNT(*) FROM ledger_entries').fetchone() != (0,):
+            raise ValueError('receipt fixture requires an empty ledger')
+        connection.execute('INSERT OR IGNORE INTO reward_funding_state(singleton,bootstrap_through,last_ledger_id)'
+                           ' VALUES(1,0,0)')
+        connection.commit()
+    os.chown(ledger, uids['core'], groups['core'].gr_gid)
+    ledger.chmod(0o600)
+    os.chown(state, uids['core'], groups['core'].gr_gid)
+
+    endpoint = runtime / 'receipt.sock'
+    wallet = json.loads(wallet_config.read_bytes())
+    identity = {name: wallet[name] for name in ('wallet_instance', 'wallet_epoch')}
+    candidate = root / 'core-with-receipts.toml'
+    candidate.write_text(core_config.read_text()
+                         .replace('sqlite://' + str(core_state / 'ledger.sqlite'), 'sqlite://' + str(ledger))
+                         .replace('listen = "127.0.0.1:8788"', 'listen = "127.0.0.1:0"')
+                         .replace('mode = "canary"', 'mode = "shadow"')
+                         .replace('https://api.dev.strike.me/', 'https://127.0.0.1:9/')
+                         .replace('http://10.8.0.6:8790/', 'http://127.0.0.1:9/') + f'''
+[cashu_receipts]
+socket = "{endpoint}"
+ipc_gid = {wallet_gid}
+wallet_uid = {uids['wallet']}
+wallet_instance = "{identity['wallet_instance']}"
+wallet_epoch = "{identity['wallet_epoch']}"
+core_epoch = "{epoch}"
+import_enabled = true
+receipts_per_24h = 10
+credit_sats_per_24h = 20
+maximum_custody_sats = 20
+deadline_seconds = 5
+connections_per_second = 8
+[[cashu_receipts.approved]]
+mint_id = "fixture"
+policy_version = "v1"
+maximum_gross_sats = 10
+maximum_net_sats = 10
+''')
+    candidate.chmod(0o444)
+    namespace = f'NetworkNamespacePath=/proc/{os.getpid()}/ns/net'
+    unit = f'{root.name}-native-receipts.service'
+    process = systemd['UnitProcess'](unit)
+    cleanup.callback(command, ['systemctl', 'reset-failed', unit], check=False)
+    cleanup.callback(process.terminate)
+    log = root / 'core-receipts.log'
+    log.touch(mode=0o600)
+    command(['systemd-run', '--unit', unit,
+             *[f'--property={key}={value}' for key, value in properties],
+             *['--property=' + entry for entry in (
+                 f'User={core_user}', f'Group={groups["core"].gr_name}', f'ReadWritePaths={state}',
+                 namespace, 'IPAddressDeny=any', 'ProtectSystem=strict',
+                 'NoNewPrivileges=yes', 'CapabilityBoundingSet=',
+                 'SetCredential=strike-api-key:synthetic-credentials-only',
+                 'SetCredential=strike-webhook-secret:synthetic-credentials-only',
+                 f'StandardOutput=append:{log}', f'StandardError=append:{log}')],
+             '--', str(core), '--config', str(candidate)])
+    ready(command, process, endpoint, log)
+    metadata = endpoint.stat()
+    if (metadata.st_uid, metadata.st_gid, stat.S_IMODE(metadata.st_mode)) != (uids['core'], wallet_gid, 0o660):
+        raise ValueError('native core receipt socket mode or isolation group differs')
+
+    probe = root / 'receipt-probe.py'
+    probe.write_text(RECEIPT_PROBE)
+    receipt = root / 'receipt.json'
+    receipt.write_text(json.dumps(dict(identity, schema_version=1, acquisition_id=str(uuid.uuid4()),
+                                      transport='cashu', source_ref='synthetic-systemd-receipt',
+                                      source_author=None, mint_id='fixture', unit='sat', gross_sats=8,
+                                      receive_fee_sats=1, net_sats=7, acquisition_evidence_digest='12' * 32,
+                                      policy_version='v1', credit_pool='herd')))
+    for path in (probe, receipt):
+        path.chmod(0o444)
+
+    def send(role, expectation, extra=()):
+        account = accounts[role]
+        result = command(['systemd-run', '--quiet', '--pipe', '--wait', '--collect',
+                          f'--property=User={account}', f'--property=Group={groups[role].gr_name}',
+                          '--property=IPAddressDeny=any', '--property=NoNewPrivileges=yes',
+                          '--property=ProtectSystem=strict', *extra, '--',
+                          '/usr/bin/python3', '-I', '-S', '-B', str(probe), str(endpoint),
+                          str(receipt), str(uids['core']), expectation], check=False)
+        if result.returncode:
+            raise ValueError(f'native receipt probe {expectation} failed:\n'
+                             + result.stderr[-1500:] + '\n' + diagnostics(command, process, log))
+        return result.stdout
+
+    send('signer', 'filesystem-denied')
+    send('signer', 'peer-denied', (f'--property=SupplementaryGroups={wallet_group}',))
+    first = send('wallet', 'accept')
+    if not first or send('wallet', 'accept') != first:
+        raise ValueError('native core did not replay the same wallet acknowledgment')
+    process.terminate()
+    if process.wait(timeout=15):
+        raise ValueError('native cashu receipt core did not stop cleanly')
+    with closing(sqlite3.connect(ledger.as_uri() + '?mode=ro', uri=True)) as connection:
+        events = connection.execute("SELECT payload_json FROM event_log WHERE event_type='payment_received'").fetchall()
+        if (connection.execute('SELECT net_sats FROM cashu_receipt_inbox').fetchall() != [(7,)]
+                or len(events) != 1 or json.loads(events[0][0])['feeding']['reason'] != 'mode_disabled'
+                or connection.execute('SELECT COUNT(*) FROM feed_attempts').fetchone() != (0,)):
+            raise ValueError('synthetic receipt failed one-credit and zero-feeds guarantees')
+    return dict(acknowledgment_replayed=True, ledger_rows=1, payment_events=1, feed_attempts=0,
+                captured_feeding_snapshot=True, filesystem_denial=True,
+                kernel_peer_denial_with_group_access=True)
+
+
 def rehearse(selection, binaries, hashes, uids, states, wallet_config, signer_config,
-             helper, helper_state, credential, request_announcement):
+             helper, helper_state, credential, request_announcement, core_config):
     if os.environ.get('GITHUB_ACTIONS') != 'true' or not os.environ.get('GITHUB_RUN_ID', '').isdigit():
         raise ValueError('systemd fixture requires the disposable Actions runner')
     archive, source, checksum = selection
@@ -189,6 +371,15 @@ def rehearse(selection, binaries, hashes, uids, states, wallet_config, signer_co
             cleanup.callback(systemd['remove_directory'], runtime)
             logs[role] = root / f'{role}.log'
             logs[role].touch(mode=0o600)
+        core_account = f'{root.name}-c'
+        command(['/usr/sbin/groupadd', '--gid', str(uids['core']), core_account])
+        cleanup.callback(command, ['/usr/sbin/groupdel', core_account], check=False)
+        command(['/usr/sbin/useradd', '--uid', str(uids['core']), '--gid', core_account, '--no-user-group',
+                 '--no-create-home', '--home-dir', '/nonexistent', '--shell', '/usr/sbin/nologin', core_account])
+        cleanup.callback(command, ['/usr/sbin/userdel', core_account], check=False)
+        accounts['core'] = core_account
+        receipts = rehearse_receipt_socket(archive, root, cleanup, systemd, accounts, uids,
+                                          states['core'], core_config, wallet_config)
         helper_dir = root / 'nak'
         shutil.copytree(helper_state, helper_dir)
         os.chown(helper_dir, uids['signer'], uids['signer'])
@@ -374,9 +565,10 @@ def rehearse(selection, binaries, hashes, uids, states, wallet_config, signer_co
                                                  'journal_and_helper_state_preserved': True},
                 repeated_start_and_stop=True, distinct_runtime_uids=True,
                 loopback_ip_denied_by_systemd=True, installed_fences_preserved=True,
+                core_receipt_socket=receipts,
                 receiving_key_rotation={'wallet_anchor_and_namespace_unchanged': True,
                                         'missing_and_wrong_key_refused': True,
                                         'signer_original_request_unchanged': True,
                                         'stale_announcement_refused': True,
                                         'new_announcement_reached_inert_helper': True},
-                scope='synthetic receiving-key rotation with inert signer; no external or financial effects')
+                scope='synthetic core credit and receiving-key rotation with inert signer; no external effects')

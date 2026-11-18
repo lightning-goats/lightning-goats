@@ -33,6 +33,8 @@ pub struct Config {
     #[serde(default)]
     pub receipts_per_24h: u64,
     #[serde(default)]
+    pub unlimited_receipts_per_24h: bool,
+    #[serde(default)]
     pub credit_sats_per_24h: u64,
     #[serde(default)]
     pub maximum_custody_sats: u64,
@@ -72,6 +74,7 @@ impl Config {
         );
         ensure!(
             self.approved.len() <= 128
+                && (!self.unlimited_receipts_per_24h || self.receipts_per_24h == 0)
                 && [
                     self.receipts_per_24h,
                     self.credit_sats_per_24h,
@@ -108,7 +111,7 @@ impl Config {
         ensure!(
             !self.import_enabled
                 || (!approved.is_empty()
-                    && self.receipts_per_24h > 0
+                    && (self.receipts_per_24h > 0 || self.unlimited_receipts_per_24h)
                     && self.credit_sats_per_24h > 0
                     && self.maximum_custody_sats > 0),
             "new receipt import requires explicit policy and budgets"
@@ -121,6 +124,7 @@ impl Config {
             import_enabled: self.import_enabled,
             limits: ImportLimits {
                 receipts_per_24h: self.receipts_per_24h,
+                unlimited_receipts_per_24h: self.unlimited_receipts_per_24h,
                 credit_sats_per_24h: self.credit_sats_per_24h,
                 maximum_custody_sats: self.maximum_custody_sats,
             },
@@ -225,6 +229,7 @@ mod tests {
             core_epoch: ledger.overlay_stream_id().await?,
             import_enabled: true,
             receipts_per_24h: 10,
+            unlimited_receipts_per_24h: false,
             credit_sats_per_24h: 10000,
             maximum_custody_sats: 10000,
             approved: vec![Mint {
@@ -300,6 +305,11 @@ mod tests {
         let mut config = server.config;
         config.receipts_per_24h = 0;
         assert!(config.validate().is_err());
+        config.unlimited_receipts_per_24h = true;
+        config.validate()?;
+        config.receipts_per_24h = 1;
+        assert!(config.validate().is_err());
+        config.receipts_per_24h = 0;
         config.import_enabled = false;
         config.validate()?;
         config.approved.push(config.approved[0].clone());

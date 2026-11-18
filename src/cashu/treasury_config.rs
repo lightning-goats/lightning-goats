@@ -116,6 +116,7 @@ mod tests {
             core_epoch: Uuid::from_u128(4),
             import_enabled: false,
             receipts_per_24h: 0,
+            unlimited_receipts_per_24h: false,
             credit_sats_per_24h: 0,
             maximum_custody_sats: 0,
             approved: vec![],

@@ -39,6 +39,7 @@ async fn frozen_cashu_journals_preserve_native_correlations_without_restore_auth
         import_enabled: true,
         limits: ImportLimits {
             receipts_per_24h: 10,
+            unlimited_receipts_per_24h: false,
             credit_sats_per_24h: 20000,
             maximum_custody_sats: 20000,
         },

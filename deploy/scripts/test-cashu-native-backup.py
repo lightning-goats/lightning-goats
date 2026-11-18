@@ -364,7 +364,7 @@ def main():
             rehearse = runpy.run_path(str(source / 'deploy/scripts/rehearse-cashu-systemd.py'))['rehearse']
             print(json.dumps(rehearse(args.systemd_package, binaries, hashes, runtime_uids, states,
                                       wallet_config, signer_config, helper, helper_state, credential,
-                                      retain_failed_signing_attempt),
+                                      retain_failed_signing_attempt, config),
                              sort_keys=True))
             return
         native_configurations, native_policy = {}, None

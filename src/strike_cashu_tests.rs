@@ -51,6 +51,7 @@ mod cashu_treasury_tests {
                 import_enabled: true,
                 limits: ImportLimits {
                     receipts_per_24h: 100,
+                    unlimited_receipts_per_24h: false,
                     credit_sats_per_24h: 20000,
                     maximum_custody_sats: 20000,
                 },
@@ -424,6 +425,7 @@ mod cashu_treasury_tests {
             import_enabled: value.import_enabled,
             limits: ImportLimits {
                 receipts_per_24h: value.limits.receipts_per_24h,
+                unlimited_receipts_per_24h: value.limits.unlimited_receipts_per_24h,
                 credit_sats_per_24h: value.limits.credit_sats_per_24h,
                 maximum_custody_sats: value.limits.maximum_custody_sats,
             },

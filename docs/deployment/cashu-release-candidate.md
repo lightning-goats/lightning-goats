@@ -62,6 +62,42 @@ with IP denied even to a listening loopback socket. A fenced restart must open n
 IPC listener and preserve the retained state. The job uses newly initialized empty
 fixtures. Funded checkpoint installation and reconciliation remain separate.
 
+## Core and wallet Unix sockets
+
+Install these two root-owned files together during the approved Cashu core
+configuration step. Keep the existing core unit and its CyberHerd drop-ins.
+
+| Packaged example | Installed path |
+| --- | --- |
+| `deploy/systemd/lightning-goats-receive.service.d/80-cashu-receipts.conf.example` | `/etc/systemd/system/lightning-goats-receive.service.d/80-cashu-receipts.conf` |
+| `deploy/tmpfiles.d/lightning-goats-cashu-receipts.conf.example` | `/etc/tmpfiles.d/lightning-goats-cashu-receipts.conf` |
+
+Provision the dedicated `lg-cashu-ipc` group and wallet account first. The
+tmpfiles rule creates `/run/lightning-goats-cashu-receipts` as
+`lightning-goats:lg-cashu-ipc` with mode `0750`. Use
+`systemd-tmpfiles --create --prefix=/run/lightning-goats-cashu-receipts
+/etc/tmpfiles.d/lightning-goats-cashu-receipts.conf` before the approved
+core startup so its mount sandbox finds the runtime path. The drop-in
+adds the group and the writable socket directory to the core service. The
+main core runtime and the original CyberHerd bridge keep their own groups
+and paths.
+
+Set `cashu_receipts.socket` in the core and `receipt_delivery.socket` in
+the wallet to `/run/lightning-goats-cashu-receipts/receipt.sock`. Set the
+core's receipt IPC GID and the wallet's listener IPC GID to the numeric
+`lg-cashu-ipc` group. Use `/run/lightning-goats-cashu/intake.sock` and
+`/run/lightning-goats-cashu/treasury.sock` for the wallet's separate
+listeners. Keep the wallet-to-signer socket in the separate
+`lg-cashu-signer-ipc` group.
+
+The packaged systemd rehearsal starts the native core with the packaged
+receipt permissions mapped into disposable paths. It exercises a synthetic
+wallet-UID receipt, identical acknowledgment on replay, refusal of the
+signer UID even when granted the socket group, and one ledger credit with
+zero feed attempts. The original payment event keeps its advisory feeding
+snapshot. Receipt verification checks the original financial fields
+independently so a presentation update cannot block import or replay.
+
 ## Add the inactive Cashu schema to an existing core
 
 Use the authenticated root-owned VPS upgrade tool closure with the paired core

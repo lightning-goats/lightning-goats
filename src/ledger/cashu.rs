@@ -91,20 +91,28 @@ impl LedgerStore {
                 .fetch_one(&mut *tx)
                 .await?;
         let limits = &policy.limits;
-        for bound in [
-            limits.receipts_per_24h,
-            limits.credit_sats_per_24h,
-            limits.maximum_custody_sats,
-        ] {
+        for bound in [limits.credit_sats_per_24h, limits.maximum_custody_sats] {
             ensure!(
                 bound > 0 && bound <= i64::MAX as u64,
                 "Cashu core limits are disabled or invalid"
             );
         }
+        ensure!(
+            if limits.unlimited_receipts_per_24h {
+                limits.receipts_per_24h == 0
+            } else {
+                (1..=i64::MAX as u64).contains(&limits.receipts_per_24h)
+            },
+            "Cashu receipt count limit is disabled or invalid"
+        );
         let remaining = RemainingBudget {
-            receipt_count: limits
-                .receipts_per_24h
-                .saturating_sub(to_u64(used.try_get("count")?, "Cashu count")?),
+            receipt_count: if limits.unlimited_receipts_per_24h {
+                u64::MAX
+            } else {
+                limits
+                    .receipts_per_24h
+                    .saturating_sub(to_u64(used.try_get("count")?, "Cashu count")?)
+            },
             credit_sats: limits
                 .credit_sats_per_24h
                 .saturating_sub(to_u64(used.try_get("sats")?, "Cashu rate usage")?),
@@ -218,11 +226,16 @@ async fn verify_row(
         .bind(row.try_get::<i64, _>("event_seq")?)
         .fetch_one(&mut **tx)
         .await?;
+    let mut payload: serde_json::Value =
+        serde_json::from_str(&event.try_get::<String, _>("payload_json")?)?;
+    // The normal event writer snapshots advisory feeder status for rendering.
+    // Validate the original financial projection even after that status changes.
+    if let Some(fields) = payload.as_object_mut() {
+        fields.remove("feeding");
+    }
     ensure!(
         event.try_get::<String, _>("event_type")? == "payment_received"
-            && serde_json::from_str::<serde_json::Value>(
-                &event.try_get::<String, _>("payload_json")?
-            )? == public_event(receipt, after),
+            && payload == public_event(receipt, after),
         "Cashu receipt lost original public event"
     );
     Ok(CashuImportResult {

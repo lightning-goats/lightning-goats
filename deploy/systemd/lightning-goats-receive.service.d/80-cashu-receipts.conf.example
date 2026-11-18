@@ -1,0 +1,6 @@
+[Unit]
+After=systemd-tmpfiles-setup.service
+
+[Service]
+SupplementaryGroups=lg-cashu-ipc
+ReadWritePaths=/run/lightning-goats-cashu-receipts

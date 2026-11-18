@@ -714,9 +714,17 @@ The unit expects a dedicated non-admin `lightning-goats-cashu` user, the
 numeric IDs in protected configuration; do not reuse production daemon or payout
 identities. Only the intended core IPC client belongs to the wallet IPC group;
 only the wallet and dedicated Cashu broker belong to the signer IPC group.
-Peer-UID authentication still controls each socket request. The core's receipt
-socket must separately grant this wallet traversal/connect access through its
-approved IPC group before receipt delivery can work.
+Peer-UID authentication still controls each socket request. Use the packaged
+core receipt drop-in and tmpfiles rule for the shared receipt directory. The
+[release runbook](cashu-release-candidate.md#core-and-wallet-unix-sockets)
+records their destinations and matching socket settings.
+
+The core receipt policy accepts `unlimited_receipts_per_24h = true` with
+`receipts_per_24h` omitted or set to zero. Set this explicitly if there should
+be no fixed count of incoming donations. The rolling credit-sat ceiling,
+outstanding custody ceiling, per-mint receipt limits and feed-credit rules
+still apply. Existing finite receipt count configurations keep their limits,
+and an enabled import policy requires an explicit count option.
 
 The canonical configuration path is `/etc/lightning-goats-cashu/config.json`,
 root-owned with protected parents. Install the pinned executable root-owned at

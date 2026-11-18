@@ -354,6 +354,7 @@ mod combined_fixture {
             import_enabled: true,
             limits: ImportLimits {
                 receipts_per_24h: 10,
+                unlimited_receipts_per_24h: false,
                 credit_sats_per_24h: 1000,
                 maximum_custody_sats: 1000,
             },
@@ -430,6 +431,7 @@ mod combined_fixture {
                 core_epoch: registration.core_epoch,
                 import_enabled: true,
                 receipts_per_24h: 10,
+                unlimited_receipts_per_24h: false,
                 credit_sats_per_24h: 1000,
                 maximum_custody_sats: 1000,
                 approved: mint_ids

@@ -26,6 +26,41 @@ INSTALL=runpy.run_path(str(SOURCE/'install-cashu-restore.py'))
 
 
 class RecoveryWorklistTests(unittest.TestCase):
+    def test_paired_custody_requires_each_named_stage(self):
+        older, later = '11' * 32, '22' * 32
+        primary = {'staged_receipt_sha256': older, 'mints': {}}
+        reference = {'staged_receipt_sha256': later, 'mints': {}}
+        plan = {'version': 3, 'treasury': [], 'feeder': [], 'custody_all': primary,
+                'reference_custody_all': reference}
+        custody = RECONCILE['custody_evidence']
+        self.assertEqual(custody(plan, older, later), {'custody_all': primary, 'reference_custody_all': reference})
+        for invalid, other in (({**plan, 'reference_custody_all': primary}, later),
+                               ({**plan, 'custody_all': reference, 'reference_custody_all': primary}, later),
+                               ({**plan, 'reference_custody_all': None}, later),
+                               ({**plan, 'version': 2}, later),
+                               (plan, older), (plan, None)):
+            with self.subTest(invalid=invalid, other=other), self.assertRaises(ValueError):
+                custody(invalid, older, other)
+        missing = {key: value for key, value in plan.items() if key != 'reference_custody_all'}
+        with self.assertRaisesRegex(ValueError, 'both checkpoint evidence batches'):
+            custody(missing, older, later)
+        self.assertEqual(custody({**missing, 'version': 2}, older, later), {'custody_all': primary})
+
+    def test_custody_distinguishes_mint_unspent_proofs_held_locally(self):
+        selected = [{'y': str(index), 'amount_sats': amount, 'local_state': state}
+                    for index, (amount, state) in enumerate(
+                        [(3, 'UNSPENT'), (5, 'RESERVED'), (7, 'PENDING'), (11, 'UNSPENT')])]
+        outcomes = ('UNSPENT', 'UNSPENT', 'PENDING', 'SPENT')
+        evidence = {'queried_mint': True, 'mint_unspent_sats': 8, 'mint_spent_sats': 11,
+                    'mint_unresolved_sats': 7, 'stale_local_unspent_sats': 11,
+                    'proofs': [{**proof, 'mint_state': outcome}
+                               for proof, outcome in zip(selected, outcomes, strict=True)]}
+        result = RECONCILE['custody_amounts'](selected, evidence)
+        self.assertEqual(result['mint_unspent_held_sats'], 5)
+        self.assertEqual(result['mint_unspent_sats'], 8)
+        self.assertEqual(result['stale_local_unspent_sats'], 11)
+        self.assertEqual(result['mint_unresolved_sats'], 7)
+
     def test_recovery_batch_requires_the_exact_union_of_original_operations(self):
         first = '10000000-0000-4000-8000-000000000001'
         second = '10000000-0000-4000-8000-000000000002'

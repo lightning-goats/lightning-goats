@@ -894,6 +894,23 @@ mod combined_fixture {
         if lost_reply {
             println!("COMBINED_CORE_EARLY_STRIKE_WAITS_FOR_WALLET_VERIFIED");
         }
+        let installed_review =
+            multi_mint && std::env::var("LG_CASHU_COMBINED_INSTALLED_REVIEW").as_deref() == Ok("1");
+        if installed_review {
+            let id: Uuid = read_when_ready(&root, "reference-credit.json").await?;
+            let amount: i64 = sqlx::query_scalar(
+                "SELECT net_sats FROM cashu_receipt_inbox WHERE acquisition_id=? AND wallet_instance=?",
+            )
+            .bind(id.to_string())
+            .bind(registration.wallet_instance.to_string())
+            .fetch_one(&pool)
+            .await?;
+            assert_eq!(amount, 16);
+            assert_eq!(ledger.feed_credit_sats().await?, 16);
+            assert_eq!(count(&pool, "cashu_receipt_inbox").await?, 3);
+            assert_eq!(count(&pool, "cashu_treasury_deposits").await?, 2);
+            assert_eq!(count(&pool, "feed_attempts").await?, 1);
+        }
         if let Some(server) = receipt_server {
             server.abort();
         }
@@ -910,7 +927,7 @@ mod combined_fixture {
             snapshot(&pool, &private.join("funded-after-effects.db")).await?;
             assert_restored_core_fenced(&private.join("funded-before-melt")).await?;
         }
-        if multi_mint && std::env::var("LG_CASHU_COMBINED_INSTALLED_REVIEW").as_deref() == Ok("1") {
+        if installed_review {
             snapshot(&pool, &private.join("mint-custody-core-after.db")).await?;
             publish(&root, "restore-core-ready.json", &true)?;
             ensure!(

@@ -487,16 +487,26 @@ The comparison independently derives the complete mint set from the selected
 wallet journal and verified images. It refuses omitted namespaces, unknown
 stores, incomplete initialization, and missing or mismatched pages. The
 report retains per-mint results, aggregate sat totals and the time range of
-the observations. These are separate reads made during that range. The
-report preserves every fence and keeps resumption unauthorized.
+the observations. `mint_unspent_held_sats` counts the part of the mint-reported
+unspent value that the local wallet still holds outside its spendable balance.
+These are separate reads made during that range. The report preserves every
+fence and keeps resumption unauthorized.
+
+Use evidence manifest version 3 to inspect both checkpoints together. Keep
+the version 2 treasury and feeder arrays. Set `custody_all` to the complete
+batch from the primary stage and `reference_custody_all` to the complete batch
+from the separate `--reference` stage. Both fields use the shape above, with
+their respective receipt hashes and independently generated selections.
+Each batch must cover every namespace in its own checkpoint. The report also
+counts operations still pending in the reference, even when the reference
+and primary share the same pending record.
 
 The funded two-mint rehearsal compares native observations from the original
 synthetic issuers after their melts. The pre-melt checkpoints still list
 250 sats and 150 sats as unspent. The comparison identifies all 400 sats as
 spent and preserves the original checkpoint bytes. The same checks run after
-a lost melt reply. This exercises custody comparison on funded snapshots in
-the separate-UID test environment. The encrypted installation rehearsal uses
-empty journals.
+a lost melt reply. The encrypted funded installation also observes the later
+checkpoint and compares the two verified custody batches together.
 
 ## Install the fenced images on a recovery host
 
@@ -573,14 +583,17 @@ restored images must preserve the original pending invoice, both credited
 receipts, 250 and 150 sats of old local custody, and every startup fence.
 The older stage's worklist must still identify that original unsettled invoice.
 
-The same rehearsal seals a later reference after both settlements and the
-simulated feeder confirmation. It selects the original proof points from the
-installed checkpoint and the original settled quotes from the later reference.
-The original synthetic mints answer both reads. The native Strike observer
+The same rehearsal seals a later reference after both settlements, the
+simulated feeder confirmation and one new 16-sat credit below the feeding
+threshold. It selects proof points from both checkpoints and the original
+settled quotes from the later reference. The original
+synthetic mints answer those reads. The native Strike observer
 checks both receives against the original loopback provider. The feeder
 observer checks the original UUID against the fixture gateway. The authenticated
 comparison must find 400 stale sats, 396 sats in the two later Strike deposits
-and one feeder confirmation missing from the older checkpoint. It refuses
-omitted operations and evidence rebound to the later custody image. Both
+and one feeder confirmation missing from the older checkpoint. It verifies
+16 sats unspent in the later reference and zero stale or unresolved mint
+value. It refuses omitted operations, missing later custody evidence and
+evidence rebound across checkpoints. Both
 stages and the installed files stay byte-identical with their fences intact.
 Safe resumption and live provider acceptance still require verification.

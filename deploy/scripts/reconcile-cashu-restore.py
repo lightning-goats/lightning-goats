@@ -227,6 +227,7 @@ def custody_amounts(selected, report):
     require(len(observations) == len(selected) and report['queried_mint'] is bool(selected),
             'custody report does not cover its original page')
     totals = dict.fromkeys(CUSTODY_TOTALS, 0)
+    unspent_held = 0
     for original, observed in zip(selected, observations):
         require(type(observed['amount_sats']) is int and all(observed[k] == value for k, value in original.items()),
                 'custody observation differs from original proof')
@@ -236,9 +237,11 @@ def custody_amounts(selected, report):
         totals[key] += original['amount_sats']
         if state == 'SPENT' and original['local_state'] == 'UNSPENT':
             totals['stale_local_unspent_sats'] += original['amount_sats']
+        if state == 'UNSPENT' and original['local_state'] != 'UNSPENT':
+            unspent_held += original['amount_sats']
     require(all(type(report[k]) is int and report[k] == amount for k, amount in totals.items()),
             'custody observation totals disagree')
-    return totals
+    return {**totals, 'mint_unspent_held_sats': unspent_held}
 
 
 def compare_custody(entry, parent, stages, mint_source, common, budget):
@@ -289,7 +292,8 @@ def compare_custody_all(entry, parent, stages, wallet_source, common, budget):
     return {'staged_receipt_sha256': stage_sha, 'mint_namespaces_compared': len(reports), 'mints': reports,
             'observed_from': min((r['observed_from'] for r in reports.values()), default=None),
             'observed_through': max((r['observed_through'] for r in reports.values()), default=None),
-            **{key: sum(r[key] for r in reports.values()) for key in ('selected_count', *CUSTODY_TOTALS)}}
+            **{key: sum(r[key] for r in reports.values())
+               for key in ('selected_count', *CUSTODY_TOTALS, 'mint_unspent_held_sats')}}
 
 
 def original_ids(*groups):
@@ -311,19 +315,35 @@ def exact_observation_entries(entries, field, expected):
     return [indexed[id] for id in sorted(indexed)]
 
 
-def compare(plan, parent, stages, staged_sha, reference_sha, common, budget, wallet_source=None):
-    custody, custody_all = plan.get('custody'), plan.get('custody_all')
+def custody_evidence(plan, staged_sha, reference_sha):
     version = plan['version']
-    require(set(plan) - {'custody', 'custody_all'} == {'version', 'treasury', 'feeder'}
-            and type(version) is int and version in (1, 2)
+    require(type(version) is int and version in (1, 2, 3), 'invalid recovery evidence manifest version')
+    required = {'version', 'treasury', 'feeder'}
+    if version == 3:
+        names = {'custody_all': staged_sha, 'reference_custody_all': reference_sha}
+        require(reference_sha is not None and reference_sha != staged_sha and set(plan) == required | set(names),
+                'paired custody requires both checkpoint evidence batches')
+        for name, expected in names.items():
+            entry = plan[name]
+            require(isinstance(entry, dict) and entry.get('staged_receipt_sha256') == expected,
+                    'custody batch is assigned to the wrong checkpoint')
+        return {name: plan[name] for name in names}
+    custody, custody_all = plan.get('custody'), plan.get('custody_all')
+    require(set(plan) - {'custody', 'custody_all'} == required
             and (custody is None or (custody_all is None and version == 1))
             and (version == 2 or any(item is not None for item in (plan['treasury'], plan['feeder'], custody, custody_all))),
             'invalid recovery evidence manifest')
+    return {name: plan[name] for name in ('custody', 'custody_all') if plan.get(name) is not None}
+
+
+def compare(plan, parent, stages, staged_sha, reference_sha, common, budget, wallet_sources=None):
+    custody_batches = custody_evidence(plan, staged_sha, reference_sha)
+    version = plan['version']
     staged = stages[staged_sha]
     reference = stages[reference_sha] if reference_sha is not None else None
     # Reuse history and immutable-identity checks across all worklist groups.
     groups = REVIEW['worklist'](*staged[1:], *(reference[1:] if reference else (None, None)),
-                                limit=BATCH_LIMIT if version == 2 else 1)
+                                limit=BATCH_LIMIT if version >= 2 else 1)
     result = {'version': version, 'result': 'CASHU_RESTORE_OBSERVATIONS_COMPARED', 'checkpoint_id': staged[0],
             'staged_receipt_sha256': staged_sha, 'reference_checkpoint_id': reference[0] if reference else None,
             'reference_receipt_sha256': reference_sha,
@@ -342,12 +362,17 @@ def compare(plan, parent, stages, staged_sha, reference_sha, common, budget, wal
         feeder = exact_observation_entries(plan['feeder'], 'request_id', original_ids(groups['feeder_requests']))
         result['treasury'] = [compare_treasury(entry, *comparison_args) for entry in treasury]
         result['feeder'] = [compare_feeder(entry, *comparison_args) for entry in feeder]
-    if custody is not None:
-        wallet, files = wallet_source
-        store = REVIEW['mint_store_name'](custody['mint_id'], common)
-        result['custody'] = compare_custody(custody, parent, stages, (wallet, files[store]), common, budget)
-    if custody_all is not None:
-        result['custody_all'] = compare_custody_all(custody_all, parent, stages, wallet_source, common, budget)
+    for name, custody in custody_batches.items():
+        wallet_source = wallet_sources[custody['staged_receipt_sha256']]
+        if name == 'custody':
+            wallet, files = wallet_source
+            store = REVIEW['mint_store_name'](custody['mint_id'], common)
+            result[name] = compare_custody(custody, parent, stages, (wallet, files[store]), common, budget)
+        else:
+            result[name] = compare_custody_all(custody, parent, stages, wallet_source, common, budget)
+    if version == 3:
+        pending = REVIEW['worklist'](*reference[1:], limit=1)
+        result['reference_pending_counts'] = {key: value['total'] for key, value in pending.items()}
     return result
 
 
@@ -372,26 +397,25 @@ def main():
         budget = common['Budget'](0, 300)
         document = read_bound(args.evidence, args.evidence_sha256, 512 * 1024, common, budget)
         stages = {}
-        custody = document.get('custody_all')
-        if custody is None:
-            custody = document.get('custody')
-        wallet_source = None
+        batches = custody_evidence(document, args.staged_sha256, args.reference_sha256)
+        custody_receipts = {batch['staged_receipt_sha256'] for batch in batches.values()}
+        require(custody_receipts <= {sha for _, sha in selected}, 'custody evidence requires its verified mint stage')
+        wallet_sources = {}
         with ExitStack() as stack:
             for directory, sha in selected:
                 require(not args.output.is_relative_to(directory) and sha not in stages,
                         'output must be outside the independently retained stages')
-                if custody is not None and custody['staged_receipt_sha256'] == sha:
+                if sha in custody_receipts:
                     checkpoint, core, wallet, files = REVIEW['open_images'](
                         directory, sha, common, budget, wallet_inventory=True)
-                    wallet_source = (wallet, files)
+                    wallet_sources[sha] = (wallet, files)
                 else:
                     checkpoint, core, wallet = REVIEW['open_images'](directory, sha, common, budget)
                 require(all(other[0] != checkpoint for other in stages.values()), 'checkpoint cannot reference itself')
                 stages[sha] = (checkpoint, *(stack.enter_context(closing(REVIEW['open_database'](file, budget)))
                                              for file in (core, wallet)))
-            require(custody is None or wallet_source is not None, 'custody evidence requires its verified mint stage')
             result = compare(document, args.evidence.parent, stages, args.staged_sha256,
-                             args.reference_sha256, common, budget, wallet_source)
+                             args.reference_sha256, common, budget, wallet_sources)
         result['evidence_sha256'] = args.evidence_sha256
         common['write_json'](args.output, result)
         common['sync'](args.output.parent)

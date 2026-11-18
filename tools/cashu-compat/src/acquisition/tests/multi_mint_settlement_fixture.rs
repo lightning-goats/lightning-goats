@@ -35,6 +35,7 @@ mod multi_mint {
     #[serde(deny_unknown_fields)]
     struct RestoreSelection {
         custody: String,
+        reference_custody: String,
         melt: String,
     }
 
@@ -54,15 +55,22 @@ mod multi_mint {
                 .get(&h.id)
                 .ok_or_else(|| anyhow::anyhow!("missing original mint selection"))?;
             let approved = h.policy().advertised_url.parse()?;
-            let custody: CustodySelection = serde_json::from_str(&selected.custody)?;
+            let effects = (
+                h.mint.executions.load(Ordering::SeqCst),
+                h.mint.melt_attempts.load(Ordering::SeqCst),
+            );
+            let mut reports = serde_json::Map::new();
+            for (name, raw) in [
+                ("custody", &selected.custody),
+                ("reference_custody", &selected.reference_custody),
+            ] {
+                let custody: CustodySelection = serde_json::from_str(raw)?;
+                let observed = custody
+                    .observe(&approved, &hex_digest(Sha256::digest(raw).into()), &h.mint)
+                    .await?;
+                reports.insert(name.into(), observed);
+            }
             let melt: Selection = serde_json::from_str(&selected.melt)?;
-            let custody = custody
-                .observe(
-                    &approved,
-                    &hex_digest(Sha256::digest(&selected.custody).into()),
-                    &h.mint,
-                )
-                .await?;
             let melt = melt
                 .observe(
                     &approved,
@@ -71,11 +79,15 @@ mod multi_mint {
                 )
                 .await?;
             ensure!(
-                h.mint.executions.load(Ordering::SeqCst) == 1
-                    && h.mint.melt_attempts.load(Ordering::SeqCst) == 1,
+                effects
+                    == (
+                        h.mint.executions.load(Ordering::SeqCst),
+                        h.mint.melt_attempts.load(Ordering::SeqCst)
+                    ),
                 "restore observation repeated a mint effect"
             );
-            results.insert(h.id.clone(), json!({"custody": custody, "melt": melt}));
+            reports.insert("melt".into(), melt);
+            results.insert(h.id.clone(), reports);
         }
         publish(root, "restore-mint-observations.json", &results)
     }
@@ -106,6 +118,8 @@ mod multi_mint {
             .ok_or_else(|| anyhow::anyhow!("core UID missing"))?;
         let group = std::env::var("LG_CASHU_COMBINED_IPC_GID")?.parse()?;
         let lost = std::env::var("LG_CASHU_COMBINED_LOST_REPLY").as_deref() == Ok("1");
+        let installed_review =
+            std::env::var("LG_CASHU_COMBINED_INSTALLED_REVIEW").as_deref() == Ok("1");
         let sdk = std::env::var_os("LG_CASHU_COMBINED_SENDER_NODE").is_some();
         let mut harnesses = [Harness::new(100)?, Harness::new(100)?];
         for (index, h) in harnesses.iter_mut().enumerate() {
@@ -359,6 +373,7 @@ mod multi_mint {
             receipt_client.deliver(&journal, instance, id).await?;
             receipts.push(wire.data().clone());
         }
+        let reference_acquirer = installed_review.then(|| coordinators.remove(0));
         drop(coordinators);
         let checkpoint =
             Path::new(&std::env::var("LG_CASHU_COMBINED_PRIVATE")?).join("mint-custody-before");
@@ -644,7 +659,19 @@ mod multi_mint {
             assert_eq!(h.mint.melt_attempts.load(Ordering::SeqCst), 1);
             publish(&checkpoint, &format!("custody-{}.json", h.id), &observation)?;
         }
-        if std::env::var("LG_CASHU_COMBINED_INSTALLED_REVIEW").as_deref() == Ok("1") {
+        if let Some(mut coordinator) = reference_acquirer {
+            // Keep an independent payment below the next feeding threshold so
+            // reference custody has a real unspent point to check.
+            let _: Value = read_when_ready(&root, "core-result.json").await?;
+            let h = &harnesses[0];
+            let contribution = contribution(h, 17, true, 7)?;
+            let id = new_id(coordinator.admit(&contribution)?);
+            let acquired = receipt(coordinator.acquire_new(id, &h.receiver).await?);
+            assert_eq!(acquired.net_sats, 16);
+            receipt_client.deliver(&journal, instance, id).await?;
+            assert_eq!(h.mint.executions.load(Ordering::SeqCst), 2);
+            assert_eq!(h.mint.melt_attempts.load(Ordering::SeqCst), 1);
+            publish(&root, "reference-credit.json", &id)?;
             snapshot_namespaced(
                 &checkpoint.with_file_name("mint-custody-after"),
                 directory,

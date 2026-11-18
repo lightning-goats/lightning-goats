@@ -521,6 +521,8 @@ def verify_funded_install(root, native_inputs, systemd_masks):
             or collector['systemd_masks_verified'] is not systemd_masks
             or restore['staged_custody_sats'] != {'fixture-a': 250, 'fixture-b': 150}
             or restore['funded_provider_comparison']['original_strike_deposit_sats'] != 396
+            or restore['funded_provider_comparison']['reference_mints_observed'] != 2
+            or restore['funded_provider_comparison']['reference_mint_unspent_sats'] != 16
             or restore['resume_authorized'] is not False):
         raise ValueError('funded installation did not verify the required scope')
     signal = root / 'exchange/restore-review-finished.pending'

@@ -113,8 +113,9 @@ are mandatory. These storage limits are unrelated to financial execution limits.
 
 Client key files contain 64 hexadecimal characters and optional LF. They must be
 private root-owned recovery sources. A systemd host-bound encrypted credential
-blob is **not** such a portable source. Export/reprovisioning and external bunker
-permissions need separate acceptance. `verify-recovery-keys PRIVATE_STAGE` uses
+blob cannot substitute for the portable key. See the fenced installer below for
+reprovisioning on a replacement host. Export and external bunker permissions
+need separate acceptance. `verify-recovery-keys PRIVATE_STAGE` uses
 the pinned curve library to compare both client keys with their configured public
 identities, reject shared/project identities, compare the receiving key, and
 recompute the wallet seed's immutable journal binding. Explicit historical keys
@@ -123,8 +124,8 @@ are checked too; this does not establish historical descriptor-window completene
 Extra files must explicitly include other required application credentials,
 helper state, protected policies and supporting artifacts. Unknown files in the
 inventoried runtime/helper directories refuse. Complete installed credential
-coverage, portable export/reprovisioning and historical-key administration remain
-acceptance requirements; a short manually declared extras list does not close them.
+coverage, portable export and historical-key administration remain acceptance
+requirements.
 
 The root-owned capsule contains exactly `launch-cashu-backup.py`,
 `collect-cashu-backup.py`, `stage-cashu-restore.py`, `review-cashu-restore.py`,
@@ -509,8 +510,35 @@ If publication is interrupted after some roles, keep all workers masked and run
 the same command with the original digests. Exact previously installed roles
 are verified and reused. All published roles carry their fences even before
 the command has verified the entire installation. The result reports the
-checkpoint and confirms all six entries. External settlement and custody checks,
-credential provisioning, and authorization for resumption are separate steps.
+checkpoint and confirms all six entries. External settlement, custody checks,
+and authorization for resumption still need separate evidence.
+
+### Reprovision the two archived signer clients
+
+On a qualified recovery host, add `--signer-credential-store /etc/credstore.encrypted`
+to the command above. Use the existing canonical root-private credential
+directory and an initialized systemd host key that belongs to this machine.
+For a fresh host, first use the
+[credential-store initializer](../../deploy/scripts/initialize-staging-credential-store.py)
+to check for orphaned encrypted files and initialize the key. Keep the six
+runtime roles masked and inactive.
+
+The installer verifies both archives against the collection receipt selected at
+staging. It takes only the portable Cashu NIP-46 client and the independent
+CyberHerd payout NIP-46 client. Their original unit credential names are
+`cashu-nostr-client` and `nostr-client-key`. It encrypts those keys for the
+current host as `lg-cashu-nostr-client` and `cyberherd-signer-client`,
+respectively. Plaintext passes through the systemd tool over pipes. The installer
+decrypts each candidate privately and checks the exact original bytes before
+publishing it. It verifies the installed journals and their fences first.
+Existing credentials are preserved. An exact retry accepts a credential only
+when it decrypts on this host under the intended name to the archived key.
+If interrupted, keep the state fenced and retry with the same stage and policy
+digests. The result lists the two verified signer roles without disclosing keys.
+
+Validate the installed unit bindings and bunker permissions before signing
+acceptance. Strike, webhook, and other independently managed credentials have
+their own recovery requirements.
 
 The encrypted fixture rehearses installation using six disposable runtime
 UIDs. It verifies a retry after interruption, rejects a changed configuration

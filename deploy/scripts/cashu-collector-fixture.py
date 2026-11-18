@@ -1,6 +1,6 @@
 """Actual native/key/encryption composition; service statuses are explicitly mocked."""
 from argparse import Namespace
-from contextlib import closing, contextmanager, nullcontext
+from contextlib import ExitStack, closing, contextmanager, nullcontext
 import hashlib
 import json
 import os
@@ -138,7 +138,7 @@ def verify_restored_runtime_fences(stage, root, workers, binaries, configuration
 def qualify_install(capsule, bootstrap, stage, output_root, policy_path, common,
                     workers, binaries, configurations, roles, systemd_masks):
     args = Namespace(stage=stage, stage_sha256=digest(stage / 'STAGED.json'),
-                     policy=policy_path, policy_sha256=digest(policy_path))
+                     policy=policy_path, policy_sha256=digest(policy_path), signer_credential_store=None)
     launcher = runpy.run_path(str(capsule / 'launch-cashu-backup.py'))
     tool = launcher['verify'](capsule, bootstrap)
     install = runpy.run_path(str(capsule / 'install-cashu-restore.py'))['install']
@@ -152,10 +152,10 @@ def qualify_install(capsule, bootstrap, stage, output_root, policy_path, common,
         else:
             raise ValueError('invalid installed checkpoint accepted')
 
-    def invoke(checksum):
+    def invoke(checksum, *extra):
         return subprocess.run(['/usr/bin/python3', '-I', '-S', '-B', str(capsule / 'launch-cashu-backup.py'),
                                bootstrap, 'install-fenced', str(stage), checksum, str(policy_path),
-                               args.policy_sha256], stdin=subprocess.DEVNULL, capture_output=True, timeout=120)
+                               args.policy_sha256, *extra], stdin=subprocess.DEVNULL, capture_output=True, timeout=120)
 
     wrong = invoke('ff' * 32)
     if (wrong.returncode != 1 or wrong.stdout or wrong.stderr !=
@@ -178,6 +178,7 @@ def qualify_install(capsule, bootstrap, stage, output_root, policy_path, common,
     installed = output_root / 'installed-fenced-runtime'
     installed.mkdir(mode=0o700)
     published = []
+    signer_clients = None
     try:
         for role, worker in workers.items():
             Path(worker['state']).rename(retained / role)
@@ -228,6 +229,8 @@ def qualify_install(capsule, bootstrap, stage, output_root, policy_path, common,
                 raise ValueError('installer removed existing runtime evidence')
         finally:
             extra.unlink()
+        if systemd_masks:
+            signer_clients = qualify_signer_clients(install, invoke, args, common, tool, workers, output_root)
         verified = verify_restored_runtime_fences(stage, output_root.parent, workers, binaries, configurations, roles)
     finally:
         for role, worker in workers.items():
@@ -242,7 +245,110 @@ def qualify_install(capsule, bootstrap, stage, output_root, policy_path, common,
             'existing_live_image_refused': True, 'active_writer_refused': True,
             'existing_empty_target_supported': True, 'changed_installed_config_refused': True,
             'authenticated_launch_wrong_digest_refused': True,
-            'authenticated_cli_retry_with_actual_masks': systemd_masks}
+            'authenticated_cli_retry_with_actual_masks': systemd_masks, 'signer_clients': signer_clients}
+
+
+def qualify_signer_clients(install, invoke, args, common, tool, workers, output_root):
+    """Reprovision archived keys in a throwaway store and let PID 1 load them."""
+    env = {'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'}
+    subprocess.run(['/usr/bin/systemd-creds', 'setup'], check=True, timeout=15,
+                   stdin=subprocess.DEVNULL, capture_output=True, env=env)
+    store = output_root / 'disposable-credential-store'
+    store.mkdir(mode=0o700)
+    args = Namespace(**{**vars(args), 'signer_credential_store': store})
+    keys = args.stage / 'checkpoint-evidence/recovery-material'
+    credentials = [('cashu_signer', 'cashu-nostr-client', 'lg-cashu-nostr-client', keys / 'cashu-client.hex'),
+                   ('signer', 'nostr-client-key', 'cyberherd-signer-client', keys / 'payout-client.hex')]
+    flags = ('--signer-credential-store', str(store))
+    cashu = store / credentials[0][2]
+    payout = store / credentials[1][2]
+    original_key = credentials[0][3]
+
+    def refused():
+        result = invoke(args.stage_sha256, *flags)
+        if (result.returncode != 1 or result.stdout or result.stderr !=
+                b'Cashu fenced installation refused. Preserve the checkpoint and any installed fences.\n'):
+            raise ValueError('invalid signer restore was accepted or disclosed private context')
+
+    saved = original_key.read_bytes()
+    original_key.write_bytes(credentials[1][3].read_bytes())
+    try:
+        refused()
+        if any(store.iterdir()):
+            raise ValueError('changed portable signer client published a credential')
+    finally:
+        original_key.write_bytes(saved)
+
+    sealed = subprocess.run(['/usr/bin/systemd-creds', '--with-key=null', '--name=cashu-nostr-client',
+                             'encrypt', '-', '-'], input=saved, check=True, capture_output=True,
+                            timeout=15, env=env).stdout
+    common['write'](cashu, sealed)
+    refused()
+    if cashu.read_bytes() != sealed or payout.exists():
+        raise ValueError('null-key refusal changed the credential store')
+    cashu.unlink()
+
+    def interrupt(role):
+        if role != 'signer-credential:cashu_signer':
+            raise ValueError('signer credential publication started in an unexpected phase')
+        raise InterruptedError('fixture interruption after first signer credential')
+
+    try:
+        install(args, common, tool, after_publish=interrupt)
+    except InterruptedError:
+        if not cashu.is_file() or payout.exists():
+            raise ValueError('interrupted restore published an unexpected credential set')
+    else:
+        raise ValueError('fixture missed the first signer credential publication')
+    first = digest(cashu)
+    restored = invoke(args.stage_sha256, *flags)
+    if restored.returncode:
+        raise ValueError('exact interrupted credential restore refused')
+    result = json.loads(restored.stdout)
+    if (result['signer_clients_verified'] != ['cashu_signer', 'signer'] or result['resume_authorized']
+            or result['services_changed'] or digest(cashu) != first):
+        raise ValueError('signer restore retry returned a different scope or rewrote the exact first credential')
+
+    probe = """
+import hashlib
+import os
+from pathlib import Path
+import sys
+directory = Path(os.environ['CREDENTIALS_DIRECTORY'])
+name, expected, ciphertext, uid = sys.argv[1:]
+assert os.getuid() == int(uid)
+assert os.listdir(directory) == [name]
+assert hashlib.sha256((directory / name).read_bytes()).hexdigest() == expected
+assert not os.access(ciphertext, os.R_OK)
+"""
+    def run(*command, check=True):
+        return subprocess.run(command, check=check, stdin=subprocess.DEVNULL, capture_output=True,
+                              timeout=30, env=env)
+
+    with ExitStack() as cleanup:
+        for role, name, filename, original in credentials:
+            worker = workers[role]
+            ciphertext = store / filename
+            unit = worker['unit'].removesuffix('.service') + '-credential-probe.service'
+            suffix = output_root.parent.name.removeprefix('lg-native-backup-')
+            account = f'lgc-{suffix}-{role[0]}'
+            run('/usr/sbin/groupadd', '--gid', str(worker['gid']), account)
+            cleanup.callback(run, '/usr/sbin/groupdel', account)
+            run('/usr/sbin/useradd', '--uid', str(worker['uid']), '--gid', account, '--no-user-group',
+                '--no-create-home', '--home-dir', '/nonexistent', '--shell', '/usr/sbin/nologin', account)
+            cleanup.callback(run, '/usr/sbin/userdel', account)
+            result = run('/usr/bin/systemd-run', '--quiet', '--wait', '--collect', '--unit=' + unit,
+                         '--property=User=' + account, '--property=Group=' + account,
+                         '--property=LoadCredentialEncrypted=' + name + ':' + str(ciphertext),
+                         '--property=PrivateNetwork=yes', '--property=NoNewPrivileges=yes',
+                         '--property=StandardOutput=null', '--property=StandardError=null', '--',
+                         '/usr/bin/python3', '-I', '-S', '-B', '-c', probe, name, digest(original),
+                         str(ciphertext), str(worker['uid']), check=False)
+            if result.returncode:
+                raise ValueError(f'systemd could not load the exact isolated {role} credential')
+    return {'archived_key_substitution_refused': True, 'non_host_envelope_refused': True,
+            'credential_interruption_recovered': True, 'exact_existing_bytes_preserved': True,
+            'systemd_loaded_separate_signer_clients': True, 'external_bunker_verified': False}
 
 
 def qualify_restore(source, output_root, collected, identity, selected, store,
@@ -521,7 +627,7 @@ def qualify(source,root,states,uids,binaries,configurations,native_policy,args,c
         'unit':native_policy['components'][role]['unit'] if role in native_policy['components']
                else f'{root.name}-{role}.service'} for role,key in native_roles.items()}
     cashu_client=config_root/'cashu-client.hex'; cashu_client.write_text('0'*63+'2');cashu_client.chmod(0o600)
-    payout_client=config_root/'payout-client.hex'; payout_client.write_text('0'*63+'5');payout_client.chmod(0o600)
+    payout_client=config_root/'payout-client.hex'; payout_client.write_text('0'*63+'5\n');payout_client.chmod(0o600)
     policy={'version':1,'operator_exclusive':True,'workers':workers,
         'native_policy':str(root/'recovery/maintenance-policy.toml'),
         'core_config':str(configurations['core']),'membership_config':str(configurations['membership']),

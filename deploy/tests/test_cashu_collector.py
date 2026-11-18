@@ -1,5 +1,5 @@
 """Root-only disposable filesystem and quiescence tests; no service mutations."""
-from contextlib import closing
+from contextlib import ExitStack, closing
 import hashlib
 import io
 import json
@@ -22,6 +22,7 @@ LAUNCH=runpy.run_path(str(SOURCE/'launch-cashu-backup.py'))
 RESTORE=runpy.run_path(str(SOURCE/'stage-cashu-restore.py'))
 REVIEW=runpy.run_path(str(SOURCE/'review-cashu-restore.py'))
 RECONCILE=runpy.run_path(str(SOURCE/'reconcile-cashu-restore.py'))
+INSTALL=runpy.run_path(str(SOURCE/'install-cashu-restore.py'))
 
 
 class RecoveryWorklistTests(unittest.TestCase):
@@ -331,6 +332,57 @@ class CollectorTests(unittest.TestCase):
         p=self.source(mode=0o440)
         with self.assertRaises(ValueError):self.frozen(p)
         self.frozen(p,secret=False).check()
+
+    def test_signer_clients_require_original_keys_and_current_host_encryption(self):
+        stage = self.root / 'stage'
+        archive = stage / 'checkpoint-evidence/recovery-material'
+        archive.mkdir(mode=0o700, parents=True)
+        store = self.root / 'credential-store'
+        store.mkdir(mode=0o700)
+        host_key = self.root / 'fixture-host-key'
+        tool_env = INSTALL['systemd_credential'].__globals__['CLEAN_ENV']
+        originals, policy = {}, {}
+        for role, (field, filename, _, _) in INSTALL['SIGNER_CLIENTS'].items():
+            raw = b'0' * 63 + (b'2' if role == 'cashu_signer' else b'5\n')
+            MODULE['write'](archive / filename, raw)
+            policy[field] = '/original/' + filename
+            originals['recovery-material/' + filename] = {
+                'source': policy[field], 'source_uid': 0, 'sha256': MODULE['sha'](raw), 'bytes': len(raw),
+            }
+
+        def prepare(stack):
+            return INSTALL['prepare_signer_clients'](store, stage, originals, policy, MODULE, self.budget, stack)
+
+        with patch.dict(tool_env, SYSTEMD_CREDENTIAL_SECRET=str(host_key)):
+            subprocess.run(['/usr/bin/systemd-creds', 'setup'], check=True,
+                           stdin=subprocess.DEVNULL, capture_output=True, timeout=5, env=tool_env)
+            key = MODULE['Frozen'](host_key, 0, 65536, self.budget)
+            with closing(key):
+                INSTALL['ensure_existing_host_key'](key, self.budget)
+            with ExitStack() as temporary:
+                candidates = prepare(temporary)
+                cashu, path, checksum = candidates['cashu_signer']
+                INSTALL['publish_no_replace'](path, cashu, self.budget)
+                self.assertEqual(MODULE['sha'](cashu.read_bytes()), checksum)
+
+            with ExitStack() as temporary:
+                candidates = prepare(temporary)
+                self.assertEqual(candidates['cashu_signer'], (cashu, None, checksum))
+                payout, path, _ = candidates['signer']
+                self.assertFalse(payout.exists())
+                INSTALL['publish_no_replace'](path, payout, self.budget)
+            misplaced = cashu.read_bytes()
+            payout.write_bytes(misplaced)
+            with ExitStack() as temporary, self.assertRaises(ValueError):
+                prepare(temporary)
+            self.assertEqual(payout.read_bytes(), misplaced)
+
+        wrong_identity = self.root / 'foreign-host-key'
+        MODULE['write'](wrong_identity, b'\0' * 17)
+        wrong_identity.chmod(0o400)
+        with (closing(MODULE['Frozen'](wrong_identity, 0, 65536, self.budget)) as key,
+              self.assertRaisesRegex(ValueError, 'current systemd credential host key required')):
+            INSTALL['ensure_existing_host_key'](key, self.budget)
 
     def test_file_and_aggregate_limits_refuse(self):
         p=self.source(raw=b'x'*1025)

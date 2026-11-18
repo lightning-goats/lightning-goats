@@ -208,7 +208,7 @@ jobs:
             chmod 0555 "$fixture/$binary"
           done
           sudo python3 -B deploy/scripts/initialize-staging-credential-store.py > "$RUNNER_TEMP/CASHU-CREDENTIAL-STORE.json"
-          sudo unshare --net -- python3 -B deploy/scripts/test-cashu-native-backup.py \
+          sudo --preserve-env=GITHUB_ACTIONS,GITHUB_RUN_ID unshare --net -- python3 -B deploy/scripts/test-cashu-native-backup.py \
             --core-cli "$fixture/lightning-goatsctl" --core-sha256 "$(sha256sum "$fixture/lightning-goatsctl" | cut -d ' ' -f 1)" \
             --wallet-cli "$fixture/lightning-goats-cashud" --wallet-sha256 "$(sha256sum "$fixture/lightning-goats-cashud" | cut -d ' ' -f 1)" \
             --signer-cli "$fixture/lightning-goats-cashu-signerd" --signer-sha256 "$(sha256sum "$fixture/lightning-goats-cashu-signerd" | cut -d ' ' -f 1)" \

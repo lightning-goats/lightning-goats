@@ -76,6 +76,8 @@ def ready(command, process, endpoint, log):
 
 def rehearse(selection, binaries, hashes, uids, states, wallet_config, signer_config,
              helper, helper_state, credential):
+    if os.environ.get('GITHUB_ACTIONS') != 'true' or not os.environ.get('GITHUB_RUN_ID', '').isdigit():
+        raise ValueError('systemd fixture requires the disposable Actions runner')
     archive, source, checksum = selection
     archive = Path(archive).resolve(strict=True)
     package = runpy.run_path(str(SCRIPTS / 'package-cashu.py'))
@@ -100,7 +102,7 @@ def rehearse(selection, binaries, hashes, uids, states, wallet_config, signer_co
         root = Path(temporary)
         root.chmod(0o755)
         installed, configs, endpoints, state_dirs, logs = {}, {}, {}, {}, {}
-        templates = {}
+        templates, accounts = {}, {}
         encrypted = root / 'synthetic-cashu-client.enc'
         command(['systemd-creds', 'encrypt', '--with-key=host', '--name=cashu-nostr-client',
                  str(credential), str(encrypted)])
@@ -109,6 +111,14 @@ def rehearse(selection, binaries, hashes, uids, states, wallet_config, signer_co
         probe.write_text(PROBE)
         probe.chmod(0o444)
         for role, (binary, name) in roles.items():
+            account = f'{root.name}-{role[0]}'
+            uid = str(uids[role])
+            command(['/usr/sbin/groupadd', '--gid', uid, account])
+            cleanup.callback(command, ['/usr/sbin/groupdel', account], check=False)
+            command(['/usr/sbin/useradd', '--uid', uid, '--gid', account, '--no-user-group',
+                     '--no-create-home', '--home-dir', '/nonexistent', '--shell', '/usr/sbin/nologin', account])
+            cleanup.callback(command, ['/usr/sbin/userdel', account], check=False)
+            accounts[role] = account
             installed[role] = root / binary
             shutil.copyfile(binaries[role], installed[role])
             installed[role].chmod(0o555)
@@ -157,7 +167,6 @@ def rehearse(selection, binaries, hashes, uids, states, wallet_config, signer_co
             listener.accept()[0].close()
 
         def launch(role, phase):
-            uid = str(uids[role])
             other = 'signer' if role == 'wallet' else 'wallet'
             state = str(state_dirs[role])
             runtime = endpoints[role].parent
@@ -165,8 +174,8 @@ def rehearse(selection, binaries, hashes, uids, states, wallet_config, signer_co
                     str(state_dirs[other]), str(configs[role]), str(installed[role]),
                     str(encrypted), str(port)]
             replacement = {
-                'User': uid, 'Group': uid,
-                'SupplementaryGroups': str(uids['signer']),
+                'User': accounts[role], 'Group': accounts[role],
+                'SupplementaryGroups': accounts['signer'],
                 'StateDirectory': f'{root.name}/{role}' + (f' {root.name}/nak' if role == 'signer' else ''),
                 'RuntimeDirectory': runtime.name,
                 'ReadWritePaths': f'{state} {runtime}' + (f' {helper_dir}' if role == 'signer' else ''),

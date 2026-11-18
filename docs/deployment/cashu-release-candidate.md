@@ -38,7 +38,7 @@ offline export. The packaged Rust toolchain notices accompany the selected
 standard library code. The host supplies system libraries. Use the existing
 source-pinned procedures for external tools such as `nak` and `age`.
 
-The `cashu-backup-capsule/` directory contains the exact nine backup and
+The `cashu-backup-capsule/` directory contains the source-pinned backup and
 maintenance programs with their source-bound `TOOL.json`. The archive verifier
 checks the capsule manifest against the selected source and its packaged tools.
 Use the approved ownership and authentication procedure in the [backup runbook](cashu-backup-collection.md).

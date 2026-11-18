@@ -15,7 +15,7 @@ HERE = Path(__file__).resolve().parent
 RESTORE = runpy.run_path(str(HERE / 'stage-cashu-restore.py'))
 
 
-def open_images(stage, expected, common, budget, mint_store=None):
+def stage_metadata(stage, expected, common):
     common['protected_directory'](stage, private=True)
     common['absent'](stage / 'INCOMPLETE')
     read = common['COMBINED']['read_private']
@@ -33,6 +33,17 @@ def open_images(stage, expected, common, budget, mint_store=None):
             or receipt['ciphertext_sha256'] != manifest['ciphertext_sha256']
             or set(manifest['roles']) != common['ROLES']):
         raise ValueError('review requires the selected complete fenced stage')
+    return receipt, manifest
+
+
+def recovery_marker(role):
+    return 'CASHU_RECOVERY_REQUIRED' if role in ('wallet', 'cashu_signer') else 'CYBERHERD_RECOVERY_REQUIRED'
+
+
+def open_images(stage, expected, common, budget, mint_store=None):
+    _, manifest = stage_metadata(stage, expected, common)
+    checkpoint = manifest['checkpoint_id']
+    read = common['COMBINED']['read_private']
     images = stage / 'fenced-images'
     common['protected_directory'](images, private=True)
     if set(p.name for p in images.iterdir()) != common['ROLES']:
@@ -41,8 +52,7 @@ def open_images(stage, expected, common, budget, mint_store=None):
     for role, members in manifest['roles'].items():
         directory = images / role
         common['protected_directory'](directory, private=True)
-        marker = ('CASHU_RECOVERY_REQUIRED' if role in ('wallet', 'cashu_signer')
-                  else 'CYBERHERD_RECOVERY_REQUIRED')
+        marker = recovery_marker(role)
         if read(directory / marker, 128) != (checkpoint + '\n').encode():
             raise ValueError('staged recovery fence differs')
         names = {marker}

@@ -1,4 +1,5 @@
 """Actual native/key/encryption composition; service statuses are explicitly mocked."""
+from argparse import Namespace
 from contextlib import closing
 import hashlib
 import json
@@ -22,24 +23,16 @@ def digest(path):
 
 
 def verify_restored_runtime_fences(stage, root, workers, binaries, configurations, roles):
-    """Open exact restored copies as distinct disposable runtime identities."""
+    """Open the installed role images as their distinct runtime identities."""
     runtime = root / 'restored-runtime'
     runtime.mkdir(mode=0o711)
     states = {}
     for role, name in roles.items():
-        directory = runtime / role
-        original = stage / 'fenced-images' / role
-        shutil.copytree(original, directory, copy_function=shutil.copyfile)
-        for path in directory.iterdir():
-            path.chmod(0o600)
-            os.chown(path, workers[role]['uid'], workers[role]['gid'])
-        directory.chmod(0o700)
-        os.chown(directory, workers[role]['uid'], workers[role]['gid'])
+        directory = Path(workers[role]['state'])
         states[role] = directory
         config = configurations[name].read_text()
         if workers[role]['state'] not in config:
             raise ValueError('fixture configuration does not identify its original state')
-        config = config.replace(workers[role]['state'], str(directory))
         if role in ('membership', 'payout', 'signer'):
             if not config.startswith('enabled = false\n') and '\nenabled = false\n' not in config:
                 raise ValueError('fixture configuration is missing its disabled switch')
@@ -94,8 +87,103 @@ def verify_restored_runtime_fences(stage, root, workers, binaries, configuration
     return sorted(roles)
 
 
+def qualify_install(capsule, bootstrap, stage, output_root, policy_path, common,
+                    workers, binaries, configurations, roles):
+    args = Namespace(stage=stage, stage_sha256=digest(stage / 'STAGED.json'),
+                     policy=policy_path, policy_sha256=digest(policy_path))
+    launcher = runpy.run_path(str(capsule / 'launch-cashu-backup.py'))
+    tool = launcher['verify'](capsule, bootstrap)
+    install = runpy.run_path(str(capsule / 'install-cashu-restore.py'))['install']
+
+    def refused(reason, **context):
+        try:
+            install(args, {**common, **context}, tool)
+        except ValueError as error:
+            if reason not in str(error):
+                raise
+        else:
+            raise ValueError('invalid installed checkpoint accepted')
+
+    wrong = subprocess.run(['/usr/bin/python3', '-I', '-S', '-B', str(capsule / 'launch-cashu-backup.py'),
+                            bootstrap, 'install-fenced', str(stage), 'ff' * 32, str(policy_path),
+                            args.policy_sha256], stdin=subprocess.DEVNULL, capture_output=True, timeout=45)
+    if (wrong.returncode != 1 or wrong.stdout or wrong.stderr !=
+            b'Cashu fenced installation refused. Preserve the checkpoint and any installed fences.\n'):
+        raise ValueError('authenticated install launch did not reject a changed review digest')
+    refused('existing target differs')
+    wallet_config = configurations['wallet']
+    approved_config = wallet_config.read_bytes()
+    wallet_config.write_bytes(approved_config + b'\n')
+    try:
+        refused('installed config or executable differs')
+    finally:
+        wallet_config.write_bytes(approved_config)
+
+    def active(*_):
+        raise ValueError('fixture active writer refusal')
+
+    retained = output_root / 'preexisting-runtime-untouched'
+    retained.mkdir(mode=0o700)
+    installed = output_root / 'installed-fenced-runtime'
+    installed.mkdir(mode=0o700)
+    published = []
+    try:
+        for role, worker in workers.items():
+            Path(worker['state']).rename(retained / role)
+        refused('fixture active writer refusal', check_quiescence=active)
+        if any(os.path.lexists(worker['state']) for worker in workers.values()):
+            raise ValueError('active writer refusal published restored bytes')
+        wallet = workers['wallet']
+        placeholder = Path(wallet['state'])
+        placeholder.mkdir(mode=0o700)
+        os.chown(placeholder, wallet['uid'], wallet['gid'])
+
+        def interrupt(role):
+            published.append(role)
+            raise InterruptedError('fixture interruption after role publication')
+
+        try:
+            install(args, common, tool, after_publish=interrupt)
+        except InterruptedError:
+            present = [role for role, worker in workers.items() if Path(worker['state']).exists()]
+            if len(published) != 1 or set(present) != {*published, 'wallet'}:
+                raise ValueError('interrupted restore published an unexpected role set')
+        else:
+            raise ValueError('fixture interruption was missed')
+        result = install(args, common, tool)
+        if (result['already_installed'] != published or result['roles'] != sorted(roles)
+                or result['result'] != 'CASHU_RESTORE_INSTALLED_FENCED'
+                or result['resume_authorized'] or result['services_changed']):
+            raise ValueError('exact restore retry differed from expected scope')
+        retries = install(args, common, tool)
+        if retries['already_installed'] != sorted(roles):
+            raise ValueError('completed installation did not recognize the original images')
+        extra = Path(workers['core']['state']) / 'unexpected'
+        extra.touch(mode=0o600)
+        try:
+            refused('existing target differs')
+            if not extra.exists():
+                raise ValueError('installer removed existing runtime evidence')
+        finally:
+            extra.unlink()
+        verified = verify_restored_runtime_fences(stage, output_root.parent, workers, binaries, configurations, roles)
+    finally:
+        for role, worker in workers.items():
+            if not (retained / role).exists():
+                continue
+            state = Path(worker['state'])
+            if state.exists():
+                state.rename(installed / role)
+            (retained / role).rename(state)
+    return {'exact_images_installed_fenced': verified, 'interrupted_install_recovered': True,
+            'exact_retry_verified': True, 'changed_target_refused': True,
+            'existing_live_image_refused': True, 'active_writer_refused': True,
+            'existing_empty_target_supported': True, 'changed_installed_config_refused': True,
+            'authenticated_launch_wrong_digest_refused': True}
+
+
 def qualify_restore(source, output_root, collected, identity, selected, store,
-                    workers, binaries, configurations, native_roles, configured_keys):
+                    workers, binaries, configurations, native_roles, configured_keys, policy_path, common):
     """Pass the real encrypted collector output through the isolated launcher."""
     scripts = source / 'deploy/scripts'
     capsule = output_root / 'restore-capsule'
@@ -166,8 +254,8 @@ def qualify_restore(source, output_root, collected, identity, selected, store,
             raise ValueError('staged native store lost committed WAL content')
     if any(p.stat().st_mode & 0o111 for p in (destination / 'checkpoint-evidence/programs').iterdir()):
         raise ValueError('stager made an archived program executable')
-    runtime_fences = verify_restored_runtime_fences(
-        destination, output_root.parent, workers, binaries, configurations, native_roles)
+    installation = qualify_install(capsule, digest(manifest), destination, output_root, policy_path, common,
+                                   workers, binaries, configurations, native_roles)
 
     def invoke_review(output, *options):
         return subprocess.run(
@@ -280,7 +368,8 @@ def qualify_restore(source, output_root, collected, identity, selected, store,
         raise ValueError('failed restore altered source or promoted an incomplete copy')
     return {'actual_authenticated_launcher': True, 'real_age_archive': True,
             'staged_roles': len(roles), 'committed_wal_preserved': True, 'image_manifest_verified': True,
-            'restored_runtime_fences_refused': runtime_fences,
+            'restored_runtime_fences_refused': installation['exact_images_installed_fenced'],
+            'fenced_installation': installation,
             'restored_runtime_roles_isolated': True, 'restored_runtime_bytes_unchanged': True,
             'wallet_fence_checked_before_keys': True, 'cashu_signer_fence_checked_without_client_credential': True,
             'configured_receiving_keys_preserved': len(configured_keys),
@@ -404,7 +493,8 @@ def qualify(source,root,states,uids,binaries,configurations,native_policy,args):
     if original!=after:raise ValueError('collector changed original application bytes')
     _, configured_keys = module['receiving_material'](json.loads(configurations['wallet'].read_bytes()))
     restore_result = qualify_restore(source, output_root, destination, identity, selected, store,
-                                    workers, binaries, configurations, native_roles, configured_keys)
+                                    workers, binaries, configurations, native_roles, configured_keys, policy_path,
+                                    dict(module, GLOBAL_LOCK=globals_['GLOBAL_LOCK'], check_quiescence=checked_status))
     key_stage=destination/'plaintext/recovery-material'
     key_negatives=0
     def key_check(success):

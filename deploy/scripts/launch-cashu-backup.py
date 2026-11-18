@@ -16,7 +16,8 @@ import stat
 import sys
 
 FILES={'launch-cashu-backup.py','collect-cashu-backup.py','stage-cashu-restore.py','review-cashu-restore.py','reconcile-cashu-restore.py',
-       'verify-cashu-backup.py','verify-cashu-combined-backup.py','apply-cashu-mint-policy.py','inactive_file_transaction.py'}
+       'verify-cashu-backup.py','verify-cashu-combined-backup.py','apply-cashu-mint-policy.py',
+       'inactive_file_transaction.py','install-cashu-restore.py'}
 
 
 def unique(pairs):
@@ -72,7 +73,8 @@ def main():
     if os.geteuid()!=0 or not sys.flags.isolated or not sys.flags.no_site or not sys.dont_write_bytecode:
         raise ValueError('root and isolated Python -I -S -B required')
     commands = {'stage': 'stage-cashu-restore.py', 'review': 'review-cashu-restore.py',
-                'reconcile': 'reconcile-cashu-restore.py', 'apply-mint-policy': 'apply-cashu-mint-policy.py'}
+                'reconcile': 'reconcile-cashu-restore.py', 'apply-mint-policy': 'apply-cashu-mint-policy.py',
+                'install-fenced': 'install-cashu-restore.py'}
     subcommand = commands.get(sys.argv[2]) if len(sys.argv) >= 3 else None
     if subcommand is None and len(sys.argv) != 5:
         raise ValueError('tool/policy hashes and new destination required')

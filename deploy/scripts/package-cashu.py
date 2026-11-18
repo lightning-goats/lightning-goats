@@ -29,6 +29,7 @@ CAPSULE_TOOLS = (
     'launch-cashu-backup.py', 'collect-cashu-backup.py', 'stage-cashu-restore.py',
     'review-cashu-restore.py', 'reconcile-cashu-restore.py', 'verify-cashu-backup.py',
     'verify-cashu-combined-backup.py', 'apply-cashu-mint-policy.py', 'inactive_file_transaction.py',
+    'install-cashu-restore.py',
 )
 CAPSULE_FILES = tuple(f'{CAPSULE}/{name}' for name in CAPSULE_TOOLS)
 PAYLOAD = (

@@ -237,7 +237,8 @@ def stage(args, common, tool_identity):
     with temporary_tar.open('rb') as archive:
         extract_plain_tar(archive, plain, budget)
     checkpoint = plain / 'checkpoint'
-    collection = document(read(plain / 'collection.json', 4 * 1024**2))
+    collection_raw = read(plain / 'collection.json', 4 * 1024**2)
+    collection = document(collection_raw)
     policy_raw = read(plain / 'collection-policy.json', 65536)
     policy = document(policy_raw)
     if (collection['checkpoint_id'] != receipt['checkpoint_id']
@@ -300,6 +301,7 @@ def stage(args, common, tool_identity):
               'checkpoint_id': receipt['checkpoint_id'], 'ciphertext_sha256': args.archive_sha256,
               'tool': tool_identity, 'fenced_roles': sorted(plan), 'keys_verified': True,
               'fenced_images_sha256': common['sha'](image_manifest.read_bytes()),
+              'collection_sha256': common['sha'](collection_raw),
               'external_reconciliation_verified': False, 'restore_authorized': False,
               'resume_authorized': False}
     common['write_json'](destination / 'STAGED.json', result)

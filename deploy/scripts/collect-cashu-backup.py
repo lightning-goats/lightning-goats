@@ -13,7 +13,7 @@ if 'verified_tool_identity' not in globals():
         raise ValueError('verified backup launcher required')
 
 import argparse
-from contextlib import ExitStack, closing
+from contextlib import ExitStack, closing, contextmanager
 import fcntl
 import hashlib
 import json
@@ -35,6 +35,9 @@ MARKER = b'LIGHTNING_GOATS_CASHU_BACKUP_COPY_V1\n'
 GLOBAL_LOCK = Path('/var/lib/lightning-goats-upgrades/CYBERHERD-OVERLAY-MAINTENANCE.lock')
 ROLES = {'core', 'membership', 'payout', 'signer', 'wallet', 'cashu_signer'}
 TOOLS = {'copy', 'statectl', 'age', 'tar'}
+CONFIG_FIELDS = {'native': 'native_policy', 'core': 'core_config', 'membership': 'membership_config',
+                 'payout': 'payout_config', 'wallet': 'wallet_config', 'cashu_signer': 'cashu_signer_config',
+                 'signer': 'payout_signer_config'}
 
 
 def sha(raw):
@@ -238,7 +241,7 @@ def receiving_material(wallet):
     return anchor, {f'receiving-key-{key}.bin': key for key in sorted(set(keys) - {anchor})}
 
 
-def load_policy(path, expected, budget):
+def load_policy(path, expected, budget, *, allow_missing_state=False):
     protected_directory(path.parent, private=True)
     with closing(Frozen(path, 0, 65536, budget)) as frozen:
         if frozen.digest != expected:
@@ -267,7 +270,13 @@ def load_policy(path, expected, budget):
                 or not re.fullmatch(r'[A-Za-z0-9_.@-]{1,128}\.service', w['unit'])
                 or w['uid'] in seen_uids or w['unit'] in seen_units):
             raise ValueError('distinct non-root writer identities required')
-        state = protected_directory(Path(w['state']), w['uid'], w['gid'], private=True)
+        state = Path(w['state'])
+        if allow_missing_state and not os.path.lexists(state):
+            if not state.is_absolute() or state.name in ('', '.', '..'):
+                raise ValueError('new writer path must be canonical and absolute')
+            protected_directory(state.parent)
+        else:
+            protected_directory(state, w['uid'], w['gid'], private=True)
         if any(state == other or state in other.parents or other in state.parents for other in seen_dirs):
             raise ValueError('writer directories overlap')
         seen_uids.add(w['uid']); seen_units.add(w['unit']); seen_dirs.add(state)
@@ -275,6 +284,26 @@ def load_policy(path, expected, budget):
         if set(value) != {'path','sha256'} or not re.fullmatch('[0-9a-f]{64}', value['sha256']):
             raise ValueError('explicit selected artifact hashes required')
     return p, raw
+
+
+@contextmanager
+def maintenance_lock(path):
+    protected_directory(path.parent, private=True)
+    with os.fdopen(os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW |
+                           os.O_NONBLOCK | os.O_CLOEXEC, 0o600), 'rb') as stream:
+        info = os.fstat(stream.fileno())
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_gid != 0
+                or info.st_mode & 0o077 or info.st_nlink != 1):
+            raise ValueError('unsafe global maintenance lock')
+        fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        original = identity(os.fstat(stream.fileno()))
+
+        def unchanged():
+            if identity(path.lstat()) != original:
+                raise ValueError('maintenance lock identity changed')
+
+        unchanged()
+        yield unchanged
 
 
 def invoke(program, arguments, budget):
@@ -406,9 +435,7 @@ def collect(policy_path, expected, destination):
         if version.returncode or version.stdout.strip() != b'v1.3.2':
             raise ValueError('qualified age version required')
         configs = {}
-        for role,field in [('native','native_policy'),('core','core_config'),
-                           ('membership','membership_config'),('payout','payout_config'),('wallet','wallet_config'),
-                           ('cashu_signer','cashu_signer_config'),('signer','payout_signer_config')]:
+        for role,field in CONFIG_FIELDS.items():
             target = plain/(role+'-config')
             copy_source(p[field],target,secret=False,maximum=65536)
             data=target.read_bytes()

@@ -130,8 +130,9 @@ The root-owned capsule contains exactly `launch-cashu-backup.py`,
 `collect-cashu-backup.py`, `stage-cashu-restore.py`, `review-cashu-restore.py`,
 `reconcile-cashu-restore.py`, `verify-cashu-backup.py`,
 `verify-cashu-combined-backup.py`, `apply-cashu-mint-policy.py`,
-`inactive_file_transaction.py` and `TOOL.json`. The latter has version 1,
-the selected 40-character source commit and SHA256 for each of the nine scripts.
+`inactive_file_transaction.py`, `install-cashu-restore.py` and `TOOL.json`.
+The manifest has version 1, the selected 40-character source commit and SHA256
+for each script.
 Authenticate the bootstrap file externally before interpreting it, then use the
 reviewed manifest hash with isolated Python:
 
@@ -216,8 +217,8 @@ inventoried historical keys, raw sidecars and program bytes stay under
 `checkpoint-evidence/`.
 
 A successful stage contains `STAGED.json` and root-private images for review.
-The receipt binds `FENCED_IMAGES.json`, which lists each staged file with its
-size and hash so the reconciliation review can identify the exact images.
+The receipt binds the collection record and `FENCED_IMAGES.json`, which lists
+each staged file with its size and hash.
 The temporary tar is removed after verification. A failed stage keeps its
 `INCOMPLETE` marker and any private evidence already written. No installed
 directory, runtime ownership, service policy or recovery marker is changed.
@@ -429,3 +430,39 @@ the mint may change state between pages.
 Mint-reported unspent value is an observation of those points. Continue to
 verify ownership, old and newly discovered operations, database history, and
 external accounting before any restore or resumption decision.
+
+## Install the fenced images on a recovery host
+
+Use the exact recovered configuration, runtime UIDs and GIDs, and independently
+installed executables recorded by the selected collection policy. Provision them
+on the recovery host and keep the six units masked and inactive. The original
+writers must be stopped and the operator must have exclusive maintenance
+control. The install command checks the selected local units and runtime UIDs.
+An older staging receipt without a collection digest requires a new stage from
+the original authenticated ciphertext.
+
+```sh
+/usr/bin/python3 -I -S -B ROOT_CAPSULE/launch-cashu-backup.py TOOL_SHA256 install-fenced \
+  STAGED_DIRECTORY STAGED_RECEIPT_SHA256 ORIGINAL_POLICY ORIGINAL_POLICY_SHA256
+```
+
+Use the independently recorded receipt and policy digests. The command checks
+the original config paths, bytes and metadata, runtime executable hashes and
+permissions, and every staged image. It prepares all missing images privately
+under their respective state-directory parents. It publishes a complete fenced
+image per directory, with mode `0700` on the role directory and mode `0600` on
+its files. An empty directory with the exact runtime ownership and mode may be
+replaced. A nonempty destination must be an exact fenced image of the selected
+checkpoint. Any other destination is preserved and the command refuses.
+
+If publication is interrupted after some roles, keep all workers masked and run
+the same command with the original digests. Exact previously installed roles
+are verified and reused. All published roles carry their fences even before
+the command has verified the entire installation. The result reports the
+checkpoint and confirms all six entries. External settlement and custody checks,
+credential provisioning, and authorization for resumption are separate steps.
+
+The encrypted fixture rehearses installation using six disposable runtime
+UIDs. It verifies a retry after interruption, rejects a changed configuration
+and prior state, and confirms native startup refuses all six installed copies.
+The fixture uses initialized state, real ownership and mocked service statuses.

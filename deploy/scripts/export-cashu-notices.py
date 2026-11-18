@@ -8,6 +8,7 @@ import re
 import runpy
 import tarfile
 import tempfile
+import tomllib
 from urllib.parse import urlsplit
 
 
@@ -51,22 +52,33 @@ def source_origin(root, package):
             digest(archive.read_bytes()))
 
 
+def verified_archive(package, cache):
+    stem = package['name'] + '-' + package['version']
+    if cache is not None:
+        for archive in sorted(cache.glob('*/' + stem + '.crate')):
+            if digest(archive.read_bytes()) == package['checksum']:
+                return archive
+    raise ValueError('verified source archive missing')
+
+
 def release_origin(package, row, cache):
-    """Recheck a reviewed signed release match for an archive missing VCS metadata."""
+    """Recheck a reviewed upstream release match for an archive missing VCS metadata."""
     origin = row['release_source']
     identity = package['name'] + '@' + package['version']
     archive_name = identity.replace('@', '-') + '.crate'
+    repository = github_repository(package['archive_repository'])
+    # LDK tags workspace versions. Its individual crate versions may differ
+    # from the workspace tag, so the reviewed file hashes bind the exact crate.
+    workspace_tag = (repository == 'https://github.com/lightningdevkit/rust-lightning'
+                     and re.fullmatch(r'v0\.2\.[0-9]+', origin['tag']))
     if (package['status'] != 'verified_archive' or package.get('archive_vcs_info') is not None
             or cache is None or set(origin) != {'tag', 'tag_object', 'git_commit', 'git_tree', 'member_git_blobs'}
-            or origin['tag'] != identity.replace('@', '-')
+            or (origin['tag'] != identity.replace('@', '-') and not workspace_tag)
             or row['commit'] != origin['git_commit']
             or any(not re.fullmatch('[a-f0-9]{40}', value) for value in
                    (origin['tag_object'], origin['git_tree'], row['commit']))):
         raise ValueError('release provenance cannot replace an archive VCS binding')
-    archive = next((p for p in sorted(cache.glob('*/' + archive_name))
-                    if digest(p.read_bytes()) == package['checksum']), None)
-    if archive is None:
-        raise ValueError('reviewed release requires its checksum-verified archive')
+    archive = verified_archive(package, cache)
     actual = {}
     names = set()
     prefix = Path(archive_name.removesuffix('.crate'))
@@ -89,8 +101,35 @@ def release_origin(package, row, cache):
     return row['commit'], package['archive_repository'], package['checksum']
 
 
+def catalog_notice_url(package, row, cache):
+    """Use the published SPDX text for an exact, archive-declared license."""
+    source = row['catalog_source']
+    declaration = package['declared_license']
+    selected = {'MIT OR Apache-2.0': 'Apache-2.0', 'MITNFA': 'MITNFA'}
+    if (package['status'] != 'verified_archive' or package['license_notice_files_sha256']
+            or declaration not in selected
+            or set(source) != {'license_id', 'catalog_commit'}
+            or source['license_id'] != selected[declaration]
+            or not re.fullmatch('[a-f0-9]{40}', source['catalog_commit'])
+            or len(row['files']) != 1):
+        raise ValueError('catalog text requires a reviewed archive declaration without notice files')
+    archive = verified_archive(package, cache)
+    manifest_name = package['name'] + '-' + package['version'] + '/Cargo.toml'
+    with tarfile.open(archive, 'r:gz') as bundle:
+        member = bundle.getmember(manifest_name)
+        if not member.isfile() or member.size > 65536:
+            raise ValueError('invalid declared-license manifest')
+        with bundle.extractfile(member) as manifest:
+            identity = tomllib.loads(manifest.read().decode())['package']
+    if (identity.get('name') != package['name'] or identity.get('version') != package['version']
+            or identity.get('license') != declaration or 'license-file' in identity):
+        raise ValueError('catalog text does not match the verified archive declaration')
+    return ('https://github.com/spdx/license-list-data/blob/' + source['catalog_commit']
+            + '/text/' + source['license_id'] + '.txt')
+
+
 def load_supplement(root, raw_inventory, inventory, path, cache=None):
-    """Accept only notice bytes bound to the archive's exact upstream commit."""
+    """Bind upstream notices or canonical license texts to verified archives."""
     if path is None:
         return {}
     document = json.loads(path.read_bytes())
@@ -104,6 +143,8 @@ def load_supplement(root, raw_inventory, inventory, path, cache=None):
         package = packages.get(identity)
         if package is None or identity in result or not row['files']:
             raise ValueError('unknown, duplicate or empty supplementary package')
+        if 'release_source' in row and 'catalog_source' in row:
+            raise ValueError('ambiguous notice source')
         if 'release_source' in row:
             commit, origin_repository, checksum = release_origin(package, row, cache)
         else:
@@ -111,8 +152,11 @@ def load_supplement(root, raw_inventory, inventory, path, cache=None):
         if (not commit or row['commit'] != commit or row['checksum'] != checksum):
             raise ValueError('supplement is not bound to the verified source archive')
         repository = github_repository(origin_repository or '')
+        catalog_url = catalog_notice_url(package, row, cache) if 'catalog_source' in row else None
         texts = {}
         for notice in row['files']:
+            if 'catalog_license_id' in notice:
+                raise ValueError('catalog attribution must come from the verified declaration')
             relative = notice['file']
             target = root / relative
             if (not relative.startswith('docs/licenses/upstream/')
@@ -121,7 +165,11 @@ def load_supplement(root, raw_inventory, inventory, path, cache=None):
                     or relative in texts):
                 raise ValueError('invalid supplementary notice file')
             url = notice['url']
-            if not url.startswith(repository + '/blob/' + commit + '/'):
+            if catalog_url:
+                if url != catalog_url:
+                    raise ValueError('notice URL does not match pinned SPDX text')
+                notice = dict(notice, catalog_license_id=row['catalog_source']['license_id'])
+            elif not url.startswith(repository + '/blob/' + commit + '/'):
                 raise ValueError('notice URL does not match pinned upstream repository')
             data = target.read_bytes()
             if (digest(data) != notice['sha256']
@@ -138,7 +186,7 @@ def main():
     parser.add_argument('output', type=Path)
     parser.add_argument('--allow-incomplete', action='store_true')
     parser.add_argument('--supplement', type=Path,
-                        help='reviewed exact-commit notice supplement for omitted archive files')
+                        help='reviewed source or SPDX catalog texts for omitted archive notices')
     parser.add_argument('--cache', type=Path, default=Path.home() / '.cargo/registry/cache')
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[2]
@@ -165,10 +213,7 @@ def main():
             texts = {}
             if package['status'] == 'verified_archive':
                 name = package['name'] + '-' + package['version']
-                candidates = sorted(args.cache.glob('*/' + name + '.crate'))
-                archive = next((p for p in candidates if digest(p.read_bytes()) == package['checksum']), None)
-                if archive is None:
-                    raise ValueError('verified source archive missing')
+                archive = verified_archive(package, args.cache)
                 with tarfile.open(archive, 'r:gz') as bundle:
                     for relative, checksum in expected.items():
                         member = bundle.getmember(name + '/' + relative)
@@ -193,14 +238,20 @@ def main():
                 references[relative] = target
             identity = package['name'] + '@' + package['version']
             upstream = []
+            catalog = []
             for relative, (data, provenance) in supplement.get(identity, {}).items():
                 target = 'texts/' + digest(data) + '.txt'
                 (stage / target).write_bytes(data)
                 references[relative] = target
-                upstream.append(provenance)
+                if 'catalog_license_id' in provenance:
+                    catalog.append(provenance)
+                else:
+                    upstream.append(provenance)
             rows.append({'name': package['name'], 'version': package['version'],
                          'source': package['source'], 'license': package['declared_license'],
                          'notice_files': references, 'upstream_notices': upstream})
+            if catalog:
+                rows[-1]['spdx_catalog_notices'] = catalog
         result = {'inventory_sha256': digest(raw), 'scope': inventory['scope'],
                   'supplement_sha256': digest(args.supplement.read_bytes()) if args.supplement else None,
                   'distribution_ready': False, 'notice_files_missing': missing,

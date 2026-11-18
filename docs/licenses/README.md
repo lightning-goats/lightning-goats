@@ -1,4 +1,4 @@
-# Upstream notice supplements
+# Cashu dependency notices
 
 The license inventory records the contents of checksum-verified crate archives.
 Some upstream workspaces omit root license files from those archives. The
@@ -29,28 +29,42 @@ against the reviewed record and checks that the notice bytes match the pinned
 Git blob. Git tag verification is part of preparation. Export runs offline.
 [Rust Bitcoin release evidence](../testing/cashu-rust-bitcoin-release-notices-20261117.json)
 
-Development export:
+The three remaining LDK archives were compared with official workspace release
+trees. All source members in `lightning-invoice@0.34.1` and
+`possiblyrandom@0.2.1` matched. For `lightning@0.2.8`, 136 source members matched
+and the archive's original Cargo manifest omits one three-line Git dependency
+stanza. Both tagged tree hashes were recomputed. The recorded GitHub tag
+signature verification is false for these releases. Their pinned MIT and
+Apache notice blobs match the exported bytes.
+
+The locked archives for `bitcoin-payment-instructions@0.7.1` and
+`hex_lit@0.1.1` declare licenses and omit notice files. The export uses the
+Apache-2.0 option declared by the former and the MITNFA text declared by the
+latter, from the pinned SPDX catalog. The exporter matches the declaration
+against the checksum-verified Cargo manifest and reports these texts under
+`spdx_catalog_notices`. The archive inventory retains the publisher file
+inventory and license declaration.
+[Release notice evidence](../testing/cashu-release-notices-20261118.json)
+
+Run the complete locked notice export offline:
 
 ```sh
 python3 deploy/scripts/export-cashu-notices.py \
   docs/testing/cashu-license-inventory-20261117.json \
-  .artifacts/cashu-development-notices-20261117-v10 \
-  --supplement docs/licenses/cashu-upstream-supplement.json --allow-incomplete
+  .artifacts/cashu-notices-20261118 \
+  --supplement docs/licenses/cashu-upstream-supplement.json
 ```
 
-The output directory must not already exist. This checkpoint exports 462 package
-entries with five missing notice files. It remains `distribution_ready:false`;
-`--allow-incomplete` is for development review only. SPDX expressions and notice
-presence alone do not qualify a distributable linked artifact. Evidence:
-[export result](../testing/cashu-rust-bitcoin-release-notices-20261117.json).
+Choose a new output directory. The export covers all 462 locked package
+entries. The report retains `distribution_ready:false` pending selection and
+verification of the actual distribution artifact and its linked dependencies.
 
 The v9 [inventory correction](../testing/cashu-license-authors-20261117.json)
 recognizes the full permission/copyright notice that `r-efi` ships in `AUTHORS`.
 Both checksum-verified archives match their exact upstream Git blob. This does
 not treat a contributor list alone as a license notice. The three archive
-regressions and ten supplement checks pass, and strict export still refuses
-the remaining 15 missing notices without creating output. The development
-inventory's complete dependency coverage does not establish distribution readiness.
+regressions and ten supplement checks passed at that checkpoint. Strict export
+then refused the remaining 15 missing notices without creating output.
 
 The Gloo archive records a workspace subdirectory URL under `rustwasm/gloo`.
 Its public repository redirects to `ranile/gloo`; the exact recorded commit

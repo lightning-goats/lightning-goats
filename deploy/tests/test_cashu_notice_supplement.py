@@ -41,9 +41,9 @@ class SupplementTests(unittest.TestCase):
         }]}
         self.path = self.root / 'supplement.json'
 
-    def load(self, document=None):
+    def load(self, document=None, cache=None):
         self.path.write_text(json.dumps(document or self.document))
-        return MODULE.load_supplement(self.root, self.raw, self.inventory, self.path)
+        return MODULE.load_supplement(self.root, self.raw, self.inventory, self.path, cache)
 
     def test_exact_commit_and_both_hashes_accept(self):
         self.assertEqual(self.load()['fixture@1.0.0'][self.relative][0], self.data)
@@ -151,6 +151,49 @@ class SupplementTests(unittest.TestCase):
             MODULE.release_origin(package, different, cache)
         with self.assertRaises(ValueError):
             MODULE.release_origin(dict(package, archive_vcs_info={'git': {}}), row, cache)
+        workspace = copy.deepcopy(row)
+        workspace['release_source']['tag'] = 'v0.2.8'
+        with self.assertRaises(ValueError):
+            MODULE.release_origin(package, workspace, cache)
+        ldk = dict(package, archive_repository='https://github.com/lightningdevkit/rust-lightning/')
+        self.assertEqual(MODULE.release_origin(ldk, workspace, cache)[0], self.commit)
+        workspace['release_source']['member_git_blobs']['src/lib.rs'] = 'f' * 40
+        with self.assertRaisesRegex(ValueError, 'does not match'):
+            MODULE.release_origin(ldk, workspace, cache)
+
+    def test_catalog_text_requires_the_verified_archive_declaration_and_exact_blob(self):
+        cache = self.root / 'cache'
+        (cache / 'registry').mkdir(parents=True)
+        archive = cache / 'registry/fixture-1.0.0.crate'
+        data = b'[package]\nname="fixture"\nversion="1.0.0"\nlicense="MITNFA"\n'
+        with tarfile.open(archive, 'w:gz') as bundle:
+            member = tarfile.TarInfo('fixture-1.0.0/Cargo.toml')
+            member.size = len(data)
+            bundle.addfile(member, io.BytesIO(data))
+        package = self.inventory['packages'][0]
+        package.update(checksum=MODULE.digest(archive.read_bytes()), declared_license='MITNFA',
+                       license_notice_files_sha256={})
+        self.raw = json.dumps(self.inventory).encode()
+        self.document['inventory_sha256'] = MODULE.digest(self.raw)
+        row = self.document['packages'][0]
+        row['checksum'] = package['checksum']
+        digest = 'c' * 40
+        row['catalog_source'] = {'license_id': 'MITNFA', 'catalog_commit': digest}
+        row['files'][0]['url'] = 'https://github.com/spdx/license-list-data/blob/' + digest + '/text/MITNFA.txt'
+        self.assertEqual(self.load(cache=cache)['fixture@1.0.0'][self.relative][1]['catalog_license_id'],
+                         'MITNFA')
+        for field, value in [('url', row['files'][0]['url'].replace('MITNFA', 'MIT')),
+                             ('git_blob_sha1', 'e' * 40), ('catalog_license_id', 'MIT')]:
+            incorrect = copy.deepcopy(self.document)
+            incorrect['packages'][0]['files'][0][field] = value
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                self.load(incorrect, cache)
+        with self.assertRaises(ValueError):
+            self.load()
+        wrong = dict(package, declared_license='MIT OR Apache-2.0')
+        claim = dict(row, catalog_source={'license_id': 'Apache-2.0', 'catalog_commit': digest})
+        with self.assertRaisesRegex(ValueError, 'verified archive declaration'):
+            MODULE.catalog_notice_url(wrong, claim, cache)
 
 
 if __name__ == '__main__':

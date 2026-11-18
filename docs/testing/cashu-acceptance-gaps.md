@@ -153,7 +153,7 @@ including implicit row IDs and signed-byte preservation. It uses the pinned
 SQLite backup API on protected copies and retains incomplete evidence. Fresh
 selected-source CI is pending; [coordinated collection](../deployment/cashu-backup-collection.md),
 encryption, funded rollback and recovery-fence clearance remain unfinished.
-| Public November package and demo | Pre-November and Cashu starting references recorded; fixture evidence retained | Reviewable public commits/PR/tag, distribution license notices, current submission rules, compatibility matrix and honestly labeled recording. The checksum-verified inventory covers 462 entries from both lock graphs with no unresolved entries; it is not a linked-binary or distribution-notice inventory. |
+| Public November package and demo | Pre-November and Cashu starting references recorded; fixture evidence retained; strict offline notice export covers both lock graphs | Selected linked distribution inventory and package, final public tag, current submission instructions, compatibility matrix and recording. |
 | Approved live pilot and production | No activation claimed | Operator-selected mints/keys/limits/fees/holding policy and explicit approval; real providers, independent clients, actual physical evidence and observation. |
 
 ## Source checks behind newly recorded gaps

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "inventory_sha256": "a21553edbc33f0bed0aad00be5d61dec2015a91fcb241ab6e4578fc22a0d54f1",
-  "scope": "Exact upstream commits recorded in checksum-verified crate archives; no substitution of current-branch licenses.",
+  "scope": "Exact archive-recorded upstream commits, reviewed release source matches and pinned SPDX texts for archive-declared licenses.",
   "packages": [
     {
       "package": "cashu@0.18.3",
@@ -646,6 +646,269 @@
           "url": "https://github.com/rust-bitcoin/rust-bitcoin/blob/ff5dc044d71a3ef8d59b29aa0328ffef9630d6d0/LICENSE"
         }
       ]
+    },
+    {
+      "package": "lightning-invoice@0.34.1",
+      "checksum": "47d83bd798e04ab9eecc8bbef1fa17d3808859bcdc0406bd16c55d51c8834444",
+      "commit": "5bc1dc84b3a1b084f84de4b7ece3d978b678d894",
+      "files": [
+        {
+          "file": "docs/licenses/upstream/lightning-invoice-LICENSE-MIT",
+          "url": "https://github.com/lightningdevkit/rust-lightning/blob/5bc1dc84b3a1b084f84de4b7ece3d978b678d894/LICENSE-MIT",
+          "git_blob_sha1": "9d982a4d63256f23b8cc0854024d134e1140f4f3",
+          "sha256": "638da3722c9e102ccd8011d82f61ae3b611174e4a0f8da185c582df137b60a8c"
+        },
+        {
+          "file": "docs/licenses/upstream/ldk-LICENSE-APACHE",
+          "url": "https://github.com/lightningdevkit/rust-lightning/blob/5bc1dc84b3a1b084f84de4b7ece3d978b678d894/LICENSE-APACHE",
+          "git_blob_sha1": "261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        }
+      ],
+      "release_source": {
+        "tag": "v0.2.5",
+        "tag_object": "00d027e256895fb7fd92c7388982de4af7c5a1ad",
+        "git_commit": "5bc1dc84b3a1b084f84de4b7ece3d978b678d894",
+        "git_tree": "e87ea43d1325fc6cf83e0a6ab4aa7771f4aedbef",
+        "member_git_blobs": {
+          ".gitignore": "f79815086fa2d2246fd9a0faba979304c0fafa27",
+          "Cargo.toml.orig": "ecd1552cfbcc1a3ab4cc51bb661e18ae9570a986",
+          "README.md": "e9968d20f285b64785a9bcde4b214acd715cde7a",
+          "src/de.rs": "a4e3cf72c9b4a2b5dcf0e5fdac1d5949095e9caa",
+          "src/lib.rs": "3401459454363e44cd5158454cd0cb50a08093ba",
+          "src/ser.rs": "6da172c7220535d497d4d4e09f9315bf7562a686",
+          "src/tb.rs": "9f8a5135906eaa2165cdd11a148dad3b7b5b8560",
+          "src/test_ser_de.rs": "e2e4d764ac2fe0c606a5abfb137004cc7f3b05e1",
+          "tests/ser_de.rs": "b4d3fa758e120fdf968016a2fbd1b73959b9ec93"
+        }
+      }
+    },
+    {
+      "package": "possiblyrandom@0.2.1",
+      "checksum": "9c564dbf654befd49035528299f1208a40508f6e07efb11c163444e304e4484f",
+      "commit": "5bc1dc84b3a1b084f84de4b7ece3d978b678d894",
+      "files": [
+        {
+          "file": "docs/licenses/upstream/lightning-invoice-LICENSE-MIT",
+          "url": "https://github.com/lightningdevkit/rust-lightning/blob/5bc1dc84b3a1b084f84de4b7ece3d978b678d894/LICENSE-MIT",
+          "git_blob_sha1": "9d982a4d63256f23b8cc0854024d134e1140f4f3",
+          "sha256": "638da3722c9e102ccd8011d82f61ae3b611174e4a0f8da185c582df137b60a8c"
+        },
+        {
+          "file": "docs/licenses/upstream/ldk-LICENSE-APACHE",
+          "url": "https://github.com/lightningdevkit/rust-lightning/blob/5bc1dc84b3a1b084f84de4b7ece3d978b678d894/LICENSE-APACHE",
+          "git_blob_sha1": "261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        }
+      ],
+      "release_source": {
+        "tag": "v0.2.5",
+        "tag_object": "00d027e256895fb7fd92c7388982de4af7c5a1ad",
+        "git_commit": "5bc1dc84b3a1b084f84de4b7ece3d978b678d894",
+        "git_tree": "e87ea43d1325fc6cf83e0a6ab4aa7771f4aedbef",
+        "member_git_blobs": {
+          "Cargo.toml.orig": "91c0f201238679f12b2d2c18451d3c98a95bf893",
+          "src/lib.rs": "6ddbc6de1a219edfab6d3b6347540cd47c5fc372"
+        }
+      }
+    },
+    {
+      "package": "lightning@0.2.8",
+      "checksum": "1cb355abfb61d8ffe201cd5ce6b3e4304c9a897b05988ceed71987f9514fb642",
+      "commit": "254bc9687dd190375956ad790f87239b97ebd058",
+      "files": [
+        {
+          "file": "docs/licenses/upstream/lightning-invoice-LICENSE-MIT",
+          "url": "https://github.com/lightningdevkit/rust-lightning/blob/254bc9687dd190375956ad790f87239b97ebd058/LICENSE-MIT",
+          "git_blob_sha1": "9d982a4d63256f23b8cc0854024d134e1140f4f3",
+          "sha256": "638da3722c9e102ccd8011d82f61ae3b611174e4a0f8da185c582df137b60a8c"
+        },
+        {
+          "file": "docs/licenses/upstream/ldk-LICENSE-APACHE",
+          "url": "https://github.com/lightningdevkit/rust-lightning/blob/254bc9687dd190375956ad790f87239b97ebd058/LICENSE-APACHE",
+          "git_blob_sha1": "261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        }
+      ],
+      "release_source": {
+        "tag": "v0.2.8",
+        "tag_object": "f0b3aeaafab0ee510ccdbcaf25597508f3c1d24b",
+        "git_commit": "254bc9687dd190375956ad790f87239b97ebd058",
+        "git_tree": "00eb3ff5ef51fc50e35af663c19608d4d9d377e8",
+        "member_git_blobs": {
+          "Cargo.toml.orig": "e2f035bb06543a3815d5d9b1132e52c66fc62737",
+          "README.md": "a0721e4140713f76218b9d7d9b57e81f207b2f8c",
+          "src/blinded_path/message.rs": "fe215332c9c8d0ee896052f8a6623eeb487a1a87",
+          "src/blinded_path/mod.rs": "2f9b1b9a411a618c10ed97ad0b6041978af8ada9",
+          "src/blinded_path/payment.rs": "94a71e28523607f845ccc5b6a7e6ba9568460199",
+          "src/blinded_path/utils.rs": "5fc359a47d91e373174eac4030be00c7cf661c9f",
+          "src/chain/chaininterface.rs": "5dc46d5a055074ec6d9a028ca7a4c8723a62bcb0",
+          "src/chain/chainmonitor.rs": "19dfd3ae7887175cc501118f863a2c017b79f036",
+          "src/chain/channelmonitor.rs": "5fd6c143f44babee93e558a44bf34d7d1cec74fa",
+          "src/chain/mod.rs": "761335f6df7183025e9e789063fde2f336c5d6e3",
+          "src/chain/onchaintx.rs": "9e73985dc781ffc46e317b6f2378c6a8a1c9ac97",
+          "src/chain/package.rs": "db46f3be60da4eb8b6d1417838f88c2e25c31947",
+          "src/chain/transaction.rs": "cde4256be40ab4eadf0286f113a320c0746619e6",
+          "src/crypto/chacha20.rs": "5b0c16c933f9be716340f85c3e849487ed1b5ea4",
+          "src/crypto/chacha20poly1305rfc.rs": "839fad9ce6ce85fd9e1007a94f63398ce12f7e98",
+          "src/crypto/mod.rs": "478918a49a8381ea1006ae7ff326c509a2cc5b6b",
+          "src/crypto/poly1305.rs": "a71e39ed773d05bd779da5303aa47fb7baa014b5",
+          "src/crypto/streams.rs": "c406e933bc9c49fcaabd066d20fd577b221a68cf",
+          "src/crypto/utils.rs": "b59cc6002d9a0465dde74dd6b352a2f5346de946",
+          "src/events/bump_transaction/mod.rs": "39ab81b54fcc675878f43f47f4ae9aa550d3b27e",
+          "src/events/bump_transaction/sync.rs": "653710a33587201fdb9e319060bcad8ed47f3b71",
+          "src/events/mod.rs": "bab1d675dd263f3d7ff08bb969405d2d2a24ff31",
+          "src/io/mod.rs": "a46b8c669ae88eb4f35705c606658dfc6116d638",
+          "src/lib.rs": "ee3b0f47a4dcb9cb7bfb69836c1476b52a75f23d",
+          "src/ln/async_payments_tests.rs": "d2b40788fa56c149905a94ca964a6b7bbdf551ef",
+          "src/ln/async_signer_tests.rs": "7a4b9cd599768f9047774b97e1006521da3c248a",
+          "src/ln/blinded_payment_tests.rs": "1ebdca0312f1b2167dd63460a7225b089d2c111e",
+          "src/ln/bolt11_payment_tests.rs": "c24d5b2714e861c3dfa3bba4393d729798133b1c",
+          "src/ln/chan_utils.rs": "733253f74172853d4efdb0ef0e38c3ae837d9696",
+          "src/ln/chanmon_update_fail_tests.rs": "c6a3c91688763b81fc07868e475617e91ae46f90",
+          "src/ln/channel.rs": "23a873ce9472703cb3d8cd5176254ddd4c8b64de",
+          "src/ln/channel_keys.rs": "d6a98e24e3a4bb0e356f6cb48218d1968be048c2",
+          "src/ln/channel_open_tests.rs": "db0bd64ff3c92c7e3219e6a20fe94a6455f7fe46",
+          "src/ln/channel_state.rs": "d10327b259a41123fad23fce9d85ea67441cccc8",
+          "src/ln/channel_type_tests.rs": "ca811539c6d3751f626986b75847dabf057731a0",
+          "src/ln/channelmanager.rs": "532c215027752973505a2d29101962b0a1e616bc",
+          "src/ln/closing_tests.rs": "d0f52fc854b74df4a00dc1bd607f520d35b0fcc0",
+          "src/ln/dual_funding_tests.rs": "fc66ec315cad6ba15f62246380a7381b29ca9f38",
+          "src/ln/features.rs": "b568d5595a5b1aa8852f4318c502f5fbadb05e49",
+          "src/ln/functional_test_utils.rs": "0e804cb4e277afd9ed07fbd9683a19144ba09a80",
+          "src/ln/functional_tests.rs": "e99215c192b7ecb81288fa61b21ac76dbeb34f77",
+          "src/ln/funding.rs": "f80b2b6daeaa9a0024e939125f0ce25f44fdbf15",
+          "src/ln/htlc_reserve_unit_tests.rs": "92ddde9be417a9fe3ad46b40fc84269a6169115c",
+          "src/ln/inbound_payment.rs": "17c2526e78d0cd08ac9248ddb8c75424c46427bd",
+          "src/ln/interactivetxs.rs": "8e6b130d36cd428ac536240934a0b509511ee04c",
+          "src/ln/invoice_utils.rs": "1258e69911494146db33b7e7c7ed3d38984b3ae8",
+          "src/ln/max_payment_path_len_tests.rs": "8425e1928ad4c1b4945ab09ff851c358c0275dff",
+          "src/ln/mod.rs": "33a837ba9df1b1ecaffc14513a89fa085b0af70d",
+          "src/ln/monitor_tests.rs": "1dc53134287e204d6ad92b9c16760e483a39eae6",
+          "src/ln/msgs.rs": "81fa2fc41fa4e0a8b698340dcd9fd98f5c61b148",
+          "src/ln/offers_tests.rs": "300066c5c5ff16a0beb8fd1ef15ab9704b7a2ee7",
+          "src/ln/onion_payment.rs": "84b1338b1a759992015aef886e919975f1d171be",
+          "src/ln/onion_route_tests.rs": "b3c5f42d6876570747447dc500e7ff251abb305c",
+          "src/ln/onion_utils.rs": "56adfd883ae577a13ca5bc5a13031b7cd73548b1",
+          "src/ln/our_peer_storage.rs": "ab0e9783ffab8dc7be600aec9c44985970f20915",
+          "src/ln/outbound_payment.rs": "f05820b1246f6f9cbbf3a0e7d9bebacf6afd37ac",
+          "src/ln/payment_tests.rs": "faf0e3eb13878b0793e11b65d0233529eba88832",
+          "src/ln/peer_channel_encryptor.rs": "d527b8f751c2f9e04522f5e7285edf84ff1782c3",
+          "src/ln/peer_handler.rs": "20844521597f61e84ca1ef8eb14df9f7b2e0fb3d",
+          "src/ln/priv_short_conf_tests.rs": "87469a7b1a0a8ef3536e745cd0ecac74d0c94015",
+          "src/ln/quiescence_tests.rs": "7a5d35b12a5fc24f088ad352d4ba78d4d9532785",
+          "src/ln/reload_tests.rs": "a9dc1d7bc17f86a8d420b8fd490efbfdb4bcc7b3",
+          "src/ln/reorg_tests.rs": "32041905139d249eb1afedc0259488ce5d6f7240",
+          "src/ln/script.rs": "6bbbf3bf86e64ffe93c515adc2518a590daf07fc",
+          "src/ln/shutdown_tests.rs": "b20d742c2ed99f04311dd4e9c8bdfad6268f54bc",
+          "src/ln/splicing_tests.rs": "338c474cc3ed55eceacb6b6374db75c97b7677c0",
+          "src/ln/types.rs": "5d72ba685cb7579ec6a5f5e47ca97cb781064cbb",
+          "src/ln/update_fee_tests.rs": "35d02752fead0ed9af6da578c2cb988e835e9c47",
+          "src/ln/wire.rs": "bc1d83adb685bc4d013672371de4bf7ac8b92d9e",
+          "src/ln/zero_fee_commitment_tests.rs": "b4fd9e0be88b319fcc13c15f3ba7414a6c030790",
+          "src/offers/async_receive_offer_cache.rs": "9c7652c782bdf048a2fdde2035bc541342b76e1f",
+          "src/offers/flow.rs": "d8fca367dff16686378657b564c190a182cb32ee",
+          "src/offers/invoice.rs": "80d81acc2d9be53e268d205374468bf11afb0c15",
+          "src/offers/invoice_error.rs": "68dbbb2db4e0f1edd351242c5e376274c23d852a",
+          "src/offers/invoice_macros.rs": "1ac6e40b896db801c2b36343962701af113b0f42",
+          "src/offers/invoice_request.rs": "eff274f52cd6315383d8e8ba4e2c44f9f014ef24",
+          "src/offers/merkle.rs": "1a38fe5441fb14f76a19a9a1989ac5611a12b9a6",
+          "src/offers/mod.rs": "5b5cf6cdc782ee52f9d7955b480591f347719490",
+          "src/offers/nonce.rs": "0675414125ffc2ea239b9ea2aec48ca13b8d268c",
+          "src/offers/offer.rs": "e9c3deb7d9a66228582e4e908e115af45ff3d10c",
+          "src/offers/parse.rs": "99dd1bb938d33aefd2aae96cb99ed73d2ca3784c",
+          "src/offers/payer.rs": "696eac240448aab6602cc16a427c4d4f0d996674",
+          "src/offers/refund.rs": "dd2c3e2a92eb61afb063d3598d7f6045d1052b4b",
+          "src/offers/signer.rs": "645949ff866062d7a733cffa62b74772ca590e09",
+          "src/offers/static_invoice.rs": "8d4b75bb627a54c79043ea2d85159876987edb14",
+          "src/offers/test_utils.rs": "d0decdf2c38d1dd094fab80a65a0fdcddc16639c",
+          "src/onion_message/async_payments.rs": "127126e150f2e2f00582b3fa1663675fed10fd21",
+          "src/onion_message/dns_resolution.rs": "c88526c093276cffbfe6848e84e7812912a6d992",
+          "src/onion_message/functional_tests.rs": "128c30a9473c256356fac1a26af71bd9d138f521",
+          "src/onion_message/messenger.rs": "6bbe6e04fcbb8491923702f215b985c94cd59a17",
+          "src/onion_message/mod.rs": "79fd69f2cbe75488f06d2a4593c8707b333f10f4",
+          "src/onion_message/offers.rs": "06988d4db8f80a7f787cd288c4327e93d2531c5c",
+          "src/onion_message/packet.rs": "2e0ccaf3a3e096585cc5a8a7a172ff802485d195",
+          "src/routing/gossip.rs": "51a9a59e47f957253f6d6ad0e2d9b7a1d9bbda2d",
+          "src/routing/log_approx.rs": "c1b5287fbe6ea55692df5ef0893081c6af07d719",
+          "src/routing/mod.rs": "cb16461dd66f4866862677b4811e35c3c93c43b1",
+          "src/routing/router.rs": "307e221ddfb4b06148e32e46ae3ce042c8fa910a",
+          "src/routing/scoring.rs": "25d69c6fe7d69930f75d8a0cc0b8e71d04036b14",
+          "src/routing/test_utils.rs": "ab2b24c19e0557153b5ca5e0d41486abd9a48366",
+          "src/routing/utxo.rs": "4968d6cd7b48c126a6afa425b5132c963baf398f",
+          "src/sign/ecdsa.rs": "e13285722af4adb7349cc05ea6b82ea3cb1d9e19",
+          "src/sign/mod.rs": "ac24a4a404009efad067bd798700206606f705aa",
+          "src/sign/taproot.rs": "22470f4f8b627f116aa9638b9cef43d210c8c153",
+          "src/sign/tx_builder.rs": "e6d598f1aabf40c382173a1b072ecce466384870",
+          "src/sign/type_resolver.rs": "b7270a8613b68b6f091ad4a03492bacd5f3aeba5",
+          "src/sync/debug_sync.rs": "c8fb212a58b3ea11c10216be6ccddb6a024403d8",
+          "src/sync/fairrwlock.rs": "6ebb196810d06ce868f9f2f1a795ddbfc82d289b",
+          "src/sync/mod.rs": "9a88984520335f0517e1b1ee906a2481977f6d6c",
+          "src/sync/nostd_sync.rs": "120707419183439d67e3214b7ea619f1fca18aa4",
+          "src/sync/test_lockorder_checks.rs": "91826342f8a60f7dcbd523500ea2d0b81a047dc3",
+          "src/util/anchor_channel_reserves.rs": "29e24c9f72778d0f33c2fcd6df616cbcf6642458",
+          "src/util/async_poll.rs": "eefa40d1055c047430890fb389a12c048d97dec3",
+          "src/util/atomic_counter.rs": "bb9f1eefdeb3670bc00c2520b98ac019834f87dc",
+          "src/util/base32.rs": "f3d7a10c5535f85b8018bef7e2c2b8f56ed19b3d",
+          "src/util/byte_utils.rs": "9e023ffeb97e68e359af631a30c6615750c254cb",
+          "src/util/config.rs": "1a0709d3304c3fe5d466b4ab5c0aa428d5b3e41f",
+          "src/util/dyn_signer.rs": "cf1cac37903e34b69f2855de515eecabdd8451b5",
+          "src/util/errors.rs": "eaaf0130ca25959f86caa07b36e3ff64034368ca",
+          "src/util/fuzz_wrappers.rs": "6475065b8beb4f8fdca18953522f9f0ca528d90d",
+          "src/util/hash_tables.rs": "00341d57b459236a0c6c6eca36780251cca2d089",
+          "src/util/indexed_map.rs": "f81139553701b6149da092d8a04438f5f1c1fb64",
+          "src/util/logger.rs": "283d31581444698a29bb60253a313c57a9323a33",
+          "src/util/macro_logger.rs": "7b8e27a487ae986fa5a5ef800a6a45d20d9472bb",
+          "src/util/message_signing.rs": "d16fc73df7c7844b71db7e6bcd1194a0175b5483",
+          "src/util/mod.rs": "dcbea904b51bc40f79a2ca4785a91cbdc5fb38dc",
+          "src/util/mut_global.rs": "396d2ec7eb1248a4729dcd6a9558178e55078ebf",
+          "src/util/native_async.rs": "886146e976da13abcbc2ebe80f55490557a9526c",
+          "src/util/persist.rs": "a26bf75167e0e923d70b4ee6ff9e04e95997fcdf",
+          "src/util/scid_utils.rs": "b9dcc4688e88cdbb801b8291d3228b64b3843fee",
+          "src/util/ser.rs": "92b1e224ac6213a10adf96a4400a63ff18070027",
+          "src/util/ser_macros.rs": "647e7c77a6c8eb371fe192589aa0f4a6f5b21b60",
+          "src/util/sweep.rs": "d49501bd47e18b0d2b014c806b0faef91595cfae",
+          "src/util/test_channel_signer.rs": "3bacd76a61063815e05c09a5e79e7b8e6caed959",
+          "src/util/test_utils.rs": "0d08e3656500f4ec4d842376aea5462b3a714b7a",
+          "src/util/time.rs": "c60415435727ff419f41997e098d136cfe800354",
+          "src/util/transaction_utils.rs": "5a77fbf06b88eb75eeed898d9bf194775b96b11a",
+          "src/util/wakers.rs": "ec5bd0efb80090e25e6481e5f4c29c0b5ed23842"
+        }
+      }
+    },
+    {
+      "package": "bitcoin-payment-instructions@0.7.1",
+      "checksum": "29f5b43b0e8338cd36ce7940bd6b8a007d54f1cbe25314ec3fbba566f870b085",
+      "commit": "3d5400ff95373a78138c09f2e310c751cc7d2770",
+      "files": [
+        {
+          "file": "docs/licenses/upstream/spdx-Apache-2.0.txt",
+          "url": "https://github.com/spdx/license-list-data/blob/31ba1a50e5397e00a304dbadc76531740e89ee48/text/Apache-2.0.txt",
+          "git_blob_sha1": "137069b823873b8bcf42979bcf8e9371052d26a2",
+          "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff"
+        }
+      ],
+      "catalog_source": {
+        "license_id": "Apache-2.0",
+        "catalog_commit": "31ba1a50e5397e00a304dbadc76531740e89ee48"
+      }
+    },
+    {
+      "package": "hex_lit@0.1.1",
+      "checksum": "3011d1213f159867b13cfd6ac92d2cd5f1345762c63be3554e84092d85a50bbd",
+      "commit": "a1b61585654a3280103a9622c272b2f8ba278a47",
+      "files": [
+        {
+          "file": "docs/licenses/upstream/spdx-MITNFA.txt",
+          "url": "https://github.com/spdx/license-list-data/blob/31ba1a50e5397e00a304dbadc76531740e89ee48/text/MITNFA.txt",
+          "git_blob_sha1": "6d44edb3db0e68a518a0286ce5f8d78e9b565d1e",
+          "sha256": "d436716f7a05466f52443893079761c8a88f4967d0ef490fabc0a1c9ef1c3a1d"
+        }
+      ],
+      "catalog_source": {
+        "license_id": "MITNFA",
+        "catalog_commit": "31ba1a50e5397e00a304dbadc76531740e89ee48"
+      }
     }
   ]
 }

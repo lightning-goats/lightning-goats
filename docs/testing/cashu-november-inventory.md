@@ -96,6 +96,12 @@ Archive inventory now retains normalized repository metadata and .cargo_vcs_info
 
 `deploy/scripts/export-cashu-notices.py` now exports inventoried text files from verified archives or local manifests, verifies every notice hash, and deduplicates identical content. The development export has 462 package entries and 239 unique verified texts, with 34 missing-file entries retained. Default invocation refuses incomplete input; the explicitly incomplete artifact is marked distribution_ready=false. See cashu-development-notices-20261116.json. Final source provenance for missing notices and a selected-distribution inventory remain required.
 
+The 2026-11-18 [release-notice checkpoint](cashu-release-notices-20261118.json)
+exports all 462 locked entries in strict mode. It supplies pinned LDK release
+notices for three crates and canonical SPDX text for two archive-declared
+licenses. The selected linked distribution inventory and package acceptance
+remain open.
+
 The [2026-11-16 official rules check](cashu-event-rules-check-20261116.md) reconfirms the deadline and November-change disclosure requirement. Full submission-form fields and final submission behavior remain unverified. No submission was made.
 
 Added the missing top-level MIT text consistent with all four project package declarations. Their inventory entries now reference that project text; vendor entries retain their own provenance. The v3 development export matches the refreshed inventory hash, verifies every text, and leaves 30 missing upstream notice entries. Earlier exports remain tied to their original inventory hashes and are historical. Distribution readiness remains false.

@@ -448,8 +448,13 @@ namespaces. Its synthetic unfunded cases cover exact CLI authority and unchanged
 pending and held states. Use the funded CDK test for a successful transition and
 separately qualify live provider reconciliation. Re-run the complete financial
 HTTP/receipt/treasury fixture on source-matched core and wallet test artifacts.
-Mint-policy updates, coordinated funded restore and installed/provider acceptance
-remain required.
+On a disposable Actions runner, run the mint-policy fixture with
+`--installed-systemd` in private mount and network namespaces. Verify refusal
+while the actual wallet unit is active and while it is inactive but unmasked.
+Verify that applying and retrying the candidate preserves the mask, and that
+an explicitly started synthetic wallet loads the new namespace and retains
+the original held operation. Production mint-policy and provider acceptance
+remain separate.
 
 ## Cashu retired request compatibility
 

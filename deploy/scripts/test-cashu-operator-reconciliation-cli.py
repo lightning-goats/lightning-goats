@@ -6,7 +6,7 @@ separately qualify the acquired-output transition; this fixture never contacts a
 mint and never touches an installed wallet or operator seed.
 """
 import argparse
-from contextlib import closing
+from contextlib import ExitStack, closing
 import fcntl
 import grp
 import hashlib
@@ -22,19 +22,121 @@ import time
 import uuid
 
 
-def install_mint_policy(root, config, candidate, binary, state, uid, other_uids):
+def installed_wallet_unit(root, config, binary, state, uid, cleanup):
+    name = root.name
+    unit = f'{name}.service'
+    unit_file = Path('/run/systemd/system') / unit
+    systemd = runpy.run_path(str(Path(__file__).with_name('rehearse-systemd.py')))
+    command = systemd['command']
+    process = systemd['UnitProcess'](unit)
+    if (os.path.lexists(unit_file) or command(
+            ['systemctl', 'show', '--property=LoadState', '--value', '--', unit],
+            check=False).stdout.strip() != 'not-found'):
+        raise ValueError('mint policy fixture unit already exists')
+    command(['/usr/sbin/groupadd', '--gid', str(uid), name])
+    cleanup.callback(command, ['/usr/sbin/groupdel', name])
+    command(['/usr/sbin/useradd', '--uid', str(uid), '--gid', name, '--no-user-group',
+             '--no-create-home', '--home-dir', '/nonexistent', '--shell', '/usr/sbin/nologin', name])
+    cleanup.callback(command, ['/usr/sbin/userdel', name])
+    ipc = root / 'ipc'
+    ipc.mkdir(mode=0o750)
+    os.chown(ipc, uid, uid)
+    socket = ipc / 'intake.sock'
+    service = f'''[Unit]
+Description=Disposable Cashu mint policy wallet
+[Service]
+User={name}
+Group={name}
+ExecStart={binary} run {config}
+PrivateNetwork=yes
+IPAddressDeny=any
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths={state} {ipc}
+'''
+
+    def reload():
+        command(['systemctl', 'daemon-reload'])
+
+    def remove():
+        process.terminate()
+        command(['systemctl', 'reset-failed', unit], check=False)
+        unit_file.unlink(missing_ok=True)
+        reload()
+
+    cleanup.callback(remove)
+
+    def unmask():
+        if unit_file.is_symlink():
+            if os.readlink(unit_file) != '/dev/null':
+                raise ValueError('unexpected mint policy fixture mask')
+            unit_file.unlink()
+        with unit_file.open('x') as file:
+            file.write(service)
+        reload()
+
+    def start():
+        command(['systemctl', 'start', unit])
+        for _ in range(100):
+            properties = process.properties()
+            if properties['ActiveState'] == 'active' and socket.is_socket():
+                pid = int(properties['MainPID'])
+                status = Path(f'/proc/{pid}/status').read_text().splitlines()
+                identity = next(line.split()[1:] for line in status if line.startswith('Uid:'))
+                if (set(map(int, identity)) != {uid}
+                        or os.readlink(f'/proc/{pid}/ns/net') == os.readlink('/proc/1/ns/net')):
+                    raise ValueError('installed wallet did not use its private network and registered UID')
+                return
+            if process.poll() is not None:
+                break
+            time.sleep(0.1)
+        journal = command(['journalctl', '--unit', unit, '--no-pager', '-n', '10'], check=False).stdout
+        raise ValueError('synthetic installed wallet did not become ready\n' + journal[-2200:])
+
+    def stop():
+        command(['systemctl', 'stop', unit])
+        if process.wait(timeout=10):
+            raise ValueError('synthetic installed wallet did not stop cleanly')
+
+    def mask():
+        unit_file.unlink()
+        unit_file.symlink_to('/dev/null')
+        reload()
+
+    def restart():
+        if (not unit_file.is_symlink() or os.readlink(unit_file) != '/dev/null'
+                or command(['systemctl', 'start', unit], check=False).returncode == 0):
+            raise ValueError('mint policy installation did not preserve the inactive mask')
+        unmask()
+        start()
+        stop()
+
+    unmask()
+    return unit, start, stop, mask, restart
+
+
+def install_mint_policy(root, config, candidate, binary, state, uid, other_uids, installed_systemd, cleanup):
     """Apply through the real authenticated launcher in this disposable namespace."""
     scripts = Path(__file__).resolve().parent
-    subprocess.run(['/usr/bin/mount', '--make-rprivate', '/'], check=True)
-    subprocess.run(['/usr/bin/mount', '-t', 'tmpfs', '-o', 'mode=0755', 'tmpfs', '/var/lib'], check=True)
-    Path('/var/lib/lightning-goats-upgrades').mkdir(mode=0o700)
-    unit = 'lg-cashu-mint-policy-fixture.service'
-    status = root/'wallet-unit-status'
-    stub = root/'systemctl'
-    stub.write_text('#!/bin/sh\n[ "$1" = show ] && [ "$5" = '+unit+' ] || exit 1\n'
-                    'cat '+str(status)+'\n')
-    stub.chmod(0o555)
-    subprocess.run(['/usr/bin/mount', '--bind', str(stub), '/usr/bin/systemctl'], check=True)
+    maintenance_dir = Path('/var/lib/lightning-goats-upgrades')
+    restart = None
+    if installed_systemd:
+        maintenance_dir.mkdir(mode=0o700)
+        cleanup.callback(maintenance_dir.rmdir)
+        lock = maintenance_dir / 'CYBERHERD-OVERLAY-MAINTENANCE.lock'
+        cleanup.callback(lock.unlink, missing_ok=True)
+        unit, start, stop, mask, restart = installed_wallet_unit(root, config, binary, state, uid, cleanup)
+    else:
+        subprocess.run(['/usr/bin/mount', '--make-rprivate', '/'], check=True)
+        subprocess.run(['/usr/bin/mount', '-t', 'tmpfs', '-o', 'mode=0755', 'tmpfs', '/var/lib'], check=True)
+        maintenance_dir.mkdir(mode=0o700)
+        unit = 'lg-cashu-mint-policy-fixture.service'
+        status = root/'wallet-unit-status'
+        stub = root/'systemctl'
+        stub.write_text('#!/bin/sh\n[ "$1" = show ] && [ "$5" = '+unit+' ] || exit 1\n'
+                        'cat '+str(status)+'\n')
+        stub.chmod(0o555)
+        subprocess.run(['/usr/bin/mount', '--bind', str(stub), '/usr/bin/systemctl'], check=True)
 
     def set_status(active='inactive', enabled='masked'):
         status.write_text(f'Id={unit}\nLoadState=masked\nActiveState={active}\nSubState=dead\n'
@@ -101,7 +203,14 @@ def install_mint_policy(root, config, candidate, binary, state, uid, other_uids)
         if digest(config) != old:
             raise ValueError('refused install changed the original config')
 
-    set_status()
+    if installed_systemd:
+        apply(success=False)
+        start()
+        apply(success=False)
+        stop()
+        mask()
+    else:
+        set_status()
     apply(success=False, policy_hash='0'*64)
     apply(success=False, candidate_hash='0'*64)
     value['runtime_artifacts']['wallet'] = dict(artifact, sha256='0'*64)
@@ -109,15 +218,16 @@ def install_mint_policy(root, config, candidate, binary, state, uid, other_uids)
     apply(success=False)
     value['runtime_artifacts']['wallet'] = artifact
     save_policy()
-    set_status(active='active')
-    apply(success=False)
-    set_status(enabled='disabled')
-    apply(success=False)
-    set_status()
+    if not installed_systemd:
+        set_status(active='active')
+        apply(success=False)
+        set_status(enabled='disabled')
+        apply(success=False)
+        set_status()
     config.chmod(0o444)
     apply(success=False)
     config.chmod(0o440)
-    maintenance = Path('/var/lib/lightning-goats-upgrades/CYBERHERD-OVERLAY-MAINTENANCE.lock')
+    maintenance = maintenance_dir / 'CYBERHERD-OVERLAY-MAINTENANCE.lock'
     with maintenance.open('rb') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         apply(success=False)
@@ -148,12 +258,14 @@ def install_mint_policy(root, config, candidate, binary, state, uid, other_uids)
             or config.stat().st_mode & 0o777 != 0o440
             or os.getxattr(config, 'user.lg_test') != b'wallet-config'):
         raise ValueError('installed bytes, metadata, or exact retry differ from approval')
+    return restart
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--cli', type=Path, required=True)
     parser.add_argument('--cli-sha256', required=True)
+    parser.add_argument('--installed-systemd', action='store_true')
     args = parser.parse_args()
     if os.geteuid() != 0 or any(os.readlink('/proc/self/ns/'+kind) == os.readlink('/proc/1/ns/'+kind)
                                   for kind in ['mnt', 'net']):
@@ -161,6 +273,9 @@ def main():
     links = json.loads(subprocess.check_output(['/usr/sbin/ip', '-j', 'link', 'show']))
     if [link['ifname'] for link in links] != ['lo']:
         raise ValueError('fixture requires loopback-only network namespace')
+    if args.installed_systemd and (os.environ.get('GITHUB_ACTIONS') != 'true'
+            or not os.environ.get('GITHUB_RUN_ID', '').isdigit() or not Path('/run/systemd/system').is_dir()):
+        raise ValueError('installed systemd rehearsal requires the disposable Actions runner')
     data = args.cli.resolve(strict=True).read_bytes()
     if len(data) > 128*1024*1024 or hashlib.sha256(data).hexdigest() != args.cli_sha256:
         raise ValueError('selected wallet CLI differs from reviewed bytes')
@@ -168,7 +283,8 @@ def main():
     used |= {int(x) for x in subprocess.check_output(['ps', '-e', '-o', 'uid='], text=True).split()}
     uid, *other_uids = [n for n in range(60000, 65000) if n not in used][:6]
     core_uid = other_uids[0]
-    with tempfile.TemporaryDirectory(prefix='lg-ownership-cli-', dir='/run') as temporary:
+    fixture_root = '/var/lib' if args.installed_systemd else '/run'
+    with (tempfile.TemporaryDirectory(prefix='lg-mint-', dir=fixture_root) as temporary, ExitStack() as cleanup):
         root = Path(temporary)
         root.chmod(0o711)
         binary = root/'cashud'
@@ -382,9 +498,22 @@ def main():
             raise ValueError('mint policy refusal changed original state or configuration')
 
         # Apply through the authenticated launcher before the disposable restart.
-        install_mint_policy(root, config, candidate_file, binary, state, uid, other_uids)
+        restart = install_mint_policy(root, config, candidate_file, binary, state, uid, other_uids,
+                                      args.installed_systemd, cleanup)
         if image() != held:
             raise ValueError('install changed the original wallet journal')
+        expected_acquisitions = [
+            (acquisition, 'mint-a', 'held_for_reconciliation', b'synthetic unfunded retained request'),
+        ]
+        expected_namespaces = [('mint-a', 1), ('mint-b', 1)]
+        if restart is not None:
+            restart()
+            with closing(sqlite3.connect(database)) as db:
+                restarted = db.execute("SELECT id,mint_id,state,request FROM acquisitions").fetchall()
+                restarted_namespaces = db.execute(
+                    "SELECT mint_id,ready FROM cdk_mint_namespaces ORDER BY mint_id").fetchall()
+            if restarted != expected_acquisitions or restarted_namespaces != expected_namespaces:
+                raise ValueError('systemd restart did not preserve the original hold and open the new namespace')
         with closing(sqlite3.connect(database)) as db:
             db.execute("UPDATE operation_holds SET reason='missing_owned_outputs' WHERE acquisition_id=?", [acquisition])
             db.commit()
@@ -394,8 +523,7 @@ def main():
             retained = db.execute("SELECT id,mint_id,state,request FROM acquisitions").fetchall()
             namespaces = db.execute("SELECT mint_id,ready FROM cdk_mint_namespaces ORDER BY mint_id").fetchall()
         if (answer['state'] != 'held_for_reconciliation' or answer['acquisition_id'] != acquisition
-                or retained != [(acquisition, 'mint-a', 'held_for_reconciliation', b'synthetic unfunded retained request')]
-                or namespaces != [('mint-a', 1), ('mint-b', 1)]):
+                or retained != expected_acquisitions or namespaces != expected_namespaces):
             raise ValueError('candidate restart changed the original work or namespace')
         print(json.dumps(dict(result='CASHU_OPERATOR_RECONCILIATION_CLI_VERIFIED',cli_sha256=args.cli_sha256,
             runtime_uid=uid,synthetic_unfunded_retained_operation=True,pending_replay_unchanged=True,
@@ -403,10 +531,12 @@ def main():
             held_prepared_new_and_exported_states_refused=True,mint_contact=False,
             eligible_reviewed_hold_preserved_without_evidence=True,other_hold_reason_refused=True,
             mint_policy_review_preserved_original=True, mint_policy_candidate_restart_verified=True,
-            mint_policy_protected_install_and_retry_verified=True, mint_policy_systemctl_mocked=True,
+            mint_policy_protected_install_and_retry_verified=True,
+            mint_policy_systemctl_mocked=not args.installed_systemd,
+            mint_policy_installed_systemd_restart_verified=args.installed_systemd,
             mint_policy_live_uid_locks_and_drift_refused=True,
             treasury_cleanup_scope_and_missing_original_refused=True,
-            acquired_transition_qualified_here=False,workers_started=False,
+            acquired_transition_qualified_here=False,workers_started=args.installed_systemd,
             sql_definitions_rows_and_rowids_unchanged=True,schema_object_insertion_order_ignored=True),sort_keys=True))
 
 

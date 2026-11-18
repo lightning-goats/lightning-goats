@@ -193,6 +193,21 @@ jobs:
           digest = hashlib.sha256(cli.read_bytes()).hexdigest()
           subprocess.run(['sudo', 'unshare', '--mount', '--net', '--', 'python3', '../../deploy/scripts/test-cashu-private-run.py', '--', 'python3', '../../deploy/scripts/test-cashu-operator-reconciliation-cli.py', '--cli', str(cli), '--cli-sha256', digest], check=True)
           PYCODE
+      - name: Rehearse mint policy installation and native restart under systemd
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYCODE' 2>&1 | tee "$RUNNER_TEMP/cashu-mint-policy-systemd.json"
+          import hashlib, subprocess
+          from pathlib import Path
+          cli = Path('target/debug/lightning-goats-cashud').resolve(strict=True)
+          digest = hashlib.sha256(cli.read_bytes()).hexdigest()
+          command = ['sudo', '--preserve-env=GITHUB_ACTIONS,GITHUB_RUN_ID', 'unshare',
+                     '--mount', '--net', '--', 'python3', '-B',
+                     '../../deploy/scripts/test-cashu-operator-reconciliation-cli.py',
+                     '--installed-systemd', '--cli', str(cli), '--cli-sha256', digest]
+          subprocess.run(command, check=True)
+          PYCODE
       - uses: actions/upload-artifact@v4
         with:
           name: cashu-request-cli-${{ github.sha }}
@@ -201,6 +216,7 @@ jobs:
             ${{ runner.temp }}/cashu-request-cli-long.json
             ${{ runner.temp }}/cashu-copy-normalization.json
             ${{ runner.temp }}/cashu-operator-cli.json
+            ${{ runner.temp }}/cashu-mint-policy-systemd.json
           if-no-files-found: error
           retention-days: 14
       - name: Install pinned parser-test Node

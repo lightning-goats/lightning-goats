@@ -671,7 +671,7 @@ Take the webhook secret's SHA256 from the original protected Strike webhook
 configuration or its independently retained provisioning record. Use the
 credential's UTF-8 value after trimming surrounding whitespace, as the runtime
 does. Record the exact approval digest separately. The approval file and
-credential store must be root-private. An example binding:
+credential store must be root-private. The approval contains the following fields.
 
 ```json
 {

@@ -320,10 +320,15 @@ reports installation without starting or unmasking a service. For a later
 correction, review a new candidate from the installed config so any subsequent
 work remains recoverable.
 
-The disposable fixture exercises the authenticated installer and an exact
-retry. It uses synthetic systemd status responses with real runtime UID
-checks and file locks. A subsequent native restart creates only the new mint
-namespace and preserves the original held acquisition.
+The local fixture exercises the authenticated installer and an exact retry
+with synthetic service status, real runtime UID checks, and file locks.
+Hosted CI also runs the native wallet in a disposable systemd unit with a
+separate UID and private networking. The real installer must refuse the
+active unit and the unmasked inactive unit, then apply and verify an exact
+retry under the actual mask. The fixture separately verifies that startup
+is still blocked by the mask. After the fixture removes its own mask, the
+native wallet restarts with the new mint namespace and preserves the original
+held acquisition. Both fixtures use synthetic, unfunded state.
 
 ```sh
 sudo unshare --mount --net -- python3 deploy/scripts/test-cashu-private-run.py -- \

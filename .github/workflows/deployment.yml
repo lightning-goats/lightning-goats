@@ -146,6 +146,43 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  cashu-package:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.88"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            tools/cashu-compat
+      - name: Fetch both locked crate inventories
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fetch --locked
+          cargo fetch --locked --manifest-path tools/cashu-compat/Cargo.toml
+      - name: Build and verify the inactive Cashu release candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 deploy/scripts/verify-sqlite-vendor.py
+          python3 tools/cashu-compat/verify_vendor.py
+          python3 deploy/scripts/package-cashu.py build "$RUNNER_TEMP/cashu-review"
+          (cd "$RUNNER_TEMP/cashu-review" && sha256sum --check SHA256SUMS)
+          python3 deploy/scripts/package-cashu.py verify "$RUNNER_TEMP/cashu-review/"*.tar.gz "$GITHUB_SHA"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cashu-review-${{ github.sha }}
+          path: ${{ runner.temp }}/cashu-review/
+          if-no-files-found: error
+          retention-days: 14
+
   systemd:
     # LoadCredentialEncrypted requires systemd >= 250; Ubuntu 22.04 has 249.
     runs-on: ubuntu-24.04

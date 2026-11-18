@@ -438,7 +438,7 @@ def main():
         if image() != held:
             raise ValueError('out-of-scope hold was changed')
         cleanup_approval = root/'cleanup-approval.json'
-        cleanup = dict(version=1, purpose='cleanup_original_treasury_melt', wallet_instance=instance,
+        treasury_cleanup = dict(version=1, purpose='cleanup_original_treasury_melt', wallet_instance=instance,
             wallet_epoch=epoch, core_epoch=core_epoch, intent_id=str(uuid.uuid4()), mint_id='mint-a',
             config_sha256=hashlib.sha256(config_bytes).hexdigest(), operation_evidence_digest='1'*64,
             approved_at=now, expires_at=now+600)
@@ -450,7 +450,7 @@ def main():
             (dict(config_sha256='0'*64), 'configuration rejected'),
             ({}, 'failed'),
         ]:
-            cleanup_approval.write_text(json.dumps(dict(cleanup, **updates)))
+            cleanup_approval.write_text(json.dumps(dict(treasury_cleanup, **updates)))
             cleanup_approval.chmod(0o444)
             failure = call(*cleanup_args, success=False).stderr
             if 'treasury reconciliation '+expected not in failure:

@@ -1005,6 +1005,24 @@ application errors remain coarse. CORS and no-store response headers come from
 the application to avoid duplicate headers. A failed upstream must not be served
 from a cache.
 
+The production ModSecurity policy normally caps requests at 32 KiB. On a
+ModSecurity-enabled site using the 64 KiB Cashu pilot settings, place
+`deploy/nginx/lightning-goats-cashu-modsecurity.conf.example` at
+`/etc/nginx/cashu-token-waf.d/10-modsecurity.conf` as a root-owned file.
+Only the exact token route includes it. The request inspection and Core Rule
+Set remain active. The standard website policy has audit and debug logs off
+and suppresses matched-data logging. The route's existing log settings also
+apply. Keep the existing body limits for other endpoints.
+
+Validate the include together with the actual site and WAF before reloading
+anything. The local TLS acceptance fixture checks that 64 KiB reaches the
+upstream unchanged, 64 KiB plus one byte is refused, the Strike webhook stays
+at 32 KiB, and the inherited WAF still blocks requests on all three Cashu paths.
+
+```sh
+python3 -B deploy/waf/acceptance.py /path/to/pinned-crs /path/to/ngx_http_modsecurity_module.so
+```
+
 Before installed acceptance, verify the selected CDN/WAF suppresses request and
 response bodies, URL arguments, audit captures, analytics and debug capture for
 these routes while retaining request bounds and attack blocking. The include

@@ -52,6 +52,8 @@ class MockBackend(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    do_OPTIONS = do_GET
+
     def do_POST(self):
         body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
         self.server.bodies.append(body)
@@ -91,6 +93,11 @@ class NginxAssemblyTests(unittest.TestCase):
             "-out", str(cls.root / "cert.pem"),
         ], check=True, capture_output=True, timeout=30)
         (cls.root / "snippets").mkdir()
+        if getattr(cls, "CASHU_ENABLED", False) and os.environ.get("LG_WAF_CRS"):
+            optional = cls.root / "cashu-token-waf.d"
+            optional.mkdir()
+            shutil.copyfile(EXAMPLES / "lightning-goats-cashu-modsecurity.conf.example",
+                            optional / "10-modsecurity.conf")
         common = (EXAMPLES / "lightning-goats-http.conf.example").read_text()
         common = common.replace("127.0.0.1:8787", f"127.0.0.1:{cls.backends['production'].server_port}")
         common = common.replace("127.0.0.1:8788", f"127.0.0.1:{cls.backends['canary'].server_port}")
@@ -103,6 +110,8 @@ class NginxAssemblyTests(unittest.TestCase):
                           else EXAMPLES / f"lightning-goats-{mode}-site.conf.example")
                 data = source.read_text()
                 if suffix == "conf":
+                    if mode == "production" and getattr(cls, "CASHU_ENABLED", False):
+                        data += "\n" + (EXAMPLES / "lightning-goats-cashu.conf.example").read_text()
                     if mode == "production" and getattr(cls, "CONTACT_ENABLED", False):
                         data += "\n" + (EXAMPLES / "lightning-goats-contact.conf.example").read_text()
                     if mode == "production" and getattr(cls, "CYBERHERD_AUTH_ENABLED", False):

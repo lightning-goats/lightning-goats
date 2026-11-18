@@ -343,7 +343,7 @@ def compare(plan, parent, stages, staged_sha, reference_sha, common, budget, wal
     reference = stages[reference_sha] if reference_sha is not None else None
     # Reuse history and immutable-identity checks across all worklist groups.
     groups = REVIEW['worklist'](*staged[1:], *(reference[1:] if reference else (None, None)),
-                                limit=BATCH_LIMIT if version >= 2 else 1)
+                                limit=BATCH_LIMIT if version >= 2 else 1, count_missing=version == 3)
     result = {'version': version, 'result': 'CASHU_RESTORE_OBSERVATIONS_COMPARED', 'checkpoint_id': staged[0],
             'staged_receipt_sha256': staged_sha, 'reference_checkpoint_id': reference[0] if reference else None,
             'reference_receipt_sha256': reference_sha,
@@ -373,6 +373,34 @@ def compare(plan, parent, stages, staged_sha, reference_sha, common, budget, wal
     if version == 3:
         pending = REVIEW['worklist'](*reference[1:], limit=1)
         result['reference_pending_counts'] = {key: value['total'] for key, value in pending.items()}
+        result['reference_missing_counts'] = {key: value['missing_from_reference'] for key, value in groups.items()}
+    return result
+
+
+def compare_checkpoints(staged, staged_sha, evidence, evidence_sha, reference, reference_sha, common, budget):
+    require(bool(reference) == bool(reference_sha), 'reference requires its reviewed receipt hash')
+    selected = [(staged, staged_sha)]
+    if reference is not None:
+        selected.append((reference, reference_sha))
+    document = read_bound(evidence, evidence_sha, 512 * 1024, common, budget)
+    batches = custody_evidence(document, staged_sha, reference_sha)
+    custody_receipts = {batch['staged_receipt_sha256'] for batch in batches.values()}
+    require(custody_receipts <= {sha for _, sha in selected}, 'custody evidence requires its verified mint stage')
+    stages, wallet_sources = {}, {}
+    with ExitStack() as stack:
+        for directory, sha in selected:
+            require(sha not in stages, 'a comparison requires independently retained stages')
+            if sha in custody_receipts:
+                checkpoint, core, wallet, files = REVIEW['open_images'](
+                    directory, sha, common, budget, wallet_inventory=True)
+                wallet_sources[sha] = (wallet, files)
+            else:
+                checkpoint, core, wallet = REVIEW['open_images'](directory, sha, common, budget)
+            require(all(other[0] != checkpoint for other in stages.values()), 'checkpoint cannot reference itself')
+            stages[sha] = (checkpoint, *(stack.enter_context(closing(REVIEW['open_database'](file, budget)))
+                                         for file in (core, wallet)))
+        result = compare(document, evidence.parent, stages, staged_sha, reference_sha, common, budget, wallet_sources)
+    result['evidence_sha256'] = evidence_sha
     return result
 
 
@@ -391,32 +419,12 @@ def main():
         require(bool(args.reference) == bool(args.reference_sha256), 'reference requires its reviewed receipt hash')
         common = runpy.run_path(str(HERE / 'collect-cashu-backup.py'))
         common['protected_directory'](args.output.parent, private=True)
-        selected = [(args.staged, args.staged_sha256)]
-        if args.reference is not None:
-            selected.append((args.reference, args.reference_sha256))
+        require(not args.output.is_relative_to(args.staged)
+                and (args.reference is None or not args.output.is_relative_to(args.reference)),
+                'output must be outside the independently retained stages')
         budget = common['Budget'](0, 300)
-        document = read_bound(args.evidence, args.evidence_sha256, 512 * 1024, common, budget)
-        stages = {}
-        batches = custody_evidence(document, args.staged_sha256, args.reference_sha256)
-        custody_receipts = {batch['staged_receipt_sha256'] for batch in batches.values()}
-        require(custody_receipts <= {sha for _, sha in selected}, 'custody evidence requires its verified mint stage')
-        wallet_sources = {}
-        with ExitStack() as stack:
-            for directory, sha in selected:
-                require(not args.output.is_relative_to(directory) and sha not in stages,
-                        'output must be outside the independently retained stages')
-                if sha in custody_receipts:
-                    checkpoint, core, wallet, files = REVIEW['open_images'](
-                        directory, sha, common, budget, wallet_inventory=True)
-                    wallet_sources[sha] = (wallet, files)
-                else:
-                    checkpoint, core, wallet = REVIEW['open_images'](directory, sha, common, budget)
-                require(all(other[0] != checkpoint for other in stages.values()), 'checkpoint cannot reference itself')
-                stages[sha] = (checkpoint, *(stack.enter_context(closing(REVIEW['open_database'](file, budget)))
-                                             for file in (core, wallet)))
-            result = compare(document, args.evidence.parent, stages, args.staged_sha256,
-                             args.reference_sha256, common, budget, wallet_sources)
-        result['evidence_sha256'] = args.evidence_sha256
+        result = compare_checkpoints(args.staged, args.staged_sha256, args.evidence, args.evidence_sha256,
+                                     args.reference, args.reference_sha256, common, budget)
         common['write_json'](args.output, result)
         common['sync'](args.output.parent)
         print(json.dumps({'result': result['result'], 'resume_authorized': False}, sort_keys=True))

@@ -154,10 +154,10 @@ def same(left, right, fields):
         raise ValueError('immutable original operation identity differs')
 
 
-def compare_rows(older, later, immutable, pending, limit, after=''):
+def compare_rows(older, later, immutable, pending, limit, after='', *, count_missing=False):
     """Merge sorted streams and keep a bounded batch and a full change count."""
     a, b = next(older, None), next(later, None) if later is not None else None
-    count, rows = 0, []
+    count, missing, rows = 0, 0, []
     while a is not None or b is not None:
         if b is None or (a is not None and a['id'] < b['id']):
             previous, reference = dict(a), None
@@ -173,6 +173,8 @@ def compare_rows(older, later, immutable, pending, limit, after=''):
             include = pending(previous)
         else:
             include = previous != reference or pending(previous)
+            if count_missing and previous is not None and reference is None:
+                missing += 1
         operation = previous if previous is not None else reference
         if include and operation['id'] > after:
             count += 1
@@ -182,7 +184,10 @@ def compare_rows(older, later, immutable, pending, limit, after=''):
     if count > limit:
         last = rows[-1]
         cursor = (last['staged'] or last['reference'])['id']
-    return {'total': count, 'next_after': cursor, 'items': rows}
+    result = {'total': count, 'next_after': cursor, 'items': rows}
+    if count_missing:
+        result['missing_from_reference'] = missing
+    return result
 
 
 def require_event_prefix(staged, reference):
@@ -345,7 +350,8 @@ def open_custody_store(wallet_path, mint, expected_store_sha, common, budget):
         original.check()
 
 
-def worklist(core, wallet, reference_core=None, reference_wallet=None, limit=100, group=None, after=''):
+def worklist(core, wallet, reference_core=None, reference_wallet=None, limit=100, group=None, after='',
+             *, count_missing=False):
     def identity(c, w):
         return (c.execute('SELECT stream_id FROM overlay_identity WHERE singleton=1').fetchone()[0],
                 w.execute('SELECT epoch FROM wallet_epoch WHERE singleton=1').fetchone()[0],
@@ -358,7 +364,8 @@ def worklist(core, wallet, reference_core=None, reference_wallet=None, limit=100
 
     def diff(before, newer, sql, immutable, pending):
         reference = iter(newer.execute(sql)) if newer is not None else None
-        return compare_rows(iter(before.execute(sql)), reference, immutable, pending, limit, after)
+        return compare_rows(iter(before.execute(sql)), reference, immutable, pending, limit, after,
+                            count_missing=count_missing)
 
     actions = {
         'strike_receives': lambda: diff(core, reference_core, CORE_TREASURY,

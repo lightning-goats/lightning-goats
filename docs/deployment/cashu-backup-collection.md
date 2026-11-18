@@ -499,7 +499,8 @@ from the separate `--reference` stage. Both fields use the shape above, with
 their respective receipt hashes and independently generated selections.
 Each batch must cover every namespace in its own checkpoint. The report also
 counts operations still pending in the reference, even when the reference
-and primary share the same pending record.
+and primary share the same pending record. It counts original operations
+missing from the reference regardless of the worklist page size.
 
 The funded two-mint rehearsal compares native observations from the original
 synthetic issuers after their melts. The pre-melt checkpoints still list
@@ -538,6 +539,36 @@ are verified and reused. All published roles carry their fences even before
 the command has verified the entire installation. The result reports the
 checkpoint and confirms all six entries. External settlement, custody checks,
 and authorization for resumption still need separate evidence.
+
+### Switch an existing fenced installation to a later reconciled checkpoint
+
+Keep every unit masked and keep both stages and the version 3 evidence
+manifest. Select the later stage as the install target, then give the
+installer the exact older stage that is already installed.
+
+```sh
+/usr/bin/python3 -I -S -B ROOT_CAPSULE/launch-cashu-backup.py TOOL_SHA256 install-fenced \
+  LATER_STAGE LATER_RECEIPT_SHA256 POLICY POLICY_SHA256 \
+  --advance-from INSTALLED_OLDER_STAGE OLDER_RECEIPT_SHA256 \
+  --advance-evidence PAIRED_EVIDENCE PAIRED_EVIDENCE_SHA256
+```
+
+The installer recomputes reconciliation from the pinned manifest and both
+stages. It checks the later stage retains all earlier operations, has no
+pending operations in the worklist, and agrees with the original treasury
+and terminal feeder outcomes. A completed treasury operation must retain
+its accounting and wallet cleanup record. The later custody observations
+must show no stale, unresolved, or locally held mint-unspent value. A
+verified spendable balance is allowed.
+
+For each runtime directory, the installer parks the exact older fenced
+image in a root-private directory on the same filesystem, then publishes
+the later fenced image. It reports the retained paths when all six pass
+verification. An interruption can leave a mix of old and new fenced
+directories or an empty slot whose older image is already retained.
+Keep the units masked and retry with the same stage, policy, and manifest
+digests. A different operation or unexpected installed image is refused.
+Service activation and resumption authorization need separate verification.
 
 ### Reprovision the two archived signer clients
 
@@ -596,4 +627,8 @@ and one feeder confirmation missing from the older checkpoint. It verifies
 value. It refuses omitted operations, missing later custody evidence and
 evidence rebound across checkpoints. Both
 stages and the installed files stay byte-identical with their fences intact.
+The rehearsal then switches the installed directories to the verified later
+checkpoint. It interrupts once after retaining an older directory and once
+after publishing a later image. The same command completes the switch and
+keeps the previous six images available in protected storage.
 Safe resumption and live provider acceptance still require verification.

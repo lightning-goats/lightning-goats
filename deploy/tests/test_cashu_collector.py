@@ -26,6 +26,43 @@ INSTALL=runpy.run_path(str(SOURCE/'install-cashu-restore.py'))
 
 
 class RecoveryWorklistTests(unittest.TestCase):
+    def test_fenced_advance_checks_the_reference_outcomes(self):
+        custody = {'stale_local_unspent_sats': 0, 'mint_unresolved_sats': 0, 'mint_unspent_held_sats': 0,
+                   'mint_unspent_sats': 16}
+        accounting = {'wallet_cdk_cleanup_retained': True, 'completion_totals': {'deposit_sats': 396}}
+        treasury = {'observed_pair_matches': True, 'reference_accounting': accounting}
+        feeder = {'checkpoint_conflict': False, 'gateway_status': 'confirmed', 'reference_status': 'confirmed'}
+        valid = {'version': 3, 'reference_missing_counts': {'cashu_acquisitions': 0},
+                 'reference_pending_counts': {'mint_splits': 0}, 'reference_custody_all': custody,
+                 'treasury': [treasury], 'feeder': [feeder]}
+        verify = INSTALL['require_reconciled_reference']
+        verify(valid)
+        verify({**valid, 'feeder': [{**feeder, 'gateway_status': 'not_dispatched',
+                                    'reference_status': 'reconciled_not_fed'}]})
+        for invalid in (
+            {'version': 2},
+            {'reference_missing_counts': {'cashu_acquisitions': 1}},
+            {'reference_pending_counts': {'mint_splits': 1}},
+            *({'reference_custody_all': {**custody, field: 1}}
+              for field in ('stale_local_unspent_sats', 'mint_unresolved_sats', 'mint_unspent_held_sats')),
+            {'treasury': [{**treasury, 'observed_pair_matches': False}]},
+            {'treasury': [{**treasury, 'reference_accounting': {**accounting, 'completion_totals': None}}]},
+            {'treasury': [{**treasury, 'reference_accounting': {**accounting, 'wallet_cdk_cleanup_retained': False}}]},
+            {'feeder': [{**feeder, 'gateway_status': 'pending'}]},
+            {'feeder': [{**feeder, 'checkpoint_conflict': True}]},
+            {'feeder': [{**feeder, 'reference_status': 'reconciled_not_fed'}]},
+        ):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                verify({**valid, **invalid})
+
+    def test_reference_missing_count_covers_rows_outside_the_selected_page(self):
+        original = [{'id': 'a'}, {'id': 'c'}, {'id': 'd'}]
+        candidate = [{'id': 'b'}, {'id': 'd'}]
+        page = REVIEW['compare_rows'](iter(original), iter(candidate), (), lambda _: False, limit=1,
+                                      after='b', count_missing=True)
+        self.assertEqual(page['missing_from_reference'], 2)
+        self.assertEqual(page['items'], [{'staged': {'id': 'c'}, 'reference': None}])
+
     def test_paired_custody_requires_each_named_stage(self):
         older, later = '11' * 32, '22' * 32
         primary = {'staged_receipt_sha256': older, 'mints': {}}

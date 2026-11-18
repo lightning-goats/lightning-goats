@@ -523,12 +523,10 @@ def verify_funded_install(root, native_inputs, systemd_masks):
             or restore['funded_provider_comparison']['original_strike_deposit_sats'] != 396
             or restore['funded_provider_comparison']['reference_mints_observed'] != 2
             or restore['funded_provider_comparison']['reference_mint_unspent_sats'] != 16
+            or restore['fenced_advancement']['resume_authorized'] is not False
+            or len(restore['fenced_advancement']['recovery_fences_verified']) != 6
             or restore['resume_authorized'] is not False):
         raise ValueError('funded installation did not verify the required scope')
-    signal = root / 'exchange/restore-review-finished.pending'
-    signal.write_text('true\n')
-    signal.chmod(0o644)
-    signal.rename(signal.with_suffix('.json'))
     return report
 
 

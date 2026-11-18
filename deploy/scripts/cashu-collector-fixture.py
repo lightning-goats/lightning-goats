@@ -387,6 +387,114 @@ def verify_funded_stage(stage, worklist, source, common):
             'original_pending_intent_in_authenticated_worklist': True}
 
 
+def qualify_advance(capsule, bootstrap, stage, reference, output, policy_path, common,
+                    workers, binaries, configurations, roles, systemd_masks):
+    manifest = output / 'provider-review/funded-restore-manifest.json'
+    args = Namespace(stage=reference, stage_sha256=digest(reference / 'STAGED.json'),
+                     policy=policy_path, policy_sha256=digest(policy_path), signer_credential_store=None,
+                     advance_from=(str(stage), digest(stage / 'STAGED.json')),
+                     advance_evidence=(str(manifest), digest(manifest)))
+    tool = runpy.run_path(str(capsule / 'launch-cashu-backup.py'))['verify'](capsule, bootstrap)
+    install = runpy.run_path(str(capsule / 'install-cashu-restore.py'))['install']
+    older_images = stage / 'fenced-images'
+    active = {role: Path(worker['state']) for role, worker in workers.items()}
+    saved = output / 'pre-advance-originals'
+    advanced = output / 'advanced-fenced-runtime'
+    for directory in (saved, advanced):
+        directory.mkdir(mode=0o700)
+
+    def refused(candidate, expected, **overrides):
+        try:
+            install(candidate, {**common, **overrides}, tool)
+        except ValueError as error:
+            if expected not in str(error):
+                raise
+        else:
+            raise ValueError('advancement accepted an unverified configuration')
+
+    def image(directory):
+        return {path.name: digest(path) for path in directory.iterdir()}
+
+    def interrupt(roles_changed):
+        def stop(role):
+            roles_changed.append(role)
+            raise InterruptedError('fixture stopped between durable per-role transitions')
+        return stop
+
+    archived, published = [], []
+    try:
+        for role, state in active.items():
+            state.rename(saved / role)
+            (output / 'installed-fenced-runtime' / role).rename(state)
+        before = {role: image(state) for role, state in active.items()}
+        refused(Namespace(**{**vars(args), 'advance_from': None, 'advance_evidence': None}),
+                'existing target differs')
+        refused(Namespace(**{**vars(args), 'advance_evidence': (str(manifest), '00' * 32)}),
+                'evidence bytes differ')
+        if before != {role: image(state) for role, state in active.items()}:
+            raise ValueError('refused advancement touched the older installed images')
+        try:
+            install(args, common, tool, after_archive=interrupt(archived))
+        except InterruptedError:
+            if len(archived) != 1 or any(
+                    os.path.lexists(state) if role in archived else image(state) != before[role]
+                    for role, state in active.items()):
+                raise ValueError('interrupted retention left an unexpected installed state')
+        else:
+            raise ValueError('test did not interrupt the first durable retention')
+        changed_evidence = output / 'provider-review/same-evidence-different-digest.json'
+        common['write'](changed_evidence, manifest.read_bytes() + b'\n')
+        refused(Namespace(**{**vars(args), 'advance_evidence': (str(changed_evidence), digest(changed_evidence))}),
+                'differs from the retained operation')
+        if systemd_masks:
+            with active_process(workers['wallet']):
+                refused(args, 'runtime UID still has a process')
+        try:
+            install(args, common, tool, after_publish=interrupt(published))
+        except InterruptedError:
+            if published != archived or image(active[published[0]]) != image(reference / 'fenced-images' / published[0]):
+                raise ValueError('interrupted publication did not install the expected fenced image')
+        else:
+            raise ValueError('test did not interrupt the first durable publication')
+
+        if systemd_masks:
+            outcome = subprocess.run(
+                ['/usr/bin/python3', '-I', '-S', '-B', str(capsule / 'launch-cashu-backup.py'), bootstrap,
+                 'install-fenced', str(reference), args.stage_sha256, str(policy_path), args.policy_sha256,
+                 '--advance-from', *args.advance_from, '--advance-evidence', *args.advance_evidence],
+                stdin=subprocess.DEVNULL, capture_output=True, timeout=120)
+            if outcome.returncode:
+                raise ValueError('authenticated advancement refused the partially published masked fixture')
+            result = json.loads(outcome.stdout)
+        else:
+            result = install(args, common, tool)
+        if (result['result'] != 'CASHU_RESTORE_ADVANCED_FENCED' or result['already_installed'] != published
+                or result['resume_authorized'] or result['services_changed']
+                or result['advance_evidence_sha256'] != args.advance_evidence[1]):
+            raise ValueError('advancement result differs from the exact paired evidence')
+        retained = {role: Path(path) for role, path in result['retained_paths'].items()}
+        if set(retained) != set(roles):
+            raise ValueError('advancement omitted a retained role')
+        for role, path in retained.items():
+            if (image(path) != image(older_images / role) or path.parent.stat().st_mode & 0o777 != 0o700
+                    or path.parent.stat().st_uid != 0):
+                raise ValueError('advancement changed an older image or exposed its retained directory')
+        if install(args, common, tool)['already_installed'] != sorted(roles):
+            raise ValueError('completed fenced advancement refused exact retry')
+        startup = output.parent / 'advanced-startup'
+        startup.mkdir(mode=0o711)
+        verified = verify_restored_runtime_fences(reference, startup, workers, binaries, configurations, roles)
+    finally:
+        for role, state in active.items():
+            if (saved / role).exists():
+                if state.exists():
+                    state.rename(advanced / role)
+                (saved / role).rename(state)
+    return {'recovery_fences_verified': verified, 'older_files_retained': True, 'archive_interrupt_recovered': True,
+            'publish_interrupt_recovered': True, 'changed_evidence_retry_refused': True, 'exact_retry_verified': True,
+            'authenticated_cli_retry_with_actual_masks': systemd_masks, 'resume_authorized': False}
+
+
 def qualify_restore(source, output_root, collected, identity, selected, store,
                     workers, binaries, configurations, native_roles, configured_keys, policy_path,
                     common, systemd_masks, funded_source, capture_reference):
@@ -490,10 +598,17 @@ def qualify_restore(source, output_root, collected, identity, selected, store,
         compare = runpy.run_path(str(scripts / 'cashu-funded-provider-fixture.py'))['compare_funded_providers']
         providers = compare(capsule, digest(manifest), destination, reference, funded_source,
                             output_root / 'provider-review', binaries['core'], common)
+        signal = funded_source / 'exchange/restore-review-finished.pending'
+        common['write_json'](signal, True)
+        signal.chmod(0o644)
+        signal.rename(signal.with_suffix('.json'))
+        advancement = qualify_advance(capsule, digest(manifest), destination, reference, output_root, policy_path,
+                                      common, workers, binaries, configurations, native_roles, systemd_masks)
         return {**observed, 'actual_authenticated_launcher': True, 'real_age_archive': True,
                 'staged_roles': len(roles), 'committed_wal_preserved': True, 'image_manifest_verified': True,
                 'fenced_installation': installation, 'restored_runtime_bytes_unchanged': True,
                 'funded_provider_comparison': providers,
+                'fenced_advancement': advancement,
                 'external_reconciliation_verified': False, 'resume_authorized': False}
     if any(json.loads(review.stdout)['counts'].values()):
         raise ValueError('empty staged checkpoint produced unexpected review work')

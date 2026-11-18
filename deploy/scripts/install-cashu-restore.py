@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install a verified checkpoint into empty service paths with every fence intact."""
+"""Install or advance a verified checkpoint with every recovery fence intact."""
 import argparse
 import base64
 from contextlib import ExitStack, closing
@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import runpy
+import sqlite3
 import stat
 import subprocess
 import tempfile
@@ -164,7 +165,88 @@ def publish_no_replace(source, target, budget):
         raise ValueError('fenced destination appeared during publication')
 
 
-def install(args, common, tool_identity, *, after_publish=lambda _: None):
+def install_stage(stage, stage_sha, policy_sha, common, budget):
+    read = common['COMBINED']['read_private']
+    receipt, manifest = REVIEW['stage_metadata'](stage, stage_sha, common)
+    collection_raw = read(stage / 'checkpoint-evidence' / 'collection.json', 4 * 1024**2)
+    collection = common['document'](collection_raw)
+    if (receipt.get('collection_sha256') != common['sha'](collection_raw)
+            or collection['checkpoint_id'] != receipt['checkpoint_id']
+            or collection['policy_sha256'] != policy_sha
+            or collection['quiescence_verified'] is not True):
+        raise ValueError('restore policy or collection evidence differs from the selected stage')
+    checkpoint = receipt['checkpoint_id']
+    original = {row['path']: row for row in collection['originals']}
+    if len(original) != len(collection['originals']):
+        raise ValueError('duplicate collection record')
+    REVIEW['open_images'](stage, stage_sha, common, budget)
+    members = {}
+    for role, rows in manifest['roles'].items():
+        marker = (checkpoint + '\n').encode()
+        members[role] = {REVIEW['recovery_marker'](role): {'sha256': common['sha'](marker), 'bytes': len(marker)}}
+        members[role].update({row['name']: {'sha256': row['sha256'], 'bytes': row['bytes']} for row in rows})
+    return receipt, manifest, collection, original, members
+
+
+def require_reconciled_reference(report):
+    if (report['version'] != 3 or any(report['reference_missing_counts'].values())
+            or any(report['reference_pending_counts'].values())):
+        raise ValueError('advancement requires retained and settled original operations')
+    custody = report['reference_custody_all']
+    if any(custody[key] for key in ('stale_local_unspent_sats', 'mint_unresolved_sats', 'mint_unspent_held_sats')):
+        raise ValueError('reference has stale or held mint custody')
+    for row in report['treasury']:
+        accounting = row['reference_accounting']
+        if (not row['observed_pair_matches'] or not accounting['wallet_cdk_cleanup_retained']
+                or accounting['completion_totals'] is None):
+            raise ValueError('reference does not retain the completed original treasury operation')
+    terminal = {'confirmed': 'confirmed', 'not_dispatched': 'reconciled_not_fed'}
+    for row in report['feeder']:
+        if (row['checkpoint_conflict'] or row['gateway_status'] not in terminal
+                or row['reference_status'] != terminal[row['gateway_status']]):
+            raise ValueError('reference does not retain the original terminal feeder outcome')
+
+
+def parking_record(state, role, old, later, previous_sha, stage_sha, policy_sha, evidence_sha):
+    directory = state.parent / f".lg-cashu-advance-{old['checkpoint_id']}-{later['checkpoint_id']}-{role}"
+    intent = {'version': 1, 'role': role, 'state_directory': str(state), 'previous_stage_sha256': previous_sha,
+              'later_stage_sha256': stage_sha, 'policy_sha256': policy_sha, 'evidence_sha256': evidence_sha}
+    return directory, intent
+
+
+def parked_state(directory, intent, common, budget):
+    if not os.path.lexists(directory):
+        return False
+    common['protected_directory'](directory, gid=0, private=True)
+    private_attributes(directory)
+    names = {p.name for p in directory.iterdir()}
+    if names not in ({'INTENT.json'}, {'INTENT.json', 'fenced-state'}):
+        raise ValueError('retained prior checkpoint has an unexpected inventory')
+    path = directory / 'INTENT.json'
+    private_attributes(path)
+    with closing(common['Frozen'](path, 0, 65536, budget, gid=0)) as source:
+        if source.digest != common['sha'](common['json_bytes'](intent)):
+            raise ValueError('fenced advancement differs from the retained operation')
+    return 'fenced-state' in names
+
+
+def prepare_parking(directory, intent, common, budget):
+    if os.path.lexists(directory):
+        if parked_state(directory, intent, common, budget):
+            raise ValueError('older checkpoint is already retained')
+        return
+    with tempfile.TemporaryDirectory(prefix='.lg-cashu-intent-', dir=directory.parent) as temporary:
+        prepared = Path(temporary) / 'retention'
+        prepared.mkdir(mode=0o700)
+        os.chown(prepared, 0, 0)
+        prepared.chmod(0o700)
+        common['write_json'](prepared / 'INTENT.json', intent)
+        common['sync'](prepared)
+        publish_no_replace(prepared, directory, budget)
+    common['sync'](directory.parent)
+
+
+def install(args, common, tool_identity, *, after_publish=lambda _: None, after_archive=lambda _: None):
     if os.geteuid() != 0:
         raise ValueError('root is required for restored runtime ownership')
     if any(not re.fullmatch('[0-9a-f]{64}', digest) for digest in (args.stage_sha256, args.policy_sha256)):
@@ -174,28 +256,14 @@ def install(args, common, tool_identity, *, after_publish=lambda _: None):
     budget = common['Budget'](policy['total_bytes'], policy['deadline_seconds'])
     workers = policy['workers']
     states = {role: Path(worker['state']) for role, worker in workers.items()}
-    read = common['COMBINED']['read_private']
     stage = args.stage
     credential_store = args.signer_credential_store
-
-    receipt, manifest = REVIEW['stage_metadata'](stage, args.stage_sha256, common)
-    collection_raw = read(stage / 'checkpoint-evidence' / 'collection.json', 4 * 1024**2)
-    collection = common['document'](collection_raw)
-    if (receipt.get('collection_sha256') != common['sha'](collection_raw)
-            or collection['checkpoint_id'] != receipt['checkpoint_id']
-            or collection['policy_sha256'] != args.policy_sha256
-            or collection['quiescence_verified'] is not True):
-        raise ValueError('restore policy or collection evidence differs from the selected stage')
+    advance_from, advance_evidence = getattr(args, 'advance_from', None), getattr(args, 'advance_evidence', None)
+    if bool(advance_from) != bool(advance_evidence):
+        raise ValueError('advancement requires an exact installed stage and paired evidence')
+    receipt, manifest, collection, original, members = install_stage(
+        stage, args.stage_sha256, args.policy_sha256, common, budget)
     checkpoint = receipt['checkpoint_id']
-    original = {row['path']: row for row in collection['originals']}
-    if len(original) != len(collection['originals']):
-        raise ValueError('duplicate collection record')
-    REVIEW['open_images'](stage, args.stage_sha256, common, budget)
-    members = {}
-    for role, rows in manifest['roles'].items():
-        marker = (checkpoint + '\n').encode()
-        members[role] = {REVIEW['recovery_marker'](role): {'sha256': common['sha'](marker), 'bytes': len(marker)}}
-        members[role].update({row['name']: {'sha256': row['sha256'], 'bytes': row['bytes']} for row in rows})
 
     with ExitStack() as stack:
         lock_unchanged = stack.enter_context(common['maintenance_lock'](common['GLOBAL_LOCK']))
@@ -232,6 +300,17 @@ def install(args, common, tool_identity, *, after_publish=lambda _: None):
             common['check_quiescence'](workers, budget)
 
         guard()
+        parking, archive = {}, set()
+        if advance_from:
+            old_stage, old_sha = Path(advance_from[0]), advance_from[1]
+            evidence, evidence_sha = Path(advance_evidence[0]), advance_evidence[1]
+            old, _, _, _, old_members = install_stage(old_stage, old_sha, args.policy_sha256, common, budget)
+            reconcile = runpy.run_path(str(HERE / 'reconcile-cashu-restore.py'))['compare_checkpoints']
+            comparison = reconcile(old_stage, old_sha, evidence, evidence_sha, stage, args.stage_sha256, common, budget)
+            require_reconciled_reference(comparison)
+            for role, state in states.items():
+                parking[role] = parking_record(state, role, old, receipt, old_sha, args.stage_sha256,
+                                                args.policy_sha256, evidence_sha)
         credentials = {}
         if credential_store is not None:
             if receipt['keys_verified'] is not True or collection['key_verification']['signer_clients_verified'] != 2:
@@ -245,7 +324,20 @@ def install(args, common, tool_identity, *, after_publish=lambda _: None):
         complete = []
         for role, state in states.items():
             common['protected_directory'](state.parent)
-            if os.path.lexists(state):
+            if advance_from:
+                park, intent = parking[role]
+                if parked_state(park, intent, common, budget):
+                    verify_directory(park / 'fenced-state', workers[role], old_members[role], common, budget)
+                    if os.path.lexists(state):
+                        verify_directory(state, workers[role], members[role], common, budget)
+                        complete.append(role)
+                        continue
+                else:
+                    verify_directory(state, workers[role], old_members[role], common, budget)
+                    if state.stat().st_dev != state.parent.stat().st_dev or os.path.ismount(state):
+                        raise ValueError('runtime directory cannot be retained on the same filesystem')
+                    archive.add(role)
+            elif os.path.lexists(state):
                 names = target_inventory(state, workers[role], common)
                 if names:
                     verify_directory(state, workers[role], members[role], common, budget, names=names)
@@ -270,6 +362,16 @@ def install(args, common, tool_identity, *, after_publish=lambda _: None):
                     raise ValueError('empty state directory changed before publication')
                 state.rmdir()
                 common['sync'](state.parent)
+            if role in archive:
+                park, intent = parking[role]
+                prepare_parking(park, intent, common, budget)
+                verify_directory(state, workers[role], old_members[role], common, budget)
+                if park.stat().st_dev != state.stat().st_dev:
+                    raise ValueError('fenced retention crossed a filesystem boundary')
+                publish_no_replace(state, park / 'fenced-state', budget)
+                common['sync'](park)
+                common['sync'](state.parent)
+                after_archive(role)
             publish_no_replace(staged, state, budget)
             common['sync'](state.parent)
             after_publish(role)
@@ -277,6 +379,11 @@ def install(args, common, tool_identity, *, after_publish=lambda _: None):
         guard()
         for role, state in states.items():
             verify_directory(state, workers[role], members[role], common, budget)
+            if advance_from:
+                park, intent = parking[role]
+                if not parked_state(park, intent, common, budget):
+                    raise ValueError('retained prior checkpoint is missing')
+                verify_directory(park / 'fenced-state', workers[role], old_members[role], common, budget)
         for role, (target, candidate, _) in credentials.items():
             if candidate is not None:
                 guard()
@@ -294,13 +401,18 @@ def install(args, common, tool_identity, *, after_publish=lambda _: None):
                     raise ValueError('installed signer credential changed during publication')
         for item in tracked:
             item.check()
-        return {'result': 'CASHU_RESTORE_INSTALLED_FENCED', 'version': 1,
+        result = {'result': 'CASHU_RESTORE_INSTALLED_FENCED', 'version': 1,
                 'checkpoint_id': checkpoint, 'stage_sha256': args.stage_sha256,
                 'policy_sha256': args.policy_sha256, 'tool': tool_identity,
                 'roles': sorted(states), 'already_installed': sorted(complete),
                 'signer_clients_verified': sorted(credentials),
                 'external_reconciliation_verified': False, 'resume_authorized': False,
                 'services_changed': False}
+        if advance_from:
+            result.update(result='CASHU_RESTORE_ADVANCED_FENCED', previous_stage_sha256=old_sha,
+                          advance_evidence_sha256=evidence_sha,
+                          retained_paths={role: str(park / 'fenced-state') for role, (park, _) in parking.items()})
+        return result
 
 
 def main():
@@ -312,11 +424,13 @@ def main():
         parser.add_argument(name + '_sha256')
     parser.add_argument('--signer-credential-store', type=Path,
                         help='reprovision both archived signer clients in this existing root-private systemd store')
+    parser.add_argument('--advance-from', nargs=2, metavar=('STAGED_DIRECTORY', 'RECEIPT_SHA256'))
+    parser.add_argument('--advance-evidence', nargs=2, metavar=('MANIFEST', 'SHA256'))
     args = parser.parse_args()
     try:
         common = runpy.run_path(str(HERE / 'collect-cashu-backup.py'))
         result = install(args, common, verified_tool_identity())
-    except (OSError, ValueError, TypeError, KeyError, subprocess.TimeoutExpired):
+    except (OSError, ValueError, TypeError, KeyError, AttributeError, IndexError, sqlite3.Error, subprocess.TimeoutExpired):
         raise SystemExit('Cashu fenced installation refused. Preserve the checkpoint and any installed fences.')
     print(json.dumps(result, sort_keys=True))
 

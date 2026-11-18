@@ -524,7 +524,9 @@ def verify_funded_install(root, native_inputs, systemd_masks):
             or report['funded_fenced_installation_verified'] is not True
             or collector['systemd_masks_verified'] is not systemd_masks
             or restore['staged_custody_sats'] != {'fixture-a': 250, 'fixture-b': 150}
+            or restore['pending_financial_plan_in_authenticated_worklist'] is not True
             or restore['funded_provider_comparison']['original_strike_deposit_sats'] != 396
+            or restore['funded_provider_comparison']['original_financial_plan_dispatched_with_same_allocation'] is not True
             or restore['funded_provider_comparison']['reference_mints_observed'] != 2
             or restore['funded_provider_comparison']['reference_mint_unspent_sats'] != 16
             or restore['fenced_advancement']['resume_authorized'] is not False

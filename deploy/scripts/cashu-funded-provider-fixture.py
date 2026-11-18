@@ -50,12 +50,13 @@ def compare_funded_providers(capsule, bootstrap, stage, reference, source, outpu
     mint_rows = [row['reference'] for row in worklist['mint_melts']['items']]
     strike_rows = {row['reference']['id']: row for row in worklist['strike_receives']['items']}
     feeder_rows = worklist['feeder_requests']['items']
+    plan_rows = worklist['financial_feed_plans']['items']
     later_credit = {'id': read(exchange / 'reference-credit.json'), 'mint_id': 'fixture-a',
                     'state': 'credited', 'net': 16}
     if (len(mint_rows) != 2 or len(strike_rows) != 2 or len(feeder_rows) != 1
             or {row['reference']['mint_id'] for row in strike_rows.values()} != {'fixture-a', 'fixture-b'}
             or set(strike_rows) != {row['id'] for row in mint_rows}
-            or worklist['mint_splits']['total']
+            or worklist['mint_splits']['total'] or len(plan_rows) != 1
             or worklist['cashu_acquisitions']['items'] != [{'staged': None, 'reference': later_credit}]):
         raise ValueError('funded worklist differs from the original melts, feed and later credit')
 
@@ -118,8 +119,13 @@ def compare_funded_providers(capsule, bootstrap, stage, reference, source, outpu
         treasury.append({'intent_id': row['id'], 'strike': strikes[mint],
                          'mint': retain(mint + '-melt-observation', reports['melt'])})
     feeder = feeder_rows[0]['reference']['id']
-    if feeder_rows[0]['staged'] is not None or read(exchange / 'credit-consumed.json') != feeder:
-        raise ValueError('reference feeder differs from the fixture confirmation')
+    earlier_plan, later_plan = plan_rows[0]['staged'], plan_rows[0]['reference']
+    if (feeder_rows[0]['staged'] is not None or read(exchange / 'credit-consumed.json') != feeder
+            or earlier_plan['state'] != 'pending' or earlier_plan['request_id'] is not None
+            or later_plan['state'] != 'dispatched' or later_plan['request_id'] != feeder
+            or earlier_plan['id'] != later_plan['id']
+            or earlier_plan['allocation_sha256'] != later_plan['allocation_sha256']):
+        raise ValueError('reference feeder or financial plan differs from the original confirmation')
     feeder_selection = read(select('feeder-selection', reference, reference_sha, '--feeder-request', feeder))
     fixture = runpy.run_path(str(Path(__file__).with_name('test-cashu-combined-settlement.py')))
     observed = json.loads(fixture['verify_feeder_read'](feeder_selection, core_cli)['confirmed'])
@@ -177,6 +183,7 @@ def compare_funded_providers(capsule, bootstrap, stage, reference, source, outpu
             'stale_reference_custody_sats': later['stale_local_unspent_sats'],
             'reference_credit_retained_sats': later_credit['net'],
             'reference_pending_counts': report['reference_pending_counts'],
+            'original_financial_plan_dispatched_with_same_allocation': True,
             'original_mints_observed': batch['mint_namespaces_compared'], 'original_strike_receives_verified': 2,
             'original_strike_deposit_sats': sum(row['deposit_sats'] for row in report['treasury']),
             'original_feeder_confirmation_verified': True, 'omitted_operation_refused': True,

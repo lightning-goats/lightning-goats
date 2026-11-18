@@ -32,8 +32,9 @@ class RecoveryWorklistTests(unittest.TestCase):
         accounting = {'wallet_cdk_cleanup_retained': True, 'completion_totals': {'deposit_sats': 396}}
         treasury = {'observed_pair_matches': True, 'reference_accounting': accounting}
         feeder = {'checkpoint_conflict': False, 'gateway_status': 'confirmed', 'reference_status': 'confirmed'}
-        valid = {'version': 3, 'reference_missing_counts': {'cashu_acquisitions': 0},
-                 'reference_pending_counts': {'mint_splits': 0}, 'reference_custody_all': custody,
+        counts = dict.fromkeys(REVIEW['GROUPS'], 0)
+        valid = {'version': 3, 'reference_missing_counts': counts,
+                 'reference_pending_counts': counts, 'reference_custody_all': custody,
                  'treasury': [treasury], 'feeder': [feeder]}
         verify = INSTALL['require_reconciled_reference']
         verify(valid)
@@ -41,8 +42,11 @@ class RecoveryWorklistTests(unittest.TestCase):
                                     'reference_status': 'reconciled_not_fed'}]})
         for invalid in (
             {'version': 2},
-            {'reference_missing_counts': {'cashu_acquisitions': 1}},
-            {'reference_pending_counts': {'mint_splits': 1}},
+            {'reference_missing_counts': {**counts, 'cashu_acquisitions': 1}},
+            {'reference_pending_counts': {**counts, 'mint_splits': 1}},
+            {'reference_missing_counts': {**counts, 'financial_feed_plans': 1}},
+            {'reference_pending_counts': {**counts, 'financial_feed_plans': 1}},
+            {'reference_pending_counts': {name: 0 for name in counts if name != 'financial_feed_plans'}},
             *({'reference_custody_all': {**custody, field: 1}}
               for field in ('stale_local_unspent_sats', 'mint_unresolved_sats', 'mint_unspent_held_sats')),
             {'treasury': [{**treasury, 'observed_pair_matches': False}]},
@@ -54,6 +58,47 @@ class RecoveryWorklistTests(unittest.TestCase):
         ):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 verify({**valid, **invalid})
+
+    def test_financial_plan_without_provider_references_is_pending_and_keeps_its_allocation(self):
+        worklist = REVIEW['worklist']
+        read_plans = REVIEW['financial_plans']
+        compare = REVIEW['compare_rows']
+        plan = '10000000-0000-4000-8000-000000000001'
+        allocation = [('early', 600), ('late', 400)]
+        with closing(sqlite3.connect(':memory:')) as core:
+            core.row_factory = sqlite3.Row
+            for migration in sorted((SOURCE.parents[1] / 'migrations').glob('*.sql')):
+                core.executescript(migration.read_text())
+            core.execute('INSERT INTO feed_financial_plans(id,threshold_sats) VALUES(?,1000)', (plan,))
+            for source, sats in allocation:
+                ledger_id = core.execute(
+                    "INSERT INTO ledger_entries(entry_type,source_key,delta_sats) VALUES('credit',?,?)",
+                    (source, sats)).lastrowid
+                core.execute("INSERT INTO reward_funding_lots VALUES(?,'unavailable',?,?,?)",
+                             (ledger_id, sats, sats, 'fixture'))
+                core.execute('INSERT INTO feed_financial_parts VALUES(?,?,?)', (plan, ledger_id, sats))
+            before = worklist(core, None, group='financial_feed_plans')['financial_feed_plans']
+            self.assertEqual(before['total'], 1)
+            original = before['items'][0]['staged']
+            self.assertEqual((original['id'], original['state'], original['request_id']), (plan, 'pending', None))
+            self.assertNotIn('ledger_id', json.dumps(original))
+            self.assertEqual(core.execute('SELECT COUNT(*) FROM cashu_treasury_intents').fetchone()[0], 0)
+            self.assertEqual(core.execute('SELECT COUNT(*) FROM feed_attempts').fetchone()[0], 0)
+
+            core.execute("UPDATE feed_financial_plans SET state='released',disposition='operator_release' WHERE id=?",
+                         (plan,))
+            self.assertEqual(worklist(core, None, group='financial_feed_plans')['financial_feed_plans']['total'], 0)
+            terminal = list(read_plans(core))[0]
+            self.assertEqual(original['allocation_sha256'], terminal['allocation_sha256'])
+            # A separately assembled reference can contain internally valid but
+            # different allocations even though the live trigger prevents rewriting them.
+            core.execute('DROP TRIGGER feed_financial_part_immutable')
+            core.execute('UPDATE feed_financial_parts SET sats=1000-sats')
+            with self.assertRaisesRegex(ValueError, 'immutable original operation identity differs'):
+                compare(iter([original]), read_plans(core), ('allocation_sha256',), lambda _: False, 1)
+            core.execute('UPDATE feed_financial_parts SET sats=1')
+            with self.assertRaisesRegex(ValueError, 'invalid source allocation'):
+                list(read_plans(core))
 
     def test_reference_missing_count_covers_rows_outside_the_selected_page(self):
         original = [{'id': 'a'}, {'id': 'c'}, {'id': 'd'}]

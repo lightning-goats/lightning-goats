@@ -2,6 +2,7 @@
 """List original external references from a fenced Cashu recovery checkpoint."""
 import argparse
 from contextlib import closing, contextmanager
+import hashlib
 from itertools import zip_longest
 import json
 from pathlib import Path
@@ -138,8 +139,13 @@ WALLET_SPLITS = """
     ORDER BY r.intent_id
 """
 FEED = "SELECT id,status,threshold_sats FROM feed_attempts ORDER BY id"
+FINANCIAL_PLAN = """
+    SELECT id,threshold_sats,created_at,state,request_id,disposition
+      FROM feed_financial_plans ORDER BY id
+"""
 ACQUISITION = "SELECT id,mint_id,state,net FROM acquisitions ORDER BY id"
-GROUPS = ('strike_receives', 'mint_melts', 'mint_splits', 'feeder_requests', 'cashu_acquisitions')
+GROUPS = ('strike_receives', 'mint_melts', 'mint_splits', 'financial_feed_plans',
+          'feeder_requests', 'cashu_acquisitions')
 
 
 def open_database(path, budget):
@@ -155,6 +161,20 @@ def same(left, right, fields):
     if left and right and any(left[field] != right[field] for field in fields
                              if left[field] is not None and right[field] is not None):
         raise ValueError('immutable original operation identity differs')
+
+
+def financial_plans(db):
+    # A plan can reserve credit before it has any treasury or feeder reference.
+    # Bind its exact ordered source allocation without putting ledger IDs in the report.
+    for row in db.execute(FINANCIAL_PLAN):
+        plan = dict(row)
+        parts = [tuple(part) for part in db.execute(
+            "SELECT ledger_id,sats FROM feed_financial_parts WHERE plan_id=? ORDER BY ledger_id LIMIT 4097",
+            (plan['id'],))]
+        if not 1 <= len(parts) <= 4096 or sum(sats for _, sats in parts) != plan['threshold_sats']:
+            raise ValueError('financial feed plan has an invalid source allocation')
+        plan['allocation_sha256'] = hashlib.sha256(json.dumps(parts, separators=(',', ':')).encode()).hexdigest()
+        yield plan
 
 
 def compare_rows(older, later, immutable, pending, limit, after='', *, count_missing=False):
@@ -382,6 +402,11 @@ def worklist(core, wallet, reference_core=None, reference_wallet=None, limit=100
                             ('split_id', 'mint_id', 'cdk_operation', 'submitted_at',
                              'submitted_request_digest'),
                             lambda row: row is not None and not row['result_retained']),
+        'financial_feed_plans': lambda: compare_rows(
+            financial_plans(core), financial_plans(reference_core) if reference_core is not None else None,
+            ('threshold_sats', 'created_at', 'request_id', 'disposition', 'allocation_sha256'),
+            lambda row: row is not None and row['state'] == 'pending', limit, after,
+            count_missing=count_missing),
         'feeder_requests': lambda: diff(core, reference_core, FEED, ('threshold_sats',),
                                 lambda row: row is not None and row['status'] in ('intent_committed', 'unknown')),
         'cashu_acquisitions': lambda: diff(wallet, reference_wallet, ACQUISITION, ('mint_id', 'net'),

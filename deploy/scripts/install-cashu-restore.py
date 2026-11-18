@@ -191,8 +191,10 @@ def install_stage(stage, stage_sha, policy_sha, common, budget):
 
 
 def require_reconciled_reference(report):
-    if (report['version'] != 3 or any(report['reference_missing_counts'].values())
-            or any(report['reference_pending_counts'].values())):
+    clear = dict.fromkeys(REVIEW['GROUPS'], 0)
+    if (report['version'] != 3
+            or report.get('reference_missing_counts') != clear
+            or report.get('reference_pending_counts') != clear):
         raise ValueError('advancement requires retained and settled original operations')
     custody = report['reference_custody_all']
     if any(custody[key] for key in ('stale_local_unspent_sats', 'mint_unresolved_sats', 'mint_unspent_held_sats')):

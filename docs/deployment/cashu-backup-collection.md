@@ -244,7 +244,10 @@ and feeder reconciliation:
 
 Supply the SHA256 of `STAGED.json` from the reviewed stage. The command
 rechecks every fenced file and reports pending Cashu acquisitions, original
-mint melt quotes and split operations, Strike receive requests and feeder UUIDs.
+mint melt quotes and split operations, Strike receive requests, financial
+feed plans and feeder UUIDs. A pending financial feed plan appears even
+before it creates a treasury intent or a feeder request. Its record binds
+the ordered source allocations by SHA256 and shows any retained dispatch UUID.
 The split list retains the original split and CDK operation IDs and the
 submitted request digest when available. When independently
 retained newer evidence exists, add `--reference REFERENCE_DIRECTORY
@@ -555,7 +558,8 @@ installer the exact older stage that is already installed.
 
 The installer recomputes reconciliation from the pinned manifest and both
 stages. It checks the later stage retains all earlier operations, has no
-pending operations in the worklist, and agrees with the original treasury
+pending operations in the worklist, including financial feed plans that
+still reserve credit, and agrees with the original treasury
 and terminal feeder outcomes. A completed treasury operation must retain
 its accounting and wallet cleanup record. The later custody observations
 must show no stale, unresolved, or locally held mint-unspent value. A

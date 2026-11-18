@@ -387,15 +387,20 @@ def verify_funded_stage(stage, worklist, source, common):
             raise ValueError('funded stage lost original mint custody')
         amounts[mint] = expected
     expected_counts = {'strike_receives': 1, 'mint_melts': 1, 'mint_splits': 0, 'feeder_requests': 0,
-                       'cashu_acquisitions': 0}
+                       'cashu_acquisitions': 0, 'financial_feed_plans': 1}
     for group, count in expected_counts.items():
         if worklist['records'][group]['total'] != count:
             raise ValueError('funded stage worklist lost its unresolved original')
     for group in ('strike_receives', 'mint_melts'):
         if worklist['records'][group]['items'][0]['staged']['id'] != original[0][0]:
             raise ValueError('funded stage worklist rebound the original intent')
+    plan = worklist['records']['financial_feed_plans']['items'][0]['staged']
+    if (plan['state'] != 'pending' or plan['request_id'] is not None
+            or rows(core, 'SELECT id,threshold_sats FROM feed_financial_plans') != [(plan['id'], plan['threshold_sats'])]):
+        raise ValueError('funded stage worklist lost the pre-dispatch financial plan')
     return {'original_invoice_retained': True, 'credited_cashu_receipts_retained': 2, 'staged_custody_sats': amounts,
-            'original_pending_intent_in_authenticated_worklist': True}
+            'original_pending_intent_in_authenticated_worklist': True,
+            'pending_financial_plan_in_authenticated_worklist': True}
 
 
 @contextmanager

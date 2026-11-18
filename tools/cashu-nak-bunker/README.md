@@ -33,3 +33,21 @@ the existing relays and general client flags. The household activation procedure
 requires explicit approval for the exact binary and configuration. The repository
 production HOLD still applies. Preserve the current household signer and its
 existing client settings for rollback.
+
+## Check the household before and after a separately authorized change
+
+Use the existing read-only household inspector with the dedicated public key
+and the candidate digest from `build-result.json`.
+
+```sh
+sudo python3 -I -S -B deploy/scripts/check-household-cyberherd-clients.py \
+  --cashu-client PUBLIC_KEY --scoped-program-sha256 CANDIDATE_SHA256
+```
+
+Keep a baseline report while the existing service is running. The report
+includes the host architecture and a digest of all ordinary loaded public
+clients. Keep that digest stable through the change. The final report should
+show the Cashu client exclusively scoped, the ordinary allowlist matching the
+configured allowlist, and the running executable matching the candidate.
+Credential files and the process environment stay outside the inspection.
+The scoped signing and refusal tests over the actual relay still follow.

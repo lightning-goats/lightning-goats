@@ -5,6 +5,7 @@ Never open a signing credential file, process environment or journal. Process
 arguments are filtered in memory; no raw argument or pairing URI is emitted.
 Never restart a unit or modify a file.
 """
+import argparse
 import hashlib
 import json
 import os
@@ -24,20 +25,39 @@ CLIENTS = {
 }
 
 
-def public_clients(arguments):
-    keys, malformed = set(), 0
+def client_flags(arguments, names):
+    keys, malformed = [], 0
     for index, argument in enumerate(arguments):
-        value = None
-        if argument in ('--authorized-keys', '-k'):
-            value = arguments[index + 1] if index + 1 < len(arguments) else ''
-        elif argument.startswith('--authorized-keys='):
-            value = argument.split('=', 1)[1]
-        if value is not None:
-            if re.fullmatch('[0-9a-fA-F]{64}', value):
-                keys.add(value.lower())
-            else:
-                malformed += 1
+        if argument == '--':
+            break
+        name, separator, inline = argument.partition('=')
+        if name not in names or (separator and not name.startswith('--')):
+            continue
+        value = inline if separator else arguments[index + 1] if index + 1 < len(arguments) else ''
+        if re.fullmatch('[0-9a-fA-F]{64}', value):
+            keys.append(value.lower())
+        else:
+            malformed += 1
     return keys, malformed
+
+
+def public_clients(arguments):
+    keys, malformed = client_flags(arguments, ('--authorized-keys', '-k'))
+    return set(keys), malformed
+
+
+def cashu_scope(arguments, client, expected_digest, running_digest, general, configured, malformed_general):
+    scoped, malformed = client_flags(arguments, ('--cashu-client',))
+    general_overlap = client in general or client in configured
+    exclusively_scoped = scoped == [client] and malformed == 0 and not general_overlap
+    return {
+        'dedicated_client_exclusively_scoped': exclusively_scoped,
+        'dedicated_client_in_general_allowlist': general_overlap,
+        'scoped_argument_count': len(scoped) + malformed,
+        'general_allowlist_matches_configured': bool(configured) and general == configured and malformed_general == 0,
+        'general_allowlist_sha256': hashlib.sha256(' '.join(sorted(general)).encode()).hexdigest(),
+        'running_program_matches_candidate': running_digest == expected_digest,
+    }
 
 
 def status(unit):
@@ -87,7 +107,7 @@ def bunker_processes(selected_pid):
             'processes_vanished_during_inventory': vanished}
 
 
-def inspect():
+def inspect(cashu_client=None, scoped_program_sha256=None):
     if os.geteuid() != 0:
         raise ValueError('run with sudo on the household host')
     before = status(UNIT)
@@ -99,6 +119,8 @@ def inspect():
     matches = re.findall(r'^BUNKER_AUTHORIZED_CLIENTS="([0-9a-fA-F ]+)"$', text, re.MULTILINE)
     configured = set(matches[0].lower().split()) if len(matches) == 1 else set()
     report['configured_clients'] = {name: key in configured for name, key in CLIENTS.items()}
+    if cashu_client is not None:
+        report['host_architecture'] = os.uname().machine
     if not report['service_active'] or int(before['MainPID']) == 0:
         report['running_client_inspection'] = 'service is not running'
         return report
@@ -106,7 +128,8 @@ def inspect():
     raw = bounded(process / 'cmdline')
     if not raw.endswith(b'\0'):
         raise ValueError('process arguments are incomplete')
-    keys, malformed = public_clients(raw.decode().split('\0')[:-1])
+    arguments = raw.decode().split('\0')[:-1]
+    keys, malformed = public_clients(arguments)
     report['running_clients'] = {name: key in keys for name, key in CLIENTS.items()}
     report['running_public_client_count'] = len(keys)
     report['malformed_public_client_arguments'] = malformed
@@ -117,6 +140,9 @@ def inspect():
     report['running_program_sha256'] = digest.hexdigest()
     expected = re.findall(r'^NAK_SHA256="?([0-9a-f]{64})"?$', text, re.MULTILINE)
     report['running_program_matches_configured_digest'] = len(expected) == 1 and expected[0] == digest.hexdigest()
+    if cashu_client is not None:
+        report['cashu_scope'] = cashu_scope(arguments, cashu_client, scoped_program_sha256, digest.hexdigest(),
+                                           keys, configured, malformed)
     report.update(bunker_processes(before['MainPID']))
     after = status(UNIT)
     if after != before:
@@ -125,9 +151,16 @@ def inspect():
     return report
 
 
-def main():
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--cashu-client', help='expected dedicated public key')
+    parser.add_argument('--scoped-program-sha256', help='expected candidate executable digest')
+    args = parser.parse_args(argv)
+    if (args.cashu_client is not None or args.scoped_program_sha256 is not None) and not all(
+            re.fullmatch('[0-9a-f]{64}', value or '') for value in (args.cashu_client, args.scoped_program_sha256)):
+        parser.error('supply both the dedicated public key and candidate SHA-256 as lowercase hex')
     try:
-        print(json.dumps(inspect(), sort_keys=True))
+        print(json.dumps(inspect(args.cashu_client, args.scoped_program_sha256), sort_keys=True))
     except Exception:
         # Unexpected decoding/process errors must never expose input bytes.
         raise SystemExit('Read-only inspection incomplete; no private input emitted.') from None

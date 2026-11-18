@@ -181,6 +181,11 @@ returns only a fixed success or failure message. It can run in a one-shot
 sandbox with the reviewed unit's encrypted credential binding and IP denial.
 Remote bunker authorization and signing permissions require separate evidence.
 
+The pinned household nak candidate supports a dedicated Cashu client scope.
+It limits the authenticated client to Cashu signing kinds 10019 and 7376 and
+NIP-44 self-encryption. Build and qualify it separately from the VPS signer.
+[Scoped household bunker](../../tools/cashu-nak-bunker/README.md)
+
 The signer reads `CREDENTIALS_DIRECTORY/cashu-nostr-client` for the credential
 check, runtime and paused recovery. Use systemd's `LoadCredentialEncrypted` with
 the reviewed protected source. The file is exactly 64 hexadecimal characters with one

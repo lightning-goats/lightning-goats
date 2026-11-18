@@ -1,0 +1,7 @@
+{
+  "upstream_commit": "8b1c3c9403d5fdce9f8e7c77b6d6fc6f1b86302c",
+  "upstream_bunker_sha256": "bde317ae6088b8a748695c225e88b7302cad75708a9d0f104d435263241f826a",
+  "source_sha256": "4f811fd928f46a88c80dbbbc32679cf1cff6e8f9bb3f651b5c03aea1295a9605",
+  "patch_sha256": "8b5ef21040c925a29047f7dc4be6c6b666a468c135d7263326db4e06b4a2961d",
+  "version": "v0.20.7+cashu-scope.1"
+}

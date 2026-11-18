@@ -129,8 +129,9 @@ acceptance requirements; a short manually declared extras list does not close th
 The root-owned capsule contains exactly `launch-cashu-backup.py`,
 `collect-cashu-backup.py`, `stage-cashu-restore.py`, `review-cashu-restore.py`,
 `reconcile-cashu-restore.py`, `verify-cashu-backup.py`,
-`verify-cashu-combined-backup.py` and `TOOL.json`. The latter has version 1,
-the selected 40-character source commit and SHA256 for each of the seven scripts.
+`verify-cashu-combined-backup.py`, `apply-cashu-mint-policy.py`,
+`inactive_file_transaction.py` and `TOOL.json`. The latter has version 1,
+the selected 40-character source commit and SHA256 for each of the nine scripts.
 Authenticate the bootstrap file externally before interpreting it, then use the
 reviewed manifest hash with isolated Python:
 

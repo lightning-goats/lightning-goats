@@ -198,7 +198,7 @@ def check_quiescence(workers, budget):
                 or values['ControlPID'] != '0' or values['ActiveState'] != 'inactive'
                 or values['SubState'] != 'dead' or values['LoadState'] not in ('loaded','masked')
                 or values['UnitFileState'] not in ('masked','masked-runtime')):
-            raise ValueError('all six writers must remain masked and inactive')
+            raise ValueError('selected writers must remain masked and inactive')
         group = values['ControlGroup']
         if group:
             if not group.startswith('/') or any(v in ('.','..') for v in group.split('/')):

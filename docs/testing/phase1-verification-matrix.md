@@ -478,13 +478,20 @@ the original and new files against the checkpoint and native key verifier,
 reject a replaced copied key, and check the recovered filename and bytes before
 running the six fenced native commands.
 
-## Cashu mint policy review
+## Cashu mint policy review and installation
 
 Review a protected candidate that pauses a mint with held work and introduces
 a separately named issuer. Match both config digests, the wallet registration,
 the original held count and the two proposed admission settings. Refuse an
 active writer, restore fence, changed recovery keys or mint URL, removed mint
 or unrelated configuration change. The review leaves financial rows intact.
-In a disposable restart, apply the exact reviewed bytes and verify the original
-held request and both namespace registrations. The retained issuer test must
-refuse the original URL and its trailing-slash spelling under a new internal ID.
+In a disposable wallet, run the authenticated installer with root-owned
+artifacts and the reviewed digests. Verify that it retains the config's
+ownership, mode and extended attributes. Verify the exact retry reports the
+previous installation. Refuse changed metadata, a running or unmasked unit,
+an unrelated process using the wallet UID, a competing maintenance command,
+an active wallet writer, and a recovery fence. Test systemd status responses
+with a fixture and test processes and locks directly. After a native restart,
+verify the original held request and both namespace registrations. The retained
+issuer test must refuse the original URL and its trailing-slash spelling under
+a new internal ID.

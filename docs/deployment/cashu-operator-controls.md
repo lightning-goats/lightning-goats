@@ -229,10 +229,33 @@ receive and publication switches. Existing spend, signer, wallet registration
 and broader runtime settings must remain identical. Review core receipt-policy
 acceptance before enabling admission under a new mint policy version.
 
-Use the existing protected configuration deployment procedure for the exact
-candidate hash after operator approval. The native fixture installs the
-candidate in a disposable wallet and verifies that restarting creates only the
-new mint namespace while retaining the original held acquisition.
+After operator approval, use the [authenticated maintenance capsule](cashu-backup-collection.md)
+and its reviewed policy to install the exact candidate. Keep a separate
+protected copy of the original config with its ownership, mode, extended
+attributes and bytes preserved. The original copy and candidate both need to
+be readable by the wallet runtime identity. The policy specifies the wallet
+config destination, runtime identity, service unit and binary digest.
+
+```sh
+/usr/bin/python3 -I -S -B ROOT_CAPSULE/launch-cashu-backup.py TOOL_SHA256 \
+  apply-mint-policy POLICY POLICY_SHA256 BASELINE BASELINE_SHA256 CANDIDATE CANDIDATE_SHA256
+```
+
+The installer verifies the stopped and masked wallet unit and an idle runtime
+UID. It reruns the native review in a private network namespace and takes the
+host maintenance and wallet writer locks before publishing the file. The
+installed candidate inherits the original config's metadata. After an
+interruption, rerun with the same protected inputs to verify the exact
+candidate or finish an interrupted install. The installer rejects changed
+installed bytes or metadata, an active writer, and a recovery fence. It
+reports installation without starting or unmasking a service. For a later
+correction, review a new candidate from the installed config so any subsequent
+work remains recoverable.
+
+The disposable fixture exercises the authenticated installer and an exact
+retry. It uses synthetic systemd status responses with real runtime UID
+checks and file locks. A subsequent native restart creates only the new mint
+namespace and preserves the original held acquisition.
 
 ```sh
 sudo unshare --mount --net -- python3 deploy/scripts/test-cashu-private-run.py -- \

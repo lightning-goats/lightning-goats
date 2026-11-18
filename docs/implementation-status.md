@@ -144,8 +144,11 @@ The protected `review-mint-policy` command checks a candidate against the
 current configuration and closed wallet. It preserves issuer identities,
 pinned keys, recovery policy, and previously advertised requests. A disposable
 native restart verifies that retiring an issuer and adding another leaves the
-original held acquisition and its mint namespace intact. The review reports
-the two exact configuration digests for a separate privileged install. The
+original held acquisition and its mint namespace intact. The authenticated
+maintenance launcher verifies the exact review digests and installs the
+candidate while the wallet is masked and stopped. The disposable rehearsal
+preserves configuration metadata, checks the runtime UID and both locks, and
+verifies an identical retry. Its systemd status responses are simulated. The
 [operator runbook](deployment/cashu-operator-controls.md) covers the review and
 its activation boundaries.
 

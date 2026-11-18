@@ -180,11 +180,11 @@ jobs:
           CARGO_TARGET_DIR=target cargo build --locked --bin lightning-goats-cashud --bin lightning-goats-cashu-signerd
           sudo unshare --net -- python3 ../../deploy/scripts/test-cashu-request-cli.py --binary target/debug/lightning-goats-cashud 2>&1 | tee "$RUNNER_TEMP/cashu-request-cli.json"
           sudo unshare --net -- python3 ../../deploy/scripts/test-cashu-request-cli.py --binary target/debug/lightning-goats-cashud --long-request 2>&1 | tee "$RUNNER_TEMP/cashu-request-cli-long.json"
-      - name: Verify protected original-acquisition CLI in private namespaces
+      - name: Verify protected acquisition and mint policy commands in private namespaces
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PYCODE'
+          python3 - <<'PYCODE' 2>&1 | tee "$RUNNER_TEMP/cashu-operator-cli.json"
           import hashlib, subprocess
           from pathlib import Path
           cli = Path('target/debug/lightning-goats-cashud').resolve(strict=True)
@@ -198,6 +198,7 @@ jobs:
             ${{ runner.temp }}/cashu-request-cli.json
             ${{ runner.temp }}/cashu-request-cli-long.json
             ${{ runner.temp }}/cashu-copy-normalization.json
+            ${{ runner.temp }}/cashu-operator-cli.json
           if-no-files-found: error
           retention-days: 14
       - name: Install pinned parser-test Node

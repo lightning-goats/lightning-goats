@@ -14,11 +14,140 @@ import json
 import os
 from pathlib import Path
 import pwd
+import runpy
 import sqlite3
 import subprocess
 import tempfile
 import time
 import uuid
+
+
+def install_mint_policy(root, config, candidate, binary, state, uid, other_uids):
+    """Apply through the real authenticated launcher in this disposable namespace."""
+    scripts = Path(__file__).resolve().parent
+    subprocess.run(['/usr/bin/mount', '--make-rprivate', '/'], check=True)
+    subprocess.run(['/usr/bin/mount', '-t', 'tmpfs', '-o', 'mode=0755', 'tmpfs', '/var/lib'], check=True)
+    Path('/var/lib/lightning-goats-upgrades').mkdir(mode=0o700)
+    unit = 'lg-cashu-mint-policy-fixture.service'
+    status = root/'wallet-unit-status'
+    stub = root/'systemctl'
+    stub.write_text('#!/bin/sh\n[ "$1" = show ] && [ "$5" = '+unit+' ] || exit 1\n'
+                    'cat '+str(status)+'\n')
+    stub.chmod(0o555)
+    subprocess.run(['/usr/bin/mount', '--bind', str(stub), '/usr/bin/systemctl'], check=True)
+
+    def set_status(active='inactive', enabled='masked'):
+        status.write_text(f'Id={unit}\nLoadState=masked\nActiveState={active}\nSubState=dead\n'
+                          f'MainPID=0\nControlPID=0\nUnitFileState={enabled}\nControlGroup=\n')
+
+    def digest(path):
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+
+    capsule = root/'mint-maintenance-capsule'
+    capsule.mkdir(mode=0o700)
+    launcher = scripts/'launch-cashu-backup.py'
+    files = runpy.run_path(str(launcher))['FILES']
+    for name in files:
+        path = capsule/name
+        path.write_bytes((scripts/name).read_bytes())
+        path.chmod(0o400)
+    manifest = capsule/'TOOL.json'
+    manifest.write_text(json.dumps(dict(version=1, source_commit='01'*20,
+                                        files={name:digest(capsule/name) for name in files})))
+    manifest.chmod(0o400)
+    baseline = root/'old-config.json'
+    baseline.write_bytes(config.read_bytes())
+    for file in (baseline,config):
+        os.chown(file, 0, uid)
+        file.chmod(0o440)
+        os.setxattr(file, 'user.lg_test', b'wallet-config')
+    candidate.chmod(0o444)
+
+    private = root/'policy'
+    private.mkdir(mode=0o700)
+    policy = private/'policy.json'
+    roles = sorted(('core','membership','payout','signer','cashu_signer'))
+    identities = dict(zip(roles, other_uids, strict=True))
+    workers = {'wallet':dict(unit=unit,uid=uid,gid=uid,state=str(state))}
+    for role, other in identities.items():
+        directory = root/role
+        directory.mkdir(mode=0o700)
+        os.chown(directory, other, other)
+        workers[role] = dict(unit=f'lg-mint-fixture-{role}.service',uid=other,gid=other,state=str(directory))
+    artifact = dict(path=str(binary),sha256=digest(binary))
+    value = dict(version=1, operator_exclusive=True, workers=workers, wallet_config=str(config),
+        native_policy='/unused', core_config='/unused', membership_config='/unused', payout_config='/unused',
+        cashu_signer_config='/unused', payout_signer_config='/unused', cashu_client_source='/unused',
+        payout_client_source='/unused', historical_receiving_keys=[], extra_files=[],
+        artifacts={name:artifact for name in ('copy','statectl','age','tar')},
+        runtime_artifacts={role:artifact for role in workers},
+        recipient='age1'+'q'*58, component_bytes=4096, total_bytes=4096, deadline_seconds=60)
+
+    def save_policy():
+        policy.write_text(json.dumps(value))
+        policy.chmod(0o600)
+
+    save_policy()
+    old, new = digest(baseline), digest(candidate)
+    def apply(*, success=True, policy_hash=None, candidate_hash=new):
+        result = subprocess.run(['/usr/bin/python3','-I','-S','-B',str(capsule/launcher.name),
+            digest(manifest),'apply-mint-policy',str(policy),policy_hash or digest(policy),
+            str(baseline),old,str(candidate),candidate_hash], stdin=subprocess.DEVNULL,
+            capture_output=True, text=True, timeout=60, env={'PATH':'/usr/bin:/bin','LC_ALL':'C'})
+        if (result.returncode == 0) != success:
+            raise ValueError('unexpected authenticated apply result: '+result.stderr[-4096:])
+        if success:
+            return json.loads(result.stdout)
+        if digest(config) != old:
+            raise ValueError('refused install changed the original config')
+
+    set_status()
+    apply(success=False, policy_hash='0'*64)
+    apply(success=False, candidate_hash='0'*64)
+    value['runtime_artifacts']['wallet'] = dict(artifact, sha256='0'*64)
+    save_policy()
+    apply(success=False)
+    value['runtime_artifacts']['wallet'] = artifact
+    save_policy()
+    set_status(active='active')
+    apply(success=False)
+    set_status(enabled='disabled')
+    apply(success=False)
+    set_status()
+    config.chmod(0o444)
+    apply(success=False)
+    config.chmod(0o440)
+    maintenance = Path('/var/lib/lightning-goats-upgrades/CYBERHERD-OVERLAY-MAINTENANCE.lock')
+    with maintenance.open('rb') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        apply(success=False)
+    with subprocess.Popen(['/usr/bin/setpriv',f'--reuid={uid}',f'--regid={uid}',
+            '--clear-groups','--no-new-privs','--','/bin/sh','-c','echo ready; exec /usr/bin/sleep 30'],
+            stdout=subprocess.PIPE, text=True) as running:
+        try:
+            if running.stdout.readline() != 'ready\n':
+                raise ValueError('synthetic wallet UID process did not start')
+            apply(success=False)
+        finally:
+            running.terminate()
+            running.wait(timeout=5)
+    with (state/'wallet-writer.lock').open('rb') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        apply(success=False)
+    marker = state/'CASHU_RECOVERY_REQUIRED'
+    marker.write_text('synthetic recovery fence')
+    apply(success=False)
+    marker.unlink()
+    answer = apply()
+    replay = apply()
+    if (answer['result'] != 'CASHU_MINT_POLICY_CONFIG_INSTALLED' or answer['services_activated']
+            or answer['already_installed'] or not replay['already_installed']
+            or answer['review']['candidate_sha256'] != new
+            or digest(config) != new or digest(baseline) != old
+            or config.stat().st_uid != 0 or config.stat().st_gid != uid
+            or config.stat().st_mode & 0o777 != 0o440
+            or os.getxattr(config, 'user.lg_test') != b'wallet-config'):
+        raise ValueError('installed bytes, metadata, or exact retry differ from approval')
 
 
 def main():
@@ -37,7 +166,8 @@ def main():
         raise ValueError('selected wallet CLI differs from reviewed bytes')
     used = {u.pw_uid for u in pwd.getpwall()} | {g.gr_gid for g in grp.getgrall()}
     used |= {int(x) for x in subprocess.check_output(['ps', '-e', '-o', 'uid='], text=True).split()}
-    uid, core_uid = [n for n in range(60000, 65000) if n not in used][:2]
+    uid, *other_uids = [n for n in range(60000, 65000) if n not in used][:6]
+    core_uid = other_uids[0]
     with tempfile.TemporaryDirectory(prefix='lg-ownership-cli-', dir='/run') as temporary:
         root = Path(temporary)
         root.chmod(0o711)
@@ -220,9 +350,10 @@ def main():
         if image() != held or config.read_bytes() != config_bytes:
             raise ValueError('mint policy refusal changed original state or configuration')
 
-        # Exercise the reviewed candidate with the original exact acquisition
-        # in a disposable restart. Root installs only the reviewed bytes here.
-        os.replace(candidate_file, config)
+        # Apply through the authenticated launcher before the disposable restart.
+        install_mint_policy(root, config, candidate_file, binary, state, uid, other_uids)
+        if image() != held:
+            raise ValueError('install changed the original wallet journal')
         with closing(sqlite3.connect(database)) as db:
             db.execute("UPDATE operation_holds SET reason='missing_owned_outputs' WHERE acquisition_id=?", [acquisition])
             db.commit()
@@ -241,6 +372,8 @@ def main():
             held_prepared_new_and_exported_states_refused=True,mint_contact=False,
             eligible_reviewed_hold_preserved_without_evidence=True,other_hold_reason_refused=True,
             mint_policy_review_preserved_original=True, mint_policy_candidate_restart_verified=True,
+            mint_policy_protected_install_and_retry_verified=True, mint_policy_systemctl_mocked=True,
+            mint_policy_live_uid_locks_and_drift_refused=True,
             acquired_transition_qualified_here=False,workers_started=False,
             sql_definitions_rows_and_rowids_unchanged=True,schema_object_insertion_order_ignored=True),sort_keys=True))
 

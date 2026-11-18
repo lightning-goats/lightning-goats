@@ -45,3 +45,11 @@ reproducibility across hosts remains unverified. The verifier reads the
 archive directly and checks its contents, hashes, lock inventories, source
 identity and ELF headers. Installed startup and live provider or feeder
 acceptance follow their existing verification procedures.
+
+The separate `cashu-systemd` job uses the same release archive in a disposable
+Ubuntu 24.04 runner. It exercises the packaged wallet and signer under their
+service sandbox properties with isolated paths, two synthetic runtime identities,
+and a host-encrypted synthetic signer credential. Both must start and stop twice
+with IP denied even to a listening loopback socket. A fenced restart must open no
+IPC listener and preserve the retained state. The job uses newly initialized empty
+fixtures. Funded checkpoint installation and reconciliation remain separate.

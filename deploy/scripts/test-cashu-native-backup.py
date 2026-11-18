@@ -42,6 +42,8 @@ def main():
         parser.add_argument('--'+option+'-cli',type=Path)
         parser.add_argument('--'+option+'-sha256')
     parser.add_argument('--rotate-receiving-key', action='store_true')
+    parser.add_argument('--systemd-package', nargs=3, metavar=('ARCHIVE', 'SOURCE', 'SHA256'),
+                        help='rehearse packaged services using the initialized synthetic fixture')
     args = parser.parse_args()
     selected = [getattr(args, name + suffix) is not None
                 for name in extended_names for suffix in ['_cli', '_sha256']]
@@ -54,6 +56,8 @@ def main():
         raise ValueError('collector fixture requires all native programs and encryption artifacts')
     if args.rotate_receiving_key and not all(collector_options):
         raise ValueError('key rotation requires the complete archive rehearsal')
+    if args.systemd_package and extended:
+        raise ValueError('systemd rehearsal uses only the three package executables')
     if (os.geteuid() != 0
             or os.readlink('/proc/self/ns/net') == os.readlink('/proc/1/ns/net')):
         raise ValueError('requires root in a fresh network namespace')
@@ -214,6 +218,12 @@ def main():
                 process.kill()
                 process.communicate(timeout=10)
         (signer_run / 'control.sock').unlink(missing_ok=True)
+        if args.systemd_package:
+            rehearse = runpy.run_path(str(source / 'deploy/scripts/rehearse-cashu-systemd.py'))['rehearse']
+            print(json.dumps(rehearse(args.systemd_package, binaries, hashes, runtime_uids, states,
+                                      wallet_config, signer_config, helper, helper_state, credential),
+                             sort_keys=True))
+            return
         native_configurations, native_policy = {}, None
         if extended:
             native_fixture = runpy.run_path(str(source / 'deploy/scripts/cashu-native-membership-fixture.py'))

@@ -200,7 +200,11 @@ async fn isolated_wallet_child() -> Result<()> {
         journal.record_acquired(id, 7, 1, b"synthetic-owned-outputs")?;
         journal.prepare_redemption(id, &owner(), 100)?;
         let ann = Uuid::new_v4();
-        journal.prepare_announcement(ann, &announcement())?;
+        let mut intent = announcement();
+        if let Intent::Announcement { receiving_key, .. } = &mut intent {
+            *receiving_key = crate::publication::nutzap_lock_key(receiving_key);
+        }
+        journal.prepare_announcement(ann, &intent)?;
         std::fs::write(&ids, serde_json::to_vec(&(id, ann))?)?;
         (id, ann)
     };

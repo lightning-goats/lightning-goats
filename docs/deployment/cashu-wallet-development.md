@@ -259,12 +259,22 @@ JSON preview containing the operation ID and advertised metadata. Review that
 preview before separately enabling signing and publication in a qualified stack.
 Receiving flags in this offline candidate do not start receiving by themselves.
 
+New kind-10019 events advertise the dedicated receiving key as 66 lowercase hex
+characters starting with `02`. Amethyst 1.21.0's sender passes the advertised
+key through to its P2PK lock, so this encoding supplies a valid Cashu key
+when the sender copies it directly. The signer's configured receiving key
+continues to use its existing 64-character format.
+[Amethyst sender](https://github.com/vitorpamplona/amethyst/blob/f3e6a6de6fd52ab182971807304793f266c7b4df/commons/src/commonMain/kotlin/com/vitorpamplona/amethyst/commons/cashu/ops/CashuWalletOps.kt#L706-L751)
+[Quartz lock serialization](https://github.com/vitorpamplona/quartz/blob/d99aae08957f1f91240da065995d40129a698b95/quartz/src/commonMain/kotlin/com/vitorpamplona/quartz/nip60Cashu/p2pk/P2PK.kt#L64-L89)
+
 Repeating the same UUID retains the first timestamp and exact advertised policy.
 A policy change with that UUID is rejected, preserving the prior intent, signature
 and any delivery acknowledgments. To intentionally advertise a changed policy,
 use a new UUID with a timestamp later than all retained announcements; same-second
 new operations and clock rollback are rejected rather than producing ambiguous
 replaceable-event ordering. Retry a lost command response using its original UUID.
+An earlier x-only announcement retains its original signed bytes and can be
+replaced by preparing a new UUID with a later timestamp.
 An already-published operation is not reset or republished by preparation.
 
 Announcement signing and publication switches require configured nutzap receiving

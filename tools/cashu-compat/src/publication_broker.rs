@@ -77,7 +77,8 @@ impl Policy {
                 && self.wallet_uid > 0,
             "invalid Cashu signing registration"
         );
-        self.announcement(0).validate()?;
+        lightning_goats_nostr_event::validate_public_key(&self.receiving_key)?;
+        self.announcement(0, true).validate()?;
         ensure!(
             self.max_history_sats <= i64::MAX as u64
                 && self.max_new_per_hour <= 3600
@@ -95,7 +96,7 @@ impl Policy {
         );
         Ok(())
     }
-    fn announcement(&self, created_at: u64) -> Intent {
+    fn announcement(&self, created_at: u64, compressed: bool) -> Intent {
         let mut mints = self.mints.clone();
         let mut relays = self.relays.clone();
         mints.sort();
@@ -103,7 +104,11 @@ impl Policy {
         Intent::Announcement {
             owner: self.owner.clone(),
             created_at,
-            receiving_key: self.receiving_key.clone(),
+            receiving_key: if compressed {
+                crate::publication::nutzap_lock_key(&self.receiving_key)
+            } else {
+                self.receiving_key.clone()
+            },
             mints,
             relays,
         }
@@ -112,8 +117,12 @@ impl Policy {
         intent.validate()?;
         ensure!(intent.owner() == self.owner, "signing owner mismatch");
         match intent {
-            Intent::Announcement { created_at, .. } => ensure!(
-                *intent == self.announcement(*created_at),
+            Intent::Announcement {
+                created_at,
+                receiving_key,
+                ..
+            } => ensure!(
+                *intent == self.announcement(*created_at, receiving_key.len() == 66),
                 "announcement differs from configured receiving policy"
             ),
             Intent::Redemption { net_sats, .. } => ensure!(

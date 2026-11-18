@@ -580,32 +580,20 @@ impl Harness {
             self.receiver.public_key(),
         )
     }
-    fn nutzap(&self, proof: Proof) -> Result<ValidatedContribution> {
-        let (body, recipient) = self.nutzap_body(proof)?;
-        nutzap_json(
-            &body,
-            &recipient,
-            &MintRegistry::new(vec![self.policy()])?,
-            &self.keys,
-            &Limits {
-                body_bytes: 65536,
-                proof_count: 8,
-                receipt_sats: 10000,
-            },
-            self.receiver.public_key(),
-        )
-    }
     fn nutzap_body(&self, proof: Proof) -> Result<(String, String)> {
+        let recipient = SecretKey::from_slice(&[3; 32])?
+            .public_key()
+            .x_only_public_key()
+            .to_string();
+        Ok((self.nutzap_body_for(proof, &recipient)?, recipient))
+    }
+    fn nutzap_body_for(&self, proof: Proof, recipient: &str) -> Result<String> {
         use cdk::secp256k1::{Keypair, Message, Secp256k1};
         use lightning_goats_nostr_event::{SignedNostrEvent, canonical_bytes};
         use sha2::{Digest, Sha256};
         let secp = Secp256k1::new();
         let sender =
             Keypair::from_secret_key(&secp, &cdk::secp256k1::SecretKey::from_slice(&[2; 32])?);
-        let recipient = SecretKey::from_slice(&[3; 32])?
-            .public_key()
-            .x_only_public_key()
-            .to_string();
         assert_ne!(
             recipient,
             self.receiver.public_key().x_only_public_key().to_string()
@@ -616,7 +604,7 @@ impl Harness {
             created_at: 1,
             kind: 9321,
             tags: vec![
-                vec!["p".into(), recipient.clone()],
+                vec!["p".into(), recipient.to_owned()],
                 vec!["u".into(), self.policy().advertised_url],
                 vec!["unit".into(), "sat".into()],
                 vec!["proof".into(), serde_json::to_string(&proof)?],
@@ -629,7 +617,7 @@ impl Harness {
         event.sig = secp
             .sign_schnorr_no_aux_rand(&Message::from_digest(hash), &sender)
             .to_string();
-        Ok((serde_json::to_string(&event)?, recipient))
+        Ok(serde_json::to_string(&event)?)
     }
     fn locked_proof(&self) -> Proof {
         let key = self
@@ -775,12 +763,34 @@ async fn ordinary_and_nutzap_use_real_cdk_and_one_reusable_descriptor() -> Resul
         receipt(coordinator.acquire_new(first, &harness.receiver).await?).net_sats,
         8
     );
-    let zap = harness.nutzap(harness.locked_proof())?;
+    let config = crate::relay_intake::tests::config(harness.directory.path())?;
+    let intent = crate::publication::Intent::announcement(&config, 1)?;
+    let raw = crate::publication::tests::sign(intent.unsigned(None)?)?;
+    let info = intent.verify_signed(None, &raw)?;
+    let key = info.singleton_tag("pubkey", true)?.unwrap();
+    // Quartz 2.13.0 copies the advertised key into the proof secret verbatim.
+    let locked = harness.mint.issue(
+        json!(["P2PK",{"nonce":"00000000000000000000000000000000","data":key,"tags":[]}])
+            .to_string(),
+    );
+    let sent = harness.nutzap_body_for(locked.clone(), &info.event().pubkey)?;
+    let zap = nutzap_json(
+        &sent,
+        &info.event().pubkey,
+        &MintRegistry::new(vec![harness.policy()])?,
+        &harness.keys,
+        &Limits {
+            body_bytes: 65536,
+            proof_count: 8,
+            receipt_sats: 10000,
+        },
+        harness.receiver.public_key(),
+    )?;
     let second = new_id(coordinator.admit(&zap)?);
     let zap_receipt = receipt(coordinator.acquire_new(second, &harness.receiver).await?);
     assert_eq!(zap_receipt.net_sats, 8);
     assert_eq!(zap_receipt.source_author.as_deref(), zap.author());
-    let replay = harness.ordinary(harness.locked_proof(), "http-rewrapped")?;
+    let replay = harness.ordinary(locked, "http-rewrapped")?;
     assert_eq!(coordinator.admit(&replay)?, Admission::Duplicate(second));
     assert_eq!(
         receipt(coordinator.acquire_new(second, &harness.receiver).await?).acquisition_id,

@@ -6,6 +6,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use uuid::Uuid;
 
+pub(crate) fn nutzap_lock_key(x_only: &str) -> String {
+    format!("02{x_only}")
+}
+
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "purpose", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Intent {
@@ -82,7 +86,7 @@ impl Intent {
         let intent = Self::Announcement {
             owner: config.recipient.clone(),
             created_at,
-            receiving_key: prepared.receiver.x_only_public_key().to_string(),
+            receiving_key: nutzap_lock_key(&prepared.receiver.x_only_public_key().to_string()),
             mints,
             relays,
         };
@@ -104,9 +108,17 @@ impl Intent {
                 relays,
                 ..
             } => {
-                validate_public_key(receiving_key)?;
+                // Retained intents can still validate their original signed bytes.
+                let x_only = if receiving_key.len() == 66 {
+                    receiving_key
+                        .strip_prefix("02")
+                        .ok_or_else(|| anyhow::anyhow!("invalid announced nutzap lock key"))?
+                } else {
+                    receiving_key
+                };
+                validate_public_key(x_only)?;
                 ensure!(
-                    receiving_key != self.owner()
+                    x_only != self.owner()
                         && !mints.is_empty()
                         && mints.len() <= 16
                         && !relays.is_empty()
@@ -324,12 +336,27 @@ pub(crate) mod tests {
             unsigned.tags[1],
             vec!["mint", "https://mint.example", "sat"]
         );
-        let advertised = &unsigned.tags[2][1];
+        let advertised = unsigned.tags[2][1].clone();
         assert_eq!(advertised.len(), 64);
         let locked = cdk::nuts::PublicKey::from_hex(format!("02{advertised}"))?;
-        assert_eq!(locked.x_only_public_key().to_string(), *advertised);
+        assert_eq!(locked.x_only_public_key().to_string(), advertised);
         let raw = sign(unsigned)?;
         intent.verify_signed(None, &raw)?;
+        let mut compressed = intent.clone();
+        if let Intent::Announcement { receiving_key, .. } = &mut compressed {
+            *receiving_key = nutzap_lock_key(receiving_key);
+        }
+        let new = compressed.unsigned(None)?;
+        assert_eq!(new.tags[2][1], locked.to_hex());
+        let canonical = sign(new)?;
+        compressed.verify_signed(None, &canonical)?;
+        assert!(intent.verify_signed(None, &canonical).is_err());
+        assert!(compressed.verify_signed(None, &raw).is_err());
+        assert!(
+            intent
+                .require_current_announcement(Some(&compressed))
+                .is_err()
+        );
         for change in 0..4 {
             let mut unsigned = intent.unsigned(None)?;
             match change {
@@ -341,10 +368,16 @@ pub(crate) mod tests {
             assert!(intent.verify_signed(None, &sign(unsigned)?).is_err());
         }
         let mut invalid = intent.clone();
-        if let Intent::Announcement { receiving_key, .. } = &mut invalid {
-            *receiving_key = owner();
+        for bad in [
+            owner(),
+            nutzap_lock_key(&owner()),
+            format!("03{advertised}"),
+        ] {
+            if let Intent::Announcement { receiving_key, .. } = &mut invalid {
+                *receiving_key = bad;
+            }
+            assert!(invalid.validate().is_err());
         }
-        assert!(invalid.validate().is_err());
         invalid = intent.clone();
         if let Intent::Announcement { relays, .. } = &mut invalid {
             relays[0] = "wss://relay.example/?secret=private".into();

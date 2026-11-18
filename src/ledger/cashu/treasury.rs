@@ -22,7 +22,69 @@ pub struct TreasuryPlan {
     pub maximum_fee_sats: u64,
 }
 
+#[cfg(unix)]
+#[derive(Clone, Copy, serde::Serialize)]
+pub(crate) struct TreasurySettlementState {
+    pub(crate) strike_deposit_retained: bool,
+    pub(crate) wallet_report_retained: bool,
+    pub(crate) settlement_complete: bool,
+}
+
 impl LedgerStore {
+    #[cfg(unix)]
+    pub(crate) async fn treasury_settlement_state(
+        &self,
+        issued: &Issued,
+        receive_id: Uuid,
+    ) -> Result<TreasurySettlementState> {
+        let mut tx = self.pool.begin().await?;
+        require_epoch(&mut tx, issued.intent.core_epoch).await?;
+        let id = issued.intent.id.to_string();
+        let deposit: Option<(String, String, i64)> = sqlx::query_as(
+            "SELECT receive_id,payment_hash,deposit_sats FROM cashu_treasury_deposits WHERE intent_id=?",
+        ).bind(&id).fetch_optional(&mut *tx).await?;
+        if let Some((retained_id, hash, sats)) = &deposit {
+            ensure!(
+                *retained_id == receive_id.to_string()
+                    && *hash == issued.payment_hash
+                    && to_u64(*sats, "retained treasury deposit")? == issued.intent.deposit_sats,
+                "approved receive differs from the retained treasury deposit"
+            );
+        }
+        let report: Option<(String, String)> = sqlx::query_as(
+            "SELECT result_digest,result_json FROM cashu_treasury_wallet_results WHERE intent_id=?",
+        )
+        .bind(&id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some((digest, json)) = &report {
+            let data: MeltData = serde_json::from_str(json)?;
+            data.validate(&issued.intent)?;
+            ensure!(
+                hex_digest(data.digest()?) == *digest,
+                "retained wallet report digest differs"
+            );
+        }
+        let complete: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM cashu_treasury_completions WHERE intent_id=?)",
+        )
+        .bind(&id)
+        .fetch_one(&mut *tx)
+        .await?;
+        let has_deposit = deposit.is_some();
+        let has_report = report.is_some();
+        ensure!(
+            complete == (has_deposit && has_report),
+            "retained treasury state is inconsistent"
+        );
+        tx.commit().await?;
+        Ok(TreasurySettlementState {
+            strike_deposit_retained: has_deposit,
+            wallet_report_retained: has_report,
+            settlement_complete: complete,
+        })
+    }
+
     pub async fn reserve_cashu_treasury(
         &self,
         registration: &ReceiptPolicy,

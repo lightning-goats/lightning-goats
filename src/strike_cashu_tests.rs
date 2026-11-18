@@ -539,6 +539,94 @@ mod cashu_treasury_tests {
     }
 
     #[tokio::test]
+    async fn operator_reconciles_only_the_original_with_a_pending_wallet_and_exact_retry() -> Result<()> {
+        use crate::cashu::operator_reconciliation::Approval;
+        let f = Fixture::new(&[250, 150], 600, 400, 0, unchanged).await;
+        f.issue().await;
+        let now = crate::gateway::now_epoch()?;
+        let mut decision = json!({
+            "version":1, "purpose":"reconcile_original_cashu_settlement",
+            "core_epoch":f.registration.core_epoch, "wallet_instance":f.registration.wallet_instance,
+            "wallet_epoch":f.registration.wallet_epoch, "intent_id":f.intent.id,
+            "intent_digest":hex_digest(f.intent.digest()?), "receive_request_id":f.state.receive_request_id,
+            "receive_id":f.state.receive_id, "config_sha256":"11".repeat(32),
+            "approved_at":now, "expires_at":now+300,
+        });
+        let approval: Approval = serde_json::from_value(decision.clone())?;
+        let wallet = ScheduledWallet {
+            registration: Arc::new(copy_registration(&f.registration)),
+            data: f.report(0, 0).validate(&f.registration, &f.intent)?.clone(),
+            requests: Arc::default(),
+            lose_reply: false.into(),
+        };
+        async fn forbidden_strike() -> Result<StrikeClient> {
+            panic!("retained or mismatched work must not use Strike")
+        }
+        let review = || std::future::ready(Ok(f.runtime.client.clone()));
+        let original = f.state.api_calls.load(Ordering::SeqCst);
+
+        for (key, wrong) in [
+            ("receive_request_id", json!(Uuid::new_v4())),
+            ("intent_digest", json!("22".repeat(32))),
+            ("wallet_epoch", json!(Uuid::new_v4())),
+        ] {
+            let mut wrong_decision = decision.clone();
+            wrong_decision[key] = wrong;
+            let wrong: Approval = serde_json::from_value(wrong_decision)?;
+            assert!(wrong.prepare(&f.ledger, &f.registration, &f.policy.destination, forbidden_strike(), &PlanningOnly).await.is_err());
+        }
+        assert_eq!(f.state.api_calls.load(Ordering::SeqCst), original);
+
+        let preview = approval.prepare(&f.ledger, &f.registration, &f.policy.destination, review(), &wallet).await?;
+        let preview = serde_json::to_value(approval.finish(&f.ledger, &f.registration, preview, false).await?)?;
+        assert_eq!(preview["strike_verified_this_run"], true);
+        assert_eq!(preview["wallet_report_observed"], true);
+        assert_eq!(preview["strike_deposit_retained"], false);
+        assert_eq!(preview["wallet_report_retained"], false);
+        assert_eq!(preview["settlement_complete"], false);
+        assert_eq!(f.count("cashu_treasury_deposits").await, 0);
+
+        wallet.lose_reply.store(true, Ordering::SeqCst);
+        let pending = approval.prepare(&f.ledger, &f.registration, &f.policy.destination, review(), &wallet).await?;
+        let pending = serde_json::to_value(approval.finish(&f.ledger, &f.registration, pending, true).await?)?;
+        assert_eq!(pending["strike_deposit_retained"], true);
+        assert_eq!(pending["wallet_status_unavailable"], true);
+        assert_eq!(pending["settlement_complete"], false);
+        assert_eq!(f.count("cashu_treasury_deposits").await, 1);
+        assert!(f.ledger.begin_feed_attempt(1000).await?.is_none());
+
+        let reply = approval.prepare(&f.ledger, &f.registration, &f.policy.destination, forbidden_strike(), &wallet).await?;
+        let completion = serde_json::to_value(approval.finish(&f.ledger, &f.registration, reply, true).await?)?;
+        assert_eq!(completion["strike_verified_this_run"], false);
+        assert_eq!(completion["wallet_report_retained"], true);
+        assert_eq!(completion["settlement_complete"], true);
+        assert_eq!(f.state.api_calls.load(Ordering::SeqCst), original + 4);
+        let replay = approval.prepare(&f.ledger, &f.registration, &f.policy.destination, forbidden_strike(), &PlanningOnly).await?;
+        let replay = serde_json::to_value(approval.finish(&f.ledger, &f.registration, replay, true).await?)?;
+        assert_eq!(replay["settlement_complete"], true);
+        assert_eq!(replay["wallet_report_observed"], false);
+        assert_eq!(f.count("cashu_treasury_wallet_results").await, 1);
+        assert_eq!(f.count("cashu_treasury_completions").await, 1);
+        assert_eq!(f.count("settled_payments").await, 1);
+        assert_eq!(f.count("event_log").await, 3);
+        {
+            let requests = wallet.requests.lock().unwrap();
+            assert_eq!(requests.len(), 3);
+            assert!(requests.iter().all(|(action, id, digest)| action == "status"
+                && *id == f.intent.id && Some(digest.as_str()) == decision["intent_digest"].as_str()));
+        }
+        decision["receive_id"] = json!(Uuid::new_v4());
+        let changed: Approval = serde_json::from_value(decision)?;
+        assert!(changed.prepare(&f.ledger, &f.registration, &f.policy.destination, forbidden_strike(), &PlanningOnly).await.is_err());
+
+        let feed = f.ledger.begin_feed_attempt(1000).await?.context("missing funded attempt")?;
+        f.ledger.confirm_feed_attempt(feed).await?;
+        assert!(f.ledger.begin_feed_attempt(1000).await?.is_none());
+        assert_eq!(f.count("feed_attempts").await, 1);
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn core_treasury_worker_reopens_after_lost_ack_and_waits_for_independent_strike() {
         use crate::cashu::treasury_worker::{Controls, Tick, Worker};
         for delivery_still_enabled in [false, true] {

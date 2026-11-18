@@ -14,6 +14,8 @@ mod treasury;
 mod treasury_planning;
 mod treasury_scheduling;
 pub use treasury::TreasuryPlan;
+#[cfg(unix)]
+pub(crate) use treasury::TreasurySettlementState;
 
 /// The immutable original acknowledgment, including on a retry after spending.
 pub use lightning_goats_cashu_receipt::acknowledgment::ImportResult as CashuImportResult;

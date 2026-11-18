@@ -176,6 +176,32 @@ maximum_in_flight_sats = 1000
         call(*arguments,'--apply',success=False)
         if image() != retained:
             raise ValueError('retry or conflicting request changed retained scope')
+        reconciliation = dict(version=1, purpose='reconcile_original_cashu_settlement',
+            core_epoch=epoch, wallet_instance=instance, wallet_epoch=wallet_epoch,
+            intent_id=str(uuid.uuid4()), intent_digest='11'*32,
+            receive_request_id=str(uuid.uuid4()), receive_id=str(uuid.uuid4()),
+            config_sha256=decision['config_sha256'], approved_at=now, expires_at=now+600)
+        reconcile = ['reconcile-cashu-settlement','--approval',str(approval),'--writers-stopped','--apply']
+        for change, expected in [
+            (dict(purpose='cashu_settlement_planning'), 'approval is invalid'),
+            (dict(config_sha256='22'*32), 'configuration differs'),
+            ({}, 'unknown treasury intent'),
+        ]:
+            save(dict(reconciliation, **change))
+            if expected not in call(*reconcile, success=False).stderr:
+                raise ValueError('native original-settlement refusal differs from fixture')
+        save(reconciliation)
+        status.write_text(stopped.replace('ActiveState=inactive','ActiveState=active'))
+        if 'core must be fully stopped' not in call(*reconcile, success=False).stderr:
+            raise ValueError('original-settlement recovery accepted an active core')
+        status.write_text(stopped)
+        marker = state/'CYBERHERD_RECOVERY_REQUIRED'
+        marker.write_text('disposable recovery fence')
+        if 'restored journal requires' not in call(*reconcile, success=False).stderr:
+            raise ValueError('original-settlement recovery bypassed the recovery fence')
+        marker.unlink()
+        if image() != retained:
+            raise ValueError('original-settlement refusal changed retained scope')
         with closing(sqlite3.connect(database)) as db:
             counts = {table:db.execute('SELECT COUNT(*) FROM '+table).fetchone()[0]
                       for table in ['cashu_sweep_requests','cashu_treasury_intents','feed_attempts','ledger_entries']}
@@ -185,6 +211,7 @@ maximum_in_flight_sats = 1000
             runtime_uid=uid,preview_unchanged=True,active_service_refused=True,
             approval_config_and_scope_refused=True,one_request_retained=True,retry_unchanged=True,
             missing_core_epoch_not_initialized=True,
+            original_settlement_scope_missing_intent_and_fence_refused=True,
             synthetic_empty_custody=True,synthetic_systemctl=True,installed_systemd_acceptance=False,
             provider_request=False,physical_actuation=False),sort_keys=True))
 

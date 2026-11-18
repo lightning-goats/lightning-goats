@@ -117,7 +117,7 @@ async fn connect_options(
 }
 
 #[cfg(unix)]
-fn check_recovery_marker(database: &std::path::Path) -> Result<()> {
+pub(crate) fn check_recovery_marker(database: &std::path::Path) -> Result<()> {
     let parent = database.parent().context("database parent is missing")?;
     match std::fs::symlink_metadata(parent.join(crate::state_maintenance::RECOVERY_MARKER)) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),

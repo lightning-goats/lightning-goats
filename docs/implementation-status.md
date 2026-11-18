@@ -161,6 +161,15 @@ CDK records before cleanup. The same fixture verifies one 398-sat synthetic
 Strike deposit and one simulated feed. The native CLI fixture covers refusal
 of invalid approvals and a missing original operation.
 
+Core can verify one originally issued treasury invoice and reconcile its
+Strike deposit and authenticated wallet report while the receive service is
+stopped. A funded core fixture verifies read-only preview, deposit retention
+during wallet unavailability, later completion from the original report and
+an exact retry without provider or wallet calls. The core produces one
+settlement and makes the original credit eligible for one simulated feed.
+The native CLI fixture checks protected scope, inactive core and recovery
+fences against a disposable ledger.
+
 Cashu operator controls update **2026-11-17**: the
 [protected planning/reconciliation checkpoint](testing/cashu-operator-controls-20261117.json)
 passes 650 core tests (12 ignored), 179 wallet tests (seven ignored), required

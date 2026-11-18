@@ -508,3 +508,17 @@ preserved and the completed retry performs no mint lookup. Keep the original
 single melt submission, Strike deposit and simulated feeder confirmation.
 Use the native CLI fixture to check review-purpose, digest, exact config and
 missing-original refusals.
+
+## Original Cashu treasury settlement in core
+
+Verify the original retained intent and receive request under an exact protected
+configuration and approval. Preview both observations and verify that the
+financial ledger is intact. Simulate an unavailable wallet while core records
+the verified Strike deposit. Credit may support the original feed only after
+core retains the authenticated wallet report. Retry from the recorded deposit,
+verify completion once, and verify the exact completed retry contacts neither
+source. Refuse conflicting receipt IDs and wrong scopes. Verify one deposit,
+one wallet result, one completion, and one simulated feed.
+
+Use the actual core CLI in private namespaces to exercise stopped-service,
+configuration, approval, missing-original and restored-journal fence refusals.

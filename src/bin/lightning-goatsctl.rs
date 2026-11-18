@@ -146,6 +146,15 @@ enum Command {
         #[arg(long)]
         apply: bool,
     },
+    /// Verify and optionally record one original Cashu treasury settlement.
+    ReconcileCashuSettlement {
+        #[arg(long)]
+        approval: PathBuf,
+        #[arg(long, required = true)]
+        writers_stopped: bool,
+        #[arg(long)]
+        apply: bool,
+    },
     /// Print the current durable feed-credit accounting state.
     Status,
 }
@@ -308,6 +317,32 @@ async fn main() -> Result<()> {
         #[cfg(not(unix))]
         {
             bail!("credit retirement requires Unix protected-file authority");
+        }
+    }
+    if let Command::ReconcileCashuSettlement {
+        approval,
+        writers_stopped,
+        apply,
+    } = &args.command
+    {
+        #[cfg(unix)]
+        {
+            if !*writers_stopped {
+                bail!("explicit stopped-writer attestation required");
+            }
+            let result = lightning_goats::cashu::operator_reconciliation::run(
+                &args.config,
+                approval,
+                *apply,
+            )
+            .await?;
+            println!("{}", serde_json::to_string(&result)?);
+            return Ok(());
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (approval, writers_stopped, apply);
+            bail!("original settlement recovery requires Unix protected-file authority");
         }
     }
     if let Command::PlanCashuSettlement {
@@ -584,7 +619,7 @@ async fn main() -> Result<()> {
                 println!("reconciled feed attempt {id} as not physically fed");
             }
         },
-        Command::PlanCashuSettlement { .. } => {
+        Command::PlanCashuSettlement { .. } | Command::ReconcileCashuSettlement { .. } => {
             unreachable!("handled before database initialization")
         }
         Command::Status => {

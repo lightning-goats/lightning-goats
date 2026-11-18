@@ -2,6 +2,8 @@ mod admission;
 #[cfg(unix)]
 mod cashu;
 #[cfg(unix)]
+pub(crate) use cashu::TreasurySettlementState;
+#[cfg(unix)]
 pub use cashu::{CashuImportResult, TreasuryPlan};
 mod credit;
 mod quotes;

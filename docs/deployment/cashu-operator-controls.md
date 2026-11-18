@@ -99,6 +99,47 @@ destination and signed invoice. A single authoritative receive-request lookup
 must confirm the BTC target. The completed receive must match the original
 Lightning invoice, payment hash and amount in BTC before core records it.
 
+Run `lightning-goatsctl reconcile-cashu-settlement` as the registered core
+runtime user while the core service is stopped. Use the established
+receive-only Strike credential delivery for a fresh verification. The command
+matches that credential to the frozen destination fingerprint. Use the wallet's
+private treasury status socket to retrieve a report still missing from core,
+with new treasury admission and execution paused.
+The same command can record the verified Strike deposit while the wallet status
+is unavailable. Once the wallet can return the original report, rerun with
+the same approval to finish. Core uses its existing transactional settlement
+path when both records agree.
+
+```sh
+lightning-goatsctl --config CORE_CONFIG reconcile-cashu-settlement \
+  --approval APPROVAL --writers-stopped
+lightning-goatsctl --config CORE_CONFIG reconcile-cashu-settlement \
+  --approval APPROVAL --writers-stopped --apply
+```
+
+The first invocation previews the evidence without writing financial records.
+Both invocations require a root-owned approval with these fields:
+
+- `version` is `1` and `purpose` is `"reconcile_original_cashu_settlement"`.
+- `core_epoch`, `wallet_instance`, `wallet_epoch`, `intent_id`,
+  `receive_request_id` and `receive_id` identify the retained operation and original
+  Strike receipt.
+- `intent_digest` is the original core intent digest. `config_sha256` is the
+  SHA256 of the exact core configuration. Use lowercase hex for both.
+- `approved_at` and `expires_at` bound the approval in Unix seconds, with a
+  maximum interval of 24 hours.
+
+Use the retained `cashu_treasury_intents.intent_digest` and its matching
+`cashu_treasury_issuances.receive_request_id`. The Strike receipt's
+`receive_id` identifies the completed receive under that request. Confirm
+that pair in private Strike evidence before creating the approval.
+
+The private result reports which records are retained and whether core completed
+the settlement. The command reuses a matching retained deposit or wallet report
+without contacting that source again. It uses the existing live ledger's
+current schema and requires restored ledgers to remain behind their recovery
+fences. Feeding remains the responsibility of the normal feeder workflow.
+
 `lightning-goats-cashud reconcile-treasury CONFIG APPROVAL` checks one retained
 submitted melt under the wallet's exclusive writer lock. Run it under the
 registered wallet UID with the wallet stopped. It uses the same original quote

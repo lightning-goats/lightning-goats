@@ -25,17 +25,7 @@ pub struct Approval {
 
 impl Approval {
     pub fn load(path: &Path) -> Result<Self> {
-        crate::private_ipc::protected_config(path)?;
-        let mut bytes = Vec::new();
-        std::fs::File::open(path)?
-            .take(4097)
-            .read_to_end(&mut bytes)?;
-        ensure!(
-            !bytes.is_empty() && bytes.len() <= 4096,
-            "settlement approval exceeds bound"
-        );
-        let decision: Self = serde_json::from_slice(&bytes)
-            .map_err(|_| anyhow::anyhow!("invalid settlement planning approval"))?;
+        let decision: Self = load_approval(path)?;
         decision.require_current()?;
         Ok(decision)
     }
@@ -71,21 +61,7 @@ impl Approval {
     }
     /// Hash and parse the same bounded bytes; never reopen a second config image.
     pub fn load_config(&self, path: &Path) -> Result<AppConfig> {
-        crate::private_ipc::protected_config(path)?;
-        let mut bytes = Vec::new();
-        std::fs::File::open(path)?
-            .take(262145)
-            .read_to_end(&mut bytes)?;
-        ensure!(
-            !bytes.is_empty()
-                && bytes.len() <= 262144
-                && hex::encode(Sha256::digest(&bytes)) == self.config_sha256,
-            "protected configuration differs from settlement approval"
-        );
-        let config: AppConfig = toml::from_str(std::str::from_utf8(&bytes)?)
-            .map_err(|_| anyhow::anyhow!("invalid protected settlement configuration"))?;
-        config.validate()?;
-        Ok(config)
+        load_config(path, &self.config_sha256)
     }
     pub fn require_registration(&self, registration: &ReceiptPolicy) -> Result<()> {
         ensure!(
@@ -96,6 +72,37 @@ impl Approval {
         );
         Ok(())
     }
+}
+
+pub(super) fn load_approval<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
+    crate::private_ipc::protected_config(path)?;
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)?
+        .take(4097)
+        .read_to_end(&mut bytes)?;
+    ensure!(
+        !bytes.is_empty() && bytes.len() <= 4096,
+        "settlement approval exceeds bound"
+    );
+    serde_json::from_slice(&bytes).map_err(|_| anyhow::anyhow!("invalid settlement approval"))
+}
+
+pub(super) fn load_config(path: &Path, expected_digest: &str) -> Result<AppConfig> {
+    crate::private_ipc::protected_config(path)?;
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)?
+        .take(262145)
+        .read_to_end(&mut bytes)?;
+    ensure!(
+        !bytes.is_empty()
+            && bytes.len() <= 262144
+            && hex::encode(Sha256::digest(&bytes)) == expected_digest,
+        "protected configuration differs from settlement approval"
+    );
+    let config: AppConfig = toml::from_str(std::str::from_utf8(&bytes)?)
+        .map_err(|_| anyhow::anyhow!("invalid protected settlement configuration"))?;
+    config.validate()?;
+    Ok(config)
 }
 
 #[cfg(test)]

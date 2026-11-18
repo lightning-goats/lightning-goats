@@ -631,4 +631,20 @@ The rehearsal then switches the installed directories to the verified later
 checkpoint. It interrupts once after retaining an older directory and once
 after publishing a later image. The same command completes the switch and
 keeps the previous six images available in protected storage.
-Safe resumption and live provider acceptance still require verification.
+
+The paused restart fixture clones the installed later core, wallet and Cashu
+signer images into disposable role directories. It starts the actual three
+binaries twice under their separate UIDs with only loopback networking and
+synthetic credentials. Core runs in shadow, wallet acquisition, credit
+delivery, treasury and publication are disabled, and the three CyberHerd
+workers refuse their disabled configurations. The core's regular Strike
+recovery loop still exists in shadow mode, so the fixture redirects Strike
+and the gateway to a reserved port with no listener. Each cycle must report
+16 sats of available feed credit, 16 sats of wallet custody and the original
+396 sats of completed Strike deposits. The test compares the original
+financial rows and both CDK stores across restart and confirms that all six
+installed role images still match the fenced reference.
+
+The rehearsal uses its own configuration and credentials. Removal of an
+installed recovery fence, restart with installed policies and credentials, and
+live provider acceptance still require separate qualification.

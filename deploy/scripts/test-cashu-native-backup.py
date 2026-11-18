@@ -2,7 +2,7 @@
 """Qualify native encrypted recovery inventories in disposable, offline state.
 
 Use initialized state or the exact core and wallet snapshots of the funded
-two-mint test. This test never clears a recovery fence.
+two-mint test. Restart only disposable copies of the later installed state.
 """
 import argparse
 from contextlib import closing, contextmanager, ExitStack
@@ -113,6 +113,8 @@ def main():
         parser.add_argument('--'+option+'-sha256')
     parser.add_argument('--rotate-receiving-key', action='store_true')
     parser.add_argument('--funded-fixture', type=Path, help='restore the disposable two-mint settlement checkpoints')
+    parser.add_argument('--core-daemon-cli', type=Path, help='selected core daemon for the funded restart rehearsal')
+    parser.add_argument('--core-daemon-sha256')
     parser.add_argument('--systemd-masks', action='store_true',
                         help='exercise the full collector against real masks on a disposable Actions runner')
     parser.add_argument('--systemd-package', nargs=3, metavar=('ARCHIVE', 'SOURCE', 'SHA256'),
@@ -131,6 +133,9 @@ def main():
         raise ValueError('key rotation requires the complete archive rehearsal')
     if args.funded_fixture is not None and (not all(collector_options) or args.rotate_receiving_key):
         raise ValueError('funded recovery requires the archive rehearsal with its original key')
+    if (bool(args.funded_fixture) != bool(args.core_daemon_cli)
+            or bool(args.funded_fixture) != bool(args.core_daemon_sha256)):
+        raise ValueError('funded restart requires the selected core daemon and digest')
     if args.systemd_package and extended:
         raise ValueError('systemd rehearsal uses only the three package executables')
     if args.systemd_masks and (not all(collector_options)
@@ -387,6 +392,13 @@ def main():
             collector_fixture=runpy.run_path(str(source/'deploy/scripts/cashu-collector-fixture.py'))
             reference = None
             if funded:
+                daemon = root / 'core-daemon'
+                shutil.copyfile(args.core_daemon_cli.resolve(strict=True), daemon)
+                if not 0 < daemon.stat().st_size <= 512 * 1024 * 1024 or digest(daemon) != args.core_daemon_sha256:
+                    raise ValueError('selected funded core daemon differs')
+                daemon.chmod(0o555)
+                binaries['core_daemon'] = daemon
+
                 def reference():
                     return funded_reference_inputs(args.funded_fixture, root, states, runtime_uids,
                                                    (wallet_instance, wallet_epoch, receiver, namespaces))

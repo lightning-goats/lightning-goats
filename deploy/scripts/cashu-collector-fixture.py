@@ -484,6 +484,12 @@ def qualify_advance(capsule, bootstrap, stage, reference, output, policy_path, c
         startup = output.parent / 'advanced-startup'
         startup.mkdir(mode=0o711)
         verified = verify_restored_runtime_fences(reference, startup, workers, binaries, configurations, roles)
+        rehearse = runpy.run_path(str(Path(__file__).with_name('cashu-funded-restart-fixture.py')))['rehearse']
+        paused_restart = rehearse(output.parent / 'restart', workers, binaries, configurations, binaries['core_daemon'])
+        common['check_quiescence'](workers, common['Budget'](65536, 30))
+        for role, state in active.items():
+            if image(state) != image(reference / 'fenced-images' / role):
+                raise ValueError('paused restart changed an installed fenced role')
     finally:
         for role, state in active.items():
             if (saved / role).exists():
@@ -492,7 +498,8 @@ def qualify_advance(capsule, bootstrap, stage, reference, output, policy_path, c
                 (saved / role).rename(state)
     return {'recovery_fences_verified': verified, 'older_files_retained': True, 'archive_interrupt_recovered': True,
             'publish_interrupt_recovered': True, 'changed_evidence_retry_refused': True, 'exact_retry_verified': True,
-            'authenticated_cli_retry_with_actual_masks': systemd_masks, 'resume_authorized': False}
+            'authenticated_cli_retry_with_actual_masks': systemd_masks,
+            'paused_restart': paused_restart, 'resume_authorized': False}
 
 
 def qualify_restore(source, output_root, collected, identity, selected, store,

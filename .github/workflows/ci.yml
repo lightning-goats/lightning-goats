@@ -74,7 +74,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo build --locked --all-features --bin lightning-goatsctl --bin cyberherd-statectl --bin cyberherdd --bin cyberherd-payoutd --bin cyberherd-signerd
+          cargo build --locked --all-features --bin lightning-goatsd --bin lightning-goatsctl --bin cyberherd-statectl --bin cyberherdd --bin cyberherd-payoutd --bin cyberherd-signerd
           python3 - <<'PYCODE'
           import hashlib, subprocess
           from pathlib import Path
@@ -99,6 +99,7 @@ jobs:
         run: |
           python3 deploy/scripts/select-cashu-test-artifact.py "$RUNNER_TEMP/native-test-artifacts.jsonl" Cargo.toml "$RUNNER_TEMP/core-test"
           cp target/debug/lightning-goatsctl "$RUNNER_TEMP/core-cli"
+          cp target/debug/lightning-goatsd "$RUNNER_TEMP/core-daemon"
           cp target/debug/cyberherd-statectl "$RUNNER_TEMP/statectl-cli"
           cp target/debug/cyberherdd "$RUNNER_TEMP/membership-cli"
           cp target/debug/cyberherd-payoutd "$RUNNER_TEMP/payout-cli"
@@ -109,6 +110,7 @@ jobs:
           path: |
             ${{ runner.temp }}/core-test
             ${{ runner.temp }}/core-cli
+            ${{ runner.temp }}/core-daemon
             ${{ runner.temp }}/statectl-cli
             ${{ runner.temp }}/membership-cli
             ${{ runner.temp }}/payout-cli
@@ -364,7 +366,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo unshare --net -- python3 deploy/scripts/test-cashu-combined-settlement.py --funded-rollback --http-intake --receipt-ipc --treasury-ipc --fees --no-change --lost-reply --core-test "$RUNNER_TEMP/cashu-core/core-test" --wallet-test "$RUNNER_TEMP/cashu-wallet/wallet-test" --core-cli "$RUNNER_TEMP/cashu-core/core-cli" 2>&1 | tee "$RUNNER_TEMP/cashu-funded-rollback.json"
-      - name: Advance the reconciled funded Cashu installation under systemd masks
+      - name: Advance the funded Cashu installation and rehearse its paused restart
         shell: bash
         run: |
           set -euo pipefail

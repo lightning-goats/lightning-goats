@@ -502,7 +502,8 @@ def verify_funded_install(root, native_inputs, systemd_masks):
                '--funded-fixture', str(root)]
     if systemd_masks:
         command.append('--systemd-masks')
-    files = {'core': 'cashu-core/core-cli', 'wallet': 'cashu-wallet/wallet-cli',
+    files = {'core': 'cashu-core/core-cli', 'core-daemon': 'cashu-core/core-daemon',
+             'wallet': 'cashu-wallet/wallet-cli',
              'signer': 'cashu-wallet/signer-cli', 'membership': 'cashu-core/membership-cli',
              'payout': 'cashu-core/payout-cli', 'payout-signer': 'cashu-core/payout-signer-cli',
              'statectl': 'cashu-core/statectl-cli', 'collector-copy': 'cashu-wallet/copy-cli',
@@ -516,6 +517,7 @@ def verify_funded_install(root, native_inputs, systemd_masks):
     report = json.loads(result.stdout)
     collector = report['coordinated_collector']
     restore = collector['restore_staging']
+    restart = restore['fenced_advancement']['paused_restart']
     if (report['result'] != 'CASHU_FUNDED_NATIVE_INSTALL_VERIFIED'
             or report['funded_fenced_installation_verified'] is not True
             or collector['systemd_masks_verified'] is not systemd_masks
@@ -525,6 +527,10 @@ def verify_funded_install(root, native_inputs, systemd_masks):
             or restore['funded_provider_comparison']['reference_mint_unspent_sats'] != 16
             or restore['fenced_advancement']['resume_authorized'] is not False
             or len(restore['fenced_advancement']['recovery_fences_verified']) != 6
+            or restart['native_start_stop_cycles'] != 2 or not restart['financial_history_unchanged']
+            or restart['shadow_core_sats'] != 16 or restart['paused_wallet_sats'] != 16
+            or restart['installed_fences_cleared'] is not False
+            or restart['resume_authorized'] is not False
             or restore['resume_authorized'] is not False):
         raise ValueError('funded installation did not verify the required scope')
     return report

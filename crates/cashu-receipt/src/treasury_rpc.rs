@@ -4,6 +4,8 @@ use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+pub const FEE_TIME_VERSION: u8 = 2;
+
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Request {
@@ -31,7 +33,7 @@ impl Request {
     }
     pub fn validate(&self) -> Result<()> {
         ensure!(
-            self.version == 1 && !self.request_id.is_nil(),
+            matches!(self.version, 1 | FEE_TIME_VERSION) && !self.request_id.is_nil(),
             "invalid treasury RPC identity"
         );
         self.intent().validate()
@@ -73,12 +75,14 @@ pub struct Reply {
     pub intent_digest: String,
     pub phase: Phase,
     pub report: Option<MeltData>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fee_recorded_at: Option<i64>,
 }
 impl Reply {
     pub fn validate_for(&self, request: &Request) -> Result<()> {
         request.validate()?;
         ensure!(
-            self.version == 1
+            self.version == request.version
                 && self.request_id == request.request_id
                 && self.intent_id == request.intent().id
                 && self.intent_digest == hex_digest(request.intent().digest()?),
@@ -87,6 +91,12 @@ impl Reply {
         ensure!(
             (self.phase == Phase::Reconciled) == self.report.is_some(),
             "treasury RPC report/state mismatch"
+        );
+        ensure!(
+            self.fee_recorded_at.is_some()
+                == (self.version == FEE_TIME_VERSION && self.phase == Phase::Reconciled)
+                && self.fee_recorded_at.is_none_or(|time| time >= 0),
+            "treasury RPC fee time/state mismatch"
         );
         if let Some(report) = &self.report {
             report.validate(request.intent())?;

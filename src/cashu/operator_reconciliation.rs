@@ -14,7 +14,7 @@ use crate::{
 use anyhow::{Context, Result, ensure};
 use lightning_goats_cashu_receipt::{
     treasury::{Destination, Issued, hex_digest},
-    treasury_rpc::{Command, Request},
+    treasury_rpc::{Command, FEE_TIME_VERSION, Request},
 };
 use serde::{Deserialize, Serialize};
 use std::{future::Future, path::Path, sync::Arc, time::Duration};
@@ -138,7 +138,7 @@ impl Approval {
             (None, false)
         } else {
             let request = Request {
-                version: 1,
+                version: FEE_TIME_VERSION,
                 request_id: Uuid::new_v4(),
                 command: Command::Status(Box::new(intent.clone())),
             };

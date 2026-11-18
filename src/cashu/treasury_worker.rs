@@ -6,7 +6,7 @@ use super::{
 };
 use crate::{ledger::LedgerStore, strike::StrikeRuntime};
 use anyhow::{Result, ensure};
-use lightning_goats_cashu_receipt::treasury_rpc::{Command, Request};
+use lightning_goats_cashu_receipt::treasury_rpc::{Command, FEE_TIME_VERSION, Request};
 use serde::Deserialize;
 use std::{future::Future, sync::Arc, time::Duration};
 
@@ -192,7 +192,7 @@ impl<W: Wallet> Worker<W> {
                         Command::Status(Box::new(issued.intent))
                     };
                 let request = Request {
-                    version: 1,
+                    version: FEE_TIME_VERSION,
                     request_id: uuid::Uuid::new_v4(),
                     command,
                 };
@@ -204,7 +204,8 @@ impl<W: Wallet> Worker<W> {
                 );
                 if let Some(report) = response.report {
                     ensure!(
-                        report.intent_id() == work.id,
+                        report.intent_id() == work.id
+                            && report.fee_recorded_at() == response.reply.fee_recorded_at,
                         "treasury report identity changed"
                     );
                     self.ledger

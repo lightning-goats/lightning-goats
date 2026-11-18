@@ -25,6 +25,7 @@ static CORE: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 static MEMBERSHIP: sqlx::migrate::Migrator = sqlx::migrate!("./cyberherd-migrations");
 static PAYOUT: sqlx::migrate::Migrator = sqlx::migrate!("./payout-migrations");
 static SIGNER: sqlx::migrate::Migrator = sqlx::migrate!("./signer-migrations");
+pub(super) const CURRENT_CORE_SCHEMA: i64 = 27;
 
 #[derive(Clone, Copy)]
 enum ReviewScope {
@@ -36,7 +37,7 @@ pub(super) async fn inspect(directory: &Path, policy: &Policy) -> Result<Report>
     inspect_version(
         directory,
         policy,
-        26,
+        CURRENT_CORE_SCHEMA,
         false,
         ReviewScope::OrdinaryMaintenance,
     )
@@ -49,6 +50,17 @@ pub(super) async fn inspect_cashu_correlations(
     directory: &Path,
     policy: &Policy,
 ) -> Result<Report> {
+    if let Ok(report) = inspect_version(
+        directory,
+        policy,
+        CURRENT_CORE_SCHEMA,
+        false,
+        ReviewScope::CashuCorrelationsOnly,
+    )
+    .await
+    {
+        return Ok(report);
+    }
     inspect_version(
         directory,
         policy,
@@ -132,20 +144,44 @@ async fn inspect_inclusive_fees(
     }
     // A payout-only upgrade may also preserve a current core with the exact
     // inactive extension. This is not a coordinated Cashu-custody backup.
-    let report = inspect_version(
+    Ok(inspect_inactive_cashu(directory, policy, before_fees)
+        .await?
+        .0)
+}
+
+pub(super) async fn inspect_inactive_cashu(
+    directory: &Path,
+    policy: &Policy,
+    before_fees: bool,
+) -> Result<(Report, i64)> {
+    let current = inspect_version(
         directory,
         policy,
-        26,
+        CURRENT_CORE_SCHEMA,
         before_fees,
         ReviewScope::OrdinaryMaintenance,
     )
-    .await?;
-    for table in super::cashu_upgrade::CASHU_TABLES {
+    .await;
+    let (report, version) = match current {
+        Ok(report) => (report, CURRENT_CORE_SCHEMA),
+        Err(_) => (
+            inspect_version(
+                directory,
+                policy,
+                26,
+                before_fees,
+                ReviewScope::OrdinaryMaintenance,
+            )
+            .await?,
+            26,
+        ),
+    };
+    for table in super::cashu_upgrade::tables_for_core(version) {
         if report.rows[&Role::Core].get(table) != Some(&0) {
-            bail!("inclusive-fee maintenance requires empty inactive Cashu tables");
+            bail!("maintenance requires empty inactive Cashu tables");
         }
     }
-    Ok(report)
+    Ok((report, version))
 }
 async fn inspect_version(
     directory: &Path,
@@ -195,7 +231,7 @@ async fn inspect_version(
         {
             bail!("journal integrity or foreign keys failed");
         }
-        if core_version != 26 && role == Role::Core {
+        if core_version != CURRENT_CORE_SCHEMA && role == Role::Core {
             require_core_prefix(&pool, core_version).await?;
         } else if before_fees && role == Role::Payout {
             require_before_inclusive_fees(&pool).await?;
@@ -278,14 +314,14 @@ async fn report(
 // restore verification: only the separate contact comparison can select it.
 async fn require_core_prefix(pool: &SqlitePool, version: i64) -> Result<()> {
     let migrations: Vec<_> = CORE.iter().collect();
-    if !matches!(version, 23..=25)
-        || migrations.len() != 26
-        || migrations.last().map(|m| m.version) != Some(26)
+    if !matches!(version, 23..=26)
+        || migrations.len() != usize::try_from(CURRENT_CORE_SCHEMA)?
+        || migrations.last().map(|m| m.version) != Some(CURRENT_CORE_SCHEMA)
     {
         bail!("additive upgrade requires the separately qualified schema prefix");
     }
     let rows = sqlx::query(
-        "SELECT version,success,checksum FROM _sqlx_migrations ORDER BY version LIMIT 27",
+        "SELECT version,success,checksum FROM _sqlx_migrations ORDER BY version LIMIT 28",
     )
     .fetch_all(pool)
     .await?;
@@ -310,9 +346,15 @@ async fn require_core_prefix(pool: &SqlitePool, version: i64) -> Result<()> {
             bail!("contact upgrade source already contains private-contact schema");
         }
     }
-    let cashu: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name LIKE 'cashu_%' OR name LIKE 'feed_source_%')")
-        .fetch_one(pool).await?;
-    if cashu {
+    let later: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE
+            (?<26 AND (name LIKE 'cashu_%' OR name LIKE 'feed_source_%'))
+            OR tbl_name='cashu_treasury_fee_observations')",
+    )
+    .bind(version)
+    .fetch_one(pool)
+    .await?;
+    if later {
         bail!("Cashu upgrade source already contains new schema objects");
     }
     Ok(())

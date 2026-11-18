@@ -257,7 +257,9 @@ mod tests {
         )
         .await
         .unwrap();
-        database::migrate_core_through(&core, 26).await.unwrap();
+        database::migrate_core_through(&core, database::CURRENT_CORE_SCHEMA)
+            .await
+            .unwrap();
         core.close().await;
         let before = root.path().join("before");
         let after = root.path().join("after");

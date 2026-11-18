@@ -4,7 +4,7 @@ mod combined_fixture {
     use super::*;
     use crate::cashu::treasury_worker::{Controls, Tick, Wallet, Worker};
     use anyhow::ensure;
-    use lightning_goats_cashu_receipt::treasury_rpc::{Command, Phase, Reply, Request};
+    use lightning_goats_cashu_receipt::treasury_rpc::{Command, FEE_TIME_VERSION, Phase, Reply, Request};
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
@@ -205,7 +205,7 @@ mod combined_fixture {
                     }
                     tokio::time::sleep(Duration::from_millis(25)).await;
                     let status = Request {
-                        version: 1,
+                        version: request.version,
                         request_id: Uuid::new_v4(),
                         command: Command::Status(Box::new(issued.intent.clone())),
                     };
@@ -220,8 +220,10 @@ mod combined_fixture {
                 // caller's original Retain request, exercising its safe retry.
                 let repeated = client.send(request).await?;
                 ensure!(
-                    repeated.report.is_some(),
-                    "retained treasury result disappeared"
+                    repeated.report.is_some()
+                        && repeated.reply.fee_recorded_at.is_some()
+                        && repeated.reply.fee_recorded_at == response.reply.fee_recorded_at,
+                    "retained treasury result or its fee time changed"
                 );
                 return Ok(repeated);
             }
@@ -251,19 +253,22 @@ mod combined_fixture {
             }
             let data: MeltData = read_when_ready(&self.root, "report.json").await?;
             data.validate(&issued.intent)?;
-            let report = PeerMelt::authenticate(
+            let fee_recorded_at = (request.version == FEE_TIME_VERSION).then_some(0);
+            let report = PeerMelt::authenticate_with_fee_time(
                 &self.registration,
                 &fixture_peer(&self.registration),
                 &serde_json::to_vec(&data)?,
+                fee_recorded_at,
             )?;
             Ok(crate::cashu::treasury_client::Response {
                 reply: Reply {
-                    version: 1,
+                    version: request.version,
                     request_id: request.request_id,
                     intent_id: issued.intent.id,
                     intent_digest: hex_digest(issued.intent.digest()?),
                     phase: Phase::Reconciled,
                     report: Some(data),
+                    fee_recorded_at,
                 },
                 report: Some(report),
             })

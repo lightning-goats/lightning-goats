@@ -126,7 +126,7 @@ enum Command {
         #[arg(long)]
         bundle: PathBuf,
     },
-    /// Compare a schema-25 backup with a separate inactive schema-26 copy.
+    /// Compare a schema-25 backup with a separate inactive Cashu schema copy.
     CompareCashuUpgrade {
         #[arg(long)]
         bundle: PathBuf,

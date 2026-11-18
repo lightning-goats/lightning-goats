@@ -193,6 +193,7 @@ pub struct PeerMelt {
     wallet_epoch: uuid::Uuid,
     core_epoch: uuid::Uuid,
     wallet_uid: u32,
+    fee_recorded_at: Option<i64>,
 }
 impl PeerMelt {
     pub fn authenticate(
@@ -200,7 +201,20 @@ impl PeerMelt {
         peer: &KernelPeer,
         bytes: &[u8],
     ) -> Result<Self> {
+        Self::authenticate_with_fee_time(registration, peer, bytes, None)
+    }
+
+    pub(crate) fn authenticate_with_fee_time(
+        registration: &ReceiptPolicy,
+        peer: &KernelPeer,
+        bytes: &[u8],
+        fee_recorded_at: Option<i64>,
+    ) -> Result<Self> {
         registration.check_peer(peer)?;
+        ensure!(
+            fee_recorded_at.is_none_or(|time| time >= 0),
+            "invalid wallet fee time"
+        );
         ensure!(
             bytes.len() <= MAX_TREASURY_BYTES,
             "treasury report exceeds frame bound"
@@ -213,6 +227,7 @@ impl PeerMelt {
             wallet_epoch: registration.wallet_epoch,
             core_epoch: registration.core_epoch,
             wallet_uid: registration.wallet_uid,
+            fee_recorded_at,
         })
     }
     pub(crate) fn validate(
@@ -235,5 +250,8 @@ impl PeerMelt {
     }
     pub(crate) fn intent_id(&self) -> uuid::Uuid {
         self.data.intent_id
+    }
+    pub(crate) fn fee_recorded_at(&self) -> Option<i64> {
+        self.fee_recorded_at
     }
 }

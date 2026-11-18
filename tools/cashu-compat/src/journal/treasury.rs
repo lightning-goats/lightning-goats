@@ -1357,7 +1357,9 @@ impl Journal {
         accept_new: bool,
         now: u64,
     ) -> Result<lightning_goats_cashu_receipt::treasury_rpc::Reply> {
-        use lightning_goats_cashu_receipt::treasury_rpc::{Command, Phase, Reply};
+        use lightning_goats_cashu_receipt::treasury_rpc::{
+            Command, FEE_TIME_VERSION, Phase, Reply,
+        };
         request.validate()?;
         let intent = request.intent();
         if let Command::Retain(issued) = &request.command {
@@ -1390,13 +1392,23 @@ impl Journal {
             _ => anyhow::bail!("invalid treasury state"),
         };
         let report = self.completed_treasury_report(binding, intent.id)?;
+        let fee_recorded_at = if report.is_some() && request.version == FEE_TIME_VERSION {
+            Some(self.connection.query_row(
+                "SELECT completed_at FROM treasury_fee_completions WHERE intent_id=?",
+                [intent.id.to_string()],
+                |row| row.get(0),
+            )?)
+        } else {
+            None
+        };
         let reply = Reply {
-            version: 1,
+            version: request.version,
             request_id: request.request_id,
             intent_id: intent.id,
             intent_digest: lightning_goats_cashu_receipt::treasury::hex_digest(intent.digest()?),
             phase,
             report,
+            fee_recorded_at,
         };
         reply.validate_for(request)?;
         Ok(reply)
@@ -1849,13 +1861,25 @@ mod tests {
         assert_eq!(report.sources[0].fee_sats, 1);
         assert_eq!(report.sources[0].change_sats, if nonzero { 2 } else { 0 });
         drop(journal);
-        let journal = Journal::open(&path, binding.wallet_epoch, 128)?;
+        let mut journal = Journal::open(&path, binding.wallet_epoch, 128)?;
         let (time, fee): (i64, u64) = journal.connection.query_row(
             "SELECT completed_at,fee_sats FROM treasury_fee_completions WHERE intent_id=?",
             [issued.intent.id.to_string()],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
         assert_eq!(fee, 1);
+        use lightning_goats_cashu_receipt::treasury_rpc::{Command, FEE_TIME_VERSION, Request};
+        let mut query = Request {
+            version: 1,
+            request_id: Uuid::new_v4(),
+            command: Command::Status(Box::new(issued.intent.clone())),
+        };
+        let old = journal.treasury_rpc(&binding, &query, false, 1000)?;
+        assert!(serde_json::to_value(&old)?.get("fee_recorded_at").is_none());
+        query.version = FEE_TIME_VERSION;
+        let current = journal.treasury_rpc(&binding, &query, false, 1000)?;
+        assert_eq!(current.fee_recorded_at, Some(time));
+        assert!(old.report == current.report);
         assert_eq!(
             crate::journal::treasury_scheduling::daily_fees(&journal.connection, time + 86_400)?,
             1

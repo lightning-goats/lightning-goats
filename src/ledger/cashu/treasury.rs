@@ -31,6 +31,12 @@ pub(crate) struct TreasurySettlementState {
 }
 
 impl LedgerStore {
+    #[cfg(test)]
+    pub(crate) async fn test_cashu_fee_budget(&self, now: i64, limit: u64) -> Result<u64> {
+        let mut tx = self.pool.begin().await?;
+        daily_fee_remaining(&mut tx, now, limit).await
+    }
+
     #[cfg(unix)]
     pub(crate) async fn treasury_settlement_state(
         &self,
@@ -324,9 +330,31 @@ impl LedgerStore {
                 previous == digest,
                 "treasury melt result conflicts with original evidence"
             );
+            if let Some(fee_time) = report.fee_recorded_at() {
+                let observed: i64 = sqlx::query_scalar(
+                    "SELECT observed_at FROM cashu_treasury_fee_observations WHERE intent_id=?",
+                )
+                .bind(intent.id.to_string())
+                .fetch_one(&mut *tx)
+                .await?;
+                ensure!(
+                    fee_time <= observed,
+                    "wallet fee time moved past the retained observation"
+                );
+            }
         } else {
             sqlx::query("INSERT INTO cashu_treasury_wallet_results(intent_id,result_digest,result_json) VALUES(?,?,?)")
                 .bind(intent.id.to_string()).bind(digest).bind(serde_json::to_string(data)?).execute(&mut *tx).await?;
+            sqlx::query(
+                "INSERT INTO cashu_treasury_fee_observations(intent_id,observed_at)
+                 VALUES(?,MAX(unixepoch(),?,
+                     COALESCE((SELECT last_seen FROM cashu_treasury_clock WHERE singleton=1),0),
+                     COALESCE((SELECT MAX(observed_at) FROM cashu_treasury_fee_observations),0)))",
+            )
+            .bind(intent.id.to_string())
+            .bind(report.fee_recorded_at().unwrap_or(0))
+            .execute(&mut *tx)
+            .await?;
         }
         let ready = complete(&mut tx, &intent).await?;
         tx.commit().await?;
@@ -509,14 +537,15 @@ pub(super) async fn reserve_in_transaction(
 }
 
 /// Pending intents can still charge their maximum, even across the boundary.
-/// Count a completed fee from the independently observed Strike deposit.
+/// A completed fee ages from the later of wallet result acceptance and Strike
+/// verification. A missing observation cannot release an existing reservation.
 pub(super) async fn daily_fee_remaining(
     tx: &mut Transaction<'_, Sqlite>,
     now: i64,
     limit: u64,
 ) -> Result<u64> {
     let used: i64 = sqlx::query_scalar(
-        "SELECT COALESCE(SUM(CASE WHEN c.intent_id IS NULL OR d.intent_id IS NULL THEN
+        "SELECT COALESCE(SUM(CASE WHEN c.intent_id IS NULL OR d.intent_id IS NULL OR o.intent_id IS NULL THEN
              CASE WHEN json_type(i.intent_json,'$.maximum_fee_sats')='integer'
                    AND json_extract(i.intent_json,'$.maximum_fee_sats') BETWEEN 0 AND i.input_sats-i.deposit_sats
                   THEN json_extract(i.intent_json,'$.maximum_fee_sats')
@@ -525,7 +554,9 @@ pub(super) async fn daily_fee_remaining(
          FROM cashu_treasury_intents i
          LEFT JOIN cashu_treasury_completions c ON c.intent_id=i.id
          LEFT JOIN cashu_treasury_deposits d ON d.intent_id=i.id
-         WHERE c.intent_id IS NULL OR d.intent_id IS NULL OR MAX(i.created_at,d.verified_at)>=?",
+         LEFT JOIN cashu_treasury_fee_observations o ON o.intent_id=i.id
+         WHERE c.intent_id IS NULL OR d.intent_id IS NULL OR o.intent_id IS NULL
+            OR MAX(i.created_at,d.verified_at,o.observed_at)>=?",
     )
     .bind(now.saturating_sub(86_400))
     .fetch_one(&mut **tx)

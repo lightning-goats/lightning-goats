@@ -250,6 +250,9 @@ mod cashu_treasury_tests {
             }
         }
         fn report(&self, fees: u64, change: u64) -> PeerMelt {
+            self.report_with_fee_time(fees, change, None)
+        }
+        fn report_with_fee_time(&self, fees: u64, change: u64, time: Option<i64>) -> PeerMelt {
             let sources = self.intent.allocate_result(fees, change).unwrap();
             let data = MeltData {
                 version: 1,
@@ -259,10 +262,11 @@ mod cashu_treasury_tests {
                 operation_evidence_digest: "ab".repeat(32),
                 sources,
             };
-            PeerMelt::authenticate(
+            PeerMelt::authenticate_with_fee_time(
                 &self.registration,
                 &fixture_peer(&self.registration),
                 &serde_json::to_vec(&data).unwrap(),
+                time,
             )
             .unwrap()
         }
@@ -286,6 +290,46 @@ mod cashu_treasury_tests {
                 .await
                 .unwrap()
         }
+    }
+
+    #[tokio::test]
+    async fn late_wallet_fee_observation_delays_release_and_migrates_legacy_evidence() -> Result<()> {
+        let f = Fixture::new(&[8], 0, 6, 2, |_| {}).await;
+        f.issue().await;
+        f.runtime.reconcile_and_credit(&f.ledger, &f.event()).await?;
+        let strike_time: i64 = sqlx::query_scalar("SELECT verified_at FROM cashu_treasury_deposits")
+            .fetch_one(&f.pool).await?;
+        let wallet_time = strike_time + 600;
+        assert_eq!(f.ledger.test_cashu_fee_budget(wallet_time, 2).await?, 0);
+        let original = f.report_with_fee_time(1, 1, Some(wallet_time));
+        for _ in 0..2 {
+            assert!(f.ledger.record_cashu_melt_result(&f.registration, &original).await?);
+        }
+        assert_eq!(f.count("cashu_treasury_fee_observations").await, 1);
+        assert_eq!(f.ledger.test_cashu_fee_budget(strike_time + 86_401, 2).await?, 1);
+        assert_eq!(f.ledger.test_cashu_fee_budget(wallet_time + 86_400, 2).await?, 1);
+        assert_eq!(f.ledger.test_cashu_fee_budget(wallet_time + 86_401, 2).await?, 2);
+        let changed = f.report_with_fee_time(1, 1, Some(wallet_time + 1));
+        assert!(f.ledger.record_cashu_melt_result(&f.registration, &changed).await.is_err());
+
+        let original: (String,String) = sqlx::query_as("SELECT result_digest,result_json FROM cashu_treasury_wallet_results")
+            .fetch_one(&f.pool).await?;
+        // Disposable schema-26 image. Keep the old result, completion and deposit bytes.
+        sqlx::raw_sql("DROP TABLE cashu_treasury_fee_observations;
+                     DELETE FROM _sqlx_migrations WHERE version=27;")
+            .execute(&f.pool).await?;
+        sqlx::migrate!("./migrations").run(&f.pool).await?;
+        let observed: i64 = sqlx::query_scalar("SELECT observed_at FROM cashu_treasury_fee_observations")
+            .fetch_one(&f.pool).await?;
+        assert!(observed >= strike_time);
+        assert_eq!(f.ledger.test_cashu_fee_budget(observed + 86_400, 2).await?, 1);
+        assert_eq!(f.ledger.test_cashu_fee_budget(observed + 86_401, 2).await?, 2);
+        let retained: (String,String) = sqlx::query_as("SELECT result_digest,result_json FROM cashu_treasury_wallet_results")
+            .fetch_one(&f.pool).await?;
+        assert_eq!(original, retained);
+        assert_eq!(f.count("cashu_treasury_completions").await, 1);
+        assert_eq!(f.ledger.feed_credit_sats().await?, 8);
+        Ok(())
     }
     #[tokio::test]
     async fn core_treasury_claims_are_bounded_and_uncertain_issuance_never_requeues() {
@@ -507,7 +551,7 @@ mod cashu_treasury_tests {
             &self,
             request: &lightning_goats_cashu_receipt::treasury_rpc::Request,
         ) -> Result<crate::cashu::treasury_client::Response> {
-            use lightning_goats_cashu_receipt::treasury_rpc::{Command, Phase, Reply};
+            use lightning_goats_cashu_receipt::treasury_rpc::{Command, FEE_TIME_VERSION, Phase, Reply};
             let action = match &request.command {
                 Command::Retain(_) => "retain",
                 Command::Status(_) => "status",
@@ -520,18 +564,21 @@ mod cashu_treasury_tests {
             if self.lose_reply.swap(false, Ordering::SeqCst) {
                 bail!("fixture acknowledgment lost")
             }
-            let report = PeerMelt::authenticate(
+            let fee_recorded_at = (request.version == FEE_TIME_VERSION).then_some(0);
+            let report = PeerMelt::authenticate_with_fee_time(
                 &self.registration,
                 &fixture_peer(&self.registration),
                 &serde_json::to_vec(&self.data)?,
+                fee_recorded_at,
             )?;
             let reply = Reply {
-                version: 1,
+                version: request.version,
                 request_id: request.request_id,
                 intent_id: self.data.intent_id,
                 intent_digest: self.data.intent_digest.clone(),
                 phase: Phase::Reconciled,
                 report: Some(serde_json::from_slice(&serde_json::to_vec(&self.data)?)?),
+                fee_recorded_at,
             };
             Ok(crate::cashu::treasury_client::Response {
                 reply,

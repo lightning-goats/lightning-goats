@@ -1,4 +1,4 @@
-//! Strict schema-25 -> 26 additive comparison of separate four-journal images.
+//! Strict schema-25 to 26 or 27 additive comparison of separate four-journal images.
 //! It does not migrate a journal, restore state or authorize service resumption.
 use std::{collections::BTreeMap, path::Path};
 
@@ -9,7 +9,8 @@ use super::{Manifest, Operator, Policy, Role, database, files, legacy::rows};
 
 use super::contact_upgrade::{Definition, catalog};
 // Child-first order also supports removal of empty additions in historical test fixtures.
-pub(super) const CASHU_TABLES: [&str; 20] = [
+pub(super) const CASHU_TABLES: [&str; 21] = [
+    "cashu_treasury_fee_observations",
     "cashu_sweep_jobs",
     "cashu_sweep_requests",
     "feed_financial_treasury",
@@ -31,7 +32,13 @@ pub(super) const CASHU_TABLES: [&str; 20] = [
     "feed_source_parts",
     "feed_source_reservations",
 ];
-pub(super) async fn private_catalog() -> Result<BTreeMap<String, Definition>> {
+pub(super) fn tables_for_core(version: i64) -> impl Iterator<Item = &'static str> {
+    CASHU_TABLES.into_iter().filter(move |name| {
+        version >= database::CURRENT_CORE_SCHEMA || *name != "cashu_treasury_fee_observations"
+    })
+}
+
+pub(super) async fn private_catalog(version: i64) -> Result<BTreeMap<String, Definition>> {
     // Static schema definitions only. No payment, private envelope, journal or
     // credential is ever loaded into this disposable reference database.
     let pool = sqlx::sqlite::SqlitePoolOptions::new()
@@ -48,6 +55,13 @@ pub(super) async fn private_catalog() -> Result<BTreeMap<String, Definition>> {
         sqlx::raw_sql(include_str!("../../migrations/0026_cashu_receipts.sql"))
             .execute(&pool)
             .await?;
+        if version == database::CURRENT_CORE_SCHEMA {
+            sqlx::raw_sql(include_str!(
+                "../../migrations/0027_cashu_fee_observations.sql"
+            ))
+            .execute(&pool)
+            .await?;
+        }
         Ok(catalog(&pool)
             .await?
             .into_iter()
@@ -61,13 +75,8 @@ pub(super) async fn private_catalog() -> Result<BTreeMap<String, Definition>> {
 
 pub(super) async fn compare_images(before: &Path, after: &Path, policy: &Policy) -> Result<()> {
     database::inspect_schema_25(before, policy).await?;
-    let migrated = database::inspect(after, policy).await?;
-    for table in CASHU_TABLES {
-        if migrated.rows[&Role::Core].get(table) != Some(&0) {
-            bail!("Cashu upgrade must add only empty inactive tables");
-        }
-    }
-    let expected_private = private_catalog().await?;
+    let (_, version) = database::inspect_inactive_cashu(after, policy, false).await?;
+    let expected_private = private_catalog(version).await?;
     for role in Role::ALL {
         let old = rows::open_named(before, &role.file()).await?;
         let new = rows::open_named(after, &role.file()).await?;
@@ -75,7 +84,7 @@ pub(super) async fn compare_images(before: &Path, after: &Path, policy: &Policy)
             let old_names = rows::names(&old).await?;
             let mut expected_names = old_names.clone();
             if role == Role::Core {
-                expected_names.extend(CASHU_TABLES.map(str::to_owned));
+                expected_names.extend(tables_for_core(version).map(str::to_owned));
                 expected_names.sort();
             }
             if rows::names(&new).await? != expected_names {
@@ -167,7 +176,7 @@ impl Operator {
     }
 
     /// Accept only a source-pinned schema-25 backup and a separate, already
-    /// migrated four-journal copy. Normal verify/restore still require schema 26.
+    /// migrated four-journal copy. Normal verify/restore still require the current schema.
     pub async fn compare_cashu_upgrade(&self, bundle: &Path, candidate: &Path) -> Result<Manifest> {
         let manifest = self.verify_cashu_upgrade_source(bundle).await?;
         files::private_bundle(candidate)?;
@@ -229,6 +238,10 @@ mod tests {
         .await
         .unwrap();
         database::migrate_core_through(&pool, 26).await.unwrap();
+        compare_images(&before, &after, &policy).await.unwrap();
+        database::migrate_core_through(&pool, database::CURRENT_CORE_SCHEMA)
+            .await
+            .unwrap();
         compare_images(&before, &after, &policy).await.unwrap();
         sqlx::query("UPDATE ledger_entries SET delta_sats=delta_sats+1 WHERE id=1")
             .execute(&pool)

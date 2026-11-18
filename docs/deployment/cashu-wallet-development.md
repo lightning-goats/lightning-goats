@@ -589,11 +589,23 @@ per-transfer limits and outstanding exposure still apply.
 An unresolved intent reserves its entire authorized fee across time windows.
 The core replaces the reservation with the recorded fee after independently
 verifying the original Strike receive and authenticating the wallet result.
-It counts the fee for 24 hours from the receive verification time, bounded by
-the original intent time. The wallet counts the recorded fee for 24 hours
-from local reconciliation. Legacy wallet results without a retained time
-reserve their maximum for one window from the first writer upgrade. Budget
-pressure leaves fresh work waiting without creating a smaller invoice or
+The wallet counts the recorded fee for 24 hours from local reconciliation.
+Treasury RPC version 2 carries that time beside the original report. The core
+retains its first authenticated observation and counts the fee for 24 hours
+from the latest of that observation, the wallet time and Strike verification.
+Version 1 replies keep their original shape. Report bytes and digests remain
+stable when read through either version.
+
+Core schema 27 adds only the fee observation table and its retention triggers.
+The migration gives prior authenticated reports one rolling window from the
+migration time and preserves their amounts and report bytes. Legacy wallet
+results without a retained time reserve their maximum for one window from
+the first writer upgrade. For an existing schema-26 installation, qualify the
+coordinated backup and upgrade with the wallet still paused. Initialize its
+legacy fee timestamps before migrating the core so the core's backfill is at
+least as recent. Fresh conversions require a source-matched pair.
+
+Budget pressure leaves fresh work waiting without creating a smaller invoice or
 charging wallet attempts. Fees include the authorized preparation split and
 melt costs. Donation acquisition fees have their own per-acquisition limit.
 

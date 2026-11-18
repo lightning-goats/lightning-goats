@@ -75,7 +75,12 @@ impl Client {
                 .report
                 .as_ref()
                 .map(|data| {
-                    PeerMelt::authenticate(&self.registration, &peer, &serde_json::to_vec(data)?)
+                    PeerMelt::authenticate_with_fee_time(
+                        &self.registration,
+                        &peer,
+                        &serde_json::to_vec(data)?,
+                        reply.fee_recorded_at,
+                    )
                 })
                 .transpose()?;
             Ok::<_, anyhow::Error>(Response { reply, report })

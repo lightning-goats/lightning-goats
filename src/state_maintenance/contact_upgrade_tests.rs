@@ -100,7 +100,7 @@ pub(in crate::state_maintenance) async fn seed(root: &Path) -> (Policy, Keep) {
             .await
             .unwrap();
     }
-    sqlx::query("DELETE FROM _sqlx_migrations WHERE version=26")
+    sqlx::query("DELETE FROM _sqlx_migrations WHERE version>=26")
         .execute(&pool)
         .await
         .unwrap();
@@ -248,6 +248,10 @@ async fn contact_upgrade_qualifies_empty_cashu_addition_and_refuses_custody_or_d
     database::migrate_core_through(&pool, 25).await.unwrap();
     compare_images(&before, &after, &p).await.unwrap();
     database::migrate_core_through(&pool, 26).await.unwrap();
+    compare_images(&before, &after, &p).await.unwrap();
+    database::migrate_core_through(&pool, database::CURRENT_CORE_SCHEMA)
+        .await
+        .unwrap();
     compare_images(&before, &after, &p).await.unwrap();
     sqlx::query(
         "CREATE TRIGGER unqualified_cashu AFTER INSERT ON cashu_import_clock BEGIN SELECT 1; END",

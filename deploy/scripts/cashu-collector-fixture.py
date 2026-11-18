@@ -1,6 +1,6 @@
 """Actual native/key/encryption composition; service statuses are explicitly mocked."""
 from argparse import Namespace
-from contextlib import closing
+from contextlib import closing, contextmanager, nullcontext
 import hashlib
 import json
 import os
@@ -20,6 +20,54 @@ def digest(path):
     with path.open('rb') as source:
         for chunk in iter(lambda:source.read(65536),b''): h.update(chunk)
     return h.hexdigest()
+
+
+def prepare_systemd_masks(root, workers, lock, cleanup):
+    units = [worker['unit'] for worker in workers.values()]
+    if (root.parent != Path('/var/lib') or not root.name.startswith('lg-native-backup-')
+            or any(not unit.startswith(root.name + '-') for unit in units)):
+        raise ValueError('runtime masks must belong to this disposable fixture')
+
+    def systemctl(*args, check=True):
+        return subprocess.run(['/usr/bin/systemctl', *args], check=check, capture_output=True, timeout=30,
+                              stdin=subprocess.DEVNULL, env={'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'})
+
+    directory = Path('/run/systemd/system')
+    masks = [directory / unit for unit in units]
+    for unit, mask in zip(units, masks, strict=True):
+        shown = systemctl('show', '--property=LoadState', '--value', '--', unit, check=False)
+        if shown.stdout.strip() != b'not-found' or os.path.lexists(mask):
+            raise ValueError('fixture cannot adopt an existing systemd unit')
+    # This fixed lock path must be new on the disposable runner. Refuse to
+    # reuse an installed maintenance directory, even if it appears unused.
+    lock.parent.mkdir(mode=0o700)
+    cleanup.callback(lock.parent.rmdir)
+    cleanup.callback(lock.unlink, missing_ok=True)
+    cleanup.callback(systemctl, 'daemon-reload')
+    for path in masks:
+        path.symlink_to('/dev/null')
+        cleanup.callback(path.unlink)
+    systemctl('daemon-reload')
+
+
+@contextmanager
+def active_process(worker):
+    proc = subprocess.Popen(['/usr/bin/setpriv', f"--reuid={worker['uid']}", f"--regid={worker['gid']}",
+                             '--clear-groups', '--no-new-privs', '--', '/usr/bin/sleep', '30'],
+                            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        identity = Path(f'/proc/{proc.pid}/status')
+        deadline = time.monotonic() + 5
+        while not any(line.startswith('Uid:') and int(line.split()[1]) == worker['uid']
+                      for line in identity.read_text().splitlines()):
+            if proc.poll() is not None or time.monotonic() >= deadline:
+                raise ValueError('disposable runtime probe did not assume its UID')
+            time.sleep(0.01)
+        yield
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
+        proc.wait(timeout=5)
 
 
 def verify_restored_runtime_fences(stage, root, workers, binaries, configurations, roles):
@@ -88,7 +136,7 @@ def verify_restored_runtime_fences(stage, root, workers, binaries, configuration
 
 
 def qualify_install(capsule, bootstrap, stage, output_root, policy_path, common,
-                    workers, binaries, configurations, roles):
+                    workers, binaries, configurations, roles, systemd_masks):
     args = Namespace(stage=stage, stage_sha256=digest(stage / 'STAGED.json'),
                      policy=policy_path, policy_sha256=digest(policy_path))
     launcher = runpy.run_path(str(capsule / 'launch-cashu-backup.py'))
@@ -104,9 +152,12 @@ def qualify_install(capsule, bootstrap, stage, output_root, policy_path, common,
         else:
             raise ValueError('invalid installed checkpoint accepted')
 
-    wrong = subprocess.run(['/usr/bin/python3', '-I', '-S', '-B', str(capsule / 'launch-cashu-backup.py'),
-                            bootstrap, 'install-fenced', str(stage), 'ff' * 32, str(policy_path),
-                            args.policy_sha256], stdin=subprocess.DEVNULL, capture_output=True, timeout=45)
+    def invoke(checksum):
+        return subprocess.run(['/usr/bin/python3', '-I', '-S', '-B', str(capsule / 'launch-cashu-backup.py'),
+                               bootstrap, 'install-fenced', str(stage), checksum, str(policy_path),
+                               args.policy_sha256], stdin=subprocess.DEVNULL, capture_output=True, timeout=120)
+
+    wrong = invoke('ff' * 32)
     if (wrong.returncode != 1 or wrong.stdout or wrong.stderr !=
             b'Cashu fenced installation refused. Preserve the checkpoint and any installed fences.\n'):
         raise ValueError('authenticated install launch did not reject a changed review digest')
@@ -130,7 +181,11 @@ def qualify_install(capsule, bootstrap, stage, output_root, policy_path, common,
     try:
         for role, worker in workers.items():
             Path(worker['state']).rename(retained / role)
-        refused('fixture active writer refusal', check_quiescence=active)
+        if systemd_masks:
+            with active_process(workers['wallet']):
+                refused('runtime UID still has a process')
+        else:
+            refused('fixture active writer refusal', check_quiescence=active)
         if any(os.path.lexists(worker['state']) for worker in workers.values()):
             raise ValueError('active writer refusal published restored bytes')
         wallet = workers['wallet']
@@ -150,7 +205,14 @@ def qualify_install(capsule, bootstrap, stage, output_root, policy_path, common,
                 raise ValueError('interrupted restore published an unexpected role set')
         else:
             raise ValueError('fixture interruption was missed')
-        result = install(args, common, tool)
+        if systemd_masks:
+            resumed = invoke(args.stage_sha256)
+            if resumed.returncode:
+                raise ValueError('authenticated installer refused the real masked fixture: '
+                                 + resumed.stderr.decode(errors='replace'))
+            result = json.loads(resumed.stdout)
+        else:
+            result = install(args, common, tool)
         if (result['already_installed'] != published or result['roles'] != sorted(roles)
                 or result['result'] != 'CASHU_RESTORE_INSTALLED_FENCED'
                 or result['resume_authorized'] or result['services_changed']):
@@ -179,11 +241,13 @@ def qualify_install(capsule, bootstrap, stage, output_root, policy_path, common,
             'exact_retry_verified': True, 'changed_target_refused': True,
             'existing_live_image_refused': True, 'active_writer_refused': True,
             'existing_empty_target_supported': True, 'changed_installed_config_refused': True,
-            'authenticated_launch_wrong_digest_refused': True}
+            'authenticated_launch_wrong_digest_refused': True,
+            'authenticated_cli_retry_with_actual_masks': systemd_masks}
 
 
 def qualify_restore(source, output_root, collected, identity, selected, store,
-                    workers, binaries, configurations, native_roles, configured_keys, policy_path, common):
+                    workers, binaries, configurations, native_roles, configured_keys, policy_path,
+                    common, systemd_masks):
     """Pass the real encrypted collector output through the isolated launcher."""
     scripts = source / 'deploy/scripts'
     capsule = output_root / 'restore-capsule'
@@ -255,7 +319,7 @@ def qualify_restore(source, output_root, collected, identity, selected, store,
     if any(p.stat().st_mode & 0o111 for p in (destination / 'checkpoint-evidence/programs').iterdir()):
         raise ValueError('stager made an archived program executable')
     installation = qualify_install(capsule, digest(manifest), destination, output_root, policy_path, common,
-                                   workers, binaries, configurations, native_roles)
+                                   workers, binaries, configurations, native_roles, systemd_masks)
 
     def invoke_review(output, *options):
         return subprocess.run(
@@ -384,7 +448,7 @@ def qualify_restore(source, output_root, collected, identity, selected, store,
             'external_reconciliation_verified': False, 'resume_authorized': False}
 
 
-def qualify(source,root,states,uids,binaries,configurations,native_policy,args):
+def qualify(source,root,states,uids,binaries,configurations,native_policy,args,cleanup):
     config_root=root/'collector-config'; config_root.mkdir(mode=0o700)
     output_root=root/'collector-output'; output_root.mkdir(mode=0o700)
     selected={}
@@ -422,7 +486,7 @@ def qualify(source,root,states,uids,binaries,configurations,native_policy,args):
                   'wallet':'wallet','cashu_signer':'signer'}
     workers={role:{'uid':uids[key],'gid':uids[key],'state':str(states[key]),
         'unit':native_policy['components'][role]['unit'] if role in native_policy['components']
-               else 'lg-cashu-collector-fixture-'+role+'.service'} for role,key in native_roles.items()}
+               else f'{root.name}-{role}.service'} for role,key in native_roles.items()}
     cashu_client=config_root/'cashu-client.hex'; cashu_client.write_text('0'*63+'2');cashu_client.chmod(0o600)
     payout_client=config_root/'payout-client.hex'; payout_client.write_text('0'*63+'5');payout_client.chmod(0o600)
     policy={'version':1,'operator_exclusive':True,'workers':workers,
@@ -440,7 +504,10 @@ def qualify(source,root,states,uids,binaries,configurations,native_policy,args):
     module=runpy.run_path(str(source/'deploy/scripts/collect-cashu-backup.py'),
         init_globals={'verified_tool_identity':lambda:{'fixture':True,'authenticated_launcher_executed':False}})
     collect=module['collect']; globals_=collect.__globals__
-    globals_['GLOBAL_LOCK']=config_root/'maintenance.lock'
+    if args.systemd_masks:
+        prepare_systemd_masks(root, workers, module['GLOBAL_LOCK'], cleanup)
+    else:
+        globals_['GLOBAL_LOCK']=config_root/'maintenance.lock'
     check=module['check_quiescence']
     original_run=subprocess.run
     active=False
@@ -457,7 +524,7 @@ def qualify(source,root,states,uids,binaries,configurations,native_policy,args):
             'UnitFileState=masked\nControlGroup=\n').encode())
 
     def checked_status(workers,budget):
-        with patch.object(subprocess,'run',side_effect=service_status):
+        with (nullcontext() if args.systemd_masks else patch.object(subprocess,'run',side_effect=service_status)):
             check(workers,budget)
     globals_['check_quiescence']=checked_status
     original={str(p):digest(p) for directory in states.values() for p in directory.rglob('*') if p.is_file()}
@@ -494,7 +561,8 @@ def qualify(source,root,states,uids,binaries,configurations,native_policy,args):
     _, configured_keys = module['receiving_material'](json.loads(configurations['wallet'].read_bytes()))
     restore_result = qualify_restore(source, output_root, destination, identity, selected, store,
                                     workers, binaries, configurations, native_roles, configured_keys, policy_path,
-                                    dict(module, GLOBAL_LOCK=globals_['GLOBAL_LOCK'], check_quiescence=checked_status))
+                                    dict(module, GLOBAL_LOCK=globals_['GLOBAL_LOCK'], check_quiescence=checked_status),
+                                    args.systemd_masks)
     key_stage=destination/'plaintext/recovery-material'
     key_negatives=0
     def key_check(success):
@@ -544,9 +612,10 @@ def qualify(source,root,states,uids,binaries,configurations,native_policy,args):
         raise ValueError('pipeline fault changed retained plaintext or failed to stop')
     negative=0
     active=True
-    try:collect(policy_path,digest(policy_path),output_root/'active-writer')
-    except ValueError:negative+=1
-    else:raise ValueError('active writer was accepted')
+    with active_process(workers['wallet']) if args.systemd_masks else nullcontext():
+        try:collect(policy_path,digest(policy_path),output_root/'active-writer')
+        except ValueError:negative+=1
+        else:raise ValueError('active writer was accepted')
     if (output_root/'active-writer').exists():raise ValueError('active-writer refusal reached copying')
     active=False
     try:collect(policy_path,'aa'*32,output_root/'wrong-policy')
@@ -570,7 +639,8 @@ def qualify(source,root,states,uids,binaries,configurations,native_policy,args):
         'native_database_inventory_and_correlations':True,'native_key_bindings':True,
         'actual_age_archive_roundtrip':True,'original_application_bytes_unchanged':True,
         'committed_wal_copy_hashes_verified':True,
-        'refusal_cases':negative,'systemctl_calls_mocked':calls,'proc_uid_scan_actual':True,
+        'refusal_cases':negative,'systemctl_calls_mocked':calls,'systemd_masks_verified':args.systemd_masks,
+        'proc_uid_scan_actual':True,
         'native_key_material_refusal_cases':key_negatives,'client_credential_optional_lf_accepted':True,
         'encryption_output_limit_refused':True,'encryption_timeout_stub_refused':True,
         'maintenance_lock_path_is_disposable':True,'authenticated_launcher_executed':False,

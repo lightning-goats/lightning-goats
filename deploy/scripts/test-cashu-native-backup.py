@@ -42,6 +42,8 @@ def main():
         parser.add_argument('--'+option+'-cli',type=Path)
         parser.add_argument('--'+option+'-sha256')
     parser.add_argument('--rotate-receiving-key', action='store_true')
+    parser.add_argument('--systemd-masks', action='store_true',
+                        help='exercise the full collector against real masks on a disposable Actions runner')
     parser.add_argument('--systemd-package', nargs=3, metavar=('ARCHIVE', 'SOURCE', 'SHA256'),
                         help='rehearse packaged services using the initialized synthetic fixture')
     args = parser.parse_args()
@@ -58,6 +60,11 @@ def main():
         raise ValueError('key rotation requires the complete archive rehearsal')
     if args.systemd_package and extended:
         raise ValueError('systemd rehearsal uses only the three package executables')
+    if args.systemd_masks and (not all(collector_options)
+            or os.environ.get('GITHUB_ACTIONS') != 'true'
+            or not os.environ.get('GITHUB_RUN_ID', '').isdigit()
+            or not Path('/run/systemd/system').is_dir()):
+        raise ValueError('real mask testing requires the complete fixture on the disposable Actions runner')
     if (os.geteuid() != 0
             or os.readlink('/proc/self/ns/net') == os.readlink('/proc/1/ns/net')):
         raise ValueError('requires root in a fresh network namespace')
@@ -75,8 +82,9 @@ def main():
     verify = runpy.run_path(str(source / 'deploy/scripts/verify-cashu-backup.py'))['verify']
     # The host manager needs its original /run. Stage this fixture's programs
     # on the executable filesystem used by the other systemd rehearsals.
-    fixture_parent = '/var/lib' if args.systemd_package else '/run'
-    with tempfile.TemporaryDirectory(prefix='lg-native-backup-', dir=fixture_parent) as temporary:
+    fixture_parent = '/var/lib' if args.systemd_package or args.systemd_masks else '/run'
+    with (tempfile.TemporaryDirectory(prefix='lg-native-backup-', dir=fixture_parent) as temporary,
+          ExitStack() as cleanup):
         root = Path(temporary)
         root.chmod(0o711)
         binaries, hashes, states = {}, {}, {}
@@ -295,7 +303,7 @@ def main():
             collector_fixture=runpy.run_path(str(source/'deploy/scripts/cashu-collector-fixture.py'))
             collector_result=collector_fixture['qualify'](source,root,states,runtime_uids,binaries,
                 dict(core=config,wallet=wallet_config,signer=signer_config,**native_configurations),
-                native_policy,args)
+                native_policy,args,cleanup)
         # Exercise refusal against the actual initialized schemas, not hand-made
         # substitutes. Restore each disposable byte image before the next case.
         def refused():

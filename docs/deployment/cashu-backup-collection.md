@@ -179,9 +179,10 @@ start restored workers. Wallet/core/coordinated funded rollback remains required
 fixtures, checking its published archive and executable hashes and retaining its
 LICENSE. It installs nothing. The expanded native fixture uses actual application
 schemas, the native copy/key helper, native correlation verification and an actual
-age decrypt/byte comparison. Service statuses and the maintenance-lock path are
-explicitly mocked there; `/proc` UID scans and file locks are actual. Its initialized
-empty journals do not establish funded restore or installed service acceptance.
+age decrypt/byte comparison. The disposable Actions rehearsal checks actual
+runtime systemd masks, `/proc` runtime UIDs and the maintenance lock. The local
+fixture substitutes service statuses and uses a private lock path. Both use
+initialized empty journals.
 
 ## Stage a checkpoint for reconciliation
 
@@ -465,4 +466,7 @@ credential provisioning, and authorization for resumption are separate steps.
 The encrypted fixture rehearses installation using six disposable runtime
 UIDs. It verifies a retry after interruption, rejects a changed configuration
 and prior state, and confirms native startup refuses all six installed copies.
-The fixture uses initialized state, real ownership and mocked service statuses.
+The Actions job invokes the authenticated command with real masks to resume the
+interrupted attempt. It verifies that a process running under the wallet UID
+blocks installation even with every unit masked. Funded recovery still requires
+its own qualification.

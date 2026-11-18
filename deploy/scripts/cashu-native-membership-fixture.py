@@ -75,7 +75,7 @@ def prepare(source, root, states, uids, call, core_epoch, owner, client):
                                  ('signer', 'payout_signer', 'signer.db')]:
         policy['components'][role] = {'database': str(states[name] / filename),
                                       'uid': uids[name], 'gid': uids[name],
-                                      'unit': f'lg-offline-fixture-{role}.service'}
+                                      'unit': f'{root.name}-{role}.service'}
     return configurations, policy
 
 

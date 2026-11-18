@@ -257,7 +257,7 @@ jobs:
           path: ${{ runner.temp }}/cashu-wallet
       - name: Prepare pinned official backup encryption fixture dependency
         run: python3 deploy/scripts/prepare-cashu-backup-age.py "$RUNNER_TEMP/backup-age"
-      - name: Verify native Cashu backup and encrypted restore staging
+      - name: Verify native Cashu backup and fenced installation under systemd masks
         shell: bash
         run: |
           set -euo pipefail
@@ -265,7 +265,8 @@ jobs:
           import hashlib, os, subprocess
           from pathlib import Path
           root = Path(os.environ['RUNNER_TEMP'])
-          command = ['sudo', 'unshare', '--mount', '--net', '--', 'python3', 'deploy/scripts/test-cashu-private-run.py', '--', 'python3', 'deploy/scripts/test-cashu-native-backup.py', '--rotate-receiving-key']
+          command = ['sudo', '--preserve-env=GITHUB_ACTIONS,GITHUB_RUN_ID', 'unshare', '--net', '--', 'python3', '-B',
+                     'deploy/scripts/test-cashu-native-backup.py', '--rotate-receiving-key', '--systemd-masks']
           for name, path in [('core', root / 'cashu-core/core-cli'), ('wallet', root / 'cashu-wallet/wallet-cli'), ('signer', root / 'cashu-wallet/signer-cli'),
                              ('membership', root / 'cashu-core/membership-cli'), ('payout', root / 'cashu-core/payout-cli'),
                              ('payout-signer', root / 'cashu-core/payout-signer-cli'), ('statectl', root / 'cashu-core/statectl-cli'),

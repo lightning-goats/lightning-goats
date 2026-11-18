@@ -6,7 +6,7 @@ use crate::{
     operation_gate::{OperationGate, TreasuryPolicy},
     writer_lock::WriterLock,
 };
-use anyhow::{Result, ensure};
+use anyhow::{Context as _, Result, ensure};
 use cdk::{
     cdk_database::{Error as DatabaseError, WalletDatabase},
     nuts::{CurrencyUnit, PaymentMethod, State},
@@ -153,11 +153,18 @@ impl<T: Transport + Clone + 'static> Executor<T> {
             })
     }
 
-    /// Recover a crash after CDK reserved proofs but before journal binding.
-    /// Reads retained local state and never submits. A missing saga may be
-    /// reconstructed only from the original quote UUID and fully reserved proofs.
-    /// Missing reservations, advanced or conflicting state remain held.
+    /// Recover an already reserved preparation without submitting.
     pub async fn recover_preparation(&self, id: Uuid) -> Result<Uuid> {
+        self.recover_preparation_with_policy(id, None).await
+    }
+
+    /// With execution enabled, an exact quote-only checkpoint can complete its
+    /// original local proof reservation. No preparation path submits a melt.
+    pub(crate) async fn recover_preparation_with_policy(
+        &self,
+        id: Uuid,
+        execution: Option<&crate::treasury_scheduler::Execution>,
+    ) -> Result<Uuid> {
         let _lease = self.gate.arm_treasury(id)?;
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
@@ -194,9 +201,18 @@ impl<T: Transport + Clone + 'static> Executor<T> {
             validate_unsubmitted_saga(saga, operation, &original)?;
         }
         let stored = self.database.get_proofs_by_ys(ys.clone()).await?;
-        validate_held_proofs(&stored, &ys, &original, State::Reserved, Some(operation))?;
         let reserved = self.database.get_reserved_proofs(&operation).await?;
-        validate_held_proofs(&reserved, &ys, &original, State::Reserved, Some(operation))?;
+        let reservation_policy = if saga.is_none() && reserved.is_empty() {
+            let execution = execution
+                .filter(|policy| policy.execute)
+                .context("original CDK proof reservation requires treasury execution")?;
+            validate_held_proofs(&stored, &ys, &original, State::Unspent, None)?;
+            Some(execution)
+        } else {
+            validate_held_proofs(&stored, &ys, &original, State::Reserved, Some(operation))?;
+            validate_held_proofs(&reserved, &ys, &original, State::Reserved, Some(operation))?;
+            None
+        };
         let quotes = self.database.get_melt_quotes().await?;
         ensure!(
             quotes.iter().all(|q| q.used_by_operation.as_deref()
@@ -234,10 +250,12 @@ impl<T: Transport + Clone + 'static> Executor<T> {
         let input_fee = u64::from(cdk::fees::calculate_fee(&counts, &fees)?.total);
         let proofs = stored.into_iter().map(|p| p.proof).collect::<Vec<_>>();
         if saga.is_none() {
-            self.journal
-                .lock()
-                .map_err(|_| anyhow::anyhow!("wallet journal unavailable"))?
-                .check_treasury_preparation_evidence(
+            {
+                let mut journal = self
+                    .journal
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("wallet journal unavailable"))?;
+                journal.check_treasury_preparation_evidence(
                     &self.policy.binding,
                     id,
                     operation,
@@ -247,6 +265,20 @@ impl<T: Transport + Clone + 'static> Executor<T> {
                     now,
                     false,
                 )?;
+                if let Some(policy) = reservation_policy {
+                    journal.authorize_treasury_execution(
+                        &self.policy.binding,
+                        id,
+                        policy,
+                        i64::try_from(now)?,
+                    )?;
+                }
+            }
+            if reservation_policy.is_some() {
+                self.database.reserve_proofs(ys.clone(), &operation).await?;
+                let reserved = self.database.get_reserved_proofs(&operation).await?;
+                validate_held_proofs(&reserved, &ys, &original, State::Reserved, Some(operation))?;
+            }
             use cdk::wallet::types::{
                 MeltOperationData, MeltSagaState, OperationData, WalletSaga, WalletSagaState,
             };

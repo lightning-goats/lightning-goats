@@ -344,16 +344,17 @@ requires no existing operation owner even if the row is labelled unspent.
 Duplicate/missing/substituted rows or stale ownership retain the original claim
 and cannot authorize submission.
 
-`recover_preparation` also covers a completed CDK preparation whose journal
-binding was interrupted. Under the shared writer lease, it loads the original
-claim/quote/holds, resolves the operation from CDK's locked quote, and requires
-the same unadvanced saga and exact reserved proofs. It uses locally retained,
-mint-scoped keyset fees with CDK's arithmetic and the original fee budget, then
-atomically binds that same operation through the normal owned-output validator.
-Recovery performs no mint requests, creates no saga, and does not submit a melt.
-The caller separately resumes the now-bound preparation. Missing saga/proofs,
-advanced state, expired terms or conflicting ownership stay held; recovery of
-partially completed CDK preparation and service orchestration remain unfinished.
+Preparation recovery loads the original claim, quote and proof holds under the
+writer lease, then resolves the operation from CDK's locked quote. An exact
+reservation can be bound with execution paused. With execution enabled, an
+exact quote-only checkpoint can reserve the complete unspent and unowned set
+locally under the retained operation. The wallet uses locally retained
+mint-scoped fees and the original budget, and can recreate a missing
+`ProofsReserved` saga under that same UUID. The owned-output validator checks
+the source allocation before recovery mutates the CDK store. Melt submission
+remains a separately scheduled step that uses that operation and the original
+quote. Partial ownership, an unknown quote owner, expired terms, or an advanced
+or conflicting saga leave the claim held.
 
 Whole-proof treasury selection now derives its candidates from journaled owned
 outputs and their source attribution, rather than caller-supplied IDs. It

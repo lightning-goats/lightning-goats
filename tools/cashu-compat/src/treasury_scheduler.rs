@@ -374,6 +374,11 @@ impl<T: Transport + Clone + 'static> Worker<T> {
                     Action::RecoverPreparation => {
                         executor.recover_preparation(work.id).await?;
                     }
+                    Action::ResumePreparation => {
+                        executor
+                            .recover_preparation_with_policy(work.id, Some(&self.execution))
+                            .await?;
+                    }
                     Action::Submit => {
                         executor.resume_prepared(work.id).await?;
                     }

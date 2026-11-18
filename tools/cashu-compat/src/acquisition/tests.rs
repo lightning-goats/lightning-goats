@@ -1444,10 +1444,10 @@ async fn prepared_treasury_case(scenario: TreasuryScenario) -> Result<()> {
         let journal = Arc::new(Mutex::new(Journal::open(&path, harness.epoch, 8)?));
         let executor = crate::treasury_execution::Executor::new(
             harness.mint.clone(),
-            policy,
+            policy.clone(),
             database.clone(),
-            journal,
-            writer,
+            journal.clone(),
+            writer.clone(),
             harness.keys.clone(),
             65536,
         )?;
@@ -1503,6 +1503,7 @@ async fn prepared_treasury_case(scenario: TreasuryScenario) -> Result<()> {
                 assert!(database.get_saga(&operation).await?.is_none());
                 database.remove_melt_quote("unrelated-reservation").await?;
                 let original_rows = database.get_reserved_proofs(&operation).await?;
+                let original_ys = original_rows.iter().map(|row| row.y).collect::<Vec<_>>();
                 let mut changed_rows = original_rows.clone();
                 changed_rows[0].proof.amount = 99u64.into();
                 database.update_proofs(changed_rows, vec![]).await?;
@@ -1524,10 +1525,70 @@ async fn prepared_treasury_case(scenario: TreasuryScenario) -> Result<()> {
                 );
                 assert_eq!(database.get_saga(&operation).await?.unwrap().id, operation);
                 fault.execute_batch("DROP TRIGGER refuse_recovered_binding;")?;
-                assert_eq!(
-                    executor.recover_preparation(issued.intent.id).await?,
-                    operation
+
+                // Earlier interruption: CDK committed only the original quote
+                // owner. Paused recovery must leave the proofs untouched.
+                use crate::treasury_scheduler::{Execution, Tick, Worker};
+                database.delete_saga(&operation).await?;
+                database.release_proofs(&operation).await?;
+                let execution = Execution {
+                    execute: true,
+                    reconcile: true,
+                    maximum_attempts: 1,
+                    maximum_input_sats: 8,
+                    maximum_fee_sats: 2,
+                    operations_per_24h: 1,
+                    input_sats_per_24h: 8,
+                    fee_sats_per_24h: Some(2),
+                    maximum_in_flight_sats: 8,
+                    ..Default::default()
+                };
+                let paused = Execution {
+                    execute: false,
+                    ..execution.clone()
+                };
+                let make_worker = |execution| {
+                    Worker::from_parts(
+                        journal.clone(),
+                        database.clone(),
+                        writer.clone(),
+                        harness.keys.clone(),
+                        vec![(policy.clone(), harness.mint.clone())],
+                        execution,
+                        std::time::Duration::from_secs(2),
+                        65536,
+                    )
+                };
+                let worker = make_worker(paused)?;
+                assert_eq!(worker.tick(now as i64).await?, Tick::RetryRetained);
+                assert_eq!(worker.tick(now as i64 + 10).await?, Tick::Idle);
+                drop(worker);
+                assert!(database.get_reserved_proofs(&operation).await?.is_empty());
+                assert!(database.get_saga(&operation).await?.is_none());
+
+                // A different owner cannot be overwritten.
+                let first = original_ys[0];
+                let unrelated = Uuid::new_v4();
+                database.reserve_proofs(vec![first], &unrelated).await?;
+                assert!(
+                    executor
+                        .recover_preparation_with_policy(issued.intent.id, Some(&execution))
+                        .await
+                        .is_err()
                 );
+                assert_eq!(database.get_reserved_proofs(&unrelated).await?.len(), 1);
+                assert!(database.get_saga(&operation).await?.is_none());
+                database.release_proofs(&unrelated).await?;
+
+                let worker = make_worker(execution)?;
+                assert_eq!(worker.tick(now as i64 + 10).await?, Tick::Progress);
+                drop(worker);
+                let recovered = database.get_reserved_proofs(&operation).await?;
+                assert_eq!(
+                    recovered.iter().map(|row| row.y).collect::<BTreeSet<_>>(),
+                    original_ys.into_iter().collect::<BTreeSet<_>>(),
+                );
+                assert_eq!(database.get_saga(&operation).await?.unwrap().id, operation);
                 assert_eq!(harness.mint.quote_attempts.load(Ordering::SeqCst), 1);
                 assert_eq!(harness.mint.melt_attempts.load(Ordering::SeqCst), 0);
                 assert!(executor.prepare_reserved(issued.intent.id).await.is_err());

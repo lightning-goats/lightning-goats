@@ -1,5 +1,5 @@
 """Start verified Cashu release binaries in disposable systemd sandboxes."""
-from contextlib import ExitStack
+from contextlib import ExitStack, closing
 import hashlib
 import json
 import os
@@ -7,6 +7,7 @@ from pathlib import Path
 import runpy
 import shutil
 import socket
+import sqlite3
 import tarfile
 import tempfile
 import time
@@ -16,6 +17,7 @@ SCRIPTS = Path(__file__).resolve().parent
 WALLET = 'lightning-goats-cashud'
 SIGNER = 'lightning-goats-cashu-signerd'
 FENCE = 'CASHU_RECOVERY_REQUIRED'
+ROTATED_RECEIVER = '02e493dbf1c10d80f3581e4904930b1404cc6c13900ee0758474fa94abe8c4cd13'
 PROBE = '''
 import os
 from pathlib import Path
@@ -70,7 +72,13 @@ def diagnostics(command, process, log):
 
 def ready(command, process, endpoint, log):
     for _ in range(100):
-        if endpoint.is_socket() and process.properties().get('ActiveState') == 'active':
+        with socket.socket(socket.AF_UNIX) as probe:
+            probe.settimeout(0.1)
+            try:
+                reachable = probe.connect_ex(str(endpoint)) == 0
+            except TimeoutError:
+                reachable = False
+        if reachable and process.properties().get('ActiveState') == 'active':
             return
         if process.poll() is not None:
             break
@@ -78,8 +86,23 @@ def ready(command, process, endpoint, log):
     raise ValueError(f'{process.unit} did not start:\n{diagnostics(command, process, log)}')
 
 
+def inspect_wallet(directory):
+    database = directory / 'acquisition.sqlite'
+    with closing(sqlite3.connect(database.as_uri() + '?mode=ro', uri=True)) as db:
+        return (db.execute('SELECT * FROM runtime_registration').fetchall(),
+                db.execute('SELECT * FROM wallet_epoch').fetchall(),
+                db.execute('SELECT * FROM cdk_mint_namespaces ORDER BY mint_id').fetchall())
+
+
+def inspect_signer(directory):
+    database = directory / 'cashu-signing.sqlite'
+    with closing(sqlite3.connect(database.as_uri() + '?mode=ro', uri=True)) as db:
+        return (db.execute('SELECT binding FROM registration').fetchone(),
+                db.execute('SELECT id,request,attempts,signed_event FROM requests ORDER BY id').fetchall())
+
+
 def rehearse(selection, binaries, hashes, uids, states, wallet_config, signer_config,
-             helper, helper_state, credential):
+             helper, helper_state, credential, request_announcement):
     if os.environ.get('GITHUB_ACTIONS') != 'true' or not os.environ.get('GITHUB_RUN_ID', '').isdigit():
         raise ValueError('systemd fixture requires the disposable Actions runner')
     archive, source, checksum = selection
@@ -150,6 +173,7 @@ def rehearse(selection, binaries, hashes, uids, states, wallet_config, signer_co
         helper_bin = root / 'unused-nak'
         shutil.copyfile(helper, helper_bin)
         helper_bin.chmod(0o555)
+        settings = {}
         for role, original in [('wallet', wallet_config), ('signer', signer_config)]:
             value = json.loads(original.read_bytes())
             value['state_directory'] = str(state_dirs[role])
@@ -159,6 +183,8 @@ def rehearse(selection, binaries, hashes, uids, states, wallet_config, signer_co
                 value['socket'] = str(endpoints[role])
                 value['nak']['private_directory'] = str(helper_dir)
                 value['nak']['binary'] = str(helper_bin)
+                value['policy'].update(announcements=True, max_new_per_hour=3, max_attempts=1)
+            settings[role] = value
             configs[role] = root / f'{role}.json'
             configs[role].write_text(json.dumps(value))
             configs[role].chmod(0o444)
@@ -200,19 +226,20 @@ def rehearse(selection, binaries, hashes, uids, states, wallet_config, signer_co
                            ('ExecStartPre', ' '.join(['/usr/bin/python3', *args])),
                            ('StandardOutput', f'append:{logs[role]}'),
                            ('StandardError', f'append:{logs[role]}')]
-            if phase == 'fenced':
+            expected_refusal = phase in ('fenced', 'missing-key', 'wrong-key')
+            if expected_refusal:
                 properties = [(key, value) for key, value in properties if key != 'Restart']
                 properties += [('Restart', 'no'), ('CollectMode', 'inactive')]
             result = command(['systemd-run', '--unit', unit,
                               *[f'--property={k}={v}' for k, v in properties], '--',
                               str(installed[role]), 'run', str(configs[role])], check=False)
-            if result.returncode and phase != 'fenced':
+            if result.returncode and not expected_refusal:
                 raise ValueError(f'{role} sandbox launch exited {result.returncode}: '
                                  f'{(result.stdout + result.stderr)[-1400:]}\n'
                                  f'{diagnostics(command, process, logs[role])}')
             return process
 
-        for phase in ('fresh', 'restart'):
+        def start_pair(phase):
             processes = {}
             for role in roles:
                 logs[role].write_text('')
@@ -225,10 +252,73 @@ def rehearse(selection, binaries, hashes, uids, states, wallet_config, signer_co
                 if set(map(int, status['Uid'].split())) != {uids[role]}:
                     raise ValueError('systemd runtime UID differs from registration')
                 processes[role] = process
+            return processes
+
+        def stop_pair(processes):
             for process in processes.values():
                 process.terminate()
                 if process.wait(timeout=15):
                     raise ValueError('Cashu runtime failed to stop cleanly')
+
+        wallet_state = state_dirs['wallet']
+        signer_state = state_dirs['signer']
+        before_wallet = inspect_wallet(wallet_state)
+        before_signer, no_requests = inspect_signer(signer_state)
+        anchor_names = ('wallet-seed.bin', 'receiving-key.bin')
+        anchor_hashes = {name: package['file_sha256'](wallet_state / name) for name in anchor_names}
+        wallet_settings, policy = settings['wallet'], settings['signer']['policy']
+        old_receiver = wallet_settings['receiving_key']
+        if (no_requests or policy['receiving_key'] != old_receiver[2:]
+                or ROTATED_RECEIVER == old_receiver):
+            raise ValueError('unexpected source receiving policy or prior signing work')
+        processes = start_pair('fresh')
+        original = request_announcement(endpoints['signer'], uids['wallet'], uids['signer'], policy)
+        stop_pair(processes)
+        binding, original_rows = inspect_signer(signer_state)
+        if (binding != before_signer or len(original_rows) != 1
+                or (original_rows[0][0], original_rows[0][2], original_rows[0][3]) != (original, 1, None)):
+            raise ValueError('original synthetic signer attempt was not retained')
+
+        rotated_file = wallet_state / f'receiving-key-{ROTATED_RECEIVER}.bin'
+        wallet_settings.update(receiving_key_anchor=old_receiver, receiving_key=ROTATED_RECEIVER,
+                               retained_receiving_keys=[{'public_key': old_receiver}])
+        policy['receiving_key'] = ROTATED_RECEIVER[2:]
+        for role in roles:
+            configs[role].write_text(json.dumps(settings[role]))
+
+        for phase in ('missing-key', 'wrong-key'):
+            if phase == 'wrong-key':
+                with rotated_file.open('xb') as output:
+                    os.fchmod(output.fileno(), 0o600)
+                    os.fchown(output.fileno(), uids['wallet'], uids['wallet'])
+                    output.write(bytes(31) + bytes([1]))
+            before = snapshot(wallet_state)
+            logs['wallet'].write_text('')
+            process = launch('wallet', phase)
+            stopped = process.wait(timeout=18)
+            if (stopped != 1 or endpoints['wallet'].exists()
+                    or 'wallet startup rejected' not in logs['wallet'].read_text()
+                    or snapshot(wallet_state) != before):
+                raise ValueError(f'{phase} changed or opened installed wallet state:\n'
+                                 + diagnostics(command, process, logs['wallet']))
+        rotated_file.write_bytes(bytes(31) + bytes([4]))
+
+        processes = start_pair('restart')
+        stale = request_announcement(endpoints['signer'], uids['wallet'], uids['signer'], policy,
+                                     receiving_key=old_receiver[2:])
+        current = request_announcement(endpoints['signer'], uids['wallet'], uids['signer'], policy)
+        stop_pair(processes)
+        binding, rows = inspect_signer(signer_state)
+        retained = {row[0]: row for row in rows}
+        if (binding != before_signer or set(retained) != {original, current}
+                or retained[original] != original_rows[0] or stale in retained
+                or retained[current][2:] != (1, None)
+                or json.loads(retained[current][1])['intent']['receiving_key'] != ROTATED_RECEIVER[2:]
+                or (helper_dir / 'invocations').read_bytes() != b'attempt\nattempt\n'):
+            raise ValueError('rotated signer changed original history or accepted stale policy')
+        if (inspect_wallet(wallet_state) != before_wallet
+                or {name: package['file_sha256'](wallet_state / name) for name in anchor_names} != anchor_hashes):
+            raise ValueError('rotation changed the wallet anchor, seed, registration or mint namespaces')
 
         for role in roles:
             marker = state_dirs[role] / FENCE
@@ -250,4 +340,9 @@ def rehearse(selection, binaries, hashes, uids, states, wallet_config, signer_co
                 archive_sha256=checksum, encrypted_signer_credential=True,
                 repeated_start_and_stop=True, distinct_runtime_uids=True,
                 loopback_ip_denied_by_systemd=True, installed_fences_preserved=True,
-                scope='synthetic empty wallet and signer; no external or financial effects')
+                receiving_key_rotation={'wallet_anchor_and_namespace_unchanged': True,
+                                        'missing_and_wrong_key_refused': True,
+                                        'signer_original_request_unchanged': True,
+                                        'stale_announcement_refused': True,
+                                        'new_announcement_reached_inert_helper': True},
+                scope='synthetic receiving-key rotation with inert signer; no external or financial effects')

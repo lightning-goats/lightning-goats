@@ -856,6 +856,13 @@ registration and journal. The current-policy check keeps outdated announcements
 out of active publication. Rehearse both configurations before an installed
 change.
 
+The inactive release rehearsal uses both packaged services and an inert
+signing helper. It checks that the wallet refuses a missing or mismatched
+rotated key and that both services restart with their original registrations.
+It also checks that the signer preserves the old request, rejects obsolete
+announcements and accepts the new key's announcement for signing. Live
+publication and operator-approved rotation require separate acceptance.
+
 The encrypted checkpoint collects the original and additional configured key
 files and verifies them against the recorded configuration. Retain the
 checkpoint and its receipt through the separately approved rotation.

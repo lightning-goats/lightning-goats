@@ -28,14 +28,14 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def retain_failed_signing_attempt(socket, wallet_uid, signer_gid, policy):
+def retain_failed_signing_attempt(socket, wallet_uid, signer_gid, policy, *, receiving_key=None):
     """Use the actual broker and a local helper that always fails."""
     operation = str(uuid.uuid4())
     request = json.dumps({
         'version': 1, 'operation_id': operation, 'wallet_instance': policy['wallet_instance'],
         'wallet_epoch': policy['wallet_epoch'],
         'intent': {'purpose': 'announcement', 'owner': policy['owner'],
-                   'receiving_key': policy['receiving_key'], 'created_at': int(time.time()),
+                   'receiving_key': receiving_key or policy['receiving_key'], 'created_at': int(time.time()),
                    'mints': sorted(policy['mints']), 'relays': sorted(policy['relays'])},
     })
     client = """
@@ -363,7 +363,8 @@ def main():
         if args.systemd_package:
             rehearse = runpy.run_path(str(source / 'deploy/scripts/rehearse-cashu-systemd.py'))['rehearse']
             print(json.dumps(rehearse(args.systemd_package, binaries, hashes, runtime_uids, states,
-                                      wallet_config, signer_config, helper, helper_state, credential),
+                                      wallet_config, signer_config, helper, helper_state, credential,
+                                      retain_failed_signing_attempt),
                              sort_keys=True))
             return
         native_configurations, native_policy = {}, None

@@ -483,6 +483,16 @@ the original and new files against the checkpoint and native key verifier,
 reject a replaced copied key, and check the recovered filename and bytes before
 running the six fenced native commands.
 
+The inactive release rehearsal starts the packaged wallet and signer as distinct
+systemd users. Rotate their receiving policy while the synthetic services are
+stopped. The wallet must refuse to start with a missing or mismatched new key.
+With the matching key installed, verify both services restart with the original
+registrations, wallet seed, anchor key and mint namespaces. The restarted
+signer must preserve the original request, refuse an announcement for the
+retired key and route the current-key request to the inert helper. This
+rehearsal keeps relay and mint access blocked. The native fixture above
+qualifies redemption using the retired key.
+
 ## Cashu mint policy review and installation
 
 Review a protected candidate that pauses a mint with held work and introduces

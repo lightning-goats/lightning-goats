@@ -535,10 +535,42 @@ class CollectorTests(unittest.TestCase):
                 payout, path, _ = candidates['signer']
                 self.assertFalse(payout.exists())
                 INSTALL['publish_no_replace'](path, payout, self.budget)
+
+            collect = MODULE['collect_systemd_signer_clients']
+            installed_policy = {'cashu_client_source': str(cashu), 'payout_client_source': str(payout)}
+            fixture_module = {**INSTALL, 'HOST_KEY': host_key}
+
+            def export(target, sources, stack, selected=installed_policy):
+                target.mkdir(mode=0o700)
+                with patch.object(runpy, 'run_path', return_value=fixture_module):
+                    return list(collect(selected, target, self.budget, stack, sources))
+
+            exported = self.root / 'exported'
+            with ExitStack() as temporary:
+                sources = []
+                records = export(exported, sources, temporary)
+                self.assertEqual(len(sources), 3)
+                for record in records:
+                    self.assertEqual(record['source_sha256'], MODULE['sha'](Path(record['source']).read_bytes()))
+                    target = exported / Path(record['path']).name
+                    self.assertEqual(target.read_bytes(), (archive / target.name).read_bytes())
+                    self.assertEqual(target.stat().st_mode & 0o777, 0o600)
+                saved_payout = payout.read_bytes()
+                payout.write_bytes(cashu.read_bytes())
+                with self.assertRaisesRegex(ValueError, 'original source changed'):
+                    sources[-1].check()
+                payout.write_bytes(saved_payout)
+
+            with ExitStack() as temporary, self.assertRaisesRegex(ValueError, 'separate systemd signer sources'):
+                export(self.root / 'same-source', [], temporary,
+                       {**installed_policy, 'payout_client_source': str(cashu)})
+
             misplaced = cashu.read_bytes()
             payout.write_bytes(misplaced)
             with ExitStack() as temporary, self.assertRaises(ValueError):
                 prepare(temporary)
+            with ExitStack() as temporary, self.assertRaises(ValueError):
+                export(self.root / 'wrong-unit-name', [], temporary)
             self.assertEqual(payout.read_bytes(), misplaced)
             raw = (archive / 'payout-client.hex').read_bytes()
             unnamed = subprocess.run(['/usr/bin/systemd-creds', '--with-key=host', 'encrypt', '-', '-'],
@@ -547,6 +579,9 @@ class CollectorTests(unittest.TestCase):
             with (ExitStack() as temporary,
                   self.assertRaisesRegex(ValueError, 'missing its unit credential name')):
                 prepare(temporary)
+            with (ExitStack() as temporary,
+                  self.assertRaisesRegex(ValueError, 'missing its unit credential name')):
+                export(self.root / 'unnamed', [], temporary)
             self.assertEqual(payout.read_bytes(), unnamed)
 
         wrong_identity = self.root / 'foreign-host-key'

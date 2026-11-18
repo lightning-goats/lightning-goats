@@ -111,6 +111,20 @@ def check_credential_store(store, common):
         private_attributes(path)
 
 
+def signer_plaintext(name, encrypted, budget):
+    decoded = base64.b64decode(b''.join(encrypted.split()), validate=True)
+    if not decoded.startswith(HOST_CREDENTIAL):
+        raise ValueError('host-encrypted signer credential required')
+    plaintext = systemd_credential('decrypt', name, encrypted, budget)
+    if not re.fullmatch(rb'[0-9a-fA-F]{64}\n?', plaintext):
+        raise ValueError('invalid portable signer client')
+    # systemd also accepts unnamed envelopes when --name is supplied.
+    if systemd_credential('decrypt', 'lg-cashu-restore-name-probe', encrypted,
+                          budget, allow_refusal=True) is not None:
+        raise ValueError('signer credential is missing its unit credential name')
+    return plaintext
+
+
 def prepare_signer_clients(store, stage, originals, policy, common, budget, stack):
     check_credential_store(store, common)
     if store.is_relative_to(stage):
@@ -142,15 +156,8 @@ def prepare_signer_clients(store, stage, originals, policy, common, budget, stac
         else:
             encrypted = systemd_credential('encrypt', name, plaintext, budget)
             candidate = directory / filename
-        decoded = base64.b64decode(b''.join(encrypted.split()), validate=True)
-        if not decoded.startswith(HOST_CREDENTIAL) or not hmac.compare_digest(
-                systemd_credential('decrypt', name, encrypted, budget), plaintext):
-            raise ValueError('installed signer credential differs from the original client or host encryption')
-        # systemd accepts unnamed envelopes even with --name. A different
-        # name must fail for the candidate to be bound to this signer unit.
-        if systemd_credential('decrypt', 'lg-cashu-restore-name-probe', encrypted,
-                              budget, allow_refusal=True) is not None:
-            raise ValueError('signer credential is missing its unit credential name')
+        if not hmac.compare_digest(signer_plaintext(name, encrypted, budget), plaintext):
+            raise ValueError('installed signer credential differs from the original client')
         if candidate is not None:
             common['write'](candidate, encrypted)
         prepared[role] = (target, candidate, common['sha'](encrypted))

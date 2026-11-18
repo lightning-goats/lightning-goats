@@ -924,8 +924,32 @@ def qualify(source,root,states,uids,binaries,configurations,native_policy,args,c
     workers={role:{'uid':uids[key],'gid':uids[key],'state':str(states[key]),
         'unit':native_policy['components'][role]['unit'] if role in native_policy['components']
                else f'{root.name}-{role}.service'} for role,key in native_roles.items()}
-    cashu_client=config_root/'cashu-client.hex'; cashu_client.write_text('0'*63+'2');cashu_client.chmod(0o600)
-    payout_client=config_root/'payout-client.hex'; payout_client.write_text('0'*63+'5\n');payout_client.chmod(0o600)
+    module=runpy.run_path(str(source/'deploy/scripts/collect-cashu-backup.py'),
+        init_globals={'verified_tool_identity':lambda:{'fixture':True,'authenticated_launcher_executed':False}})
+    signer_secrets = {'cashu-client.hex': b'0' * 63 + b'2',
+                      'payout-client.hex': b'0' * 63 + b'5\n'}
+    systemd_sources = args.systemd_masks and args.rotate_receiving_key
+    if systemd_sources:
+        install = runpy.run_path(str(source / 'deploy/scripts/install-cashu-restore.py'))
+        signer_systemd_command('/usr/bin/systemd-creds', 'setup')
+        input_store = config_root / 'installed-signer-sources'
+        input_store.mkdir(mode=0o700)
+        inputs = {}
+        budget = module['Budget'](4096, 30)
+        for field, archived, name, filename in install['SIGNER_CLIENTS'].values():
+            path = input_store / filename
+            encrypted = install['systemd_credential']('encrypt', name, signer_secrets[archived], budget)
+            path.write_bytes(encrypted)
+            path.chmod(0o600)
+            inputs[field] = str(path)
+        inputs['systemd_signer_sources'] = True
+    else:
+        for filename, secret in signer_secrets.items():
+            path = config_root / filename
+            path.write_bytes(secret)
+            path.chmod(0o600)
+        inputs = {'cashu_client_source': str(config_root / 'cashu-client.hex'),
+                  'payout_client_source': str(config_root / 'payout-client.hex')}
     helper_files = []
     runtime_binaries = {role: binaries[key] for role, key in native_roles.items()}
     if args.funded_fixture is not None:
@@ -938,15 +962,13 @@ def qualify(source,root,states,uids,binaries,configurations,native_policy,args,c
         'core_config':str(configurations['core']),'membership_config':str(configurations['membership']),
         'payout_config':str(configurations['payout']),'payout_signer_config':str(configurations['payout_signer']),
         'wallet_config':str(configurations['wallet']),'cashu_signer_config':str(configurations['signer']),
-        'cashu_client_source':str(cashu_client),'payout_client_source':str(payout_client),
+        **inputs,
         'historical_receiving_keys':[],'extra_files':helper_files,
         'artifacts':{name:{'path':str(path),'sha256':digest(path)} for name,path in selected.items() if name!='keygen'},
         'runtime_artifacts':{role:{'path':str(path),'sha256':digest(path)} for role,path in runtime_binaries.items()},
         'recipient':recipient,'component_bytes':128*1024**2,'total_bytes':1024**3,'deadline_seconds':300}
     policy_path=config_root/'policy.json'
     policy_path.write_text(json.dumps(policy));policy_path.chmod(0o600)
-    module=runpy.run_path(str(source/'deploy/scripts/collect-cashu-backup.py'),
-        init_globals={'verified_tool_identity':lambda:{'fixture':True,'authenticated_launcher_executed':False}})
     collect=module['collect']; globals_=collect.__globals__
     if args.systemd_masks:
         prepare_systemd_masks(root, workers, module['GLOBAL_LOCK'], cleanup)
@@ -985,6 +1007,15 @@ def qualify(source,root,states,uids,binaries,configurations,native_policy,args,c
     for item in collection['originals']:
         if digest(destination/'plaintext'/item['path'])!=item['sha256']:
             raise ValueError('retained copy digest differs from collection metadata: '+item['path'])
+    if systemd_sources:
+        records = {item['path']: item for item in collection['originals']}
+        for field, archived, _, _ in install['SIGNER_CLIENTS'].values():
+            name = 'recovery-material/' + archived
+            original = Path(inputs[field])
+            if (records[name]['source'] != str(original)
+                    or records[name]['source_sha256'] != digest(original)
+                    or (destination / 'plaintext' / name).read_bytes() != signer_secrets[archived]):
+                raise ValueError('host-bound signer export lost the original identity or binding')
     restored=root/'collector-decrypted.tar'
     with restored.open('xb') as output:
         os.fchmod(output.fileno(),0o600)
@@ -1092,6 +1123,7 @@ def qualify(source,root,states,uids,binaries,configurations,native_policy,args,c
     return {'result':'CASHU_COORDINATED_COLLECTOR_FIXTURE_VERIFIED',
         'native_database_inventory_and_correlations':True,'native_key_bindings':True,
         'actual_age_archive_roundtrip':True,'original_application_bytes_unchanged':True,
+        'host_encrypted_signer_clients_collected':systemd_sources,
         'committed_wal_copy_hashes_verified':True,
         'refusal_cases':negative,'systemctl_calls_mocked':calls,'systemd_masks_verified':args.systemd_masks,
         'proc_uid_scan_actual':True,

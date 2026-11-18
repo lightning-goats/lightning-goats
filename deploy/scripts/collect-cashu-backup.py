@@ -254,7 +254,9 @@ def load_policy(path, expected, budget, *, allow_missing_state=False):
               'cashu_signer_config', 'payout_signer_config', 'cashu_client_source',
               'payout_client_source', 'historical_receiving_keys', 'extra_files',
               'artifacts', 'runtime_artifacts', 'recipient', 'component_bytes', 'total_bytes', 'deadline_seconds'}
-    if (set(p) != fields or type(p['version']) is not int or p['version'] != 1 or p['operator_exclusive'] is not True
+    if (set(p) - {'systemd_signer_sources'} != fields
+            or ('systemd_signer_sources' in p and p['systemd_signer_sources'] is not True)
+            or type(p['version']) is not int or p['version'] != 1 or p['operator_exclusive'] is not True
             or set(p['workers']) != ROLES or set(p['artifacts']) != TOOLS or set(p['runtime_artifacts']) != ROLES
             or not re.fullmatch('age1[023456789acdefghjklmnpqrstuvwxyz]{58}', p['recipient'])
             or type(p['component_bytes']) is not int or not 4096 <= p['component_bytes'] <= 1024**3
@@ -284,6 +286,35 @@ def load_policy(path, expected, budget, *, allow_missing_state=False):
         if set(value) != {'path','sha256'} or not re.fullmatch('[0-9a-f]{64}', value['sha256']):
             raise ValueError('explicit selected artifact hashes required')
     return p, raw
+
+
+def collect_systemd_signer_clients(policy, keys, budget, stack, sources):
+    # The authenticated launcher checks this sibling before running the collector.
+    install = runpy.run_path(str(HERE / 'install-cashu-restore.py'))
+    roles = install['SIGNER_CLIENTS'].values()
+    store = Path(policy['cashu_client_source']).parent
+    install['check_credential_store'](store, {'protected_directory': protected_directory})
+    if any(policy[field] != str(store / filename) for field, _, _, filename in roles):
+        raise ValueError('explicit separate systemd signer sources in one store required')
+    host = install['HOST_KEY']
+    install['private_attributes'](host)
+    host_key = stack.enter_context(closing(Frozen(host, 0, 65536, budget, gid=0)))
+    install['ensure_existing_host_key'](host_key, budget)
+    sources.append(host_key)
+    for field, target, name, _ in roles:
+        path = Path(policy[field])
+        install['private_attributes'](path)
+        frozen = stack.enter_context(closing(Frozen(path, 0, 4096, budget, gid=0)))
+        sources.append(frozen)
+        frozen.file.seek(0)
+        plaintext = install['signer_plaintext'](name, frozen.file.read(4096), budget)
+        host_key.check()
+        frozen.check()
+        budget.add(len(plaintext))
+        write(keys / target, plaintext)
+        yield {'source': str(path), 'path': 'recovery-material/' + target,
+               'source_uid': 0, 'source_gid': 0, 'source_mode': stat.S_IMODE(frozen.expected[4]),
+               'source_sha256': frozen.digest, 'sha256': sha(plaintext), 'bytes': len(plaintext)}
 
 
 @contextmanager
@@ -532,8 +563,11 @@ def collect(policy_path, expected, destination):
         for name,role in [('wallet-seed.bin','wallet_seed'),('receiving-key.bin','receiving_key')]:
             copied_key=component(role,wallet_state/name,permissions=key_permissions)
             copy_source(copied_key,keys/name)
-        for role,field,name in [('cashu_signer','cashu_client_source','cashu-client.hex'),('signer','payout_client_source','payout-client.hex')]:
-            copy_source(p[field],keys/name,maximum=65)
+        if p.get('systemd_signer_sources'):
+            copied.extend(collect_systemd_signer_clients(p, keys, budget, stack, sources))
+        else:
+            copy_source(p['cashu_client_source'], keys / 'cashu-client.hex', maximum=65)
+            copy_source(p['payout_client_source'], keys / 'payout-client.hex', maximum=65)
         historical=[]
         for index,h in enumerate(p['historical_receiving_keys']):
             if set(h) != {'source','public_key'}: raise ValueError('historical key binding required')

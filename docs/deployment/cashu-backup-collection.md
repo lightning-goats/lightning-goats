@@ -112,10 +112,27 @@ key sources. Component, aggregate plaintext-plus-ciphertext and duration bounds
 are mandatory. These storage limits are unrelated to financial execution limits.
 
 Client key files contain 64 hexadecimal characters and optional LF. They must be
-private root-owned recovery sources. A systemd host-bound encrypted credential
-blob cannot substitute for the portable key. See the fenced installer below for
-reprovisioning on a replacement host. Export and external bunker permissions
-need separate acceptance. `verify-recovery-keys PRIVATE_STAGE` uses
+private root-owned recovery sources. A collection policy can also read the two
+host-encrypted signer clients directly. For the shipped systemd bindings, add
+these fields to the protected policy:
+
+```json
+{
+  "systemd_signer_sources": true,
+  "cashu_client_source": "/etc/credstore.encrypted/lg-cashu-nostr-client",
+  "payout_client_source": "/etc/credstore.encrypted/cyberherd-signer-client"
+}
+```
+
+Both files must share a protected root-private store. The collector requires
+the current systemd host key and checks each envelope against its expected unit
+credential name. It writes the portable bytes only to the private checkpoint
+before age encryption. The collection metadata records the original ciphertext
+hashes. Omit `systemd_signer_sources` to use the two portable files described in
+the [policy example](../../deploy/cashu/backup-collection.json.example).
+See the fenced installer below for reprovisioning on a replacement host.
+External bunker permissions need separate acceptance.
+`verify-recovery-keys PRIVATE_STAGE` uses
 the pinned curve library to compare both client keys with their configured public
 identities, reject shared/project identities, compare the receiving key, and
 recompute the wallet seed's immutable journal binding. Explicit historical keys
@@ -124,8 +141,7 @@ are checked too; this does not establish historical descriptor-window completene
 Extra files must explicitly include other required application credentials,
 helper state, protected policies and supporting artifacts. Unknown files in the
 inventoried runtime/helper directories refuse. Complete installed credential
-coverage, portable export and historical-key administration remain acceptance
-requirements.
+coverage and historical-key administration remain acceptance requirements.
 
 The root-owned capsule contains exactly `launch-cashu-backup.py`,
 `collect-cashu-backup.py`, `stage-cashu-restore.py`, `review-cashu-restore.py`,

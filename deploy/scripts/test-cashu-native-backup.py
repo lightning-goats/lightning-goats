@@ -73,7 +73,10 @@ def main():
         runtime_uids.update(zip(['membership', 'payout', 'payout_signer'], available[3:6]))
     source = Path(__file__).resolve().parents[2]
     verify = runpy.run_path(str(source / 'deploy/scripts/verify-cashu-backup.py'))['verify']
-    with tempfile.TemporaryDirectory(prefix='lg-native-backup-', dir='/run') as temporary:
+    # The host manager needs its original /run. Stage this fixture's programs
+    # on the executable filesystem used by the other systemd rehearsals.
+    fixture_parent = '/var/lib' if args.systemd_package else '/run'
+    with tempfile.TemporaryDirectory(prefix='lg-native-backup-', dir=fixture_parent) as temporary:
         root = Path(temporary)
         root.chmod(0o711)
         binaries, hashes, states = {}, {}, {}
@@ -109,7 +112,7 @@ def main():
                                     stdin=subprocess.DEVNULL, capture_output=True,
                                     text=True, timeout=30, umask=0o077)
             if (result.returncode == 0) != success:
-                raise ValueError(name + ' native fixture command had unexpected outcome')
+                raise ValueError(f'{name} synthetic fixture exited {result.returncode}: {result.stderr[-1200:]}')
             return result
 
         ledger = states['core'] / 'ledger.sqlite'

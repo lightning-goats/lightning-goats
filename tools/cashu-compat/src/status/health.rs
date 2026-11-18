@@ -1,5 +1,12 @@
 //! Private journal accounting, not a live mint balance or payment authority.
-use crate::{journal::custody::Custody, service_config::Config};
+use crate::{
+    journal::{
+        custody::Custody,
+        treasury_scheduling::{SCHEDULED_TREASURY_WORK, daily_fees},
+    },
+    service_config::Config,
+    treasury_scheduler::Execution,
+};
 use anyhow::{Result, ensure};
 use rusqlite::{Connection, params};
 use serde::Serialize;
@@ -14,6 +21,7 @@ pub struct Health {
     pub malformed_retained_acknowledgments: u64,
     pub totals: Funds,
     pub queue: Queue,
+    pub treasury: TreasuryQueue,
     pub mints: Vec<MintFunds>,
     pub mints_truncated: bool,
 }
@@ -48,6 +56,89 @@ pub struct Queue {
     pub oldest_pending_age_seconds: Option<u64>,
     pub oldest_scheduled_due_at: Option<i64>,
     pub scheduled_lag_seconds: Option<u64>,
+}
+
+#[derive(Default, Serialize)]
+pub struct TreasuryQueue {
+    pub pending_operations: u64,
+    pub submitted_outcomes_pending: u64,
+    pub paid_cleanups_pending: u64,
+    pub finite_retries_exhausted: u64,
+    pub oldest_scheduled_due_at: Option<i64>,
+    pub rolling_fee_commitment_sats: Option<u64>,
+    pub rolling_fee_remaining_sats: Option<u64>,
+    pub operations: Vec<TreasuryOperation>,
+    pub operations_truncated: bool,
+}
+
+#[derive(Serialize)]
+pub struct TreasuryOperation {
+    pub intent_id: Uuid,
+    pub mint_id: String,
+    pub state: String,
+    pub stage: String,
+    pub attempts: u32,
+    pub next_attempt_at: Option<i64>,
+    pub continues_past_attempt_limit: bool,
+    pub retries_exhausted: bool,
+}
+
+impl TreasuryQueue {
+    fn read(db: &Connection, policy: &Execution, now: i64) -> Result<Self> {
+        let mut summary = Self::default();
+        let mut query = db.prepare(&format!(
+            "{SCHEDULED_TREASURY_WORK}
+             SELECT id,mint_id,state,action,attempts,next_attempt,continue_recovery,
+                    exhausted,COUNT(*) OVER(),
+                    SUM(continue_recovery AND action!='cleanup') OVER(),
+                    SUM(action='cleanup') OVER(),SUM(exhausted) OVER(),
+                    MIN(CASE WHEN next_attempt<=?3 THEN next_attempt END) OVER()
+             FROM (
+                 SELECT scheduled.*,(NOT continue_recovery AND attempts>0 AND attempts>=?2) AS exhausted
+                 FROM scheduled
+             )
+             ORDER BY continue_recovery DESC, exhausted DESC, ordering LIMIT ?4"
+        ))?;
+        let mut rows = query.query(params![
+            policy.execute,
+            policy.maximum_attempts,
+            now,
+            i64::try_from(super::DETAIL_LIMIT)?,
+        ])?;
+        while let Some(row) = rows.next()? {
+            if summary.operations.is_empty() {
+                summary.pending_operations = row.get(8)?;
+                summary.submitted_outcomes_pending = row.get(9)?;
+                summary.paid_cleanups_pending = row.get(10)?;
+                summary.finite_retries_exhausted = row.get(11)?;
+                summary.oldest_scheduled_due_at = row.get(12)?;
+            }
+            summary.operations.push(TreasuryOperation {
+                intent_id: Uuid::parse_str(&row.get::<_, String>(0)?)?,
+                mint_id: row.get(1)?,
+                state: row.get(2)?,
+                stage: row.get(3)?,
+                attempts: row.get(4)?,
+                next_attempt_at: row.get(5)?,
+                continues_past_attempt_limit: row.get(6)?,
+                retries_exhausted: row.get(7)?,
+            });
+        }
+        summary.operations_truncated = summary.pending_operations > summary.operations.len() as u64;
+        let has_fee_history: bool = db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name='treasury_fee_completions')",
+            [],
+            |row| row.get(0),
+        )?;
+        if has_fee_history {
+            let commitment = daily_fees(db, now)?;
+            summary.rolling_fee_commitment_sats = Some(commitment);
+            summary.rolling_fee_remaining_sats = policy
+                .fee_sats_per_24h
+                .map(|limit| limit.saturating_sub(commitment));
+        }
+        Ok(summary)
+    }
 }
 
 impl Funds {
@@ -132,8 +223,13 @@ impl Health {
         } else {
             (pending_receipts, 0, None)
         };
-        let oldest_scheduled_due_at: Option<i64> = db.query_row(
-            "SELECT MIN(due) FROM (SELECT s.next_attempt due FROM acquisition_schedule s JOIN acquisitions a ON a.id=s.acquisition_id WHERE a.state IN ('validated','acquisition_prepared','acquiring') UNION ALL SELECT s.next_attempt FROM receipt_delivery_schedule s JOIN acquisitions a ON a.id=s.acquisition_id WHERE a.state IN ('acquired','credit_export_pending') UNION ALL SELECT s.next_attempt FROM treasury_work_schedule s JOIN treasury_instructions i ON i.id=s.intent_id WHERE i.state!='reconciled') WHERE due<=?",[now],|r|r.get(0))?;
+        let treasury = TreasuryQueue::read(db, &config.treasury_execution, now)?;
+        let oldest_receipt_due_at: Option<i64> = db.query_row(
+            "SELECT MIN(due) FROM (SELECT s.next_attempt due FROM acquisition_schedule s JOIN acquisitions a ON a.id=s.acquisition_id WHERE a.state IN ('validated','acquisition_prepared','acquiring') UNION ALL SELECT s.next_attempt FROM receipt_delivery_schedule s JOIN acquisitions a ON a.id=s.acquisition_id WHERE a.state IN ('acquired','credit_export_pending')) WHERE due<=?",[now],|r|r.get(0))?;
+        let oldest_scheduled_due_at = oldest_receipt_due_at
+            .into_iter()
+            .chain(treasury.oldest_scheduled_due_at)
+            .min();
         let age = |timestamp: Option<i64>| -> Result<Option<u64>> {
             timestamp
                 .map(|t| {
@@ -158,6 +254,7 @@ impl Health {
             malformed_retained_acknowledgments,
             totals,
             queue,
+            treasury,
             mints,
             mints_truncated,
         })

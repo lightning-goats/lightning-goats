@@ -6,7 +6,7 @@ use serde::Serialize;
 use std::{collections::BTreeMap, os::unix::fs::MetadataExt, path::Path, time::Duration};
 use uuid::Uuid;
 mod health;
-pub use health::{Funds, Health, MintFunds, Queue};
+pub use health::{Funds, Health, MintFunds, Queue, TreasuryOperation, TreasuryQueue};
 mod recovery;
 pub use recovery::{PausedRecovery, RecoveryReadiness};
 

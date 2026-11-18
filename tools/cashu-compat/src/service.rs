@@ -724,6 +724,95 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn treasury_health_reports_current_stages_and_preserves_legacy_fee_history() -> Result<()>
+    {
+        use rusqlite::params;
+        let directory = crate::test_directory()?;
+        keys(directory.path())?;
+        let mut config = configuration(directory.path(), Uuid::new_v4(), Uuid::new_v4())?;
+        config.treasury_execution.maximum_attempts = 2;
+        config.treasury_execution.fee_sats_per_24h = Some(5);
+        let runtime = Runtime::initialize(config).await?;
+        let db = rusqlite::Connection::open(directory.path().join("acquisition.sqlite"))?;
+        let (_, mut issued) = crate::treasury::tests::fixture();
+        issued.intent.maximum_fee_sats = 1;
+        for index in 0..66 {
+            issued.intent.id = Uuid::from_u128(100 + index);
+            issued.receive_request_id = Uuid::from_u128(200 + index);
+            issued.payment_hash = format!("{index:064x}");
+            let state = match index {
+                0 => "prepared",
+                1 => "submitted",
+                2 => "reconciled",
+                _ => "bound",
+            };
+            db.execute(
+                "INSERT INTO treasury_instructions(id,issued_json,receive_id,payment_hash,state)
+                 VALUES(?,?,?,?,?)",
+                params![
+                    issued.intent.id.to_string(),
+                    serde_json::to_vec(&issued)?,
+                    issued.receive_request_id.to_string(),
+                    issued.payment_hash,
+                    state
+                ],
+            )?;
+        }
+        let prepared = Uuid::from_u128(100);
+        db.execute(
+            "INSERT INTO treasury_execution_admissions(intent_id,admitted_at,input_sats) VALUES(?,900,101)",
+            [prepared.to_string()],
+        )?;
+        for (id, stage, due) in [
+            (prepared, "reserve", 5), // Old stage lag must not leak into current status.
+            (prepared, "submit", 990),
+            (Uuid::from_u128(101), "reconcile", 1200),
+            (Uuid::from_u128(102), "cleanup", 950),
+        ] {
+            db.execute(
+                "INSERT INTO treasury_work_schedule(intent_id,action,attempts,next_attempt) VALUES(?,?,2,?)",
+                params![id.to_string(), stage, due],
+            )?;
+        }
+        let status = crate::status::Status::read_at(&runtime.config, 1000)?;
+        let treasury = &status.health.treasury;
+        assert_eq!(treasury.pending_operations, 66);
+        assert_eq!(treasury.submitted_outcomes_pending, 1);
+        assert_eq!(treasury.paid_cleanups_pending, 1);
+        assert_eq!(treasury.finite_retries_exhausted, 1);
+        assert_eq!(treasury.operations.len(), 64);
+        assert!(treasury.operations_truncated);
+        assert_eq!(treasury.rolling_fee_commitment_sats, Some(1));
+        assert_eq!(treasury.rolling_fee_remaining_sats, Some(4));
+        assert_eq!(treasury.oldest_scheduled_due_at, Some(950));
+        assert_eq!(status.health.queue.scheduled_lag_seconds, Some(50));
+        assert_eq!(treasury.operations[0].stage, "reconcile");
+        assert_eq!(treasury.operations[0].next_attempt_at, Some(1200));
+        assert!(treasury.operations[0].continues_past_attempt_limit);
+        assert!(!treasury.operations[0].retries_exhausted);
+        assert_eq!(treasury.operations[1].stage, "cleanup");
+        assert_eq!(treasury.operations[2].intent_id, prepared);
+        assert_eq!(treasury.operations[2].stage, "submit");
+        assert!(treasury.operations[2].retries_exhausted);
+        let encoded = serde_json::to_string(&status)?;
+        assert!(!encoded.contains(&issued.invoice));
+        assert!(!encoded.contains(&issued.payment_hash));
+
+        // An older read-only image has no exact rolling fee observations.
+        db.execute("DROP TABLE treasury_fee_completions", [])?;
+        let legacy = crate::status::Status::read_at(&runtime.config, 1000)?;
+        assert_eq!(legacy.health.treasury.rolling_fee_commitment_sats, None);
+        assert_eq!(legacy.health.treasury.rolling_fee_remaining_sats, None);
+        let recreated: bool = db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name='treasury_fee_completions')",
+            [],
+            |row| row.get(0),
+        )?;
+        assert!(!recreated);
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn status_is_read_only_bounded_and_available_while_the_writer_is_active() -> Result<()> {
         use crate::journal::{HoldReason, Transport, ValidatedIntake};
         use cdk::{

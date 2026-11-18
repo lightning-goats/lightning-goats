@@ -3,6 +3,41 @@ use super::*;
 use crate::{treasury::TreasuryBinding, treasury_scheduler::Execution};
 use anyhow::Context;
 
+// Share the current stage and its schedule with the read-only operator status.
+pub(crate) const SCHEDULED_TREASURY_WORK: &str = "WITH work AS (
+    SELECT i.id,i.rowid AS ordering,i.state,json_extract(i.issued_json,'$.intent.mint_id') AS mint_id,
+        json_extract(i.issued_json,'$.intent.maximum_fee_sats') AS maximum_fee_sats,
+        CASE
+          WHEN i.state='reconciled' THEN 'cleanup'
+          WHEN i.state='submitted' OR EXISTS(SELECT 1 FROM treasury_melt_requests r WHERE r.intent_id=i.id) THEN 'reconcile'
+          WHEN i.state='prepared' THEN 'submit'
+          WHEN EXISTS(SELECT 1 FROM treasury_preparation_claims c WHERE c.intent_id=i.id)
+            THEN CASE WHEN ?1 THEN 'resume_preparation' ELSE 'recover_preparation' END
+          WHEN EXISTS(SELECT 1 FROM treasury_split_results r WHERE r.intent_id=i.id)
+            AND NOT EXISTS(SELECT 1 FROM treasury_proof_selections p WHERE p.intent_id=i.id) THEN 'select_split'
+          WHEN NOT EXISTS(SELECT 1 FROM treasury_split_results r WHERE r.intent_id=i.id)
+            AND (EXISTS(SELECT 1 FROM treasury_split_execution_claims c WHERE c.intent_id=i.id)
+              OR EXISTS(SELECT 1 FROM treasury_split_requests r WHERE r.intent_id=i.id)) THEN 'recover_split'
+          WHEN EXISTS(SELECT 1 FROM treasury_quotes q WHERE q.intent_id=i.id)
+            AND EXISTS(SELECT 1 FROM treasury_split_reservations r WHERE r.intent_id=i.id)
+            AND NOT EXISTS(SELECT 1 FROM treasury_split_results r WHERE r.intent_id=i.id) THEN 'split'
+          WHEN EXISTS(SELECT 1 FROM treasury_quotes q WHERE q.intent_id=i.id) THEN 'prepare'
+          WHEN EXISTS(SELECT 1 FROM treasury_quote_requests q WHERE q.intent_id=i.id) THEN 'recover_quote'
+          WHEN EXISTS(SELECT 1 FROM treasury_proof_selections p WHERE p.intent_id=i.id)
+            OR EXISTS(SELECT 1 FROM treasury_split_reservations r WHERE r.intent_id=i.id) THEN 'quote'
+          ELSE 'reserve'
+        END AS action
+    FROM treasury_instructions i
+    WHERE i.state!='reconciled' OR NOT EXISTS(SELECT 1 FROM treasury_cdk_cleanup c WHERE c.intent_id=i.id)
+), scheduled AS (
+    SELECT w.*,COALESCE(s.attempts,0) AS attempts,s.next_attempt,
+        (w.action='cleanup' OR (w.action='reconcile' AND w.state='submitted')
+        OR (w.action='recover_split' AND EXISTS(
+            SELECT 1 FROM treasury_split_submissions x WHERE x.intent_id=w.id
+        ))) AS continue_recovery
+    FROM work w LEFT JOIN treasury_work_schedule s ON s.intent_id=w.id AND s.action=w.action
+)";
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
     Reserve,
@@ -78,49 +113,19 @@ impl Journal {
             _ => None,
         };
         let row: Option<(String, String, String, u32, bool)> = tx.query_row(
-            "WITH work AS (
-                SELECT i.id,i.rowid AS ordering,i.state,json_extract(i.issued_json,'$.intent.mint_id') AS mint_id,
-                    json_extract(i.issued_json,'$.intent.maximum_fee_sats') AS maximum_fee_sats,
-                    CASE
-                      WHEN i.state='reconciled' THEN 'cleanup'
-                      WHEN i.state='submitted' OR EXISTS(SELECT 1 FROM treasury_melt_requests r WHERE r.intent_id=i.id) THEN 'reconcile'
-                      WHEN i.state='prepared' THEN 'submit'
-                      WHEN EXISTS(SELECT 1 FROM treasury_preparation_claims c WHERE c.intent_id=i.id)
-                        THEN CASE WHEN ?1 THEN 'resume_preparation' ELSE 'recover_preparation' END
-                      WHEN EXISTS(SELECT 1 FROM treasury_split_results r WHERE r.intent_id=i.id)
-                        AND NOT EXISTS(SELECT 1 FROM treasury_proof_selections p WHERE p.intent_id=i.id) THEN 'select_split'
-                      WHEN NOT EXISTS(SELECT 1 FROM treasury_split_results r WHERE r.intent_id=i.id)
-                        AND (EXISTS(SELECT 1 FROM treasury_split_execution_claims c WHERE c.intent_id=i.id)
-                          OR EXISTS(SELECT 1 FROM treasury_split_requests r WHERE r.intent_id=i.id)) THEN 'recover_split'
-                      WHEN EXISTS(SELECT 1 FROM treasury_quotes q WHERE q.intent_id=i.id)
-                        AND EXISTS(SELECT 1 FROM treasury_split_reservations r WHERE r.intent_id=i.id)
-                        AND NOT EXISTS(SELECT 1 FROM treasury_split_results r WHERE r.intent_id=i.id) THEN 'split'
-                      WHEN EXISTS(SELECT 1 FROM treasury_quotes q WHERE q.intent_id=i.id) THEN 'prepare'
-                      WHEN EXISTS(SELECT 1 FROM treasury_quote_requests q WHERE q.intent_id=i.id) THEN 'recover_quote'
-                      WHEN EXISTS(SELECT 1 FROM treasury_proof_selections p WHERE p.intent_id=i.id)
-                        OR EXISTS(SELECT 1 FROM treasury_split_reservations r WHERE r.intent_id=i.id) THEN 'quote'
-                      ELSE 'reserve'
-                    END AS action
-                FROM treasury_instructions i
-                WHERE i.state!='reconciled' OR NOT EXISTS(SELECT 1 FROM treasury_cdk_cleanup c WHERE c.intent_id=i.id)
-            ), scheduled AS (
-                SELECT w.*,COALESCE(s.attempts,0) AS attempts,COALESCE(s.next_attempt,0) AS due,
-                    (w.action='cleanup' OR (w.action='reconcile' AND w.state='submitted')
-                    OR (w.action='recover_split' AND EXISTS(
-                        SELECT 1 FROM treasury_split_submissions x WHERE x.intent_id=w.id
-                    ))) AS continue_recovery
-                FROM work w LEFT JOIN treasury_work_schedule s ON s.intent_id=w.id AND s.action=w.action
-            )
-            SELECT w.id,w.mint_id,w.action,w.attempts,w.continue_recovery
-            FROM scheduled w
-            WHERE ((?1 AND w.action IN ('reserve','quote','prepare','submit','select_split'))
-                OR (?1 AND ?2 AND w.action='split')
-                OR (?3 AND w.action IN ('recover_quote','recover_preparation','resume_preparation','recover_split','reconcile','cleanup')))
-              AND (w.action IN ('recover_quote','recover_preparation','resume_preparation','recover_split','reconcile','cleanup')
-                OR EXISTS(SELECT 1 FROM treasury_execution_admissions a WHERE a.intent_id=w.id)
-                OR w.maximum_fee_sats<=?6)
-              AND (w.attempts<?4 OR w.continue_recovery) AND w.due<=?5
-            ORDER BY w.due,w.ordering LIMIT 1",
+            &format!(
+                "{SCHEDULED_TREASURY_WORK}
+                 SELECT w.id,w.mint_id,w.action,w.attempts,w.continue_recovery
+                 FROM scheduled w
+                 WHERE ((?1 AND w.action IN ('reserve','quote','prepare','submit','select_split'))
+                     OR (?1 AND ?2 AND w.action='split')
+                     OR (?3 AND w.action IN ('recover_quote','recover_preparation','resume_preparation','recover_split','reconcile','cleanup')))
+                   AND (w.action IN ('recover_quote','recover_preparation','resume_preparation','recover_split','reconcile','cleanup')
+                     OR EXISTS(SELECT 1 FROM treasury_execution_admissions a WHERE a.intent_id=w.id)
+                     OR w.maximum_fee_sats<=?6)
+                   AND (w.attempts<?4 OR w.continue_recovery) AND COALESCE(w.next_attempt,0)<=?5
+                 ORDER BY COALESCE(w.next_attempt,0),w.ordering LIMIT 1"
+            ),
             params![policy.execute,policy.split.enabled,policy.reconcile,policy.maximum_attempts,now,fee_remaining],
             |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?)),
         ).optional()?;
@@ -219,7 +224,7 @@ impl Journal {
     }
 }
 
-pub(super) fn daily_fees(db: &Connection, now: i64) -> Result<u64> {
+pub(crate) fn daily_fees(db: &Connection, now: i64) -> Result<u64> {
     Ok(db.query_row(
         "SELECT COALESCE(SUM(COALESCE(c.fee_sats,json_extract(i.issued_json,'$.intent.maximum_fee_sats'))),0)
          FROM treasury_instructions i LEFT JOIN treasury_fee_completions c ON c.intent_id=i.id

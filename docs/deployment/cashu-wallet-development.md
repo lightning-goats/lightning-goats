@@ -76,12 +76,24 @@ fees are already inside completed conversion costs. Reported treasury deposits
 are wallet journal claims, not independent Strike verification. The rolling
 24-hour execution-admission count/input are admitted budgets, not expenditure.
 
+`health.treasury` reports the current stage of up to 64 unfinished conversions,
+with private intent IDs, attempt counts and persisted retry times. Submitted
+operations awaiting an outcome and paid melts awaiting cleanup appear first.
+They remain recoverable after the ordinary retry budget. The
+`finite_retries_exhausted` count covers only stages with a finite budget.
+Summary counts include rows beyond the displayed limit. The rolling fee
+commitment combines retained conversion fees with the maximum fees reserved
+by unresolved operations. Remaining sats use the configured wallet ceiling.
+Older read-only images without fee observation history report these amounts
+as unknown. The status command leaves the journal untouched.
+
 New acquisition timestamps commit with admission and never change on retries.
 Queue health exposes oldest known pending age and overdue persisted schedule lag.
 Older records have unknown age; status never backfills a guessed receipt time or
 creates the optional timing table. Future timestamps are counted separately to
-expose clock rollback without reporting negative ages. Schedule lag describes
-retained deadlines even when work is paused or attempts are exhausted.
+expose clock rollback without reporting negative ages. Treasury schedule lag
+uses the current stage only, including pending paid cleanup. Schedule lag
+describes retained deadlines even when work is paused or attempts are exhausted.
 Historical core acknowledgment epochs are compared only with the configured
 expected core epoch. Different epochs are diagnostic, not proof that an earlier
 credit was invalid or that a currently running core matches the configuration.

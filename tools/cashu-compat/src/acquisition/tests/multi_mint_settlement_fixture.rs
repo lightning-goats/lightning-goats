@@ -7,6 +7,79 @@ mod multi_mint {
     use sha2::{Digest, Sha256};
     use std::time::Duration;
 
+    fn snapshot_namespaced(
+        destination: &Path,
+        directory: &Path,
+        journal: &Path,
+        harnesses: &[Harness],
+    ) -> Result<Vec<std::path::PathBuf>> {
+        std::fs::create_dir(destination)?;
+        std::fs::set_permissions(destination, std::fs::Permissions::from_mode(0o700))?;
+        snapshot_wallet_file(journal, &destination.join("acquisition.sqlite"))?;
+        snapshot_wallet_file(
+            &directory.join("wallet.sqlite"),
+            &destination.join("wallet.sqlite"),
+        )?;
+        let mut images = Vec::new();
+        for mint in harnesses {
+            let hash = Sha256::digest(format!("lightning-goats/cdk-mint-store/v1\0{}", mint.id));
+            let name = format!("mint-{}.sqlite", cdk::util::hex::encode(hash));
+            let image = destination.join(&name);
+            snapshot_wallet_file(&directory.join(name), &image)?;
+            images.push(image);
+        }
+        Ok(images)
+    }
+
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct RestoreSelection {
+        custody: String,
+        melt: String,
+    }
+
+    async fn observe_installed_checkpoint(root: &Path, harnesses: &[Harness]) -> Result<()> {
+        use crate::restore_mint::{CustodySelection, Selection};
+        use lightning_goats_cashu_receipt::treasury::hex_digest;
+        publish(root, "restore-wallet-ready.json", &true)?;
+        let selections: BTreeMap<String, RestoreSelection> =
+            read_when_ready(root, "restore-mint-selections.json").await?;
+        ensure!(
+            selections.len() == harnesses.len(),
+            "missing original mint selection"
+        );
+        let mut results = BTreeMap::new();
+        for h in harnesses {
+            let selected = selections
+                .get(&h.id)
+                .ok_or_else(|| anyhow::anyhow!("missing original mint selection"))?;
+            let approved = h.policy().advertised_url.parse()?;
+            let custody: CustodySelection = serde_json::from_str(&selected.custody)?;
+            let melt: Selection = serde_json::from_str(&selected.melt)?;
+            let custody = custody
+                .observe(
+                    &approved,
+                    &hex_digest(Sha256::digest(&selected.custody).into()),
+                    &h.mint,
+                )
+                .await?;
+            let melt = melt
+                .observe(
+                    &approved,
+                    &hex_digest(Sha256::digest(&selected.melt).into()),
+                    &h.mint,
+                )
+                .await?;
+            ensure!(
+                h.mint.executions.load(Ordering::SeqCst) == 1
+                    && h.mint.melt_attempts.load(Ordering::SeqCst) == 1,
+                "restore observation repeated a mint effect"
+            );
+            results.insert(h.id.clone(), json!({"custody": custody, "melt": melt}));
+        }
+        publish(root, "restore-mint-observations.json", &results)
+    }
+
     #[tokio::test]
     #[ignore = "requires explicit separate-UID multi-mint financial runner"]
     async fn combined_multi_mint_wallet_child() -> Result<()> {
@@ -367,21 +440,7 @@ mod multi_mint {
                 tokio::time::sleep(Duration::from_millis(25)).await;
             };
             if round == 0 {
-                std::fs::create_dir(&checkpoint)?;
-                std::fs::set_permissions(&checkpoint, std::fs::Permissions::from_mode(0o700))?;
-                snapshot_wallet_file(&path, &checkpoint.join("acquisition.sqlite"))?;
-                snapshot_wallet_file(
-                    &directory.join("wallet.sqlite"),
-                    &checkpoint.join("wallet.sqlite"),
-                )?;
-                for mint in &harnesses {
-                    let hash =
-                        Sha256::digest(format!("lightning-goats/cdk-mint-store/v1\0{}", mint.id));
-                    let name = format!("mint-{}.sqlite", cdk::util::hex::encode(hash));
-                    let image = checkpoint.join(&name);
-                    snapshot_wallet_file(&directory.join(name), &image)?;
-                    mint_images.push(image);
-                }
+                mint_images = snapshot_namespaced(&checkpoint, directory, &path, &harnesses)?;
                 publish(
                     &checkpoint,
                     "receiving-key.json",
@@ -584,6 +643,15 @@ mod multi_mint {
             assert_eq!(observation["mint_unspent_sats"], 0);
             assert_eq!(h.mint.melt_attempts.load(Ordering::SeqCst), 1);
             publish(&checkpoint, &format!("custody-{}.json", h.id), &observation)?;
+        }
+        if std::env::var("LG_CASHU_COMBINED_INSTALLED_REVIEW").as_deref() == Ok("1") {
+            snapshot_namespaced(
+                &checkpoint.with_file_name("mint-custody-after"),
+                directory,
+                &path,
+                &harnesses,
+            )?;
+            observe_installed_checkpoint(&root, &harnesses).await?;
         }
         intake_server.abort();
         treasury_server.abort();

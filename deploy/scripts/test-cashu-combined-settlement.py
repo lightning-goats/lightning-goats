@@ -520,8 +520,13 @@ def verify_funded_install(root, native_inputs, systemd_masks):
             or report['funded_fenced_installation_verified'] is not True
             or collector['systemd_masks_verified'] is not systemd_masks
             or restore['staged_custody_sats'] != {'fixture-a': 250, 'fixture-b': 150}
+            or restore['funded_provider_comparison']['original_strike_deposit_sats'] != 396
             or restore['resume_authorized'] is not False):
         raise ValueError('funded installation did not verify the required scope')
+    signal = root / 'exchange/restore-review-finished.pending'
+    signal.write_text('true\n')
+    signal.chmod(0o644)
+    signal.rename(signal.with_suffix('.json'))
     return report
 
 
@@ -627,6 +632,8 @@ def main():
         env['LG_CASHU_COMBINED_MULTI_MINT'] = '1' if args.multi_mint else '0'
         env['LG_CASHU_COMBINED_REPEAT_REQUEST'] = '1' if args.repeat_request else '0'
         env['LG_CASHU_COMBINED_FUNDED_ROLLBACK'] = '1' if args.funded_rollback else '0'
+        if args.funded_install_inputs is not None:
+            env['LG_CASHU_COMBINED_INSTALLED_REVIEW'] = '1'
         env.update(sender_environment)
         prefix = ['/usr/bin/setpriv', f'--reuid={identity}', f'--regid={identity}',
                   '--clear-groups', '--no-new-privs', '--']
@@ -657,9 +664,15 @@ def main():
                                            env=child_env, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT)
                 processes.append(process)
             deadline = time.monotonic() + 150
+            funded_install = None
+            ready = [exchange / f'restore-{role}-ready.json' for role in ('core', 'wallet')]
             while any(process.poll() is None for process in processes):
                 if any(process.poll() not in (None, 0) for process in processes):
                     raise ValueError('combined fixture child failed')
+                if args.funded_install_inputs is not None and funded_install is None and all(p.exists() for p in ready):
+                    funded_install = verify_funded_install(root, args.funded_install_inputs,
+                                                           args.funded_install_systemd_masks)
+                    deadline = max(deadline, time.monotonic() + 15)
                 if time.monotonic() >= deadline:
                     raise ValueError('combined fixture deadline exceeded')
                 time.sleep(0.05)
@@ -737,8 +750,9 @@ def main():
             if args.multi_mint:
                 result['funded_mint_custody'] = verify_funded_mint_batch(root)
             if args.funded_install_inputs is not None:
-                result['funded_installed_restore'] = verify_funded_install(
-                    root, args.funded_install_inputs, args.funded_install_systemd_masks)
+                if funded_install is None:
+                    raise ValueError('funded installed fixture exited before provider review')
+                result['funded_installed_restore'] = funded_install
             if args.funded_rollback:
                 source = args.core_cli.resolve(strict=True)
                 if not source.is_file() or not 0 < source.stat().st_size <= 512 * 1024 * 1024:

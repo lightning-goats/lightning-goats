@@ -910,6 +910,14 @@ mod combined_fixture {
             snapshot(&pool, &private.join("funded-after-effects.db")).await?;
             assert_restored_core_fenced(&private.join("funded-before-melt")).await?;
         }
+        if multi_mint && std::env::var("LG_CASHU_COMBINED_INSTALLED_REVIEW").as_deref() == Ok("1") {
+            snapshot(&pool, &private.join("mint-custody-core-after.db")).await?;
+            publish(&root, "restore-core-ready.json", &true)?;
+            ensure!(
+                read_when_ready::<bool>(&root, "restore-review-finished.json").await?,
+                "restore review did not verify the original provider outcomes"
+            );
+        }
         if treasury_ipc {
             println!("COMBINED_CORE_FULL_FINANCIAL_IPC_VERIFIED");
         }

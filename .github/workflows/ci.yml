@@ -364,7 +364,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo unshare --net -- python3 deploy/scripts/test-cashu-combined-settlement.py --funded-rollback --http-intake --receipt-ipc --treasury-ipc --fees --no-change --lost-reply --core-test "$RUNNER_TEMP/cashu-core/core-test" --wallet-test "$RUNNER_TEMP/cashu-wallet/wallet-test" --core-cli "$RUNNER_TEMP/cashu-core/core-cli" 2>&1 | tee "$RUNNER_TEMP/cashu-funded-rollback.json"
-      - name: Install the encrypted funded two-mint rollback under systemd masks
+      - name: Install and reconcile the encrypted funded two-mint rollback under systemd masks
         shell: bash
         run: |
           set -euo pipefail

@@ -572,5 +572,15 @@ authenticated stager, and fenced installation under real systemd masks. The
 restored images must preserve the original pending invoice, both credited
 receipts, 250 and 150 sats of old local custody, and every startup fence.
 The older stage's worklist must still identify that original unsettled invoice.
-Full provider reconciliation of the installed checkpoint and safe resumption
-require additional evidence.
+
+The same rehearsal seals a later reference after both settlements and the
+simulated feeder confirmation. It selects the original proof points from the
+installed checkpoint and the original settled quotes from the later reference.
+The original synthetic mints answer both reads. The native Strike observer
+checks both receives against the original loopback provider. The feeder
+observer checks the original UUID against the fixture gateway. The authenticated
+comparison must find 400 stale sats, 396 sats in the two later Strike deposits
+and one feeder confirmation missing from the older checkpoint. It refuses
+omitted operations and evidence rebound to the later custody image. Both
+stages and the installed files stay byte-identical with their fences intact.
+Safe resumption and live provider acceptance still require verification.

@@ -5,7 +5,7 @@ Use initialized state or the exact core and wallet snapshots of the funded
 two-mint test. This test never clears a recovery fence.
 """
 import argparse
-from contextlib import closing, ExitStack
+from contextlib import closing, contextmanager, ExitStack
 import fcntl
 import grp
 import hashlib
@@ -28,11 +28,11 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def copy_funded_inputs(source, core, wallet, core_uid, wallet_uid):
+def copy_funded_inputs(source, core, wallet, core_uid, wallet_uid, phase='before'):
     if source.resolve(strict=True) != source or not source.name.startswith('lg-cashu-combined-'):
         raise ValueError('select a disposable synthetic settlement fixture')
-    snapshot = source / 'wallet-private/mint-custody-before'
-    ledger = source / 'core-private/mint-custody-core-before.db'
+    snapshot = source / 'wallet-private' / ('mint-custody-' + phase)
+    ledger = source / 'core-private' / ('mint-custody-core-' + phase + '.db')
 
     def copy(original, target, uid):
         if original.resolve(strict=True) != original or not original.is_file():
@@ -46,7 +46,7 @@ def copy_funded_inputs(source, core, wallet, core_uid, wallet_uid):
     copy(ledger, core, core_uid)
     copy(snapshot / 'acquisition.sqlite', wallet / 'acquisition.sqlite', wallet_uid)
     copy(snapshot / 'wallet.sqlite', wallet / 'wallet.sqlite', wallet_uid)
-    receiver = json.loads((snapshot / 'receiving-key.json').read_bytes())
+    receiver = json.loads((source / 'wallet-private/mint-custody-before/receiving-key.json').read_bytes())
     if not re.fullmatch(r'0[23][a-f0-9]{64}', receiver):
         raise ValueError('invalid funded receiving fixture identity')
     with closing(sqlite3.connect((wallet / 'acquisition.sqlite').as_uri() + '?mode=ro&immutable=1', uri=True)) as db:
@@ -66,6 +66,35 @@ def copy_funded_inputs(source, core, wallet, core_uid, wallet_uid):
     lock.touch(mode=0o600, exist_ok=False)
     os.chown(lock, wallet_uid, wallet_uid)
     return registration[0][0], epochs[0][0], receiver, namespaces
+
+
+@contextmanager
+def funded_reference_inputs(source, root, states, uids, expected):
+    with tempfile.TemporaryDirectory(prefix='reference-runtime-', dir=root) as temporary, ExitStack() as stack:
+        parked = Path(temporary)
+        for role in ('core', 'wallet'):
+            active = states[role]
+            original = parked / ('before-' + role)
+            active.rename(original)
+            stack.callback(restore_fixture_state, active, original, parked / ('after-' + role))
+            active.mkdir(mode=0o700)
+            os.chown(active, uids[role], uids[role])
+        identity = copy_funded_inputs(source, states['core'] / 'ledger.sqlite', states['wallet'],
+                                     uids['core'], uids['wallet'], phase='after')
+        if identity != expected:
+            raise ValueError('funded reference changed the wallet registration or mint scope')
+        for name in ('wallet-seed.bin', 'receiving-key.bin'):
+            target = states['wallet'] / name
+            shutil.copyfile(parked / 'before-wallet' / name, target)
+            target.chmod(0o600)
+            os.chown(target, uids['wallet'], uids['wallet'])
+        yield
+
+
+def restore_fixture_state(active, original, after):
+    if active.exists():
+        active.rename(after)
+    original.rename(active)
 
 
 def main():
@@ -356,9 +385,14 @@ def main():
         collector_result=None
         if all(collector_options):
             collector_fixture=runpy.run_path(str(source/'deploy/scripts/cashu-collector-fixture.py'))
+            reference = None
+            if funded:
+                def reference():
+                    return funded_reference_inputs(args.funded_fixture, root, states, runtime_uids,
+                                                   (wallet_instance, wallet_epoch, receiver, namespaces))
             collector_result=collector_fixture['qualify'](source,root,states,runtime_uids,binaries,
                 dict(core=config,wallet=wallet_config,signer=signer_config,**native_configurations),
-                native_policy,args,cleanup)
+                native_policy,args,cleanup,reference)
         # Exercise refusal against the actual initialized schemas, not hand-made
         # substitutes. Restore each disposable byte image before the next case.
         def refused():

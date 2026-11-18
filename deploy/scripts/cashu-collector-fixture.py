@@ -389,7 +389,7 @@ def verify_funded_stage(stage, worklist, source, common):
 
 def qualify_restore(source, output_root, collected, identity, selected, store,
                     workers, binaries, configurations, native_roles, configured_keys, policy_path,
-                    common, systemd_masks, funded_source):
+                    common, systemd_masks, funded_source, capture_reference):
     """Pass the real encrypted collector output through the isolated launcher."""
     scripts = source / 'deploy/scripts'
     capsule = output_root / 'restore-capsule'
@@ -405,12 +405,12 @@ def qualify_restore(source, output_root, collected, identity, selected, store,
     manifest.chmod(0o600)
     ciphertext = collected / 'checkpoint.tar.age'
     checksum = digest(ciphertext)
-    receipt = collected / 'COMPLETE.json'
-
-    def invoke(destination, digest_override=checksum, key=identity):
+    def invoke(destination, digest_override=None, key=identity, collection=collected):
+        archive = collection / 'checkpoint.tar.age'
         return subprocess.run(
             ['/usr/bin/python3', '-I', '-S', '-B', str(capsule / 'launch-cashu-backup.py'),
-             digest(manifest), 'stage', str(ciphertext), digest_override, str(receipt),
+             digest(manifest), 'stage', str(archive), digest_override or digest(archive),
+             str(collection / 'COMPLETE.json'),
              str(key), str(destination), '--age', str(selected['age']), '--age-sha256',
              digest(selected['age']), '--statectl', str(selected['statectl']),
              '--key-verifier', str(selected['copy']), '--max-bytes', str(1024**3)],
@@ -484,9 +484,16 @@ def qualify_restore(source, output_root, collected, identity, selected, store,
         raise ValueError('restore worklist omitted its exact source or page binding')
     if funded_source is not None:
         observed = verify_funded_stage(destination, report, funded_source, common)
+        reference = output_root / 'restore-reference'
+        if invoke(reference, collection=capture_reference()).returncode:
+            raise ValueError('authenticated stager refused the later funded reference')
+        compare = runpy.run_path(str(scripts / 'cashu-funded-provider-fixture.py'))['compare_funded_providers']
+        providers = compare(capsule, digest(manifest), destination, reference, funded_source,
+                            output_root / 'provider-review', binaries['core'], common)
         return {**observed, 'actual_authenticated_launcher': True, 'real_age_archive': True,
                 'staged_roles': len(roles), 'committed_wal_preserved': True, 'image_manifest_verified': True,
                 'fenced_installation': installation, 'restored_runtime_bytes_unchanged': True,
+                'funded_provider_comparison': providers,
                 'external_reconciliation_verified': False, 'resume_authorized': False}
     if any(json.loads(review.stdout)['counts'].values()):
         raise ValueError('empty staged checkpoint produced unexpected review work')
@@ -630,7 +637,7 @@ def qualify_restore(source, output_root, collected, identity, selected, store,
             'external_reconciliation_verified': False, 'resume_authorized': False}
 
 
-def qualify(source,root,states,uids,binaries,configurations,native_policy,args,cleanup):
+def qualify(source,root,states,uids,binaries,configurations,native_policy,args,cleanup,reference=None):
     config_root=root/'collector-config'; config_root.mkdir(mode=0o700)
     output_root=root/'collector-output'; output_root.mkdir(mode=0o700)
     selected={}
@@ -741,10 +748,20 @@ def qualify(source,root,states,uids,binaries,configurations,native_policy,args,c
     after={str(p):digest(p) for directory in states.values() for p in directory.rglob('*') if p.is_file()}
     if original!=after:raise ValueError('collector changed original application bytes')
     _, configured_keys = module['receiving_material'](json.loads(configurations['wallet'].read_bytes()))
+
+    def capture_reference():
+        reference_path = output_root / 'funded-reference'
+        with reference():
+            receipt = collect(policy_path, digest(policy_path), reference_path)
+        if (receipt['checkpoint_id'] == result['checkpoint_id'] or receipt['resume_authorized']
+                or not receipt['quiescence_verified']):
+            raise ValueError('funded reference collection did not verify its own checkpoint')
+        return reference_path
+
     restore_result = qualify_restore(source, output_root, destination, identity, selected, store,
                                     workers, binaries, configurations, native_roles, configured_keys, policy_path,
                                     dict(module, GLOBAL_LOCK=globals_['GLOBAL_LOCK'], check_quiescence=checked_status),
-                                    args.systemd_masks, args.funded_fixture)
+                                    args.systemd_masks, args.funded_fixture, capture_reference)
     key_stage=destination/'plaintext/recovery-material'
     key_negatives=0
     def key_check(success):

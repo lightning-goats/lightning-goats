@@ -37,6 +37,37 @@ pub struct Policy {
     pub max_attempts: u16,
 }
 impl Policy {
+    fn registration_binding(&self) -> Result<Vec<u8>> {
+        Ok(serde_json::to_vec(&(
+            self.broker_instance,
+            self.broker_epoch,
+            self.wallet_instance,
+            self.wallet_epoch,
+            self.wallet_uid,
+            &self.owner,
+        ))?)
+    }
+
+    fn require_registration(&self, connection: &Connection) -> Result<()> {
+        let retained: Vec<u8> = connection.query_row(
+            "SELECT binding FROM registration WHERE singleton=1",
+            [],
+            |row| row.get(0),
+        )?;
+        ensure!(
+            retained == self.registration_binding()?,
+            "Cashu signing registration changed; restore or reconcile"
+        );
+        Ok(())
+    }
+
+    /// The recovery caller holds the existing writer lock during inspection.
+    pub(crate) fn verify_recovered_journal(&self, connection: &Connection) -> Result<u64> {
+        self.require_registration(connection)?;
+        connection.prepare("SELECT id,request,source_key,source_event,admitted_at,attempts,next_attempt,ciphertext,verified,signed_event FROM requests LIMIT 0")?;
+        Ok(connection.query_row("SELECT COUNT(*) FROM requests", [], |row| row.get(0))?)
+    }
+
     pub fn validate(&self) -> Result<()> {
         ensure!(
             !self.broker_instance.is_nil()
@@ -212,30 +243,14 @@ impl Broker {
         if initialize {
             connection.execute_batch("CREATE TABLE registration(singleton INTEGER PRIMARY KEY CHECK(singleton=1),binding BLOB NOT NULL,last_clock INTEGER NOT NULL DEFAULT 0); CREATE TABLE requests(id TEXT PRIMARY KEY,request BLOB NOT NULL,source_key TEXT NOT NULL UNIQUE,source_event TEXT UNIQUE,admitted_at INTEGER NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,next_attempt INTEGER NOT NULL DEFAULT 0,ciphertext TEXT,verified INTEGER NOT NULL DEFAULT 0 CHECK(verified IN (0,1)),signed_event TEXT,CHECK(verified=0 OR ciphertext IS NOT NULL));")?;
         }
-        let binding = serde_json::to_vec(&(
-            policy.broker_instance,
-            policy.broker_epoch,
-            policy.wallet_instance,
-            policy.wallet_epoch,
-            policy.wallet_uid,
-            &policy.owner,
-        ))?;
         let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if initialize {
             tx.execute(
                 "INSERT INTO registration(singleton,binding) VALUES(1,?)",
-                [&binding],
+                [policy.registration_binding()?],
             )?;
         }
-        let retained: Vec<u8> = tx.query_row(
-            "SELECT binding FROM registration WHERE singleton=1",
-            [],
-            |r| r.get(0),
-        )?;
-        ensure!(
-            retained == binding,
-            "Cashu signing registration changed; restore or reconcile"
-        );
+        policy.require_registration(&tx)?;
         tx.commit()?;
         Ok(Self {
             connection,

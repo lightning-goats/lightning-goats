@@ -63,6 +63,33 @@ impl Config {
         crate::private_ipc::protected_config(&self.binary)?;
         self.digest_and_state()
     }
+    /// Qualify local files and credential binding without retaining a client.
+    pub(crate) fn verify_recovered_client(&self, client_key: &str) -> Result<()> {
+        self.validate()?;
+        self.runtime_files()?;
+        self.verify_client_identity(client_key)
+    }
+
+    fn verify_client_identity(&self, client_key: &str) -> Result<()> {
+        ensure!(client_key.len() == 64, "invalid NIP-46 client credential");
+        let bytes = Zeroizing::new(
+            hex::decode(client_key)
+                .map_err(|_| anyhow::anyhow!("invalid NIP-46 client credential"))?,
+        );
+        let mut key = cdk::secp256k1::SecretKey::from_slice(&bytes)
+            .map_err(|_| anyhow::anyhow!("invalid NIP-46 client credential"))?;
+        let public =
+            cdk::secp256k1::PublicKey::from_secret_key(&cdk::secp256k1::Secp256k1::new(), &key)
+                .x_only_public_key()
+                .0
+                .to_string();
+        key.non_secure_erase();
+        ensure!(
+            public == self.client_pubkey && public != self.owner,
+            "NIP-46 credential does not match separate client identity"
+        );
+        Ok(())
+    }
     fn digest_and_state(&self) -> Result<()> {
         crate::private_ipc::private_state(&self.private_directory)?;
         let mut file = std::fs::File::open(&self.binary)?;
@@ -101,23 +128,7 @@ impl Nak {
     }
     fn assemble(config: Config, client_key: Zeroizing<String>) -> Result<Self> {
         config.validate_identity()?;
-        ensure!(client_key.len() == 64, "invalid NIP-46 client credential");
-        let bytes = Zeroizing::new(
-            hex::decode(client_key.as_str())
-                .map_err(|_| anyhow::anyhow!("invalid NIP-46 client credential"))?,
-        );
-        let mut key = cdk::secp256k1::SecretKey::from_slice(&bytes)
-            .map_err(|_| anyhow::anyhow!("invalid NIP-46 client credential"))?;
-        let public =
-            cdk::secp256k1::PublicKey::from_secret_key(&cdk::secp256k1::Secp256k1::new(), &key)
-                .x_only_public_key()
-                .0
-                .to_string();
-        key.non_secure_erase();
-        ensure!(
-            public == config.client_pubkey && public != config.owner,
-            "NIP-46 credential does not match separate client identity"
-        );
+        config.verify_client_identity(&client_key)?;
         let mut bunker = url::Url::parse(&format!("bunker://{}", config.owner))?;
         for relay in &config.relays {
             bunker.query_pairs_mut().append_pair("relay", relay);

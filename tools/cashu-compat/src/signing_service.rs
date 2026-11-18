@@ -2,10 +2,12 @@
 use crate::{
     publication_broker::{Broker, Policy},
     publication_nak::{self, Nak},
+    status::open_private_readonly_store,
+    writer_lock::{WriterLock, check_recovery_marker},
 };
 use anyhow::{Result, ensure};
 use rustix::fs::{self as posix, Mode, OFlags, StatVfsMountFlags};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{
     fs::File,
     io::Read,
@@ -101,7 +103,7 @@ impl Config {
     }
     pub fn open(self) -> Result<Runtime> {
         self.require_identity()?;
-        crate::writer_lock::check_recovery_marker(&self.state_directory)?;
+        check_recovery_marker(&self.state_directory)?;
         let backend = Nak::new(self.nak, load_client_credential()?)?;
         let broker = Broker::open(&self.state_directory, self.policy)?;
         Ok(Runtime {
@@ -111,6 +113,52 @@ impl Config {
             group: self.ipc_gid,
         })
     }
+
+    /// Verify the restored journal and local signer credential without a broker or helper process.
+    pub fn open_paused_recovery(&self) -> Result<PausedRecovery> {
+        self.require_identity()?;
+        ensure!(rusqlite::version() == "3.54.1", "unqualified SQLite engine");
+        let writer = WriterLock::lock_existing(&self.state_directory)?;
+        let journal = open_private_readonly_store(
+            &self.state_directory.join("cashu-signing.sqlite"),
+            self.runtime_uid,
+        )?;
+        journal.pragma_update(None, "trusted_schema", false)?;
+        let signing_requests = self.policy.verify_recovered_journal(&journal)?;
+        self.nak
+            .verify_recovered_client(&load_client_credential()?)?;
+        check_recovery_marker(&self.state_directory)?;
+        Ok(PausedRecovery {
+            _writer: writer,
+            readiness: RecoveryReadiness {
+                mode: "recovery-paused",
+                broker_instance: self.policy.broker_instance,
+                broker_epoch: self.policy.broker_epoch,
+                wallet_instance: self.policy.wallet_instance,
+                wallet_epoch: self.policy.wallet_epoch,
+                signing_requests,
+                client_credential_verified: true,
+                resume_authorized: false,
+            },
+        })
+    }
+}
+
+pub struct PausedRecovery {
+    _writer: File,
+    pub readiness: RecoveryReadiness,
+}
+
+#[derive(Serialize)]
+pub struct RecoveryReadiness {
+    mode: &'static str,
+    broker_instance: uuid::Uuid,
+    broker_epoch: uuid::Uuid,
+    wallet_instance: uuid::Uuid,
+    wallet_epoch: uuid::Uuid,
+    signing_requests: u64,
+    client_credential_verified: bool,
+    resume_authorized: bool,
 }
 
 pub struct Runtime {

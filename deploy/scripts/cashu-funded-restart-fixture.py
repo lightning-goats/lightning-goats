@@ -98,24 +98,24 @@ def http_json(port, path):
     return json.loads(body)
 
 
-def unix_listener(path):
-    with socket.socket(socket.AF_UNIX) as client:
-        client.settimeout(1)
-        client.connect(str(path))
-    return True
-
-
 def require_writer_held(lock):
     with lock.open('rb') as contender:
         try:
             fcntl.flock(contender, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             return
-        raise ValueError('paused wallet failed to hold its existing writer exclusion')
+        raise ValueError('paused service failed to hold its existing writer exclusion')
 
 
 @contextmanager
-def runtime(command, ready, log, stop, environment=None):
+def runtime(command, ready, log, stop, environment=None, unit=None):
+    def stop_runtime(process, check=True):
+        if unit is None:
+            process.send_signal(stop)
+        else:
+            subprocess.run(['/usr/bin/systemctl', 'stop', unit], stdin=subprocess.DEVNULL,
+                           capture_output=True, timeout=20, check=check, env=CLEAN_ENV)
+
     with log.open('w+') as output:
         os.fchmod(output.fileno(), 0o600)
         process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=output, stderr=output,
@@ -127,22 +127,25 @@ def runtime(command, ready, log, stop, environment=None):
                     if ready():
                         break
                 except OSError:
-                    time.sleep(0.05)
+                    pass
+                time.sleep(0.05)
             else:
                 output.seek(0)
                 raise ValueError(f'{log.stem} synthetic restart failed: {output.read()[-2200:]}')
             yield
-            process.send_signal(stop)
+            stop_runtime(process)
             if process.wait(timeout=10):
                 output.seek(0)
                 raise ValueError(f'{log.stem} synthetic shutdown failed: {output.read()[-2200:]}')
         finally:
             if process.poll() is None:
+                if unit is not None:
+                    stop_runtime(process, check=False)
                 process.kill()
                 process.wait(timeout=5)
 
 
-def rehearse(root, workers, binaries, configurations, core_daemon):
+def rehearse(root, workers, binaries, configurations, core_daemon, archived_signer_client, encrypted_signer):
     # This helper runs inside the verified loopback-only native backup fixture.
     # Only clone files from the exact installed later image. Leave its fences intact.
     root.mkdir(mode=0o711)
@@ -265,7 +268,32 @@ connections_per_second = 8
         signer = json.loads(configurations['signer'].read_bytes())
         signer.update(state_directory=str(dirs['cashu_signer']), socket=str(signer_socket))
         signer_config = config_file(root / 'signer.json', json.dumps(signer))
-        signer_env = credentials(root / 'signer-creds', workers['cashu_signer'], {'cashu-nostr-client': '0' * 63 + '2'})
+        signer_worker = workers['cashu_signer']
+        signer_env = credentials(root / 'signer-creds', signer_worker,
+                                 {'cashu-nostr-client': archived_signer_client.read_text()})
+        signer_log = root / 'signer.log'
+        signer_lock = dirs['cashu_signer'] / 'wallet-writer.lock'
+        signer_journal = dirs['cashu_signer'] / 'cashu-signing.sqlite'
+        helper_invocations = Path(signer['nak']['private_directory']) / 'invocations'
+
+        def refuse_signer(configuration, reason, config_env=None):
+            result = subprocess.run(as_runtime(signer_worker, binaries['signer'], 'recovery-paused', configuration),
+                                    stdin=subprocess.DEVNULL, capture_output=True, timeout=10,
+                                    env={**CLEAN_ENV, **(config_env or {})})
+            if result.returncode != 1 or result.stdout or reason not in result.stderr:
+                raise ValueError('paused signer accepted a nonready recovery image')
+
+        startup = b'signer startup rejected'
+        refuse_signer(configurations['signer'], b'Cashu recovery requires explicit reconciliation')
+        refuse_signer(signer_config, startup)
+        wrong = credentials(root / 'wrong-signer-creds', signer_worker, {'cashu-nostr-client': '0' * 63 + '5'})
+        refuse_signer(signer_config, startup, wrong)
+        rebound = {**signer, 'policy': {**signer['policy'], 'broker_epoch': wallet['wallet_epoch']}}
+        refuse_signer(config_file(root / 'rebound-signer.json', json.dumps(rebound)), startup, signer_env)
+        original_signer = signer_journal.read_bytes()
+        if (rows(signer_journal, {'requests': 'SELECT attempts,signed_event FROM requests'})['requests'] != [(1, None)]
+                or helper_invocations.read_bytes() != b'attempt\n' or not signer['policy']['announcements']):
+            raise ValueError('restored signer lacks the pending request with an enabled policy')
 
         for role, name in [('membership', 'membership'), ('payout', 'payout'), ('signer', 'payout_signer')]:
             command = as_runtime(workers[role], binaries[name], '--config', configurations[name])
@@ -273,12 +301,29 @@ connections_per_second = 8
             if refused.returncode != 1 or b'disabled' not in refused.stderr:
                 raise ValueError(f'{role} did not honor the disabled configuration')
 
-        for stop in (signal.SIGINT, signal.SIGTERM):
+        for cycle, stop in enumerate((signal.SIGINT, signal.SIGTERM)):
+            signer_command = [str(binaries['signer']), 'recovery-paused', str(signer_config)]
+            signer_unit = None
+            if encrypted_signer is None:
+                signer_command = as_runtime(signer_worker, *signer_command)
+                signer_environment = signer_env
+            else:
+                ciphertext, account, group = encrypted_signer
+                signer_unit = signer_worker['unit'].removesuffix('.service') + f'-paused-{cycle}.service'
+                signer_environment = None
+                signer_command = [
+                    '/usr/bin/systemd-run', '--quiet', '--pipe', '--wait', '--collect', '--unit=' + signer_unit,
+                    '--property=Type=exec', '--property=User=' + account, '--property=Group=' + group,
+                    '--property=LoadCredentialEncrypted=cashu-nostr-client:' + str(ciphertext),
+                    '--property=PrivateNetwork=yes', '--property=NoNewPrivileges=yes',
+                    '--property=TimeoutStopSec=10s', '--property=KillSignal=' + stop.name,
+                    '--', *signer_command,
+                ]
             with (runtime(as_runtime(workers['core'], core_daemon, '--recovery-paused', '--config', core_config),
                           lambda: http_json(port, '/healthz') == {'status': 'ok'}, root / 'core.log',
                           stop),
-                  runtime(as_runtime(workers['cashu_signer'], binaries['signer'], 'run', signer_config),
-                          lambda: unix_listener(signer_socket), root / 'signer.log', signal.SIGTERM, signer_env),
+                  runtime(signer_command, lambda: signer_log.read_text().endswith('\n'),
+                          signer_log, stop, signer_environment, signer_unit),
                   runtime(as_runtime(workers['wallet'], binaries['wallet'], 'recovery-paused', wallet_config),
                           lambda: wallet_log.read_text().endswith('\n'), wallet_log, stop)):
                 core = http_json(port, '/api/v1/status')
@@ -299,8 +344,16 @@ connections_per_second = 8
                                  'resume_authorized': False}:
                     raise ValueError('paused wallet readiness differs from the funded registration')
                 require_writer_held(lock)
-                if any(os.path.lexists(path) for path in (wallet_socket, treasury_socket, receipt_socket)):
-                    raise ValueError('paused recovery exposed an intake, treasury or receipt socket')
+                signer_readiness = json.loads(signer_log.read_bytes())
+                if signer_readiness != {
+                        'mode': 'recovery-paused', 'signing_requests': 1, 'client_credential_verified': True,
+                        'resume_authorized': False, **{key: signer['policy'][key] for key in
+                            ('broker_instance', 'broker_epoch', 'wallet_instance', 'wallet_epoch')}}:
+                    raise ValueError('paused signer readiness differs from the restored registration')
+                require_writer_held(signer_lock)
+                sockets = (wallet_socket, treasury_socket, receipt_socket, signer_socket)
+                if any(os.path.lexists(path) for path in sockets):
+                    raise ValueError('paused recovery exposed an effectful socket')
                 funds = status['health']['totals']
                 if (not status['registration_matches'] or status['recovery_required']
                         or len(status['mint_namespaces']) != 2 or status['incomplete_mint_namespaces']
@@ -310,7 +363,9 @@ connections_per_second = 8
             if (before != financial_state(dirs)
                     or any(hashlib.sha256(path.read_bytes()).hexdigest() != expected
                            for path, expected in wallet_bytes.items())
-                    or any(os.path.lexists(path) for path in (wallet_socket, treasury_socket, receipt_socket))
+                    or signer_journal.read_bytes() != original_signer
+                    or helper_invocations.read_bytes() != b'attempt\n'
+                    or any(os.path.lexists(path) for path in sockets)
                     or select.select([outbound_probe], [], [], 0)[0]):
                 raise ValueError('paused restart changed retained financial history or mint state')
     return {'native_start_stop_cycles': 2, 'paused_core_sats': 16, 'paused_wallet_sats': 16,
@@ -321,4 +376,8 @@ connections_per_second = 8
             'core_receipt_socket_absent': True,
             'wallet_fence_honored': True, 'wallet_writer_held': True, 'wallet_intake_sockets_absent': True,
             'wallet_wrong_or_missing_artifacts_refused': True, 'wallet_durable_bytes_unchanged': True,
+            'signer_requests_retained': 1, 'signer_credential_verified': True, 'signer_writer_held': True,
+            'signer_fence_honored': True, 'signer_refused_missing_or_wrong_binding': True,
+            'signer_socket_absent': True, 'signer_helper_never_ran_during_restart': True,
+            'signer_loaded_archived_systemd_credential': encrypted_signer is not None,
             'installed_fences_cleared': False, 'resume_authorized': False}

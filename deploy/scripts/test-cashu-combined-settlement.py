@@ -533,7 +533,11 @@ def verify_funded_install(root, native_inputs, systemd_masks):
                 'core_effectful_routes_absent', 'core_backend_connections_absent', 'core_fence_honored',
                 'core_receipt_socket_absent', 'wallet_fence_honored', 'wallet_writer_held',
                 'wallet_intake_sockets_absent', 'wallet_wrong_or_missing_artifacts_refused',
-                'wallet_durable_bytes_unchanged'))
+                'wallet_durable_bytes_unchanged', 'signer_credential_verified', 'signer_writer_held',
+                'signer_fence_honored', 'signer_refused_missing_or_wrong_binding', 'signer_socket_absent',
+                'signer_helper_never_ran_during_restart'))
+            or restart['signer_requests_retained'] != 1
+            or restart['signer_loaded_archived_systemd_credential'] is not systemd_masks
             or restart['installed_fences_cleared'] is not False
             or restart['resume_authorized'] is not False
             or restore['resume_authorized'] is not False):

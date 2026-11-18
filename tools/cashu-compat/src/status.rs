@@ -19,7 +19,7 @@ pub(crate) fn open_readonly_journal(config: &Config) -> Result<Connection> {
     )
 }
 
-fn open_private_readonly_store(path: &Path, runtime_uid: u32) -> Result<Connection> {
+pub(crate) fn open_private_readonly_store(path: &Path, runtime_uid: u32) -> Result<Connection> {
     let metadata = std::fs::symlink_metadata(path)?;
     ensure!(
         metadata.is_file()

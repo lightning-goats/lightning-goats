@@ -632,7 +632,7 @@ checkpoint. It interrupts once after retaining an older directory and once
 after publishing a later image. The same command completes the switch and
 keeps the previous six images available in protected storage.
 
-### Paused core and wallet readiness
+### Paused core, wallet, and signer readiness
 
 The core daemon can serve read-only recovery status on the configured loopback
 listener. Use the flag on a disposable, verified recovery copy under the
@@ -651,7 +651,7 @@ The daemon skips provider credentials, payment and WebSocket routes, all
 financial workers, receipt sockets, Nostr, and the feeder gateway. The flag
 does not grant authority to clear a marker or resume financial processing.
 
-The wallet has a matching mode under its dedicated runtime identity:
+The wallet has a matching mode under its dedicated runtime identity.
 
 ```sh
 lightning-goats-cashud recovery-paused WALLET_CONFIG
@@ -663,6 +663,19 @@ retained mint-to-store bindings. It reads journal custody and deposit totals
 without running database migrations or starting listeners and workers. The
 mode prints one JSON readiness record and holds the lock until SIGINT or
 SIGTERM. The reported totals come from the recovered journal.
+
+The Cashu signer verifies offline recovery readiness under its dedicated
+runtime identity with the original systemd credential binding.
+
+```sh
+lightning-goats-cashu-signerd recovery-paused CASHU_SIGNER_CONFIG
+```
+
+It honors the marker, takes its existing writer lock, and opens only the
+existing signing journal read-only. It checks the journal registration, the
+dedicated NIP-46 client identity, and the pinned helper files. It reports the
+retained request count and releases the lock on SIGINT or SIGTERM. The signer
+opens no socket and performs no signing or publication.
 
 Newly staged wallet and Cashu signer images include private empty lock files
 bound into the staging manifest. The stager creates these files for the
@@ -679,13 +692,17 @@ stays absent, and confirms neither loopback provider receives a connection.
 The wallet uses its paused mode with acquisition, receipt delivery and
 treasury enabled in the test configuration. The test verifies writer
 exclusion, checks that intake and treasury sockets stay absent, and tests
-refusal of a missing lock, missing mint store, and mismatched seed. The three
-CyberHerd workers refuse their disabled settings.
+refusal of a missing lock, missing mint store, and mismatched seed. The signer
+retains an original request with one failed attempt from the disposable
+helper. Its paused starts hold the writer lock without opening a socket or
+replaying that request. The hosted test supplies the exact archived synthetic
+client credential through systemd after reprovisioning and verifies both
+clean shutdowns. The three CyberHerd workers refuse their disabled settings.
 Each cycle must preserve 16 sats of available feed credit, 16 sats of wallet
 custody, completed Strike deposits totaling 396 sats, and the original
-simulated feeding. The test compares durable wallet bytes, checks both the
-core and wallet fences before starting copies, and confirms all six installed
-role images still match the fenced reference afterward.
+simulated feeding. The test compares durable wallet and signer bytes, checks
+the core, wallet, and signer fences before starting copies, and confirms all
+six installed role images still match the fenced reference afterward.
 
 Removal of an installed recovery fence, startup using installed policies and
 credentials, and live provider acceptance still require separate qualification.

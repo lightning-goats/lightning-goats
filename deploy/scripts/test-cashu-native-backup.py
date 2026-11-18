@@ -28,6 +28,36 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def retain_failed_signing_attempt(socket, wallet_uid, signer_gid, policy):
+    """Use the actual broker and a local helper that always fails."""
+    operation = str(uuid.uuid4())
+    request = json.dumps({
+        'version': 1, 'operation_id': operation, 'wallet_instance': policy['wallet_instance'],
+        'wallet_epoch': policy['wallet_epoch'],
+        'intent': {'purpose': 'announcement', 'owner': policy['owner'],
+                   'receiving_key': policy['receiving_key'], 'created_at': int(time.time()),
+                   'mints': sorted(policy['mints']), 'relays': sorted(policy['relays'])},
+    })
+    client = """
+import json, socket, sys
+with socket.socket(socket.AF_UNIX) as connection:
+    connection.settimeout(5)
+    connection.connect(sys.argv[1])
+    body = sys.argv[2].encode()
+    connection.sendall(len(body).to_bytes(4, 'big') + body)
+    with connection.makefile('rb') as response:
+        length = int.from_bytes(response.read(4), 'big')
+        if length > 1024 or json.loads(response.read(length)) != {'result': 'rejected'}:
+            raise ValueError('inert fixture helper response differed')
+"""
+    subprocess.run(
+        ['/usr/bin/setpriv', f'--reuid={wallet_uid}', f'--regid={signer_gid}',
+         '--clear-groups', '--no-new-privs', '--', '/usr/bin/python3', '-I', '-S', '-B',
+         '-c', client, str(socket), request], check=True, stdin=subprocess.DEVNULL,
+        capture_output=True, timeout=10, env={'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'})
+    return operation
+
+
 def copy_funded_inputs(source, core, wallet, core_uid, wallet_uid, phase='before'):
     if source.resolve(strict=True) != source or not source.name.startswith('lg-cashu-combined-'):
         raise ValueError('select a disposable synthetic settlement fixture')
@@ -267,7 +297,7 @@ def main():
                             retained_receiving_keys=[{'public_key': original}])
             wallet_config.write_text(json.dumps(settings))
         helper = root / 'unused-nak'
-        helper.write_text('#!/bin/sh\nexit 97\n')
+        helper.write_text('#!/bin/sh\nprintf "attempt\\n" >> "$2/invocations"\nexit 97\n')
         helper.chmod(0o555)
         helper_state = root / 'unused-nak-state'
         helper_state.mkdir(mode=0o700)
@@ -283,21 +313,24 @@ def main():
         signer_run = root / 'signer-run'
         signer_run.mkdir(mode=0o710)
         os.chown(signer_run, signer_uid, signer_uid)
+        signer_policy = {'broker_instance': str(uuid.uuid4()), 'broker_epoch': str(uuid.uuid4()),
+                         'wallet_instance': wallet_instance, 'wallet_epoch': wallet_epoch,
+                         'wallet_uid': wallet_uid, 'owner': owner, 'receiving_key': receiver[2:],
+                         'mints': [m['advertised_url'] for m in mints], 'relays': ['wss://relay.example']}
+        if funded:
+            signer_policy.update(announcements=True, max_new_per_hour=2, max_attempts=3)
         signer_config = protected('signer.json', {
             'version': 1, 'runtime_uid': signer_uid, 'ipc_gid': signer_uid,
             'state_directory': str(states['signer']), 'socket': str(root / 'signer-run/control.sock'),
-            'policy': {'broker_instance': str(uuid.uuid4()), 'broker_epoch': str(uuid.uuid4()),
-                       'wallet_instance': wallet_instance, 'wallet_epoch': wallet_epoch,
-                       'wallet_uid': wallet_uid, 'owner': owner, 'receiving_key': receiver[2:],
-                       'mints': [m['advertised_url'] for m in mints], 'relays': ['wss://relay.example']},
+            'policy': signer_policy,
             'nak': {'binary': str(helper), 'binary_sha256': digest(helper),
                     'private_directory': str(root / 'unused-nak-state'),
                     'owner': owner, 'client_pubkey': client,
                     'relays': ['wss://relay.example'], 'deadline_seconds': 5},
         })
         call('signer', signer_uid, 'initialize', signer_config)
-        # Positive control proves the same synthetic credential/configuration can
-        # open the broker. No request reaches the inert helper or any relay.
+        # The funded case leaves a durable failed request through the inert
+        # helper; neither case reaches a relay.
         process = subprocess.Popen(command_for('signer', signer_uid, ['run', signer_config]),
                                    env={'PATH': '/usr/bin:/bin', **signer_environment},
                                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
@@ -308,6 +341,9 @@ def main():
                 if process.poll() is not None or time.monotonic() >= deadline:
                     raise ValueError('positive signer startup control did not become ready')
                 time.sleep(0.025)
+            if funded:
+                operation = retain_failed_signing_attempt(signer_run / 'control.sock', wallet_uid,
+                                                          signer_uid, signer_policy)
             process.send_signal(signal.SIGTERM)
             _, error = process.communicate(timeout=10)
             if process.returncode != 0 or error:
@@ -317,6 +353,13 @@ def main():
                 process.kill()
                 process.communicate(timeout=10)
         (signer_run / 'control.sock').unlink(missing_ok=True)
+        if funded:
+            with closing(sqlite3.connect((states['signer'] / 'cashu-signing.sqlite').as_uri() + '?mode=ro',
+                                         uri=True)) as db:
+                if db.execute('SELECT id,attempts,signed_event FROM requests').fetchall() != [(operation, 1, None)]:
+                    raise ValueError('native signer did not retain the original failed request')
+            if (helper_state / 'invocations').read_bytes() != b'attempt\n':
+                raise ValueError('inert helper did not see the original attempt exactly once')
         if args.systemd_package:
             rehearse = runpy.run_path(str(source / 'deploy/scripts/rehearse-cashu-systemd.py'))['rehearse']
             print(json.dumps(rehearse(args.systemd_package, binaries, hashes, runtime_uids, states,

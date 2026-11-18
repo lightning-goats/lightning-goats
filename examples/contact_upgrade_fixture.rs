@@ -13,7 +13,7 @@ use std::{os::unix::fs::MetadataExt as _, path::Path, time::Duration};
 const GUARD: &str = "/run/lightning-goats-contact-fixture/ALLOW";
 const ATTESTATION: &[u8] = b"LIGHTNING_GOATS_DISPOSABLE_CONTACT_UPGRADE_CI_v1\n";
 const DATABASE: &str = "/var/lib/lightning-goats/lightning-goats.db";
-const CURRENT_CORE_SCHEMA: usize = 27;
+const CURRENT_CORE_SCHEMA: usize = 28;
 
 fn isolated_fixture() -> Result<u32> {
     let uid = std::fs::metadata("/proc/self")?.uid();
@@ -57,6 +57,7 @@ fn isolated_fixture() -> Result<u32> {
 // Child-first order preserves foreign-key enforcement. This fixture accepts
 // only completely unused Cashu state; it is not a financial downgrade tool.
 const CASHU_FIXTURE_TABLES: &[&str] = &[
+    "cashu_treasury_inspections",
     "cashu_treasury_fee_observations",
     "cashu_sweep_jobs",
     "cashu_sweep_requests",
@@ -97,11 +98,11 @@ async fn strip_empty_cashu_fixture(
             .execute(&mut **transaction)
             .await?;
     }
-    if sqlx::query("DELETE FROM _sqlx_migrations WHERE version IN (26,27)")
+    if sqlx::query("DELETE FROM _sqlx_migrations WHERE version IN (26,27,28)")
         .execute(&mut **transaction)
         .await?
         .rows_affected()
-        != 2
+        != 3
     {
         bail!("synthetic Cashu migration missing");
     }
@@ -139,8 +140,9 @@ async fn strip_empty_contact_schema(uid: u32) -> Result<()> {
     }
     let migrations = sqlx::migrate!("./migrations");
     let rows = sqlx::query(
-        "SELECT version,success,checksum FROM _sqlx_migrations ORDER BY version LIMIT 28",
+        "SELECT version,success,checksum FROM _sqlx_migrations ORDER BY version LIMIT ?",
     )
+    .bind(i64::try_from(CURRENT_CORE_SCHEMA + 1)?)
     .fetch_all(&pool)
     .await?;
     if rows.len() != CURRENT_CORE_SCHEMA || migrations.iter().count() != CURRENT_CORE_SCHEMA {
@@ -449,7 +451,7 @@ mod tests {
         let mut tx = pool.begin().await?;
         super::strip_empty_cashu_fixture(&mut tx).await?;
         let extension: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations WHERE version IN (26,27)")
+            sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations WHERE version IN (26,27,28)")
                 .fetch_one(&mut *tx)
                 .await?;
         let previous: i64 =
@@ -494,6 +496,7 @@ mod tests {
         let expected = include_str!("../migrations/0026_cashu_receipts.sql")
             .lines()
             .chain(include_str!("../migrations/0027_cashu_fee_observations.sql").lines())
+            .chain(include_str!("../migrations/0028_cashu_treasury_inspections.sql").lines())
             .filter_map(|line| line.strip_prefix("CREATE TABLE "))
             .map(|line| line.split_whitespace().next().unwrap())
             .collect::<std::collections::BTreeSet<_>>();

@@ -194,8 +194,9 @@ async fn frozen_cashu_journals_preserve_native_correlations_without_restore_auth
         .await
         .unwrap();
     sqlx::raw_sql(
-        "DROP TABLE cashu_treasury_fee_observations;
-         DELETE FROM _sqlx_migrations WHERE version=27;",
+        "DROP TABLE cashu_treasury_inspections;
+         DROP TABLE cashu_treasury_fee_observations;
+         DELETE FROM _sqlx_migrations WHERE version IN (27,28);",
     )
     .execute(&pool)
     .await

@@ -615,9 +615,20 @@ Strike recovery worker. Startup construction does not contact the wallet or mint
 Its socket must differ from receipt and public-intake sockets; configured intake
 must use the same wallet identity/epoch. Workers require distinct non-root core
 and wallet identities. Restart reloads protected policy without resetting durable
-attempt counters. Disabling the spending policy prevents new issuance claims and
-makes wallet delivery fall back to status inspection. A missing wallet record
-stays unresolved in inspection-only mode.
+attempt counters. Issuance and wallet delivery have finite attempt budgets.
+Schema 28 adds a separate durable read-only inspection schedule for issued
+conversions still awaiting the original wallet report. Inspection backs off
+to five minutes plus the configured deadline and continues after delivery
+attempts are exhausted. It does not use an issuance or delivery attempt.
+An authenticated pending reply confirms the wallet retained the instruction
+and closes its delivery stage. Expired invoices also close delivery and remain
+eligible for read-only inspection. Neither case releases custody or proves
+settlement. The original wallet report and verified Strike deposit are still
+required for completion.
+
+Disabling the spending policy pauses issuance and delivery. With
+`inspect = true`, read-only checks continue and leave the delivery budget
+available if execution resumes while the original invoice is still valid.
 
 This coordinator processes retained intents and can generate jobs from pending
 financial feed plans when `controls.plan` is enabled. Wallet proof splitting has

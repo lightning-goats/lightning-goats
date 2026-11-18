@@ -315,8 +315,9 @@ mod cashu_treasury_tests {
         let original: (String,String) = sqlx::query_as("SELECT result_digest,result_json FROM cashu_treasury_wallet_results")
             .fetch_one(&f.pool).await?;
         // Disposable schema-26 image. Keep the old result, completion and deposit bytes.
-        sqlx::raw_sql("DROP TABLE cashu_treasury_fee_observations;
-                     DELETE FROM _sqlx_migrations WHERE version=27;")
+        sqlx::raw_sql("DROP TABLE cashu_treasury_inspections;
+                     DROP TABLE cashu_treasury_fee_observations;
+                     DELETE FROM _sqlx_migrations WHERE version IN (27,28);")
             .execute(&f.pool).await?;
         sqlx::migrate!("./migrations").run(&f.pool).await?;
         let observed: i64 = sqlx::query_scalar("SELECT observed_at FROM cashu_treasury_fee_observations")
@@ -484,6 +485,7 @@ mod cashu_treasury_tests {
                         },
                         requests: requests.clone(),
                         lose_reply: std::sync::atomic::AtomicBool::new(false),
+                        pending_replies: 0.into(),
                     },
                     Controls {
                         issue: true,
@@ -495,7 +497,7 @@ mod cashu_treasury_tests {
                     Duration::from_secs(30),
                 )
                 .unwrap();
-                let now = 1_800_000_010;
+                let now = crate::gateway::now_epoch().unwrap();
                 assert_eq!(worker.tick(now).await.unwrap(), Tick::Progress);
                 assert_eq!(worker.tick(now + 1).await.unwrap(), Tick::Progress);
                 assert_eq!(f.count("cashu_treasury_completions").await, 0);
@@ -545,6 +547,7 @@ mod cashu_treasury_tests {
         data: MeltData,
         requests: Arc<std::sync::Mutex<Vec<(String, Uuid, String)>>>,
         lose_reply: std::sync::atomic::AtomicBool,
+        pending_replies: std::sync::atomic::AtomicUsize,
     }
     impl crate::cashu::treasury_worker::Wallet for ScheduledWallet {
         async fn exchange(
@@ -563,6 +566,20 @@ mod cashu_treasury_tests {
             ));
             if self.lose_reply.swap(false, Ordering::SeqCst) {
                 bail!("fixture acknowledgment lost")
+            }
+            if self.pending_replies.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |count| count.checked_sub(1)).is_ok() {
+                return Ok(crate::cashu::treasury_client::Response {
+                    reply: Reply {
+                        version: request.version,
+                        request_id: request.request_id,
+                        intent_id: self.data.intent_id,
+                        intent_digest: self.data.intent_digest.clone(),
+                        phase: Phase::Bound,
+                        report: None,
+                        fee_recorded_at: None,
+                    },
+                    report: None,
+                });
             }
             let fee_recorded_at = (request.version == FEE_TIME_VERSION).then_some(0);
             let report = PeerMelt::authenticate_with_fee_time(
@@ -607,6 +624,7 @@ mod cashu_treasury_tests {
             data: f.report(0, 0).validate(&f.registration, &f.intent)?.clone(),
             requests: Arc::default(),
             lose_reply: false.into(),
+            pending_replies: 0.into(),
         };
         async fn forbidden_strike() -> Result<StrikeClient> {
             panic!("retained or mismatched work must not use Strike")
@@ -697,6 +715,7 @@ mod cashu_treasury_tests {
                 data,
                 requests: requests.clone(),
                 lose_reply: std::sync::atomic::AtomicBool::new(true),
+                pending_replies: 0.into(),
             };
             let controls = Controls {
                 plan: false,
@@ -704,9 +723,9 @@ mod cashu_treasury_tests {
                 issue: true,
                 deliver: true,
                 inspect: true,
-                maximum_attempts: 2,
+                maximum_attempts: 1,
             };
-            let now = 1_800_000_000;
+            let now = crate::gateway::now_epoch().unwrap();
             let worker = Worker::new(
                 f.ledger.clone(),
                 f.runtime.clone(),
@@ -727,6 +746,16 @@ mod cashu_treasury_tests {
             assert_eq!(worker.tick(now + 1).await.unwrap(), Tick::RetryRetained);
             assert_eq!(worker.tick(now + 2).await.unwrap(), Tick::Idle);
             drop(worker);
+            if !delivery_still_enabled {
+                // Upgrade a historical wallet work row with exhausted delivery.
+                sqlx::raw_sql(
+                    "DROP TABLE cashu_treasury_inspections;
+                     DELETE FROM _sqlx_migrations WHERE version=28;",
+                )
+                .execute(&f.pool)
+                .await
+                .unwrap();
+            }
             if delivery_still_enabled {
                 Arc::get_mut(&mut policy).unwrap().enabled = false;
             }
@@ -749,6 +778,7 @@ mod cashu_treasury_tests {
                 data,
                 requests: requests.clone(),
                 lose_reply: std::sync::atomic::AtomicBool::new(false),
+                pending_replies: 2.into(),
             };
             let worker = Worker::new(
                 reopened.clone(),
@@ -764,7 +794,10 @@ mod cashu_treasury_tests {
                 Duration::from_secs(30),
             )
             .unwrap();
-            assert_eq!(worker.tick(now + 36).await.unwrap(), Tick::Progress);
+            assert_eq!(worker.tick(now + 36).await.unwrap(), Tick::RetryRetained);
+            assert_eq!(worker.tick(now + 70).await.unwrap(), Tick::Idle);
+            assert_eq!(worker.tick(now + 71).await.unwrap(), Tick::RetryRetained);
+            assert_eq!(worker.tick(now + 111).await.unwrap(), Tick::Progress);
             assert_eq!(worker.tick(now + 1000).await.unwrap(), Tick::Idle);
             let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM cashu_treasury_completions")
                 .fetch_one(&f.pool)
@@ -801,12 +834,72 @@ mod cashu_treasury_tests {
                 issued.invoice
             );
             let seen = requests.lock().unwrap();
-            assert_eq!(seen.len(), 2);
+            assert_eq!(seen.len(), 4);
             assert_eq!(seen[0].0, "retain");
-            assert_eq!(seen[1].0, "status");
-            assert_eq!(seen[0].1, seen[1].1);
-            assert_eq!(seen[0].2, seen[1].2);
+            for request in &seen[1..] {
+                assert_eq!(request.0, "status");
+                assert_eq!(seen[0].1, request.1);
+                assert_eq!(seen[0].2, request.2);
+            }
         }
+    }
+
+    #[tokio::test]
+    async fn core_treasury_pause_preserves_delivery_budget_and_expiry_uses_only_status() -> Result<()> {
+        use crate::cashu::treasury_worker::{Controls, Tick, Worker};
+        for expired in [false, true] {
+            let f = Fixture::new(&[8], 0, 7, 1, |_| {}).await;
+            let registration = Arc::new(copy_registration(&f.registration));
+            let policy = Arc::new(f.policy.clone());
+            let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let make_worker = |deliver, lose_reply| Worker::new(
+                f.ledger.clone(),
+                f.runtime.clone(),
+                registration.clone(),
+                policy.clone(),
+                ScheduledWallet {
+                    registration: registration.clone(),
+                    data: f.report(1, 0).validate(&registration, &f.intent).unwrap().clone(),
+                    requests: requests.clone(),
+                    lose_reply: std::sync::atomic::AtomicBool::new(lose_reply),
+                    pending_replies: 1.into(),
+                },
+                Controls {
+                    issue: true,
+                    deliver,
+                    inspect: true,
+                    maximum_attempts: 1,
+                    ..Default::default()
+                },
+                Duration::from_secs(1),
+            );
+            let now = crate::gateway::now_epoch()?;
+            let paused = make_worker(false, true)?;
+            assert_eq!(paused.tick(now).await?, Tick::Progress);
+            assert_eq!(paused.tick(now + 1).await?, Tick::RetryRetained);
+            let attempts: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM cashu_treasury_work WHERE stage='wallet'",
+            ).fetch_one(&f.pool).await?;
+            assert_eq!(attempts, 0);
+            drop(paused);
+
+            let resumed = make_worker(true, false)?;
+            let delivery = if expired {
+                let issued = f.ledger.cashu_treasury_invoice(f.intent.id).await?.unwrap();
+                let invoice: lightning_invoice::Bolt11Invoice = issued.invoice.parse()?;
+                i64::try_from(invoice.expires_at().unwrap().as_secs())?
+            } else {
+                now + 2
+            };
+            assert_eq!(resumed.tick(delivery).await?, Tick::RetryRetained);
+            assert_eq!(resumed.tick(delivery + 30).await?, Tick::Progress);
+            let commands = requests.lock().unwrap().iter()
+                .map(|request| request.0.clone()).collect::<Vec<_>>();
+            assert_eq!(commands, ["status", if expired { "status" } else { "retain" }, "status"]);
+            assert_eq!(f.count("cashu_treasury_completions").await, 0);
+            assert_eq!(f.ledger.feed_credit_sats().await?, 8);
+        }
+        Ok(())
     }
 
     async fn lightning(ledger: &LedgerStore, sats: u64) {

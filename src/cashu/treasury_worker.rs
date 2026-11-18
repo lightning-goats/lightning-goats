@@ -55,7 +55,8 @@ pub enum Tick {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Stage {
     Issue,
-    Wallet,
+    Deliver,
+    Inspect,
 }
 pub(crate) struct Work {
     pub id: uuid::Uuid,
@@ -108,6 +109,7 @@ impl<W: Wallet> Worker<W> {
     pub async fn tick(&self, now: i64) -> Result<Tick> {
         let controls = Controls {
             issue: self.controls.issue && self.policy.enabled,
+            deliver: self.controls.deliver && self.policy.enabled,
             ..self.controls.clone()
         };
         let Some(work) = self
@@ -149,7 +151,7 @@ impl<W: Wallet> Worker<W> {
             return Ok(Tick::Idle);
         };
         Ok(
-            match tokio::time::timeout(self.deadline, self.advance(work)).await {
+            match tokio::time::timeout(self.deadline, self.advance(work, now)).await {
                 Ok(Ok(true)) => Tick::Progress,
                 _ => Tick::RetryRetained,
             },
@@ -166,7 +168,7 @@ impl<W: Wallet> Worker<W> {
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
     }
-    async fn advance(&self, work: Work) -> Result<bool> {
+    async fn advance(&self, work: Work, now: i64) -> Result<bool> {
         match work.stage {
             Stage::Issue => Ok(self
                 .strike
@@ -178,19 +180,27 @@ impl<W: Wallet> Worker<W> {
                 )
                 .await?
                 .is_some()),
-            Stage::Wallet => {
+            Stage::Deliver | Stage::Inspect => {
                 let issued = self
                     .ledger
                     .cashu_treasury_invoice(work.id)
                     .await?
                     .ok_or_else(|| anyhow::anyhow!("treasury invoice missing"))?;
-                let command =
-                    if self.controls.deliver && self.policy.check_new(&issued.intent).is_ok() {
-                        // Paused spending must not prevent inspection after a lost ACK.
-                        Command::Retain(Box::new(issued))
-                    } else {
-                        Command::Status(Box::new(issued.intent))
-                    };
+                let mut deliver =
+                    work.stage == Stage::Deliver && self.policy.check_new(&issued.intent).is_ok();
+                if deliver {
+                    let invoice: lightning_invoice::Bolt11Invoice = issued.invoice.parse()?;
+                    let now = Duration::from_secs(u64::try_from(now)?);
+                    if invoice.expires_at().is_none_or(|expiry| now >= expiry) {
+                        self.ledger.close_cashu_treasury_delivery(work.id).await?;
+                        deliver = false;
+                    }
+                }
+                let command = if deliver {
+                    Command::Retain(Box::new(issued))
+                } else {
+                    Command::Status(Box::new(issued.intent))
+                };
                 let request = Request {
                     version: FEE_TIME_VERSION,
                     request_id: uuid::Uuid::new_v4(),
@@ -213,6 +223,8 @@ impl<W: Wallet> Worker<W> {
                         .await?;
                     Ok(true)
                 } else {
+                    // A valid reply proves the original instruction is retained.
+                    self.ledger.close_cashu_treasury_delivery(work.id).await?;
                     Ok(false)
                 }
             }

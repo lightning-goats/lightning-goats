@@ -1,4 +1,4 @@
-//! Strict schema-25 to 26 or 27 additive comparison of separate four-journal images.
+//! Strict additive Cashu comparison of separate four-journal images.
 //! It does not migrate a journal, restore state or authorize service resumption.
 use std::{collections::BTreeMap, path::Path};
 
@@ -9,7 +9,8 @@ use super::{Manifest, Operator, Policy, Role, database, files, legacy::rows};
 
 use super::contact_upgrade::{Definition, catalog};
 // Child-first order also supports removal of empty additions in historical test fixtures.
-pub(super) const CASHU_TABLES: [&str; 21] = [
+pub(super) const CASHU_TABLES: [&str; 22] = [
+    "cashu_treasury_inspections",
     "cashu_treasury_fee_observations",
     "cashu_sweep_jobs",
     "cashu_sweep_requests",
@@ -33,8 +34,10 @@ pub(super) const CASHU_TABLES: [&str; 21] = [
     "feed_source_reservations",
 ];
 pub(super) fn tables_for_core(version: i64) -> impl Iterator<Item = &'static str> {
-    CASHU_TABLES.into_iter().filter(move |name| {
-        version >= database::CURRENT_CORE_SCHEMA || *name != "cashu_treasury_fee_observations"
+    CASHU_TABLES.into_iter().filter(move |name| match *name {
+        "cashu_treasury_inspections" => version >= 28,
+        "cashu_treasury_fee_observations" => version >= 27,
+        _ => true,
     })
 }
 
@@ -55,9 +58,16 @@ pub(super) async fn private_catalog(version: i64) -> Result<BTreeMap<String, Def
         sqlx::raw_sql(include_str!("../../migrations/0026_cashu_receipts.sql"))
             .execute(&pool)
             .await?;
-        if version == database::CURRENT_CORE_SCHEMA {
+        if version >= 27 {
             sqlx::raw_sql(include_str!(
                 "../../migrations/0027_cashu_fee_observations.sql"
+            ))
+            .execute(&pool)
+            .await?;
+        }
+        if version >= 28 {
+            sqlx::raw_sql(include_str!(
+                "../../migrations/0028_cashu_treasury_inspections.sql"
             ))
             .execute(&pool)
             .await?;

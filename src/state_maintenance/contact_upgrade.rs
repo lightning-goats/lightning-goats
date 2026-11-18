@@ -1,4 +1,4 @@
-//! Strict schema-23 to 25/26/27 additive comparison of separate four-journal images.
+//! Strict additive contact comparison of separate four-journal images.
 //! Cashu schemas additionally require the exact, empty inactive extension.
 //! It does not migrate a journal, restore state or authorize service resumption.
 use std::{collections::BTreeMap, path::Path};
@@ -204,7 +204,7 @@ impl Operator {
     }
 
     /// Accept only a source-pinned schema-23 backup and a separate, already
-    /// migrated four-journal copy at exact schema 25, 26 or 27. Cashu schemas permit
+    /// migrated four-journal copy at exact schema 25 through 28. Cashu schemas permit
     /// only the empty, inactive Cashu extension. Normal verify/restore still
     /// require the current schema and retain their separate custody restrictions.
     pub async fn compare_contact_upgrade(

@@ -25,7 +25,7 @@ static CORE: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 static MEMBERSHIP: sqlx::migrate::Migrator = sqlx::migrate!("./cyberherd-migrations");
 static PAYOUT: sqlx::migrate::Migrator = sqlx::migrate!("./payout-migrations");
 static SIGNER: sqlx::migrate::Migrator = sqlx::migrate!("./signer-migrations");
-pub(super) const CURRENT_CORE_SCHEMA: i64 = 27;
+pub(super) const CURRENT_CORE_SCHEMA: i64 = 28;
 
 #[derive(Clone, Copy)]
 enum ReviewScope {
@@ -309,15 +309,16 @@ async fn report(
 // restore verification: only the separate contact comparison can select it.
 async fn require_core_prefix(pool: &SqlitePool, version: i64) -> Result<()> {
     let migrations: Vec<_> = CORE.iter().collect();
-    if !matches!(version, 23..=26)
+    if !(23..CURRENT_CORE_SCHEMA).contains(&version)
         || migrations.len() != usize::try_from(CURRENT_CORE_SCHEMA)?
         || migrations.last().map(|m| m.version) != Some(CURRENT_CORE_SCHEMA)
     {
         bail!("additive upgrade requires the separately qualified schema prefix");
     }
     let rows = sqlx::query(
-        "SELECT version,success,checksum FROM _sqlx_migrations ORDER BY version LIMIT 28",
+        "SELECT version,success,checksum FROM _sqlx_migrations ORDER BY version LIMIT ?",
     )
+    .bind(CURRENT_CORE_SCHEMA + 1)
     .fetch_all(pool)
     .await?;
     if rows.len() != usize::try_from(version)? {
@@ -344,8 +345,10 @@ async fn require_core_prefix(pool: &SqlitePool, version: i64) -> Result<()> {
     let later: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE
             (?<26 AND (name LIKE 'cashu_%' OR name LIKE 'feed_source_%'))
-            OR tbl_name='cashu_treasury_fee_observations')",
+            OR (?<27 AND tbl_name='cashu_treasury_fee_observations')
+            OR tbl_name='cashu_treasury_inspections')",
     )
+    .bind(version)
     .bind(version)
     .fetch_one(pool)
     .await?;

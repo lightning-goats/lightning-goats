@@ -638,8 +638,10 @@ operator-provisioned dedicated NIP-46 client key, never the project signing key.
 Do not create that credential or authorize bunker purposes as part of installing
 an inactive example. Systemd decrypts the selected credential into its protected
 runtime credential directory before the service's mount restrictions apply;
-the source credential stores remain hidden from the running process. Qualify
-this behavior and the loader's ownership/ancestry checks on the actual target.
+the source credential stores remain hidden from the running process. The
+loader accepts systemd's root-owned read-only credential mount when its
+access ACL grants only the registered signer UID the required read and
+directory search permissions. Qualify this behavior on the actual target.
 The signer unit hides wallet custody and core/payout state and denies IP egress
 by default. It cannot reach a bunker until a separately reviewed egress override
 is accepted. No `[Install]` section or dependency automatically starts it alongside

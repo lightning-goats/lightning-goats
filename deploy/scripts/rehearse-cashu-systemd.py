@@ -36,8 +36,12 @@ assert status['NoNewPrivs'].strip() == '1' and int(status['CapEff'], 16) == 0
 credentials = os.environ.get('CREDENTIALS_DIRECTORY')
 if role == 'signer':
     directory = Path(credentials)
-    assert list(directory.iterdir()) == [directory / 'cashu-nostr-client']
-    assert (directory / 'cashu-nostr-client').read_text() == '0' * 63 + '2'
+    client = directory / 'cashu-nostr-client'
+    assert list(directory.iterdir()) == [client]
+    assert client.read_text() == '0' * 63 + '2'
+    print('systemd credential modes', oct(directory.stat().st_mode & 0o7777),
+          oct(client.stat().st_mode & 0o7777), 'read-only mount',
+          bool(os.statvfs(directory).f_flag & os.ST_RDONLY))
 else:
     assert credentials is None
 try:

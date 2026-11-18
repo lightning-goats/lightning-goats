@@ -4,17 +4,19 @@ use crate::{
     publication_nak::{self, Nak},
 };
 use anyhow::{Result, ensure};
+use rustix::fs::{self as posix, Mode, OFlags, StatVfsMountFlags};
 use serde::Deserialize;
 use std::{
     fs::File,
     io::Read,
-    os::unix::fs::MetadataExt,
+    os::{fd::AsFd, unix::fs::MetadataExt},
     path::{Path, PathBuf},
 };
 use zeroize::Zeroizing;
 
 const MAX_CONFIG: usize = 65_536;
 const CLIENT_CREDENTIAL: &str = "cashu-nostr-client";
+const SYSTEMD_CREDENTIALS: &str = "/run/credentials";
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -136,23 +138,89 @@ fn load_client_credential() -> Result<Zeroizing<String>> {
     );
     let uid = rustix::process::geteuid().as_raw();
     ensure!(uid > 0, "signer credentials require a non-root runtime");
-    for (index, path) in directory.ancestors().enumerate() {
+    for path in directory.ancestors().skip(1) {
         let metadata = std::fs::symlink_metadata(path)?;
         ensure!(
-            metadata.is_dir()
-                && if index == 0 {
-                    (metadata.uid() == uid || metadata.uid() == 0) && metadata.mode() & 0o077 == 0
-                } else {
-                    metadata.uid() == 0 && metadata.mode() & 0o022 == 0
-                },
+            metadata.is_dir() && metadata.uid() == 0 && metadata.mode() & 0o022 == 0,
             "unprotected signer credential directory"
         );
     }
-    read_client_credential(&directory.join(CLIENT_CREDENTIAL), uid)
+    let systemd = directory.parent() == Some(Path::new(SYSTEMD_CREDENTIALS))
+        && directory
+            .extension()
+            .is_some_and(|suffix| suffix == "service");
+    let handle = File::from(posix::open(
+        &directory,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK,
+        Mode::empty(),
+    )?);
+    ensure!(
+        private_credential_mode(&handle, uid, 0o077, systemd, 5)?,
+        "unprotected signer credential directory"
+    );
+    read_client_credential(&handle, Path::new(CLIENT_CREDENTIAL), uid, systemd)
 }
-fn read_client_credential(path: &Path, uid: u32) -> Result<Zeroizing<String>> {
-    use rustix::fs::{Mode, OFlags};
-    let fd = rustix::fs::open(
+
+fn private_credential_mode(
+    file: &File,
+    uid: u32,
+    private_mask: u32,
+    systemd: bool,
+    rights: u16,
+) -> Result<bool> {
+    let metadata = file.metadata()?;
+    if (metadata.uid() == uid || metadata.uid() == 0) && metadata.mode() & private_mask == 0 {
+        return Ok(true);
+    }
+    // systemd can preserve root ownership while giving this service read access
+    // through a named-user ACL. st_mode exposes the ACL mask as group bits.
+    let mode = u32::from(rights) * 0o110;
+    if !systemd
+        || metadata.uid() != 0
+        || metadata.gid() != 0
+        || metadata.mode() & 0o7777 != mode
+        || !posix::fstatvfs(file)?
+            .f_flag
+            .contains(StatVfsMountFlags::RDONLY)
+    {
+        return Ok(false);
+    }
+    let mut acl = [0; 44];
+    let Ok(length) = posix::fgetxattr(file, "system.posix_acl_access", &mut acl[..]) else {
+        return Ok(false);
+    };
+    Ok(exact_systemd_acl(&acl[..length], uid, rights))
+}
+
+fn exact_systemd_acl(raw: &[u8], uid: u32, rights: u16) -> bool {
+    // Linux ACL xattr version 2 has an ordered eight-byte entry for each tag.
+    let entries = [
+        (0x01_u16, rights, u32::MAX), // owner
+        (0x02, rights, uid),          // dedicated runtime UID
+        (0x04, 0, u32::MAX),          // owning group
+        (0x10, rights, u32::MAX),     // effective ACL mask
+        (0x20, 0, u32::MAX),          // other
+    ];
+    raw.len() == 44
+        && raw[..4] == 2_u32.to_le_bytes()
+        && raw[4..]
+            .chunks_exact(8)
+            .zip(entries)
+            .all(|(entry, (tag, mode, id))| {
+                entry[..2] == tag.to_le_bytes()
+                    && entry[2..4] == mode.to_le_bytes()
+                    && entry[4..] == id.to_le_bytes()
+            })
+}
+
+fn read_client_credential(
+    directory: impl AsFd,
+    path: &Path,
+    uid: u32,
+    systemd: bool,
+) -> Result<Zeroizing<String>> {
+    let fd = posix::openat(
+        directory,
         path,
         OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK,
         Mode::empty(),
@@ -162,8 +230,7 @@ fn read_client_credential(path: &Path, uid: u32) -> Result<Zeroizing<String>> {
     ensure!(
         metadata.is_file()
             && metadata.nlink() == 1
-            && (metadata.uid() == uid || metadata.uid() == 0)
-            && metadata.mode() & 0o177 == 0
+            && private_credential_mode(&file, uid, 0o177, systemd, 4)?
             && (64..=65).contains(&metadata.len()),
         "invalid signer client credential file"
     );
@@ -268,16 +335,17 @@ mod tests {
         std::fs::write(&path, format!("{value}\n"))?;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
         let uid = rustix::process::geteuid().as_raw();
-        assert_eq!(read_client_credential(&path, uid)?.as_str(), value);
+        let load = |file: &Path| read_client_credential(posix::CWD, file, uid, false);
+        assert_eq!(load(&path)?.as_str(), value);
         let alias = temp.path().join("alias");
         std::os::unix::fs::symlink(&path, &alias)?;
-        assert!(read_client_credential(&alias, uid).is_err());
+        assert!(load(&alias).is_err());
         std::fs::remove_file(&alias)?;
         std::fs::hard_link(&path, &alias)?;
-        assert!(read_client_credential(&path, uid).is_err());
+        assert!(load(&path).is_err());
         std::fs::remove_file(&alias)?;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o640))?;
-        assert!(read_client_credential(&path, uid).is_err());
+        assert!(load(&path).is_err());
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
         for invalid in [
             "x".repeat(64),
@@ -286,8 +354,26 @@ mod tests {
             format!("{}\r\n", "0".repeat(64)),
         ] {
             std::fs::write(&path, invalid)?;
-            assert!(read_client_credential(&path, uid).is_err());
+            assert!(load(&path).is_err());
         }
+        Ok(())
+    }
+
+    #[test]
+    fn systemd_named_acl_grants_only_the_registered_uid() -> Result<()> {
+        let mut acl = hex::decode(concat!(
+            "02000000",
+            "01000400ffffffff",
+            "0200040034120000",
+            "04000000ffffffff",
+            "10000400ffffffff",
+            "20000000ffffffff"
+        ))?;
+        assert!(exact_systemd_acl(&acl, 0x1234, 4));
+        assert!(!exact_systemd_acl(&acl, 0x1235, 4));
+        assert!(!exact_systemd_acl(&acl, 0x1234, 5));
+        acl[22] = 4; // Give the owning group read permission too.
+        assert!(!exact_systemd_acl(&acl, 0x1234, 4));
         Ok(())
     }
 }

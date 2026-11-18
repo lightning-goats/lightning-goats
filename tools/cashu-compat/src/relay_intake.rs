@@ -77,14 +77,24 @@ fn scope(config: &service_config::Config, relay: &Config) -> Result<[u8; 32]> {
         .map(|k| (&k.mint_id, &k.id, &k.keys))
         .collect();
     keys.sort();
-    let inventory = serde_json::to_vec(&serde_json::json!({
+    let mut inventory = serde_json::json!({
         "version":1,"instance":config.wallet_instance,"epoch":config.wallet_epoch,
         "recipient":config.recipient,"receiving_key":config.receiving_key,
         "mints":mints,"keysets":keys,"body_bytes":config.body_bytes,
         "proof_count":config.proof_count,"receipt_sats":config.receipt_sats,
         "floor":relay.historical_floor,"span":relay.window_seconds,
         "overlap":relay.overlap_seconds,"limit":relay.event_limit
-    }))?;
+    });
+    let mut historical = config
+        .retained_receiving_keys
+        .iter()
+        .filter(|key| key.nutzap.is_some())
+        .collect::<Vec<_>>();
+    historical.sort_by_key(|key| &key.public_key);
+    if !historical.is_empty() {
+        inventory["retained_receiving_keys"] = serde_json::to_value(historical)?;
+    }
+    let inventory = serde_json::to_vec(&inventory)?;
     let mut hash = Sha256::new();
     hash.update(b"lightning-goats-nutzap-discovery-v1\0");
     hash.update(inventory);
@@ -215,13 +225,17 @@ impl<'a> Worker<'a> {
                     break;
                 }
                 let body = serde_json::to_string(event.event())?;
-                match crate::intake::nutzap_json(
+                match crate::intake::nutzap_json_at(
                     &body,
                     &self.runtime.config.recipient,
                     &self.runtime.policy.registry,
                     &self.runtime.policy.keys,
                     &self.runtime.policy.limits,
-                    self.runtime.policy.receiver,
+                    crate::intake::NutzapReceivers {
+                        current: self.runtime.policy.receiver,
+                        retained: &self.runtime.config.retained_receiving_keys,
+                        now: u64::try_from(clock()?)?,
+                    },
                 ) {
                     Err(_) => rejected += 1,
                     Ok(contribution) => {

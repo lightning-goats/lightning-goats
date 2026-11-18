@@ -2,27 +2,81 @@
 use anyhow::{Result, ensure};
 use cdk::nuts::{PublicKey, SecretKey};
 use rustix::fs::{Mode, OFlags};
-use std::{fs::File, io::Read, os::unix::fs::MetadataExt, path::Path};
+use sha2::{Digest, Sha256};
+use std::{collections::BTreeMap, fs::File, io::Read, os::unix::fs::MetadataExt, path::Path};
 use zeroize::Zeroizing;
 
 pub struct Keys {
     pub seed: Zeroizing<[u8; 64]>,
     pub receiving: SecretKey,
+    anchor: PublicKey,
+    retained: BTreeMap<cdk::secp256k1::XOnlyPublicKey, SecretKey>,
 }
 
 impl Keys {
     /// Files contain raw bytes, not hex, JSON, environment variables or CLI secrets.
     pub fn load(directory: &Path, expected_receiver: PublicKey) -> Result<Self> {
+        Self::load_configured(directory, expected_receiver, expected_receiver, &[])
+    }
+
+    pub(crate) fn load_configured(
+        directory: &Path,
+        expected_receiver: PublicKey,
+        anchor: PublicKey,
+        inventory: &[PublicKey],
+    ) -> Result<Self> {
         crate::private_ipc::private_state(directory)?;
         let seed = read_secret::<64>(&directory.join("wallet-seed.bin"))?;
-        let receiving_bytes = read_secret::<32>(&directory.join("receiving-key.bin"))?;
-        let receiving = SecretKey::from_slice(receiving_bytes.as_ref())
-            .map_err(|_| anyhow::anyhow!("invalid dedicated receiving key"))?;
-        ensure!(
-            receiving.public_key() == expected_receiver,
-            "dedicated receiving key differs from protected configuration"
-        );
-        Ok(Self { seed, receiving })
+        let load = |expected: PublicKey| -> Result<SecretKey> {
+            let name = if expected == anchor {
+                "receiving-key.bin".into()
+            } else {
+                format!("receiving-key-{}.bin", expected.to_hex())
+            };
+            let bytes = read_secret::<32>(&directory.join(name))?;
+            let key = SecretKey::from_slice(bytes.as_ref())
+                .map_err(|_| anyhow::anyhow!("invalid dedicated receiving key"))?;
+            ensure!(
+                key.public_key() == expected,
+                "receiving key differs from protected configuration"
+            );
+            Ok(key)
+        };
+        let anchor_key = load(anchor)?;
+        let mut retained = BTreeMap::new();
+        let receiving = if expected_receiver == anchor {
+            anchor_key
+        } else {
+            retained.insert(anchor.x_only_public_key(), anchor_key);
+            load(expected_receiver)?
+        };
+        for key in inventory.iter().filter(|key| **key != anchor) {
+            retained.insert(key.x_only_public_key(), load(*key)?);
+        }
+        Ok(Self {
+            seed,
+            receiving,
+            anchor,
+            retained,
+        })
+    }
+
+    pub(crate) fn signing_key(&self, lock: PublicKey) -> Result<&SecretKey> {
+        let identity = lock.x_only_public_key();
+        if self.receiving.public_key().x_only_public_key() == identity {
+            return Ok(&self.receiving);
+        }
+        self.retained
+            .get(&identity)
+            .ok_or_else(|| anyhow::anyhow!("admitted receiving key is unavailable"))
+    }
+
+    pub(crate) fn binding(&self) -> [u8; 32] {
+        let mut hash = Sha256::new();
+        hash.update(b"lightning-goats-cashu-runtime-keys-v1\0");
+        hash.update(&self.seed[..]);
+        hash.update(self.anchor.to_bytes());
+        hash.finalize().into()
     }
 }
 

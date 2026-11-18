@@ -791,6 +791,122 @@ async fn ordinary_and_nutzap_use_real_cdk_and_one_reusable_descriptor() -> Resul
 }
 
 #[tokio::test]
+async fn rotated_receivers_redeem_original_queued_and_in_window_proofs() -> Result<()> {
+    use crate::{
+        descriptor::{Descriptor, Encoding, RetiredDescriptor, RetiredMint},
+        intake::{DescriptorAcceptance, NutzapReceivers, nutzap_json_at, ordinary_json_at},
+        service_config::{NutzapWindow, RetainedReceiver},
+        service_keys::Keys,
+    };
+    use std::os::unix::fs::PermissionsExt;
+    let harness = Harness::new(0)?;
+    let old = harness.receiver.public_key();
+    let current = SecretKey::from_slice(&[8; 32])?.public_key();
+    for (name, bytes) in [
+        ("wallet-seed.bin".into(), harness.seed.to_vec()),
+        ("receiving-key.bin".into(), vec![1; 32]),
+        (
+            format!("receiving-key-{}.bin", current.to_hex()),
+            vec![8; 32],
+        ),
+    ] {
+        let path = harness.directory.path().join(name);
+        std::fs::write(&path, bytes)?;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    let incoming = |key: PublicKey, nonce| {
+        let even = key
+            .x_only_public_key()
+            .public_key(cdk::secp256k1::Parity::Even);
+        harness
+            .mint
+            .issue(json!(["P2PK",{"nonce":nonce,"data":even.to_string()}]).to_string())
+    };
+    let queued = {
+        let first = harness.open().await?;
+        new_id(first.admit(&harness.ordinary(incoming(old, "queued"), "queued-before-rotation")?)?)
+    };
+    let keys = Keys::load_configured(harness.directory.path(), current, old, &[old])?;
+    let mut reopened = harness.open().await?;
+    let mint = harness.policy();
+    let registry = MintRegistry::new(vec![mint.clone()])?;
+    let endpoint = "https://lightning-goats.example/api/v1/cashu";
+    let old_descriptor = Descriptor::prepare(&registry, endpoint, old, Encoding::CreqA)?;
+    let retired = [RetiredDescriptor {
+        id: old_descriptor.id().into(),
+        endpoint: endpoint.into(),
+        receiving_key: Some(old.to_hex()),
+        retired_at: 100,
+        accept_before: 200,
+        mints: vec![RetiredMint {
+            id: mint.id.clone(),
+            advertised_url: mint.advertised_url.clone(),
+            policy_version: mint.policy_version.clone(),
+        }],
+    }];
+    let retained = [RetainedReceiver {
+        public_key: old.to_hex(),
+        nutzap: Some(NutzapWindow {
+            starts_at: 100,
+            accept_before: 200,
+            mint_ids: BTreeSet::from([mint.id.clone()]),
+        }),
+    }];
+    let limits = Limits {
+        body_bytes: 65536,
+        proof_count: 8,
+        receipt_sats: 10000,
+    };
+    let (zap, recipient) = harness.nutzap_body(incoming(old, "delayed-zap"))?;
+    let decode_zap = |now| {
+        nutzap_json_at(
+            &zap,
+            &recipient,
+            &registry,
+            &harness.keys,
+            &limits,
+            NutzapReceivers {
+                current,
+                retained: &retained,
+                now,
+            },
+        )
+    };
+    let payload = serde_json::to_vec(&json!({
+        "id":old_descriptor.id(),"mint":mint.advertised_url,"unit":"sat","proofs":[incoming(old,"old-qr")]
+    }))?;
+    let decode_qr = |now| {
+        ordinary_json_at(
+            &payload,
+            "old-qr-source",
+            DescriptorAcceptance {
+                active: &[],
+                retired: &retired,
+                now,
+            },
+            &registry,
+            &harness.keys,
+            &limits,
+            current,
+        )
+    };
+    assert!(decode_zap(200).is_err() && decode_qr(200).is_err());
+    let late_zap = new_id(reopened.admit(&decode_zap(199)?)?);
+    let old_qr = new_id(reopened.admit(&decode_qr(199)?)?);
+    for id in [queued, late_zap, old_qr] {
+        let verified = receipt(
+            reopened
+                .acquire_with_receivers(id, |lock| keys.signing_key(lock))
+                .await?,
+        );
+        assert_eq!(verified.acquisition_id, id);
+        assert_eq!(verified.net_sats, 8);
+    }
+    assert_eq!(harness.mint.swap_attempts.load(Ordering::SeqCst), 3);
+    Ok(())
+}
+
+#[tokio::test]
 async fn lost_mint_reply_restarts_and_restores_without_a_second_execution() -> Result<()> {
     let harness = Harness::new(0)?;
     harness.mint.lose_reply.store(true, Ordering::SeqCst);
@@ -2006,6 +2122,7 @@ async fn retired_descriptor_preserves_exact_admission_retry_after_its_window() -
     let retired = |accept_before| RetiredDescriptor {
         id: old.id().into(),
         endpoint: endpoint.into(),
+        receiving_key: None,
         retired_at: now - 60,
         accept_before,
         mints: vec![RetiredMint {
@@ -2042,6 +2159,7 @@ async fn retired_descriptor_preserves_exact_admission_retry_after_its_window() -
         recipient: "",
         descriptors: &active,
         retired_descriptors: &within_window,
+        retained_receivers: &[],
         public_request: Some(&current_descriptor),
         journal: journal.clone(),
         writer: &writer,
@@ -2151,6 +2269,7 @@ async fn private_intake_authenticates_before_read_and_deduplicates_across_transp
         recipient: &recipient,
         descriptors: &["reusable".into()],
         retired_descriptors: &[],
+        retained_receivers: &[],
         public_request: None,
         journal: journal.clone(),
         writer: &writer,

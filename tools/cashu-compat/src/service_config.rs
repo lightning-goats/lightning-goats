@@ -31,6 +31,10 @@ pub struct Config {
     #[serde(default)]
     pub receive_nutzap: bool,
     pub receiving_key: String,
+    #[serde(default)]
+    pub receiving_key_anchor: Option<String>,
+    #[serde(default)]
+    pub retained_receiving_keys: Vec<RetainedReceiver>,
     pub recipient: String,
     pub descriptors: Vec<String>,
     #[serde(default)]
@@ -76,10 +80,27 @@ pub struct Keyset {
     pub keys: BTreeMap<u64, String>,
 }
 
+#[derive(Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RetainedReceiver {
+    pub public_key: String,
+    pub nutzap: Option<NutzapWindow>,
+}
+
+#[derive(Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct NutzapWindow {
+    pub starts_at: u64,
+    pub accept_before: u64,
+    pub mint_ids: BTreeSet<String>,
+}
+
 pub struct Prepared {
     pub registry: MintRegistry,
     pub keys: PinnedKeys,
     pub receiver: PublicKey,
+    pub key_anchor: PublicKey,
+    pub retained_receivers: Vec<PublicKey>,
     pub limits: Limits,
     pub public_request: Option<crate::descriptor::Descriptor>,
 }
@@ -116,7 +137,12 @@ impl Config {
         let prepared = self.prepare()?;
         self.require_runtime_identity()?;
         crate::writer_lock::check_recovery_marker(&self.state_directory)?;
-        crate::service_keys::Keys::load(&self.state_directory, prepared.receiver)
+        crate::service_keys::Keys::load_configured(
+            &self.state_directory,
+            prepared.receiver,
+            prepared.key_anchor,
+            &prepared.retained_receivers,
+        )
     }
     /// Public receiving instructions only: no runtime identity, key or journal access.
     pub fn prepare_request(
@@ -227,17 +253,73 @@ impl Config {
         );
         let registry = MintRegistry::new(self.mints.clone())?;
         let receiver = PublicKey::from_hex(&self.receiving_key)?;
+        let key_anchor = self
+            .receiving_key_anchor
+            .as_deref()
+            .map(PublicKey::from_hex)
+            .transpose()?
+            .unwrap_or(receiver);
+        ensure!(
+            self.retained_receiving_keys.len() <= 16
+                && (key_anchor == receiver
+                    || key_anchor.x_only_public_key() != receiver.x_only_public_key()),
+            "invalid retained receiver inventory"
+        );
+        if self.receiving_key_anchor.is_some() || !self.retained_receiving_keys.is_empty() {
+            ensure!(
+                self.receiving_key == receiver.to_hex()
+                    && self
+                        .receiving_key_anchor
+                        .as_ref()
+                        .is_none_or(|raw| *raw == key_anchor.to_hex()),
+                "rotated receiving identities must use canonical compressed encoding"
+            );
+        }
+        let mut retained_receivers = Vec::new();
+        let mut receiving_identities = BTreeSet::from([receiver.x_only_public_key()]);
+        for retained in &self.retained_receiving_keys {
+            let key = PublicKey::from_hex(&retained.public_key)?;
+            ensure!(
+                key.to_hex() == retained.public_key
+                    && (key == key_anchor
+                        || key.x_only_public_key() != key_anchor.x_only_public_key())
+                    && receiving_identities.insert(key.x_only_public_key()),
+                "duplicate or noncanonical retained receiver"
+            );
+            if let Some(window) = &retained.nutzap {
+                ensure!(
+                    window.starts_at > 0
+                        && window.starts_at < window.accept_before
+                        && window.accept_before <= i64::MAX as u64
+                        && !window.mint_ids.is_empty()
+                        && window
+                            .mint_ids
+                            .iter()
+                            .all(|id| self.mints.iter().any(|mint| mint.id == *id)),
+                    "invalid retained nutzap receiving window"
+                );
+            }
+            retained_receivers.push(key);
+        }
         let mut descriptor_ids = self.descriptors.iter().collect::<BTreeSet<_>>();
         for retired in &self.retired_descriptors {
             ensure!(
                 descriptor_ids.insert(&retired.id),
                 "retired descriptor still active or listed twice"
             );
-            retired.verify(receiver)?;
+            let bound = retired.receiver(receiver)?;
+            ensure!(
+                bound == receiver || bound == key_anchor || retained_receivers.contains(&bound),
+                "retired descriptor receiver is not retained"
+            );
+            retired.verify(bound)?;
         }
         lightning_goats_nostr_event::validate_public_key(&self.recipient)?;
         ensure!(
-            receiver.x_only_public_key().to_string() != self.recipient,
+            receiving_identities
+                .iter()
+                .all(|key| key.to_string() != self.recipient)
+                && key_anchor.x_only_public_key().to_string() != self.recipient,
             "Cashu receiving key must be separate from project Nostr identity"
         );
         let mut keys = PinnedKeys::default();
@@ -333,6 +415,8 @@ impl Config {
             registry,
             keys,
             receiver,
+            key_anchor,
+            retained_receivers,
             limits: Limits {
                 body_bytes: self.body_bytes,
                 proof_count: self.proof_count,

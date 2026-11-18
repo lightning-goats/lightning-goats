@@ -13,7 +13,7 @@ use anyhow::{Result, ensure};
 use cdk::{
     cdk_database::{Error as DatabaseError, WalletDatabase},
     mint_url::MintUrl,
-    nuts::{CheckStateRequest, SecretKey},
+    nuts::{CheckStateRequest, PublicKey, SecretKey},
     wallet::{ReceiveOptions, Wallet},
 };
 use cdk_http_client::Transport;
@@ -143,6 +143,21 @@ impl<T: Transport + 'static> Coordinator<'_, T> {
 
     /// Retry of an already submitted acquisition never starts a new swap.
     pub async fn acquire_new(&mut self, id: Uuid, receiving_key: &SecretKey) -> Result<Progress> {
+        self.acquire_with_receivers(id, |lock| {
+            ensure!(
+                lock.x_only_public_key() == receiving_key.public_key().x_only_public_key(),
+                "admitted receiving key is unavailable"
+            );
+            Ok(receiving_key)
+        })
+        .await
+    }
+
+    pub(crate) async fn acquire_with_receivers<'key>(
+        &mut self,
+        id: Uuid,
+        key_for: impl Fn(PublicKey) -> Result<&'key SecretKey>,
+    ) -> Result<Progress> {
         if let Some(progress) = self.ready(id)? {
             return Ok(progress);
         }
@@ -165,12 +180,21 @@ impl<T: Transport + 'static> Coordinator<'_, T> {
             .lock()
             .map_err(|_| anyhow::anyhow!("wallet journal unavailable"))?
             .admitted_proofs(id)?;
+        let mut locks = std::collections::BTreeSet::new();
+        let mut signing_keys = Vec::new();
+        for proof in &proofs {
+            if let Some(lock) = crate::intake::receiver_lock(proof)? {
+                if locks.insert(lock.x_only_public_key()) {
+                    signing_keys.push(key_for(lock)?.clone());
+                }
+            }
+        }
         let _lease = self
             .gate
             .arm_new_acquisition(id, self.maximum_receive_fee_sats)
             .await?;
         let options = ReceiveOptions {
-            p2pk_signing_keys: vec![receiving_key.clone()],
+            p2pk_signing_keys: signing_keys,
             ..Default::default()
         };
         // Any error retains the original journal. A timeout is never failure evidence.

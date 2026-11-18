@@ -53,6 +53,7 @@ async fn isolated_public_request_wallet_child() -> Result<()> {
         let retired = RetiredDescriptor {
             id: original.id().into(),
             endpoint: endpoint.into(),
+            receiving_key: None,
             retired_at: 1,
             accept_before: 2,
             mints: vec![RetiredMint {
@@ -109,6 +110,7 @@ async fn isolated_public_request_wallet_child() -> Result<()> {
         recipient: "",
         descriptors: &ids,
         retired_descriptors: &retired_descriptors,
+        retained_receivers: &[],
         public_request: Some(&descriptor),
         journal: journal.clone(),
         writer: &writer,

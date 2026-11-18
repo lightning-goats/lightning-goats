@@ -264,7 +264,7 @@ jobs:
           import hashlib, os, subprocess
           from pathlib import Path
           root = Path(os.environ['RUNNER_TEMP'])
-          command = ['sudo', 'unshare', '--mount', '--net', '--', 'python3', 'deploy/scripts/test-cashu-private-run.py', '--', 'python3', 'deploy/scripts/test-cashu-native-backup.py']
+          command = ['sudo', 'unshare', '--mount', '--net', '--', 'python3', 'deploy/scripts/test-cashu-private-run.py', '--', 'python3', 'deploy/scripts/test-cashu-native-backup.py', '--rotate-receiving-key']
           for name, path in [('core', root / 'cashu-core/core-cli'), ('wallet', root / 'cashu-wallet/wallet-cli'), ('signer', root / 'cashu-wallet/signer-cli'),
                              ('membership', root / 'cashu-core/membership-cli'), ('payout', root / 'cashu-core/payout-cli'),
                              ('payout-signer', root / 'cashu-core/payout-signer-cli'), ('statectl', root / 'cashu-core/statectl-cli'),

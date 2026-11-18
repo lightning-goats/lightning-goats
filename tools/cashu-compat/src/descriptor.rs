@@ -20,6 +20,8 @@ pub use lightning_goats_cashu_receipt::public_request::Encoding;
 pub struct RetiredDescriptor {
     pub id: String,
     pub endpoint: String,
+    #[serde(default)]
+    pub receiving_key: Option<String>,
     pub retired_at: u64,
     pub accept_before: u64,
     pub mints: Vec<RetiredMint>,
@@ -34,6 +36,15 @@ pub struct RetiredMint {
 }
 
 impl RetiredDescriptor {
+    pub(crate) fn receiver(&self, current: PublicKey) -> Result<PublicKey> {
+        Ok(self
+            .receiving_key
+            .as_deref()
+            .map(PublicKey::from_hex)
+            .transpose()?
+            .unwrap_or(current))
+    }
+
     pub(crate) fn verify(&self, receiver: PublicKey) -> Result<()> {
         ensure!(
             self.retired_at > 0

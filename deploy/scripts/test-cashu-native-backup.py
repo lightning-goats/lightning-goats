@@ -41,6 +41,7 @@ def main():
         option=name.replace('_','-')
         parser.add_argument('--'+option+'-cli',type=Path)
         parser.add_argument('--'+option+'-sha256')
+    parser.add_argument('--rotate-receiving-key', action='store_true')
     args = parser.parse_args()
     selected = [getattr(args, name + suffix) is not None
                 for name in extended_names for suffix in ['_cli', '_sha256']]
@@ -51,6 +52,8 @@ def main():
                        for name in ['collector_copy','age','age_keygen'] for suffix in ['_cli','_sha256']]
     if any(collector_options) and (not all(collector_options) or not extended):
         raise ValueError('collector fixture requires all native programs and encryption artifacts')
+    if args.rotate_receiving_key and not all(collector_options):
+        raise ValueError('key rotation requires the complete archive rehearsal')
     if (os.geteuid() != 0
             or os.readlink('/proc/self/ns/net') == os.readlink('/proc/1/ns/net')):
         raise ValueError('requires root in a fresh network namespace')
@@ -149,6 +152,17 @@ def main():
         status = json.loads(call('wallet', wallet_uid, 'status', wallet_config).stdout)
         if status.get('recovery_required'):
             raise ValueError('fresh wallet unexpectedly requires recovery')
+        if args.rotate_receiving_key:
+            original = '02' + receiver
+            receiver = 'e493dbf1c10d80f3581e4904930b1404cc6c13900ee0758474fa94abe8c4cd13'
+            rotated_key = states['wallet'] / ('receiving-key-02' + receiver + '.bin')
+            rotated_key.write_bytes(bytes(31) + bytes([4]))
+            rotated_key.chmod(0o600)
+            os.chown(rotated_key, wallet_uid, wallet_uid)
+            settings = json.loads(wallet_config.read_bytes())
+            settings.update(receiving_key_anchor=original, receiving_key='02' + receiver,
+                            retained_receiving_keys=[{'public_key': original}])
+            wallet_config.write_text(json.dumps(settings))
         helper = root / 'unused-nak'
         helper.write_text('#!/bin/sh\nexit 97\n')
         helper.chmod(0o555)

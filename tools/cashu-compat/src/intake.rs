@@ -86,6 +86,40 @@ impl ValidatedContribution {
     }
 }
 
+/// The exact key encoded in an already supported simple P2PK lock.
+/// Used for both admission and choosing a signer for retained proofs.
+pub(crate) fn receiver_lock(proof: &Proof) -> Result<Option<PublicKey>> {
+    let secret = proof.secret.as_bytes();
+    if secret.iter().find(|b| !b.is_ascii_whitespace()) != Some(&b'[') {
+        return Ok(None);
+    }
+    let condition: nut10::Secret = serde_json::from_slice(secret)
+        .map_err(|_| anyhow::anyhow!("unsupported spending condition"))?;
+    ensure!(
+        condition.kind() == nut10::Kind::P2PK,
+        "unsupported spending condition"
+    );
+    let data = condition.secret_data();
+    ensure!(
+        data.tags().is_none_or(|tags| tags.is_empty()),
+        "only simple receiver P2PK is supported"
+    );
+    let value: serde_json::Value = serde_json::from_slice(secret)?;
+    let fields = value
+        .get(1)
+        .and_then(|v| v.as_object())
+        .ok_or_else(|| anyhow::anyhow!("invalid locking profile"))?;
+    ensure!(
+        fields
+            .keys()
+            .all(|key| matches!(key.as_str(), "nonce" | "data" | "tags")),
+        "unsupported locking field"
+    );
+    Ok(Some(
+        PublicKey::from_hex(data.data()).map_err(|_| anyhow::anyhow!("invalid receiver lock"))?,
+    ))
+}
+
 fn validate_proofs(
     proofs: &[Proof],
     policy: &MintPolicy,
@@ -121,28 +155,11 @@ fn validate_proofs(
             proof.p2pk_e.is_none(),
             "unsupported blinded locking profile"
         );
-        let secret = proof.secret.as_bytes();
-        // A condition-shaped secret must parse as a supported condition; an
-        // unknown/malformed NUT-10 array must never degrade into bearer cash.
-        let conditional = secret.iter().find(|b| !b.is_ascii_whitespace()) == Some(&b'[');
-        if conditional {
+        if let Some(public) = receiver_lock(proof)? {
             ensure!(
                 proof.dleq.is_some(),
                 "receiver P2PK requires DLEQ before admission"
             );
-            let condition: nut10::Secret = serde_json::from_slice(secret)
-                .map_err(|_| anyhow::anyhow!("unsupported spending condition"))?;
-            ensure!(
-                condition.kind() == nut10::Kind::P2PK,
-                "unsupported spending condition"
-            );
-            let data = condition.secret_data();
-            ensure!(
-                data.tags().is_none_or(|tags| tags.is_empty()),
-                "only simple receiver P2PK is supported"
-            );
-            let public = PublicKey::from_hex(data.data())
-                .map_err(|_| anyhow::anyhow!("invalid receiver lock"))?;
             ensure!(
                 public.x_only_public_key() == receiver.x_only_public_key(),
                 "wrong receiver lock"
@@ -150,19 +167,6 @@ fn validate_proofs(
             if nutzap {
                 ensure!(public.to_bytes()[0] == 2, "invalid NIP-61 key encoding");
             }
-            // CDK's condition parser ignores unknown JSON fields; reject those
-            // before claiming proof identities under this deliberately narrow profile.
-            let value: serde_json::Value = serde_json::from_slice(secret)?;
-            let fields = value
-                .get(1)
-                .and_then(|v| v.as_object())
-                .ok_or_else(|| anyhow::anyhow!("invalid locking profile"))?;
-            ensure!(
-                fields
-                    .keys()
-                    .all(|key| matches!(key.as_str(), "nonce" | "data" | "tags")),
-                "unsupported locking field"
-            );
         } else {
             ensure!(!nutzap, "nutzap requires receiver P2PK");
         }
@@ -222,16 +226,15 @@ pub(crate) fn ordinary_json_at(
         serde_json::from_slice(body).map_err(|_| anyhow::anyhow!("invalid Cashu payload"))?;
     ensure!(payload.unit == CurrencyUnit::Sat, "unsupported unit");
     let policy = registry.accepting(&payload.mint.to_string(), false)?;
-    if let Some(id) = payload.id {
-        ensure!(
-            descriptors.active.contains(&id)
-                || descriptors
-                    .retired
-                    .iter()
-                    .any(|old| old.accepts(&id, policy, descriptors.now)),
-            "receiving descriptor not accepted"
-        );
-    }
+    let receiver = match payload.id {
+        Some(id) if !descriptors.active.contains(&id) => descriptors
+            .retired
+            .iter()
+            .find(|old| old.accepts(&id, policy, descriptors.now))
+            .ok_or_else(|| anyhow::anyhow!("receiving descriptor not accepted"))?
+            .receiver(receiver)?,
+        _ => receiver,
+    };
     validate_proofs(&payload.proofs, policy, keys, limits, receiver, false)?;
     Ok(ValidatedContribution {
         mint_id: policy.id.clone(),
@@ -250,6 +253,34 @@ pub fn nutzap_json(
     keys: &PinnedKeys,
     limits: &Limits,
     receiver: PublicKey,
+) -> Result<ValidatedContribution> {
+    nutzap_json_at(
+        body,
+        recipient,
+        registry,
+        keys,
+        limits,
+        NutzapReceivers {
+            current: receiver,
+            retained: &[],
+            now: 0,
+        },
+    )
+}
+
+pub(crate) struct NutzapReceivers<'a> {
+    pub current: PublicKey,
+    pub retained: &'a [crate::service_config::RetainedReceiver],
+    pub now: u64,
+}
+
+pub(crate) fn nutzap_json_at(
+    body: &str,
+    recipient: &str,
+    registry: &MintRegistry,
+    keys: &PinnedKeys,
+    limits: &Limits,
+    receivers: NutzapReceivers<'_>,
 ) -> Result<ValidatedContribution> {
     limits.validate()?;
     ensure!(
@@ -293,6 +324,27 @@ pub fn nutzap_json(
                 serde_json::from_str::<Proof>(&tag[1])
                     .map_err(|_| anyhow::anyhow!("invalid nutzap proof"))?,
             );
+        }
+    }
+    let mut receiver = receivers.current;
+    if !receivers.retained.is_empty() {
+        let first = proofs
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("nutzap proof missing"))?;
+        let lock = receiver_lock(first)?.ok_or_else(|| anyhow::anyhow!("nutzap lock missing"))?;
+        if lock.x_only_public_key() != receiver.x_only_public_key() {
+            for historical in receivers.retained {
+                if let Some(window) = &historical.nutzap {
+                    let key = PublicKey::from_hex(&historical.public_key)?;
+                    if key.x_only_public_key() == lock.x_only_public_key()
+                        && window.mint_ids.contains(&policy.id)
+                        && (window.starts_at..window.accept_before).contains(&receivers.now)
+                    {
+                        receiver = key;
+                        break;
+                    }
+                }
+            }
         }
     }
     validate_proofs(&proofs, policy, keys, limits, receiver, true)?;

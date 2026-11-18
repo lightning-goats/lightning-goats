@@ -462,3 +462,18 @@ receiving. A late new body must be refused. Replay the exact admitted HTTP
 body after expiry and verify its original status capability, one journal
 entry, and no new mint request. A changed body using that delivery ID must
 refuse. Verify that the current request continues to accept new payments.
+
+## Cashu receiving-key rotation
+
+Initialize a wallet with the original key file, then add a new current key
+while preserving the wallet epoch, registration, seed and original file.
+Admit a P2PK payment before rotation and verify its original lock is signed
+after restart. Admit a delayed nutzap and an old QR payment within their
+respective windows, and verify that each acquires its original eight sats once.
+Refuse new admission against the old key at the cutoff. A queued proof for an
+unavailable non-anchor key must prevent wallet startup until the key returns.
+
+Run the authenticated archive rehearsal with `--rotate-receiving-key`. Verify
+the original and new files against the checkpoint and native key verifier,
+reject a replaced copied key, and check the recovered filename and bytes before
+running the six fenced native commands.

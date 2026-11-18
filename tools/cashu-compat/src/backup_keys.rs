@@ -118,7 +118,8 @@ pub fn verify(directory: &Path) -> Result<Receipt> {
     let mut names = std::collections::BTreeSet::new();
     for historical in &bindings.historical {
         ensure!(
-            historical.name.starts_with("historical-")
+            (historical.name.starts_with("historical-")
+                || historical.name == format!("receiving-key-{}.bin", historical.public_key))
                 && historical.name.ends_with(".bin")
                 && historical.name.len() <= 96
                 && historical

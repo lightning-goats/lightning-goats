@@ -130,7 +130,7 @@ impl<'a> Worker<'a> {
         let result = tokio::time::timeout(Duration::from_secs(config.deadline_seconds), async {
             if work.state == "validated" {
                 coordinator
-                    .acquire_new(work.id, &self.runtime.keys.receiving)
+                    .acquire_with_receivers(work.id, |lock| self.runtime.keys.signing_key(lock))
                     .await
             } else if config.execution.original_swap_replay {
                 coordinator.recover_original(work.id).await

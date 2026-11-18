@@ -95,7 +95,7 @@ def verify_restored_runtime_fences(stage, root, workers, binaries, configuration
 
 
 def qualify_restore(source, output_root, collected, identity, selected, store,
-                    workers, binaries, configurations, native_roles):
+                    workers, binaries, configurations, native_roles, configured_keys):
     """Pass the real encrypted collector output through the isolated launcher."""
     scripts = source / 'deploy/scripts'
     capsule = output_root / 'restore-capsule'
@@ -157,6 +157,10 @@ def qualify_restore(source, output_root, collected, identity, selected, store,
             if digest(image) != item['sha256'] or image.stat().st_size != item['bytes']:
                 raise ValueError('staged image differs from retained manifest')
     image = destination / 'fenced-images/wallet' / store.name
+    for name in configured_keys:
+        if digest(destination / 'fenced-images/wallet' / name) != digest(
+                Path(workers['wallet']['state']) / name):
+            raise ValueError('fenced restore lost a configured receiving key')
     with closing(sqlite3.connect(image.as_uri() + '?immutable=1&mode=ro', uri=True)) as db:
         if db.execute('SELECT value FROM collector_fixture_wal').fetchall() != [(b'synthetic committed WAL value',)]:
             raise ValueError('staged native store lost committed WAL content')
@@ -279,6 +283,7 @@ def qualify_restore(source, output_root, collected, identity, selected, store,
             'restored_runtime_fences_refused': runtime_fences,
             'restored_runtime_roles_isolated': True, 'restored_runtime_bytes_unchanged': True,
             'wallet_fence_checked_before_keys': True, 'cashu_signer_fence_checked_without_client_credential': True,
+            'configured_receiving_keys_preserved': len(configured_keys),
             'refusal_cases': 3, 'archive_programs_executable': False,
             'offline_worklist_launcher_verified': True, 'worklist_tampered_image_refused': True,
             'worklist_source_and_page_bound': True,
@@ -397,8 +402,9 @@ def qualify(source,root,states,uids,binaries,configurations,native_policy,args):
                 raise ValueError('encrypted archive omitted or changed a retained component')
     after={str(p):digest(p) for directory in states.values() for p in directory.rglob('*') if p.is_file()}
     if original!=after:raise ValueError('collector changed original application bytes')
+    _, configured_keys = module['receiving_material'](json.loads(configurations['wallet'].read_bytes()))
     restore_result = qualify_restore(source, output_root, destination, identity, selected, store,
-                                    workers, binaries, configurations, native_roles)
+                                    workers, binaries, configurations, native_roles, configured_keys)
     key_stage=destination/'plaintext/recovery-material'
     key_negatives=0
     def key_check(success):
@@ -409,7 +415,8 @@ def qualify(source,root,states,uids,binaries,configurations,native_policy,args):
             raise ValueError('recovery-key refusal disclosed private context')
     for name,replacement in [('wallet-seed.bin',bytes([9])*64),('receiving-key.bin',bytes(32)),
                              ('cashu-client.hex',('0'*63+'5').encode()),
-                             ('payout-client.hex',('0'*63+'2').encode())]:
+                             ('payout-client.hex',('0'*63+'2').encode()),
+                             *((name, bytes(32)) for name in configured_keys)]:
         path=key_stage/name; saved=path.read_bytes()
         try:path.write_bytes(replacement);key_check(False);key_negatives+=1
         finally:path.write_bytes(saved)

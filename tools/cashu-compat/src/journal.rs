@@ -605,6 +605,27 @@ impl Journal {
         Ok(proofs)
     }
 
+    pub(crate) fn require_queued_receivers(&self, keys: &crate::service_keys::Keys) -> Result<()> {
+        let mut rows = self
+            .connection
+            .prepare("SELECT c.proofs FROM acquisitions a LEFT JOIN acquisition_context c ON c.acquisition_id=a.id WHERE a.state='validated'")?;
+        let pending = rows.query_map([], |row| row.get::<_, Vec<u8>>(0))?;
+        for material in pending {
+            let proofs: Vec<Proof> = serde_json::from_slice(&material?)
+                .map_err(|_| anyhow::anyhow!("invalid retained proof material"))?;
+            ensure!(
+                (1..=1024).contains(&proofs.len()),
+                "invalid retained proof count"
+            );
+            for proof in proofs {
+                if let Some(lock) = crate::intake::receiver_lock(&proof)? {
+                    keys.signing_key(lock)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Persist exact swap material before any state-changing mint request.
     pub fn prepare(&mut self, id: Uuid, request: &[u8]) -> Result<()> {
         ensure!(

@@ -125,7 +125,20 @@ protected time window. Configuration regenerates its ID from the original
 endpoint and mint inventory using the current receiving key. Intake honors only
 the intersection of the advertised mint list and current qualified policy.
 The wallet tests verify expiry and the original status capability on a
-byte-identical retry. Historical receiving-key rotation remains open.
+byte-identical retry. All ten workflows passed at `6caaaf8`. The
+[authenticated HTTP fixture](testing/cashu-retired-request-ci-20261118.json)
+retains exactly two admissions and refuses a changed body after restart.
+
+The wallet can rotate its receiving key while preserving the original
+registration and seed. It selects the key from the original proof lock, and
+startup verifies that queued payments still have their keys. Synthetic funded
+tests verify three 8-sat acquisitions across an old queued payment, a delayed
+nutzap and a retired QR. The compatibility windows use current mint admission
+policy and refuse new work at their cutoff. Encrypted checkpoints include all
+configured keys under their runtime filenames so they can be restored behind
+the startup fence. The encrypted archive rehearsal verifies a rotated wallet's
+original anchor and new key file, rejects a substituted new key, and preserves
+both files during fenced native startup under separate UIDs.
 
 Cashu operator controls update **2026-11-17**: the
 [protected planning/reconciliation checkpoint](testing/cashu-operator-controls-20261117.json)

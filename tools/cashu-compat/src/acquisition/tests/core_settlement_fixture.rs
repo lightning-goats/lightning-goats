@@ -393,6 +393,7 @@ async fn combined_settlement_wallet_child() -> Result<()> {
                 recipient: "",
                 descriptors: &descriptors,
                 retired_descriptors: &[],
+                retained_receivers: &[],
                 public_request: Some(&descriptor),
                 journal,
                 writer: &writer,

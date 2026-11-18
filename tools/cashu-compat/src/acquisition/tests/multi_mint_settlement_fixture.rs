@@ -156,6 +156,7 @@ mod multi_mint {
                 recipient: "",
                 descriptors: &descriptors,
                 retired_descriptors: &[],
+                retained_receivers: &[],
                 public_request: Some(&descriptor),
                 journal: server_journal,
                 writer: &server_writer,

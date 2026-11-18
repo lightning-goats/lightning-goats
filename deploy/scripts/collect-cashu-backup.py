@@ -222,6 +222,22 @@ def check_quiescence(workers, budget):
                 raise ValueError('a runtime UID still has a process')
 
 
+def receiving_material(wallet):
+    active = wallet['receiving_key']
+    anchor = wallet.get('receiving_key_anchor')
+    if anchor is None:
+        anchor = active
+    retained = wallet.get('retained_receiving_keys', [])
+    if not isinstance(retained, list) or len(retained) > 16:
+        raise ValueError('invalid configured receiving key inventory')
+    keys = [active, anchor, *(row['public_key'] for row in retained)]
+    if any(not re.fullmatch(r'0[23][0-9a-f]{64}', key) for key in keys):
+        raise ValueError('invalid configured receiving key')
+    if len(set(keys)) != len({key[2:] for key in keys}):
+        raise ValueError('conflicting configured receiving key parity')
+    return anchor, {f'receiving-key-{key}.bin': key for key in sorted(set(keys) - {anchor})}
+
+
 def load_policy(path, expected, budget):
     protected_directory(path.parent, private=True)
     with closing(Frozen(path, 0, 65536, budget)) as frozen:
@@ -497,7 +513,11 @@ def collect(policy_path, expected, destination):
             name=f'historical-{index}.bin'
             copy_source(h['source'],keys/name,maximum=32)
             historical.append({'name':name,'public_key':h['public_key']})
-        key_bindings={'version':1,'owner':owner,'receiving_key':wallet['receiving_key'],
+        anchor, configured_keys = receiving_material(wallet)
+        for name, public_key in configured_keys.items():
+            copy_source(wallet_state / name, keys / name, **key_permissions, maximum=32)
+            historical.append({'name': name, 'public_key': public_key})
+        key_bindings={'version':1,'owner':owner,'receiving_key':anchor,
             'wallet_key_binding':registration[0][1].hex(), 'cashu_client':signer['nak']['client_pubkey'],
             'payout_client':configs['signer']['policy']['client_pubkey'],'historical':historical}
         write_json(keys/'key-bindings.json',key_bindings)

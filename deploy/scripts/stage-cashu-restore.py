@@ -156,7 +156,9 @@ def image_plan(checkpoint, inventory, native):
     return plan
 
 
-def verify_key_bindings(plain, checkpoint, inventory, native, policy, read, document, budget):
+def verify_key_bindings(plain, checkpoint, inventory, native, policy, common, budget):
+    read = common['COMBINED']['read_private']
+    document = common['document']
     keys = plain / 'recovery-material'
     bindings = document(read(keys / 'key-bindings.json', 65536))
     wallet = document(read(plain / 'wallet-config', 65536))
@@ -170,18 +172,23 @@ def verify_key_bindings(plain, checkpoint, inventory, native, policy, read, docu
         rows = db.execute('SELECT instance,key_binding FROM runtime_registration WHERE singleton=1').fetchall()
     if len(rows) != 1 or rows[0][0] != inventory['registrations']['wallet_instance']:
         raise ValueError('wallet registration differs from copied key binding')
+    anchor, configured_keys = common['receiving_material'](wallet)
+    historical = [{'name': f'historical-{index}.bin', 'public_key': key['public_key']}
+                  for index, key in enumerate(policy['historical_receiving_keys'])]
+    historical.extend({'name': name, 'public_key': public_key}
+                      for name, public_key in configured_keys.items())
     expected = {
-        'version': 1, 'owner': native['policy']['owner'], 'receiving_key': wallet['receiving_key'],
+        'version': 1, 'owner': native['policy']['owner'], 'receiving_key': anchor,
         'wallet_key_binding': rows[0][1].hex(), 'cashu_client': cashu_signer['nak']['client_pubkey'],
         'payout_client': payout_signer['policy']['client_pubkey'],
-        'historical': [{'name': f'historical-{index}.bin', 'public_key': key['public_key']}
-                       for index, key in enumerate(policy['historical_receiving_keys'])],
+        'historical': historical,
     }
     if bindings != expected:
         raise ValueError('archived recovery-key bindings differ from checkpoint scope')
     for role, filename in (('wallet_seed', 'wallet-seed.bin'), ('receiving_key', 'receiving-key.bin')):
         if hashlib.sha256(read(keys / filename, 64)).hexdigest() != by_role[role]['sha256']:
             raise ValueError('collected recovery key differs from wallet image inventory')
+    return configured_keys
 
 
 def stage(args, common, tool_identity):
@@ -252,7 +259,7 @@ def stage(args, common, tool_identity):
         report = common['COMBINED']['verify'](checkpoint, statectl.path, statectl_sha)
         inventory = document(read(checkpoint / 'cashu/inventory.json'))
         native = document(read(checkpoint / 'native/MANIFEST.json'))
-        verify_key_bindings(plain, checkpoint, inventory, native, policy, read, document, budget)
+        configured_keys = verify_key_bindings(plain, checkpoint, inventory, native, policy, common, budget)
         key_report = common['invoke'](keys.path, ['verify-recovery-keys', plain / 'recovery-material'], budget)
         statectl.check()
         keys.check()
@@ -262,6 +269,7 @@ def stage(args, common, tool_identity):
             or key_report['wallet_key_binding_verified'] is not True):
         raise ValueError('checkpoint or recovery key replay differs')
     plan = image_plan(checkpoint, inventory, native)
+    plan['wallet'].extend((plain / 'recovery-material' / name, Path(name)) for name in configured_keys)
     images = destination / 'fenced-images'
     images.mkdir(mode=0o700)
     for role in plan:

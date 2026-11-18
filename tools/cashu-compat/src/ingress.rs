@@ -2,8 +2,8 @@
 use crate::{
     descriptor::RetiredDescriptor,
     intake::{
-        DescriptorAcceptance, Limits, PinnedKeys, ValidatedContribution, nutzap_json,
-        ordinary_json_at,
+        DescriptorAcceptance, Limits, NutzapReceivers, PinnedKeys, ValidatedContribution,
+        nutzap_json_at, ordinary_json_at,
     },
     journal::{Admission, Journal},
     mint_policy::MintRegistry,
@@ -40,6 +40,7 @@ pub struct Intake<'a> {
     pub recipient: &'a str,
     pub descriptors: &'a [String],
     pub retired_descriptors: &'a [RetiredDescriptor],
+    pub retained_receivers: &'a [crate::service_config::RetainedReceiver],
     pub public_request: Option<&'a crate::descriptor::Descriptor>,
     pub journal: Arc<Mutex<Journal>>,
     pub writer: &'a WriterLock,
@@ -271,13 +272,19 @@ impl Intake<'_> {
             }
             Payload::Nutzap(body) => {
                 ensure!(self.receive_nutzap, "nutzap receiving disabled");
-                nutzap_json(
+                nutzap_json_at(
                     &body,
                     self.recipient,
                     self.registry,
                     self.keys,
                     self.limits,
-                    self.receiver,
+                    NutzapReceivers {
+                        current: self.receiver,
+                        retained: self.retained_receivers,
+                        now: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)?
+                            .as_secs(),
+                    },
                 )?
             }
         };
@@ -338,6 +345,7 @@ mod tests {
             recipient: "",
             descriptors: &[],
             retired_descriptors: &[],
+            retained_receivers: &[],
             public_request: None,
             journal,
             writer: &writer,

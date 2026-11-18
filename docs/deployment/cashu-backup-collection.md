@@ -145,7 +145,12 @@ The policy itself must be root-private and match its separately supplied digest.
 
 The destination retains a private `plaintext` tree with raw main/WAL copies,
 standalone normalized images, the linked native/Cashu reviews, verified recovery
-keys, configurations and the exact selected programs. The same normalized core
+keys, configurations and the exact selected programs. The verified
+`receiving-key.bin` remains the wallet registration anchor. Any additional
+active or retained key named by the wallet configuration is copied from its
+canonical runtime filename and verified against its public binding. Use the
+collector policy's explicit historical list for separately retained material
+outside the configured inventory. The same normalized core
 bytes enter both inventories by copying, never hardlinking. Only these disposable
 copies are opened through SQLite or the key verifier.
 
@@ -204,8 +209,10 @@ stager accepts regular files and directories from the collector's USTAR format,
 rechecks recorded copy hashes, reruns the combined inventory verifier, and
 binds the recovered keys to the wallet journal and collected configurations.
 It creates the recovery markers for all six roles before copying the normalized
-images into `fenced-images/`. The remaining policies, signer credentials,
-historical keys, raw sidecars and program bytes stay under `checkpoint-evidence/`.
+images into `fenced-images/`. Configured wallet keys use their original filenames
+in the fenced image. The remaining policies, signer credentials, separately
+inventoried historical keys, raw sidecars and program bytes stay under
+`checkpoint-evidence/`.
 
 A successful stage contains `STAGED.json` and root-private images for review.
 The receipt binds `FENCED_IMAGES.json`, which lists each staged file with its

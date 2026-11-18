@@ -7,7 +7,6 @@ use crate::{
     writer_lock::WriterLock,
 };
 use anyhow::{Result, ensure};
-use sha2::{Digest, Sha256};
 use std::{
     sync::{Arc, Mutex},
     time::Duration,
@@ -101,13 +100,10 @@ impl Runtime {
             config.wallet_epoch,
             config.proof_count,
         )?;
-        let mut hash = Sha256::new();
-        hash.update(b"lightning-goats-cashu-runtime-keys-v1\0");
-        hash.update(&keys.seed[..]);
-        hash.update(keys.receiving.public_key().to_bytes());
-        let binding: [u8; 32] = hash.finalize().into();
+        let binding = keys.binding();
         if !initialize {
             journal.runtime_registration(config.wallet_instance, &binding, false)?;
+            journal.require_queued_receivers(&keys)?;
         }
         if initialize {
             drop(crate::wallet::open_wallet_storage(&config.state_directory).await?);
@@ -208,6 +204,7 @@ impl Runtime {
             recipient: &self.config.recipient,
             descriptors: &self.config.descriptors,
             retired_descriptors: &self.config.retired_descriptors,
+            retained_receivers: &self.config.retained_receiving_keys,
             public_request: self.policy.public_request.as_ref(),
             journal: self.journal.clone(),
             writer: &self.writer,
@@ -251,6 +248,68 @@ mod tests {
             std::fs::write(&path, bytes)?;
             std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
         }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn rotated_wallet_preserves_registration_and_requires_keys_for_queued_proofs()
+    -> Result<()> {
+        use crate::{
+            journal::{Transport, ValidatedIntake},
+            service_config::RetainedReceiver,
+        };
+        let dir = crate::test_directory()?;
+        let instance = Uuid::new_v4();
+        let epoch = Uuid::new_v4();
+        keys(dir.path())?;
+        let initialized = Runtime::initialize(configuration(dir.path(), instance, epoch)?).await?;
+        let original = initialized.keys.receiving.public_key();
+        let binding = initialized.keys.binding();
+        drop(initialized);
+        let additional = |scalar| -> Result<cdk::nuts::PublicKey> {
+            let key = SecretKey::from_slice(&[scalar; 32])?.public_key();
+            let path = dir
+                .path()
+                .join(format!("receiving-key-{}.bin", key.to_hex()));
+            std::fs::write(&path, [scalar; 32])?;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+            Ok(key)
+        };
+        let active = additional(8)?;
+        let retained = additional(9)?;
+        let rotated = |keep_old| -> Result<Config> {
+            let mut config = configuration(dir.path(), instance, epoch)?;
+            config.receiving_key_anchor = Some(original.to_hex());
+            config.receiving_key = active.to_hex();
+            if keep_old {
+                config.retained_receiving_keys.push(RetainedReceiver {
+                    public_key: retained.to_hex(),
+                    nutzap: None,
+                });
+            }
+            Ok(config)
+        };
+        let runtime = Runtime::open(rotated(true)?).await?;
+        assert_eq!(runtime.keys.binding(), binding);
+        assert_eq!(runtime.keys.receiving.public_key(), active);
+        assert_eq!(runtime.keys.signing_key(original)?.public_key(), original);
+        let proof = crate::intake::tests::proof(
+            serde_json::json!([
+                "P2PK", {"nonce":"retained fixture","data":retained.to_hex()}
+            ])
+            .to_string(),
+        );
+        runtime.journal.lock().unwrap().admit(&ValidatedIntake {
+            mint_id: "fixture",
+            policy_version: "v1",
+            transport: Transport::Cashu,
+            source_ref: "original-queued-fixture",
+            source_author: None,
+            proofs: &[proof],
+        })?;
+        drop(runtime);
+        assert!(Runtime::open(rotated(false)?).await.is_err());
+        assert_eq!(Runtime::open(rotated(true)?).await?.keys.binding(), binding);
         Ok(())
     }
 

@@ -741,9 +741,41 @@ An exact previously admitted HTTP body can retrieve its original status
 capability after retirement while the bounded intake route is open. An
 expired ID cannot admit a new body. The status route continues to accept
 existing capabilities. Retain admitted state and the applicable keys across
-rotation. This procedure covers request rotation with the same receiving
-key. Historical key rotation still requires separate implementation and
-qualification.
+rotation. When changing the receiving key, include the old compressed public
+key as `receiving_key` on each retired descriptor that used it.
+
+### Rotating a receiving key
+
+Keep the existing `wallet-seed.bin` and `receiving-key.bin` in place. The
+original receiving key and seed bind the existing wallet registration, epoch
+and mint counters. Set `receiving_key_anchor` to the original compressed public
+key and `receiving_key` to the new compressed public key. Supply the new raw
+32-byte secret as `receiving-key-<compressed-public-key>.bin` in the private
+wallet state directory with the same runtime ownership and mode `0600`.
+The wallet verifies that each file matches the configured public key.
+
+List additional retired keys in `retained_receiving_keys` using their compressed
+`public_key`. Use the same filename convention for each retained non-anchor key.
+The anchor is available for previously admitted work. To continue accepting
+delayed nutzaps against it or another prior key, add that key to the list with a
+`nutzap` object containing `starts_at`, `accept_before` and the original
+`mint_ids` still approved for the window. Use Unix seconds and set an exclusive
+end. Admission checks the wallet's observation time and current mint policy.
+Omit the `nutzap` object to retain a key for already admitted work and any
+explicitly bound retired QR.
+
+The acquisition worker selects the signing key from each retained proof's lock.
+Keep the corresponding key files while such work is queued. Wallet startup
+requires the keys named by queued proofs. Previously submitted work continues
+to use its serialized request. If NIP-61 publication is configured, update the
+Cashu signer policy's `receiving_key` to the new x-only key while keeping its
+registration and journal. The current-policy check keeps outdated announcements
+out of active publication. Rehearse both configurations before an installed
+change.
+
+The encrypted checkpoint collects the original and additional configured key
+files and verifies them against the recorded configuration. Retain the
+checkpoint and its receipt through the separately approved rotation.
 
 ## Inactive Cashu edge include
 

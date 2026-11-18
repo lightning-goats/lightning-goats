@@ -4,6 +4,7 @@ import http.client
 import json
 import os
 from pathlib import Path
+import select
 import shutil
 import signal
 import socket
@@ -25,6 +26,12 @@ PAUSED = (
     'publication_signing_enabled', 'publication_delivery_enabled',
 )
 CLEAN_ENV = {'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'}
+PAYMENT_AND_PRESENTATION_ROUTES = (
+    ('GET', '/.well-known/lnurlp/herd'), ('GET', '/lnurlp/herd/callback?amount=1000'),
+    ('POST', '/api/v1/strike/webhook'), ('POST', '/api/v1/contact'),
+    ('POST', '/api/v1/cashu'), ('GET', '/api/v1/cashu/request'),
+    ('POST', '/api/v1/cashu/status'), ('GET', '/ws/overlay'),
+)
 
 
 def rows(database, queries):
@@ -76,13 +83,18 @@ def credentials(path, worker, values):
     return {'CREDENTIALS_DIRECTORY': str(path)}
 
 
-def http_json(port, path):
+def http_request(port, path, method='GET'):
     with closing(http.client.HTTPConnection('127.0.0.1', port, timeout=1)) as connection:
-        connection.request('GET', path)
+        connection.request(method, path)
         response = connection.getresponse()
-        if response.status != 200:
-            raise ValueError(f'synthetic restored core returned HTTP {response.status}')
-        return json.loads(response.read())
+        return response.status, response.read()
+
+
+def http_json(port, path):
+    status, body = http_request(port, path)
+    if status != 200:
+        raise ValueError(f'synthetic restored core returned HTTP {status}')
+    return json.loads(body)
 
 
 def unix_listener(path):
@@ -139,20 +151,27 @@ def rehearse(root, workers, binaries, configurations, core_daemon):
             or len(before[0]['cashu_receipt_inbox']) != 3 or len(before[2]) != 2):
         raise ValueError('restart fixture lacks the funded later-stage history')
 
-    # The canary example otherwise permits feeding. Pin shadow mode, and reserve
-    # an unused loopback destination that can accept no gateway or provider traffic.
-    with socket.socket() as listener_port, socket.socket() as blackhole:
+    fenced = subprocess.run(
+        as_runtime(workers['core'], core_daemon, '--recovery-paused', '--config', configurations['core']),
+        stdin=subprocess.DEVNULL, capture_output=True, timeout=10, env=CLEAN_ENV)
+    if fenced.returncode != 1 or b'requires explicit external reconciliation' not in fenced.stderr:
+        raise ValueError('paused recovery started despite the installed core fence')
+
+    # Keep feeding-enabled canary settings and configure ordinary Cashu and
+    # receipt ingress. Paused recovery must ignore their runtime authority.
+    with socket.socket() as listener_port, socket.socket() as outbound_probe:
         listener_port.bind(('127.0.0.1', 0))
-        blackhole.bind(('127.0.0.1', 0))
-        port, denied = listener_port.getsockname()[1], blackhole.getsockname()[1]
+        outbound_probe.bind(('127.0.0.1', 0))
+        outbound_probe.listen()
+        port, outbound_port = listener_port.getsockname()[1], outbound_probe.getsockname()[1]
         listener_port.close()
         original = configurations['core'].read_text()
         values = tomllib.loads(original)
         replacements = {
             values['database']['url']: 'sqlite://' + str(dirs['core'] / 'ledger.sqlite'),
             values['service']['listen']: f'127.0.0.1:{port}',
-            values['strike']['api_url']: f'https://127.0.0.1:{denied}/',
-            values['gateway']['url']: f'http://127.0.0.1:{denied}/',
+            values['strike']['api_url']: f'https://127.0.0.1:{outbound_port}/',
+            values['gateway']['url']: f'http://127.0.0.1:{outbound_port}/',
         }
         if values['service']['mode'] != 'canary' or set(values) & {'core_bridge', 'cashu', 'cashu_receipts', 'cashu_treasury'}:
             raise ValueError('unexpected core fixture configuration')
@@ -160,19 +179,34 @@ def rehearse(root, workers, binaries, configurations, core_daemon):
             if original.count(old) != 1:
                 raise ValueError('ambiguous synthetic core configuration')
             original = original.replace(old, new)
-        original = original.replace('mode = "canary"', 'mode = "shadow"')
-        original = original.replace('interface_info_enabled = true', 'interface_info_enabled = false')
-        original = original.replace('weather_enabled = true', 'weather_enabled = false')
-        core_config = config_file(root / 'core.toml', original)
-        core_env = credentials(root / 'core-creds', workers['core'], {
-            'strike-api-key': 'synthetic-restore-fixture-api-key',
-            'strike-webhook-secret': 'synthetic-restore-fixture-webhook-secret',
-        })
-
         wallet_socket = private_directory(root / 'w', workers['wallet'], 0o710) / 'intake.sock'
         wallet = json.loads(configurations['wallet'].read_bytes())
         wallet.update(state_directory=str(dirs['wallet']), intake_socket=str(wallet_socket))
         wallet_config = config_file(root / 'wallet.json', json.dumps(wallet))
+
+        receipt_socket = private_directory(root / 'c', workers['core'], 0o710) / 'receipts.sock'
+        [(core_epoch,)] = rows(dirs['core'] / 'ledger.sqlite', {
+            'epoch': 'SELECT stream_id FROM overlay_identity WHERE singleton=1'})['epoch']
+        registration = f'''
+wallet_uid = {wallet['runtime_uid']}
+wallet_instance = "{wallet['wallet_instance']}"
+wallet_epoch = "{wallet['wallet_epoch']}"
+deadline_seconds = 5
+'''
+        core_config = config_file(root / 'core.toml', original + f'''
+[cashu]
+socket = "{wallet_socket}"
+receive_cashu = true
+body_bytes = 65536
+concurrent_requests = 4
+{registration}
+[cashu_receipts]
+socket = "{receipt_socket}"
+ipc_gid = {workers['core']['gid']}
+core_epoch = "{core_epoch}"
+connections_per_second = 8
+{registration}
+''')
 
         signer_socket = private_directory(root / 's', workers['cashu_signer'], 0o710) / 'broker.sock'
         signer = json.loads(configurations['signer'].read_bytes())
@@ -186,18 +220,22 @@ def rehearse(root, workers, binaries, configurations, core_daemon):
             if refused.returncode != 1 or b'disabled' not in refused.stderr:
                 raise ValueError(f'{role} did not honor the disabled configuration')
 
-        for _ in range(2):
-            with (runtime(as_runtime(workers['core'], core_daemon, '--config', core_config),
+        for stop in (signal.SIGINT, signal.SIGTERM):
+            with (runtime(as_runtime(workers['core'], core_daemon, '--recovery-paused', '--config', core_config),
                           lambda: http_json(port, '/healthz') == {'status': 'ok'}, root / 'core.log',
-                          signal.SIGINT, core_env),
+                          stop),
                   runtime(as_runtime(workers['cashu_signer'], binaries['signer'], 'run', signer_config),
                           lambda: unix_listener(signer_socket), root / 'signer.log', signal.SIGTERM, signer_env),
                   runtime(as_runtime(workers['wallet'], binaries['wallet'], 'run', wallet_config),
                           lambda: unix_listener(wallet_socket), root / 'wallet.log', signal.SIGTERM)):
                 core = http_json(port, '/api/v1/status')
-                if (core['mode'] != 'shadow' or core['feed_credit_sats'] != 16
-                        or core['unresolved_feed_attempt'] is not None or core['gateway_reachable']):
+                if core != {'mode': 'recovery-paused', 'feed_credit_sats': 16, 'unresolved_feed_attempt': None}:
                     raise ValueError('restored core did not preserve its paused state and available credit')
+                for method, path in PAYMENT_AND_PRESENTATION_ROUTES:
+                    if http_request(port, path, method)[0] != 404:
+                        raise ValueError(f'paused recovery still serves {method} {path}')
+                if os.path.lexists(receipt_socket) or select.select([outbound_probe], [], [], 0)[0]:
+                    raise ValueError('paused core opened receipt intake or contacted a backend')
                 status = json.loads(subprocess.check_output(
                     as_runtime(workers['wallet'], binaries['wallet'], 'status', wallet_config),
                     stdin=subprocess.DEVNULL, timeout=10, env=CLEAN_ENV))
@@ -207,9 +245,13 @@ def rehearse(root, workers, binaries, configurations, core_daemon):
                         or funds['journal_custody_sats'] != 16 or funds['reported_treasury_deposit_sats'] != 396
                         or any(status[flag] is not False for flag in PAUSED)):
                     raise ValueError('restored wallet did not preserve its paused policy and funded custody')
-            if before != financial_state(dirs):
+            if (before != financial_state(dirs) or os.path.lexists(receipt_socket)
+                    or select.select([outbound_probe], [], [], 0)[0]):
                 raise ValueError('paused restart changed retained financial history or mint state')
-    return {'native_start_stop_cycles': 2, 'shadow_core_sats': 16, 'paused_wallet_sats': 16,
+    return {'native_start_stop_cycles': 2, 'paused_core_sats': 16, 'paused_wallet_sats': 16,
             'original_deposited_sats': 396, 'original_confirmed_feeds': 1,
             'disabled_workers': ['membership', 'payout', 'signer'], 'financial_history_unchanged': True,
+            'core_started_without_credentials': True, 'core_effectful_routes_absent': True,
+            'core_backend_connections_absent': True, 'core_fence_honored': True,
+            'core_receipt_socket_absent': True,
             'installed_fences_cleared': False, 'resume_authorized': False}

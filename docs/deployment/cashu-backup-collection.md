@@ -632,19 +632,39 @@ checkpoint. It interrupts once after retaining an older directory and once
 after publishing a later image. The same command completes the switch and
 keeps the previous six images available in protected storage.
 
-The paused restart fixture clones the installed later core, wallet and Cashu
-signer images into disposable role directories. It starts the actual three
-binaries twice under their separate UIDs with only loopback networking and
-synthetic credentials. Core runs in shadow, wallet acquisition, credit
-delivery, treasury and publication are disabled, and the three CyberHerd
-workers refuse their disabled configurations. The core's regular Strike
-recovery loop still exists in shadow mode, so the fixture redirects Strike
-and the gateway to a reserved port with no listener. Each cycle must report
-16 sats of available feed credit, 16 sats of wallet custody and the original
-396 sats of completed Strike deposits. The test compares the original
-financial rows and both CDK stores across restart and confirms that all six
-installed role images still match the fenced reference.
+### Paused core readiness
 
-The rehearsal uses its own configuration and credentials. Removal of an
-installed recovery fence, restart with installed policies and credentials, and
-live provider acceptance still require separate qualification.
+The core daemon can serve read-only recovery status on the configured loopback
+listener. Use the flag on a disposable, verified recovery copy under the
+runtime identity:
+
+```sh
+lightning-goatsd --recovery-paused --config RECOVERY_CONFIG
+```
+
+The mode checks the existing ledger's exact migration history and honors the
+installed recovery marker. It opens SQLite read-only with committed WAL
+visibility. It never initializes or migrates a ledger. Only `GET /healthz`
+and `GET /api/v1/status` are registered. Status reports `recovery-paused`,
+available feed credit, and the unresolved feeder request ID if applicable.
+The daemon skips provider credentials, payment and WebSocket routes, all
+financial workers, receipt sockets, Nostr, and the feeder gateway. The flag
+does not grant authority to clear a marker or resume financial processing.
+
+The funded restart fixture clones the installed later core, wallet and Cashu
+signer images into disposable role directories. It starts the actual three
+binaries twice under separate UIDs in a loopback-only namespace. The core
+uses paused recovery with a canary configuration that enables Cashu intake
+and configures receipt import. The test starts the core without credentials,
+probes for rejected effectful HTTP routes, checks that the receipt socket
+stays absent, and confirms neither loopback provider receives a connection.
+The paused wallet disables acquisition, credit delivery, treasury, and
+publication. The three CyberHerd workers refuse their disabled settings.
+Each cycle must preserve 16 sats of available feed credit, 16 sats of wallet
+custody, completed Strike deposits totaling 396 sats, and the original
+simulated feeding. The test checks the installed core's fence before starting
+the copies and confirms all six installed role images still match the fenced
+reference afterward.
+
+Removal of an installed recovery fence, startup using installed policies and
+credentials, and live provider acceptance still require separate qualification.

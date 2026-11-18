@@ -528,7 +528,10 @@ def verify_funded_install(root, native_inputs, systemd_masks):
             or restore['fenced_advancement']['resume_authorized'] is not False
             or len(restore['fenced_advancement']['recovery_fences_verified']) != 6
             or restart['native_start_stop_cycles'] != 2 or not restart['financial_history_unchanged']
-            or restart['shadow_core_sats'] != 16 or restart['paused_wallet_sats'] != 16
+            or restart['paused_core_sats'] != 16 or restart['paused_wallet_sats'] != 16
+            or not all(restart[key] is True for key in ('core_started_without_credentials',
+                'core_effectful_routes_absent', 'core_backend_connections_absent', 'core_fence_honored',
+                'core_receipt_socket_absent'))
             or restart['installed_fences_cleared'] is not False
             or restart['resume_authorized'] is not False
             or restore['resume_authorized'] is not False):

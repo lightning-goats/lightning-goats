@@ -80,6 +80,17 @@ pub enum SettlementOutcome {
 }
 
 impl LedgerStore {
+    /// Open only an existing current ledger for paused recovery status.
+    /// The pool opens every connection read-only and never runs migrations.
+    pub async fn connect_recovery_read_only(database_url: &str) -> Result<Self> {
+        let pool = crate::sqlite::connect_recovery_read_only(database_url).await?;
+        crate::sqlite::require_current_schema(&pool, &MIGRATOR).await?;
+        Ok(Self {
+            pool,
+            publication: Default::default(),
+        })
+    }
+
     pub async fn connect(database_url: &str) -> Result<Self> {
         let pool = crate::sqlite::connect_durable(database_url, 5)
             .await
@@ -356,6 +367,80 @@ mod tests {
             settled_at: Some(1_700_000_000),
             context_json: Some(r#"{"receive_request_id":"request-1"}"#.to_owned()),
         }
+    }
+
+    #[tokio::test]
+    async fn recovery_readonly_sees_committed_wal_and_refuses_writes() {
+        let (directory, writer) = store().await;
+        let path = directory.path().join("lightning-goats.db");
+        let url = format!("sqlite://{}", path.display());
+        sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+            .execute(&writer.pool)
+            .await
+            .unwrap();
+        let main = std::fs::read(&path).unwrap();
+        writer
+            .record_payment(&payment("receive-read-only", &"16".repeat(32), 16))
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), main);
+
+        let reader = LedgerStore::connect_recovery_read_only(&url).await.unwrap();
+        assert_eq!(reader.feed_credit_sats().await.unwrap(), 16);
+        let mut connection = reader.pool.acquire().await.unwrap();
+        sqlx::query("PRAGMA query_only=OFF")
+            .execute(&mut *connection)
+            .await
+            .unwrap();
+        assert!(
+            sqlx::query("DELETE FROM ledger_entries")
+                .execute(&mut *connection)
+                .await
+                .is_err()
+        );
+        assert_eq!(writer.feed_credit_sats().await.unwrap(), 16);
+    }
+
+    #[tokio::test]
+    async fn recovery_readonly_requires_an_existing_current_unfenced_ledger() {
+        let (directory, writer) = store().await;
+        let missing = directory.path().join("missing.db");
+        let url = format!("sqlite://{}", missing.display());
+        assert!(LedgerStore::connect_recovery_read_only(&url).await.is_err());
+        assert!(!missing.exists());
+
+        let path = directory.path().join("lightning-goats.db");
+        let url = format!("sqlite://{}", path.display());
+        #[cfg(unix)]
+        {
+            let marker = directory
+                .path()
+                .join(crate::state_maintenance::RECOVERY_MARKER);
+            std::fs::write(&marker, "keep fenced").unwrap();
+            let error = LedgerStore::connect_recovery_read_only(&url)
+                .await
+                .unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("requires explicit external reconciliation")
+            );
+            assert_eq!(std::fs::read_to_string(&marker).unwrap(), "keep fenced");
+            std::fs::remove_file(marker).unwrap();
+        }
+
+        sqlx::query("UPDATE _sqlx_migrations SET success=0 WHERE version=(SELECT MAX(version) FROM _sqlx_migrations)")
+            .execute(&writer.pool)
+            .await
+            .unwrap();
+        assert!(LedgerStore::connect_recovery_read_only(&url).await.is_err());
+        let success: bool = sqlx::query_scalar(
+            "SELECT success FROM _sqlx_migrations ORDER BY version DESC LIMIT 1",
+        )
+        .fetch_one(&writer.pool)
+        .await
+        .unwrap();
+        assert!(!success);
     }
 
     #[tokio::test]

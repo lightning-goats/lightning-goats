@@ -31,6 +31,8 @@ use serde::{Deserialize, Serialize};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
+mod paused_recovery;
+
 const MAX_STRIKE_WEBHOOK_BODY: usize = 32 * 1024;
 
 #[derive(Debug, Parser)]
@@ -39,6 +41,9 @@ const MAX_STRIKE_WEBHOOK_BODY: usize = 32 * 1024;
 struct Args {
     #[arg(long, default_value = "/etc/lightning-goats/config.toml")]
     config: PathBuf,
+    /// Serve local readiness and read-only ledger status for paused recovery.
+    #[arg(long)]
+    recovery_paused: bool,
 }
 
 #[derive(Clone)]
@@ -93,6 +98,9 @@ async fn main() -> Result<()> {
 
     let args = Args::parse();
     let config = Arc::new(AppConfig::load(&args.config)?);
+    if args.recovery_paused {
+        return paused_recovery::serve(&config).await;
+    }
     let ledger = LedgerStore::connect(&config.database.url).await?;
     ledger
         .configure_feeder_credit_cap(config.feeder.threshold_sats)

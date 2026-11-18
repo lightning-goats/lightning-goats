@@ -93,6 +93,34 @@ pub(crate) async fn connect_existing_durable(
     .await
 }
 
+/// Read an existing ledger without migration or financial write authority.
+pub(crate) async fn connect_recovery_read_only(database_url: &str) -> Result<SqlitePool> {
+    let configured = durable_options(database_url)?;
+    let file = configured.get_filename();
+    #[cfg(unix)]
+    check_recovery_marker(file)?;
+    if !std::fs::symlink_metadata(file)
+        .context("recovery requires an existing ledger file")?
+        .is_file()
+    {
+        bail!("recovery requires a regular ledger file");
+    }
+    // Keep SQLite's WAL reads enabled so committed transactions remain visible.
+    // Build clean options to avoid requesting a journal-mode change on open.
+    let options = SqliteConnectOptions::new()
+        .filename(file)
+        .read_only(true)
+        .create_if_missing(false)
+        .pragma("query_only", "ON")
+        .pragma("trusted_schema", "OFF")
+        .busy_timeout(Duration::from_secs(5));
+    SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(options)
+        .await
+        .context("failed opening read-only recovery ledger")
+}
+
 async fn connect_options(
     options: SqliteConnectOptions,
     max_connections: u32,

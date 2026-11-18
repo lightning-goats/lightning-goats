@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import pwd
 import runpy
+import socket
 import sqlite3
 import subprocess
 import tempfile
@@ -41,7 +42,7 @@ def installed_wallet_unit(root, config, binary, state, uid, cleanup):
     ipc = root / 'ipc'
     ipc.mkdir(mode=0o750)
     os.chown(ipc, uid, uid)
-    socket = ipc / 'intake.sock'
+    endpoint = ipc / 'intake.sock'
     service = f'''[Unit]
 Description=Disposable Cashu mint policy wallet
 [Service]
@@ -79,7 +80,13 @@ ReadWritePaths={state} {ipc}
         command(['systemctl', 'start', unit])
         for _ in range(100):
             properties = process.properties()
-            if properties['ActiveState'] == 'active' and socket.is_socket():
+            with socket.socket(socket.AF_UNIX) as probe:
+                probe.settimeout(0.1)
+                try:
+                    ready = probe.connect_ex(str(endpoint)) == 0
+                except TimeoutError:
+                    ready = False
+            if properties['ActiveState'] == 'active' and ready:
                 pid = int(properties['MainPID'])
                 status = Path(f'/proc/{pid}/status').read_text().splitlines()
                 identity = next(line.split()[1:] for line in status if line.startswith('Uid:'))

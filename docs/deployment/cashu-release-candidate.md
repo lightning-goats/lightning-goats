@@ -38,10 +38,18 @@ offline export. The packaged Rust toolchain notices accompany the selected
 standard library code. The host supplies system libraries. Use the existing
 source-pinned procedures for external tools such as `nak` and `age`.
 
+The `cashu-backup-capsule/` directory contains the exact nine backup and
+maintenance programs with their source-bound `TOOL.json`. The archive verifier
+checks the capsule manifest against the selected source and its packaged tools.
+Use the approved ownership and authentication procedure in the [backup runbook](cashu-backup-collection.md).
+Coordinated recovery also needs the matching CyberHerd binaries from the same
+workflow checkout and the verified external `age` executable.
+
 The builder runs `--help` on each trusted build and writes the archive with
-ordered members, normalized modes and Git-commit timestamps. Archive assembly
-is deterministic with the same build inputs. Independent compiled-binary
-reproducibility across hosts remains unverified. The verifier reads the
+ordered members, normalized modes and Git-commit timestamps. The tar payload
+reassembles deterministically with the same inputs. Gzip bytes can vary with the
+compression implementation. Independent compiled-binary reproducibility across
+hosts remains unverified. The verifier reads the
 archive directly and checks its contents, hashes, lock inventories, source
 identity and ELF headers. Installed startup and live provider or feeder
 acceptance follow their existing verification procedures.

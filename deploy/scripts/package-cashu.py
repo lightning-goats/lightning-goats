@@ -23,6 +23,14 @@ BINS = CORE + WALLET
 INVENTORY = 'docs/testing/cashu-license-inventory-20261117.json'
 SUPPLEMENT = 'docs/licenses/cashu-upstream-supplement.json'
 LOCKS = ('Cargo.lock', 'tools/cashu-compat/Cargo.lock')
+CAPSULE = 'cashu-backup-capsule'
+CAPSULE_MANIFEST = f'{CAPSULE}/TOOL.json'
+CAPSULE_TOOLS = (
+    'launch-cashu-backup.py', 'collect-cashu-backup.py', 'stage-cashu-restore.py',
+    'review-cashu-restore.py', 'reconcile-cashu-restore.py', 'verify-cashu-backup.py',
+    'verify-cashu-combined-backup.py', 'apply-cashu-mint-policy.py', 'inactive_file_transaction.py',
+)
+CAPSULE_FILES = tuple(f'{CAPSULE}/{name}' for name in CAPSULE_TOOLS)
 PAYLOAD = (
     'LICENSE', 'Cargo.toml', 'tools/cashu-compat/Cargo.toml', *LOCKS, INVENTORY,
     'deploy/config.receive.toml.example', 'deploy/systemd/lightning-goats-cashu.service.example',
@@ -31,16 +39,13 @@ PAYLOAD = (
     'docs/deployment/cashu-wallet-development.md', 'docs/deployment/cashu-backup-collection.md',
     'docs/deployment/cashu-operator-controls.md', 'docs/deployment/cashu-seed-provisioning.md',
     'docs/deployment/cashu-release-candidate.md', 'docs/deployment/audit-remediation.md',
+    'docs/deployment/cashu-recovery-inventory.md',
     'web/overlay.html', 'web/overlay.css', 'web/overlay.js',
     'web/vendor/qrcode.js', 'web/vendor/qrcode-LICENSE.txt', 'web/vendor/SOURCES.txt',
     *(f'web/images/{name}.png' for name in (
         'cosmo', 'dexter', 'lightning', 'lightninggoatslogo1', 'newton', 'nova', 'rowan',
     )),
-    *(f'deploy/scripts/{name}.py' for name in (
-        'add-cashu-seed', 'launch-cashu-backup', 'collect-cashu-backup', 'stage-cashu-restore',
-        'review-cashu-restore', 'reconcile-cashu-restore', 'verify-cashu-backup', 'verify-cashu-combined-backup',
-        'apply-cashu-mint-policy', 'inactive_file_transaction', 'prepare-cashu-backup-age',
-    )),
+    'deploy/scripts/add-cashu-seed.py', 'deploy/scripts/prepare-cashu-backup-age.py',
 )
 SHA = re.compile(r'[0-9a-f]{64}')
 RELEASE_ID = re.compile(r'[0-9a-f]{40}')
@@ -58,6 +63,13 @@ def file_sha256(path):
 
 def store_json(path, value):
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + '\n')
+
+
+def unique_fields(fields):
+    result = dict(fields)
+    if len(result) != len(fields):
+        raise ValueError('duplicate backup capsule manifest field')
+    return result
 
 
 def package_identity(package_id, by_manifest, known):
@@ -199,6 +211,11 @@ def build(output, profile):
             path = stage / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(run('git', 'show', f'{source}:{name}'))
+        (stage / CAPSULE).mkdir()
+        for name in CAPSULE_TOOLS:
+            (stage / CAPSULE / name).write_bytes(run('git', 'show', f'{source}:deploy/scripts/{name}'))
+        store_json(stage / CAPSULE_MANIFEST, dict(version=1, source_commit=source,
+                   files={name: file_sha256(stage / CAPSULE / name) for name in CAPSULE_TOOLS}))
         shutil.copytree(sysroot / 'share/doc/rust/licenses', stage / 'rust-toolchain/licenses')
         shutil.copyfile(sysroot / 'share/doc/rust/COPYRIGHT-library.html',
                         stage / 'rust-toolchain/COPYRIGHT-library.html')
@@ -226,7 +243,7 @@ def build(output, profile):
 def verify(archive, source):
     if not RELEASE_ID.fullmatch(source):
         raise ValueError('expected exact source commit')
-    manifest_files = {'SHA256SUMS', 'BUILD-INFO.json', 'notices/index.json', INVENTORY}
+    manifest_files = {'SHA256SUMS', 'BUILD-INFO.json', 'notices/index.json', INVENTORY, CAPSULE_MANIFEST}
     files, manifests, total = {}, {}, 0
     with tarfile.open(archive, 'r:gz') as tar:
         for member in tar:
@@ -239,6 +256,8 @@ def verify(archive, source):
             expected_mode = 0o755 if member.name in BINS else 0o644
             if member.mode != expected_mode or member.uid or member.gid:
                 raise ValueError('archive ownership or mode differs from candidate layout')
+            if member.name.startswith(CAPSULE + '/') and member.size > 1024**2:
+                raise ValueError('backup capsule member exceeds launcher limit')
             with tar.extractfile(member) as stream:
                 if member.name in manifest_files:
                     if member.size > 8 * 1024**2:
@@ -266,13 +285,19 @@ def verify(archive, source):
         expected[name] = digest
     if expected != {k: v for k, v in files.items() if k != 'SHA256SUMS'}:
         raise ValueError('archive checksum manifest differs from payload')
-    if not set((*PAYLOAD, *BINS, 'rust-toolchain/COPYRIGHT-library.html')).issubset(files):
+    if not set((*PAYLOAD, *BINS, *CAPSULE_FILES, *manifest_files,
+                'rust-toolchain/COPYRIGHT-library.html')).issubset(files):
         raise ValueError('review archive is missing required files')
     info = json.loads(manifests['BUILD-INFO.json'])
     if (info['source_commit'] != source or info['target'] != TARGET or info['activation'] != 'none'
             or info['profile'] not in ('dev', 'release') or set(info['binaries']) != set(BINS)
             or not RELEASE_ID.fullmatch(info['source_tree'])):
         raise ValueError('candidate build identity differs')
+    capsule = json.loads(manifests[CAPSULE_MANIFEST], object_pairs_hook=unique_fields)
+    expected_tools = {name: files[f'{CAPSULE}/{name}'] for name in CAPSULE_TOOLS}
+    if (not isinstance(capsule, dict) or type(capsule.get('version')) is not int
+            or capsule != {'version': 1, 'source_commit': source, 'files': expected_tools}):
+        raise ValueError('backup capsule does not match candidate source or files')
     notices = json.loads(manifests['notices/index.json'])
     inventory = json.loads(manifests[INVENTORY])
     identities = {p['name'] + '@' + p['version'] for p in inventory['packages']}
@@ -291,7 +316,7 @@ def verify(archive, source):
                 raise ValueError('notice text differs from index')
             notice_files.add('notices/' + path)
     rust_files = {file for file in files if file.startswith('rust-toolchain/licenses/')}
-    allowed = {*PAYLOAD, *BINS, *manifest_files, *notice_files,
+    allowed = {*PAYLOAD, *BINS, *manifest_files, *notice_files, *CAPSULE_FILES,
                'rust-toolchain/COPYRIGHT-library.html', *rust_files}
     if not rust_files or set(files) != allowed:
         raise ValueError('candidate contains unexpected files or incomplete toolchain notices')

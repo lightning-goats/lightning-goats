@@ -7,6 +7,7 @@ import unittest
 
 
 TOOLS = runpy.run_path(str(Path(__file__).resolve().parents[1] / 'scripts/package-cashu.py'))
+BACKUP = runpy.run_path(str(Path(__file__).resolve().parents[1] / 'scripts/launch-cashu-backup.py'))
 SOURCE = '1' * 40
 
 
@@ -27,6 +28,10 @@ class CashuPackageTests(unittest.TestCase):
     def stage_review(self):
         for name in TOOLS['PAYLOAD']:
             self.write(name, b'fixture')
+        capsule = TOOLS['CAPSULE']
+        capsule_files = {name: self.write(f'{capsule}/{name}', b'fixture tool') for name in TOOLS['CAPSULE_TOOLS']}
+        self.write(TOOLS['CAPSULE_MANIFEST'], json.dumps({'version': 1, 'source_commit': SOURCE,
+                                                         'files': capsule_files}).encode())
         rules = {lock: TOOLS['file_sha256'](self.payload / lock) for lock in TOOLS['LOCKS']}
         archive = {'name': 'fixture', 'version': '1.0.0'}
         inventory = self.write(TOOLS['INVENTORY'], json.dumps({'lock_sha256': rules, 'packages': [archive]}).encode())
@@ -89,6 +94,15 @@ class CashuPackageTests(unittest.TestCase):
         self.assertEqual(dict(TOOLS['selected_archives'](raw_map)), {archive: {'owner.o'}})
         with self.assertRaisesRegex(ValueError, 'no inventoried owner'):
             TOOLS['identify_links'](raw_map, [], {}, self.directory / 'sysroot', self.directory / 'elf')
+
+    def test_rehashed_backup_capsule_still_requires_the_original_bundled_file(self):
+        self.assertEqual(set(TOOLS['CAPSULE_TOOLS']), BACKUP['FILES'])
+        self.stage_review()
+        self.write(f"{TOOLS['CAPSULE']}/launch-cashu-backup.py", b'changed bootstrap')
+        archive = self.directory / 'changed-capsule.tar.gz'
+        TOOLS['pack'](self.payload, archive, 1234)
+        with self.assertRaisesRegex(ValueError, 'backup capsule'):
+            TOOLS['verify'](archive, SOURCE)
 
 
 if __name__ == '__main__':

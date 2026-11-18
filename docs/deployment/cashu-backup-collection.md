@@ -724,10 +724,19 @@ capsule when an earlier staged wallet lacks its lock file.
 
 The funded fixture interrupts both marker transitions, verifies exact retry
 and reversal, and refuses a different approval. It exercises ordinary
-startup refusal with the paused markers present. It clones the installed
-later core, wallet, and Cashu signer images with their authorized markers
-into disposable role directories. It starts the actual three
-binaries twice under separate UIDs in a loopback-only namespace. The core
+startup refusal with the paused markers present. It starts the three binaries
+pinned by the backup policy directly against the installed disposable stage
+with its original configurations and role UIDs. The hosted test uses temporary
+systemd units while the six ordinary units stay masked. It verifies read-only
+mounts for each started service's state and configuration, and loads the
+archived synthetic signer credential through systemd. Both start and stop
+cycles preserve the bytes, ownership, permissions, and file identities of
+all six installed role directories.
+
+The fixture separately clones the installed core, wallet, and Cashu signer
+images with their authorized markers to exercise rejection cases and enabled
+settings. It starts the three binaries twice under separate UIDs with no
+external network access. The core
 uses paused recovery with a canary configuration that enables Cashu intake
 and configures receipt import. The test starts the core without credentials,
 probes for rejected effectful HTTP routes, checks that the receipt socket
@@ -747,5 +756,5 @@ simulated feeding. The test compares durable wallet and signer bytes, checks
 the core, wallet, and signer fences before starting copies, and confirms all
 six installed role images match the original fenced reference after reversal.
 
-Removal of an installed recovery fence, startup using installed policies and
-credentials, and live provider acceptance still require separate qualification.
+Ordinary production startup, removal of the recovery fence, and live provider
+acceptance still require separate qualification.

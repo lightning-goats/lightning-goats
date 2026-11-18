@@ -518,6 +518,7 @@ def verify_funded_install(root, native_inputs, systemd_masks):
     collector = report['coordinated_collector']
     restore = collector['restore_staging']
     restart = restore['fenced_advancement']['paused_restart']
+    installed = restore['fenced_advancement']['installed_paused_restart']
     gate = restore['fenced_advancement']['paused_gate']
     if (report['result'] != 'CASHU_FUNDED_NATIVE_INSTALL_VERIFIED'
             or report['funded_fenced_installation_verified'] is not True
@@ -528,6 +529,15 @@ def verify_funded_install(root, native_inputs, systemd_masks):
             or restore['funded_provider_comparison']['reference_mint_unspent_sats'] != 16
             or restore['fenced_advancement']['resume_authorized'] is not False
             or len(restore['fenced_advancement']['recovery_fences_verified']) != 6
+            or installed['start_stop_cycles'] != 2
+            or not all(installed[key] is True for key in (
+                'exact_installed_executables_and_configurations', 'separate_runtime_identities_verified',
+                'all_six_images_unchanged', 'effectful_routes_and_sockets_absent'))
+            or installed['systemd_read_only_mounts_verified'] is not systemd_masks
+            or installed['systemd_ordinary_units_remained_masked'] is not systemd_masks
+            or installed['signer_loaded_archived_systemd_credential'] is not systemd_masks
+            or installed['paused_core_sats'] != 16 or installed['paused_wallet_sats'] != 16
+            or installed['signer_requests_retained'] != 1 or installed['resume_authorized'] is not False
             or restart['native_start_stop_cycles'] != 2 or not restart['financial_history_unchanged']
             or restart['paused_core_sats'] != 16 or restart['paused_wallet_sats'] != 16
             or not all(restart[key] is True for key in ('core_started_without_credentials',

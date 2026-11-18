@@ -94,17 +94,19 @@ impl WriterLock {
     /// Take the ordinary writer lease for a read-only review of existing state.
     /// An absent or substituted lock file requires normal provisioning first.
     pub(crate) fn lock_existing(directory: &Path) -> Result<File> {
-        Self::lock_existing_checked(directory, check_recovery_marker)
+        Self::lock_existing_checked(directory, OFlags::RDWR, check_recovery_marker)
     }
 
     pub(crate) fn lock_paused_recovery(directory: &Path, role: &str) -> Result<File> {
-        Self::lock_existing_checked(directory, |directory| {
+        // Linux flock can take the exclusive lease on a read-only mount.
+        Self::lock_existing_checked(directory, OFlags::RDONLY, |directory| {
             check_paused_recovery_marker(directory, role)
         })
     }
 
     fn lock_existing_checked(
         directory: &Path,
+        access: OFlags,
         check_marker: impl Fn(&Path) -> Result<()>,
     ) -> Result<File> {
         crate::private_ipc::private_state(directory)?;
@@ -112,7 +114,7 @@ impl WriterLock {
         let path = directory.join("wallet-writer.lock");
         let file = File::from(rustix::fs::open(
             &path,
-            OFlags::RDWR | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+            access | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
             Mode::empty(),
         )?);
         let info = file.metadata()?;

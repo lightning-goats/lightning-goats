@@ -1,5 +1,5 @@
-"""Rehearse startup and restart from a disposable copy of the advanced checkpoint."""
-from contextlib import closing, contextmanager
+"""Rehearse paused restart of an advanced checkpoint on a disposable installation."""
+from contextlib import ExitStack, closing, contextmanager
 import fcntl
 import hashlib
 import http.client
@@ -11,6 +11,7 @@ import shutil
 import signal
 import socket
 import sqlite3
+import stat
 import subprocess
 import time
 import tomllib
@@ -107,6 +108,14 @@ def require_writer_held(lock):
         raise ValueError('paused service failed to hold its existing writer exclusion')
 
 
+def transient_command(unit, account, stop, command, properties):
+    user, group = account
+    settings = ['Type=exec', f'User={user}', f'Group={group}', 'NoNewPrivileges=yes',
+                'TimeoutStopSec=10s', 'KillSignal=' + stop.name, *properties]
+    return ['/usr/bin/systemd-run', '--quiet', '--pipe', '--wait', '--collect', '--unit=' + unit,
+            *('--property=' + setting for setting in settings), '--', *command]
+
+
 @contextmanager
 def runtime(command, ready, log, stop, environment=None, unit=None):
     def stop_runtime(process, check=True):
@@ -132,7 +141,7 @@ def runtime(command, ready, log, stop, environment=None, unit=None):
             else:
                 output.seek(0)
                 raise ValueError(f'{log.stem} synthetic restart failed: {output.read()[-2200:]}')
-            yield
+            yield process
             stop_runtime(process)
             if process.wait(timeout=10):
                 output.seek(0)
@@ -143,6 +152,174 @@ def runtime(command, ready, log, stop, environment=None, unit=None):
                     stop_runtime(process, check=False)
                 process.kill()
                 process.wait(timeout=5)
+
+
+def installed_fingerprints(directories, extra):
+    paths = list(extra)
+    for directory in directories:
+        paths.extend((directory, *sorted(directory.iterdir())))
+    fingerprints = {}
+    for path in paths:
+        info = path.lstat()
+        if stat.S_ISREG(info.st_mode):
+            with path.open('rb') as source:
+                content = hashlib.file_digest(source, 'sha256').hexdigest()
+        elif stat.S_ISLNK(info.st_mode):
+            content = os.readlink(path)
+        elif stat.S_ISDIR(info.st_mode):
+            content = None
+        else:
+            raise ValueError(f'unexpected installed recovery entry: {path.name}')
+        fingerprints[path] = (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid,
+                              info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns, content)
+    return fingerprints
+
+
+def require_installed_process(pid, worker, command, unit):
+    proc = Path(f'/proc/{pid}')
+    expected = b'\0'.join(map(os.fsencode, command)) + b'\0'
+    if (proc / 'cmdline').read_bytes() != expected:
+        raise ValueError('paused service did not start the exact installed executable and configuration')
+    status = dict(line.split(':', 1) for line in (proc / 'status').read_text().splitlines())
+    if (any(status[field].split() != [str(worker[key])] * 4
+            for field, key in (('Uid', 'uid'), ('Gid', 'gid')))
+            or status['NoNewPrivs'].strip() != '1' or int(status['CapEff'].strip(), 16)):
+        raise ValueError('paused service did not run under its installed identity')
+    if unit is not None:
+        namespace = os.readlink(proc / 'ns/net')
+        fixture_namespace = os.readlink('/proc/self/ns/net')
+        if (namespace == os.readlink('/proc/1/ns/net')
+                or (namespace == fixture_namespace) != ('--config' in command)):
+            raise ValueError(f'{unit} did not join its isolated recovery network')
+        mounts = [line.split()[:6] for line in (proc / 'mountinfo').read_text().splitlines()]
+        for target in map(Path, (worker['state'], command[-1])):
+            _, _, _, _, _, options = max(
+                (row for row in mounts if target.is_relative_to(row[4])),
+                key=lambda row: len(Path(row[4]).parts))
+            if 'ro' not in options.split(','):
+                raise ValueError(f'{unit} did not mount {target.name} read-only')
+
+
+def require_inactive_masks(workers):
+    for worker in workers.values():
+        properties = subprocess.check_output(
+            ['/usr/bin/systemctl', 'show', '--property=ActiveState,UnitFileState', '--', worker['unit']],
+            stdin=subprocess.DEVNULL, env=CLEAN_ENV, timeout=5)
+        values = dict(line.split(b'=', 1) for line in properties.splitlines())
+        if values[b'ActiveState'] != b'inactive' or values[b'UnitFileState'] not in (b'masked', b'masked-runtime'):
+            raise ValueError('ordinary installed unit lost its inactive runtime mask')
+
+
+def require_core_paused(port):
+    if http_json(port, '/api/v1/status') != {
+            'mode': 'recovery-paused', 'feed_credit_sats': 16, 'unresolved_feed_attempt': None}:
+        raise ValueError('restored core did not preserve its paused state and available credit')
+    for method, path in PAYMENT_AND_PRESENTATION_ROUTES:
+        if http_request(port, path, method)[0] != 404:
+            raise ValueError(f'paused recovery still serves {method} {path}')
+
+
+def require_wallet_paused(log, wallet):
+    if json.loads(log.read_bytes()) != {
+            'mode': 'recovery-paused', 'wallet_instance': wallet['wallet_instance'],
+            'wallet_epoch': wallet['wallet_epoch'], 'mint_namespaces': 2,
+            'journal_custody_sats': 16, 'reported_treasury_deposit_sats': 396,
+            'resume_authorized': False}:
+        raise ValueError('paused wallet readiness differs from the funded registration')
+
+
+def require_signer_paused(log, signer):
+    if json.loads(log.read_bytes()) != {
+            'mode': 'recovery-paused', 'signing_requests': 1, 'client_credential_verified': True,
+            'resume_authorized': False, **{key: signer['policy'][key] for key in
+                ('broker_instance', 'broker_epoch', 'wallet_instance', 'wallet_epoch')}}:
+        raise ValueError('paused signer readiness differs from the restored registration')
+
+
+def rehearse_installed(root, workers, policy_path, archived_signer_client, systemd_roles, ciphertext):
+    # The collector has just authenticated the installation and paused markers.
+    root.mkdir(mode=0o711)
+    policy = json.loads(policy_path.read_bytes())
+    configs = {role: Path(policy[role + '_config']) for role in ('core', 'wallet', 'cashu_signer')}
+    commands = {}
+    for role, config in configs.items():
+        artifact = policy['runtime_artifacts'][role]
+        binary = Path(artifact['path'])
+        with binary.open('rb') as executable:
+            if hashlib.file_digest(executable, 'sha256').hexdigest() != artifact['sha256']:
+                raise ValueError(f'{role} installed executable differs from the collection policy')
+        mode = ['--recovery-paused', '--config'] if role == 'core' else ['recovery-paused']
+        commands[role] = [str(binary), *mode, str(config)]
+    core = tomllib.loads(configs['core'].read_text())
+    wallet = json.loads(configs['wallet'].read_bytes())
+    signer = json.loads(configs['cashu_signer'].read_bytes())
+    if (core['database']['url'] != 'sqlite://' + workers['core']['state'] + '/ledger.sqlite'
+            or wallet['state_directory'] != workers['wallet']['state']
+            or signer['state_directory'] != workers['cashu_signer']['state']):
+        raise ValueError('paused startup configuration did not select the installed images')
+    host, port = core['service']['listen'].rsplit(':', 1)
+    if host != '127.0.0.1':
+        raise ValueError('paused startup requires the installed loopback listener')
+    port = int(port)
+    sockets = [wallet['intake_socket'], signer['socket']]
+    for config, name in ((wallet, 'treasury_intake'), (core, 'cashu_receipts')):
+        if config.get(name, {}).get('socket'):
+            sockets.append(config[name]['socket'])
+    helper_invocations = Path(signer['nak']['private_directory']) / 'invocations'
+    dirs = [Path(worker['state']) for worker in workers.values()]
+    extra = [*configs.values(), helper_invocations]
+    before = installed_fingerprints(dirs, extra)
+    if helper_invocations.read_bytes() != b'attempt\n':
+        raise ValueError('installed signer fixture lacks the original attempt')
+    signer_env = {} if systemd_roles else credentials(
+        root / 'signer-creds', workers['cashu_signer'],
+        {'cashu-nostr-client': archived_signer_client.read_text()})
+    logs = {role: root / f'{role}.log' for role in configs}
+    ready = {
+        'core': lambda: http_json(port, '/healthz') == {'status': 'ok'},
+        'wallet': lambda: logs['wallet'].read_bytes().endswith(b'\n'),
+        'cashu_signer': lambda: logs['cashu_signer'].read_bytes().endswith(b'\n'),
+    }
+    for cycle, stop in enumerate((signal.SIGINT, signal.SIGTERM)):
+        with ExitStack() as services:
+            for role, command in commands.items():
+                worker = workers[role]
+                unit = None
+                if systemd_roles:
+                    unit = worker['unit'].removesuffix('.service') + f'-installed-paused-{cycle}.service'
+                    network = (f'NetworkNamespacePath=/proc/{os.getpid()}/ns/net'
+                               if role == 'core' else 'PrivateNetwork=yes')
+                    properties = ['ProtectSystem=strict', network]
+                    if role == 'cashu_signer':
+                        properties.append(f'LoadCredentialEncrypted=cashu-nostr-client:{ciphertext}')
+                    launch = transient_command(unit, systemd_roles[role], stop, command, properties)
+                else:
+                    launch = as_runtime(worker, *command)
+                process = services.enter_context(runtime(
+                    launch, ready[role], logs[role], stop, signer_env if role == 'cashu_signer' else None,
+                    unit))
+                pid = int(subprocess.check_output(
+                    ['/usr/bin/systemctl', 'show', '--property=MainPID', '--value', unit],
+                    stdin=subprocess.DEVNULL, env=CLEAN_ENV, timeout=10)) if unit else process.pid
+                require_installed_process(pid, worker, command, unit)
+            require_core_paused(port)
+            require_wallet_paused(logs['wallet'], wallet)
+            require_signer_paused(logs['cashu_signer'], signer)
+            for role in ('wallet', 'cashu_signer'):
+                require_writer_held(Path(workers[role]['state']) / 'wallet-writer.lock')
+            if systemd_roles:
+                require_inactive_masks(workers)
+            if any(map(os.path.lexists, sockets)) or installed_fingerprints(dirs, extra) != before:
+                raise ValueError('paused startup opened an effectful socket or changed the installed image')
+        if any(map(os.path.lexists, sockets)) or installed_fingerprints(dirs, extra) != before:
+            raise ValueError('paused shutdown changed the installed image or left a socket')
+    return {'start_stop_cycles': 2, 'exact_installed_executables_and_configurations': True,
+            'separate_runtime_identities_verified': True, 'all_six_images_unchanged': True,
+            'systemd_read_only_mounts_verified': bool(systemd_roles),
+            'systemd_ordinary_units_remained_masked': bool(systemd_roles),
+            'signer_loaded_archived_systemd_credential': bool(systemd_roles),
+            'paused_core_sats': 16, 'paused_wallet_sats': 16, 'signer_requests_retained': 1,
+            'effectful_routes_and_sockets_absent': True, 'resume_authorized': False}
 
 
 def rehearse(root, workers, binaries, configurations, core_daemon, archived_signer_client, encrypted_signer):
@@ -319,14 +496,9 @@ connections_per_second = 8
                 ciphertext, account, group = encrypted_signer
                 signer_unit = signer_worker['unit'].removesuffix('.service') + f'-paused-{cycle}.service'
                 signer_environment = None
-                signer_command = [
-                    '/usr/bin/systemd-run', '--quiet', '--pipe', '--wait', '--collect', '--unit=' + signer_unit,
-                    '--property=Type=exec', '--property=User=' + account, '--property=Group=' + group,
-                    '--property=LoadCredentialEncrypted=cashu-nostr-client:' + str(ciphertext),
-                    '--property=PrivateNetwork=yes', '--property=NoNewPrivileges=yes',
-                    '--property=TimeoutStopSec=10s', '--property=KillSignal=' + stop.name,
-                    '--', *signer_command,
-                ]
+                signer_command = transient_command(
+                    signer_unit, (account, group), stop, signer_command,
+                    [f'LoadCredentialEncrypted=cashu-nostr-client:{ciphertext}', 'PrivateNetwork=yes'])
             with (runtime(as_runtime(workers['core'], core_daemon, '--recovery-paused', '--config', core_config),
                           lambda: http_json(port, '/healthz') == {'status': 'ok'}, root / 'core.log',
                           stop),
@@ -334,30 +506,15 @@ connections_per_second = 8
                           signer_log, stop, signer_environment, signer_unit),
                   runtime(as_runtime(workers['wallet'], binaries['wallet'], 'recovery-paused', wallet_config),
                           lambda: wallet_log.read_text().endswith('\n'), wallet_log, stop)):
-                core = http_json(port, '/api/v1/status')
-                if core != {'mode': 'recovery-paused', 'feed_credit_sats': 16, 'unresolved_feed_attempt': None}:
-                    raise ValueError('restored core did not preserve its paused state and available credit')
-                for method, path in PAYMENT_AND_PRESENTATION_ROUTES:
-                    if http_request(port, path, method)[0] != 404:
-                        raise ValueError(f'paused recovery still serves {method} {path}')
+                require_core_paused(port)
                 if os.path.lexists(receipt_socket) or select.select([outbound_probe], [], [], 0)[0]:
                     raise ValueError('paused core opened receipt intake or contacted a backend')
                 status = json.loads(subprocess.check_output(
                     as_runtime(workers['wallet'], binaries['wallet'], 'status', wallet_config),
                     stdin=subprocess.DEVNULL, timeout=10, env=CLEAN_ENV))
-                readiness = json.loads(wallet_log.read_bytes())
-                if readiness != {'mode': 'recovery-paused', 'wallet_instance': wallet['wallet_instance'],
-                                 'wallet_epoch': wallet['wallet_epoch'], 'mint_namespaces': 2,
-                                 'journal_custody_sats': 16, 'reported_treasury_deposit_sats': 396,
-                                 'resume_authorized': False}:
-                    raise ValueError('paused wallet readiness differs from the funded registration')
+                require_wallet_paused(wallet_log, wallet)
                 require_writer_held(lock)
-                signer_readiness = json.loads(signer_log.read_bytes())
-                if signer_readiness != {
-                        'mode': 'recovery-paused', 'signing_requests': 1, 'client_credential_verified': True,
-                        'resume_authorized': False, **{key: signer['policy'][key] for key in
-                            ('broker_instance', 'broker_epoch', 'wallet_instance', 'wallet_epoch')}}:
-                    raise ValueError('paused signer readiness differs from the restored registration')
+                require_signer_paused(signer_log, signer)
                 require_writer_held(signer_lock)
                 sockets = (wallet_socket, treasury_socket, receipt_socket, signer_socket)
                 if any(os.path.lexists(path) for path in sockets):

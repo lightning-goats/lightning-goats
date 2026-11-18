@@ -254,11 +254,11 @@ def signer_systemd_command(*command, check=True):
 
 
 @contextmanager
-def signer_fixture_account(worker, fixture_root, role):
+def fixture_role_account(worker, fixture_root, role):
     if fixture_root.parent != Path('/var/lib') or not fixture_root.name.startswith('lg-native-backup-'):
-        raise ValueError('signer account requires a disposable systemd fixture')
+        raise ValueError('runtime account requires a disposable systemd fixture')
     suffix = fixture_root.name.removeprefix('lg-native-backup-')
-    account = f'lgc-{suffix}-{role[0]}'
+    account = f"lgc-{suffix}-{role.replace('_', '-')}"
     group = account + '-group'
     run = signer_systemd_command
     with ExitStack() as cleanup:
@@ -347,7 +347,7 @@ assert not os.access(ciphertext, os.R_OK)
         worker = workers[role]
         ciphertext = store / filename
         unit = worker['unit'].removesuffix('.service') + '-credential-probe.service'
-        with signer_fixture_account(worker, output_root.parent, role) as (account, group):
+        with fixture_role_account(worker, output_root.parent, role) as (account, group):
             result = signer_systemd_command(
                          '/usr/bin/systemd-run', '--quiet', '--wait', '--collect', '--unit=' + unit,
                          '--property=User=' + account, '--property=Group=' + group,
@@ -589,14 +589,20 @@ def qualify_advance(capsule, bootstrap, stage, reference, output, policy_path, c
         startup = output.parent / 'advanced-startup'
         startup.mkdir(mode=0o711)
         verified = verify_restored_runtime_fences(reference, startup, workers, binaries, configurations, roles)
-        rehearse = runpy.run_path(str(Path(__file__).with_name('cashu-funded-restart-fixture.py')))['rehearse']
-        worker = workers['cashu_signer']
+        restart = runpy.run_path(str(Path(__file__).with_name('cashu-funded-restart-fixture.py')))
         signer_client = reference / 'checkpoint-evidence/recovery-material/cashu-client.hex'
         with (exercise_paused_gate(install, invoke, args, common, tool, workers, output, systemd_masks),
-              (signer_fixture_account(worker, output.parent, 'cashu_signer') if systemd_masks else nullcontext()) as account):
-            encrypted = (credential_store / 'lg-cashu-nostr-client', *account) if systemd_masks else None
-            paused_restart = rehearse(output.parent / 'restart', workers, binaries, configurations,
-                                      binaries['core_daemon'], signer_client, encrypted)
+              ExitStack() as accounts):
+            systemd_roles, ciphertext, encrypted = {}, None, None
+            if systemd_masks:
+                systemd_roles = {role: accounts.enter_context(fixture_role_account(workers[role], output.parent, role))
+                                 for role in ('core', 'wallet', 'cashu_signer')}
+                ciphertext = credential_store / 'lg-cashu-nostr-client'
+                encrypted = (ciphertext, *systemd_roles['cashu_signer'])
+            installed_paused_restart = restart['rehearse_installed'](
+                output.parent / 'installed-restart', workers, policy_path, signer_client, systemd_roles, ciphertext)
+            paused_restart = restart['rehearse'](output.parent / 'restart', workers, binaries, configurations,
+                                                 binaries['core_daemon'], signer_client, encrypted)
         common['check_quiescence'](workers, common['Budget'](65536, 30))
         for role, state in active.items():
             if image(state) != image(reference / 'fenced-images' / role):
@@ -613,6 +619,7 @@ def qualify_advance(capsule, bootstrap, stage, reference, output, policy_path, c
             'paused_gate': {'prepare_and_restore_interruption_recovered': True,
                             'different_approval_refused': True, 'original_markers_restored': True,
                             'authenticated_cli_with_actual_masks': systemd_masks},
+            'installed_paused_restart': installed_paused_restart,
             'paused_restart': paused_restart, 'resume_authorized': False}
 
 
@@ -915,7 +922,9 @@ def qualify(source,root,states,uids,binaries,configurations,native_policy,args,c
     cashu_client=config_root/'cashu-client.hex'; cashu_client.write_text('0'*63+'2');cashu_client.chmod(0o600)
     payout_client=config_root/'payout-client.hex'; payout_client.write_text('0'*63+'5\n');payout_client.chmod(0o600)
     helper_files = []
+    runtime_binaries = {role: binaries[key] for role, key in native_roles.items()}
     if args.funded_fixture is not None:
+        runtime_binaries['core'] = binaries['core_daemon']
         signer_config = json.loads(configurations['signer'].read_bytes())
         invocations = Path(signer_config['nak']['private_directory']) / 'invocations'
         helper_files.append({'source': str(invocations), 'uid': uids['signer'], 'secret': True})
@@ -927,7 +936,7 @@ def qualify(source,root,states,uids,binaries,configurations,native_policy,args,c
         'cashu_client_source':str(cashu_client),'payout_client_source':str(payout_client),
         'historical_receiving_keys':[],'extra_files':helper_files,
         'artifacts':{name:{'path':str(path),'sha256':digest(path)} for name,path in selected.items() if name!='keygen'},
-        'runtime_artifacts':{role:{'path':str(binaries[key]),'sha256':digest(binaries[key])} for role,key in native_roles.items()},
+        'runtime_artifacts':{role:{'path':str(path),'sha256':digest(path)} for role,path in runtime_binaries.items()},
         'recipient':recipient,'component_bytes':128*1024**2,'total_bytes':1024**3,'deadline_seconds':300}
     policy_path=config_root/'policy.json'
     policy_path.write_text(json.dumps(policy));policy_path.chmod(0o600)

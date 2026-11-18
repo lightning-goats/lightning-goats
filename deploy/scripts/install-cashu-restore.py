@@ -75,12 +75,14 @@ def copy_role(source, destination, members, worker, common, budget):
     common['sync'](destination.parent)
 
 
-def systemd_credential(operation, name, data, budget):
+def systemd_credential(operation, name, data, budget, *, allow_refusal=False):
     args = ['/usr/bin/systemd-creds', '--no-pager', '--newline=no', '--name=' + name]
     if operation == 'encrypt':
         args.append('--with-key=host')
     result = subprocess.run([*args, operation, '-', '-'], input=data, capture_output=True,
                             timeout=budget.remaining(15), env=CLEAN_ENV)
+    if result.returncode and allow_refusal and not result.stdout:
+        return None
     if result.returncode or not 0 < len(result.stdout) <= 4096:
         raise ValueError('systemd signer credential operation refused')
     return result.stdout
@@ -141,6 +143,11 @@ def prepare_signer_clients(store, stage, originals, policy, common, budget, stac
         if not decoded.startswith(HOST_CREDENTIAL) or not hmac.compare_digest(
                 systemd_credential('decrypt', name, encrypted, budget), plaintext):
             raise ValueError('installed signer credential differs from the original client or host encryption')
+        # systemd accepts unnamed envelopes even with --name. A different
+        # name must fail for the candidate to be bound to this signer unit.
+        if systemd_credential('decrypt', 'lg-cashu-restore-name-probe', encrypted,
+                              budget, allow_refusal=True) is not None:
+            raise ValueError('signer credential is missing its unit credential name')
         if candidate is not None:
             common['write'](candidate, encrypted)
         prepared[role] = (target, candidate, common['sha'](encrypted))

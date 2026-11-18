@@ -376,6 +376,14 @@ class CollectorTests(unittest.TestCase):
             with ExitStack() as temporary, self.assertRaises(ValueError):
                 prepare(temporary)
             self.assertEqual(payout.read_bytes(), misplaced)
+            raw = (archive / 'payout-client.hex').read_bytes()
+            unnamed = subprocess.run(['/usr/bin/systemd-creds', '--with-key=host', 'encrypt', '-', '-'],
+                                     check=True, input=raw, capture_output=True, timeout=5, env=tool_env).stdout
+            payout.write_bytes(unnamed)
+            with (ExitStack() as temporary,
+                  self.assertRaisesRegex(ValueError, 'missing its unit credential name')):
+                prepare(temporary)
+            self.assertEqual(payout.read_bytes(), unnamed)
 
         wrong_identity = self.root / 'foreign-host-key'
         MODULE['write'](wrong_identity, b'\0' * 17)

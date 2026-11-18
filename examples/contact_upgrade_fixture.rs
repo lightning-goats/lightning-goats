@@ -13,6 +13,7 @@ use std::{os::unix::fs::MetadataExt as _, path::Path, time::Duration};
 const GUARD: &str = "/run/lightning-goats-contact-fixture/ALLOW";
 const ATTESTATION: &[u8] = b"LIGHTNING_GOATS_DISPOSABLE_CONTACT_UPGRADE_CI_v1\n";
 const DATABASE: &str = "/var/lib/lightning-goats/lightning-goats.db";
+const CURRENT_CORE_SCHEMA: usize = 27;
 
 fn isolated_fixture() -> Result<u32> {
     let uid = std::fs::metadata("/proc/self")?.uid();
@@ -56,6 +57,7 @@ fn isolated_fixture() -> Result<u32> {
 // Child-first order preserves foreign-key enforcement. This fixture accepts
 // only completely unused Cashu state; it is not a financial downgrade tool.
 const CASHU_FIXTURE_TABLES: &[&str] = &[
+    "cashu_treasury_fee_observations",
     "cashu_sweep_jobs",
     "cashu_sweep_requests",
     "feed_financial_supersessions",
@@ -95,11 +97,11 @@ async fn strip_empty_cashu_fixture(
             .execute(&mut **transaction)
             .await?;
     }
-    if sqlx::query("DELETE FROM _sqlx_migrations WHERE version=26")
+    if sqlx::query("DELETE FROM _sqlx_migrations WHERE version IN (26,27)")
         .execute(&mut **transaction)
         .await?
         .rows_affected()
-        != 1
+        != 2
     {
         bail!("synthetic Cashu migration missing");
     }
@@ -137,11 +139,11 @@ async fn strip_empty_contact_schema(uid: u32) -> Result<()> {
     }
     let migrations = sqlx::migrate!("./migrations");
     let rows = sqlx::query(
-        "SELECT version,success,checksum FROM _sqlx_migrations ORDER BY version LIMIT 27",
+        "SELECT version,success,checksum FROM _sqlx_migrations ORDER BY version LIMIT 28",
     )
     .fetch_all(&pool)
     .await?;
-    if rows.len() != 26 || migrations.iter().count() != 26 {
+    if rows.len() != CURRENT_CORE_SCHEMA || migrations.iter().count() != CURRENT_CORE_SCHEMA {
         bail!("exact current disposable schema required");
     }
     for (row, migration) in rows.iter().zip(migrations.iter()) {
@@ -447,7 +449,7 @@ mod tests {
         let mut tx = pool.begin().await?;
         super::strip_empty_cashu_fixture(&mut tx).await?;
         let extension: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations WHERE version=26")
+            sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations WHERE version IN (26,27)")
                 .fetch_one(&mut *tx)
                 .await?;
         let previous: i64 =
@@ -459,7 +461,7 @@ mod tests {
         let migrations: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations")
             .fetch_one(&pool)
             .await?;
-        assert_eq!(migrations, 26);
+        assert_eq!(usize::try_from(migrations)?, super::CURRENT_CORE_SCHEMA);
         Ok(())
     }
     #[tokio::test]
@@ -491,6 +493,7 @@ mod tests {
     fn disposable_drop_inventory_covers_every_cashu_migration_table() {
         let expected = include_str!("../migrations/0026_cashu_receipts.sql")
             .lines()
+            .chain(include_str!("../migrations/0027_cashu_fee_observations.sql").lines())
             .filter_map(|line| line.strip_prefix("CREATE TABLE "))
             .map(|line| line.split_whitespace().next().unwrap())
             .collect::<std::collections::BTreeSet<_>>();

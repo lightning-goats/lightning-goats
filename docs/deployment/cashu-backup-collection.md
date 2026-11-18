@@ -381,6 +381,22 @@ observations alongside it for separate ownership and external-history review.
 This comparison does not discover all external operations, revalidate current
 mint change ownership, apply accounting changes or authorize clearing a fence.
 
+For a batch, use manifest `version: 2` and arrays for `treasury` and `feeder`.
+Each entry uses the corresponding version 1 fields. Use an empty array only
+when the corresponding worklist has no entries. The command independently
+derives the required treasury IDs from the union of `strike_receives` and
+`mint_melts` and the feeder IDs from `feeder_requests`. It rejects missing,
+duplicate, and unrelated originals before comparing the observations. A batch
+can include `custody_all` for every retained mint in one of the selected stages.
+
+A batch supports up to 1,000 originals of each type in a 512 KiB manifest.
+If a worklist is larger, use the paged worklist and individual observations.
+Some pending operations have no provider identifiers yet. A complete batch
+requires matching evidence for every selected original, so preserve any such
+operation separately behind its fence. The report still counts unresolved
+splits and acquisitions. Recovery decisions also require evidence for those
+operations and any effects after the selected reference.
+
 ### Observe the mint's current custody state
 
 Select a configured mint ID from the fenced stage. The selector checks the

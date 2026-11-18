@@ -16,6 +16,7 @@ NO_AUTHORITY = {'external_reconciliation_verified': False, 'restore_authorized':
 RESULTS = {'mint': 'CASHU_RESTORE_MINT_MELT_OBSERVED', 'strike': 'CASHU_RESTORE_STRIKE_RECEIVE_VERIFIED',
            'feeder': 'CASHU_RESTORE_FEEDER_REQUEST_OBSERVED', 'custody': 'CASHU_RESTORE_MINT_CUSTODY_OBSERVED'}
 CUSTODY_TOTALS = ('mint_unspent_sats', 'mint_spent_sats', 'mint_unresolved_sats', 'stale_local_unspent_sats')
+BATCH_LIMIT = 1000
 
 
 def require(condition, message):
@@ -291,27 +292,56 @@ def compare_custody_all(entry, parent, stages, wallet_source, common, budget):
             **{key: sum(r[key] for r in reports.values()) for key in ('selected_count', *CUSTODY_TOTALS)}}
 
 
+def original_ids(*groups):
+    ids = set()
+    for group in groups:
+        require(group['next_after'] is None and group['total'] == len(group['items']),
+                'recovery worklist exceeds the batch bound')
+        for item in group['items']:
+            ids.add(valid_id((item['staged'] or item['reference'])['id']))
+    return ids
+
+
+def exact_observation_entries(entries, field, expected):
+    require(isinstance(entries, list) and len(entries) <= BATCH_LIMIT,
+            'invalid bounded recovery observation batch')
+    indexed = {valid_id(item[field]): item for item in entries}
+    require(len(indexed) == len(entries) and set(indexed) == expected,
+            'recovery batch must cover every required original operation exactly once')
+    return [indexed[id] for id in sorted(indexed)]
+
+
 def compare(plan, parent, stages, staged_sha, reference_sha, common, budget, wallet_source=None):
     custody, custody_all = plan.get('custody'), plan.get('custody_all')
+    version = plan['version']
     require(set(plan) - {'custody', 'custody_all'} == {'version', 'treasury', 'feeder'}
-            and type(plan['version']) is int and plan['version'] == 1
-            and (custody is None or custody_all is None)
-            and any(item is not None for item in (plan['treasury'], plan['feeder'], custody, custody_all)),
+            and type(version) is int and version in (1, 2)
+            and (custody is None or (custody_all is None and version == 1))
+            and (version == 2 or any(item is not None for item in (plan['treasury'], plan['feeder'], custody, custody_all))),
             'invalid recovery evidence manifest')
     staged = stages[staged_sha]
     reference = stages[reference_sha] if reference_sha is not None else None
     # Reuse history and immutable-identity checks across all worklist groups.
-    groups = REVIEW['worklist'](*staged[1:], *(reference[1:] if reference else (None, None)), limit=1)
-    result = {'version': 1, 'result': 'CASHU_RESTORE_OBSERVATIONS_COMPARED', 'checkpoint_id': staged[0],
+    groups = REVIEW['worklist'](*staged[1:], *(reference[1:] if reference else (None, None)),
+                                limit=BATCH_LIMIT if version == 2 else 1)
+    result = {'version': version, 'result': 'CASHU_RESTORE_OBSERVATIONS_COMPARED', 'checkpoint_id': staged[0],
             'staged_receipt_sha256': staged_sha, 'reference_checkpoint_id': reference[0] if reference else None,
             'reference_receipt_sha256': reference_sha,
             'worklist_counts': {key: value['total'] for key, value in groups.items()},
-            'treasury': (compare_treasury(plan['treasury'], parent, stages, staged_sha, reference_sha, common, budget)
-                         if plan['treasury'] is not None else None),
-            'feeder': (compare_feeder(plan['feeder'], parent, stages, staged_sha, reference_sha, common, budget)
-                       if plan['feeder'] is not None else None),
             'custody': None,
             **NO_AUTHORITY}
+    comparison_args = (parent, stages, staged_sha, reference_sha, common, budget)
+    if version == 1:
+        result['treasury'] = (compare_treasury(plan['treasury'], *comparison_args)
+                              if plan['treasury'] is not None else None)
+        result['feeder'] = (compare_feeder(plan['feeder'], *comparison_args)
+                            if plan['feeder'] is not None else None)
+    else:
+        treasury = exact_observation_entries(plan['treasury'], 'intent_id',
+                                             original_ids(groups['strike_receives'], groups['mint_melts']))
+        feeder = exact_observation_entries(plan['feeder'], 'request_id', original_ids(groups['feeder_requests']))
+        result['treasury'] = [compare_treasury(entry, *comparison_args) for entry in treasury]
+        result['feeder'] = [compare_feeder(entry, *comparison_args) for entry in feeder]
     if custody is not None:
         wallet, files = wallet_source
         store = REVIEW['mint_store_name'](custody['mint_id'], common)
@@ -340,7 +370,7 @@ def main():
         if args.reference is not None:
             selected.append((args.reference, args.reference_sha256))
         budget = common['Budget'](0, 300)
-        document = read_bound(args.evidence, args.evidence_sha256, 65536, common, budget)
+        document = read_bound(args.evidence, args.evidence_sha256, 512 * 1024, common, budget)
         stages = {}
         custody = document.get('custody_all')
         if custody is None:

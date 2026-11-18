@@ -276,6 +276,20 @@ def verify_combined_observation_review(paths, strike, mint, feeder, common, budg
                 or not feeding['confirmed_observation_missing_from_stage']
                 or feeding['reference_status'] != 'confirmed' or any(result[k] for k in no_authority)):
             raise ValueError('combined review missed the original financial or feeder rollback')
+        batch = {'version': 2, 'treasury': [plan['treasury']], 'feeder': [plan['feeder']]}
+        all_originals = reviewed(batch, parent, stages, staged_sha, reference_sha, common, budget)
+        if (all_originals['version'] != 2 or all_originals['treasury'] != [treasury]
+                or all_originals['feeder'] != [feeding] or any(all_originals[k] for k in no_authority)):
+            raise ValueError('batch review missed the original funded operation outcomes')
+        for incomplete in ({**batch, 'treasury': []}, {**batch, 'feeder': []},
+                           {**batch, 'treasury': batch['treasury'] * 2}):
+            try:
+                reviewed(incomplete, parent, stages, staged_sha, reference_sha, common, budget)
+            except ValueError as error:
+                if 'every required original' not in str(error):
+                    raise
+            else:
+                raise ValueError('batch review accepted missing or repeated funded evidence')
         plan['feeder']['observation'] = preserve('conflict.json', feeder['conflicting'])
         result = reviewed(plan, parent, stages, staged_sha, reference_sha, common, budget)
         if result['feeder']['checkpoint_conflict'] is not True:
@@ -465,6 +479,7 @@ def verify_funded_rollback(root, core_cli):
     require(all(digest(path) == expected_hash for path, expected_hash in before.items()),
             'restore provider observations changed checkpoint bytes')
     return {
+        'batch_original_treasury_and_feeder_verified': True,
         'wallet_only_history_refused': True,
         'core_only_local_agreement_insufficient': True,
         'coordinated_older_local_agreement_insufficient': True,

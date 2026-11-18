@@ -26,6 +26,26 @@ INSTALL=runpy.run_path(str(SOURCE/'install-cashu-restore.py'))
 
 
 class RecoveryWorklistTests(unittest.TestCase):
+    def test_recovery_batch_requires_the_exact_union_of_original_operations(self):
+        first = '10000000-0000-4000-8000-000000000001'
+        second = '10000000-0000-4000-8000-000000000002'
+        unknown = '10000000-0000-4000-8000-000000000003'
+        old = {'staged': {'id': first}, 'reference': None}
+        new = {'staged': None, 'reference': {'id': second}}
+        original_ids = RECONCILE['original_ids']
+        entries = RECONCILE['exact_observation_entries']
+        strike = {'total': 1, 'next_after': None, 'items': [old]}
+        mint = {'total': 2, 'next_after': None, 'items': [old, new]}
+        expected = original_ids(strike, mint)
+        self.assertEqual(expected, {first, second})
+        self.assertEqual(entries([{'intent_id': second}, {'intent_id': first}], 'intent_id', expected),
+                         [{'intent_id': first}, {'intent_id': second}])
+        for invalid in ([], [first], [first, first], [first, unknown], [first, second, unknown]):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(ValueError, 'every required original'):
+                entries([{'intent_id': id} for id in invalid], 'intent_id', expected)
+        with self.assertRaisesRegex(ValueError, 'exceeds the batch bound'):
+            original_ids(strike, {**mint, 'next_after': first, 'items': [old]})
+
     def test_mint_custody_pages_preserve_exact_unspent_and_reserved_points(self):
         url = 'https://mint.example/Bitcoin'
         page = REVIEW['custody_page']

@@ -126,7 +126,7 @@ class ContactMaintenanceFiles(unittest.TestCase):
                    (U, 'verified_tool_identity', lambda: {'source': 'contact-maintenance-fixture'}),
                    (U.C, 'root', lambda: None), (U.C, 'status', self.status), (U.C, 'command', self.command),
                    (U.Q, 'no_role_processes', lambda identities: None),
-                   (U.Q.I, 'require_no_sudo', lambda name: None), (U.S, 'role_dropins', lambda: {}),
+                   (U.Q.I, 'require_no_sudo', lambda name: None), (U.S, 'role_dropins', lambda **kwargs: {}),
                    (U.Q.I, 'check_identities', lambda: {U.P.ROLE_NAMES[role]: value for role, value in self.identity.items() if role != 'core'}),
                    (U.C.pwd, 'getpwnam', lambda name: types.SimpleNamespace(pw_name='lightning-goats', pw_uid=50001, pw_gid=50001, pw_shell='/usr/sbin/nologin')),
                    (U.C.grp, 'getgrgid', lambda gid: types.SimpleNamespace(gr_name='lightning-goats' if gid == 50001 else 'fixture')),
@@ -224,7 +224,7 @@ class ContactMaintenanceFiles(unittest.TestCase):
                         self.starts.append(unit)
             return ''
         operation = arguments[3]
-        if operation in ('snapshot-before-contact', 'snapshot'):
+        if operation in ('snapshot-before-contact', 'snapshot-before-cashu', 'snapshot'):
             destination = Path(arguments[arguments.index('--destination') + 1])
             destination.mkdir(mode=0o700)
             images = []
@@ -238,7 +238,7 @@ class ContactMaintenanceFiles(unittest.TestCase):
         else:
             bundle = Path(arguments[arguments.index('--bundle') + 1])
         manifest = json.loads((bundle / 'MANIFEST.json').read_text())
-        if operation == 'compare-contact-upgrade':
+        if operation in ('compare-contact-upgrade', 'compare-cashu-upgrade'):
             candidate = Path(arguments[arguments.index('--candidate-copy') + 1])
             self.assertEqual((candidate / 'core.db').read_bytes(), b'migrated synthetic core')
             self.assertEqual((bundle / 'core.db').read_bytes(), self.old_bytes['core'])
@@ -246,7 +246,10 @@ class ContactMaintenanceFiles(unittest.TestCase):
                 self.assertEqual((candidate / (role + '.db')).read_bytes(), self.old_bytes[role])
         names = {'snapshot-before-contact': 'contact_upgrade_snapshot', 'snapshot': 'snapshot',
                  'verify-contact-upgrade-source': 'contact_upgrade_source_verify', 'verify': 'verify',
-                 'compare-contact-upgrade': 'contact_upgrade_compare'}
+                 'compare-contact-upgrade': 'contact_upgrade_compare',
+                 'snapshot-before-cashu': 'cashu_upgrade_snapshot',
+                 'verify-cashu-upgrade-source': 'cashu_upgrade_source_verify',
+                 'compare-cashu-upgrade': 'cashu_upgrade_compare'}
         return json.dumps({'operation': names[operation], 'id': manifest['id'],
                            'accepted': operation != self.native_refusal, 'resume_authorized': False})
 
@@ -302,6 +305,46 @@ class ContactMaintenanceFiles(unittest.TestCase):
             self.assertEqual((self.binary / name).read_bytes(), ('old program: ' + name).encode())
         with self.assertRaisesRegex(ValueError, 'already began'):
             U.apply(self.execution, True)
+
+    def select_cashu_review(self, outgoing):
+        for role in outgoing:
+            unit = U.P.ROLE_NAMES[role] + '.service'
+            (self.etc / unit).unlink()
+            self.unit_live[unit] = True
+            self.baseline['states'][role] = self.status(unit)
+        review = U.C.read_json(self.review / 'PREPARED.json')
+        review.update(core_upgrade='cashu', baseline=self.baseline)
+        self.write(self.review / 'PREPARED.json', json.dumps(review).encode(), 0o600)
+        self.execution = self.base / 'cashu-execution'
+        U.plan(self.review, U.digest(self.review / 'PREPARED.json'), self.execution)
+
+    def test_cashu_stops_and_resumes_all_originally_running_roles(self):
+        with patch.object(U, 'UPGRADE_KIND', 'cashu'), patch.object(U.P, 'UPGRADE_KIND', 'cashu'), \
+                patch.object(U.P, 'require_inactive_cashu'):
+            self.select_cashu_review(('payout', 'signer'))
+            U.apply(self.execution, True)
+            stopped_units = [call[3] for call in self.commands if call[:2] == ('/usr/bin/systemctl', 'stop')]
+            self.assertEqual(stopped_units, ['cyberherd-payout.service', 'cyberherd.service',
+                                            'cyberherd-signer.service', 'lightning-goats-receive.service'])
+            self.assertTrue(all(U.M.masked(self.etc / unit) for unit in stopped_units))
+            self.assertEqual(self.starts, [])
+            resumed = U.resume(self.execution, True)
+            self.assertEqual(resumed['resumed_roles'], ['core', 'signer', 'membership', 'payout'])
+            self.assertEqual(self.starts, list(reversed(stopped_units)))
+            self.assertTrue(resumed['payouts_enabled'])
+            self.assertTrue(all(self.unit_live[unit] for unit in stopped_units))
+
+    def test_cashu_source_rejection_keeps_active_financial_roles_masked(self):
+        with patch.object(U, 'UPGRADE_KIND', 'cashu'), patch.object(U.P, 'UPGRADE_KIND', 'cashu'), \
+                patch.object(U.P, 'require_inactive_cashu'):
+            self.select_cashu_review(('payout', 'signer'))
+            self.native_refusal = 'verify-cashu-upgrade-source'
+            with self.assertRaisesRegex(ValueError, 'not positively accepted'):
+                U.apply(self.execution, True)
+            self.assertEqual(self.migrations, [])
+            self.assertTrue(all(U.M.masked(self.etc / unit) for unit in self.unit_live))
+            self.assertEqual(self.starts, [])
+            self.assertEqual(self.core_db.read_bytes(), self.old_bytes['core'])
 
     def test_unaccepted_clone_never_changes_live_programs_or_schema(self):
         self.native_refusal = 'compare-contact-upgrade'

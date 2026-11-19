@@ -1,0 +1,25 @@
+{
+  "source_commit": "ebdbf479bffb3b9ae4641e7bfae783e9f4bd7b52",
+  "checkout_commit": "c4c051cd4fa78de4d9b63f60f95c2c6897d08107",
+  "matching_source_and_checkout_tree": "4e4d002ba146bb36fb5147668f2e3b28cefb79f9",
+  "ci_run": "https://github.com/lightning-goats/lightning-goats/actions/runs/44199721578",
+  "deployment_run": "https://github.com/lightning-goats/lightning-goats/actions/runs/44199721715",
+  "security_run": "https://github.com/lightning-goats/lightning-goats/actions/runs/44199721662",
+  "all_ten_workflows_passed": true,
+  "artifact": {
+    "id": 14380569225,
+    "size_bytes": 19742,
+    "sha256": "0f2edd6e50579b9c724061020d9d241da1b19e733eaaea805bb1f91b64d71afd",
+    "member": "cashu-native-backup.json",
+    "member_sha256": "c6b1461250a62861efd057cb41f762f1cc6ae193b3935218189c8008ed65ce6b"
+  },
+  "archive_fixture": {
+    "restored_runtime_fences_refused": ["cashu_signer", "core", "membership", "payout", "signer", "wallet"],
+    "restored_runtime_roles_isolated": true,
+    "restored_runtime_bytes_unchanged": true,
+    "wallet_fence_checked_before_keys": true,
+    "cashu_signer_fence_checked_without_client_credential": true,
+    "resume_authorized": false
+  },
+  "scope": "Disposable native CLI commands using authenticated, encrypted, empty-state archive copies and separate runtime UIDs. Installed Cashu restore/resumption remains open."
+}

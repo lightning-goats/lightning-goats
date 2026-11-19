@@ -1,0 +1,68 @@
+--- a/bunker.go
++++ b/bunker.go
+@@ -138,6 +138,11 @@
+ 			Aliases: []string{"k"},
+ 			Usage:   "pubkeys for which we will always respond",
+ 		},
++		&cli.StringFlag{
++			Name:     "cashu-client",
++			Usage:    "dedicated Cashu client public key with restricted signing and self-encryption",
++			OnlyOnce: true,
++		},
+ 		&cli.StringSliceFlag{
+ 			Name:   "relay",
+ 			Usage:  "relays to connect to (can also be provided as naked arguments)",
+@@ -283,6 +288,18 @@
+ 				return fmt.Errorf("failed to decrypt: %w", err)
+ 			}
+ 			sec = plain
++		}
++
++		var cashu *cashuScope
++		if c.IsSet("cashu-client") {
++			var err error
++			cashu, err = newCashuScope(c.String("cashu-client"), sec)
++			if err != nil {
++				return err
++			}
++			if slices.ContainsFunc(config.Clients, func(client BunkerConfigClient) bool { return client.PubKey == cashu.client }) {
++				return errors.New("dedicated Cashu client is already in the general authorization list")
++			}
+ 		}
+
+ 		if persist != nil {
+@@ -460,6 +477,10 @@
+ 		signer.DefaultRelays = config.Relays
+
+ 		signer.AuthorizeRequest = func(harmless bool, from nostr.PubKey, secret string) bool {
++			// Scoped relay requests reach this callback only after cashu.handle.
++			if cashu != nil && from == cashu.client {
++				return true
++			}
+ 			mu.Lock()
+
+ 			if slices.ContainsFunc(config.Clients, func(b BunkerConfigClient) bool { return b.PubKey == from }) {
+@@ -499,6 +520,14 @@
+ 		handleBunkerRequest := func(ie nostr.RelayEvent) {
+ 			// handle the NIP-46 request event
+ 			from := ie.Event.PubKey
++			if cashu != nil && from == cashu.client {
++				response, err := cashu.handle(ctx, &signer, sec, ie.Event)
++				if err == nil {
++					for range sys.Pool.PublishMany(ctx, config.Relays, response) {
++					}
++				}
++				return
++			}
+ 			req, resp, eventResponse, err := signer.HandleRequest(ctx, ie.Event)
+ 			if err != nil {
+ 				if errors.Is(err, nip46.AlreadyHandled) {
+@@ -539,7 +568,7 @@
+ 		go func() {
+ 			for uri := range onSocketConnect(ctx, c, terminal.Log) {
+ 				clientPublicKey, err := nostr.PubKeyFromHex(uri.Host)
+-				if err != nil {
++				if err != nil || (cashu != nil && cashu.client == clientPublicKey) {
+ 					continue
+ 				}
+ 				terminal.Log("- got nostrconnect:// request from '%s': %s\n", color.New(color.Bold, color.FgBlue).Sprint(clientPublicKey.Hex()), uri.String())

@@ -89,6 +89,25 @@ class ContactPreparationBoundaries(unittest.TestCase):
             with self.subTest(keys=keys), self.assertRaises(ValueError):
                 PREPARE.configuration_boundary(*changed)
 
+    def test_cashu_preparation_preserves_existing_active_configuration(self):
+        core, member, payout, signer, policy = fixture()
+        core['contact'] = {'recipient': policy['owner'], 'inbox_relays': ['wss://relay.example']}
+        core['core_bridge']['payout_execution_enabled'] = True
+        core['core_bridge']['reward_policy']['max_sats_per_feed'] = 30
+        member['rewards'] = {'existing': True}
+        payout['enabled'] = payout['policy']['execution_enabled'] = signer['enabled'] = True
+        values = (core, member, payout, signer, policy)
+        original = copy.deepcopy(values)
+        with patch.object(PREPARE, 'UPGRADE_KIND', 'cashu'):
+            PREPARE.configuration_boundary(*values)
+            self.assertEqual(values, original)
+            for field in ('cashu', 'cashu_receipts', 'cashu_treasury'):
+                with self.assertRaisesRegex(ValueError, 'without Cashu policy'):
+                    PREPARE.configuration_boundary(dict(core, **{field: {}}), *values[1:])
+            payout['policy']['scope']['owner'] = 'f' * 64
+            with self.assertRaisesRegex(ValueError, 'owner'):
+                PREPARE.configuration_boundary(*values)
+
     def test_archives_are_pinned_and_never_overwritten(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

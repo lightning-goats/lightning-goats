@@ -63,7 +63,7 @@ def original(review, r, path):
 
 def patch_mode(record, current_schema):
     if record.get('core_upgrade', 'contact') != UPGRADE_KIND:
-        raise ValueError('contact and feeder-cap upgrade transactions cannot be interchanged')
+        raise ValueError('different core upgrade transactions cannot be interchanged')
     if (record.get('current_schema_patch', False) is not current_schema
             or (current_schema and record.get('schema_upgrade_authorized') is not False)):
         raise ValueError('current-schema and migration transactions cannot be interchanged')
@@ -79,7 +79,7 @@ def review_record(review, expected, *, current_schema=False):
             or r.get('native_runtime_help_verified') is not True
             or any(r[key] is not False for key in ('activation_supported', 'services_changed',
                    'journals_opened', 'credentials_loaded'))
-            or (not current_schema and r.get('contact_enabled') is not False)
+            or (not current_schema and UPGRADE_KIND != 'cashu' and r.get('contact_enabled') is not False)
             or (review / 'INCOMPLETE').exists()):
         raise ValueError('matching complete preparation-only review required')
     files, order = r['baseline']['files'], r['original_order']
@@ -209,8 +209,8 @@ def stable(m, r, masked=False, installed=False):
             or groups & {'root', 'sudo', 'wheel', 'admin', 'docker', 'lxd', 'disk'}):
         raise ValueError('core runtime identity changed')
     Q.I.require_no_sudo('lightning-goats')
-    if S.role_dropins() != {name: fp for name, fp in files.items()
-                            if Path(name).parent.name in {role + '.service.d' for role in Q.ROLES}}:
+    if P.retained_role_dropins() != {name: fp for name, fp in files.items()
+                                     if Path(name).parent.name in {role + '.service.d' for role in Q.ROLES}}:
         raise ValueError('hidden role override set changed')
     hidden = {}
     for unit in (C.UNIT_NAME, 'service'):
@@ -230,6 +230,8 @@ def stable(m, r, masked=False, installed=False):
 
 def stopped(m, r, installed=False):
     stable(m, r, masked=True, installed=installed)
+    if UPGRADE_KIND == 'cashu':
+        P.require_inactive_cashu()
     for role, name in P.ROLE_NAMES.items():
         unit = name + '.service'
         value = C.status(unit)
@@ -252,18 +254,35 @@ def stopped(m, r, installed=False):
 
 def quiesce(m, r):
     stable(m, r)
-    for name in ('cyberherd-payout', 'cyberherd-signer'):
-        if not M.masked(MASKS / (name + '.service')) or C.status(name + '.service')['MainPID'] != '0':
-            raise ValueError('outgoing roles must remain masked')
-    C.command('/usr/bin/systemctl', 'stop', '--', 'cyberherd.service', C.UNIT_NAME, timeout=120)
+    roles = active_roles(r)
+    for role in ('payout', 'signer'):
+        if role not in roles:
+            unit = P.ROLE_NAMES[role] + '.service'
+            if not M.masked(MASKS / unit) or C.status(unit)['MainPID'] != '0':
+                raise ValueError('inactive outgoing roles must remain masked')
+    if UPGRADE_KIND == 'cashu':
+        P.require_inactive_cashu()
+        # Stop callers before their backing services, preserving original work
+        # in the native journals. Start in the opposite order after comparison.
+        for role in reversed(roles):
+            C.command('/usr/bin/systemctl', 'stop', '--', P.ROLE_NAMES[role] + '.service', timeout=120)
+    else:
+        C.command('/usr/bin/systemctl', 'stop', '--', 'cyberherd.service', C.UNIT_NAME, timeout=120)
     M.mask(C.UNIT, (r['baseline']['files'][str(C.UNIT)],))
-    member = MASKS / 'cyberherd.service'
-    if member.exists() or member.is_symlink():
-        raise ValueError('unexpected preexisting membership mask')
-    member.symlink_to('/dev/null')
-    TX.sync_directory(member.parent)
+    for role in roles:
+        if role == 'core':
+            continue
+        mask = MASKS / (P.ROLE_NAMES[role] + '.service')
+        mask.symlink_to('/dev/null')
+    TX.sync_directory(MASKS)
     C.command('/usr/bin/systemctl', 'daemon-reload')
     stopped(m, r)
+
+
+def active_roles(review):
+    if UPGRADE_KIND == 'cashu':
+        return P.retained_roles(review['baseline']['states'])
+    return ('core', 'membership')
 
 
 def native(m, operation, *arguments):
@@ -271,12 +290,19 @@ def native(m, operation, *arguments):
         operation = {'snapshot-before-contact':'snapshot-before-feeder-cap',
                      'verify-contact-upgrade-source':'verify-feeder-cap-upgrade-source',
                      'compare-contact-upgrade':'compare-feeder-cap-upgrade'}.get(operation, operation)
+    elif UPGRADE_KIND == 'cashu':
+        operation = {'snapshot-before-contact': 'snapshot-before-cashu',
+                     'verify-contact-upgrade-source': 'verify-cashu-upgrade-source',
+                     'compare-contact-upgrade': 'compare-cashu-upgrade'}.get(operation, operation)
     program = Path(m['review']) / 'payload/cyberherd-statectl'
     C.protected(program)
     result = json.loads(C.command(str(program), '--config', str(S.MAINTENANCE), operation, *map(str, arguments), timeout=300))
     names = {'snapshot-before-feeder-cap':'feeder_cap_upgrade_snapshot',
              'verify-feeder-cap-upgrade-source':'feeder_cap_upgrade_source_verify',
              'compare-feeder-cap-upgrade':'feeder_cap_upgrade_compare',
+             'snapshot-before-cashu': 'cashu_upgrade_snapshot',
+             'verify-cashu-upgrade-source': 'cashu_upgrade_source_verify',
+             'compare-cashu-upgrade': 'cashu_upgrade_compare',
              'snapshot-before-contact': 'contact_upgrade_snapshot',
              'verify-contact-upgrade-source': 'contact_upgrade_source_verify',
              'compare-contact-upgrade': 'contact_upgrade_compare', 'snapshot': 'snapshot', 'verify': 'verify'}
@@ -474,7 +500,7 @@ def apply(directory, approved, *, current_schema=False):
                 'core_upgrade': UPGRADE_KIND,
                 'migrated_manifest_sha256': digest(directory / 'migrated/MANIFEST.json')})
     return {'upgraded': True, 'four_journal_backup_verified': True, 'clone_compared': True,
-            'live_migration_compared': True, 'services_started': False, 'contact_enabled': False}
+            'live_migration_compared': True, 'services_started': False, 'contact_enabled': r['contact_enabled']}
 
 
 def repair_backlog(directory, repair_id, credit_entry_id, expected_sats):
@@ -559,42 +585,65 @@ def resume(directory, approved, *, current_schema=False):
                           '--candidate-copy', directory / 'migrated') != accepted['compared']
                 or digest(directory / 'migrated/MANIFEST.json') != accepted['migrated_manifest_sha256']):
             raise ValueError('accepted migration comparison changed before resumption')
-        M.note(directory, 'RESUME-REQUESTED.json', {'approved': True, 'contact_enabled': r['contact_enabled'], 'payouts_enabled': False})
+        roles = active_roles(r)
+        payout_resumed = 'payout' in roles
+        if UPGRADE_KIND == 'cashu':
+            P.require_inactive_cashu()
+        M.note(directory, 'RESUME-REQUESTED.json', {'approved': True, 'contact_enabled': r['contact_enabled'],
+                                                'payouts_enabled': payout_resumed})
         M.restore_unit(original(Path(m['review']), r, C.UNIT), r['baseline']['files'][str(C.UNIT)])
-        member_mask = MASKS / 'cyberherd.service'
-        if not M.masked(member_mask):
-            raise ValueError('membership mask changed before restoration')
-        member_mask.unlink()
-        TX.sync_directory(member_mask.parent)
+        for role in roles:
+            if role == 'core':
+                continue
+            mask = MASKS / (P.ROLE_NAMES[role] + '.service')
+            if not M.masked(mask):
+                raise ValueError('reviewed mask changed before restoration')
+            mask.unlink()
+        TX.sync_directory(MASKS)
         C.command('/usr/bin/systemctl', 'daemon-reload')
         stable(m, r, installed=True)
-        for role in ('core', 'membership'):
+        for role in roles:
             name = P.ROLE_NAMES[role] + '.service'
             value = C.status(name)
             before = r['baseline']['states'][role]
             if (value['FragmentPath'] != before['FragmentPath'] or value['DropInPaths'] != before['DropInPaths']
-                    or value['NeedDaemonReload'] != 'no'):
+                    or value['NeedDaemonReload'] != 'no'
+                    or (UPGRADE_KIND == 'cashu' and value['UnitFileState'] != before['UnitFileState'])):
                 raise ValueError('effective unit changed before resumption')
-            M.start_identity(value, 'lightning-goats' if role == 'core' else 'cyberherd')
-        C.command('/usr/bin/systemctl', 'start', '--', C.UNIT_NAME, timeout=120)
-        M.running(C.UNIT_NAME, 'lightning-goats', Q.BIN / 'lightning-goatsd')
-        M.health('http://127.0.0.1:8787/healthz')
-        C.command('/usr/bin/systemctl', 'start', '--', 'cyberherd.service', timeout=120)
-        M.running('cyberherd.service', 'cyberherd', Q.BIN / 'cyberherdd')
-        M.health('http://127.0.0.1:3340/api/v1/cyberherd')
-        for role in ('cyberherd-payout', 'cyberherd-signer'):
-            if not M.masked(MASKS / (role + '.service')) or C.status(role + '.service')['MainPID'] != '0':
+            M.start_identity(value, 'lightning-goats' if role == 'core' else P.ROLE_NAMES[role])
+        health = {'core': 'http://127.0.0.1:8787/healthz',
+                  'membership': 'http://127.0.0.1:3340/api/v1/cyberherd'}
+        for role in roles:
+            name = P.ROLE_NAMES[role]
+            unit = name + '.service'
+            user, program = ('lightning-goats', 'lightning-goatsd') if role == 'core' else (name, Q.ROLES[name][0])
+            C.command('/usr/bin/systemctl', 'start', '--', unit, timeout=120)
+            M.running(unit, user, Q.BIN / program)
+            if role in health:
+                M.health(health[role])
+        for role in ('payout', 'signer'):
+            if role in roles:
+                continue
+            unit = P.ROLE_NAMES[role] + '.service'
+            if not M.masked(MASKS / unit) or C.status(unit)['MainPID'] != '0':
                 raise ValueError('outgoing role changed during resumption')
-        M.note(directory, 'RESUMED.json', {'core_running': True, 'membership_running': True,
-                'contact_enabled': r['contact_enabled'], 'payouts_enabled': False})
-    return {'core_running': True, 'membership_running': True, 'contact_enabled': r['contact_enabled'], 'payouts_enabled': False}
+        if UPGRADE_KIND == 'cashu':
+            P.require_inactive_cashu()
+        result = {'core_running': True, 'membership_running': True,
+                  'contact_enabled': r['contact_enabled'], 'payouts_enabled': payout_resumed}
+        if UPGRADE_KIND == 'cashu':
+            result['resumed_roles'] = list(roles)
+        M.note(directory, 'RESUMED.json', result)
+    return result
 
 
 def main():
     global UPGRADE_KIND
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--feeder-cap', action='store_true', help='exact contained schema-24 to 25 feeder-cap upgrade')
-    parser.add_argument('--current-schema', action='store_true', help='program-only patch; never migrate live state')
+    kinds = parser.add_mutually_exclusive_group()
+    kinds.add_argument('--feeder-cap', action='store_true', help='exact contained schema-24 to 25 feeder-cap upgrade')
+    kinds.add_argument('--cashu', action='store_true', help='inactive Cashu schema addition preserving current configuration')
+    kinds.add_argument('--current-schema', action='store_true', help='program-only patch; never migrate live state')
     commands = parser.add_subparsers(dest='operation', required=True)
     planning = commands.add_parser('plan')
     planning.add_argument('review', type=Path)
@@ -613,8 +662,9 @@ def main():
     resuming.add_argument('--approve-resumption', required=True, action='store_true')
     args = parser.parse_args()
     if args.feeder_cap:
-        if args.current_schema: raise ValueError('upgrade kinds cannot be combined')
         UPGRADE_KIND = P.UPGRADE_KIND = 'feeder-cap'
+    elif args.cashu:
+        UPGRADE_KIND = P.UPGRADE_KIND = 'cashu'
     if args.operation == 'plan':
         result = plan(args.review, args.review_sha256, args.directory, current_schema=args.current_schema)
     elif args.operation == 'apply':

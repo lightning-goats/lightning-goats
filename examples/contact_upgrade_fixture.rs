@@ -13,6 +13,7 @@ use std::{os::unix::fs::MetadataExt as _, path::Path, time::Duration};
 const GUARD: &str = "/run/lightning-goats-contact-fixture/ALLOW";
 const ATTESTATION: &[u8] = b"LIGHTNING_GOATS_DISPOSABLE_CONTACT_UPGRADE_CI_v1\n";
 const DATABASE: &str = "/var/lib/lightning-goats/lightning-goats.db";
+const CURRENT_CORE_SCHEMA: usize = 28;
 
 fn isolated_fixture() -> Result<u32> {
     let uid = std::fs::metadata("/proc/self")?.uid();
@@ -53,7 +54,62 @@ fn isolated_fixture() -> Result<u32> {
     Ok(uid)
 }
 
-async fn strip_empty_contact_schema(uid: u32) -> Result<()> {
+// Child-first order preserves foreign-key enforcement. This fixture accepts
+// only completely unused Cashu state; it is not a financial downgrade tool.
+const CASHU_FIXTURE_TABLES: &[&str] = &[
+    "cashu_treasury_inspections",
+    "cashu_treasury_fee_observations",
+    "cashu_sweep_jobs",
+    "cashu_sweep_requests",
+    "feed_financial_supersessions",
+    "feed_financial_treasury",
+    "feed_financial_parts",
+    "feed_financial_plans",
+    "cashu_treasury_work",
+    "cashu_treasury_source_results",
+    "cashu_treasury_completions",
+    "cashu_treasury_wallet_results",
+    "cashu_treasury_deposits",
+    "cashu_treasury_issuances",
+    "cashu_treasury_claims",
+    "cashu_treasury_sources",
+    "cashu_treasury_intents",
+    "cashu_treasury_clock",
+    "feed_source_parts",
+    "feed_source_reservations",
+    "cashu_receipt_inbox",
+    "cashu_import_clock",
+];
+async fn strip_empty_cashu_fixture(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+) -> Result<()> {
+    // Inspect the entire extension before any DDL. Even a monotonic clock row
+    // means the extension was used and must retain its state.
+    for table in CASHU_FIXTURE_TABLES {
+        let count: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
+            .fetch_one(&mut **transaction)
+            .await?;
+        if count != 0 {
+            bail!("Cashu/financial fixture state must be entirely unused");
+        }
+    }
+    for table in CASHU_FIXTURE_TABLES {
+        sqlx::query(&format!("DROP TABLE {table}"))
+            .execute(&mut **transaction)
+            .await?;
+    }
+    if sqlx::query("DELETE FROM _sqlx_migrations WHERE version IN (26,27,28)")
+        .execute(&mut **transaction)
+        .await?
+        .rows_affected()
+        != 3
+    {
+        bail!("synthetic Cashu migration missing");
+    }
+    Ok(())
+}
+
+async fn strip_fixture_schema(uid: u32, cashu_only: bool) -> Result<()> {
     if std::env::var_os("CREDENTIALS_DIRECTORY").is_some() {
         bail!("synthetic schema fixture must not load credentials");
     }
@@ -84,11 +140,12 @@ async fn strip_empty_contact_schema(uid: u32) -> Result<()> {
     }
     let migrations = sqlx::migrate!("./migrations");
     let rows = sqlx::query(
-        "SELECT version,success,checksum FROM _sqlx_migrations ORDER BY version LIMIT 26",
+        "SELECT version,success,checksum FROM _sqlx_migrations ORDER BY version LIMIT ?",
     )
+    .bind(i64::try_from(CURRENT_CORE_SCHEMA + 1)?)
     .fetch_all(&pool)
     .await?;
-    if rows.len() != 25 || migrations.iter().count() != 25 {
+    if rows.len() != CURRENT_CORE_SCHEMA || migrations.iter().count() != CURRENT_CORE_SCHEMA {
         bail!("exact current disposable schema required");
     }
     for (row, migration) in rows.iter().zip(migrations.iter()) {
@@ -103,10 +160,17 @@ async fn strip_empty_contact_schema(uid: u32) -> Result<()> {
         .fetch_one(&pool)
         .await?;
     let synthetic: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM settled_payments WHERE source='strike' AND source_id='TEST-ONLY-original-receipt' AND amount_msat=2340000").fetch_one(&pool).await?;
-    let signed: Vec<String> =
+    let signed: Vec<String> = if cashu_only {
+        // Later disposable stages can retain more outbox rows. The original
+        // signed witness still has to be present.
+        sqlx::query_scalar("SELECT signed_event_json FROM message_outbox WHERE json_extract(signed_event_json,'$.content') LIKE 'TEST ONLY: retain exact original signed bytes;%' LIMIT 2")
+            .fetch_all(&pool)
+            .await?
+    } else {
         sqlx::query_scalar("SELECT signed_event_json FROM message_outbox LIMIT 2")
             .fetch_all(&pool)
-            .await?;
+            .await?
+    };
     if payments != 1 || synthetic != 1 || signed.len() != 1 {
         bail!("only the existing synthetic paid/signed fixture may be transformed");
     }
@@ -119,6 +183,17 @@ async fn strip_empty_contact_schema(uid: u32) -> Result<()> {
         bail!("not the synthetic signed fixture");
     }
     let mut transaction = pool.begin().await?;
+    strip_empty_cashu_fixture(&mut transaction).await?;
+    if cashu_only {
+        transaction.commit().await?;
+        pool.close().await;
+        println!(
+            "{}",
+            serde_json::json!({"synthetic":true,"schema":25,
+                 "only_unused_cashu_removed":true,"production_supported":false})
+        );
+        return Ok(());
+    }
     for table in [
         "message_outbox_suppressions",
         "feeding_announcement_sources",
@@ -347,7 +422,9 @@ async fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let uid = isolated_fixture()?;
     if args == ["--strip-empty-contact-schema"] {
-        strip_empty_contact_schema(uid).await
+        strip_fixture_schema(uid, false).await
+    } else if args == ["--strip-empty-cashu-schema"] {
+        strip_fixture_schema(uid, true).await
     } else if args == ["--strip-empty-inclusive-fee-schema"] {
         strip_empty_inclusive_fee_schema(uid).await
     } else if args == ["--diagnose-installed-export"] {
@@ -373,6 +450,80 @@ async fn main() {
 
 #[cfg(test)]
 mod tests {
+    async fn current_fixture() -> anyhow::Result<sqlx::SqlitePool> {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                sqlx::sqlite::SqliteConnectOptions::new()
+                    .in_memory(true)
+                    .foreign_keys(true)
+                    .pragma("trusted_schema", "OFF"),
+            )
+            .await?;
+        sqlx::migrate!("./migrations").run(&pool).await?;
+        Ok(pool)
+    }
+    #[tokio::test]
+    async fn unused_current_cashu_extension_can_be_stripped_and_rolled_back() -> anyhow::Result<()>
+    {
+        let pool = current_fixture().await?;
+        let mut tx = pool.begin().await?;
+        super::strip_empty_cashu_fixture(&mut tx).await?;
+        let extension: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations WHERE version IN (26,27,28)")
+                .fetch_one(&mut *tx)
+                .await?;
+        let previous: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations WHERE version=25")
+                .fetch_one(&mut *tx)
+                .await?;
+        assert_eq!((extension, previous), (0, 1));
+        tx.rollback().await?;
+        let migrations: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations")
+            .fetch_one(&pool)
+            .await?;
+        assert_eq!(usize::try_from(migrations)?, super::CURRENT_CORE_SCHEMA);
+        Ok(())
+    }
+    #[tokio::test]
+    async fn any_used_cashu_state_refuses_before_dropping_any_schema_object() -> anyhow::Result<()>
+    {
+        let pool = current_fixture().await?;
+        sqlx::query("INSERT INTO cashu_import_clock VALUES(1,7)")
+            .execute(&pool)
+            .await?;
+        let mut tx = pool.begin().await?;
+        let before: Vec<(String, String, Option<String>)> =
+            sqlx::query_as("SELECT type,name,sql FROM sqlite_master ORDER BY type,name")
+                .fetch_all(&mut *tx)
+                .await?;
+        assert!(super::strip_empty_cashu_fixture(&mut tx).await.is_err());
+        let after: Vec<(String, String, Option<String>)> =
+            sqlx::query_as("SELECT type,name,sql FROM sqlite_master ORDER BY type,name")
+                .fetch_all(&mut *tx)
+                .await?;
+        assert_eq!(before, after);
+        tx.rollback().await?;
+        let time: i64 = sqlx::query_scalar("SELECT last_seen FROM cashu_import_clock")
+            .fetch_one(&pool)
+            .await?;
+        assert_eq!(time, 7);
+        Ok(())
+    }
+    #[test]
+    fn disposable_drop_inventory_covers_every_cashu_migration_table() {
+        let expected = include_str!("../migrations/0026_cashu_receipts.sql")
+            .lines()
+            .chain(include_str!("../migrations/0027_cashu_fee_observations.sql").lines())
+            .chain(include_str!("../migrations/0028_cashu_treasury_inspections.sql").lines())
+            .filter_map(|line| line.strip_prefix("CREATE TABLE "))
+            .map(|line| line.split_whitespace().next().unwrap())
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            expected,
+            super::CASHU_FIXTURE_TABLES.iter().copied().collect()
+        );
+    }
     #[test]
     fn ordinary_process_cannot_enter_the_disposable_state_fixture() {
         assert!(super::isolated_fixture().is_err());

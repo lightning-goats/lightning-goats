@@ -1,0 +1,2 @@
+# Context lines in the pinned unified diff preserve upstream Go indentation.
+bunker.patch -whitespace

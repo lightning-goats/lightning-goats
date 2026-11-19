@@ -24,6 +24,32 @@ struct Args {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Validate protected daemon settings offline, without opening its database or credentials.
+    CheckConfig,
+    /// Read the gateway status of one original feeder UUID from a fenced Cashu checkpoint.
+    ObserveRestoredCashuFeeder {
+        #[arg(long)]
+        selection: PathBuf,
+        #[arg(long)]
+        selection_sha256: String,
+        #[arg(long)]
+        gateway_origin: String,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    /// Read one original Strike treasury receive selected from a fenced Cashu checkpoint.
+    VerifyRestoredCashuStrike {
+        #[arg(long)]
+        selection: PathBuf,
+        #[arg(long)]
+        selection_sha256: String,
+        #[arg(long)]
+        credential: PathBuf,
+        #[arg(long, default_value = "https://api.strike.me/")]
+        strike_origin: String,
+        #[arg(long)]
+        output: PathBuf,
+    },
     /// Check only a pre-CyberHerd core upgrade policy; no app config or database.
     CheckCoreUpgrade {
         #[arg(long)]
@@ -104,6 +130,38 @@ enum Command {
         #[arg(long)]
         apply: bool,
     },
+    /// Preview/apply one reviewed pending financial plan release; never release custody.
+    ReleaseFinancialPlan {
+        #[arg(long)]
+        approval: PathBuf,
+        #[arg(long, required = true)]
+        writers_stopped: bool,
+        #[arg(long)]
+        apply: bool,
+    },
+    /// Preview/apply a bounded core-owned Cashu settlement reservation; no payment is sent.
+    PlanCashuSettlement {
+        #[arg(long)]
+        approval: PathBuf,
+        #[arg(long, required = true)]
+        writers_stopped: bool,
+        #[arg(long)]
+        apply: bool,
+    },
+    /// Verify and optionally record one original Cashu treasury settlement.
+    ReconcileCashuSettlement {
+        #[arg(long)]
+        approval: PathBuf,
+        #[arg(long, required = true)]
+        writers_stopped: bool,
+        #[arg(long)]
+        apply: bool,
+    },
+    /// Inspect retained evidence and the linked feeding plan for an original Cashu settlement.
+    InspectCashuSettlement {
+        #[arg(long)]
+        intent: Uuid,
+    },
     /// Print the current durable feed-credit accounting state.
     Status,
 }
@@ -117,6 +175,82 @@ enum ReconcileOutcome {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+    if matches!(args.command, Command::CheckConfig) {
+        #[cfg(unix)]
+        {
+            lightning_goats::payout::cost_recovery::require_protected_configuration(&args.config)?;
+            AppConfig::load(&args.config)
+                .map_err(|_| anyhow::anyhow!("core configuration rejected"))?;
+            println!("Core configuration valid; database and credentials not opened.");
+            return Ok(());
+        }
+        #[cfg(not(unix))]
+        bail!("offline core configuration validation requires Unix protected-file authority");
+    }
+    if let Command::ObserveRestoredCashuFeeder {
+        selection,
+        selection_sha256,
+        gateway_origin,
+        output,
+    } = &args.command
+    {
+        #[cfg(unix)]
+        {
+            lightning_goats::state_maintenance::cashu_feeder_review::observe(
+                selection,
+                selection_sha256,
+                gateway_origin,
+                output,
+            )
+            .await
+            .map_err(|_| anyhow::anyhow!("restored Cashu feeder observation refused"))?;
+            println!(
+                "{{\"result\":\"CASHU_RESTORE_FEEDER_REQUEST_OBSERVED\",\"resume_authorized\":false}}"
+            );
+            return Ok(());
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (selection, selection_sha256, gateway_origin, output);
+            bail!("restored Cashu feeder observation requires Unix protected-file authority");
+        }
+    }
+    if let Command::VerifyRestoredCashuStrike {
+        selection,
+        selection_sha256,
+        credential,
+        strike_origin,
+        output,
+    } = &args.command
+    {
+        #[cfg(unix)]
+        {
+            lightning_goats::state_maintenance::cashu_strike_review::verify(
+                selection,
+                selection_sha256,
+                credential,
+                strike_origin,
+                output,
+            )
+            .await
+            .map_err(|_| anyhow::anyhow!("restored Cashu Strike verification refused"))?;
+            println!(
+                "{{\"result\":\"CASHU_RESTORE_STRIKE_RECEIVE_VERIFIED\",\"resume_authorized\":false}}"
+            );
+            return Ok(());
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (
+                selection,
+                selection_sha256,
+                credential,
+                strike_origin,
+                output,
+            );
+            bail!("restored Cashu Strike verification requires Unix protected-file authority");
+        }
+    }
     #[cfg(not(unix))]
     if matches!(
         args.command,
@@ -204,6 +338,150 @@ async fn main() -> Result<()> {
             bail!("credit retirement requires Unix protected-file authority");
         }
     }
+    if let Command::ReconcileCashuSettlement {
+        approval,
+        writers_stopped,
+        apply,
+    } = &args.command
+    {
+        #[cfg(unix)]
+        {
+            if !*writers_stopped {
+                bail!("explicit stopped-writer attestation required");
+            }
+            let result = lightning_goats::cashu::operator_reconciliation::run(
+                &args.config,
+                approval,
+                *apply,
+            )
+            .await?;
+            println!("{}", serde_json::to_string(&result)?);
+            return Ok(());
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (approval, writers_stopped, apply);
+            bail!("original settlement recovery requires Unix protected-file authority");
+        }
+    }
+    if let Command::InspectCashuSettlement { intent } = &args.command {
+        #[cfg(unix)]
+        {
+            lightning_goats::payout::cost_recovery::require_protected_configuration(&args.config)?;
+            let config = AppConfig::load(&args.config)?;
+            lightning_goats::payout::cost_recovery::existing_private_database(
+                &config.database.url,
+            )?;
+            let ledger = LedgerStore::connect_recovery_read_only(&config.database.url).await?;
+            let status = ledger.inspect_cashu_settlement(*intent).await?;
+            println!("{}", serde_json::to_string(&status)?);
+            return Ok(());
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = intent;
+            bail!("Cashu settlement inspection requires Unix protected-file authority");
+        }
+    }
+    if let Command::PlanCashuSettlement {
+        approval,
+        writers_stopped,
+        apply,
+    } = &args.command
+    {
+        #[cfg(unix)]
+        {
+            if !*writers_stopped {
+                bail!("explicit stopped-writer attestation required");
+            }
+            let decision = lightning_goats::cashu::operator_settlement::Approval::load(approval)?;
+            let config = decision.load_config(&args.config)?;
+            let receipts = config
+                .cashu_receipts
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("protected wallet registration is absent"))?;
+            let registration = receipts.policy()?;
+            decision.require_registration(&registration)?;
+            let treasury = config
+                .cashu_treasury
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("protected treasury policy is absent"))?;
+            lightning_goats::cashu::financial_release::require_stopped_core().await?;
+            let ledger = LedgerStore::connect_existing_recovery(&config.database.url).await?;
+            decision.require_current()?;
+            let planned = ledger
+                .plan_operator_cashu_settlement(
+                    &registration,
+                    &treasury.policy,
+                    &decision.request,
+                    *apply,
+                )
+                .await?;
+            println!(
+                "{}",
+                serde_json::json!({"request_id":decision.request.id,"mint_id":decision.request.mint_id,
+                "maximum_input_sats":decision.request.maximum_input_sats,"apply_requested":apply,
+                "would_plan":planned.is_some(),"intent_id":if *apply {planned.as_ref().map(|i|i.id)} else {None},
+                "input_sats":planned.as_ref().map(|i|i.input_sats),"deposit_sats":planned.as_ref().map(|i|i.deposit_sats),
+                "maximum_fee_sats":planned.as_ref().map(|i|i.maximum_fee_sats),
+                "provider_request":false,"physical_actuation":false})
+            );
+            return Ok(());
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (approval, writers_stopped, apply);
+            bail!("settlement planning requires Unix protected-file authority");
+        }
+    }
+    if let Command::ReleaseFinancialPlan {
+        approval,
+        writers_stopped,
+        apply,
+    } = &args.command
+    {
+        #[cfg(unix)]
+        {
+            if !*writers_stopped {
+                bail!("explicit stopped-writer attestation required");
+            }
+            lightning_goats::payout::cost_recovery::require_protected_configuration(&args.config)?;
+            let decision = lightning_goats::cashu::financial_release::Approval::load(approval)?;
+            let config = AppConfig::load(&args.config)?;
+            if config.feeder.threshold_sats != decision.threshold_sats {
+                bail!("release threshold differs from protected configuration");
+            }
+            lightning_goats::cashu::financial_release::require_stopped_core().await?;
+            let ledger = LedgerStore::connect_existing_recovery(&config.database.url).await?;
+            if ledger.overlay_stream_id().await? != decision.epoch {
+                bail!("release approval belongs to another ledger epoch");
+            }
+            decision.require_current()?;
+            let would_release = ledger
+                .preview_financial_feed_plan_release(decision.plan_id, decision.threshold_sats)
+                .await?;
+            let changed = if *apply {
+                decision.require_current()?;
+                ledger
+                    .release_financial_feed_plan(decision.plan_id, decision.threshold_sats)
+                    .await?
+            } else {
+                false
+            };
+            println!(
+                "{}",
+                serde_json::json!({"plan_id":decision.plan_id,"would_release":would_release,
+                "apply_requested":apply,"changed":changed,"custody_released":false,
+                "provider_request":false,"physical_actuation":false})
+            );
+            return Ok(());
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (approval, writers_stopped, apply);
+            bail!("financial release requires Unix protected-file authority");
+        }
+    }
     let config = AppConfig::load(&args.config)?;
     if let Command::RetireFeedCredit {
         id,
@@ -244,6 +522,12 @@ async fn main() -> Result<()> {
     };
 
     match args.command {
+        Command::VerifyRestoredCashuStrike { .. } | Command::ObserveRestoredCashuFeeder { .. } => {
+            unreachable!("handled before database initialization")
+        }
+        Command::ReleaseFinancialPlan { .. } => {
+            bail!("financial release must use the protected offline path")
+        }
         Command::CheckCoreUpgrade { .. }
         | Command::BackupLegacyCore { .. }
         | Command::VerifyCoreUpgrade { .. } => {
@@ -373,6 +657,12 @@ async fn main() -> Result<()> {
                 println!("reconciled feed attempt {id} as not physically fed");
             }
         },
+        Command::PlanCashuSettlement { .. }
+        | Command::ReconcileCashuSettlement { .. }
+        | Command::InspectCashuSettlement { .. }
+        | Command::CheckConfig => {
+            unreachable!("handled before database initialization")
+        }
         Command::Status => {
             let credit = ledger.feed_credit_sats().await?;
             let threshold = config.feeder.threshold_sats;

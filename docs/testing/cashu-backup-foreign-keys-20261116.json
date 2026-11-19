@@ -1,0 +1,49 @@
+{
+  "result": "CASHU_BACKUP_FOREIGN_KEYS_VERIFIED",
+  "regression_before_fix": "An orphaned internal relationship passed PRAGMA integrity_check and was accepted by the inventory verifier.",
+  "tests_passed": 18,
+  "native_fixture": {
+    "artifacts_sha256": {
+      "core": "9cde4e987ac65e0b8c63321b6226db760189f8a7e8527814cccee9ef47a5827a",
+      "signer": "5a499674d66019d729524fe911913b702f873daf53789169df2bb1501e7b9aaa",
+      "wallet": "43b8df9ef8f0a220d715c2c1b94eb6b5181014c5526b5665564698bfa7aa8da4"
+    },
+    "core_recovery_marker_refused": true,
+    "distinct_runtime_uids": true,
+    "empty_initialized_state_only": true,
+    "external_reconciliation_verified": false,
+    "fenced_core_bytes_unchanged": true,
+    "fenced_signer_bytes_unchanged": true,
+    "fenced_wallet_bytes_unchanged": true,
+    "funded_restore_qualified": false,
+    "inventory_result": {
+      "acknowledged_receipts_checked": 0,
+      "components": 11,
+      "core_wallet_signer_registration_agrees": true,
+      "database_foreign_keys_checked": true,
+      "external_reconciliation_verified": false,
+      "mint_stores_checked": 2,
+      "restore_authorized": false,
+      "result": "CASHU_BACKUP_INVENTORY_VERIFIED",
+      "source_databases_opened": false
+    },
+    "missing_key_refused": true,
+    "missing_mint_namespace_refused": true,
+    "positive_signer_startup_control": true,
+    "production_changes": false,
+    "result": "CASHU_EMPTY_NATIVE_BACKUP_VERIFIED",
+    "signer_recovery_marker_refused": true,
+    "wallet_recovery_marker_refused": true,
+    "wrong_epoch_refused": true
+  },
+  "frozen_database_query_only": true,
+  "frozen_database_trusted_schema": false,
+  "foreign_key_check_required": true,
+  "source_sha256": {
+    "deploy/scripts/verify-cashu-backup.py": "80dfe8e1ece05878fc8f76722aad219126d88020d030ae2897d016c6b65b66c5",
+    "deploy/tests/test_cashu_backup_inventory.py": "0616ac0c5010cce5504a41ce5a5dedac4e2c0f11ce542fa153a8e5d40aefaf59"
+  },
+  "restore_authorized": false,
+  "funded_restore_qualified": false,
+  "existing_cyberherd_journals_included": false
+}

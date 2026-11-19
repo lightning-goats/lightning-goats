@@ -22,6 +22,8 @@ FILES = {
     'install-cyberherd-inactive.py', 'verify-cyberherd-package.py', 'verify-sqlite-vendor.py',
     'prepare-cyberherd-payout-key.py',
     'prepare-cyberherd-nostr-clients.py', 'prepare-household-nostr-client.py',
+    'prepare-cashu-signer-client.py',
+    'prepare-cashu-wallet-keys.py',
     'qualify-cyberherd-installed.py',
     'qualify-cyberherd-workers.py',
     'stage-cyberherd-overlay.py',
@@ -130,6 +132,18 @@ def main():
     elif arguments[:1] == ['--current-core-maintenance']:
         operation = 'maintain-contact-upgrade.py'
         arguments = ['--current-schema', *arguments[1:]]
+    elif arguments[:1] == ['--cashu-core-prepare']:
+        operation = 'prepare-contact-upgrade.py'
+        arguments = ['--cashu', *arguments[1:]]
+    elif arguments[:1] == ['--cashu-signer-client']:
+        operation = 'prepare-cashu-signer-client.py'
+        arguments = arguments[1:]
+    elif arguments[:1] == ['--cashu-wallet-keys']:
+        operation = 'prepare-cashu-wallet-keys.py'
+        arguments = arguments[1:]
+    elif arguments[:1] == ['--cashu-core-maintenance']:
+        operation = 'maintain-contact-upgrade.py'
+        arguments = ['--cashu', *arguments[1:]]
     elif arguments[:1] == ['--contact-upgrade-prepare']:
         operation = 'prepare-contact-upgrade.py'
         arguments = arguments[1:]

@@ -42,7 +42,7 @@ pub(super) async fn private_catalog() -> Result<BTreeMap<String, Definition>> {
 
 pub(super) async fn compare_images(before: &Path, after: &Path, policy: &Policy) -> Result<()> {
     database::inspect_before_feeder_cap(before, policy).await?;
-    let migrated = database::inspect(after, policy).await?;
+    let migrated = database::inspect_schema_25(after, policy).await?;
     for table in ["feeder_credit_policy", "feed_credit_retirements"] {
         if migrated.rows[&Role::Core].get(table) != Some(&0) {
             bail!(
@@ -243,7 +243,7 @@ mod tests {
         )
         .await
         .unwrap();
-        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        database::migrate_core_through(&pool, 25).await.unwrap();
         compare_images(&before, &after, &p).await.unwrap();
         sqlx::query("UPDATE ledger_entries SET delta_sats=delta_sats+1 WHERE id=1")
             .execute(&pool)

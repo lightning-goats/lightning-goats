@@ -111,8 +111,85 @@ class SelfReadWaf(unittest.TestCase):
         self.assertEqual(len(self.backends['production'].calls), expected)
 
 
+class CashuWaf(unittest.TestCase):
+    CASHU_ENABLED = True
+    setUpClass = classmethod(NginxAssemblyTests.setUpClass.__func__)
+    stop_nginx = classmethod(NginxAssemblyTests.stop_nginx.__func__)
+    request = NginxAssemblyTests.request
+
+    def test_cashu_routes_proxy_without_logging_private_material(self):
+        marker = 'SYNTHETIC_CASHU_EDGE_7083'
+        headers = {'Content-Type': 'application/json', 'Origin': 'https://wallet.example'}
+        proof = {'amount': 1, 'id': '00' + 'ad' * 7, 'secret': marker,
+                 'C': '02' + 'ad' * 32, 'dleq': {field: 'ac' * 32 for field in ('e', 's', 'r')}}
+        routes = [
+            ('OPTIONS', '/api/v1/cashu', None),
+            ('POST', '/api/v1/cashu', {'id': 'lg1-' + 'ad' * 16, 'unit': 'sat',
+                                      'mint': 'https://mint.example', 'proofs': [proof]}),
+            ('GET', '/api/v1/cashu/request', None),
+            ('POST', '/api/v1/cashu/status', {'capability': 'a1' * 32}),
+        ]
+        backend = self.backends['production']
+        for index, (method, path, data) in enumerate(routes, 1):
+            body = json.dumps(data, separators=(',', ':')).encode() if data is not None else None
+            request_headers = dict(headers)
+            if method == 'OPTIONS':
+                request_headers.update({'Access-Control-Request-Method': 'POST',
+                                        'Access-Control-Request-Headers': 'content-type'})
+            status, _, _ = self.request('production', path, method, body, request_headers,
+                                        source=f'127.0.8.{index}')
+            self.assertEqual(status, 200, (method, path))
+            self.assertEqual(backend.calls[-1][:2], (method, path))
+            if body is not None:
+                self.assertEqual(backend.bodies[-1], body)
+            self.assertEqual(self.request('canary', path, method, body, headers, source=f'127.0.8.{index}')[0], 404)
+        protected = len(backend.calls)
+        status, _, _ = self.request('production', f'/api/v1/cashu/status?capability={marker}', 'POST',
+                                    b'{}', headers, source='127.0.8.5')
+        self.assertEqual(status, 400)
+        self.assertEqual(len(backend.calls), protected)
+        for path in self.root.rglob('*.log'):
+            data = path.read_bytes()
+            self.assertNotIn(marker.encode(), data)
+            self.assertNotIn(('a1' * 32).encode(), data)
+
+    def test_cashu_waf_enforces_the_wallet_body_boundary(self):
+        if os.environ.get('LG_WAF_MODE', 'On') != 'On':
+            self.skipTest('body rejection requires enforcement mode')
+        path = '/api/v1/cashu'
+        headers = {'Content-Type': 'application/json'}
+        backend = self.backends['production']
+        for index, length, expected in [(1, 65536, 200), (2, 65537, 403)]:
+            body = b'{}' + b' ' * (length - 2)
+            before = len(backend.calls)
+            status, _, _ = self.request('production', path, 'POST', body, headers, source=f'127.0.9.{index}')
+            self.assertEqual(status, expected)
+            self.assertEqual(len(backend.calls), before + (expected == 200))
+            if expected == 200:
+                self.assertEqual(backend.bodies[-1], body)
+        before = len(backend.calls)
+        status, _, _ = self.request('production', '/api/v1/strike/webhook', 'POST',
+                                    b'{}' + b' ' * 32767, headers, source='127.0.9.3')
+        self.assertEqual(status, 413)
+        self.assertEqual(len(backend.calls), before)
+
+    def test_inherited_waf_still_blocks_on_all_three_cashu_routes(self):
+        backend = self.backends['production']
+        for index, (method, path) in enumerate([('POST', '/api/v1/cashu'),
+                                                ('GET', '/api/v1/cashu/request'),
+                                                ('POST', '/api/v1/cashu/status')], 1):
+            before = len(backend.calls)
+            body = b'{}' if method == 'POST' else None
+            status, _, _ = self.request('production', path, method, body,
+                {'Content-Type': 'application/json', 'X-Lightning-Goats-Waf-Probe': 'blocked'},
+                source=f'127.0.10.{index}')
+            enforcing = os.environ.get('LG_WAF_MODE', 'On') == 'On'
+            self.assertEqual(status, 403 if enforcing else 200)
+            self.assertEqual(len(backend.calls), before + (not enforcing))
+
+
 if __name__ == "__main__":
     if len(sys.argv) != 3:
         raise SystemExit(__doc__)
     os.environ["LG_WAF_CRS"], os.environ["LG_WAF_MODULE"] = sys.argv[1:]
-    unittest.main(argv=[sys.argv[0]], defaultTest=("WafAcceptance", "SelfReadWaf"), verbosity=2)
+    unittest.main(argv=[sys.argv[0]], defaultTest=("WafAcceptance", "SelfReadWaf", "CashuWaf"), verbosity=2)

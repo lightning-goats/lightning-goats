@@ -2,7 +2,7 @@
 
 use std::{future::pending, path::PathBuf, sync::Arc, time::Duration};
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use axum::{
     Json, Router,
     body::Bytes,
@@ -31,6 +31,8 @@ use serde::{Deserialize, Serialize};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
+mod paused_recovery;
+
 const MAX_STRIKE_WEBHOOK_BODY: usize = 32 * 1024;
 
 #[derive(Debug, Parser)]
@@ -39,6 +41,9 @@ const MAX_STRIKE_WEBHOOK_BODY: usize = 32 * 1024;
 struct Args {
     #[arg(long, default_value = "/etc/lightning-goats/config.toml")]
     config: PathBuf,
+    /// Serve local readiness and read-only ledger status for paused recovery.
+    #[arg(long)]
+    recovery_paused: bool,
 }
 
 #[derive(Clone)]
@@ -52,6 +57,7 @@ struct AppState {
     status_slots: Arc<tokio::sync::Semaphore>,
     overlay_slots: Arc<tokio::sync::Semaphore>,
     contact_slots: Arc<tokio::sync::Semaphore>,
+    cashu: Option<Arc<lightning_goats::cashu::intake::Forwarder>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -92,6 +98,9 @@ async fn main() -> Result<()> {
 
     let args = Args::parse();
     let config = Arc::new(AppConfig::load(&args.config)?);
+    if args.recovery_paused {
+        return paused_recovery::serve(&config).await;
+    }
     let ledger = LedgerStore::connect(&config.database.url).await?;
     ledger
         .configure_feeder_credit_cap(config.feeder.threshold_sats)
@@ -136,7 +145,31 @@ async fn main() -> Result<()> {
         None
     };
 
+    let cashu = config
+        .cashu
+        .as_ref()
+        .map(|c| c.forwarder())
+        .transpose()?
+        .map(Arc::new);
+    let cashu_receipts = config
+        .cashu_receipts
+        .clone()
+        .map(|c| lightning_goats::cashu::receipt_server::Server::new(c, ledger.clone()))
+        .transpose()?;
+    let cashu_treasury = config
+        .cashu_treasury
+        .as_ref()
+        .map(|treasury| {
+            let receipts = config
+                .cashu_receipts
+                .as_ref()
+                .context("treasury wallet registration missing")?;
+            treasury.worker(receipts, ledger.clone(), strike.clone())
+        })
+        .transpose()?
+        .flatten();
     let state = AppState {
+        cashu,
         config: Arc::clone(&config),
         ledger: ledger.clone(),
         gateway: gateway.clone(),
@@ -258,6 +291,20 @@ async fn main() -> Result<()> {
         }
     });
 
+    let mut cashu_receipts = tokio::spawn(async move {
+        match cashu_receipts {
+            Some(server) => server.serve(pending()).await,
+            None => pending::<Result<()>>().await,
+        }
+    });
+
+    let mut cashu_treasury = tokio::spawn(async move {
+        match cashu_treasury {
+            Some(worker) => worker.run().await,
+            None => pending::<Result<()>>().await,
+        }
+    });
+
     let result = tokio::select! {
         _ = shutdown_signal() => {
             info!("shutdown signal received");
@@ -273,6 +320,8 @@ async fn main() -> Result<()> {
         result = &mut publisher => task_exit("Nostr outbox publisher", result),
         result = &mut zap_receipts => task_exit("zap receipt publisher", result),
         result = &mut contact_delivery => task_exit("private contact delivery", result),
+        result = &mut cashu_treasury => task_exit("Cashu treasury coordination", result),
+        result = &mut cashu_receipts => task_exit("private Cashu receipt import", result),
     };
 
     server.abort();
@@ -285,6 +334,8 @@ async fn main() -> Result<()> {
     publisher.abort();
     zap_receipts.abort();
     contact_delivery.abort();
+    cashu_receipts.abort();
+    cashu_treasury.abort();
     #[cfg(unix)]
     if let Some(bridge) = core_bridge {
         bridge.abort();
@@ -293,6 +344,7 @@ async fn main() -> Result<()> {
 }
 
 fn app(state: AppState) -> Router {
+    let cashu = state.cashu.clone();
     Router::new()
         .route("/healthz", get(healthz))
         .route("/api/v1/status", get(status))
@@ -317,6 +369,7 @@ fn app(state: AppState) -> Router {
         )
         .route("/ws/overlay", get(overlay_ws))
         .with_state(state)
+        .merge(lightning_goats::cashu::http::router(cashu))
         .layer(middleware::from_fn_with_state(
             Arc::new(tokio::sync::Semaphore::new(64)),
             bounded_http,
@@ -680,6 +733,7 @@ async fn overlay_ws(
     let ledger = state.ledger.clone();
     let renderer = state.renderer.clone();
     let threshold_sats = state.config.feeder.threshold_sats;
+    let cashu = state.cashu.clone();
     ws.max_message_size(1024)
         .max_frame_size(1024)
         .write_buffer_size(4096)
@@ -687,7 +741,7 @@ async fn overlay_ws(
         .on_upgrade(move |socket| async move {
             let _permit = permit;
             if let Err(error) =
-                serve_overlay_socket(socket, ledger, renderer, threshold_sats, resume).await
+                serve_overlay_socket(socket, ledger, renderer, threshold_sats, resume, cashu).await
             {
                 tracing::warn!(%error, "overlay websocket disconnected after server-side error");
             }
@@ -793,6 +847,7 @@ mod tests {
         )
         .unwrap();
         let router = app(AppState {
+            cashu: None,
             config: Arc::new(config),
             ledger: ledger.clone(),
             gateway: GatewayClient::new("http://127.0.0.1:9/").unwrap(),

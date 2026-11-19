@@ -1,0 +1,48 @@
+{
+  "scope": "CI integration for independent parsing of freshly generated native request outputs",
+  "workflow_yaml_syntax": "passed",
+  "step_bash_syntax": "passed",
+  "native_fixture_combination_matches_canonical": true,
+  "preparation_script_result": "Locked dependencies prepared; no package scripts or wallet operations executed.",
+  "native_current_parser_result": {
+    "library": "@cashu/cashu-ts",
+    "version": "4.7.2",
+    "results": [
+      {
+        "name": "creqA",
+        "status": "failed",
+        "reason": "Unsupported amount input type"
+      },
+      {
+        "name": "creqB",
+        "status": "parsed",
+        "encoding": "creqB",
+        "payload_length": 344
+      },
+      {
+        "name": "long_creqA",
+        "status": "failed",
+        "reason": "Unsupported amount input type"
+      },
+      {
+        "name": "long_creqB",
+        "status": "parsed",
+        "encoding": "creqB",
+        "payload_length": 718
+      }
+    ],
+    "scope": "Independent offline parsing only; no sender payment or phone scan",
+    "live_payment": false
+  },
+  "expected_current_exit_code": 1,
+  "candidate_correction_passes_separately": true,
+  "source_sha256": {
+    ".github/workflows/ci.yml": "246a9780ee36eb4f353680265a4c219fb22383ae150a499944045e5eaf585524",
+    "tools/cashu-client-compat/packages.json": "dce4f9f5b8365809397454e79f882dfd77ed32b502859fdcff09e63d0700c36e",
+    "tools/cashu-client-compat/prepare.py": "6ff11238b1d45856255ad2156974cf4e37c47a21686fbbe6d59b7a41e7a01254",
+    "tools/cashu-client-compat/combine-native.py": "131c84a91682ff59c5f888d6f9f845c32868ff7089dced7f17e2952505851a65",
+    "tools/cashu-client-compat/verify-requests.mjs": "af2f164c444e9ca2bf0b54f904b9d192de9b60fc6b6bb8c09129a56e28253e63"
+  },
+  "ci_run_performed": false,
+  "production_changed": false
+}

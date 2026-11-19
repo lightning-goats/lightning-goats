@@ -16,6 +16,17 @@ redesign and automated swaps/refunds are not added to either active deliverable.
 Older documents naming CyberHerd as “Phase 2” describe a future architecture, not
 the currently selected second payment deliverable.
 
+## Cashu exception — operator direction, 2026-11-15
+
+The [Nut November plan](cashu-nutnovember-implementation-plan.md) authorizes
+ordinary Cashu and NIP-61 receiving through one isolated wallet and acquisition
+engine, shared herd credit, constrained Cashu-to-Strike treasury settlement and
+the specified two-QR overlay. This is the narrow exception to the alternative
+provider and automated conversion deferrals above. Preserve existing CyberHerd
+behavior and opt-outs, Lightning, Square entitlements, paid history and the
+Monero hold. Production keys, mints, limits, schema upgrades, public announcements,
+financial activation and physical feeding remain operator-controlled.
+
 ## 1. Minimal Lightning deliverable
 
 Use the existing Strike backend and current daemon/gateway architecture, not a

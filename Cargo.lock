@@ -1109,6 +1109,7 @@ dependencies = [
 name = "lightning-goats"
 version = "0.1.0"
 dependencies = [
+ "lightning-goats-cashu-receipt",
  "anyhow",
  "axum",
  "base64",
@@ -1122,6 +1123,7 @@ dependencies = [
  "hmac",
  "hyper",
  "hyper-util",
+ "lightning-goats-nostr-event",
  "lightning-invoice",
  "proptest",
  "reqwest",
@@ -1137,6 +1139,31 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "zeroize",
+]
+
+[[package]]
+name = "lightning-goats-cashu-receipt"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "lightning-goats-nostr-event",
+ "serde",
+ "serde_json",
+ "sha2",
+ "uuid",
+ "url",
+]
+
+[[package]]
+name = "lightning-goats-nostr-event"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitcoin",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]

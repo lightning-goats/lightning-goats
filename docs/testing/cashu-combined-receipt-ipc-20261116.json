@@ -1,0 +1,48 @@
+{
+  "result": "CASHU_COMBINED_SETTLEMENT_VERIFIED",
+  "artifacts_sha256": {
+    "core": "bc669cd4531876358f1ef705174e963bb1d5e13aa2eba0cce2f1e5e55bd67008",
+    "wallet": "a764771c9688c0962b9339f70e52dcb06b531c9ed374063c11f3db4f108e8cdd"
+  },
+  "distinct_uid_receipt_ipc": true,
+  "treasury_ipc": false,
+  "financial_result": {
+    "contributions": 3,
+    "original_granted_credit_sats": 1000,
+    "credit_sats": 0,
+    "receive_fees_sats": 2,
+    "conversion_fee_sats": 2,
+    "retained_change_sats": 0,
+    "supplemental_native_sats": 0,
+    "treasury_deposit_sats": 398,
+    "new_transfer_credit_sats": 0,
+    "synthetic_confirmed_feeds": 1
+  },
+  "receipt_ack_checkpoint_retried": true,
+  "receipt_replay_after_consumption": true,
+  "core_gates": {
+    "fmt": 0,
+    "clippy": 0,
+    "lib_build": 0,
+    "protocol_fmt": 0,
+    "protocol_clippy": 0,
+    "protocol_tests": 0,
+    "sqlite": 0,
+    "whitespace": 0,
+    "audit": 0
+  },
+  "wallet_gates": {
+    "fmt": 0,
+    "clippy": 0,
+    "tests": 0,
+    "vendor": 0
+  },
+  "core_build_only_not_full_test_rerun": true,
+  "core_source_manifest_sha256": "7a649db74c7d750f9b80f9bddf67137e4809e7d729a74aa3a7f6e81c5f82f57a",
+  "wallet_source_manifest_sha256": "bccd4f23f462c069460d8f5cd00b2be4dcb32205bff29526d6880aa2c03784d8",
+  "live_provider": false,
+  "physical_actuation": false,
+  "normal_and_lost_melt_reply_passed": true,
+  "strike_before_wallet_report_in_lost_case": true,
+  "wallet_recovery_while_paused_in_lost_case": true
+}

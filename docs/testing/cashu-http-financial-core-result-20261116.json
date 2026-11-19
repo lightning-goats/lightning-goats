@@ -1,0 +1,19 @@
+{
+  "gates": {
+    "fmt": 0,
+    "clippy": 0,
+    "lib_build": 0,
+    "protocol_fmt": 0,
+    "protocol_clippy": 0,
+    "protocol_tests": 0,
+    "sqlite": 0,
+    "whitespace": 0,
+    "audit": 0
+  },
+  "source_manifest_sha256": "8257a9b8dd05179a0d48832b4a67cac5a9e79c515c317899dddd5a60cf248ba0",
+  "source_hashes_unchanged": true,
+  "build_only_not_full_core_test_rerun": true,
+  "wallet_http_compile_failed": true,
+  "wallet_fix": "Explicit serde_json body encoding/decoding avoids enabling new Reqwest features.",
+  "combined_http_native_qualified": false
+}

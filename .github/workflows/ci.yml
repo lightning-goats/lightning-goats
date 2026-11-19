@@ -12,6 +12,10 @@ permissions:
 jobs:
   rust:
     runs-on: ubuntu-latest
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -25,6 +29,21 @@ jobs:
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
 
+      - name: Verify offline Cashu backup inventory checks
+        run: python3 -W error::ResourceWarning -m unittest discover -s deploy/tests -p test_cashu_backup_inventory.py
+      - name: Verify combined Cashu and native backup linkage
+        run: python3 -m unittest discover -s deploy/tests -p test_cashu_combined_backup.py
+      - name: Verify root-owned collector filesystem and capsule checks
+        run: sudo unshare --net -- python3 -B -W error::ResourceWarning -m unittest discover -s deploy/tests -p test_cashu_collector.py -v
+      - name: Verify exact-source Cashu license notice supplements
+        run: python3 -m unittest discover -s deploy/tests -p test_cashu_notice_supplement.py
+      - name: Verify Cashu archive permission notice inventory
+        run: python3 -m unittest discover -s deploy/tests -p test_cashu_license_inventory.py
+      - name: Verify offline Cashu seed preparation
+        run: python3 -m unittest discover -s deploy/tests -p test_cashu_seed_import.py
+      - name: Verify pinned SDK fixture inventory copying
+        run: python3 -m unittest discover -s deploy/tests -p test_cashu_sdk_inventory.py
+
       - name: Verify published SQLite driver backport
         run: python3 deploy/scripts/verify-sqlite-vendor.py
 
@@ -37,12 +56,67 @@ jobs:
       - name: Test
         run: cargo test --locked --all-features
 
+      - name: Check shared Cashu receipt and Nostr contracts
+        run: |
+          cargo fmt --manifest-path crates/cashu-receipt/Cargo.toml --check
+          cargo fmt --manifest-path crates/nostr-event/Cargo.toml --check
+          cargo clippy --locked --all-targets -p lightning-goats-cashu-receipt -p lightning-goats-nostr-event -- -D warnings
+          cargo test --locked -p lightning-goats-cashu-receipt -p lightning-goats-nostr-event
+
       - name: Verify state and financial-review files with actual root ownership
         shell: bash
         run: |
           set -euo pipefail
           cargo test --locked --all-features --lib --no-run --message-format=json > "$RUNNER_TEMP/native-test-artifacts.jsonl"
           python3 deploy/scripts/test-failed-cost-approval.py "$RUNNER_TEMP/native-test-artifacts.jsonl"
+
+      - name: Verify actual financial-release CLI in private namespaces
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked --all-features --bin lightning-goatsd --bin lightning-goatsctl --bin cyberherd-statectl --bin cyberherdd --bin cyberherd-payoutd --bin cyberherd-signerd
+          python3 - <<'PYCODE'
+          import hashlib, subprocess
+          from pathlib import Path
+          cli = Path('target/debug/lightning-goatsctl').resolve(strict=True)
+          digest = hashlib.sha256(cli.read_bytes()).hexdigest()
+          subprocess.run(['sudo', 'unshare', '--mount', '--net', '--fork', '--', 'python3', 'deploy/scripts/test-cashu-financial-release-cli.py', '--cli', str(cli), '--cli-sha256', digest], check=True)
+          PYCODE
+
+      - name: Verify protected Cashu settlement planning through the actual CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYCODE'
+          import hashlib, subprocess
+          from pathlib import Path
+          cli = Path('target/debug/lightning-goatsctl').resolve(strict=True)
+          digest = hashlib.sha256(cli.read_bytes()).hexdigest()
+          subprocess.run(['sudo', 'unshare', '--mount', '--net', '--', 'python3', 'deploy/scripts/test-cashu-private-run.py', '--', 'python3', 'deploy/scripts/test-cashu-operator-settlement-cli.py', '--cli', str(cli), '--cli-sha256', digest], check=True)
+          PYCODE
+
+      - name: Select current core Cashu fixture artifact
+        run: |
+          python3 deploy/scripts/select-cashu-test-artifact.py "$RUNNER_TEMP/native-test-artifacts.jsonl" Cargo.toml "$RUNNER_TEMP/core-test"
+          cp target/debug/lightning-goatsctl "$RUNNER_TEMP/core-cli"
+          cp target/debug/lightning-goatsd "$RUNNER_TEMP/core-daemon"
+          cp target/debug/cyberherd-statectl "$RUNNER_TEMP/statectl-cli"
+          cp target/debug/cyberherdd "$RUNNER_TEMP/membership-cli"
+          cp target/debug/cyberherd-payoutd "$RUNNER_TEMP/payout-cli"
+          cp target/debug/cyberherd-signerd "$RUNNER_TEMP/payout-signer-cli"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cashu-core-native-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/core-test
+            ${{ runner.temp }}/core-cli
+            ${{ runner.temp }}/core-daemon
+            ${{ runner.temp }}/statectl-cli
+            ${{ runner.temp }}/membership-cli
+            ${{ runner.temp }}/payout-cli
+            ${{ runner.temp }}/payout-signer-cli
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Verify inactive cross-host preparation
         shell: bash
@@ -55,5 +129,359 @@ jobs:
         with:
           name: cross-host-prepared-${{ github.sha }}
           path: ${{ runner.temp }}/CROSS-HOST-PREPARED.json
+          if-no-files-found: error
+          retention-days: 14
+
+  cashu-wallet:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools/cashu-compat
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.88"
+          components: rustfmt, clippy
+      - name: Cache isolated wallet build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tools/cashu-compat
+      - name: Verify exact SQLite and CDK sources
+        run: python3 verify_vendor.py
+      - name: Reject altered vendor sources and inventories
+        run: python3 -m unittest test_vendor
+      - name: Format isolated wallet
+        run: cargo fmt --all --check
+      - name: Clippy isolated wallet
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+      - name: Test isolated wallet
+        run: cargo test --locked --all-features
+      - name: Verify native normalization of private database copies
+        shell: bash
+        run: |
+          set -euo pipefail
+          CARGO_TARGET_DIR=target cargo build --locked --bin lightning-goats-cashu-statectl
+          python3 - <<'PYCODE' 2>&1 | tee "$RUNNER_TEMP/cashu-copy-normalization.json"
+          import hashlib, subprocess
+          from pathlib import Path
+          cli = Path('target/debug/lightning-goats-cashu-statectl').resolve(strict=True)
+          digest = hashlib.sha256(cli.read_bytes()).hexdigest()
+          subprocess.run(['sudo', 'unshare', '--net', '--', 'python3', '-B', '../../deploy/scripts/test-cashu-copy-normalization.py', '--cli', str(cli), '--cli-sha256', digest], check=True)
+          PYCODE
+      - name: Verify offline reusable request preparation through the native CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          CARGO_TARGET_DIR=target cargo build --locked --bin lightning-goats-cashud --bin lightning-goats-cashu-signerd
+          sudo unshare --net -- python3 ../../deploy/scripts/test-cashu-request-cli.py --binary target/debug/lightning-goats-cashud 2>&1 | tee "$RUNNER_TEMP/cashu-request-cli.json"
+          sudo unshare --net -- python3 ../../deploy/scripts/test-cashu-request-cli.py --binary target/debug/lightning-goats-cashud --long-request 2>&1 | tee "$RUNNER_TEMP/cashu-request-cli-long.json"
+      - name: Verify protected acquisition and mint policy commands in private namespaces
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYCODE' 2>&1 | tee "$RUNNER_TEMP/cashu-operator-cli.json"
+          import hashlib, subprocess
+          from pathlib import Path
+          cli = Path('target/debug/lightning-goats-cashud').resolve(strict=True)
+          digest = hashlib.sha256(cli.read_bytes()).hexdigest()
+          subprocess.run(['sudo', 'unshare', '--mount', '--net', '--', 'python3', '../../deploy/scripts/test-cashu-private-run.py', '--', 'python3', '../../deploy/scripts/test-cashu-operator-reconciliation-cli.py', '--cli', str(cli), '--cli-sha256', digest], check=True)
+          PYCODE
+      - name: Rehearse mint policy installation and native restart under systemd
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYCODE' 2>&1 | tee "$RUNNER_TEMP/cashu-mint-policy-systemd.json"
+          import hashlib, subprocess
+          from pathlib import Path
+          cli = Path('target/debug/lightning-goats-cashud').resolve(strict=True)
+          digest = hashlib.sha256(cli.read_bytes()).hexdigest()
+          command = ['sudo', '--preserve-env=GITHUB_ACTIONS,GITHUB_RUN_ID', 'unshare',
+                     '--mount', '--net', '--', 'python3', '-B',
+                     '../../deploy/scripts/test-cashu-operator-reconciliation-cli.py',
+                     '--installed-systemd', '--cli', str(cli), '--cli-sha256', digest]
+          subprocess.run(command, check=True)
+          PYCODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cashu-request-cli-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/cashu-request-cli.json
+            ${{ runner.temp }}/cashu-request-cli-long.json
+            ${{ runner.temp }}/cashu-copy-normalization.json
+            ${{ runner.temp }}/cashu-operator-cli.json
+            ${{ runner.temp }}/cashu-mint-policy-systemd.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Install pinned parser-test Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.23.1"
+      - name: Verify native requests with independent Cashu-TS
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 ../cashu-client-compat/prepare.py "$RUNNER_TEMP/cashu-ts"
+          python3 ../cashu-client-compat/combine-native.py "$RUNNER_TEMP/cashu-request-cli.json" "$RUNNER_TEMP/cashu-request-cli-long.json" "$RUNNER_TEMP/cashu-ts-native-input.json"
+          cashu_node="$(command -v node)"
+          sudo unshare --net -- /usr/bin/setpriv --reuid="$(id -u)" --regid="$(id -g)" --clear-groups -- "$cashu_node" ../cashu-client-compat/verify-requests.mjs "$RUNNER_TEMP/cashu-ts" "$RUNNER_TEMP/cashu-ts-native-input.json" 2>&1 | tee "$RUNNER_TEMP/cashu-ts-result.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cashu-independent-parser-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/cashu-ts-result.json
+            ${{ runner.temp }}/cashu-ts-native-input.json
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Select current wallet Cashu fixture artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked --all-features --lib --no-run --message-format=json > "$RUNNER_TEMP/wallet-test-artifacts.jsonl"
+          python3 ../../deploy/scripts/select-cashu-test-artifact.py "$RUNNER_TEMP/wallet-test-artifacts.jsonl" Cargo.toml "$RUNNER_TEMP/wallet-test"
+          cp target/debug/lightning-goats-cashud "$RUNNER_TEMP/wallet-cli"
+          cp target/debug/lightning-goats-cashu-signerd "$RUNNER_TEMP/signer-cli"
+          cp target/debug/lightning-goats-cashu-statectl "$RUNNER_TEMP/copy-cli"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cashu-wallet-native-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/wallet-test
+            ${{ runner.temp }}/wallet-cli
+            ${{ runner.temp }}/signer-cli
+            ${{ runner.temp }}/copy-cli
+          if-no-files-found: error
+          retention-days: 1
+
+  cashu-cross-uid:
+    needs: [rust, cashu-wallet]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: cashu-core-native-${{ github.sha }}
+          path: ${{ runner.temp }}/cashu-core
+      - uses: actions/download-artifact@v4
+        with:
+          name: cashu-wallet-native-${{ github.sha }}
+          path: ${{ runner.temp }}/cashu-wallet
+      - name: Prepare pinned official backup encryption fixture dependency
+        run: python3 deploy/scripts/prepare-cashu-backup-age.py "$RUNNER_TEMP/backup-age"
+      - name: Verify native Cashu backup and fenced installation under systemd masks
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYCODE' 2>&1 | tee "$RUNNER_TEMP/cashu-native-backup.json"
+          import hashlib, os, subprocess
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP'])
+          command = ['sudo', '--preserve-env=GITHUB_ACTIONS,GITHUB_RUN_ID', 'unshare', '--net', '--', 'python3', '-B',
+                     'deploy/scripts/test-cashu-native-backup.py', '--rotate-receiving-key', '--systemd-masks']
+          for name, path in [('core', root / 'cashu-core/core-cli'), ('wallet', root / 'cashu-wallet/wallet-cli'), ('signer', root / 'cashu-wallet/signer-cli'),
+                             ('membership', root / 'cashu-core/membership-cli'), ('payout', root / 'cashu-core/payout-cli'),
+                             ('payout-signer', root / 'cashu-core/payout-signer-cli'), ('statectl', root / 'cashu-core/statectl-cli'),
+                             ('collector-copy', root / 'cashu-wallet/copy-cli'), ('age', root / 'backup-age/age'),
+                             ('age-keygen', root / 'backup-age/age-keygen')]:
+              command += ['--' + name + '-cli', str(path), '--' + name + '-sha256', hashlib.sha256(path.read_bytes()).hexdigest()]
+          subprocess.run(command, check=True)
+          PYCODE
+      - name: Verify real separate UIDs and lost acknowledgment replay
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo unshare --net -- python3 deploy/scripts/test-cashu-cross-uid.py --core-test "$RUNNER_TEMP/cashu-core/core-test" --wallet-test "$RUNNER_TEMP/cashu-wallet/wallet-test" > "$RUNNER_TEMP/cashu-cross-uid.json"
+          cat "$RUNNER_TEMP/cashu-cross-uid.json"
+      - name: Verify separate signer UID, lost reply and restart replay
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo unshare --net -- python3 deploy/scripts/test-cashu-signer-cross-uid.py --wallet-test "$RUNNER_TEMP/cashu-wallet/wallet-test" > "$RUNNER_TEMP/cashu-signer-cross-uid.json"
+          cat "$RUNNER_TEMP/cashu-signer-cross-uid.json"
+      - name: Verify native NutZap relay intake, CDK acquisition and core receipt replay
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo unshare --mount --net -- python3 -B deploy/scripts/test-cashu-private-run.py -- \
+            python3 -B deploy/scripts/test-cashu-wss-intake.py \
+            --wallet "$RUNNER_TEMP/cashu-wallet/wallet-cli" --wallet-test "$RUNNER_TEMP/cashu-wallet/wallet-test" \
+            --core-test "$RUNNER_TEMP/cashu-core/core-test" \
+            2>&1 | tee "$RUNNER_TEMP/cashu-wss-intake.json"
+      - name: Verify treasury admission, paused restart and unrelated UID rejection
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo unshare --net -- python3 deploy/scripts/test-cashu-treasury-cross-uid.py --core-test "$RUNNER_TEMP/cashu-core/core-test" --wallet-test "$RUNNER_TEMP/cashu-wallet/wallet-test" > "$RUNNER_TEMP/cashu-treasury-cross-uid.json"
+          cat "$RUNNER_TEMP/cashu-treasury-cross-uid.json"
+      - name: Verify public descriptor HTTP and snapshot under separate UIDs
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo unshare --net -- python3 deploy/scripts/test-cashu-public-request-cross-uid.py --core-test "$RUNNER_TEMP/cashu-core/core-test" --wallet-test "$RUNNER_TEMP/cashu-wallet/wallet-test" 2>&1 | tee "$RUNNER_TEMP/cashu-public-request-cross-uid.json"
+      - name: Verify acquired Cashu and nutzap funding through independent Strike settlement
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo unshare --net -- python3 deploy/scripts/test-cashu-combined-settlement.py --core-test "$RUNNER_TEMP/cashu-core/core-test" --wallet-test "$RUNNER_TEMP/cashu-wallet/wallet-test" 2>&1 | tee "$RUNNER_TEMP/cashu-combined-settlement.json"
+      - name: Verify lost melt reply and early Strike confirmation during paused recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo unshare --net -- python3 deploy/scripts/test-cashu-combined-settlement.py --lost-reply --core-test "$RUNNER_TEMP/cashu-core/core-test" --wallet-test "$RUNNER_TEMP/cashu-wallet/wallet-test" 2>&1 | tee "$RUNNER_TEMP/cashu-combined-lost-reply.json"
+      - name: Verify Cashu preserves native four-journal recovery correlations
+        shell: bash
+        run: |
+          set -euo pipefail
+          digest=$(sha256sum "$RUNNER_TEMP/cashu-core/core-test" | cut -d ' ' -f1)
+          sudo unshare --net -- python3 deploy/scripts/test-cashu-correlation-review.py --core-test "$RUNNER_TEMP/cashu-core/core-test" --core-test-sha256 "$digest" 2>&1 | tee "$RUNNER_TEMP/cashu-correlation-review.json"
+      - name: Verify protected financial-release approvals as root
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo unshare --net -- python3 deploy/scripts/test-cashu-financial-release-approval.py --core-test "$RUNNER_TEMP/cashu-core/core-test" 2>&1 | tee "$RUNNER_TEMP/cashu-financial-release-approval.json"
+      - name: Verify actual mint fees and returned change conservation
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo unshare --net -- python3 deploy/scripts/test-cashu-combined-settlement.py --fees --core-test "$RUNNER_TEMP/cashu-core/core-test" --wallet-test "$RUNNER_TEMP/cashu-wallet/wallet-test" 2>&1 | tee "$RUNNER_TEMP/cashu-combined-fees.json"
+      - name: Verify fee-bearing melt recovery after lost response
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo unshare --net -- python3 deploy/scripts/test-cashu-combined-settlement.py --fees --lost-reply --core-test "$RUNNER_TEMP/cashu-core/core-test" --wallet-test "$RUNNER_TEMP/cashu-wallet/wallet-test" 2>&1 | tee "$RUNNER_TEMP/cashu-combined-fees-lost-reply.json"
+      - name: Verify original mixed credit feeds with fees and no returned change
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo unshare --net -- python3 deploy/scripts/test-cashu-combined-settlement.py --fees --no-change --core-test "$RUNNER_TEMP/cashu-core/core-test" --wallet-test "$RUNNER_TEMP/cashu-wallet/wallet-test" 2>&1 | tee "$RUNNER_TEMP/cashu-combined-fees-no-change.json"
+      - name: Verify fee-only original credit after lost melt response
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo unshare --net -- python3 deploy/scripts/test-cashu-combined-settlement.py --fees --no-change --lost-reply --core-test "$RUNNER_TEMP/cashu-core/core-test" --wallet-test "$RUNNER_TEMP/cashu-wallet/wallet-test" 2>&1 | tee "$RUNNER_TEMP/cashu-combined-fees-no-change-lost-reply.json"
+      - name: Verify combined receipt and treasury sockets
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo unshare --net -- python3 deploy/scripts/test-cashu-combined-settlement.py --receipt-ipc --treasury-ipc --fees --no-change --core-test "$RUNNER_TEMP/cashu-core/core-test" --wallet-test "$RUNNER_TEMP/cashu-wallet/wallet-test" 2>&1 | tee "$RUNNER_TEMP/cashu-combined-financial-ipc.json"
+      - name: Verify combined receipt and treasury sockets after lost melt reply
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo unshare --net -- python3 deploy/scripts/test-cashu-combined-settlement.py --receipt-ipc --treasury-ipc --fees --no-change --lost-reply --core-test "$RUNNER_TEMP/cashu-core/core-test" --wallet-test "$RUNNER_TEMP/cashu-wallet/wallet-test" 2>&1 | tee "$RUNNER_TEMP/cashu-combined-financial-ipc-lost-reply.json"
+      - name: Verify public HTTP contribution through financial sockets
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo unshare --net -- python3 deploy/scripts/test-cashu-combined-settlement.py --http-intake --receipt-ipc --treasury-ipc --fees --no-change --core-test "$RUNNER_TEMP/cashu-core/core-test" --wallet-test "$RUNNER_TEMP/cashu-wallet/wallet-test" 2>&1 | tee "$RUNNER_TEMP/cashu-combined-http-financial.json"
+      - name: Verify public HTTP contribution through financial sockets after lost melt reply
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo unshare --net -- python3 deploy/scripts/test-cashu-combined-settlement.py --http-intake --receipt-ipc --treasury-ipc --fees --no-change --lost-reply --core-test "$RUNNER_TEMP/cashu-core/core-test" --wallet-test "$RUNNER_TEMP/cashu-wallet/wallet-test" 2>&1 | tee "$RUNNER_TEMP/cashu-combined-http-financial-lost-reply.json"
+      - name: Verify funded rollback fences after a lost melt reply
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo unshare --net -- python3 deploy/scripts/test-cashu-combined-settlement.py --funded-rollback --http-intake --receipt-ipc --treasury-ipc --fees --no-change --lost-reply --core-test "$RUNNER_TEMP/cashu-core/core-test" --wallet-test "$RUNNER_TEMP/cashu-wallet/wallet-test" --core-cli "$RUNNER_TEMP/cashu-core/core-cli" 2>&1 | tee "$RUNNER_TEMP/cashu-funded-rollback.json"
+      - name: Advance the funded Cashu installation and rehearse its paused restart
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo --preserve-env=GITHUB_ACTIONS,GITHUB_RUN_ID unshare --net -- python3 deploy/scripts/test-cashu-combined-settlement.py \
+            --multi-mint --http-intake --receipt-ipc --treasury-ipc --fees --no-change --lost-reply \
+            --funded-install-inputs "$RUNNER_TEMP" --funded-install-systemd-masks \
+            --core-test "$RUNNER_TEMP/cashu-core/core-test" --wallet-test "$RUNNER_TEMP/cashu-wallet/wallet-test" \
+            2>&1 | tee "$RUNNER_TEMP/cashu-funded-installed.json"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.23.1"
+      - name: Install disposable Cashu HTTPS edge dependencies
+        run: sudo apt-get update && sudo apt-get install -y nginx openssl
+      - name: Verify pinned Cashu-TS offline sender through composed HTTP settlement
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/cashu-client-compat/prepare.py "$RUNNER_TEMP/cashu-ts-sender"
+          python3 - <<'PYCODE'
+          import hashlib, os, shutil, subprocess
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP'])
+          installation = root / 'cashu-ts-sender'
+          manifest = hashlib.sha256((installation / 'package-files.json').read_bytes()).hexdigest()
+          command = ['sudo', 'unshare', '--net', '--', 'python3', 'deploy/scripts/test-cashu-combined-settlement.py', '--http-intake', '--receipt-ipc', '--treasury-ipc', '--fees', '--no-change', '--cashu-ts-sender', '--sender-installation', str(installation), '--sender-files-sha256', manifest, '--sender-node', shutil.which('node'), '--core-test', str(root / 'cashu-core/core-test'), '--wallet-test', str(root / 'cashu-wallet/wallet-test')]
+          output = root / 'cashu-sdk-https-edge.json'
+          with output.open('w') as stream:
+              result = subprocess.run(command + ['--https-edge', '--lost-reply'], stdout=stream, stderr=subprocess.STDOUT)
+          if result.returncode:
+              print(output.read_text()[-24000:], flush=True)
+              result.check_returncode()
+          for repeated in [False, True]:
+              for lost in [False, True]:
+                  suffix = ('-repeated' if repeated else '') + ('-lost' if lost else '')
+                  output = root / ('cashu-sdk-sender' + suffix + '.json')
+                  flags = (['--repeat-request'] if repeated else []) + (['--lost-reply'] if lost else [])
+                  with output.open('w') as stream:
+                      result = subprocess.run(command + flags, stdout=stream, stderr=subprocess.STDOUT)
+                  if result.returncode:
+                      print(output.read_text()[-24000:], flush=True)
+                      result.check_returncode()
+          residual = [arg for arg in command if arg != '--no-change'] + ['--settle-change']
+          for lost in [False, True]:
+              output = root / ('cashu-sdk-residual' + ('-lost' if lost else '') + '.json')
+              with output.open('w') as stream:
+                  result = subprocess.run(residual + (['--lost-reply'] if lost else []), stdout=stream, stderr=subprocess.STDOUT)
+              if result.returncode:
+                  print(output.read_text()[-24000:], flush=True)
+                  result.check_returncode()
+          for lost in [False, True]:
+              output = root / ('cashu-sdk-multi-mint' + ('-lost' if lost else '') + '.json')
+              with output.open('w') as stream:
+                  result = subprocess.run(command + ['--multi-mint'] + (['--lost-reply'] if lost else []), stdout=stream, stderr=subprocess.STDOUT)
+              if result.returncode:
+                  print(output.read_text()[-24000:], flush=True)
+                  result.check_returncode()
+          PYCODE
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cashu-cross-uid-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/cashu-sdk-https-edge.json
+            ${{ runner.temp }}/cashu-sdk-sender.json
+            ${{ runner.temp }}/cashu-sdk-sender-lost.json
+            ${{ runner.temp }}/cashu-sdk-sender-repeated.json
+            ${{ runner.temp }}/cashu-sdk-sender-repeated-lost.json
+            ${{ runner.temp }}/cashu-sdk-residual.json
+            ${{ runner.temp }}/cashu-sdk-residual-lost.json
+            ${{ runner.temp }}/cashu-sdk-multi-mint.json
+            ${{ runner.temp }}/cashu-sdk-multi-mint-lost.json
+            ${{ runner.temp }}/cashu-native-backup.json
+            ${{ runner.temp }}/cashu-cross-uid.json
+            ${{ runner.temp }}/cashu-signer-cross-uid.json
+            ${{ runner.temp }}/cashu-wss-intake.json
+            ${{ runner.temp }}/cashu-treasury-cross-uid.json
+            ${{ runner.temp }}/cashu-public-request-cross-uid.json
+            ${{ runner.temp }}/cashu-combined-settlement.json
+            ${{ runner.temp }}/cashu-combined-lost-reply.json
+            ${{ runner.temp }}/cashu-financial-release-approval.json
+            ${{ runner.temp }}/cashu-correlation-review.json
+            ${{ runner.temp }}/cashu-combined-fees.json
+            ${{ runner.temp }}/cashu-combined-fees-lost-reply.json
+            ${{ runner.temp }}/cashu-combined-fees-no-change.json
+            ${{ runner.temp }}/cashu-combined-fees-no-change-lost-reply.json
+            ${{ runner.temp }}/cashu-combined-financial-ipc.json
+            ${{ runner.temp }}/cashu-combined-financial-ipc-lost-reply.json
+            ${{ runner.temp }}/cashu-combined-http-financial.json
+            ${{ runner.temp }}/cashu-combined-http-financial-lost-reply.json
+            ${{ runner.temp }}/cashu-funded-rollback.json
+            ${{ runner.temp }}/cashu-funded-installed.json
           if-no-files-found: error
           retention-days: 14

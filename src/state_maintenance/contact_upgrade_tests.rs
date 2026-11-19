@@ -85,6 +85,25 @@ pub(in crate::state_maintenance) async fn seed(root: &Path) -> (Policy, Keep) {
     .await
     .unwrap();
     let pool = crate::sqlite::connect_durable(&core_url, 1).await.unwrap();
+    // Fixture-only removal of the empty Cashu addition before constructing
+    // historical sources; no runtime downgrade path exists.
+    for table in crate::state_maintenance::cashu_upgrade::CASHU_TABLES {
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(&format!("SELECT COUNT(*) FROM {table}"))
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            0
+        );
+        sqlx::query(&format!("DROP TABLE {table}"))
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    sqlx::query("DELETE FROM _sqlx_migrations WHERE version>=26")
+        .execute(&pool)
+        .await
+        .unwrap();
     for table in [
         "message_outbox_suppressions",
         "feeding_announcement_sources",
@@ -162,7 +181,7 @@ async fn additive_contact_upgrade_retains_all_four_journals_and_refuses_row_or_d
         crate::sqlite::connect_durable(&format!("sqlite://{}", after.join("core.db").display()), 1)
             .await
             .unwrap();
-    sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+    database::migrate_core_through(&pool, 25).await.unwrap();
     pool.close().await;
     compare_images(&before, &after, &p).await.unwrap();
     assert_eq!(
@@ -209,6 +228,61 @@ async fn additive_contact_upgrade_retains_all_four_journals_and_refuses_row_or_d
         std::fs::read(before.join("core.db")).unwrap(),
         original_bytes
     );
+    assert_eq!(std::fs::read(before.join("core.db-wal")).ok(), original_wal);
+}
+
+#[tokio::test]
+async fn contact_upgrade_qualifies_empty_cashu_addition_and_refuses_custody_or_ddl() {
+    let root = tempfile::TempDir::new().unwrap();
+    let (p, _keep) = seed(root.path()).await;
+    let before = root.path().join("before");
+    let after = root.path().join("after");
+    copy_images(&p, &before);
+    copy_images(&p, &after);
+    let original = std::fs::read(before.join("core.db")).unwrap();
+    let original_wal = std::fs::read(before.join("core.db-wal")).ok();
+    let pool =
+        crate::sqlite::connect_durable(&format!("sqlite://{}", after.join("core.db").display()), 1)
+            .await
+            .unwrap();
+    database::migrate_core_through(&pool, 25).await.unwrap();
+    compare_images(&before, &after, &p).await.unwrap();
+    database::migrate_core_through(&pool, 26).await.unwrap();
+    compare_images(&before, &after, &p).await.unwrap();
+    database::migrate_core_through(&pool, database::CURRENT_CORE_SCHEMA)
+        .await
+        .unwrap();
+    compare_images(&before, &after, &p).await.unwrap();
+    sqlx::query(
+        "CREATE TRIGGER unqualified_cashu AFTER INSERT ON cashu_import_clock BEGIN SELECT 1; END",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(compare_images(&before, &after, &p).await.is_err());
+    sqlx::query("DROP TRIGGER unqualified_cashu")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE ledger_entries SET delta_sats=delta_sats+1 WHERE id=1")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(compare_images(&before, &after, &p).await.is_err());
+    sqlx::query("UPDATE ledger_entries SET delta_sats=delta_sats-1 WHERE id=1")
+        .execute(&pool)
+        .await
+        .unwrap();
+    compare_images(&before, &after, &p).await.unwrap();
+    // The production trigger deliberately retains this monotonic clock. Check
+    // refusal last so the fixture never tries to erase used Cashu state.
+    sqlx::query("INSERT INTO cashu_import_clock VALUES(1,100)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(compare_images(&before, &after, &p).await.is_err());
+    pool.close().await;
+    assert_eq!(std::fs::read(before.join("core.db")).unwrap(), original);
     assert_eq!(std::fs::read(before.join("core.db-wal")).ok(), original_wal);
 }
 
@@ -357,7 +431,7 @@ async fn root_contact_upgrade_compares_private_images_and_retains_original_backu
         crate::sqlite::connect_durable(&format!("sqlite://{}", after.join("core.db").display()), 1)
             .await
             .unwrap();
-    sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+    database::migrate_core_through(&pool, 25).await.unwrap();
     pool.close().await;
     protect(&after);
     assert_eq!(

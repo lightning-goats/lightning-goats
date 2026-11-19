@@ -1,0 +1,35 @@
+{
+  "recorded_at": "2026-11-16T17:46:02.252517+00:00",
+  "checks": {
+    "rsa_unreachable": 0,
+    "core_vendor": 0,
+    "wallet_vendor": 0,
+    "core_audit": 0,
+    "wallet_audit": 0
+  },
+  "lock_sha256": {
+    "Cargo.lock": "880e667ecbd768a02487ae281e61114b01dd1278a20d4912e4ce19d7870e4b00",
+    "tools/cashu-compat/Cargo.lock": "89a2df145d7f8807862645946b84e673ce42d8b11f7d3071ea26eac1ae55fb3a"
+  },
+  "logs_sha256": {
+    "rsa_unreachable.log": "4dc8e4fe7f86c681d8b81d94c4e76a3dda13457f37def5513d5850195a7778f6",
+    "wallet_vendor.log": "e64fb22abb8d7c16b93dd3c508ab7783f58babec3002bb8f78842d7ce1f96a7d",
+    "wallet_audit.log": "d0ce5053c1ba44536ec38c05489d8dc78eecf28dc0d8c2555dc838ddb9db6d48",
+    "core_vendor.log": "2ae3fc4a6790b3f276d213c269f56b3ed23c6fde266d96811d491431715cee04",
+    "core_audit.log": "bd7e338c3d9d34085eca1b3d2369ef842f3ec0d467980764c6fae01f56204487"
+  },
+  "wallet_warnings": [
+    {
+      "id": "RUSTSEC-2024-0436",
+      "crate": "paste",
+      "version": "1.0.15",
+      "kind": "unmaintained",
+      "fatal": false
+    }
+  ],
+  "core_exception": {
+    "id": "RUSTSEC-2023-0071",
+    "rsa_reachable": false
+  },
+  "advisory_database_commit": "02e2517f457a359fc6d3440ea4560c8ea188fee8"
+}

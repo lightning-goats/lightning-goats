@@ -1,0 +1,63 @@
+{
+  "date": "2026-11-17",
+  "scope": "Recognize actual permission/copyright notice in AUTHORS; no linked-binary or legal-clearance claim",
+  "package_count": 462,
+  "missing_notices_before": 17,
+  "missing_notices_after": 15,
+  "distribution_ready": false,
+  "tests": {
+    "archive_inventory_regressions": 3,
+    "supplement_boundary_regressions": 10,
+    "all_passed": true
+  },
+  "strict_export_refusal": {
+    "exit_code": 2,
+    "output_created": false,
+    "reason": "usage: export-cashu-notices.py [-h] [--allow-incomplete]\n                               [--supplement SUPPLEMENT] [--cache CACHE]\n                               inventory output\nexport-cashu-notices.py: error: notice files missing; use --allow-incomplete only for a development export"
+  },
+  "notices_from_verified_source_archives": [
+    {
+      "package": "r-efi@5.3.0",
+      "archive_sha256": "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f",
+      "path": "AUTHORS",
+      "notice_sha256": "ff92bed461f50338dd703a9ba9aee496a425957873df1d91192776e4bdf5dda7",
+      "git_blob_sha1": "7397b2bd6a8580d51fe7b23783f8f1a05fa70291",
+      "upstream_url": "https://github.com/r-efi/r-efi/blob/97b55bed1c2c91dcbf787674849f05337ff80b33/AUTHORS",
+      "source_notice_matches_exact_upstream_blob": true,
+      "inventory_omits_authors_license_file": true
+    },
+    {
+      "package": "r-efi@6.0.0",
+      "archive_sha256": "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf",
+      "path": "AUTHORS",
+      "notice_sha256": "d027e91dbc9cdbb2f1190068e498bd6b61cff022b6a032b191021ba658d96111",
+      "git_blob_sha1": "79c8b7c4a1dabcfbc718b7fe6d43b1892f9850cd",
+      "upstream_url": "https://github.com/r-efi/r-efi/blob/7e1b0322d31d625f81a5656096330934f9cd835d/AUTHORS",
+      "source_notice_matches_exact_upstream_blob": true,
+      "inventory_omits_authors_license_file": true
+    }
+  ],
+  "hashes": {
+    "deploy/scripts/inventory-cashu-licenses.py": "f1731d0b28af32bde7c9211645e6f125c32e06f7f1a4cd7c66d137c5a83c576a",
+    "docs/testing/cashu-license-inventory-20261117.json": "a21553edbc33f0bed0aad00be5d61dec2015a91fcb241ab6e4578fc22a0d54f1",
+    "docs/licenses/cashu-upstream-supplement.json": "fd1ee4e6125df0c23e83539c70a60c374f59165d1c3e7756c6ec1bd03113164e",
+    ".artifacts/cashu-development-notices-20261117-v9/index.json": "183c2f35b815a46dcf47bef7f169be53b73a31580e66259d4b7c720cb0813986"
+  },
+  "remaining": [
+    "base58ck@0.1.101",
+    "bitcoin@0.32.102",
+    "bitcoin-consensus-encoding@1.2.0",
+    "bitcoin-consensus-encoding@1.3.0",
+    "bitcoin-internals@0.6.0",
+    "bitcoin-internals@0.7.0",
+    "bitcoin-io@0.1.101",
+    "bitcoin-payment-instructions@0.7.1",
+    "bitcoin-units@0.1.101",
+    "bitcoin_hashes@0.14.101",
+    "bitcoin_hashes@1.2.0",
+    "hex_lit@0.1.1",
+    "lightning@0.2.8",
+    "lightning-invoice@0.34.1",
+    "possiblyrandom@0.2.1"
+  ]
+}

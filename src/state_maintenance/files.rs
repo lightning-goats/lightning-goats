@@ -52,6 +52,27 @@ pub(super) fn private_bundle(path: &Path) -> Result<()> {
     }
     Ok(())
 }
+pub(super) fn private_file_parent(path: &Path) -> Result<&Path> {
+    absolute(path)?;
+    let parent = path.parent().context("private file parent missing")?;
+    private_bundle(parent)?;
+    Ok(parent)
+}
+
+pub(super) fn review_selection<T: serde::de::DeserializeOwned>(
+    path: &Path,
+    expected_sha256: &str,
+    maximum: u64,
+) -> Result<(T, String)> {
+    private_file_parent(path)?;
+    let raw = read_private(path, maximum)?;
+    let digest = hash_bytes(&raw);
+    if digest != expected_sha256 {
+        bail!("review selection checksum differs");
+    }
+    Ok((serde_json::from_slice(&raw)?, digest))
+}
+
 pub(super) fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
     let mut file = OpenOptions::new()
         .write(true)

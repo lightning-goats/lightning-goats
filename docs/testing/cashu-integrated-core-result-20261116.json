@@ -1,0 +1,34 @@
+{
+  "gates": {
+    "fmt": 0,
+    "clippy": 0,
+    "tests": 0,
+    "protocol_fmt": 0,
+    "protocol_clippy": 0,
+    "protocol_tests": 0,
+    "sqlite": 0,
+    "whitespace": 0,
+    "audit": 0
+  },
+  "cargo_test_totals": {
+    "passed": 648,
+    "failed": 0,
+    "ignored": 11
+  },
+  "library_passed": 505,
+  "source_hashes_unchanged": true,
+  "execution": "linuxuser, no-new-privileges, fresh loopback-only network namespace",
+  "source_manifest_sha256": "859ca2a7ca9781c80fa8d215082b4f4f9a32ed6226e41499790899fc8430e145",
+  "logs_sha256": {
+    "lg-cashu-netns-core-audit.log": "b5c00defd8e468e3271cd41037db5b3c4f05d39cc8d3edf4a6a6d2a0e0427d54",
+    "lg-cashu-netns-core-whitespace.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "lg-cashu-netns-core-sqlite.log": "2ae3fc4a6790b3f276d213c269f56b3ed23c6fde266d96811d491431715cee04",
+    "lg-cashu-netns-core-protocol_tests.log": "bd7a8558f5cce614a175143336e290d0eb628d0cead011490f4bc2f923fa71f4",
+    "lg-cashu-netns-core-protocol_clippy.log": "7554f5e8da33228b2d79760b36aa9ce316cc2966590400139c53cab2f47ae4ab",
+    "lg-cashu-netns-core-protocol_fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "lg-cashu-netns-core-tests.log": "02b0236558d5616547bdd791a3fc7242f778e2ead40b6a14858007da14423989",
+    "lg-cashu-netns-core-clippy.log": "f3e3d8a47034ced816293fe9d97119d7857abf0f89d021c866a0dac651aadf68",
+    "lg-cashu-netns-core-fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "remaining_scope": "acceptance map remains open; not deployed/live acceptance"
+}

@@ -1,0 +1,19 @@
+{
+  "gates": {
+    "fmt": 0,
+    "clippy": 0
+  },
+  "source_manifest_sha256": "cac14394d82d8f08ae78d2b7b867a132fdb2e7651b55b241ccf45bdae09e41b6",
+  "log_sha256": {
+    "fmt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "clippy": "ddd01c80b623dadd032dcf57cc82a9747dcbdeb679287dbf59ce7e688facec19"
+  },
+  "source_unchanged_at_checkpoint": true,
+  "tests": "compiling; no final result yet",
+  "pending_stages_not_qualified": [
+    "transport admissions",
+    "fee-only composition",
+    "recovery status"
+  ],
+  "session": 80915
+}

@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, time::Duration};
+use std::{collections::VecDeque, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result, bail};
 use axum::extract::ws::{Message, WebSocket};
@@ -59,6 +59,7 @@ pub async fn serve_overlay_socket(
     renderer: MessageRenderer,
     threshold_sats: u64,
     resume: OverlayResume,
+    cashu: Option<Arc<crate::cashu::intake::Forwarder>>,
 ) -> Result<()> {
     serve_with_timing(
         socket,
@@ -67,6 +68,7 @@ pub async fn serve_overlay_socket(
         threshold_sats,
         resume,
         Timing::default(),
+        cashu,
     )
     .await
 }
@@ -106,9 +108,20 @@ async fn snapshot(
     threshold: u64,
     stream: Uuid,
     reason: Option<&str>,
+    cashu: Option<&crate::cashu::intake::Forwarder>,
 ) -> Result<Queued> {
     let (seq, encoded) = ledger.overlay_snapshot_message(threshold).await?;
     let mut value: Value = serde_json::from_str(&encoded)?;
+    value["cashu"] = match cashu {
+        Some(wallet) => wallet
+            .public_request()
+            .await
+            .ok()
+            .flatten()
+            .map(crate::cashu::public_request::public_value)
+            .unwrap_or(Value::Null),
+        None => Value::Null,
+    };
     value["version"] = 1.into();
     value["stream_id"] = stream.to_string().into();
     if let Some(reason) = reason {
@@ -171,11 +184,12 @@ async fn serve_with_timing(
     threshold: u64,
     resume: OverlayResume,
     timing: Timing,
+    cashu: Option<Arc<crate::cashu::intake::Forwarder>>,
 ) -> Result<()> {
     resume.validate()?;
     let stream = ledger.overlay_stream_id().await?;
     let (mut sender, mut receiver) = socket.split();
-    let mut checkpoint = snapshot(&ledger, threshold, stream, None).await?;
+    let mut checkpoint = snapshot(&ledger, threshold, stream, None, cashu.as_deref()).await?;
     let mut last_seq = checkpoint.seq;
     let mut queue = VecDeque::new();
     if let Some(after) = resume.after {
@@ -198,7 +212,14 @@ async fn serve_with_timing(
             last_seq = after;
             queue = replay;
         } else {
-            checkpoint = snapshot(&ledger, threshold, stream, Some("resume_unavailable")).await?;
+            checkpoint = snapshot(
+                &ledger,
+                threshold,
+                stream,
+                Some("resume_unavailable"),
+                cashu.as_deref(),
+            )
+            .await?;
             last_seq = checkpoint.seq;
         }
     }
@@ -254,7 +275,7 @@ async fn serve_with_timing(
                 };
                 match messages {
                     Some(messages) => queue = messages,
-                    None => queue.push_back(snapshot(&ledger, threshold, stream, Some("event_window_unavailable")).await?),
+                    None => queue.push_back(snapshot(&ledger, threshold, stream, Some("event_window_unavailable"), cashu.as_deref()).await?),
                 }
             }
         }
@@ -332,6 +353,41 @@ mod tests {
 
     fn renderer() -> MessageRenderer {
         MessageRenderer::embedded().unwrap()
+    }
+
+    #[tokio::test]
+    async fn unavailable_cashu_metadata_preserves_snapshot_and_financial_sequence() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let ledger = LedgerStore::connect(&format!(
+            "sqlite://{}",
+            directory.path().join("overlay.sqlite").display()
+        ))
+        .await?;
+        let stream = ledger.overlay_stream_id().await?;
+        let baseline = snapshot(&ledger, 1000, stream, None, None).await?;
+        let wallet = crate::cashu::intake::Forwarder::new(crate::cashu::intake::Policy {
+            socket: directory.path().join("missing.sock"),
+            wallet_uid: crate::private_ipc::uid()?.checked_add(1).unwrap(),
+            wallet_instance: Uuid::new_v4(),
+            wallet_epoch: Uuid::new_v4(),
+            receive_cashu: true,
+            receive_nutzap: false,
+            body_bytes: 1024,
+            concurrent_requests: 1,
+            deadline: Duration::from_secs(60),
+        })?;
+        let actual = tokio::time::timeout(
+            Duration::from_secs(2),
+            snapshot(&ledger, 1000, stream, None, Some(&wallet)),
+        )
+        .await??;
+        assert_eq!(actual.seq, baseline.seq);
+        assert_eq!(
+            serde_json::from_str::<Value>(&actual.body)?,
+            serde_json::from_str::<Value>(&baseline.body)?
+        );
+        assert!(serde_json::from_str::<Value>(&actual.body)?["cashu"].is_null());
+        Ok(())
     }
 
     #[test]

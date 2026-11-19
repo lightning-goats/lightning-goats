@@ -63,7 +63,7 @@ def namespace_override(text):
     return namespace
 
 
-def role_dropins():
+def role_dropins(*, preserve_existing=False):
     """Pin existing role-specific overrides, including those hidden by masks."""
     result = {}
     for role in Q.ROLES:
@@ -77,7 +77,8 @@ def role_dropins():
                     C.protected(path)
                     if path.stat().st_size > 65536:
                         raise ValueError('role override exceeds configuration bound')
-                    namespace_override(path.read_text())
+                    if not preserve_existing:
+                        namespace_override(path.read_text())
                     result[str(path)] = C.TX.fingerprint(path)
     return result
 

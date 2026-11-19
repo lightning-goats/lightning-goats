@@ -1,0 +1,13 @@
+{
+  "result": "expected_rejection",
+  "exit_code": 1,
+  "reason": "required current fixture is missing",
+  "log": "Traceback (most recent call last):\n  File \"/home/linuxuser/lightning-goats/.worktrees/cashu-nutnovember-20261115/deploy/scripts/test-cashu-public-request-cross-uid.py\", line 123, in <module>\n    main()\n    ~~~~^^\n  File \"/home/linuxuser/lightning-goats/.worktrees/cashu-nutnovember-20261115/deploy/scripts/test-cashu-public-request-cross-uid.py\", line 72, in main\n    raise ValueError(\"required current fixture is missing\")\nValueError: required current fixture is missing\n",
+  "artifacts_sha256": {
+    "deploy/scripts/test-cashu-public-request-cross-uid.py": "7950eb096aab4d9dd6a825b5191ead50cc049085c7fb95491131cfd8c1805765",
+    ".artifacts/cashu-combined-fixture-20261116/core-lost-test": "4ec3642187631d52cfb93e1ebc2babad6d4577795efee7d9bedd36c46ee4755e",
+    ".artifacts/cashu-combined-fixture-20261116/wallet-lost-test": "1b9a361bbe97a3e984118fe70429f8c8fec8e32f4121b19c6a3669180795ffbd"
+  },
+  "scope": "Runner rejects older native artifacts lacking its explicit metadata child test; positive cross-UID delivery is not yet qualified",
+  "production_changed": false
+}

@@ -1,4 +1,5 @@
-//! Strict schema-23 -> 25 (contact plus qualified feeder-cap schema) additive comparison of separate four-journal images.
+//! Strict additive contact comparison of separate four-journal images.
+//! Cashu schemas additionally require the exact, empty inactive extension.
 //! It does not migrate a journal, restore state or authorize service resumption.
 use std::{collections::BTreeMap, path::Path};
 
@@ -79,7 +80,7 @@ async fn private_catalog() -> Result<BTreeMap<String, Definition>> {
 
 pub(super) async fn compare_images(before: &Path, after: &Path, policy: &Policy) -> Result<()> {
     database::inspect_before_contact(before, policy).await?;
-    let migrated = database::inspect(after, policy).await?;
+    let (migrated, version) = database::inspect_upgrade_copy(after, policy, 25, false).await?;
     for table in PRIVATE_TABLES {
         if migrated.rows[&Role::Core].get(table) != Some(&0) {
             bail!("contact upgrade must add empty private tables only");
@@ -87,6 +88,9 @@ pub(super) async fn compare_images(before: &Path, after: &Path, policy: &Policy)
     }
     let mut expected_private = private_catalog().await?;
     expected_private.extend(super::feeder_cap_upgrade::private_catalog().await?);
+    if version >= 26 {
+        expected_private.extend(super::cashu_upgrade::private_catalog(version).await?);
+    }
     for table in ["feeder_credit_policy", "feed_credit_retirements"] {
         if migrated.rows[&Role::Core].get(table) != Some(&0) {
             bail!("contact upgrade must not activate feeder policy or retire credit");
@@ -104,6 +108,10 @@ pub(super) async fn compare_images(before: &Path, after: &Path, policy: &Policy)
             if role == Role::Core {
                 expected_names.extend(PRIVATE_TABLES.map(str::to_owned));
                 expected_names.extend(super::feeder_cap_upgrade::CAP_TABLES.map(str::to_owned));
+                if version >= 26 {
+                    expected_names
+                        .extend(super::cashu_upgrade::tables_for_core(version).map(str::to_owned));
+                }
                 expected_names.sort();
             }
             if rows::names(&new).await? != expected_names {
@@ -196,7 +204,9 @@ impl Operator {
     }
 
     /// Accept only a source-pinned schema-23 backup and a separate, already
-    /// migrated four-journal copy. Normal verify/restore still require schema 25.
+    /// migrated four-journal copy at exact schema 25 through 28. Cashu schemas permit
+    /// only the empty, inactive Cashu extension. Normal verify/restore still
+    /// require the current schema and retain their separate custody restrictions.
     pub async fn compare_contact_upgrade(
         &self,
         bundle: &Path,

@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Lightning Goats OBS overlay</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/overlay.css?v=6">
+  <link rel="stylesheet" href="/overlay.css?v=8">
   <script src="/vendor/qrcode.js" defer></script>
-  <script src="/overlay.js?v=9" defer></script>
+  <script src="/overlay.js?v=10" defer></script>
 </head>
 <body>
   <main id="container" aria-label="Lightning Goats stream overlay">
@@ -18,13 +18,17 @@
       <span id="credit" class="sr-only">Waiting for ledger</span>
       <span id="due" class="sr-only"></span>
     </div>
-    <a id="qr-code" href="lightning:herd@lightning-goats.com" aria-label="Pay herd@lightning-goats.com">
-      <div id="qr-image" role="img" aria-label="Lightning payment QR for herd@lightning-goats.com"></div>
-      <div id="qr-brand"><img src="/images/lightninggoatslogo1.png?v=artwork-20261109" alt=""></div>
-      <img id="lightning-img" src="/images/lightning.png?v=artwork-20261109" alt="" aria-hidden="true">
-    </a>
-    <div id="connection" role="status">Connecting…</div>
-    <div id="feeding-state" role="status" aria-live="polite" hidden><span id="feeding-state-label"></span><span id="feeding-queue"></span></div>
+    <div id="payment-column">
+      <a id="qr-code" href="lightning:herd@lightning-goats.com" aria-label="Pay herd@lightning-goats.com">
+        <div id="qr-image" role="img" aria-label="Lightning payment QR for herd@lightning-goats.com"></div>
+        <div id="qr-brand"><img src="/images/lightninggoatslogo1.png?v=artwork-20261109" alt=""></div>
+        <img id="lightning-img" src="/images/lightning.png?v=artwork-20261109" alt="" aria-hidden="true">
+      </a>
+      <div id="lightning-label">Lightning</div>
+      <div id="cashu-code" hidden><div id="cashu-image" role="img" aria-label="Cashu payment request QR"></div><span>Cashu</span></div>
+      <div id="connection" role="status">Connecting…</div>
+      <div id="feeding-state" role="status" aria-live="polite" hidden><span id="feeding-state-label"></span><span id="feeding-queue"></span></div>
+    </div>
     <div id="sats-received-overlay" aria-live="polite"></div>
     <div id="feeder-triggered" aria-live="polite">⚡ Feeder Triggered ⚡</div>
     <div id="accordion-container" aria-label="Featured goats and CyberHerd"></div>

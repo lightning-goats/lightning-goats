@@ -12,7 +12,6 @@ use std::{
 use tokio::sync::Mutex;
 
 const MAX_PEOPLE: usize = 8;
-const MAX_USER_RELAYS: usize = 8;
 const MAX_CACHE: usize = 256;
 const REFRESH_SECONDS: i64 = 900;
 
@@ -140,50 +139,14 @@ pub struct RelayList {
 }
 impl RelayList {
     pub fn parse(event: &VerifiedEvent, author: &str, now: i64) -> Result<Self> {
-        validate_public_key(author)?;
-        if now < 0
-            || event.event().pubkey != author
-            || event.event().kind != 10002
-            || event.event().created_at > now as u64
-        {
-            bail!("relay list author, kind or time differs");
-        }
-        if event
-            .tag_values("expiration")
-            .any(|v| v.parse::<i64>().map_or(true, |t| t <= now))
-        {
-            bail!("relay list is expired or malformed");
-        }
-        let mut read = BTreeSet::new();
-        let mut write = BTreeSet::new();
-        for tag in &event.event().tags {
-            if tag.first().map(String::as_str) != Some("r") || !(2..=3).contains(&tag.len()) {
-                continue;
-            }
-            let Ok(url) = crate::public_network::validate_destination(&tag[1], "wss") else {
-                continue;
-            };
-            if is_broadcaster(url.as_str()) {
-                continue;
-            }
-            match tag.get(2).map(String::as_str) {
-                None => {
-                    read.insert(url.to_string());
-                    write.insert(url.to_string());
-                }
-                Some("read") => {
-                    read.insert(url.to_string());
-                }
-                Some("write") => {
-                    write.insert(url.to_string());
-                }
-                _ => {}
-            }
-        }
+        let directions = crate::nostr_event::relay_list::directions(event, author, now, |raw| {
+            let url = crate::public_network::validate_destination(raw, "wss").ok()?;
+            (!is_broadcaster(url.as_str())).then(|| url.to_string())
+        })?;
         Ok(Self {
             event: event.clone(),
-            read: read.into_iter().take(MAX_USER_RELAYS).collect(),
-            write: write.into_iter().take(MAX_USER_RELAYS).collect(),
+            read: directions.read,
+            write: directions.write,
         })
     }
     pub fn event(&self) -> &VerifiedEvent {

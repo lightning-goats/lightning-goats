@@ -84,6 +84,26 @@ turn a schema-upgrade review into an implicit program-only deployment.
 
 ## Source coordinator commands (not production-qualified yet)
 
+For an existing **core schema 26 with no Cashu state**, the development source
+adds an explicit preparation variant:
+`--inclusive-fee-upgrade --cashu-core-source prepare ...`. The protected reviewed
+preparation binds `cashu_core_source=true`; ordinary program maintenance rejects
+it. Apply requires its exact review digest and the existing exclusive maintenance
+flag. The native source snapshot validates the exact compiled core-26 and
+payout-8 migration tuples, all four journals and twenty empty Cashu tables. The
+old payout-prefix verifier predates core 26 and is retained as an artifact but is
+not used or claimed as source acceptance for this variant. There is no automatic
+fallback after a verifier refuses. Without this explicit selector, the legacy
+path still requires both original and selected native source verifiers.
+
+Only the payout copy/live journal is migrated. The comparison requires all core
+rows, schema, signed bytes and migration records to remain identical, including
+the empty Cashu extension. It rejects Cashu custody, monotonic clock state,
+unqualified schema and unknown migrations. It creates no coordinated Cashu backup
+or restore authority. A schema-25 source cannot acquire Cashu schema through this
+payout-only path. Selected-source native and installed-systemd qualification of
+the new variant remains required before any actual invocation.
+
 The authenticated tool now exposes separate `apply-inclusive-fees` and
 `resume-inclusive-fees` commands with the reviewed preparation digest and their
 explicit maintenance/resumption flags. Preparation uses `--inclusive-fee-upgrade
@@ -91,7 +111,8 @@ prepare`; application and resumption use their dedicated command names, without
 that preparation selector. Program-only apply/rollback/resume continue rejecting
 the schema-upgrade record.
 
-The apply path accepts both native source verifiers, rehearses a payout copy under
+The legacy apply path accepts both native source verifiers; the explicitly reviewed
+Cashu-core variant uses the selected exact-prefix verifier described above. Each rehearses a payout copy under
 its runtime UID, verifies all four journals, replaces the reviewed programs, then
 records migration start before touching the live payout journal. A fresh native
 snapshot and strict comparison must succeed before an applied receipt exists.

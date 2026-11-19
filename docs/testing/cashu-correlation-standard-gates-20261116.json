@@ -1,0 +1,32 @@
+{
+  "result": "CASHU_CORRELATION_STANDARD_CORE_GATES_PASSED",
+  "scope": "standard non-admin full core regression; explicit root recovery fixture remains failed/unqualified",
+  "gates": {
+    "fmt": 0,
+    "tests": 0,
+    "protocol_fmt": 0,
+    "protocol_clippy": 0,
+    "protocol_tests": 0,
+    "sqlite": 0,
+    "whitespace": 0,
+    "audit": 0
+  },
+  "clippy_exit_code": 0,
+  "tests_passed": 648,
+  "tests_failed": 0,
+  "tests_ignored": 12,
+  "source_inventory_sha256": "e143db285f89f76b26f68ecc975632f05cbf73d67eca5514ac050ee518c3f2d0",
+  "selected_source_sha256": {
+    "src/state_maintenance/cashu_correlations.rs": "b0c40dace2af8e7ec03452c45d647f001a54b1ffca075de67821006eb13fe444",
+    "src/state_maintenance/cashu_correlations/tests.rs": "12f95e8a31e11b983d56c80c6b3883a5d38a28063a21cddfe253e6f2350e7600",
+    "src/state_maintenance/database.rs": "afae97d8425648bc36bcab34d19461e245836654b3ae281117d5dbcd20a7c522",
+    "src/state_maintenance/mod.rs": "3d848e9b020a76a42de8717fdb4a49b50d760d2f8e1fede5f42485676473c0a7",
+    "src/bin/cyberherd-statectl.rs": "0c96625dcb3674a06aac3ea955bf465843cfede95c2ae6a76e2c7cc217e3eebc"
+  },
+  "source_unchanged_during_gates": true,
+  "test_artifact_sha256": "5e9f8656a2cccac694c4678c7261639e20b53fb32244f80f9fdc8124f188fbb1",
+  "root_correlation_fixture_qualified": false,
+  "root_failure_evidence": "cashu-correlation-fixture-failure-20261116.json",
+  "native_combined_cli_qualified": false,
+  "production_changes": false
+}

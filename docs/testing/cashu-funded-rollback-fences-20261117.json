@@ -1,0 +1,83 @@
+{
+  "source_commit": "fa15df3fcfc75e4cbe0bc9f3220e1f348b23fe74",
+  "ci_tree_equals_source_tree": true,
+  "source_tree": "0fcbed635e853ce0d7ab47549391d015d3349764",
+  "ci_checkout": "3578ee82f6c094808a605901370dddfe38473382",
+  "ci_run": "https://github.com/lightning-goats/lightning-goats/actions/runs/44177693417",
+  "deployment_run": "https://github.com/lightning-goats/lightning-goats/actions/runs/44177693426",
+  "all_ten_workflows_passed": true,
+  "ci_job": 134376904376,
+  "artifact": {
+    "id": 14371212454,
+    "bytes": 19378,
+    "sha256": "fd7433f0bc07a834d5588a8ee7489852417a67f311736737bb2f810bf322293f"
+  },
+  "fixture": {
+    "artifacts_sha256": {
+      "core": "fbbbc2f6f385fa18dbd22f17b69498a376c5b52baf982702ceac77390abcc824",
+      "wallet": "c73973b871d1315991613dc90abec4109d6f9b64f3c5153ad2bc3fb08ebb2616"
+    },
+    "cashu_ts_offline_sender": false,
+    "distinct_uid_ipc": true,
+    "distinct_uid_receipt_ipc": true,
+    "financial_result": {
+      "contributions": 3,
+      "conversion_fee_sats": 2,
+      "credit_sats": 0,
+      "funded_rollback": {
+        "coordinated_older_local_agreement_insufficient": true,
+        "core_only_local_agreement_insufficient": true,
+        "fence_clearance_qualified": false,
+        "later_melt_deposit_and_feeding_retained": true,
+        "original_invoice_and_intent_preserved": true,
+        "restored_core_startup_fenced": true,
+        "restored_wallet_writer_fenced": true,
+        "scoped_reconciliation_recorded_and_replayed": true,
+        "wallet_only_history_refused": true
+      },
+      "new_transfer_credit_sats": 0,
+      "original_granted_credit_sats": 1000,
+      "receive_fees_sats": 2,
+      "retained_change_sats": 0,
+      "supplemental_native_sats": 0,
+      "synthetic_confirmed_feeds": 1,
+      "treasury_deposit_sats": 398
+    },
+    "http_intake": true,
+    "independent_sender": false,
+    "live_provider": false,
+    "lost_melt_reply": true,
+    "multiple_mints": false,
+    "nonzero_fees": true,
+    "physical_actuation": false,
+    "repeat_request": false,
+    "residual_change_settled": false,
+    "result": "CASHU_COMBINED_SETTLEMENT_VERIFIED",
+    "returned_change": false,
+    "sender_inventory": null,
+    "sender_node_sha256": null,
+    "sender_script_sha256": null,
+    "strike_before_wallet_report": true,
+    "tls_verified": false,
+    "treasury_ipc": true,
+    "wallet_health_verified": true,
+    "wallet_recovery_while_paused": true
+  },
+  "before_effects": {
+    "cdk_unspent_sats": 400,
+    "core_deposit_rows": 0,
+    "core_feed_attempts": 0
+  },
+  "after_effects": {
+    "cdk_unspent_sats": 0,
+    "core_deposit_rows": 1,
+    "core_feed_attempts": 1
+  },
+  "scope": [
+    "The fee-only native fixture uses real CDK, authenticated sockets and a simulated mint, Strike and feeding.",
+    "This exercises startup and writer checks against the selected older fixture databases; no on-host restore installer ran.",
+    "The treasury CLI entry point is checked for argument handling and redaction. The successful funded path invokes its shared reconciliation function with the simulated mint.",
+    "Old core with either wallet generation can appear consistent locally. Local agreement never grants restore or resumption authority.",
+    "External reconciliation after restoring an older checkpoint, installed recovery and approval to clear fences remain open."
+  ]
+}

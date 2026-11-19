@@ -1,0 +1,132 @@
+{
+  "scope": "reserved split executor, paused original-operation recovery, custody commit and subsequent original-quote melt preparation",
+  "production_state_changed": false,
+  "source_hashes_rechecked": true,
+  "source_hashes": {
+    "tools/cashu-compat/src/acquisition/tests/split_tests.rs": "e180765fbc2b384d0b3a6307e61c4e73ee1240dd146ddbab6f5da4daaa8399a6",
+    "tools/cashu-compat/src/acquisition/tests.rs": "d6811bb0af672d4d2beae79581bc5d8109b9d9dd6cda627fdb86107a98f4134b",
+    "tools/cashu-compat/src/acquisition.rs": "03a81ca939de128266737cf5323c10f72ddb74371ab64054712697d76ea78451",
+    "tools/cashu-compat/src/bin/lightning-goats-cashu-signerd.rs": "286a859ef52c06556090b86158b6b5f7004a0ae043c7d21e7a9a8ac08d0e128a",
+    "tools/cashu-compat/src/bin/lightning-goats-cashud.rs": "236e7a5aa270e4211ab59a697e9bb0d30387a09b646231694ed9352bfc4c814c",
+    "tools/cashu-compat/src/descriptor.rs": "4ef2bd863f0e9fb7bb3c8bc2c52232d5d68819ca86fdd67c961c8c5abb34c86b",
+    "tools/cashu-compat/src/ingress.rs": "39c9b04b900f6a0c1b56d2e119559f501ac1bffc94ba8e28c72dd22d629ebee1",
+    "tools/cashu-compat/src/intake.rs": "7a9a99a7f8f20e9c4f2ced66f47a6dee00c9221a97fa436e02093cd2bdf4477b",
+    "tools/cashu-compat/src/journal/publication.rs": "7420cf1b5bd7d118760b1af19adec89d34711fe31328fd19b47b98134401fac6",
+    "tools/cashu-compat/src/journal/publication_delivery.rs": "cef4d9daf17de1c6b1b978bbec54f861d37f3f7ea6ba0e9cab18d964d8fe1e9c",
+    "tools/cashu-compat/src/journal/relay_scans.rs": "9e3b395e303682a7ba1dc29dc6dc39ab3afbc6ba4714a601030b796a1d036f80",
+    "tools/cashu-compat/src/journal/scheduling.rs": "41f672cb794a20f0571e8985b3cccb9c3c6a4f0fa95353119b93b5aece34da87",
+    "tools/cashu-compat/src/journal/treasury.rs": "171bfbdf83c4b3930ed9059635e942be691e985c67bac5c3fb7042ece1a63e14",
+    "tools/cashu-compat/src/journal/treasury_budget.rs": "205a856ce21a1fd598daf06440be9cc11cc725ae02564472fe417c6b0fea2782",
+    "tools/cashu-compat/src/journal/treasury_scheduling.rs": "c0a726e3be446a9c0a1564aaa2752e3968c3c61d7990dde6cb7593e0c2c1f904",
+    "tools/cashu-compat/src/journal/treasury_selection.rs": "6ffca3d40e8a967cf71cb6f28610a379b2afea78d698deb9806609b241a7e569",
+    "tools/cashu-compat/src/journal/treasury_split/admission.rs": "37774bc8bc43fbb0a03d4081a0f14e30a939b613f04c3fcd017ef188371c6ac0",
+    "tools/cashu-compat/src/journal/treasury_split/submission.rs": "e64d1de0c04b660d96106d23c4a16c7a479db3ab0897ef27c10fde7d9caa194c",
+    "tools/cashu-compat/src/journal/treasury_split.rs": "841a419d7edac0494b96aa02232d5c523c682b90b1ae48787c4abe88337af1af",
+    "tools/cashu-compat/src/journal.rs": "cddd6f45b668cc22de2362c75fe946964cb72ef00a30b0b84e5b045a74b70b7d",
+    "tools/cashu-compat/src/lib.rs": "6b8e526fda4a2d4a1c07d0b7e7adb6d83a7095ab2fcd3a4d4924cb93a2c00ae5",
+    "tools/cashu-compat/src/main.rs": "fae0b42abbcb6c49cc7981932262e0adb6771e864e787088459887f452495c0e",
+    "tools/cashu-compat/src/melt_derivation.rs": "67c958377b05409f4b69ebe84c1d2843733f32edac8edc6737deba89fd7270e7",
+    "tools/cashu-compat/src/melt_reconciliation.rs": "b2159930b85f8f027c5212f09fb8d9fa8806c78d4d10fe6a040f1daf4b710749",
+    "tools/cashu-compat/src/mint_policy.rs": "313674eca44d8b2f6d6aae467e4e141742eda8ad1d867363db06a2096ec0a142",
+    "tools/cashu-compat/src/operation_gate/split.rs": "9b35176c2084de073c5138e9cf8245f681ca285ba1e8667674f9be7f10c9f900",
+    "tools/cashu-compat/src/operation_gate.rs": "6da9fce27e1beccbf62229ec7679bdd564e6ec3ec31844c85a14fe919985610c",
+    "tools/cashu-compat/src/ownership.rs": "d54433a6c243878c6252068ba5525b9a316ee4773a44cd9e892d4f03b3910a37",
+    "tools/cashu-compat/src/publication.rs": "9319fa0f7e544af290e7939dd31ddbca9e65f637daaf9b54a1694a1efd50d0b7",
+    "tools/cashu-compat/src/publication_broker/cross_uid_fixture.rs": "5317bbccd924db71aad6b9c1e401db71107f6f91334f6afd1cc27cece1502115",
+    "tools/cashu-compat/src/publication_broker.rs": "bbcce28eedc439530ca0af2cf0aaeb6d3443f58f0b720286bae23cb561f9fd60",
+    "tools/cashu-compat/src/publication_delivery.rs": "5fd7ddc4a165e585899a2705096aeb60eec1fd60f326c60639850c4fe7fd0355",
+    "tools/cashu-compat/src/publication_nak.rs": "9548cd8d34fbb00dc7682ec3ce102a90a56284e104f7dde840c54daaf1816727",
+    "tools/cashu-compat/src/publication_relay.rs": "3bf226a84d450e4ce1005d8793d9a82fa4e14594ae66544685947c9cfb8abbdc",
+    "tools/cashu-compat/src/publication_signing.rs": "21de1ce8d7b9315d9514906f4ca910f5b7b0c8e15b696648c94d7b6deca6934f",
+    "tools/cashu-compat/src/receipt_delivery/cross_uid_fixture.rs": "05dc1b3b0d623e15522a3714c9d96307bb62310faea3531c90bf986b83c9e534",
+    "tools/cashu-compat/src/receipt_delivery.rs": "e365f47ce18975beda241d9707b5cb13e59e02cbc90f435cec48b03f33ead901",
+    "tools/cashu-compat/src/receipt_outbox.rs": "141c5786743d3a240bad9658581d7618082a8f50d3a278d8e09e0ac1b53c049e",
+    "tools/cashu-compat/src/receipt_wire.rs": "5ae4dd6ca984515a2f50e58a32eb6da7034c341a51b4bf086469736f86e128cd",
+    "tools/cashu-compat/src/relay.rs": "c6f265848f4870628befc5c9a096001085eb364a90eca6e015a422d61eb3676c",
+    "tools/cashu-compat/src/relay_intake.rs": "a7e63663cae85417884690dcc8d11e2d8ebfa182a14166b0ba81bca3f3aa1eed",
+    "tools/cashu-compat/src/scheduler.rs": "1935ece237d8a42867f0e7c78d107c613148e0c7235b322364f4ea57aae96179",
+    "tools/cashu-compat/src/service.rs": "4130fbdd8a541a492b8ea23fd5e4a10043179ba39334647d00d64d21f7d2c192",
+    "tools/cashu-compat/src/service_config.rs": "d7aa4c033b25b52b93d4fa15f6432f2b4db252795aa0e0e4571fbe76a860b880",
+    "tools/cashu-compat/src/service_keys.rs": "acebe1a94d68098476e093b987dbbc015c00d91c309aca1df818af82b1599c0c",
+    "tools/cashu-compat/src/signing_service.rs": "676c42ffa211d92fc3c1b0111e87010c070cf40d5ddd19f174af42c8ccf845e1",
+    "tools/cashu-compat/src/status.rs": "aa0411b82a8b4c90d0828cfe773b45a17fd8cc51bc401f8dd9e7f120d589a6a7",
+    "tools/cashu-compat/src/transport.rs": "0e1a2b396098df4d4cd47b97c89da53162276a06d27c34218ed32ad28f5ec860",
+    "tools/cashu-compat/src/treasury.rs": "64c32f50ddfe03e49c4b3ee6f57ab67ed945838dd8512ce7d8241048a98544db",
+    "tools/cashu-compat/src/treasury_config.rs": "ffd80801e2bbb107b8a7f152fff59cf1c55ab20a31f79d3c41b9b84fa1f5bb38",
+    "tools/cashu-compat/src/treasury_execution/split.rs": "2f527f0861adae81ac68e0dc353516e6d0ebf5d25fd479d43ae815c1eb7473c6",
+    "tools/cashu-compat/src/treasury_execution.rs": "847d6c333e77e05fc3953acc933a0cab0f3a9535ce8c40256b05f96be36d61b1",
+    "tools/cashu-compat/src/treasury_ingress/cross_uid_fixture.rs": "6f9f6a5e0b5493565b65ac7526628a6b8c536f0e5827aeb88428b7394830eddf",
+    "tools/cashu-compat/src/treasury_ingress.rs": "8e2b17f3085e5fc2d70edb23891317cb0aa2f6f3f3f9f80f963dabf48a82c2f5",
+    "tools/cashu-compat/src/treasury_recovery.rs": "bc566997c0dbaf64186fe8e27f6be3a548a73624ae6b01b035a2a70f04220654",
+    "tools/cashu-compat/src/treasury_scheduler.rs": "c84ac5a97b4622bdf394d33615812f721fd1020eb21d5cb1035a0d89fa8b4fa8",
+    "tools/cashu-compat/src/treasury_split.rs": "c5e51e6b0fbe668458f2571ce6b5e021bdb7b5e1351a50c8ae6053527578f129",
+    "tools/cashu-compat/src/wallet.rs": "8a7dd5de4de17c4b8131be3003601b02a4827d7f5408a3f558a7010388ae7a52",
+    "tools/cashu-compat/src/writer_lock.rs": "8f9ab93d36d63d954e2dd1076d2bb481fcd2786a9e9258daf25c3a94c19e8f8e",
+    "tools/cashu-compat/Cargo.toml": "47f203b57bfea262b335ae53e754af0a44c5a6649886895a7ae81865e4451e07",
+    "tools/cashu-compat/Cargo.lock": "dc8b63cc5d31cf96de912397e14e03b5ddf24ec0e6f3c083bb233cb19369b2ed"
+  },
+  "gates": {
+    "fmt": 0,
+    "clippy": 0,
+    "tests": 0,
+    "vendor": 0
+  },
+  "results": [
+    {
+      "passed": 141,
+      "failed": 0,
+      "ignored": 5
+    },
+    {
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0
+    }
+  ],
+  "total_passed": 148,
+  "test_log_sha256": "8c814281c2491d4175068013123f88ffdea84c75ada6e19bb37d0e613c572745",
+  "initial_failures": [
+    "The conflict fixture initially omitted CDK saga version advancement; corrected using update_state.",
+    "Strict lint rejected clone calls on Copy saga states; removed.",
+    "Restoring the unrelated fixture quote initially reused its stale optimistic version; corrected by reloading the current quote before updating."
+  ],
+  "coverage": [
+    "Executor refuses split execution without a separately configured policy and after its original attempt.",
+    "Successful and lost-reply executions reopen with split execution disabled and reconcile original outputs.",
+    "Unrelated saga, altered original saga and unrelated quote reservation refuse recovery without cleanup.",
+    "Repeated committed recovery is idempotent; one acquisition plus one split, one quote and zero melts.",
+    "Original receipt digest remains unchanged and only the four treasury sats are selected after one sat of split fee.",
+    "Subsequent melt preparation uses the original quote, one original replacement proof and one sat of remaining input fee."
+  ],
+  "remaining": [
+    "Automatic bounded split proof selection",
+    "Runtime split configuration and durable scheduler stages",
+    "Recovery for interrupted preparation lacking complete CDK recovery state",
+    "Full split-to-melt-to-independent-Strike settlement qualification"
+  ]
+}

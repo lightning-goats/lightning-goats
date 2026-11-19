@@ -1,5 +1,18 @@
 # Lightning Goats documentation
 
+The [Cashu / Nut November implementation plan](planning/cashu-nutnovember-implementation-plan.md)
+authorizes isolated ordinary Cashu and NIP-61 implementation alongside Strike.
+See the [compatibility checkpoint](testing/cashu-compatibility.md) for actual progress;
+receiving, spending, deployment and physical activation remain separate.
+The [wallet/core boundary](architecture/cashu-wallet-boundary.md) records the
+current private receipt and physical source-selection contracts and open work.
+The [wallet development entry point](deployment/cashu-wallet-development.md)
+documents isolated configuration, initialization and runtime commands.
+The [protected operator controls](deployment/cashu-operator-controls.md) describe
+bounded settlement planning and original-acquisition ownership checks, with their
+qualification and recovery limits. The [offline seed tool](deployment/cashu-seed-provisioning.md)
+prepares private staging separately from runtime installation.
+
 The operator-directed CyberHerd port is now tracked in
 [`planning/cyberherd-implementation-plan.md`](planning/cyberherd-implementation-plan.md),
 including the updated explanation/code references and the explicit no-NIP-05 and

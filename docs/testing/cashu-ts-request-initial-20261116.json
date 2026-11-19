@@ -1,0 +1,92 @@
+{
+  "library": "@cashu/cashu-ts",
+  "version": "4.7.2",
+  "results": [
+    {
+      "name": "creqA",
+      "status": "failed",
+      "reason": "Unsupported amount input type"
+    },
+    {
+      "name": "creqB",
+      "status": "parsed",
+      "encoding": "creqB",
+      "payload_length": 344
+    },
+    {
+      "name": "long_creqA",
+      "status": "failed",
+      "reason": "Unsupported amount input type"
+    },
+    {
+      "name": "long_creqB",
+      "status": "parsed",
+      "encoding": "creqB",
+      "payload_length": 718
+    }
+  ],
+  "scope": "Independent offline parsing only; no sender payment or phone scan",
+  "live_payment": false,
+  "result": "partial_parser_compatibility_failure",
+  "exit_code": 1,
+  "cause": "CDK 0.18.3 serializes amount=None as CBOR a:null; Cashu-TS 4.7.2 amount constructor accepts undefined but rejects null",
+  "upstream_sources": [
+    "https://cashu-ts.dev/classes/index.PaymentRequest.html",
+    "https://github.com/cashubtc/cashu-ts/blob/v4.7.2/src/model/PaymentRequest.ts"
+  ],
+  "packages": [
+    {
+      "name": "@cashu/cashu-ts",
+      "version": "4.7.2",
+      "url": "https://registry.npmjs.org/@cashu/cashu-ts/-/cashu-ts-4.7.2.tgz",
+      "integrity": "sha512-rNfArnXhaoUCi7crcLFwayHFQ9ek9VUI0EemBbleC9dNEhrJDGBdyqkFH7b6ubmA2Pej0DskUfiLRx0fCp0ebQ==",
+      "dependencies": {
+        "@scure/base": "^2.2.0",
+        "@scure/bip32": "^2.2.0",
+        "@noble/curves": "^2.2.0",
+        "@noble/hashes": "^2.2.0"
+      },
+      "license": "MIT"
+    },
+    {
+      "name": "@scure/base",
+      "version": "2.2.0",
+      "url": "https://registry.npmjs.org/@scure/base/-/base-2.2.0.tgz",
+      "integrity": "sha512-b8XEupJibegiXV+tDUseI8oLQc8ei3d/4Jkb2RpbHh3MfE054ov3uIz2dhFkB3FI8iwYkEh0gGCApkrYggkPNg==",
+      "dependencies": {},
+      "license": "MIT"
+    },
+    {
+      "name": "@scure/bip32",
+      "version": "2.2.0",
+      "url": "https://registry.npmjs.org/@scure/bip32/-/bip32-2.2.0.tgz",
+      "integrity": "sha512-zFr7t2F+a9+5tB7QbarF2HQNYrgjCNaoLAupZdKkrFMYMozJf5zqH2WJCQibMzm1qQ0QogrxVGO3qXfQDYMaQg==",
+      "dependencies": {
+        "@scure/base": "2.2.0",
+        "@noble/curves": "2.2.0",
+        "@noble/hashes": "2.2.0"
+      },
+      "license": "MIT"
+    },
+    {
+      "name": "@noble/curves",
+      "version": "2.2.0",
+      "url": "https://registry.npmjs.org/@noble/curves/-/curves-2.2.0.tgz",
+      "integrity": "sha512-T/BoHgFXirb0ENSPBquzX0rcjXeM6Lo892a2jlYJkqk83LqZx0l1Of7DzlKJ6jkpvMrkHSnAcgb5JegL8SeIkQ==",
+      "dependencies": {
+        "@noble/hashes": "2.2.0"
+      },
+      "license": "MIT"
+    },
+    {
+      "name": "@noble/hashes",
+      "version": "2.2.0",
+      "url": "https://registry.npmjs.org/@noble/hashes/-/hashes-2.2.0.tgz",
+      "integrity": "sha512-IYqDGiTXab6FniAgnSdZwgWbomxpy9FtYvLKs7wCUs2a8RkITG+DFGO1DM9cr+E3/RgADRpFjrKVaJ1z6sjtEg==",
+      "dependencies": {},
+      "license": "MIT"
+    }
+  ],
+  "fixture_sha256": "bd9a3430e92a3d025ca6f70fd42ee132312c09868256a99c55e5f12911f279ac",
+  "network_namespace_isolated": true
+}

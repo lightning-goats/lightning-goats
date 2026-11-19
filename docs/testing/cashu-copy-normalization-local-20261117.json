@@ -1,0 +1,54 @@
+{
+  "date": "2026-11-17",
+  "scope": "Local qualification of the native normalization primitive on protected disposable database copies; not coordinated backup or restore.",
+  "source_parent_commit": "0f66d53c5434f1a6872ca7bc22f7e0e59c8d6965",
+  "source_files_sha256": {
+    "tools/cashu-compat/Cargo.toml": "961944287674db5a970748081c96d1f0086f180eb4f772e8ce2f4255ba16b14f",
+    "tools/cashu-compat/src/lib.rs": "2e8bcd3a1518d76ed3fc7cfdd736dc428f7ef024c54c6bb86e1448818cf49dff",
+    "tools/cashu-compat/src/backup_copy.rs": "ef48c0910226c3b6ffa2a9725a895b77257df7b29ecb47dd8b434cabec4e4108",
+    "tools/cashu-compat/src/bin/lightning-goats-cashu-statectl.rs": "25c0e98ee5d6f5ccb399bb59fd8d584656714c0fd3f7a49ea816808e49e538e4",
+    "tools/cashu-compat/tests/backup_copy_cli.rs": "6bd8c46b5cef5799bad7e9c1a883831790bfc27c85dbe4111049038bbb5ada0e",
+    "deploy/scripts/test-cashu-copy-normalization.py": "d3265c6a18e5bc3b07b94272c0482416b3cc0b2ead2b6d8a855ef9d2f85f9d1c",
+    ".github/workflows/ci.yml": "66a0572703da3685ebe9a147b60be1f657315534d06c976d6d419adf4ee482ea"
+  },
+  "native_fixture": {
+    "cli_sha256": "faed9525ff979ae632e3369831d7f8af6ca1e26a7676bd3606b103a7d43397c1",
+    "committed_wal_included": true,
+    "engine": "3.54.1",
+    "implicit_rowids_and_signed_bytes_preserved": true,
+    "interrupted_stage_retained": true,
+    "live_financial_or_physical_operations": false,
+    "negative_cases": 21,
+    "positive_cases": 2,
+    "quiescence_or_restore_qualified": false,
+    "result": "CASHU_COPY_NORMALIZATION_VERIFIED"
+  },
+  "local_checks": {
+    "root_and_wallet_format": "passed",
+    "wallet_locked_all_target_all_feature_strict_clippy": "passed",
+    "native_cli_help_and_private_refusal_test": "passed",
+    "vendor_verification": "passed",
+    "backup_inventory_tests": 18,
+    "combined_backup_tests": 5,
+    "inventory_test_environment": "Regular non-root UID in an isolated network namespace; the default sandbox refused the synthetic Unix socket.",
+    "full_selected_source_ci": "pending"
+  },
+  "corrected_fixture_failures": [
+    {
+      "case": "committed WAL copy",
+      "cause": "SQLite Unix VFS fchown refreshes copied WAL ctime even for unchanged owner/group.",
+      "correction": "Permit WAL ctime refresh only; preserve inode, UID/GID, mode, links, size, mtime and complete byte checks. Main and marker remain ctime-strict."
+    },
+    {
+      "case": "forced interrupted normalized output",
+      "cause": "RLIMIT_FSIZE on a WAL input could interrupt shared-memory setup before target creation.",
+      "correction": "Use main-only immutable input for destination-write interruption; retain separate committed-WAL coverage."
+    }
+  ],
+  "limitations": [
+    "No installed database, operator seed, runtime service or external provider was accessed.",
+    "Writer quiescence, complete cross-store checkpoint collection, encryption and funded restore remain unfinished.",
+    "The helper never clears INCOMPLETE or recovery fences and never overwrites an output.",
+    "Current helper is source-only; root-owned installation and operational acceptance remain open."
+  ]
+}

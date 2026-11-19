@@ -18,6 +18,10 @@ use crate::{
 
 type HmacSha256 = Hmac<Sha256>;
 
+#[cfg(unix)]
+#[path = "strike_cashu.rs"]
+mod cashu_treasury;
+
 const STRIKE_SOURCE: &str = "strike";
 const COMPLETED_RECEIVE_EVENT: &str = "receive-request.receive-completed";
 
@@ -144,6 +148,22 @@ impl StrikeClient {
         description_hash: &str,
         expiry_seconds: u64,
     ) -> Result<CreatedStrikeReceiveRequest> {
+        self.create_bolt11_receive_request_inner(
+            amount_msat,
+            description_hash,
+            expiry_seconds,
+            false,
+        )
+        .await
+    }
+
+    async fn create_bolt11_receive_request_inner(
+        &self,
+        amount_msat: u64,
+        description_hash: &str,
+        expiry_seconds: u64,
+        require_btc_target: bool,
+    ) -> Result<CreatedStrikeReceiveRequest> {
         if amount_msat == 0 {
             bail!("Strike receive amount must be greater than zero");
         }
@@ -174,6 +194,9 @@ impl StrikeClient {
                 "create receive request",
             )
             .await?;
+        if require_btc_target && response.target_currency.as_deref() != Some("BTC") {
+            bail!("treasury receive request omitted its exact BTC target");
+        }
         let invoice = validate_receive_request_response(&response, amount_msat, description_hash)?;
         crate::bolt11::verify_issuance_expiry(&invoice, expiry_seconds)?;
 
@@ -254,8 +277,21 @@ impl StrikeClient {
         stored: &StoredStrikeReceiveRequest,
         receive_id: Uuid,
     ) -> Result<ReconciledStrikeReceive> {
+        self.reconcile_completed_receive_inner(stored, receive_id, false)
+            .await
+    }
+
+    async fn reconcile_completed_receive_inner(
+        &self,
+        stored: &StoredStrikeReceiveRequest,
+        receive_id: Uuid,
+        require_native_btc: bool,
+    ) -> Result<ReconciledStrikeReceive> {
         let request = self.find_receive_request(stored.receive_request_id).await?;
         validate_stored_request(&request, stored)?;
+        if require_native_btc && request.target_currency.as_deref() != Some("BTC") {
+            bail!("treasury receive request omitted its exact BTC target");
+        }
 
         let receive = self
             .find_receive(stored.receive_request_id, receive_id)
@@ -265,6 +301,11 @@ impl StrikeClient {
         }
         if receive.state != "COMPLETED" {
             bail!("Strike receive is not completed (state={})", receive.state);
+        }
+        if require_native_btc
+            && (receive.receive_type != "LIGHTNING" || receive.conversion_rate.is_some())
+        {
+            bail!("treasury requires an exact native BTC Lightning receipt");
         }
         validate_provider_amount(&receive.amount_received)?;
         if let Some(rate) = &receive.conversion_rate {
@@ -593,6 +634,13 @@ impl StrikeRuntime {
         } = issuance;
         crate::domain::invoice::validate_user(address_user)?;
         crate::domain::invoice::validate_user(credit_pool)?;
+        if ["contact", "cashu_treasury"].contains(&address_user)
+            || ["contact", "cashu_treasury"].contains(&credit_pool)
+        {
+            bail!(
+                "private receive purposes require their own immutable intent before provider contact"
+            );
+        }
         if amount_msat == 0
             || !amount_msat.is_multiple_of(1000)
             || amount_msat > i64::MAX as u64
@@ -741,6 +789,31 @@ impl StrikeRuntime {
                     event.receive_request_id
                 )
             })?;
+        #[cfg(unix)]
+        let treasury = ledger
+            .cashu_treasury_for_receive(stored.receive_request_id)
+            .await?;
+        #[cfg(unix)]
+        #[cfg(unix)]
+        if let Some(intent) = treasury {
+            let receive = self
+                .client
+                .verify_cashu_treasury_receive(&intent, &stored, event.receive_id)
+                .await?;
+            return Ok(
+                if ledger
+                    .record_cashu_treasury_deposit(&intent, &receive)
+                    .await?
+                {
+                    SettlementOutcome::TreasurySettlementAccepted
+                } else {
+                    SettlementOutcome::Duplicate
+                },
+            );
+        }
+        if stored.address_user == "cashu_treasury" || stored.credit_pool == "cashu_treasury" {
+            bail!("treasury invoice omitted its immutable purpose binding");
+        }
         let receive = self
             .client
             .reconcile_completed_receive(&stored, event.receive_id)
@@ -1074,6 +1147,8 @@ pub(crate) fn btc_decimal_to_msat(value: &str) -> Result<u64> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    include!("strike_cashu_tests.rs");
     use std::sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
@@ -1106,6 +1181,7 @@ mod tests {
         conversion: Option<Value>,
         receive_state: &'static str,
         receive_type: &'static str,
+        request_target_currency: Option<&'static str>,
         api_calls: Arc<AtomicUsize>,
         unavailable: Arc<AtomicUsize>,
         page_padding: bool,
@@ -1149,7 +1225,7 @@ mod tests {
         Json(json!({
             "receiveRequestId": state.receive_request_id,
             "created": "2026-09-07T17:00:00Z",
-            "targetCurrency": "BTC",
+            "targetCurrency": state.request_target_currency,
             "bolt11": {
                 "invoice": state.invoice,
                 "requestedAmount": {"amount": state.amount_btc, "currency":"BTC"},
@@ -1213,6 +1289,11 @@ mod tests {
     }
 
     async fn spawn_mock(state: MockState) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        spawn_mock_on(listener, state)
+    }
+
+    fn spawn_mock_on(listener: TcpListener, state: MockState) -> String {
         let request_path = format!("/v1/receive-requests/{}", state.receive_request_id);
         let receives_path = format!("{request_path}/receives");
         let app = Router::new()
@@ -1220,7 +1301,6 @@ mod tests {
             .route(&request_path, get(request_handler))
             .route(&receives_path, get(receive_handler))
             .with_state(state);
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
@@ -1242,6 +1322,7 @@ mod tests {
             conversion: None,
             receive_state: "COMPLETED",
             receive_type: "LIGHTNING",
+            request_target_currency: Some("BTC"),
             api_calls: Arc::new(AtomicUsize::new(0)),
             unavailable: Arc::new(AtomicUsize::new(0)),
             page_padding: false,
@@ -1699,6 +1780,37 @@ mod tests {
         };
         assert!(runtime.reconcile_and_credit(&ledger, &event).await.is_err());
         assert_eq!(ledger.feed_credit_sats().await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn treasury_reads_one_exact_btc_request_and_only_accepts_native_lightning() {
+        for (target, receive_type, calls, settled) in [
+            (None, "LIGHTNING", 1, false),
+            (Some("USD"), "LIGHTNING", 1, false),
+            (Some("BTC"), "P2P", 2, false),
+            (Some("BTC"), "LIGHTNING", 2, true),
+        ] {
+            let mut state = state();
+            state.request_target_currency = target;
+            state.receive_type = receive_type;
+            let base_url = spawn_mock(state.clone()).await;
+            let client = StrikeClient::new(&base_url, state.api_key.to_owned()).unwrap();
+            let stored = StoredStrikeReceiveRequest {
+                receive_request_id: state.receive_request_id,
+                address_user: "cashu_treasury".into(),
+                credit_pool: "cashu_treasury".into(),
+                amount_msat: 2_340_000,
+                description_hash: state.description_hash,
+                payment_hash: state.payment_hash,
+                invoice: state.invoice,
+                created_provider: None,
+            };
+            let result = client
+                .reconcile_completed_receive_inner(&stored, state.receive_id, true)
+                .await;
+            assert_eq!(result.is_ok(), settled);
+            assert_eq!(state.api_calls.load(Ordering::SeqCst), calls);
+        }
     }
 
     #[tokio::test]

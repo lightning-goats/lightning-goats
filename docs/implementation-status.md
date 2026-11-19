@@ -1,5 +1,326 @@
 # Lightning Goats implementation status
 
+Cashu publication update **2026-11-17**: public publication is authorized and
+[draft PR #139](https://github.com/lightning-goats/lightning-goats/pull/139) is open.
+The fully qualified membership repair [#138](https://github.com/lightning-goats/lightning-goats/pull/138)
+has merged; the Cashu draft now targets main. Fresh CI exposed an omitted upstream
+`rusqlite` archive lockfile. Commit `c36df2c` retains the exact published bytes;
+a fresh Git export passes vendor verification and all 13 notice tests. Core and
+wallet CI gates now pass for that checkpoint; combined/other CI qualification is
+recorded separately. The [two-settlement residual-change composition](testing/cashu-residual-settlement-20261117.json)
+passes normal/lost-reply CI at `69ba9de`, with no transfer credit or native top-up.
+The strict empty-Cashu contact comparison passes the installed rehearsal at
+`42e9956`. A later historical payout-8 upgrade failed because its pinned old
+verifier cannot read core schema 26. The [compatibility correction](testing/cashu-upgrade-compatibility-20261117.json)
+at `cb582e9` passes all ten selected-source workflows, including full native
+gates and the installed systemd rehearsal. Its distinct reviewed empty-Cashu
+source selector retains the default legacy requirement for both original and
+selected verifiers. All 26 protected orchestration regressions also pass locally
+without skips. The [two-configured-mint HTTP/financial composition](testing/cashu-two-mint-settlement-20261117.json)
+now passes normal/lost replies at `0f66d53`, with all ten selected-source workflows
+successful. Two original Strike receives deposit 396 sats before one synthetic
+feeding, with four sats of conversion fees, zero remaining custody and no
+transfer credit. The matched source/CI trees and artifact hashes are retained in
+that checkpoint. Installed Runtime, Android, live provider and physical acceptance
+remain open. The separate [native backup-copy helper](testing/cashu-copy-normalization-local-20261117.json)
+passes local main/WAL, row-ID/signed-byte and 21 refusal/interruption checks,
+strict Clippy and its CLI privacy test. The later
+[FIFO correction](testing/cashu-copy-special-files-20261117.json) prevents blocking
+before file-type validation and passes 24 refusal/interruption cases in isolated
+root fixtures. All ten [selected-source workflows](testing/cashu-copy-special-files-ci-20261117.json)
+now pass at `7f8a2d7`, including the installed systemd rehearsal; a browser
+dependency-download mirror failure passed on retry.
+The [runbook](deployment/cashu-backup-collection.md) keeps installed writer
+quiescence, complete credential coverage and funded recovery explicitly unfinished.
+
+The subsequent [coordinated collector](testing/cashu-coordinated-collector-ci-20261117.json)
+passes all ten workflows at `3bdf518`.
+It requires all six writers to remain masked/stopped, retains correlated
+native/Cashu images, mint stores, declared key copies and exact artifacts, then streams an age-encrypted
+archive while retaining plaintext/incomplete evidence. The native key verifier
+checks the seed binding and both distinct signer-client public identities.
+Local disposable-native composition passes encryption/decryption, committed WAL
+and retained-copy hashes, four collector refusals, six key-material refusals and
+two encryption fault cases; service-status responses and the host
+maintenance-lock path are mocked, with actual UID scans and native verification.
+Thirteen root-owned unit checks pass, including an actual isolated bootstrap
+refusal before collection. Installed credential coverage,
+portable credential export/reprovisioning, historical descriptor completeness,
+funded rollback and external reconciliation remain open. No production key,
+service, real transfer or physical action was used by this work.
+
+The [funded rollback fixture](testing/cashu-funded-rollback-fences-20261117.json)
+passes at `fa15df3`. It exercises stale wallet and core copies after a lost
+melt response, 398 sats of independently verified synthetic Strike settlement,
+and a single simulated feeding. Both older images are refused by the startup
+fences. The same fixture records and replays the original wallet report through
+the scoped operator reconciliation function. This does not grant permission to
+clear a fence or resume from a restored checkpoint.
+
+The [encrypted restore stage](testing/cashu-encrypted-restore-stage-local-20261117.json)
+opens the real collector archive through the authenticated launcher, replays
+native inventory and key binding checks, and stages all six roles with recovery
+fences. The fixture verifies exact staged file hashes and committed WAL content.
+The follow-up review command checks these hashes again, reports original external
+references from the fenced images, and can compare a later retained checkpoint.
+The encrypted staging and changed-image refusal pass with isolated disposable
+native state. The funded fixture now also exercises recovery of the original
+mint quote, Strike receive and feeder UUID from later reference evidence.
+[Selected-source CI evidence](testing/cashu-staged-restore-worklist-ci-20261117.json)
+records the authenticated archive and funded worklist results at `55fcc19`.
+The [single Strike receive verification](testing/cashu-restore-strike-local-20261117.json)
+now checks the original signed treasury invoice and completed receive through
+the native CLI with the original destination and credential scope. The funded
+loopback fixture verifies a 398-sat receive without changing checkpoint bytes.
+The authenticated encrypted restore launcher refuses an unknown intent.
+The mint observer selects the submitted quote and CDK operation and uses the
+wallet's constrained HTTPS read path. The feeder observer queries the original
+UUID and records uncertainty or conflicts with the checkpoint. The funded local
+fixture selects the original mint quote and passes the feeder checks while the
+older core and wallet images remain fenced and unchanged. The fixture copies
+the selected CLI into an executable private file so GitHub's stripped artifact
+permissions do not interrupt the test.
+All ten workflows passed at [the mint and feeder checkpoint](testing/cashu-restore-mint-feeder-ci-20261117.json).
+The combined comparison matches provider observations to the exact original
+selections in the fenced stage and independently retained reference. The funded
+fixture detects the deposit and confirmed feeder attempt missing from the older
+checkpoint and verifies retained allocation totals. It keeps pending observations
+unresolved and refuses rehashed evidence with a spliced selection, foreign
+checkpoint or wrong preimage.
+[All ten workflows passed for the comparison checkpoint](testing/cashu-restore-comparison-ci-20261117.json).
+The mint custody observer selects pages from a fenced CDK namespace by its
+verified file hash and compares the exact retained proof points with the mint.
+The comparison rejects missing or reordered pages and recomputes the reported
+totals. The authenticated archive fixture exercises the native observation and
+comparison of an empty namespace with no external lookup.
+The funded rollback fixture observes all 400 sats listed as unspent in the
+older image as already spent by the synthetic mint. It also observes the
+retained non-spendable records in the newer image, finds no mint-reported
+unspent value, and preserves both database images.
+All ten workflows passed at `e321a58`.
+[Authenticated CI evidence](testing/cashu-restore-custody-ci-20261117.json)
+records both fixtures.
+Installed recovery and live outcome verification remain open.
+
+The encrypted archive rehearsal also passes with copies assigned to six
+distinct runtime UIDs. Each native command stops at its recovery guard and
+leaves the restored files byte-for-byte unchanged. The wallet reports the
+fence with an unreadable seed file, and the Cashu signer reports it without
+a client credential. The rehearsal uses disposable state in private mount
+and network namespaces. All ten workflows passed at `ebdbf47`.
+[Authenticated runtime fence evidence](testing/cashu-restore-runtime-fences-ci-20261117.json)
+records the six native results.
+
+An operator can recheck a `missing_owned_outputs` hold on an original acquiring
+operation using a protected exact-configuration approval. Fresh verified
+ownership advances the acquisition atomically and retains its hold history.
+The funded CDK test preserves the hold through an unavailable and an incomplete
+mint response, then recovers the original 7 sats after a 1-sat receive fee with
+one swap submission and no receipt export during the recheck. The unfunded CLI
+fixture verifies that insufficient evidence preserves the eligible hold and
+another hold cause is rejected.
+
+Cashu request rotation now accepts an explicitly retired descriptor within a
+protected time window. Configuration regenerates its ID from the original
+endpoint and mint inventory using the current receiving key. Intake honors only
+the intersection of the advertised mint list and current qualified policy.
+The wallet tests verify expiry and the original status capability on a
+byte-identical retry. All ten workflows passed at `6caaaf8`. The
+[authenticated HTTP fixture](testing/cashu-retired-request-ci-20261118.json)
+retains exactly two admissions and refuses a changed body after restart.
+
+The wallet can rotate its receiving key while preserving the original
+registration and seed. It selects the key from the original proof lock, and
+startup verifies that queued payments still have their keys. Synthetic funded
+tests verify three 8-sat acquisitions across an old queued payment, a delayed
+nutzap and a retired QR. The compatibility windows use current mint admission
+policy and refuse new work at their cutoff. Encrypted checkpoints include all
+configured keys under their runtime filenames so they can be restored behind
+the startup fence. The encrypted archive rehearsal verifies a rotated wallet's
+original anchor and new key file, rejects a substituted new key, and preserves
+both files during fenced native startup under separate UIDs.
+
+The protected `review-mint-policy` command checks a candidate against the
+current configuration and closed wallet. It preserves issuer identities,
+pinned keys, recovery policy, and previously advertised requests. A disposable
+native restart verifies that retiring an issuer and adding another leaves the
+original held acquisition and its mint namespace intact. The authenticated
+maintenance launcher verifies the exact review digests and installs the
+candidate while the wallet is masked and stopped. The disposable rehearsal
+preserves configuration metadata, checks the runtime UID and both locks, and
+verifies an identical retry. Its systemd status responses are simulated. The
+[operator runbook](deployment/cashu-operator-controls.md) covers the review and
+its activation boundaries.
+
+The wallet can clean up one previously reported melt while new execution is
+paused. The protected `cleanup-treasury` approval binds the retained report
+digest and original operation. The funded fixture refuses incomplete spent
+evidence, interrupts the checkpoint after the CDK changes, and completes
+cleanup once on retry. The earlier backup comparison still covers the retained
+CDK records before cleanup. The same fixture verifies one 398-sat synthetic
+Strike deposit and one simulated feed. The native CLI fixture covers refusal
+of invalid approvals and a missing original operation.
+
+Core can verify one originally issued treasury invoice and reconcile its
+Strike deposit and authenticated wallet report while the receive service is
+stopped. A funded core fixture verifies read-only preview, deposit retention
+during wallet unavailability, later completion from the original report and
+an exact retry without provider or wallet calls. The core produces one
+settlement and makes the original credit eligible for one simulated feed.
+The native CLI fixture checks protected scope, inactive core and recovery
+fences against a disposable ledger.
+
+Cashu operator controls update **2026-11-17**: the
+[protected planning/reconciliation checkpoint](testing/cashu-operator-controls-20261117.json)
+passes 650 core tests (12 ignored), 179 wallet tests (seven ignored), required
+format/strict Clippy/dependency/vendor gates and both actual CLI fixtures under
+unused UIDs in private namespaces. The [current-source financial matrix](testing/cashu-operator-composition-20261117.json)
+passes all eight HTTP/receipt/treasury cases with health accounting. A bounded
+root-reviewed core request can preview/retain custody reservations and replay its
+original intent. A separately approved wallet command can verify owned outputs
+for one original acquiring operation without swap/melt replay or receipt export.
+The [runbook](deployment/cashu-operator-controls.md) records exact scopes and
+fixture limits: empty/unfunded CLI state and mocked systemctl remain separate
+from funded native tests and installed acceptance. Held-policy administration,
+treasury reconciliation, coordinated funded restore, multi-mint/economical-change
+composition and independent client/provider acceptance remain open. No Cashu
+service, operator seed installation or live financial/physical activation occurred.
+
+Cashu private health update **2026-11-17**: the
+[operational diagnostic checkpoint](testing/cashu-private-health-20261117.json)
+passes 175 wallet tests (seven ignored), strict Clippy/format/vendor/dependency
+gates and eight full HTTP/receipt/treasury composition cases with independent
+health-accounting assertions. Private status now reports journal custody and
+fees, queue age/lag, unknown legacy ages, future timestamps, retained core epochs
+and fenced wallet registration mismatches. It reads no keys or provider state;
+journal values are not current balances or spend permission. Constrained
+operational commands, complete coordinated recovery and installed acceptance
+remain open. No new runtime identity, key, service or financial/physical activation
+was performed by this increment.
+
+Cashu intake update **2026-11-17**: durable
+[backpressure](testing/cashu-intake-backpressure-20261117.json) bounds uncredited
+work and replay aliases. [Independent receives after compensated rejection](testing/cashu-mint-progress-20261117.json)
+retain original recovery material and counter fences; all 170 wallet tests pass
+(seven ignored). The [HTTP retry checkpoint](testing/cashu-http-retries-20261117.json)
+passes all 648 core tests (12 ignored), strict Clippy and required local gates;
+its separate-UID fixture retains two source records after 80 identical retries
+per payment and preserves status across paused restart. The
+[notice inventory correction](testing/cashu-license-authors-20261117.json) passes
+13 tests and reduces missing notices to 15, with distribution readiness false.
+The later [Rust Bitcoin release comparison](testing/cashu-rust-bitcoin-release-notices-20261117.json)
+matches ten archives to signed tags and reduces the remaining notices to five.
+The [2026-11-18 release notice checkpoint](testing/cashu-release-notices-20261118.json)
+supplies pinned release notices or declared SPDX texts for the final five.
+Strict offline export covers all 462 locked entries. The final distribution
+artifact and its linked dependency inventory remain open.
+The [current-artifact financial matrix](testing/cashu-final-composition-20261117.json)
+now passes eight full HTTP/receipt/treasury IPC cases, including normal/lost
+replies and repeated descriptor use, with actual CDK and an offline SDK sender.
+The [dedicated seed preparation tool](deployment/cashu-seed-provisioning.md)
+also passes eight public/synthetic tests. The operator confirmed seed staging;
+metadata-only observation found a private 64-byte file under a 0700 directory.
+The phrase was not supplied to Codex; runtime installation remains pending. Multi-mint/economical-change financial composition,
+operational/recovery work and independent-client acceptance remain open in the
+[full-plan map](testing/cashu-acceptance-gaps.md). The operator canceled the
+security review; no completed-review claim or Cashu activation follows.
+
+Cashu recovery update **2026-11-16**: the
+[initialized combined native backup rehearsal](testing/cashu-empty-combined-native-backup-20261116.json)
+now verifies 14 Cashu components/two mint stores together with all four native
+CyberHerd journals and identical core bytes, and rejects Cashu/payout signer
+substitution. The [standard core gate](testing/cashu-correlation-standard-gates-20261116.json)
+passes 648 tests (12 ignored), strict Clippy and required local checks. The [corrected root correlation fixture](testing/cashu-correlation-root-result-20261116.json)
+passes without weakening immutable bindings, and its
+[full corrected-source gate](testing/cashu-correlation-corrected-gates-20261116.json)
+passes all 648 tests and required local checks. Funded rollback, full key/client recovery,
+writer-quiescent collection and external reconciliation remain open. No Cashu
+service, schema, credential, payment or feeder activation is claimed.
+
+Cashu source checkpoint **2026-11-16** remains an implementation in an isolated
+branch under the [Nut November plan](planning/cashu-nutnovember-implementation-plan.md).
+No Cashu service, schema upgrade, receiving, spending, public announcement or
+physical activation is deployed by this work. The
+[wallet/core boundary](architecture/cashu-wallet-boundary.md),
+[compatibility checkpoint](testing/cashu-compatibility.md) and
+[development runtime](deployment/cashu-wallet-development.md) distinguish source
+fixtures from installed acceptance.
+
+The 2026-11-16 selected-artifact qualification passes the full loopback HTTP,
+authenticated receipt and treasury IPC, actual CDK and independently mocked Strike
+composition. The [four-case SDK matrix](testing/cashu-repeated-request-result-20261116.json)
+includes two distinct acquired ordinary payments to one descriptor, each with its
+own capability, replay after credit consumption, and normal/lost melt replies.
+Original credit remains stable and fee/source accounting is explicit. The wallet
+passes 166 native tests with seven ignored plus strict Clippy/format/vendor gates.
+That SDK checkpoint compiled its core fixture and ran protocol/vendor/audit checks.
+The later recovery checkpoint above passes the full standard core suite; the
+corrected recovery source now passes its separate full gate above. Independent end-user
+applications, actual browser/phone/TLS, multi-mint settlement composition and
+approved live/physical acceptance remain open.
+
+The [native empty-state recovery fixture](testing/cashu-native-recovery-fences-20261116.json)
+passes all three explicit core/wallet/Cashu-broker fences. The [offline inventory
+verifier](testing/cashu-backup-foreign-keys-20261116.json) passes 18 tests and native
+schema checks, including streaming memory bounds and foreign-key validation.
+Funded rollback and a full combined inventory including the existing CyberHerd
+membership, payout and payout-signer journals remain incomplete. No restore or
+restart authorization follows from these checks. See the full
+[acceptance map](testing/cashu-acceptance-gaps.md) for remaining requirements.
+
+The separate wallet runtime implements protected startup, common acquired-proof
+accounting, receipt retries, default-off NIP-61 discovery, and bounded publication
+with exact signed bytes and per-relay acknowledgment. The purpose-limited signing
+broker and nak adapter have synthetic NIP-46/NIP-44 and separate-UID IPC coverage.
+Original-operation treasury admission, whole-proof selection, separately gated
+splitting, paid recovery, combined fee/change accounting and retryable CDK cleanup
+are wired. Cleanup preserves unrelated operations and permits subsequent same-mint
+receiving. A missing unsubmitted saga can be reconstructed only when its original
+quote UUID and complete proof reservations are retained. The earlier cleanup
+snapshot passed **154 tests**, strict Clippy, formatting and vendor checks; its
+source hashes remain unchanged. See the retained
+[cleanup](testing/cashu-cdk-cleanup-20261116.json),
+[quote adoption](testing/cashu-quote-adoption-20261116.json) and
+[partial preparation](testing/cashu-partial-preparation-20261116.json) evidence.
+Interruptions before proof reservation or before an original UUID is retained
+still remain held and require further recovery work.
+
+The core imports authenticated receipts once, preserves cap/retirement provenance,
+and independently verifies purpose-bound Strike treasury receives without issuing
+new donation credit. Financial feed plans now freeze source allocations before
+physical dispatch, persist across restart and protect reserved credit from
+retirement. Explicit local release retains history; a settled replacement plan is
+linked to the superseded waiting plan. Default-off job planning creates bounded
+per-mint treasury reservations atomically with their plan links, subtracting
+verified coverage and pending transfers. Existing transfer jobs survive plan
+release. Physical requests and confirmed debits use the exact financial parts;
+unknown physical outcomes keep the original authority and UUID.
+
+The [financial planning checkpoint](testing/cashu-financial-jobs-20261116.json)
+passes **629 core tests**, with nine explicitly ignored fixtures, plus formatting,
+strict Clippy, SQLite vendor verification, whitespace and a cached advisory audit
+(1,509 advisories; 317 dependencies). Native default/all-feature dependency trees
+contain no active RSA dependency. The initial retirement-test failure is retained
+in the evidence; adding an explicit financial-release step resolves it. This is
+working-tree source qualification, not release approval or installed acceptance.
+
+The optional Cashu nginx include passes [four isolated edge tests](testing/cashu-nginx-20261116.json) for exact routes, method/body bounds and local log suppression. Installed WAF/CDN and sender acceptance remain open.
+
+Independent [Cashu-TS 4.7.2 parser testing](testing/cashu-ts-request-initial-20261116.json) found a concrete compatibility blocker: both CDK-generated amountless `creqA` fixtures contain CBOR `a:null` and are rejected by that parser; both `creqB` fixtures parse correctly. This is isolated library-level evidence, not sender/payment qualification. A [standalone candidate correction](testing/cashu-ts-request-candidate-20261116.json) passes exact typed CDK round-trip, all four Cashu-TS parser cases and focused browser decoding/collision checks. The wallet encoder correction and separate-UID fixture children are now integrated; fresh core/wallet gates and a corrected CLI build are running. The [corrected native CLI output](testing/cashu-request-corrected-native-20261116.json) now passes both native fixtures, all four independent Cashu-TS parsing cases and all 44 browser tests. Integrated Rust gates and explicit separate-UID metadata composition remain running/pending; actual sender applications and phone scans are still unqualified.
+
+The [two-QR frontend checkpoint](testing/cashu-overlay-20261116.md) passes all 44 website browser tests, including exact native-CDK request decoding at 1080p and 720p and full-roster/goat-card/banner/payment/feed-effect collision checks. Protected wallet selection passes its separate configuration checkpoint; read-only metadata IPC, public request HTTP and snapshot wiring are now implemented and under full qualification. Positive cross-UID metadata composition and real sender/phone scans remain pending.
+
+Age/balance/operator sweeps now pass the [635-test core checkpoint](testing/cashu-sweeps-20261116.json), with nine explicitly ignored fixture entry points, strict Clippy, formatting, vendor checks and the cached advisory audit. This includes shared reservations when sweeps race feed funding, atomic operator requests and fair mint admission. The [combined wallet/core checkpoint](testing/cashu-combined-settlement-20261116.json) now qualifies the zero-fee 600/250/150 case with actual CDK acquisition/melt and independent mocked Strike verification; 636 core tests pass with ten fixture entry points explicitly ignored by the ordinary suite. The explicit combined runner passes separately. The [explicit combined lost-melt-response/early-Strike/paused-recovery fixture](testing/cashu-combined-lost-reply-20261116.json) also passes with source-matched native artifacts; all wallet and core gates pass with unchanged source hashes (155 wallet tests, 636 core tests; six and ten explicitly ignored fixture entry points respectively). The runner rejects older artifacts lacking its case markers. Combined fee/change and complete private-transport coverage remain open. Both inactive service examples pass syntax verification only; installed runtime/network acceptance remains open. Other
+unfinished work includes protected operator release tooling, complete automatically
+planned wallet-to-core settlement qualification, public reusable descriptor serving
+and independent-wallet acceptance, positive HTTP-to-wallet UID qualification,
+coordinated wallet/core/broker backup and restore, private custody/lag health,
+the requested two-QR overlay and real scan matrix, inactive deployment artifacts,
+installed signer acceptance, exact-commit CI/review and the November contribution
+package. Cashu-derived rewards remain disabled. Production activation and real
+payments or physical acceptance still require the explicitly approved operator
+steps in the plan. Existing live checkpoint descriptions below remain unchanged.
+
 CyberHerd membership audit **2026-11-16**: the
 [morning join investigation](testing/cyberherd-membership-audit-20261116.md)
 identifies a missing profile lookup on the actor's signed outbox relays,
@@ -7,7 +328,13 @@ shared core-bridge admission starvation and a stalled membership signer relay
 bundle. Source corrections add bounded profile fallback, independent role
 quotas/connection slots, shared payout-client pacing and individual signer-relay
 fallback, alongside the pending optional-social liveness correction below.
-Qualification is in progress; these changes are not installed.
+The exact candidate passed all 14 CI checks and was installed with operator
+approval on 2026-11-16. Fresh four-journal backup/native comparison passed;
+Jr’s and nostrpoorgirl’s memberships recovered, three messages received relay
+acknowledgements, and the pending input queue drained. This deployment evidence
+is for the CyberHerd candidate, not the uninstalled Cashu work. Core’s missing
+Strike payment-read permission was subsequently corrected by the operator;
+normal reconciliation recorded 93 sats spent, 1 sat released and zero held.
 
 CyberHerd intake checkpoint **2026-11-15**: the optional-social
 [liveness correction](testing/cyberherd-intake-liveness-20261115.md) is under source
@@ -479,3 +806,49 @@ integration tests, not deployment configuration alone. See
 status and [`deployment/deployment-artifacts.md`](deployment/deployment-artifacts.md)
 for the corrected nginx/release workflow. Keep tracker #6 open until all required
 source, integration and live acceptance evidence is recorded.
+
+The [Nut November source inventory](testing/cashu-november-inventory.md) records the pre-November reference, Cashu starting revision, evidence scope and unfinished submission requirements. No final Cashu release/tag or submission is claimed.
+
+The read-only metadata wallet increment passes [156 tests and all wallet gates](testing/cashu-public-metadata-wallet-20261116.json). The separate fee/change composition draft is prepared but uncompiled; its [runner rejects older zero-fee artifacts](testing/cashu-combined-fee-old-artifact-rejection-20261116.json). Positive fee/change qualification remains open.
+
+The fee/change draft now has a passing [standalone synthetic mint-change probe](testing/cashu-fee-change-mint-probe-20261116.json) for real signatures/DLEQ, preserved recovery material and replay rejection. Actual CDK scheduler/change handling and combined accounting remain unqualified.
+
+The [full-plan acceptance map](testing/cashu-acceptance-gaps.md) keeps all receiving, recovery, operational, interoperability and release requirements in scope. It additionally records the missing asynchronous sender status capability and protected financial-plan release CLI; neither is covered by the passing metadata/parser fixtures.
+
+A [four-test standalone sender-status prototype](testing/cashu-receive-status-prototype-20261116.json) now verifies opaque capability persistence, nonce/epoch binding and evidence-bound status projection. It is not integrated into the wallet listener or public HTTP path; that requirement remains open.
+
+Sender-status private dispatch/core forwarding/HTTP code is now drafted but uncompiled. The inactive status-route nginx addition passes [four expanded local edge tests](testing/cashu-status-nginx-20261116.json), including the 512-byte bound and capability log suppression. No application status endpoint or live activation is claimed.
+
+The [request/metadata acceptance checkpoint](testing/cashu-request-acceptance-20261116.json) now passes full integrated Rust gates, positive separate-UID HTTP/WebSocket metadata (including rogue peer and paused restart), ordinary/lost-reply financial composition, corrected native CLI/parser/browser checks, and post-regeneration shared protocol checks. Canonical QR fixtures are now regenerated from the corrected binary. The first explicit metadata attempt failed because fresh-netns loopback was down; its setup correction and original failure are [recorded](testing/cashu-public-request-loopback-initial-20261116.json).
+
+The next 15-file source increment is now integrated and under fresh core/wallet gates: immutable sender-status capabilities with private listener/core/HTTP dispatch, the bounded status route, protected exact-plan/epoch financial release with preview and stopped-core approval gates, and the real signed-change/nonzero-fee combined fixture. Their source is implemented, but application/root/positive fee/status transport qualification remains pending. No production services or financial settings changed.
+
+### Cashu integrated development checkpoint — 2026-11-16
+
+The uncommitted Cashu source now preserves the separately installed CyberHerd
+membership/payout fixes. This checkpoint does not install or enable Cashu.
+
+Wallet formatting, strict Clippy, 154 library tests, seven other native tests and
+vendor checks pass; seven specialized tests are explicitly ignored by Cargo.
+The core's isolated loopback rerun passes formatting, strict Clippy and 505
+library tests, with ten ignored; all binary/integration gates, receipt protocol
+checks, vendor verification and audit now pass, with source hashes unchanged
+([evidence](testing/cashu-integrated-core-result-20261116.json)). The initial restricted-sandbox failure is retained separately and is
+not used as a passing test result.
+
+Matched native artifacts pass separate-UID HTTP admission/status, receipt,
+signer and treasury checks, all six synthetic settlement variants, three root
+financial-approval checks and eight root maintenance fixtures. The HTTP check
+admits two pending payments without claiming acquired funds. The fee-only
+settlement variants consume the original 1000-sat credit once without another
+donation. Signed-change variants retain the one-sat dust and use later native
+funding. Providers and confirmation are synthetic; no real payment or feeding
+was performed.
+
+The offline backup verifier passes twelve synthetic checks covering private
+inventory, registrations, receipt/acknowledgment agreement and retained treasury
+reports. Full coordinated restore, external outcome/ownership reconciliation,
+complete financial IPC, multi-mint composition, independent senders, phone scans,
+guarded release CLI, final public source/CI/package and operator-directed live
+acceptance remain open. The [acceptance map](testing/cashu-acceptance-gaps.md)
+links exact evidence and remaining requirements.

@@ -1,0 +1,317 @@
+{
+  "recorded_at": "2026-11-16T07:25:06.048544+00:00",
+  "base_commit": "54c053b1ae655c829fc6bed96ad59b22b409c082",
+  "integrated_commit": "382046cddc5e55d9bf4406013eaf2a75c37ddac3",
+  "method": "reviewed three-way source integration; existing work hash-checked before writes",
+  "git_history_changed": false,
+  "production_state_changed": false,
+  "combined_verification": "strict all-target/all-feature Clippy passed; full locked all-feature suite passed; snapshot rechecked unchanged before subsequent expiry correction",
+  "files": [
+    {
+      "path": "docs/architecture/cyberherd-ingress.md",
+      "before": "77d6a7aaaab24e350cdb8c3dd7c54051bb1c95334a4fe9b37d3c02a2bcd2855c",
+      "candidate": "44a117b0978ce2fcaf00e8207841fe2c6c436ba41f62c9df246ba8dc56683e3d",
+      "status": "clean",
+      "existed_before": true
+    },
+    {
+      "path": "docs/architecture/cyberherd-outgoing-contract.md",
+      "before": "b266cf7e5f55355f1f25399c9dc98e4c4e2548e78c45e08d7fa519641909b216",
+      "candidate": "cc3b91c0fd9155b29a9fc61a332c888f06d2bd95a6286c0977d8ff851622b7bf",
+      "status": "clean",
+      "existed_before": true
+    },
+    {
+      "path": "docs/architecture/cyberherd-outgoing-invoices.md",
+      "before": "b6cb23ff31c226e69fb16fb094bed1952a08fbab2c5b21da094154b208199ff5",
+      "candidate": "1b904c3b5ef9f54bdca1816f923c786fa23f7b4a17b4ffd88dd27c3296512f0d",
+      "status": "clean",
+      "existed_before": true
+    },
+    {
+      "path": "docs/architecture/cyberherd-payout-runtime.md",
+      "before": "dde8b3d33605569e28313890e481b184882fe7885e244e5b3038024b51dfba98",
+      "candidate": "03e53c3fd087545a6615bd13daccc12f8cf59a9e27765b95f13b823b184adfd5",
+      "status": "clean",
+      "existed_before": true
+    },
+    {
+      "path": "docs/architecture/cyberherd-worker.md",
+      "before": "ac431240f11993d06e7359a83d6c5a53f21d19cf04bb10c82d86a04cfd9b1616",
+      "candidate": "2aa046a56fb4f91bfe7f0fedc887437c68f52d13bc814b8e69676c1a0a3546eb",
+      "status": "clean",
+      "existed_before": true
+    },
+    {
+      "path": "docs/deployment/cyberherd-state-maintenance.md",
+      "before": "59b85d645d9fc6eb9da2315a7d434004f94c9d5718865bf12c73ec4ed75b688c",
+      "candidate": "5ea1caa52758ad620ec98d2665ae5eea2aa175299d033f6f03b3d49014222aa6",
+      "status": "clean",
+      "existed_before": true
+    },
+    {
+      "path": "docs/implementation-status.md",
+      "before": "e252103d2f100b1d7ef1c5e2f2671c27747d799daada10a6b47af65eaa2df5d3",
+      "candidate": "0ce59b828b5035f51b9de8f37b30fe7fe7c26c2f868013a2c70e2cc6bfce05fe",
+      "status": "resolved_preserving_both_checkpoints",
+      "existed_before": true
+    },
+    {
+      "path": "docs/testing/cyberherd-intake-liveness-20261115.md",
+      "before": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "candidate": "7032a57642f00e71a6984071c63ec2529c379f78c12eba2c6b6d333f9870581a",
+      "status": "clean",
+      "existed_before": false
+    },
+    {
+      "path": "docs/testing/payout-fallback-live-20261115.md",
+      "before": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "candidate": "6482b5d9b4a452f85375f1c053bc35fe4c87a6fe6fb6eb5c1e252dac5714c3cf",
+      "status": "clean",
+      "existed_before": false
+    },
+    {
+      "path": "src/bolt11.rs",
+      "before": "c694ae8316bcc991ca900a9964c6be2192efaa9f03e5faf2e86f1fdd647046fa",
+      "candidate": "d97ed33774e7d57d1ba39df0fe10b9ee8f64d07d443621e8a1926435ffe71a9b",
+      "status": "clean",
+      "existed_before": true
+    },
+    {
+      "path": "src/cyberherd/ingress.rs",
+      "before": "90e37b21cb1f88c47c4df532e18cb27106d18624a58466d222ca6ba09bc3aaf7",
+      "candidate": "12654b11babbd35c6cf41b3291ea979a9ede9019f77a5a9227477e443a26c367",
+      "status": "clean",
+      "existed_before": true
+    },
+    {
+      "path": "src/cyberherd/ingress_store.rs",
+      "before": "65ce3c3000af794d79ad3f1f9df157f20beb4cb1c21c4b89c695c49b7b7ef3d0",
+      "candidate": "48841e390345c3e22191b2360ae01269c777340ce43a8f0fb5f9689214da07c0",
+      "status": "clean",
+      "existed_before": true
+    },
+    {
+      "path": "src/cyberherd/ingress_tests.rs",
+      "before": "523ea7380800aad59bd88b58dc0b8e6e6a4ca7cfec2c03c78ca2b6d1851b014a",
+      "candidate": "32554f49744874dd68f1a4a8cd9747ac7e629407f2e65411586c7b37e7f1591a",
+      "status": "clean",
+      "existed_before": true
+    },
+    {
+      "path": "src/cyberherd/operator_store.rs",
+      "before": "7667060f1ee63cad95aee99010e385b7f92bf4c124c0071bd98db7a8fe5599b6",
+      "candidate": "caf6d972f88ddf9b26d975ceaa33a7c5bb5e107c86eaa666894c7f49fdbc32cb",
+      "status": "clean",
+      "existed_before": true
+    },
+    {
+      "path": "src/cyberherd/operator_tests.rs",
+      "before": "c961f14c32744aaf812e9fc79d31c4e611081d5e570b2e8175c22906d2dfa46f",
+      "candidate": "f4fe8920092fa526895dd94b96f178d3d9c500bd61946aeee2f41c63aa948aaf",
+      "status": "clean",
+      "existed_before": true
+    },
+    {
+      "path": "src/cyberherd/runtime.rs",
+      "before": "3efb0e5096bc4f5e2f680792d83134b989170fe5b114303bf3c20802087cdc1b",
+      "candidate": "f391a90a96e1c26390c668a49266e844aa71ccdcb79961886f8d2b4ae3fb364e",
+      "status": "clean",
+      "existed_before": true
+    },
+    {
+      "path": "src/cyberherd/worker.rs",
+      "before": "3be2a58fd8ce9ca5b306315eabc6183690d7774b83c9557b4b417441454f29d4",
+      "candidate": "79b7a43f2fac424076600d1edce9dd66e28d90ca8be89d8d0fa8c662ad30575d",
+      "status": "clean",
+      "existed_before": true
+    },
+    {
+      "path": "src/payout/funding_tests.rs",
+      "before": "474a5a830541daf816ebef11d243c74346ffd1581f55fa3c2a4bf69a71bb2391",
+      "candidate": "90ba3e291ee1ed4d084a12b78c0b986e304c57a5c6784b48597877779eaa7be0",
+      "status": "clean",
+      "existed_before": true
+    },
+    {
+      "path": "src/payout/invoice.rs",
+      "before": "c98f9acc07ed41bf8bc8dab6b0167db60df328fa4ae9c1e01c24837c99b3b080",
+      "candidate": "45861e4f57f096d875ceacba9ee2e6668637e5e0266cf45690500116b2e0f7a2",
+      "status": "clean",
+      "existed_before": true
+    },
+    {
+      "path": "src/payout/provider.rs",
+      "before": "35ac20fb000530c30c6075faaf7afe6d0ade73f4dfe3da229faac571fcc7a08f",
+      "candidate": "f548c7b0e33dde5adfb1485b18bc77618df5f777e71cff794e8ddb7085cf758c",
+      "status": "clean",
+      "existed_before": true
+    },
+    {
+      "path": "src/payout/recipient.rs",
+      "before": "4f0571f6636c3f02810dd360a79d2b6f581fbe3e586eefa9dd915547aeb21456",
+      "candidate": "7644f1d41a10672c3b48c481b4f0d0899423298041d9f95ebf2055a60cf04f95",
+      "status": "clean",
+      "existed_before": true
+    },
+    {
+      "path": "src/payout/store_fee_probes.rs",
+      "before": "473e33e8d8e120999a19154117ab42d487c885452005e7d1ad9e66684be4f4f4",
+      "candidate": "6143964fd45ab08a8a08b23dc6b4a8696ff9966ed0ccac514c66e8167a94f92a",
+      "status": "clean",
+      "existed_before": true
+    },
+    {
+      "path": "src/payout/store_provider.rs",
+      "before": "2d04d9ca15fe7c320382060f8d0ed414a7235351d8ecd1375868d468348c3154",
+      "candidate": "920272b61aa44a886e6cdc6ad7a8a401b264808682bad05d932189e087679086",
+      "status": "clean",
+      "existed_before": true
+    },
+    {
+      "path": "src/payout/worker.rs",
+      "before": "f1f13ac4cb85529f72ed07c918e81ca25b87dc7a3c23b15a03b5c3795bd7a148",
+      "candidate": "a1d94d823dbc7c7bcf5c721791be65e5bd88baddc930e7b39e343f14fb8cb00f",
+      "status": "clean",
+      "existed_before": true
+    },
+    {
+      "path": "src/payout/worker_tests.rs",
+      "before": "922b9d25023b1f50cb95e322631776561116f90dc45e93a20ef53e7d63af705e",
+      "candidate": "8941d4ac6cb81f38f628fd72c29682c49cc1eed3cf09ec2104fb44296e12f8da",
+      "status": "clean",
+      "existed_before": true
+    },
+    {
+      "path": "src/state_maintenance/database.rs",
+      "before": "7d53bea5d8f427f3d3e5cddb39ba904df397959227cafc742f38b7b3678bedfc",
+      "candidate": "53297e3cb9c21ee64119fedaa4658b51a559eb07cdff14a6e1ba53b08285432a",
+      "status": "merged",
+      "existed_before": true
+    }
+  ],
+  "source_snapshot_sha256": "61fd0406b440aaec343a880c048599f59828cb0a5f77c82a5af47399c38fc374",
+  "full_suite_log_sha256": "1889b3fb8010dcdd2f5b9e5a5d109cf34be2d0c23f8f6d79eb57fae5fdaa3035",
+  "test_results": [
+    {
+      "passed": 483,
+      "failed": 0,
+      "ignored": 8
+    },
+    {
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 4,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 26,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 21,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 7,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 10,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 6,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 13,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 6,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 0,
+      "failed": 0,
+      "ignored": 1
+    },
+    {
+      "passed": 4,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 29,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 9,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0
+    }
+  ]
+}

@@ -95,6 +95,73 @@ class ProgramBoundaries(unittest.TestCase):
                     P.inclusive_clone_compare(Path('/missing'),{}, {},{})
                 copy.assert_not_called();scratch.assert_not_called()
 
+    def test_cashu_core_source_requires_distinct_review_before_any_host_access(self):
+        for selector, fee in ((True, False), (1, True), ('true', True), (None, True)):
+            with self.subTest(selector=selector, fee=fee), patch.object(P.C, 'root') as root:
+                with self.assertRaisesRegex(ValueError, 'distinct inclusive-fee'):
+                    P.prepare(None, None, None, None, None, None,
+                              inclusive_fee_upgrade=fee, cashu_core_source=selector)
+                root.assert_not_called()
+
+    def test_reviewed_cashu_core_uses_exact_prefix_without_old_verifier_fallback(self):
+        record = {'inclusive_fee_upgrade': True, 'program_upgrade_only': False,
+                  'cashu_core_source': True}
+        receipt = {'id': str(uuid.uuid4()), 'accepted': True, 'resume_authorized': False}
+        manifest = {'report': {'rows': {'core': {'_sqlx_migrations': 28}}}}
+        with patch.object(P.U, 'stopped'), patch.object(P.U, 'state_files', return_value={'frozen': True}), \
+                patch.object(P.U, 'sources_match') as sources, patch.object(P.U, 'digest', return_value='digest'), \
+                patch.object(P.C, 'read_json', return_value=manifest), \
+                patch.object(P, 'original_verify') as old, \
+                patch.object(P, 'inclusive_native', return_value=receipt) as native, \
+                patch.object(P.M, 'note') as note:
+            self.assertEqual(P.inclusive_backup(Path('/protected'), {}, record), {'frozen': True})
+            old.assert_not_called()
+            self.assertEqual([c.args[1] for c in native.call_args_list],
+                             ['snapshot-before-inclusive-fees', 'verify-inclusive-fee-upgrade-source'])
+            sources.assert_called_once()
+            accepted = note.call_args.args[2]
+            self.assertIsNone(accepted['native'])
+            self.assertIs(accepted['original_verifier_used'], False)
+            self.assertIs(accepted['cashu_core_source'], True)
+            self.assertEqual(accepted['selected_source'], receipt)
+
+    def test_cashu_prefix_failure_or_wrong_schema_never_falls_back_or_accepts(self):
+        record = {'inclusive_fee_upgrade': True, 'program_upgrade_only': False,
+                  'cashu_core_source': True}
+        for count in (25, 29, True, '26', None):
+            with self.subTest(count=count), patch.object(P.U, 'stopped'), \
+                    patch.object(P.U, 'state_files'), patch.object(P.U, 'sources_match') as sources, \
+                    patch.object(P.C, 'read_json', return_value={'report': {'rows': {'core': {'_sqlx_migrations': count}}}}), \
+                    patch.object(P, 'original_verify') as old, \
+                    patch.object(P, 'inclusive_native', return_value={'id': 'selected'}), patch.object(P.M, 'note') as note:
+                with self.assertRaisesRegex(ValueError, 'exact core schema 26'):
+                    P.inclusive_backup(Path('/protected'), {}, record)
+                old.assert_not_called(); note.assert_not_called(); sources.assert_not_called()
+        with patch.object(P.U, 'stopped'), patch.object(P.U, 'state_files'), \
+                patch.object(P, 'original_verify') as old, patch.object(P.M, 'note') as note, \
+                patch.object(P, 'inclusive_native', side_effect=ValueError('Cashu state is used')):
+            with self.assertRaisesRegex(ValueError, 'Cashu state is used'):
+                P.inclusive_backup(Path('/protected'), {}, record)
+            old.assert_not_called(); note.assert_not_called()
+        with patch.object(P.U, 'stopped'), patch.object(P.U, 'state_files'), \
+                patch.object(P, 'original_verify') as old, patch.object(P.M, 'note') as note, \
+                patch.object(P, 'inclusive_native', side_effect=[{'id': 'snapshot'}, {'id': 'different'}]):
+            with self.assertRaisesRegex(ValueError, 'identities differ'):
+                P.inclusive_backup(Path('/protected'), {}, record)
+            old.assert_not_called(); note.assert_not_called()
+
+    def test_legacy_fee_source_still_requires_both_original_and_selected_verifiers(self):
+        receipt = {'id': str(uuid.uuid4())}
+        record = {'inclusive_fee_upgrade': True, 'program_upgrade_only': False}
+        with patch.object(P.U, 'stopped'), patch.object(P.U, 'state_files'), \
+                patch.object(P.U, 'sources_match'), patch.object(P.U, 'digest'), \
+                patch.object(P, 'original_verify', return_value=receipt) as old, \
+                patch.object(P, 'inclusive_native', return_value=receipt) as native, patch.object(P.M, 'note'):
+            P.inclusive_backup(Path('/protected'), {}, record)
+            self.assertEqual([c.args[1] for c in old.call_args_list], ['snapshot', 'verify'])
+            native.assert_called_once_with(Path('/protected'), 'verify-inclusive-fee-upgrade-source',
+                                           '--bundle', Path('/protected/backup'))
+
     def test_native_original_snapshot_receipt_rejects_aliases_and_activation(self):
         good = {'operation': 'snapshot', 'id': str(uuid.uuid4()), 'accepted': True, 'resume_authorized': False}
         for value in [good, dict(good, accepted=1), dict(good, resume_authorized=0),
@@ -243,6 +310,16 @@ class ProgramFiles(unittest.TestCase):
         path.write_text(json.dumps(record))
         digest=P.U.digest(path)
         P.load(self.destination,digest,inclusive_fee_upgrade=True)
+        record['cashu_core_source'] = True
+        path.write_text(json.dumps(record))
+        digest = P.U.digest(path)
+        P.load(self.destination,digest,inclusive_fee_upgrade=True)
+        for invalid in (1, 'true', None):
+            changed = dict(record, cashu_core_source=invalid)
+            path.write_text(json.dumps(changed))
+            with self.assertRaisesRegex(ValueError, 'matching program-only'):
+                P.load(self.destination, P.U.digest(path), inclusive_fee_upgrade=True)
+        path.write_text(json.dumps(record))
         for operation in (P.apply,P.rollback,P.resume):
             with self.subTest(operation=operation.__name__):
                 with self.assertRaisesRegex(ValueError,'matching program-only'):

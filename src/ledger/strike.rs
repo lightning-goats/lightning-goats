@@ -30,10 +30,21 @@ impl LedgerStore {
         request: &StoredStrikeReceiveRequest,
         zap: Option<&crate::zap::ZapRequest>,
     ) -> Result<()> {
-        if request.address_user == "contact" || request.credit_pool == "contact" {
-            bail!("private contact issuance requires a separate immutable intent");
+        if ["contact", "cashu_treasury"].contains(&request.address_user.as_str())
+            || ["contact", "cashu_treasury"].contains(&request.credit_pool.as_str())
+        {
+            bail!("private receive issuance requires a separate immutable purpose intent");
         }
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let treasury: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM cashu_treasury_intents WHERE intent_digest=?)",
+        )
+        .bind(&request.description_hash)
+        .fetch_one(&mut *transaction)
+        .await?;
+        if treasury {
+            bail!("treasury invoice intent cannot be issued as a donation");
+        }
         record_in_transaction(&mut transaction, request, zap).await?;
         transaction.commit().await?;
         Ok(())

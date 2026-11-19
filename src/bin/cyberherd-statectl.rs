@@ -29,6 +29,14 @@ enum Command {
         #[arg(long)]
         bundle: PathBuf,
     },
+    /// Review only the existing four journals for a linked Cashu recovery set.
+    /// Does not verify wallet custody, accept a backup or permit restore/resume.
+    ReviewCashuCorrelations {
+        #[arg(long)]
+        bundle: PathBuf,
+        #[arg(long)]
+        destination: PathBuf,
+    },
     /// Review retained reward backlog in an accepted backup; never live journals.
     ReviewRewards {
         #[arg(long)]
@@ -106,6 +114,25 @@ enum Command {
         #[arg(long)]
         candidate_copy: PathBuf,
     },
+    /// Snapshot the exact schema-25 source with every affected writer stopped.
+    SnapshotBeforeCashu {
+        #[arg(long)]
+        destination: PathBuf,
+        #[arg(long, required = true)]
+        writers_stopped: bool,
+    },
+    /// Verify only the exact schema-25 Cashu upgrade source.
+    VerifyCashuUpgradeSource {
+        #[arg(long)]
+        bundle: PathBuf,
+    },
+    /// Compare a schema-25 backup with a separate inactive Cashu schema copy.
+    CompareCashuUpgrade {
+        #[arg(long)]
+        bundle: PathBuf,
+        #[arg(long)]
+        candidate_copy: PathBuf,
+    },
     /// Snapshot the exact payout-schema-8 source with all four writers masked.
     SnapshotBeforeInclusiveFees {
         #[arg(long)]
@@ -151,6 +178,21 @@ async fn main() -> Result<()> {
             writers_stopped: true,
         } => ("snapshot", operator.snapshot(&destination).await?),
         Command::Verify { bundle } => ("verify", operator.verify(&bundle).await?),
+        Command::ReviewCashuCorrelations {
+            bundle,
+            destination,
+        } => {
+            let review = operator
+                .review_cashu_correlations(&bundle, &destination)
+                .await?;
+            println!(
+                "{}",
+                serde_json::json!({"operation":"review_cashu_correlations", "id":review.id,
+                "four_journal_correlations_verified":true,"cashu_wallet_verified":false,
+                "combined_restore_authorized":false,"resume_authorized":false})
+            );
+            return Ok(());
+        }
         Command::ReviewRewards {
             bundle,
             destination,
@@ -245,6 +287,26 @@ async fn main() -> Result<()> {
             "feeder_cap_upgrade_compare",
             operator
                 .compare_feeder_cap_upgrade(&bundle, &candidate_copy)
+                .await?,
+        ),
+        Command::SnapshotBeforeCashu {
+            destination,
+            writers_stopped: true,
+        } => (
+            "cashu_upgrade_snapshot",
+            operator.snapshot_before_cashu(&destination).await?,
+        ),
+        Command::VerifyCashuUpgradeSource { bundle } => (
+            "cashu_upgrade_source_verify",
+            operator.verify_cashu_upgrade_source(&bundle).await?,
+        ),
+        Command::CompareCashuUpgrade {
+            bundle,
+            candidate_copy,
+        } => (
+            "cashu_upgrade_compare",
+            operator
+                .compare_cashu_upgrade(&bundle, &candidate_copy)
                 .await?,
         ),
         Command::SnapshotBeforeInclusiveFees {

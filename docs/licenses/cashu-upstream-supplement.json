@@ -1,0 +1,914 @@
+{
+  "schema_version": 1,
+  "inventory_sha256": "a21553edbc33f0bed0aad00be5d61dec2015a91fcb241ab6e4578fc22a0d54f1",
+  "scope": "Exact archive-recorded upstream commits, reviewed release source matches and pinned SPDX texts for archive-declared licenses.",
+  "packages": [
+    {
+      "package": "cashu@0.18.3",
+      "checksum": "8fae7ec6607dd662c92d6f5582b86be608b7709eefe08cfce965a8733f163449",
+      "commit": "b2035a3525c98b22226926bdc20fa128a1351ae5",
+      "files": [
+        {
+          "file": "docs/licenses/upstream/cdk-LICENSE-MIT",
+          "url": "https://github.com/cashubtc/cdk/blob/b2035a3525c98b22226926bdc20fa128a1351ae5/LICENSE-MIT",
+          "git_blob_sha1": "604328316cfbd34cf4e614f6bee296a16ca20cc9",
+          "sha256": "3663aab5c30dee2b10b4f358b46774d09d6e9713a01a38abd5bada63fe547257"
+        },
+        {
+          "file": "docs/licenses/upstream/cdk-LICENSE-APACHE",
+          "url": "https://github.com/cashubtc/cdk/blob/b2035a3525c98b22226926bdc20fa128a1351ae5/LICENSE-APACHE",
+          "git_blob_sha1": "9af4720b40cad9d8f66fcce557b2f6353cddf9e8",
+          "sha256": "26c2ed53b6f7afb4de9846d94e2af5cde27c348fcc5abeb7e28d9964c3aa22d4"
+        }
+      ]
+    },
+    {
+      "package": "cdk-common@0.18.3",
+      "checksum": "267bdcdf8a6bbc7fca2c531225f084f93ada55ad763a16dcfcd3d2d126218dfc",
+      "commit": "b2035a3525c98b22226926bdc20fa128a1351ae5",
+      "files": [
+        {
+          "file": "docs/licenses/upstream/cdk-LICENSE-MIT",
+          "url": "https://github.com/cashubtc/cdk/blob/b2035a3525c98b22226926bdc20fa128a1351ae5/LICENSE-MIT",
+          "git_blob_sha1": "604328316cfbd34cf4e614f6bee296a16ca20cc9",
+          "sha256": "3663aab5c30dee2b10b4f358b46774d09d6e9713a01a38abd5bada63fe547257"
+        },
+        {
+          "file": "docs/licenses/upstream/cdk-LICENSE-APACHE",
+          "url": "https://github.com/cashubtc/cdk/blob/b2035a3525c98b22226926bdc20fa128a1351ae5/LICENSE-APACHE",
+          "git_blob_sha1": "9af4720b40cad9d8f66fcce557b2f6353cddf9e8",
+          "sha256": "26c2ed53b6f7afb4de9846d94e2af5cde27c348fcc5abeb7e28d9964c3aa22d4"
+        }
+      ]
+    },
+    {
+      "package": "cdk-http-client@0.18.3",
+      "checksum": "262a1ce236bcdcb25a79a1e6f2e1f38a168ce3e4f33952fe89bbe6fa76cab992",
+      "commit": "b2035a3525c98b22226926bdc20fa128a1351ae5",
+      "files": [
+        {
+          "file": "docs/licenses/upstream/cdk-LICENSE-MIT",
+          "url": "https://github.com/cashubtc/cdk/blob/b2035a3525c98b22226926bdc20fa128a1351ae5/LICENSE-MIT",
+          "git_blob_sha1": "604328316cfbd34cf4e614f6bee296a16ca20cc9",
+          "sha256": "3663aab5c30dee2b10b4f358b46774d09d6e9713a01a38abd5bada63fe547257"
+        },
+        {
+          "file": "docs/licenses/upstream/cdk-LICENSE-APACHE",
+          "url": "https://github.com/cashubtc/cdk/blob/b2035a3525c98b22226926bdc20fa128a1351ae5/LICENSE-APACHE",
+          "git_blob_sha1": "9af4720b40cad9d8f66fcce557b2f6353cddf9e8",
+          "sha256": "26c2ed53b6f7afb4de9846d94e2af5cde27c348fcc5abeb7e28d9964c3aa22d4"
+        }
+      ]
+    },
+    {
+      "package": "cdk-signatory@0.18.3",
+      "checksum": "9a81e8eb20eaf45b0cbb5dc5d0e3bbfffd1292a47b9634bca735045d7db59cba",
+      "commit": "b2035a3525c98b22226926bdc20fa128a1351ae5",
+      "files": [
+        {
+          "file": "docs/licenses/upstream/cdk-LICENSE-MIT",
+          "url": "https://github.com/cashubtc/cdk/blob/b2035a3525c98b22226926bdc20fa128a1351ae5/LICENSE-MIT",
+          "git_blob_sha1": "604328316cfbd34cf4e614f6bee296a16ca20cc9",
+          "sha256": "3663aab5c30dee2b10b4f358b46774d09d6e9713a01a38abd5bada63fe547257"
+        },
+        {
+          "file": "docs/licenses/upstream/cdk-LICENSE-APACHE",
+          "url": "https://github.com/cashubtc/cdk/blob/b2035a3525c98b22226926bdc20fa128a1351ae5/LICENSE-APACHE",
+          "git_blob_sha1": "9af4720b40cad9d8f66fcce557b2f6353cddf9e8",
+          "sha256": "26c2ed53b6f7afb4de9846d94e2af5cde27c348fcc5abeb7e28d9964c3aa22d4"
+        }
+      ]
+    },
+    {
+      "package": "cdk-sql-common@0.18.3",
+      "checksum": "1490bc11c172bbd5b9bc7c7e6c4f11ec4bbc606fe87b04982a0cd69a62aaece1",
+      "commit": "b2035a3525c98b22226926bdc20fa128a1351ae5",
+      "files": [
+        {
+          "file": "docs/licenses/upstream/cdk-LICENSE-MIT",
+          "url": "https://github.com/cashubtc/cdk/blob/b2035a3525c98b22226926bdc20fa128a1351ae5/LICENSE-MIT",
+          "git_blob_sha1": "604328316cfbd34cf4e614f6bee296a16ca20cc9",
+          "sha256": "3663aab5c30dee2b10b4f358b46774d09d6e9713a01a38abd5bada63fe547257"
+        },
+        {
+          "file": "docs/licenses/upstream/cdk-LICENSE-APACHE",
+          "url": "https://github.com/cashubtc/cdk/blob/b2035a3525c98b22226926bdc20fa128a1351ae5/LICENSE-APACHE",
+          "git_blob_sha1": "9af4720b40cad9d8f66fcce557b2f6353cddf9e8",
+          "sha256": "26c2ed53b6f7afb4de9846d94e2af5cde27c348fcc5abeb7e28d9964c3aa22d4"
+        }
+      ]
+    },
+    {
+      "package": "cdk-sqlite@0.18.3",
+      "checksum": "c5302422baeb33a6e910a388845fae155043d7ac4973d5a1b499700fd31bb70e",
+      "commit": "b2035a3525c98b22226926bdc20fa128a1351ae5",
+      "files": [
+        {
+          "file": "docs/licenses/upstream/cdk-LICENSE-MIT",
+          "url": "https://github.com/cashubtc/cdk/blob/b2035a3525c98b22226926bdc20fa128a1351ae5/LICENSE-MIT",
+          "git_blob_sha1": "604328316cfbd34cf4e614f6bee296a16ca20cc9",
+          "sha256": "3663aab5c30dee2b10b4f358b46774d09d6e9713a01a38abd5bada63fe547257"
+        },
+        {
+          "file": "docs/licenses/upstream/cdk-LICENSE-APACHE",
+          "url": "https://github.com/cashubtc/cdk/blob/b2035a3525c98b22226926bdc20fa128a1351ae5/LICENSE-APACHE",
+          "git_blob_sha1": "9af4720b40cad9d8f66fcce557b2f6353cddf9e8",
+          "sha256": "26c2ed53b6f7afb4de9846d94e2af5cde27c348fcc5abeb7e28d9964c3aa22d4"
+        }
+      ]
+    },
+    {
+      "package": "valuable@0.1.1",
+      "checksum": "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65",
+      "commit": "9efc29b6e58cef28f6566a47aa7e142a55fead77",
+      "files": [
+        {
+          "file": "docs/licenses/upstream/valuable-LICENSE",
+          "url": "https://github.com/tokio-rs/valuable/blob/9efc29b6e58cef28f6566a47aa7e142a55fead77/LICENSE",
+          "git_blob_sha1": "4ca822a5cb54142a14070f5be388e60497781615",
+          "sha256": "ed60d479b8fd1f64e9cbc3de449a16a53ac1b3d1b6aeb9bf9d190a8e93061b44"
+        }
+      ]
+    },
+    {
+      "package": "lightning-invoice@0.34.2",
+      "checksum": "5e874476e461bcca94ae30335bc5263f126f9219fdbd7bde6e02b530dbaa6567",
+      "commit": "254bc9687dd190375956ad790f87239b97ebd058",
+      "files": [
+        {
+          "file": "docs/licenses/upstream/lightning-invoice-LICENSE-MIT",
+          "url": "https://github.com/lightningdevkit/rust-lightning/blob/254bc9687dd190375956ad790f87239b97ebd058/LICENSE-MIT",
+          "git_blob_sha1": "9d982a4d63256f23b8cc0854024d134e1140f4f3",
+          "sha256": "638da3722c9e102ccd8011d82f61ae3b611174e4a0f8da185c582df137b60a8c"
+        }
+      ]
+    },
+    {
+      "package": "lightning-macros@0.2.1",
+      "checksum": "d4c717494cdc2c8bb85bee7113031248f5f6c64f8802b33c1c9e2d98e594aa71",
+      "commit": "b18924cb17537ca8397992709b8bea536b19f9d2",
+      "files": [
+        {
+          "file": "docs/licenses/upstream/lightning-macros-LICENSE-MIT",
+          "url": "https://github.com/lightningdevkit/rust-lightning/blob/b18924cb17537ca8397992709b8bea536b19f9d2/LICENSE-MIT",
+          "git_blob_sha1": "9d982a4d63256f23b8cc0854024d134e1140f4f3",
+          "sha256": "638da3722c9e102ccd8011d82f61ae3b611174e4a0f8da185c582df137b60a8c"
+        }
+      ]
+    },
+    {
+      "package": "lightning-types@0.3.5",
+      "checksum": "c77c676d4a34cceb2ae3756916e446b4d17f9430a24107e099981f0f9aec77e6",
+      "commit": "5bc1dc84b3a1b084f84de4b7ece3d978b678d894",
+      "files": [
+        {
+          "file": "docs/licenses/upstream/lightning-types-LICENSE-MIT",
+          "url": "https://github.com/lightningdevkit/rust-lightning/blob/5bc1dc84b3a1b084f84de4b7ece3d978b678d894/LICENSE-MIT",
+          "git_blob_sha1": "9d982a4d63256f23b8cc0854024d134e1140f4f3",
+          "sha256": "638da3722c9e102ccd8011d82f61ae3b611174e4a0f8da185c582df137b60a8c"
+        }
+      ]
+    },
+    {
+      "package": "wasite@0.1.0",
+      "checksum": "b8dad83b4f25e74f184f64c43b150b91efe7647395b42289f38e50566d82855b",
+      "commit": "0c72934ad329ab4670eb017581640c2d6eceb289",
+      "files": [
+        {
+          "file": "docs/licenses/upstream/wasite-LICENSE-MIT",
+          "url": "https://github.com/ardaku/wasite/blob/0c72934ad329ab4670eb017581640c2d6eceb289/LICENSE_MIT.txt",
+          "git_blob_sha1": "9cf106272ac3b56b0c4c80218e8fc10a664ca5f4",
+          "sha256": "508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1"
+        }
+      ]
+    },
+    {
+      "package": "gloo-timers@0.3.0",
+      "checksum": "bbb143cf96099802033e0d4f4963b19fd2e0b728bcf076cd9cf7f6634f092994",
+      "commit": "f3bb1d1a1c33dbcccaf26446aca7d0cea8e9d574",
+      "files": [
+        {
+          "file": "docs/licenses/upstream/gloo-LICENSE-MIT",
+          "url": "https://github.com/rustwasm/gloo/blob/f3bb1d1a1c33dbcccaf26446aca7d0cea8e9d574/LICENSE-MIT",
+          "retrieved_url": "https://github.com/ranile/gloo/blob/f3bb1d1a1c33dbcccaf26446aca7d0cea8e9d574/LICENSE-MIT",
+          "redirect_evidence": "https://github.com/rustwasm/gloo",
+          "git_blob_sha1": "1ae4a6988028e2122acb3a755fdd00759b893426",
+          "sha256": "5a6f5443ea473f130adbdcf84254761d1292bc79759b5253915d4b5e7afbef66"
+        }
+      ]
+    },
+    {
+      "package": "cdk@0.18.3",
+      "checksum": "6969a2ea499035f5f49f5cdaf355f34251ce85a8ddd47c557177ecee5ed7da2a",
+      "commit": "b2035a3525c98b22226926bdc20fa128a1351ae5",
+      "files": [
+        {
+          "file": "docs/licenses/upstream/cdk-LICENSE-MIT",
+          "url": "https://github.com/cashubtc/cdk/blob/b2035a3525c98b22226926bdc20fa128a1351ae5/LICENSE-MIT",
+          "git_blob_sha1": "604328316cfbd34cf4e614f6bee296a16ca20cc9",
+          "sha256": "3663aab5c30dee2b10b4f358b46774d09d6e9713a01a38abd5bada63fe547257"
+        },
+        {
+          "file": "docs/licenses/upstream/cdk-LICENSE-APACHE",
+          "url": "https://github.com/cashubtc/cdk/blob/b2035a3525c98b22226926bdc20fa128a1351ae5/LICENSE-APACHE",
+          "git_blob_sha1": "9af4720b40cad9d8f66fcce557b2f6353cddf9e8",
+          "sha256": "26c2ed53b6f7afb4de9846d94e2af5cde27c348fcc5abeb7e28d9964c3aa22d4"
+        }
+      ]
+    },
+    {
+      "package": "base58ck@0.1.101",
+      "checksum": "365c0acd5b2e8dd0111a46c4faea83fb3cfb6e39a49a7c73a06e090db7b2eff0",
+      "commit": "a010f1e9fd7752ee5e7ca60a909d32a58e0d3297",
+      "release_source": {
+        "tag": "base58ck-0.1.101",
+        "tag_object": "5a381283da6d04302ab901226cee3e8b79e2a1c1",
+        "git_commit": "a010f1e9fd7752ee5e7ca60a909d32a58e0d3297",
+        "git_tree": "0d9c4a1243626e7c452b4f4652217581d98eaf66",
+        "member_git_blobs": {
+          "CHANGELOG.md": "dafb36f0c676e783701068dd8cb7ed50b9a68d1b",
+          "Cargo.toml.orig": "0ff9ab5fd3c32e55609398c98c3d358fb8691afc",
+          "README.md": "211b85744652c10d80752dbaa3ffdd4e2cc02dc8",
+          "src/error.rs": "1cbd0513f0f23f2183dc50e53d294f0bf0716224",
+          "src/internal_macros.rs": "1a48ef08f77348240271fb84db056006362190e7",
+          "src/lib.rs": "b8d96e80df00f114f4793be1b3ed839d30fa62f4"
+        }
+      },
+      "files": [
+        {
+          "file": "docs/licenses/upstream/rust-bitcoin-LICENSE-CC0",
+          "sha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+          "git_blob_sha1": "6ca207ef004cb69d03041e7e5c288a2be4968045",
+          "url": "https://github.com/rust-bitcoin/rust-bitcoin/blob/a010f1e9fd7752ee5e7ca60a909d32a58e0d3297/LICENSE"
+        }
+      ]
+    },
+    {
+      "package": "bitcoin-internals@0.7.0",
+      "checksum": "e8bea3a9f0cfece4564e37cb49a38cc245ca5184719e50d7d0dda3268722c4e2",
+      "commit": "a53101246ec046340d0127d520192d00d39d261d",
+      "release_source": {
+        "tag": "bitcoin-internals-0.7.0",
+        "tag_object": "7e0f8e4a926325c68e2613a6a00374f15c0311d6",
+        "git_commit": "a53101246ec046340d0127d520192d00d39d261d",
+        "git_tree": "e6d5ed1c699baa7c8f43e6fbc0b7357afb3a67a9",
+        "member_git_blobs": {
+          "CHANGELOG.md": "5e5ed9e6b6596881ded9d8539d0d36c127ec56e3",
+          "Cargo.toml.orig": "0e33ba4db34b01bf80753eb1560682d82153d65e",
+          "README.md": "66aae69cdd756be05ad2e862981fdd7ca133d635",
+          "build.rs": "725526c033eac57cb97e18c1340f03f2944214c6",
+          "src/array.rs": "4891d91df501bba12414654e942c9d9f44f13353",
+          "src/array_vec.rs": "fdf0bbdb3c633f9a880d1d2cda8669b0ca49443e",
+          "src/const_casts.rs": "ec99ec49425d671d1481dd71caee3beaf024a8fa",
+          "src/error/input_string.rs": "c603eb1d6d004f1a21934a74ec8b3759b42c7230",
+          "src/error/mod.rs": "9d52822de2eb9259e3951b50340a836fca6016f2",
+          "src/error/parse_error.rs": "b81954a4e4cb5f76ac42b6db6c4b46020acab504",
+          "src/lib.rs": "daaed8d644a39028cd7c0e0273128b5015783d3e",
+          "src/script.rs": "10bab35075b0761e7f3c5fef0db4b99a1385d589",
+          "src/serde.rs": "1db364ad9cb64ff15b1e600fd600386a74b1ae5b",
+          "src/slice.rs": "ddecd1fc7ce9d90106e1c76cd4e536d9c1a6681b",
+          "src/u256.rs": "10846485ae4f9381b7767768cadb8a42c8fa7a36"
+        }
+      },
+      "files": [
+        {
+          "file": "docs/licenses/upstream/rust-bitcoin-LICENSE-CC0",
+          "sha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+          "git_blob_sha1": "6ca207ef004cb69d03041e7e5c288a2be4968045",
+          "url": "https://github.com/rust-bitcoin/rust-bitcoin/blob/a53101246ec046340d0127d520192d00d39d261d/LICENSE"
+        }
+      ]
+    },
+    {
+      "package": "bitcoin_hashes@1.2.0",
+      "checksum": "5304e53726dbe5f93141535e102ed97b5bf4714fbecefdda8f9fb98d7fdaff0e",
+      "commit": "0f68fcb392512b5707529f864fb87882306e33d9",
+      "release_source": {
+        "tag": "bitcoin_hashes-1.2.0",
+        "tag_object": "70443c107b1f9886abfb8fc8f7acd4744dfd1d71",
+        "git_commit": "0f68fcb392512b5707529f864fb87882306e33d9",
+        "git_tree": "76ec9cdfbd4ff120f92a343ab1076c46f93a3616",
+        "member_git_blobs": {
+          "CHANGELOG.md": "6b7efb2e0c447c7182bea599e8526914ab34bfbd",
+          "Cargo.toml.orig": "d879683b97ac83f8614b675b690adee83701ad0f",
+          "README.md": "cdbcc47cd8e69ffcf17229cd0e59b0865e7f623d",
+          "include/array_newtype.rs": "f09df39599f337c0bd02462f3dcfa2feb29b0511",
+          "include/asref_push_bytes.rs": "3cd46f33455b5532292f808a64f9798b28242f49",
+          "include/decoder_newtype.rs": "96a12e83e7285390c83be22d61bceda5533cb083",
+          "include/newtype.rs": "11ade9b8251cd52a35c77fde21293414185fb201",
+          "include/u256.rs": "8935c5e0b4c980d69a3072f73fb2662363251797",
+          "src/cmp.rs": "90d6c3c560cef21330117046a6f6acd47829d9d9",
+          "src/hash160/mod.rs": "94ce4e32534821b69b0f6c1fe86fba7e9779646e",
+          "src/hkdf/mod.rs": "59a4a06b297895dabb0cad44f4439a6127ffe6f9",
+          "src/hmac/mod.rs": "0f8c0eb1c86cb9e7cdc6cab90af4e5ea9523d56b",
+          "src/internal_macros.rs": "b8387ee9cb38623be1511a35d53bf3c737fb7b4f",
+          "src/lib.rs": "6b2fad86b292ed0ea7c4cad249a5f019f20bf879",
+          "src/macros.rs": "f2b44130fa40cb6d90580b4b85857324bef9ef63",
+          "src/muhash/mod.rs": "f713d8267cce48ae0451d53bd74bf26826d7ac0e",
+          "src/ripemd160/crypto.rs": "d9e6ffe8b553947fb6956a81e12f60e21b01103c",
+          "src/ripemd160/mod.rs": "ac51f64d4715289146f10cd2e3dc7ebeda4e1bda",
+          "src/ripemd160/tests.rs": "8eb9061af1b8223a0633814d9256cdce44e852b0",
+          "src/sha1/crypto.rs": "0e4c424d137e6a9b5a361b589b715cebd3ba1c11",
+          "src/sha1/mod.rs": "5257e2a68b0d861d287f0d23c229842bc1dd2524",
+          "src/sha1/tests.rs": "831457ac2be9152e3f75325497638459d5bb428a",
+          "src/sha256/crypto/arm_sha2.rs": "3314d57dba064d28de573056fbe5437683deac94",
+          "src/sha256/crypto/avx2.rs": "64b41b6194d37884dd422df8ecd07ef16bbe3877",
+          "src/sha256/crypto/mod.rs": "e339a40e97287d14419b44601aaa4fa7831eb37a",
+          "src/sha256/crypto/sse41.rs": "b29ecc0078ca852a55e79ecc6285285f3468c480",
+          "src/sha256/crypto/x86_shani.rs": "137193a75e1a1eca3718849736ccc1fcc11de735",
+          "src/sha256/mod.rs": "2cbdf5e5236df21270479b2d3b6b8c0963af576d",
+          "src/sha256/tests.rs": "565bf99b75d9463b0165ffcf5d521249b013647f",
+          "src/sha256d/mod.rs": "3f2613b8402ed219be614927a1608759497bacb8",
+          "src/sha256t/mod.rs": "fbd08b80f63e358bb45de606afa32c6b6ee0d79e",
+          "src/sha384/mod.rs": "ec95d1c3a5a3d37b4d0ea421fa3df31d315cb819",
+          "src/sha3_256/mod.rs": "d0b8f40531b5137be81ce4f8a12ab2a94840568f",
+          "src/sha512/crypto.rs": "ea8368fecb170e53d3c9561bb3372090f65332a2",
+          "src/sha512/mod.rs": "928d2b675e35e72d05d1b722bd8489d8d6384a25",
+          "src/sha512/tests.rs": "4d982fd9e6040df530ccb8d6988f6a1cf4024a39",
+          "src/sha512_256/mod.rs": "0e6201e38be0e08f800ef9a9d8f0bcc25f867bb2",
+          "src/siphash24/mod.rs": "47d1fb047613a67f8f9f5d5fe21de901959f4930"
+        }
+      },
+      "files": [
+        {
+          "file": "docs/licenses/upstream/rust-bitcoin-LICENSE-CC0",
+          "sha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+          "git_blob_sha1": "6ca207ef004cb69d03041e7e5c288a2be4968045",
+          "url": "https://github.com/rust-bitcoin/rust-bitcoin/blob/0f68fcb392512b5707529f864fb87882306e33d9/LICENSE"
+        }
+      ]
+    },
+    {
+      "package": "bitcoin-consensus-encoding@1.3.0",
+      "checksum": "9daa31138eb443d5751b207f3f64154e2bb09cd59960562ccc7a7112be38147f",
+      "commit": "0cfc7908ff7c7c58e9c61c008c09cb2aeedb82cb",
+      "release_source": {
+        "tag": "bitcoin-consensus-encoding-1.3.0",
+        "tag_object": "c82f877832a004c64d709c2f1cf4ed419f2add05",
+        "git_commit": "0cfc7908ff7c7c58e9c61c008c09cb2aeedb82cb",
+        "git_tree": "1432cb53e2ea02cc2de843a824a4d211d8185815",
+        "member_git_blobs": {
+          "CHANGELOG.md": "86659cbd9a072f5c99e92c5956b187f582708885",
+          "Cargo.toml.orig": "7be8599cf3aaf90ae282c63b82ece46d7de042d5",
+          "README.md": "b8df531693b1805816fc3bf0c60088d702d436a0",
+          "examples/encoder.rs": "bcc1c5738e36b9a147397c6faed8f2c2fd0e1b38",
+          "src/compact_size.rs": "d6d30ac3061ea3614aad851aee83f9f7bc36fcb0",
+          "src/decode/decoders.rs": "48ea7e9b4fb9f8853e0f2d81b0d75813d8defeca",
+          "src/decode/mod.rs": "d3f25dbf244234b7172e74a86ba83b269d928688",
+          "src/encode/encoders.rs": "bc95c4b255c1cca5ec1b80c0e7f8e0a6e8563d7a",
+          "src/encode/iter.rs": "f1dba37a77cf0640b12e832066ddd9cef5ad19ff",
+          "src/encode/mod.rs": "4634be35c4b9b3611325ea5070ad081b77630e65",
+          "src/error.rs": "d01144a75895ebe38d14c3baecc88d4ef43a0dc3",
+          "src/lib.rs": "4b96c92f15941c723cf0897c1e169b88c6b07d2c",
+          "src/serde_as_consensus.rs": "2d7f757c4b5884c5e5e58de6d8d0d44f9969393f"
+        }
+      },
+      "files": [
+        {
+          "file": "docs/licenses/upstream/rust-bitcoin-LICENSE-CC0",
+          "sha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+          "git_blob_sha1": "6ca207ef004cb69d03041e7e5c288a2be4968045",
+          "url": "https://github.com/rust-bitcoin/rust-bitcoin/blob/0cfc7908ff7c7c58e9c61c008c09cb2aeedb82cb/LICENSE"
+        }
+      ]
+    },
+    {
+      "package": "bitcoin-consensus-encoding@1.2.0",
+      "checksum": "6712f9c6fd6785b3b270884e57c441c403dc5d7e19ca45368c97c7a1de3000ec",
+      "commit": "799d662e47f2842afcf65283fadc5e6042eec5fb",
+      "release_source": {
+        "tag": "bitcoin-consensus-encoding-1.2.0",
+        "tag_object": "e2ad83f0eeb69399d938fafede285a26845ebef7",
+        "git_commit": "799d662e47f2842afcf65283fadc5e6042eec5fb",
+        "git_tree": "dac45302664bf0aea06afea707dbaf17ac640a70",
+        "member_git_blobs": {
+          "CHANGELOG.md": "dfeb3bbc35f43370a05dfb0905a0bd551970fac5",
+          "Cargo.toml.orig": "7eaf41b67e477561216037188c9a39769956c5d9",
+          "README.md": "b8df531693b1805816fc3bf0c60088d702d436a0",
+          "examples/encoder.rs": "bcc1c5738e36b9a147397c6faed8f2c2fd0e1b38",
+          "src/compact_size.rs": "a2efb70b839bb19d9a4f4a27d5570ef09a4a1ac9",
+          "src/decode/decoders.rs": "eaa8cef2cf401f7c6334daa8ebcfc2c5fb7c718a",
+          "src/decode/mod.rs": "2e7f0f90493844f425aa85b8bfe101bb26f89259",
+          "src/encode/encoders.rs": "5187a4f57e7d82c53f36c43de3fe4d3f17d8282a",
+          "src/encode/iter.rs": "68ba7fe0c05ce2ad4ead6882894efc565df7a335",
+          "src/encode/mod.rs": "04d190847f2eb7f9980f2cf836f8d3b1cbf84508",
+          "src/error.rs": "d01144a75895ebe38d14c3baecc88d4ef43a0dc3",
+          "src/lib.rs": "4b96c92f15941c723cf0897c1e169b88c6b07d2c",
+          "src/serde_as_consensus.rs": "2d7f757c4b5884c5e5e58de6d8d0d44f9969393f"
+        }
+      },
+      "files": [
+        {
+          "file": "docs/licenses/upstream/rust-bitcoin-LICENSE-CC0",
+          "sha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+          "git_blob_sha1": "6ca207ef004cb69d03041e7e5c288a2be4968045",
+          "url": "https://github.com/rust-bitcoin/rust-bitcoin/blob/799d662e47f2842afcf65283fadc5e6042eec5fb/LICENSE"
+        }
+      ]
+    },
+    {
+      "package": "bitcoin-internals@0.6.0",
+      "checksum": "d573f4cf32996a8dce612e4348cece65a241f1882ed594047c9ba348e8869fa5",
+      "commit": "3812750b6824eb0374504d7e2fddd8e8528a2cda",
+      "release_source": {
+        "tag": "bitcoin-internals-0.6.0",
+        "tag_object": "44b1e6f8a15ba0cf6582ade2aea11c710e6a54c6",
+        "git_commit": "3812750b6824eb0374504d7e2fddd8e8528a2cda",
+        "git_tree": "01ec5e1fa970bc5e61238cee7a0378e9a42567ab",
+        "member_git_blobs": {
+          "CHANGELOG.md": "d887713974fd39f4215222cab70fe241370b1bb3",
+          "Cargo.toml.orig": "09c11567c1ab738c1f6593deefcdeadb4b120e24",
+          "README.md": "66aae69cdd756be05ad2e862981fdd7ca133d635",
+          "build.rs": "725526c033eac57cb97e18c1340f03f2944214c6",
+          "src/array.rs": "4891d91df501bba12414654e942c9d9f44f13353",
+          "src/array_vec.rs": "9b466801ea37a0d8cafe3120d3fd3023d0ce3aa5",
+          "src/const_casts.rs": "6ef95488aa0516cf07046fed411de3ee261d0d15",
+          "src/error/input_string.rs": "b6708b906a624b80f8e9ceea022210537242018f",
+          "src/error/mod.rs": "9d52822de2eb9259e3951b50340a836fca6016f2",
+          "src/error/parse_error.rs": "b81954a4e4cb5f76ac42b6db6c4b46020acab504",
+          "src/lib.rs": "ff539e529c2dbd3db9c5d6f0ef5599c862761188",
+          "src/script.rs": "10bab35075b0761e7f3c5fef0db4b99a1385d589",
+          "src/serde.rs": "1db364ad9cb64ff15b1e600fd600386a74b1ae5b",
+          "src/slice.rs": "ddecd1fc7ce9d90106e1c76cd4e536d9c1a6681b"
+        }
+      },
+      "files": [
+        {
+          "file": "docs/licenses/upstream/rust-bitcoin-LICENSE-CC0",
+          "sha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+          "git_blob_sha1": "6ca207ef004cb69d03041e7e5c288a2be4968045",
+          "url": "https://github.com/rust-bitcoin/rust-bitcoin/blob/3812750b6824eb0374504d7e2fddd8e8528a2cda/LICENSE"
+        }
+      ]
+    },
+    {
+      "package": "bitcoin-io@0.1.101",
+      "checksum": "bb5de036369d1ac59d3c1819ebc4d850f89466f5401c571a285b6ed564a4cb78",
+      "commit": "a010f1e9fd7752ee5e7ca60a909d32a58e0d3297",
+      "release_source": {
+        "tag": "bitcoin-io-0.1.101",
+        "tag_object": "8298525df098aa009c1c204951d0635e74c3d902",
+        "git_commit": "a010f1e9fd7752ee5e7ca60a909d32a58e0d3297",
+        "git_tree": "0d9c4a1243626e7c452b4f4652217581d98eaf66",
+        "member_git_blobs": {
+          "CHANGELOG.md": "3598f99717495366b9c87fb8ff7a3a3a778919e4",
+          "Cargo.toml.orig": "7977313ff56ebbb91d078589b05ed87d0a770db0",
+          "README.md": "e38e2d068925673c9a986f0fb7e5e079068a1c29",
+          "build.rs": "ca8890254f958caf3507aa846f665ae7c862d4c0",
+          "src/bridge.rs": "beccbbe5efd3cfcacd567c554b83c7874e3b3543",
+          "src/error.rs": "47e56b9fd5381ded542d003cd91f2831c2187f53",
+          "src/lib.rs": "6a194576fe9282149c8b2427def8df08383d1755",
+          "src/macros.rs": "5fae2a7508a9fde5480540b5b54ce3ab4fa32183"
+        }
+      },
+      "files": [
+        {
+          "file": "docs/licenses/upstream/rust-bitcoin-LICENSE-CC0",
+          "sha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+          "git_blob_sha1": "6ca207ef004cb69d03041e7e5c288a2be4968045",
+          "url": "https://github.com/rust-bitcoin/rust-bitcoin/blob/a010f1e9fd7752ee5e7ca60a909d32a58e0d3297/LICENSE"
+        }
+      ]
+    },
+    {
+      "package": "bitcoin-units@0.1.101",
+      "checksum": "9cb95693f371d089a4b5b6fc41c6f3ea6e01ee8c15388335dfac8ea685173b51",
+      "commit": "a010f1e9fd7752ee5e7ca60a909d32a58e0d3297",
+      "release_source": {
+        "tag": "bitcoin-units-0.1.101",
+        "tag_object": "a56bd6ffe20367f4b1a3538544b1a674a5ad4a9e",
+        "git_commit": "a010f1e9fd7752ee5e7ca60a909d32a58e0d3297",
+        "git_tree": "0d9c4a1243626e7c452b4f4652217581d98eaf66",
+        "member_git_blobs": {
+          "CHANGELOG.md": "b3671e88db62217bb64200e2f30b1bbd59689a43",
+          "Cargo.toml.orig": "d1c78856a8ac99cdac78a8fe839e122e5f203624",
+          "README.md": "4b419c4fc7c631b7a814ae8e45b65a1507514824",
+          "include/decoder_newtype.rs": "96a12e83e7285390c83be22d61bceda5533cb083",
+          "src/amount.rs": "844e6848e4beac15bab2435c78290f3c79354351",
+          "src/fee_rate.rs": "3405b9924d4fe317167bae47b0686fab9cb4f6ab",
+          "src/input_string.rs": "5264b1ce7a39fab62d5041da95710ef6738d9c3d",
+          "src/internal_macros.rs": "1a48ef08f77348240271fb84db056006362190e7",
+          "src/lib.rs": "2fc0cb3ae220526f6e805b5ca7efe0def528f50d",
+          "src/locktime/absolute.rs": "ab6567e0a0a9e8a29a971549d03a2727c6cf4be4",
+          "src/locktime/mod.rs": "4cf62ad101f1b193023e8f3f212b2dafc4a8ff56",
+          "src/locktime/relative.rs": "953b6cf3ab18563ea3d39320ebdcc12f27f4e270",
+          "src/parse.rs": "cd79a8ee2aa2ae0d5d04c9392107c5bc620ef85d",
+          "src/test_macros.rs": "bc2d05e2658959bda69ed4051230603156fd348c",
+          "src/weight.rs": "1dd715a62c0703dfc633c4456037fbf3760fe69d"
+        }
+      },
+      "files": [
+        {
+          "file": "docs/licenses/upstream/rust-bitcoin-LICENSE-CC0",
+          "sha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+          "git_blob_sha1": "6ca207ef004cb69d03041e7e5c288a2be4968045",
+          "url": "https://github.com/rust-bitcoin/rust-bitcoin/blob/a010f1e9fd7752ee5e7ca60a909d32a58e0d3297/LICENSE"
+        }
+      ]
+    },
+    {
+      "package": "bitcoin_hashes@0.14.101",
+      "checksum": "bca4c7abb40c8817d77403c880988cfd484f23ab2365726afb2f798363e2c4a2",
+      "commit": "a010f1e9fd7752ee5e7ca60a909d32a58e0d3297",
+      "release_source": {
+        "tag": "bitcoin_hashes-0.14.101",
+        "tag_object": "26e805faf5b3f7a627c321ffb4255be2fd9db652",
+        "git_commit": "a010f1e9fd7752ee5e7ca60a909d32a58e0d3297",
+        "git_tree": "0d9c4a1243626e7c452b4f4652217581d98eaf66",
+        "member_git_blobs": {
+          "CHANGELOG.md": "2be624066e78168c5ea926f40bd93faa44b1c586",
+          "Cargo.toml.orig": "a5c1367d0987bf4cb08bbc61e0a3169526759c96",
+          "README.md": "4ce91fa9586578060b3067abcc43bb7b5aa18b73",
+          "src/cmp.rs": "d84b31c007199a792f5f5a7efe288c5b87d3a7fe",
+          "src/hash160.rs": "41098a8a5d4425ea09f282ea168eba4c3683dd0f",
+          "src/hmac.rs": "7003d1e1ee4f51ace140b2bda28f13b1b7690b49",
+          "src/impls.rs": "3f093b831eb3cbccc2271db3fc484973f1c771fc",
+          "src/internal_macros.rs": "1a7aac803ec3c2c6dbf7198660067c30b0d89329",
+          "src/lib.rs": "4539911aaa803686a56e788378732054f5a39de4",
+          "src/ripemd160.rs": "1581dd242d62c040ae0cecf58e75f866655a56bf",
+          "src/serde_macros.rs": "889be7ffad83c02925bb00e4f52c5d5c67b75d7f",
+          "src/sha1.rs": "00d8446dec8cffbcf1739f7dae53a2bc4fdb9598",
+          "src/sha256.rs": "716679b9d023338fbc1fd8b1d3360a0d264776f6",
+          "src/sha256d.rs": "fb3b0c5e7907e6bc0216c43d2ae1f29f6451b5a9",
+          "src/sha256t.rs": "705ac33824fe343a5e386eb984e3f51f287dd119",
+          "src/sha384.rs": "a943875362dd56eaac038ac12ccf5ef2de8cdc5f",
+          "src/sha512.rs": "b2363875eb9cf68c1a9773a1d1f340e54709ffdf",
+          "src/sha512_256.rs": "e5c366247672d8d9f303181e71e8badf2add7ab8",
+          "src/siphash24.rs": "a20c1d3317c614e3f29f4f9536010c9efd1607b0",
+          "src/util.rs": "79ac4d052676339316e72f13d7b78653ac036b72"
+        }
+      },
+      "files": [
+        {
+          "file": "docs/licenses/upstream/rust-bitcoin-LICENSE-CC0",
+          "sha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+          "git_blob_sha1": "6ca207ef004cb69d03041e7e5c288a2be4968045",
+          "url": "https://github.com/rust-bitcoin/rust-bitcoin/blob/a010f1e9fd7752ee5e7ca60a909d32a58e0d3297/LICENSE"
+        }
+      ]
+    },
+    {
+      "package": "bitcoin@0.32.102",
+      "checksum": "bb0ce8bd5baaa0d303a19915a6d93afed161f528654e42da2a7a97d05c59499a",
+      "commit": "ff5dc044d71a3ef8d59b29aa0328ffef9630d6d0",
+      "release_source": {
+        "tag": "bitcoin-0.32.102",
+        "tag_object": "9ff85f197bf53d2d4ed3f71a0d5f8717c069fbc7",
+        "git_commit": "ff5dc044d71a3ef8d59b29aa0328ffef9630d6d0",
+        "git_tree": "1aa0309b50845ceb7f3d5e7fd5bd486db36166f1",
+        "member_git_blobs": {
+          "CHANGELOG.md": "c9218d8e39bcd1027bb50dac9f2c03d0eabb7968",
+          "Cargo.toml.orig": "a6b5d805fc14ef6dcad3b0779db414be440b3a46",
+          "README.md": "58093d6fdf55d8a391279a385bd7ad3406c06f37",
+          "build.rs": "15add3f3a0191654556baaf2b214407835ece5ca",
+          "examples/bip32.rs": "901793edf736e4f73eabe0df4fcc059fe1a96b44",
+          "examples/ecdsa-psbt.rs": "cd6801075bf074af6a24c73b9d982bbd5d212c24",
+          "examples/handshake.rs": "d77828bb370c08f7c0d6fdc45c51a013266632cb",
+          "examples/sighash.rs": "830fe49bb1916d5904b1f9cd45c4761119336be7",
+          "examples/sign-tx-segwit-v0.rs": "6a8879d336bc067182a0e2d6fcfc711f283f9407",
+          "examples/sign-tx-taproot.rs": "9dae0b2e0fede0eb46ea77a4c5f5b3e2ba12a71a",
+          "examples/taproot-psbt.rs": "439bf2a84567cc556a23350c06a137661d23fd27",
+          "include/decoder_newtype.rs": "96a12e83e7285390c83be22d61bceda5533cb083",
+          "src/address/error.rs": "bc0a306477903b7064619a9242225180ac6e74f8",
+          "src/address/mod.rs": "f30784048b0d5ba630674d705635b46f6cd33dc8",
+          "src/array_vec.rs": "cfd83de534bde655c5d84f2a9bed261a4c3e113b",
+          "src/bip152.rs": "d7c444e2dd54302ddd114a43fa4a24775bbcc8e7",
+          "src/bip158.rs": "0ba2c2a16a97c47a60cf0285459856147051ff9c",
+          "src/bip32.rs": "94f9de1c7dacf47050484ee01c158c30add22b6c",
+          "src/blockdata/block.rs": "0a7891f2a18605824aaad9764db05027e5c252fe",
+          "src/blockdata/constants.rs": "bb3976412e4cd7536a792ca9787f4bb3d00808f3",
+          "src/blockdata/locktime/absolute.rs": "9409c5453891168d6a7d38fa133e7bf7517a7aa9",
+          "src/blockdata/locktime/mod.rs": "c09d3323cf6ae194c131a194d9f90edbb095699b",
+          "src/blockdata/locktime/relative.rs": "72d73312cf103d895b72281edcd3bc33e6caf699",
+          "src/blockdata/mod.rs": "1d7ee2bbf65cf52eabf7d4672a36a3d5e121ea69",
+          "src/blockdata/opcodes.rs": "6ca490d980b594079fe9d060b9cd49533b12d955",
+          "src/blockdata/script/borrowed.rs": "a2cbd62a1b2a0b301b58399a6166e8e6c43fdd44",
+          "src/blockdata/script/builder.rs": "7ba32c2c43690275b049983ceed0d868d4a47931",
+          "src/blockdata/script/instruction.rs": "f579751d875d133d8bf09fad3400d5891a68872a",
+          "src/blockdata/script/mod.rs": "be1c835388c0fb139c74f02d2e79ed49e3b4e90d",
+          "src/blockdata/script/owned.rs": "e2bfbcb3654f4123644a3d3472b45d0e06aa0ec2",
+          "src/blockdata/script/push_bytes.rs": "e42e422e7ddd554952bf2a371964fb5836dfede5",
+          "src/blockdata/script/tests.rs": "9b4e1f71dc892a913257c118e55a05d52eda917c",
+          "src/blockdata/script/witness_program.rs": "337408b33c32239c04c34c9c4ca9f4320d9f6b2b",
+          "src/blockdata/script/witness_version.rs": "567ca28b6b33cc79f379bdc1cb0fcc34c1e7330a",
+          "src/blockdata/transaction.rs": "a3132086d5bc654d26a7aab3d0135c9852a0a88c",
+          "src/blockdata/witness.rs": "2650f9fe2c7fa545ffc8b70c138f24b4a22f1f77",
+          "src/consensus/encode.rs": "a496fb97cd894202e87baf8b6e94ebed24bd6597",
+          "src/consensus/mod.rs": "9cace01ac50964e37c81f63cc5f6cb4c8cfa0935",
+          "src/consensus/params.rs": "325a6c7ee8f9ae2801821e4e3f0711c12decba44",
+          "src/consensus/serde.rs": "178e7906dda1358f6775f8eb4a26de2e7062cc9f",
+          "src/consensus/validation.rs": "bfcb4beaa97cc8292d514f7f07bdcd70d0be036c",
+          "src/const_tools.rs": "754c9e86a43ad7d42e2762806c10cce01682a3b0",
+          "src/crypto/ecdsa.rs": "832b6d7310ff89f01d05596303e7000fac71afbb",
+          "src/crypto/key.rs": "04bfdfb4e15877215c526cd556a0b995b631188c",
+          "src/crypto/mod.rs": "82c412790317507aceeae27f04b89e88ea96c94c",
+          "src/crypto/sighash.rs": "aea38f32e3ca8cf7cfbd9ce35ec423126b9fc016",
+          "src/crypto/taproot.rs": "794c972f9088e121ac7160b78b02a8b147b711c4",
+          "src/error.rs": "2ffb795408e76984e83e88238076c573311f0b62",
+          "src/hash_types.rs": "a7014583a6b6f4314a0a4b195efcef229ff6334e",
+          "src/internal_macros.rs": "c31ed1f9742adfff0983dfc54b24b19934c3522c",
+          "src/lib.rs": "95cdecd07bebb707a0dbdd9d91a0e35a42164cae",
+          "src/merkle_tree/block.rs": "6a3dc909e1f8736d8b6a307cb535e5804e968613",
+          "src/merkle_tree/mod.rs": "c3929d42063e72b4e5b217f6b1b4837ebc58a01d",
+          "src/network.rs": "d82c0be00380fe3d59647203f1f921c15ac24401",
+          "src/p2p/address.rs": "78b60149181b7fafd333d1ce7dbea6fbb5f6c85d",
+          "src/p2p/message.rs": "86ddb0607957e554e200be1e6f1fc71652a90c78",
+          "src/p2p/message_blockdata.rs": "6b0858c4227093fbb19b7e04ca8c2f4f1dd68885",
+          "src/p2p/message_bloom.rs": "6c1ceecf67065d8c106c4101015e660f106d1454",
+          "src/p2p/message_compact_blocks.rs": "30708db9b6227ffcd858897a8e02b585aaff3ab6",
+          "src/p2p/message_filter.rs": "cda4ec7d152c8b5cd0dccd75f8aa727fab3202bc",
+          "src/p2p/message_network.rs": "2e194f8186a24d8ed0c8f3b369b7ad80918f88a1",
+          "src/p2p/mod.rs": "6397705a47f65b7ecf2becedfebebc054fc9fc2c",
+          "src/policy.rs": "6bda6608e22037c4ad051ed2cd6bf539c5a355ea",
+          "src/pow.rs": "89292faf667bf7dfab44ad2b7bcd76884deffe55",
+          "src/psbt/error.rs": "25f3c7d243a9394ea9d464901550ed46424db650",
+          "src/psbt/macros.rs": "0b498bfac223553cda61c90c62ebd341cfd45097",
+          "src/psbt/map/global.rs": "7803df2be5971a5bbd298e2a11c711f03ceb3bc3",
+          "src/psbt/map/input.rs": "56c4bff75ed7218a00da6aaeec0d13608a65e6ff",
+          "src/psbt/map/mod.rs": "f416e5dbb11d5bb127ceba8b6c20cfd1d114646d",
+          "src/psbt/map/output.rs": "90080b60aff1b2bf4133ddff953b560ce24a0363",
+          "src/psbt/mod.rs": "9585433446fd9c377e0d7abcbb8f8fa6fd95a0c1",
+          "src/psbt/raw.rs": "948dab63944cbdae55d74b30b4afe3e12f9f3a75",
+          "src/psbt/serialize.rs": "6698b3a53f8fb4d53580240d1859ec9ddc38c4e9",
+          "src/serde_utils.rs": "c58598fe945c797fa308fd0f57d76a4691e17604",
+          "src/sign_message.rs": "c241f5e833c59bee9c7e3442fefdd244a360d4dc",
+          "src/taproot/merkle_branch.rs": "79d6e36b32b5b79c0b092b1239cbadda171a7737",
+          "src/taproot/mod.rs": "5079f6ddfb569e7b32b4fef65009aa8ee82ccb3d",
+          "src/taproot/serialized_signature.rs": "e2c74a625fa4c1c4db8a16b1f4a88ea65433299f",
+          "src/test_macros.rs": "cbcbd4bd57a52d1f52dc35dbdeedc0d02d30842f"
+        }
+      },
+      "files": [
+        {
+          "file": "docs/licenses/upstream/rust-bitcoin-LICENSE-CC0",
+          "sha256": "7179683e8000e6bdc9bbc60d85edf0a4ac8e76f951857f54fcb775d5886f1309",
+          "git_blob_sha1": "6ca207ef004cb69d03041e7e5c288a2be4968045",
+          "url": "https://github.com/rust-bitcoin/rust-bitcoin/blob/ff5dc044d71a3ef8d59b29aa0328ffef9630d6d0/LICENSE"
+        }
+      ]
+    },
+    {
+      "package": "lightning-invoice@0.34.1",
+      "checksum": "47d83bd798e04ab9eecc8bbef1fa17d3808859bcdc0406bd16c55d51c8834444",
+      "commit": "5bc1dc84b3a1b084f84de4b7ece3d978b678d894",
+      "files": [
+        {
+          "file": "docs/licenses/upstream/lightning-invoice-LICENSE-MIT",
+          "url": "https://github.com/lightningdevkit/rust-lightning/blob/5bc1dc84b3a1b084f84de4b7ece3d978b678d894/LICENSE-MIT",
+          "git_blob_sha1": "9d982a4d63256f23b8cc0854024d134e1140f4f3",
+          "sha256": "638da3722c9e102ccd8011d82f61ae3b611174e4a0f8da185c582df137b60a8c"
+        },
+        {
+          "file": "docs/licenses/upstream/ldk-LICENSE-APACHE",
+          "url": "https://github.com/lightningdevkit/rust-lightning/blob/5bc1dc84b3a1b084f84de4b7ece3d978b678d894/LICENSE-APACHE",
+          "git_blob_sha1": "261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        }
+      ],
+      "release_source": {
+        "tag": "v0.2.5",
+        "tag_object": "00d027e256895fb7fd92c7388982de4af7c5a1ad",
+        "git_commit": "5bc1dc84b3a1b084f84de4b7ece3d978b678d894",
+        "git_tree": "e87ea43d1325fc6cf83e0a6ab4aa7771f4aedbef",
+        "member_git_blobs": {
+          ".gitignore": "f79815086fa2d2246fd9a0faba979304c0fafa27",
+          "Cargo.toml.orig": "ecd1552cfbcc1a3ab4cc51bb661e18ae9570a986",
+          "README.md": "e9968d20f285b64785a9bcde4b214acd715cde7a",
+          "src/de.rs": "a4e3cf72c9b4a2b5dcf0e5fdac1d5949095e9caa",
+          "src/lib.rs": "3401459454363e44cd5158454cd0cb50a08093ba",
+          "src/ser.rs": "6da172c7220535d497d4d4e09f9315bf7562a686",
+          "src/tb.rs": "9f8a5135906eaa2165cdd11a148dad3b7b5b8560",
+          "src/test_ser_de.rs": "e2e4d764ac2fe0c606a5abfb137004cc7f3b05e1",
+          "tests/ser_de.rs": "b4d3fa758e120fdf968016a2fbd1b73959b9ec93"
+        }
+      }
+    },
+    {
+      "package": "possiblyrandom@0.2.1",
+      "checksum": "9c564dbf654befd49035528299f1208a40508f6e07efb11c163444e304e4484f",
+      "commit": "5bc1dc84b3a1b084f84de4b7ece3d978b678d894",
+      "files": [
+        {
+          "file": "docs/licenses/upstream/lightning-invoice-LICENSE-MIT",
+          "url": "https://github.com/lightningdevkit/rust-lightning/blob/5bc1dc84b3a1b084f84de4b7ece3d978b678d894/LICENSE-MIT",
+          "git_blob_sha1": "9d982a4d63256f23b8cc0854024d134e1140f4f3",
+          "sha256": "638da3722c9e102ccd8011d82f61ae3b611174e4a0f8da185c582df137b60a8c"
+        },
+        {
+          "file": "docs/licenses/upstream/ldk-LICENSE-APACHE",
+          "url": "https://github.com/lightningdevkit/rust-lightning/blob/5bc1dc84b3a1b084f84de4b7ece3d978b678d894/LICENSE-APACHE",
+          "git_blob_sha1": "261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        }
+      ],
+      "release_source": {
+        "tag": "v0.2.5",
+        "tag_object": "00d027e256895fb7fd92c7388982de4af7c5a1ad",
+        "git_commit": "5bc1dc84b3a1b084f84de4b7ece3d978b678d894",
+        "git_tree": "e87ea43d1325fc6cf83e0a6ab4aa7771f4aedbef",
+        "member_git_blobs": {
+          "Cargo.toml.orig": "91c0f201238679f12b2d2c18451d3c98a95bf893",
+          "src/lib.rs": "6ddbc6de1a219edfab6d3b6347540cd47c5fc372"
+        }
+      }
+    },
+    {
+      "package": "lightning@0.2.8",
+      "checksum": "1cb355abfb61d8ffe201cd5ce6b3e4304c9a897b05988ceed71987f9514fb642",
+      "commit": "254bc9687dd190375956ad790f87239b97ebd058",
+      "files": [
+        {
+          "file": "docs/licenses/upstream/lightning-invoice-LICENSE-MIT",
+          "url": "https://github.com/lightningdevkit/rust-lightning/blob/254bc9687dd190375956ad790f87239b97ebd058/LICENSE-MIT",
+          "git_blob_sha1": "9d982a4d63256f23b8cc0854024d134e1140f4f3",
+          "sha256": "638da3722c9e102ccd8011d82f61ae3b611174e4a0f8da185c582df137b60a8c"
+        },
+        {
+          "file": "docs/licenses/upstream/ldk-LICENSE-APACHE",
+          "url": "https://github.com/lightningdevkit/rust-lightning/blob/254bc9687dd190375956ad790f87239b97ebd058/LICENSE-APACHE",
+          "git_blob_sha1": "261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        }
+      ],
+      "release_source": {
+        "tag": "v0.2.8",
+        "tag_object": "f0b3aeaafab0ee510ccdbcaf25597508f3c1d24b",
+        "git_commit": "254bc9687dd190375956ad790f87239b97ebd058",
+        "git_tree": "00eb3ff5ef51fc50e35af663c19608d4d9d377e8",
+        "member_git_blobs": {
+          "Cargo.toml.orig": "e2f035bb06543a3815d5d9b1132e52c66fc62737",
+          "README.md": "a0721e4140713f76218b9d7d9b57e81f207b2f8c",
+          "src/blinded_path/message.rs": "fe215332c9c8d0ee896052f8a6623eeb487a1a87",
+          "src/blinded_path/mod.rs": "2f9b1b9a411a618c10ed97ad0b6041978af8ada9",
+          "src/blinded_path/payment.rs": "94a71e28523607f845ccc5b6a7e6ba9568460199",
+          "src/blinded_path/utils.rs": "5fc359a47d91e373174eac4030be00c7cf661c9f",
+          "src/chain/chaininterface.rs": "5dc46d5a055074ec6d9a028ca7a4c8723a62bcb0",
+          "src/chain/chainmonitor.rs": "19dfd3ae7887175cc501118f863a2c017b79f036",
+          "src/chain/channelmonitor.rs": "5fd6c143f44babee93e558a44bf34d7d1cec74fa",
+          "src/chain/mod.rs": "761335f6df7183025e9e789063fde2f336c5d6e3",
+          "src/chain/onchaintx.rs": "9e73985dc781ffc46e317b6f2378c6a8a1c9ac97",
+          "src/chain/package.rs": "db46f3be60da4eb8b6d1417838f88c2e25c31947",
+          "src/chain/transaction.rs": "cde4256be40ab4eadf0286f113a320c0746619e6",
+          "src/crypto/chacha20.rs": "5b0c16c933f9be716340f85c3e849487ed1b5ea4",
+          "src/crypto/chacha20poly1305rfc.rs": "839fad9ce6ce85fd9e1007a94f63398ce12f7e98",
+          "src/crypto/mod.rs": "478918a49a8381ea1006ae7ff326c509a2cc5b6b",
+          "src/crypto/poly1305.rs": "a71e39ed773d05bd779da5303aa47fb7baa014b5",
+          "src/crypto/streams.rs": "c406e933bc9c49fcaabd066d20fd577b221a68cf",
+          "src/crypto/utils.rs": "b59cc6002d9a0465dde74dd6b352a2f5346de946",
+          "src/events/bump_transaction/mod.rs": "39ab81b54fcc675878f43f47f4ae9aa550d3b27e",
+          "src/events/bump_transaction/sync.rs": "653710a33587201fdb9e319060bcad8ed47f3b71",
+          "src/events/mod.rs": "bab1d675dd263f3d7ff08bb969405d2d2a24ff31",
+          "src/io/mod.rs": "a46b8c669ae88eb4f35705c606658dfc6116d638",
+          "src/lib.rs": "ee3b0f47a4dcb9cb7bfb69836c1476b52a75f23d",
+          "src/ln/async_payments_tests.rs": "d2b40788fa56c149905a94ca964a6b7bbdf551ef",
+          "src/ln/async_signer_tests.rs": "7a4b9cd599768f9047774b97e1006521da3c248a",
+          "src/ln/blinded_payment_tests.rs": "1ebdca0312f1b2167dd63460a7225b089d2c111e",
+          "src/ln/bolt11_payment_tests.rs": "c24d5b2714e861c3dfa3bba4393d729798133b1c",
+          "src/ln/chan_utils.rs": "733253f74172853d4efdb0ef0e38c3ae837d9696",
+          "src/ln/chanmon_update_fail_tests.rs": "c6a3c91688763b81fc07868e475617e91ae46f90",
+          "src/ln/channel.rs": "23a873ce9472703cb3d8cd5176254ddd4c8b64de",
+          "src/ln/channel_keys.rs": "d6a98e24e3a4bb0e356f6cb48218d1968be048c2",
+          "src/ln/channel_open_tests.rs": "db0bd64ff3c92c7e3219e6a20fe94a6455f7fe46",
+          "src/ln/channel_state.rs": "d10327b259a41123fad23fce9d85ea67441cccc8",
+          "src/ln/channel_type_tests.rs": "ca811539c6d3751f626986b75847dabf057731a0",
+          "src/ln/channelmanager.rs": "532c215027752973505a2d29101962b0a1e616bc",
+          "src/ln/closing_tests.rs": "d0f52fc854b74df4a00dc1bd607f520d35b0fcc0",
+          "src/ln/dual_funding_tests.rs": "fc66ec315cad6ba15f62246380a7381b29ca9f38",
+          "src/ln/features.rs": "b568d5595a5b1aa8852f4318c502f5fbadb05e49",
+          "src/ln/functional_test_utils.rs": "0e804cb4e277afd9ed07fbd9683a19144ba09a80",
+          "src/ln/functional_tests.rs": "e99215c192b7ecb81288fa61b21ac76dbeb34f77",
+          "src/ln/funding.rs": "f80b2b6daeaa9a0024e939125f0ce25f44fdbf15",
+          "src/ln/htlc_reserve_unit_tests.rs": "92ddde9be417a9fe3ad46b40fc84269a6169115c",
+          "src/ln/inbound_payment.rs": "17c2526e78d0cd08ac9248ddb8c75424c46427bd",
+          "src/ln/interactivetxs.rs": "8e6b130d36cd428ac536240934a0b509511ee04c",
+          "src/ln/invoice_utils.rs": "1258e69911494146db33b7e7c7ed3d38984b3ae8",
+          "src/ln/max_payment_path_len_tests.rs": "8425e1928ad4c1b4945ab09ff851c358c0275dff",
+          "src/ln/mod.rs": "33a837ba9df1b1ecaffc14513a89fa085b0af70d",
+          "src/ln/monitor_tests.rs": "1dc53134287e204d6ad92b9c16760e483a39eae6",
+          "src/ln/msgs.rs": "81fa2fc41fa4e0a8b698340dcd9fd98f5c61b148",
+          "src/ln/offers_tests.rs": "300066c5c5ff16a0beb8fd1ef15ab9704b7a2ee7",
+          "src/ln/onion_payment.rs": "84b1338b1a759992015aef886e919975f1d171be",
+          "src/ln/onion_route_tests.rs": "b3c5f42d6876570747447dc500e7ff251abb305c",
+          "src/ln/onion_utils.rs": "56adfd883ae577a13ca5bc5a13031b7cd73548b1",
+          "src/ln/our_peer_storage.rs": "ab0e9783ffab8dc7be600aec9c44985970f20915",
+          "src/ln/outbound_payment.rs": "f05820b1246f6f9cbbf3a0e7d9bebacf6afd37ac",
+          "src/ln/payment_tests.rs": "faf0e3eb13878b0793e11b65d0233529eba88832",
+          "src/ln/peer_channel_encryptor.rs": "d527b8f751c2f9e04522f5e7285edf84ff1782c3",
+          "src/ln/peer_handler.rs": "20844521597f61e84ca1ef8eb14df9f7b2e0fb3d",
+          "src/ln/priv_short_conf_tests.rs": "87469a7b1a0a8ef3536e745cd0ecac74d0c94015",
+          "src/ln/quiescence_tests.rs": "7a5d35b12a5fc24f088ad352d4ba78d4d9532785",
+          "src/ln/reload_tests.rs": "a9dc1d7bc17f86a8d420b8fd490efbfdb4bcc7b3",
+          "src/ln/reorg_tests.rs": "32041905139d249eb1afedc0259488ce5d6f7240",
+          "src/ln/script.rs": "6bbbf3bf86e64ffe93c515adc2518a590daf07fc",
+          "src/ln/shutdown_tests.rs": "b20d742c2ed99f04311dd4e9c8bdfad6268f54bc",
+          "src/ln/splicing_tests.rs": "338c474cc3ed55eceacb6b6374db75c97b7677c0",
+          "src/ln/types.rs": "5d72ba685cb7579ec6a5f5e47ca97cb781064cbb",
+          "src/ln/update_fee_tests.rs": "35d02752fead0ed9af6da578c2cb988e835e9c47",
+          "src/ln/wire.rs": "bc1d83adb685bc4d013672371de4bf7ac8b92d9e",
+          "src/ln/zero_fee_commitment_tests.rs": "b4fd9e0be88b319fcc13c15f3ba7414a6c030790",
+          "src/offers/async_receive_offer_cache.rs": "9c7652c782bdf048a2fdde2035bc541342b76e1f",
+          "src/offers/flow.rs": "d8fca367dff16686378657b564c190a182cb32ee",
+          "src/offers/invoice.rs": "80d81acc2d9be53e268d205374468bf11afb0c15",
+          "src/offers/invoice_error.rs": "68dbbb2db4e0f1edd351242c5e376274c23d852a",
+          "src/offers/invoice_macros.rs": "1ac6e40b896db801c2b36343962701af113b0f42",
+          "src/offers/invoice_request.rs": "eff274f52cd6315383d8e8ba4e2c44f9f014ef24",
+          "src/offers/merkle.rs": "1a38fe5441fb14f76a19a9a1989ac5611a12b9a6",
+          "src/offers/mod.rs": "5b5cf6cdc782ee52f9d7955b480591f347719490",
+          "src/offers/nonce.rs": "0675414125ffc2ea239b9ea2aec48ca13b8d268c",
+          "src/offers/offer.rs": "e9c3deb7d9a66228582e4e908e115af45ff3d10c",
+          "src/offers/parse.rs": "99dd1bb938d33aefd2aae96cb99ed73d2ca3784c",
+          "src/offers/payer.rs": "696eac240448aab6602cc16a427c4d4f0d996674",
+          "src/offers/refund.rs": "dd2c3e2a92eb61afb063d3598d7f6045d1052b4b",
+          "src/offers/signer.rs": "645949ff866062d7a733cffa62b74772ca590e09",
+          "src/offers/static_invoice.rs": "8d4b75bb627a54c79043ea2d85159876987edb14",
+          "src/offers/test_utils.rs": "d0decdf2c38d1dd094fab80a65a0fdcddc16639c",
+          "src/onion_message/async_payments.rs": "127126e150f2e2f00582b3fa1663675fed10fd21",
+          "src/onion_message/dns_resolution.rs": "c88526c093276cffbfe6848e84e7812912a6d992",
+          "src/onion_message/functional_tests.rs": "128c30a9473c256356fac1a26af71bd9d138f521",
+          "src/onion_message/messenger.rs": "6bbe6e04fcbb8491923702f215b985c94cd59a17",
+          "src/onion_message/mod.rs": "79fd69f2cbe75488f06d2a4593c8707b333f10f4",
+          "src/onion_message/offers.rs": "06988d4db8f80a7f787cd288c4327e93d2531c5c",
+          "src/onion_message/packet.rs": "2e0ccaf3a3e096585cc5a8a7a172ff802485d195",
+          "src/routing/gossip.rs": "51a9a59e47f957253f6d6ad0e2d9b7a1d9bbda2d",
+          "src/routing/log_approx.rs": "c1b5287fbe6ea55692df5ef0893081c6af07d719",
+          "src/routing/mod.rs": "cb16461dd66f4866862677b4811e35c3c93c43b1",
+          "src/routing/router.rs": "307e221ddfb4b06148e32e46ae3ce042c8fa910a",
+          "src/routing/scoring.rs": "25d69c6fe7d69930f75d8a0cc0b8e71d04036b14",
+          "src/routing/test_utils.rs": "ab2b24c19e0557153b5ca5e0d41486abd9a48366",
+          "src/routing/utxo.rs": "4968d6cd7b48c126a6afa425b5132c963baf398f",
+          "src/sign/ecdsa.rs": "e13285722af4adb7349cc05ea6b82ea3cb1d9e19",
+          "src/sign/mod.rs": "ac24a4a404009efad067bd798700206606f705aa",
+          "src/sign/taproot.rs": "22470f4f8b627f116aa9638b9cef43d210c8c153",
+          "src/sign/tx_builder.rs": "e6d598f1aabf40c382173a1b072ecce466384870",
+          "src/sign/type_resolver.rs": "b7270a8613b68b6f091ad4a03492bacd5f3aeba5",
+          "src/sync/debug_sync.rs": "c8fb212a58b3ea11c10216be6ccddb6a024403d8",
+          "src/sync/fairrwlock.rs": "6ebb196810d06ce868f9f2f1a795ddbfc82d289b",
+          "src/sync/mod.rs": "9a88984520335f0517e1b1ee906a2481977f6d6c",
+          "src/sync/nostd_sync.rs": "120707419183439d67e3214b7ea619f1fca18aa4",
+          "src/sync/test_lockorder_checks.rs": "91826342f8a60f7dcbd523500ea2d0b81a047dc3",
+          "src/util/anchor_channel_reserves.rs": "29e24c9f72778d0f33c2fcd6df616cbcf6642458",
+          "src/util/async_poll.rs": "eefa40d1055c047430890fb389a12c048d97dec3",
+          "src/util/atomic_counter.rs": "bb9f1eefdeb3670bc00c2520b98ac019834f87dc",
+          "src/util/base32.rs": "f3d7a10c5535f85b8018bef7e2c2b8f56ed19b3d",
+          "src/util/byte_utils.rs": "9e023ffeb97e68e359af631a30c6615750c254cb",
+          "src/util/config.rs": "1a0709d3304c3fe5d466b4ab5c0aa428d5b3e41f",
+          "src/util/dyn_signer.rs": "cf1cac37903e34b69f2855de515eecabdd8451b5",
+          "src/util/errors.rs": "eaaf0130ca25959f86caa07b36e3ff64034368ca",
+          "src/util/fuzz_wrappers.rs": "6475065b8beb4f8fdca18953522f9f0ca528d90d",
+          "src/util/hash_tables.rs": "00341d57b459236a0c6c6eca36780251cca2d089",
+          "src/util/indexed_map.rs": "f81139553701b6149da092d8a04438f5f1c1fb64",
+          "src/util/logger.rs": "283d31581444698a29bb60253a313c57a9323a33",
+          "src/util/macro_logger.rs": "7b8e27a487ae986fa5a5ef800a6a45d20d9472bb",
+          "src/util/message_signing.rs": "d16fc73df7c7844b71db7e6bcd1194a0175b5483",
+          "src/util/mod.rs": "dcbea904b51bc40f79a2ca4785a91cbdc5fb38dc",
+          "src/util/mut_global.rs": "396d2ec7eb1248a4729dcd6a9558178e55078ebf",
+          "src/util/native_async.rs": "886146e976da13abcbc2ebe80f55490557a9526c",
+          "src/util/persist.rs": "a26bf75167e0e923d70b4ee6ff9e04e95997fcdf",
+          "src/util/scid_utils.rs": "b9dcc4688e88cdbb801b8291d3228b64b3843fee",
+          "src/util/ser.rs": "92b1e224ac6213a10adf96a4400a63ff18070027",
+          "src/util/ser_macros.rs": "647e7c77a6c8eb371fe192589aa0f4a6f5b21b60",
+          "src/util/sweep.rs": "d49501bd47e18b0d2b014c806b0faef91595cfae",
+          "src/util/test_channel_signer.rs": "3bacd76a61063815e05c09a5e79e7b8e6caed959",
+          "src/util/test_utils.rs": "0d08e3656500f4ec4d842376aea5462b3a714b7a",
+          "src/util/time.rs": "c60415435727ff419f41997e098d136cfe800354",
+          "src/util/transaction_utils.rs": "5a77fbf06b88eb75eeed898d9bf194775b96b11a",
+          "src/util/wakers.rs": "ec5bd0efb80090e25e6481e5f4c29c0b5ed23842"
+        }
+      }
+    },
+    {
+      "package": "bitcoin-payment-instructions@0.7.1",
+      "checksum": "29f5b43b0e8338cd36ce7940bd6b8a007d54f1cbe25314ec3fbba566f870b085",
+      "commit": "3d5400ff95373a78138c09f2e310c751cc7d2770",
+      "files": [
+        {
+          "file": "docs/licenses/upstream/spdx-Apache-2.0.txt",
+          "url": "https://github.com/spdx/license-list-data/blob/31ba1a50e5397e00a304dbadc76531740e89ee48/text/Apache-2.0.txt",
+          "git_blob_sha1": "137069b823873b8bcf42979bcf8e9371052d26a2",
+          "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff"
+        }
+      ],
+      "catalog_source": {
+        "license_id": "Apache-2.0",
+        "catalog_commit": "31ba1a50e5397e00a304dbadc76531740e89ee48"
+      }
+    },
+    {
+      "package": "hex_lit@0.1.1",
+      "checksum": "3011d1213f159867b13cfd6ac92d2cd5f1345762c63be3554e84092d85a50bbd",
+      "commit": "a1b61585654a3280103a9622c272b2f8ba278a47",
+      "files": [
+        {
+          "file": "docs/licenses/upstream/spdx-MITNFA.txt",
+          "url": "https://github.com/spdx/license-list-data/blob/31ba1a50e5397e00a304dbadc76531740e89ee48/text/MITNFA.txt",
+          "git_blob_sha1": "6d44edb3db0e68a518a0286ce5f8d78e9b565d1e",
+          "sha256": "d436716f7a05466f52443893079761c8a88f4967d0ef490fabc0a1c9ef1c3a1d"
+        }
+      ],
+      "catalog_source": {
+        "license_id": "MITNFA",
+        "catalog_commit": "31ba1a50e5397e00a304dbadc76531740e89ee48"
+      }
+    }
+  ]
+}

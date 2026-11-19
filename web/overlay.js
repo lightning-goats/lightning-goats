@@ -46,6 +46,7 @@
         renderFeedingBanner();
     }
     function clearPresentation() {
+        showCashuRequest(null);
         for (const timer of timers) clearTimeout(timer);
         timers.clear();
         for (const animation of animations) animation.cancel();
@@ -301,6 +302,7 @@
             awaitingConfirmation = typeof data.unresolved_feed_attempt === "string";
             if (data.cyberherd === null) showCards([], true);
             else if (data.cyberherd !== undefined && !acceptRoster(data.cyberherd)) return resetConnection();
+            showCashuRequest(data.cashu);
             replaying = false; el("connection").dataset.state = "live"; el("connection").textContent = ""; el("connection").ariaLabel = "Connected"; render(); return;
         }
         if (!integer(data.seq) || seq === null || stream === null) return resetConnection();
@@ -322,7 +324,9 @@
             else addMessage(data.message);
             if (isPayment) {
                 if (payments.length >= 12) payments.shift();
-                payments.push(data.amount_sats); toggleQr(); showPayment();
+                payments.push(data.amount_sats);
+                if (data.source !== "cashu" && data.source !== "nutzap") toggleQr();
+                showPayment();
             }
             if (kind === "feeder_confirmed") {
                 if (feeds.length < 8) feeds.push(data.seq);
@@ -410,6 +414,40 @@
             // ordered socket; a slower HTTP response must never regress the ledger.
         } catch { setFeedingState("unknown"); }
     }
+    function showCashuRequest(descriptor) {
+        const frame = el("cashu-code"), image = el("cashu-image");
+        frame.hidden = true; image.replaceChildren();
+        // Presentation failure must not reset the financial event stream. Only
+        // public receiving instructions belong here, never spendable tokens.
+        if (!descriptor || descriptor.version !== 1 || descriptor.enabled !== true ||
+            typeof descriptor.id !== "string" || !/^lg1-[0-9a-f]{32}$/.test(descriptor.id) ||
+            typeof descriptor.request !== "string" || descriptor.request.length > 2048) return;
+        const payload = descriptor.request;
+        const valid = descriptor.encoding === "creqA" ? /^creqA[A-Za-z0-9_-]+={0,2}$/.test(payload)
+            : descriptor.encoding === "creqB" && /^CREQB1[023456789ACDEFGHJKLMNPQRSTUVWXYZ]+$/.test(payload);
+        if (!valid) return;
+        try {
+            const qr = qrcode(0, "M");
+            qr.addData(payload, descriptor.encoding === "creqB" ? "Alphanumeric" : "Byte"); qr.make();
+            const modules = qr.getModuleCount() + 8;
+            // Multiples of three preserve whole module pixels at 1080p and
+            // 720p fit=1. Refuse requests too dense for the reserved space.
+            const scale = Math.max(3, Math.floor(300 / modules / 3) * 3);
+            const side = modules * scale;
+            if (side > 384) return;
+            const svg = qrSvg(qr); svg.style.width = svg.style.height = `${side}px`;
+            image.append(svg); frame.hidden = false;
+        } catch { /* Unrenderable metadata leaves the receiving QR hidden. */ }
+    }
+    function qrSvg(qr) {
+        const count = qr.getModuleCount(), ns = "http://www.w3.org/2000/svg";
+        const svg = document.createElementNS(ns, "svg"); svg.setAttribute("viewBox", `0 0 ${count + 8} ${count + 8}`); svg.setAttribute("shape-rendering", "crispEdges");
+        const white = document.createElementNS(ns, "rect"); white.setAttribute("width", "100%"); white.setAttribute("height", "100%"); white.setAttribute("fill", "white"); svg.append(white);
+        let path = "";
+        for (let y = 0; y < count; y++) for (let x = 0; x < count; x++) if (qr.isDark(y, x)) path += `M${x + 4},${y + 4}h1v1h-1z`;
+        const modules = document.createElementNS(ns, "path"); modules.setAttribute("d", path); modules.setAttribute("fill", "black"); svg.append(modules);
+        return svg;
+    }
     function makeQr() {
         // LUD-16 discovery encoded as LNURL with the Bech32 checksum. Uppercase
         // uses QR alphanumeric mode; H correction protects the small center logo.
@@ -427,12 +465,7 @@
         checksum ^= 1;
         const payload = "LNURL1" + [...words, ...[25, 20, 15, 10, 5, 0].map((shift) => (checksum >>> shift) & 31)].map((word) => chars[word]).join("").toUpperCase();
         const qr = qrcode(0, "H"); qr.addData(payload, "Alphanumeric"); qr.make();
-        const count = qr.getModuleCount(), ns = "http://www.w3.org/2000/svg";
-        const svg = document.createElementNS(ns, "svg"); svg.setAttribute("viewBox", `0 0 ${count + 8} ${count + 8}`); svg.setAttribute("shape-rendering", "crispEdges");
-        const white = document.createElementNS(ns, "rect"); white.setAttribute("width", "100%"); white.setAttribute("height", "100%"); white.setAttribute("fill", "white"); svg.append(white);
-        let path = "";
-        for (let y = 0; y < count; y++) for (let x = 0; x < count; x++) if (qr.isDark(y, x)) path += `M${x + 4},${y + 4}h1v1h-1z`;
-        const modules = document.createElementNS(ns, "path"); modules.setAttribute("d", path); modules.setAttribute("fill", "black"); svg.append(modules);
+        const svg = qrSvg(qr);
         el("qr-image").append(svg); el("qr-code").href = `lightning:${payload}`; el("qr-code").dataset.lnurl = payload;
     }
     function tick() {

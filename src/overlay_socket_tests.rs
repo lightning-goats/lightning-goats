@@ -51,6 +51,7 @@ impl Fixture {
                                     1000,
                                     resume,
                                     timing,
+                                    None,
                                 )
                                 .await;
                                 let _ = completed_tx.try_send(

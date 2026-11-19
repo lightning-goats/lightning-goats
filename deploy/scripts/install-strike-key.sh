@@ -32,7 +32,8 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-echo 'Use a key with partner.receive-request.create and partner.receive-request.read only.'
+echo 'Use the core key with partner.receive-request.create and partner.receive-request.read.'
+echo 'CyberHerd accounting also requires partner.payment.read; never add quote/execute/spend permissions.'
 if [[ -n $source_file ]]; then
     [[ -f $source_file && ! -L $source_file ]] || { echo 'Key source must be a regular file, not a symlink.' >&2; exit 1; }
     [[ $(stat -c '%u:%a' "$source_file") == 0:600 ]] || { echo 'Key source must be root-owned with mode 0600.' >&2; exit 1; }

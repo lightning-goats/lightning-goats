@@ -1,0 +1,100 @@
+{
+  "checked_at": "2026-11-16T22:24:37.667040+00:00",
+  "operator_selected_mint": "https://mint.minibits.cash/Bitcoin",
+  "advertised_version": "cdk-mintd/0.18.3",
+  "active_sat_keysets": [
+    {
+      "id": "01fc0ec0e59cd6fa01b7a88f8cd77fce81fd1e64bca67d752e984992b7a3c3a821",
+      "unit": "sat",
+      "active": true,
+      "input_fee_ppk": 0
+    }
+  ],
+  "lightning_melt_advertisement": {
+    "methods": [
+      {
+        "method": "bolt11",
+        "unit": "sat",
+        "method_name": "Bolt11",
+        "min_amount": 1,
+        "max_amount": 1000000,
+        "amountless": true
+      },
+      {
+        "method": "onchain",
+        "unit": "sat",
+        "method_name": "Onchain",
+        "min_amount": 10000,
+        "max_amount": 1000000
+      }
+    ],
+    "disabled": false
+  },
+  "recovery_and_lock_advertisements": {
+    "7": {
+      "supported": true
+    },
+    "9": {
+      "supported": true
+    },
+    "11": {
+      "supported": true
+    },
+    "12": {
+      "supported": true
+    },
+    "19": {
+      "ttl": 3600,
+      "cached_endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/swap"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/mint/bolt11"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/melt/bolt11"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/mint/onchain"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/melt/onchain"
+        }
+      ]
+    }
+  },
+  "public_read_evidence": [
+    {
+      "endpoint": "https://mint.minibits.cash/Bitcoin/v1/info",
+      "bytes": 1934,
+      "sha256": "0ca0b90d8593614d21287cec327a1f7c2223908209b231a98b7caa6c465b1071"
+    },
+    {
+      "endpoint": "https://mint.minibits.cash/Bitcoin/v1/keysets",
+      "bytes": 278,
+      "sha256": "3b39072a80030ebe4f777e9a8d9a9887c824433de4d23b53824ccb3df1ca3c6c"
+    },
+    {
+      "endpoint": "https://mint.minibits.cash/Bitcoin/v1/keys",
+      "bytes": 2614,
+      "sha256": "d440f5d7016c5e8ca2377361e144b9958ef62f6009f35f5ace2334328622596b"
+    }
+  ],
+  "application_candidate": {
+    "ordinary_cashu": "Minibits",
+    "platform": "Android",
+    "nutzap_candidate": "Amethyst",
+    "reviewed_version": "v1.21.0",
+    "official_source": "https://github.com/vitorpamplona/amethyst/blob/v1.21.0/README.md"
+  },
+  "live_swaps_or_melts_requested": false,
+  "receive_or_payment_request_created": false,
+  "production_configuration_changed": false,
+  "mint_financially_qualified": false
+}

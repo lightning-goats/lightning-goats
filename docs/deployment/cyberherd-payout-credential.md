@@ -1,6 +1,22 @@
 # Separate CyberHerd payout credential
 
-The receive daemon keeps its existing credential and never loads a spend key.
+The receive daemon keeps its own credential and never loads a spend key.
+When CyberHerd outcome verification is enabled, that credential also needs
+[`partner.payment.read`](https://docs.strike.me/api/get-payment-by-id/) in addition
+to its existing receive permissions. Core independently reads the original outgoing
+payment before accepting the payout worker's accounting report. Giving this scope
+only to the payout key is insufficient. Never copy the payout key into core or add
+quote creation/execution permissions to the core key.
+
+Before considering financial activation complete, verify that **both identities**
+can read an existing, operator-approved payment ID. A successful payout does not
+prove core can reconcile it. Use only GET and redact credentials and payment
+preimages. If core receives HTTP 403, retain the reservation and original terminal
+manifest, correct its payment-read permission, and let the normal worker retry.
+Do not resend the payment, fabricate an acknowledgement, or edit ledger rows.
+Verify the final core accounting and the payout acknowledgement agree before
+reporting the hold released.
+
 The separate payout role requires only:
 
 - [`partner.receive-request.read`](https://docs.strike.me/api/find-receive-request-by-id/)

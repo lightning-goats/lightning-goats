@@ -146,6 +146,94 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  cashu-package:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.88"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            tools/cashu-compat
+      - name: Fetch both locked crate inventories
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fetch --locked
+          cargo fetch --locked --manifest-path tools/cashu-compat/Cargo.toml
+      - name: Build and verify the inactive Cashu release candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 deploy/scripts/verify-sqlite-vendor.py
+          python3 tools/cashu-compat/verify_vendor.py
+          python3 deploy/scripts/package-cashu.py build "$RUNNER_TEMP/cashu-review"
+          (cd "$RUNNER_TEMP/cashu-review" && sha256sum --check SHA256SUMS)
+          python3 deploy/scripts/package-cashu.py verify "$RUNNER_TEMP/cashu-review/"*.tar.gz "$GITHUB_SHA"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cashu-review-${{ github.sha }}
+          path: ${{ runner.temp }}/cashu-review/
+          if-no-files-found: error
+          retention-days: 14
+
+  cashu-systemd:
+    runs-on: ubuntu-24.04
+    needs: cashu-package
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: cashu-review-${{ github.sha }}
+          path: ${{ runner.temp }}/cashu-review
+      - name: Exercise the Cashu egress policy in disposable namespaces
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v nft >/dev/null; then
+            sudo --preserve-env=GITHUB_ACTIONS,RUNNER_OS bash deploy/scripts/configure-ci-apt-mirrors.sh
+            sudo apt-get update && sudo apt-get install -y nftables
+          fi
+          sudo unshare --net -- env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin python3 -B deploy/nftables/test-cashu-egress.py | tee "$RUNNER_TEMP/CASHU-EGRESS.json"
+      - name: Rehearse installed Cashu startup, isolation and recovery fencing
+        shell: bash
+        run: |
+          set -euo pipefail
+          review="$RUNNER_TEMP/cashu-review"
+          (cd "$review" && sha256sum --check SHA256SUMS)
+          archive=$(find "$review" -maxdepth 1 -name '*.tar.gz' -type f)
+          checksum=$(sha256sum "$archive" | cut -d ' ' -f 1)
+          python3 -B deploy/scripts/package-cashu.py verify "$archive" "$GITHUB_SHA"
+          fixture="$RUNNER_TEMP/cashu-systemd-bin"
+          mkdir "$fixture"
+          for binary in lightning-goatsctl lightning-goats-cashud lightning-goats-cashu-signerd; do
+            tar -xOf "$archive" "$binary" > "$fixture/$binary"
+            chmod 0555 "$fixture/$binary"
+          done
+          sudo python3 -B deploy/scripts/initialize-staging-credential-store.py > "$RUNNER_TEMP/CASHU-CREDENTIAL-STORE.json"
+          sudo --preserve-env=GITHUB_ACTIONS,GITHUB_RUN_ID unshare --net -- python3 -B deploy/scripts/test-cashu-native-backup.py \
+            --core-cli "$fixture/lightning-goatsctl" --core-sha256 "$(sha256sum "$fixture/lightning-goatsctl" | cut -d ' ' -f 1)" \
+            --wallet-cli "$fixture/lightning-goats-cashud" --wallet-sha256 "$(sha256sum "$fixture/lightning-goats-cashud" | cut -d ' ' -f 1)" \
+            --signer-cli "$fixture/lightning-goats-cashu-signerd" --signer-sha256 "$(sha256sum "$fixture/lightning-goats-cashu-signerd" | cut -d ' ' -f 1)" \
+            --systemd-package "$archive" "$GITHUB_SHA" "$checksum" | tee "$RUNNER_TEMP/CASHU-SYSTEMD.json"
+          (cd "$RUNNER_TEMP" && sha256sum CASHU-SYSTEMD.json CASHU-CREDENTIAL-STORE.json CASHU-EGRESS.json > CASHU-SYSTEMD-SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cashu-systemd-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/CASHU-SYSTEMD.json
+            ${{ runner.temp }}/CASHU-CREDENTIAL-STORE.json
+            ${{ runner.temp }}/CASHU-EGRESS.json
+            ${{ runner.temp }}/CASHU-SYSTEMD-SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
+
   systemd:
     # LoadCredentialEncrypted requires systemd >= 250; Ubuntu 22.04 has 249.
     runs-on: ubuntu-24.04

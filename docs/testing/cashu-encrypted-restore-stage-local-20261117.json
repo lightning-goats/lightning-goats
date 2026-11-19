@@ -1,0 +1,38 @@
+{
+  "scope": "Isolated restore staging from a real encrypted archive with six initialized disposable native roles",
+  "prior_native_program_checkpoint": "7f8a2d7ee7ca36662ca1a43b28b18a54ef5d14c2",
+  "command_tests": 17,
+  "command_tests_under_root_passed": true,
+  "sources_sha256": {
+    "deploy/scripts/stage-cashu-restore.py": "90fdb3e057cc3aa9c92903dd2059d6e0a58c505e987a5815887f4e68dcca7df0",
+    "deploy/scripts/launch-cashu-backup.py": "74d1bdae7d7d2e48a1ea697b74c37be614883fb192f315a58414b86322790796",
+    "deploy/scripts/cashu-collector-fixture.py": "f35e697a8f31a4ba301898cf4c333a2b7d4ed050e32c2f9b8ae3467203d95c61",
+    "deploy/tests/test_cashu_collector.py": "ca185f86daf4ce337774a52003f25087c7ef4cc82e4bbe0fb7eb8357d38fcb53",
+    ".github/workflows/ci.yml": "e3a708da4b10a31de4229ee9a58fd6be641376718ed0787560cc915f16edf8e1"
+  },
+  "native_programs_sha256": {
+    "core": "87015d260bbfa0b49eb20c03089697bb7c0a518591dbf431e8d6e4a84d795a34",
+    "membership": "c858e6e9f9368030d2904f92002420fb19604833f20745e8e3a8c2ecf14a8a33",
+    "payout": "ba3c5c41e9f3d9fd592b97c5601a8062686bd498502039edc1c2361c108f7e43",
+    "payout_signer": "4b8b53f51a4ace5b5e206d3e92e95dab5c92c6c52792b72c4d71b086f856141e",
+    "signer": "30dfc68576cd47ed69594cc6a88b5adb8873b70e48e171f3258c1166559b76c2",
+    "statectl": "9cd45ef036a364a032d259ad5c9385382c243ff7ff90c0d8ae0de9b28885474b",
+    "wallet": "b95f2b195fa1b2baaa880afbf59366d8a8f424859933126c74850022aef45e14"
+  },
+  "stage": {
+    "actual_authenticated_launcher": true,
+    "archive_programs_executable": false,
+    "committed_wal_preserved": true,
+    "external_reconciliation_verified": false,
+    "image_manifest_verified": true,
+    "real_age_archive": true,
+    "refusal_cases": 3,
+    "resume_authorized": false,
+    "staged_roles": 6
+  },
+  "scope_limits": [
+    "Archive collector systemctl and maintenance lock identity are simulated",
+    "All application journals are initialized disposable copies",
+    "Installed restore, real external reconciliation and safe resumption still require qualification"
+  ]
+}

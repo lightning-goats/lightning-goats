@@ -1,0 +1,20 @@
+[
+  {
+    "file": "docs/licenses/upstream/lightning-invoice-LICENSE-MIT",
+    "url": "https://github.com/lightningdevkit/rust-lightning/blob/254bc9687dd190375956ad790f87239b97ebd058/LICENSE-MIT",
+    "git_blob_sha1": "9d982a4d63256f23b8cc0854024d134e1140f4f3",
+    "sha256": "638da3722c9e102ccd8011d82f61ae3b611174e4a0f8da185c582df137b60a8c"
+  },
+  {
+    "file": "docs/licenses/upstream/lightning-macros-LICENSE-MIT",
+    "url": "https://github.com/lightningdevkit/rust-lightning/blob/b18924cb17537ca8397992709b8bea536b19f9d2/LICENSE-MIT",
+    "git_blob_sha1": "9d982a4d63256f23b8cc0854024d134e1140f4f3",
+    "sha256": "638da3722c9e102ccd8011d82f61ae3b611174e4a0f8da185c582df137b60a8c"
+  },
+  {
+    "file": "docs/licenses/upstream/lightning-types-LICENSE-MIT",
+    "url": "https://github.com/lightningdevkit/rust-lightning/blob/5bc1dc84b3a1b084f84de4b7ece3d978b678d894/LICENSE-MIT",
+    "git_blob_sha1": "9d982a4d63256f23b8cc0854024d134e1140f4f3",
+    "sha256": "638da3722c9e102ccd8011d82f61ae3b611174e4a0f8da185c582df137b60a8c"
+  }
+]

@@ -305,6 +305,11 @@ impl LedgerStore {
         if !super::reward_funding::prepare(&mut tx).await? {
             bail!("original funding history must be initialized and verified first");
         }
+        let reserved: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM feed_financial_parts p JOIN feed_financial_plans f ON f.id=p.plan_id WHERE p.ledger_id=? AND f.state='pending')")
+            .bind(credit_id).fetch_one(&mut *tx).await?;
+        if reserved {
+            bail!("cannot retire credit reserved by a pending financial plan");
+        }
         let remaining: i64 =
             sqlx::query_scalar("SELECT remaining_sats FROM reward_funding_lots WHERE ledger_id=?")
                 .bind(credit_id)
@@ -393,7 +398,10 @@ mod tests {
         std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
         let path = directory.join("core.db");
         let url = format!("sqlite://{}", path.display());
-        let store = LedgerStore::connect(&url).await.unwrap();
+        let source = root.path().join("fixture-source.db");
+        let store = LedgerStore::connect(&format!("sqlite://{}", source.display()))
+            .await
+            .unwrap();
         store.initialize_reward_funding().await.unwrap();
         grant(&store, "saved", 70).await;
         grant(&store, "original-donation", 34031).await;
@@ -406,15 +414,16 @@ mod tests {
         .fetch_one(&store.pool)
         .await
         .unwrap();
+        // Materialize the stopped journal at a separate path. The fixture's
+        // setup connection can finish SQLite sidecar shutdown only at source.
+        sqlx::query("VACUUM INTO ?")
+            .bind(path.to_str().unwrap())
+            .execute(&store.pool)
+            .await
+            .unwrap();
         store.pool.close().await;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
-        for suffix in ["", "-wal", "-shm"] {
-            let file = std::path::PathBuf::from(format!("{}{suffix}", path.display()));
-            if file.exists() {
-                std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
-                std::os::unix::fs::chown(&file, Some(50119), Some(50119)).unwrap();
-            }
-        }
+        std::os::unix::fs::chown(&path, Some(50119), Some(50119)).unwrap();
         std::os::unix::fs::chown(&directory, Some(50119), Some(50119)).unwrap();
         assert!(LedgerStore::connect_existing_recovery(&url).await.is_err());
         let preview = LedgerStore::retire_credit_offline(&url, "reviewed", credit, 24101, true)

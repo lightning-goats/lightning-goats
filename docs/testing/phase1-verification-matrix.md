@@ -388,3 +388,178 @@ Coverage is in native `reward_cutover`/`reward_review` tests and protected-file
 The latter mock services/native calls; root UID/native-store qualification runs
 separately. Combined installed-systemd, provider/recipient, recovery adoption and
 explicit production activation remain separate acceptance requirements.
+
+## Dated Cashu exception: private operational health
+
+For the [Cashu implementation plan](../planning/cashu-nutnovember-implementation-plan.md),
+qualify the protected wallet status command with its isolated wallet gates.
+It must remain readable with hidden keys and an active writer, without modifying
+journals, initializing missing stores or querying a provider. Configured/observed
+wallet identity mismatches must report a recovery fence while daemon startup
+continues to refuse them. Retained core acknowledgment epochs are diagnostics,
+not evidence of the live core's identity.
+
+Check timestamp replay/restart preservation, legacy unknown ages, missing timing
+tables, future timestamps, overdue schedules, invalid acknowledgment JSON and
+detail truncation beyond 64 historical mints. Global financial totals must include
+value outside the displayed mint detail list. Unverified input face value must
+never be reported as acquired custody or credit.
+
+Use actual CDK split/melt regressions and the explicit combined HTTP/receipt/
+treasury fixture to verify receive fees, completed conversion costs, unfinished
+preparation fees, dust change and pending reservations. Completed split fees
+must not be counted twice. The combined runner requires the wallet's health
+accounting marker; older artifacts without that check must refuse qualification.
+Mocked deposits/simulated feed confirmation do not qualify installed providers,
+real mint custody or physical dispatch.
+
+## Dated Cashu exception: protected operator controls
+
+Qualify `lightning-goatsctl plan-cashu-settlement` against the exact selected
+core artifact. Its approval must bind the protected configuration bytes, core
+and wallet identities, mint, request UUID, input ceiling and a bounded current
+review window. Preview must roll back the same planner transaction used by
+apply, including source reservations and request rows. Funded apply/restart
+retries must return the original intent without a second reservation or credit.
+Conflicting reuse, unapproved mint and excessive input must fail closed.
+
+Run the actual CLI through `deploy/scripts/test-cashu-operator-settlement-cli.py`
+in fresh mount/network namespaces using `test-cashu-private-run.py` and the
+selected executable SHA-256. Confirm active/unknown core-service refusal, exact
+configuration/scope/permissions, no initialization of a missing core epoch, and
+stable empty-custody request retention. This fixture uses mocked systemctl and
+empty custody; qualify funded selection separately with the native ledger test.
+Neither check authorizes installed systemd changes, provider requests or feeding.
+
+For `lightning-goats-cashud reconcile-acquisition`, qualify the protected exact
+configuration and wallet/mint/acquisition binding, time/review limits, exclusive
+writer lock and restore fence. New, prepared, exported and credited states
+must refuse this procedure. An ownership hold is eligible only with an explicit
+held-work approval and the original `acquiring` journal history. Bind the exact
+hold reason, with older approvals scoped to `missing_owned_outputs`. Use
+actual CDK-owned output tests to prove that fresh mint-state
+verification can complete only the original receive, without another swap/melt
+or receipt export. Missing derivations and unavailable or incomplete responses
+must preserve active holds. A successful recheck must preserve the original
+request, hold history, and exactly-once output attribution. Verify that a hold
+recorded before submission preserves proof claims while disjoint payments at
+the same mint can proceed. Missing evidence for an acquiring hold or an
+unfinished CDK saga must retain the mint's original recovery fence.
+While a mint is locally fenced, verify that later payments at that mint
+retain their attempt budgets across ticks and restart. The worker must
+still select ready work from another configured mint. Unconfigured mints
+retain their scheduled history. Once the fence clears, charge one durable
+attempt before the fresh mint request.
+Exhaust an acquisition's retry budget after the original request is frozen.
+With reconciliation enabled, verify that read-only checks continue on the
+persisted schedule across restart. Simulate an unavailable mint-state response
+and then verify the original signed outputs. Preserve the attempt count and
+confirm there is no replay even when original replay is enabled. Verify that
+an expired scheduling selection cannot advance the new schedule.
+Use a funded mint fixture that commits the swap and loses the reply before
+CDK stores its outputs. Expire the response cache, reject unavailable or
+invalid restores, then recover the exact NUT-09 signatures. Interrupt after the
+proofs are saved and verify restart completes the same local transaction
+without an extra swap, a second signature restore, or early receipt export.
+
+With the core and wallet using the explicit unlimited daily conversion-count
+setting, settle multiple transfers inside one rolling day and preserve the
+exact fee reservations, in-flight exposure and no-duplicate-credit checks.
+Verify that existing positive daily count caps are still enforced and that
+configurations specifying both a positive cap and unlimited count fail.
+
+Run `deploy/scripts/test-cashu-operator-reconciliation-cli.py` with the selected
+wallet executable/hash through the private-run helper in fresh mount/network
+namespaces. Its synthetic unfunded cases cover exact CLI authority and unchanged
+pending and held states. Use the funded CDK test for a successful transition and
+separately qualify live provider reconciliation. Re-run the complete financial
+HTTP/receipt/treasury fixture on source-matched core and wallet test artifacts.
+On a disposable Actions runner, run the mint-policy fixture with
+`--installed-systemd` in private mount and network namespaces. Verify refusal
+while the actual wallet unit is active and while it is inactive but unmasked.
+Verify that applying and retrying the candidate preserves the mask, and that
+an explicitly started synthetic wallet loads the new namespace and retains
+the original held operation. Production mint-policy and provider acceptance
+remain separate.
+
+## Cashu retired request compatibility
+
+Rotate a reusable descriptor while retaining its exact old endpoint, mint
+scope, policy versions and receiving key. Validate the inclusive beginning
+and exclusive end of the approved window. Refuse a changed historical ID,
+endpoint, key or policy by regenerating the old request identity. An old ID
+cannot accept payment from a mint added later or a mint disabled for current
+receiving. A late new body must be refused. Replay the exact admitted HTTP
+body after expiry and verify its original status capability, one journal
+entry, and no new mint request. A changed body using that delivery ID must
+refuse. Verify that the current request continues to accept new payments.
+
+## Cashu receiving-key rotation
+
+Initialize a wallet with the original key file, then add a new current key
+while preserving the wallet epoch, registration, seed and original file.
+Admit a P2PK payment before rotation and verify its original lock is signed
+after restart. Admit a delayed nutzap and an old QR payment within their
+respective windows, and verify that each acquires its original eight sats once.
+Refuse new admission against the old key at the cutoff. A queued proof for an
+unavailable non-anchor key must prevent wallet startup until the key returns.
+
+Run the authenticated archive rehearsal with `--rotate-receiving-key`. Verify
+the original and new files against the checkpoint and native key verifier,
+reject a replaced copied key, and check the recovered filename and bytes before
+running the six fenced native commands.
+
+The inactive release rehearsal starts the packaged wallet and signer as distinct
+systemd users. Rotate their receiving policy while the synthetic services are
+stopped. The wallet must refuse to start with a missing or mismatched new key.
+With the matching key installed, verify both services restart with the original
+registrations, wallet seed, anchor key and mint namespaces. The restarted
+signer must preserve the original request, refuse an announcement for the
+retired key and route the current-key request to the inert helper. This
+rehearsal keeps relay and mint access blocked. The native fixture above
+qualifies redemption using the retired key.
+
+## Cashu mint policy review and installation
+
+Review a protected candidate that pauses a mint with held work and introduces
+a separately named issuer. Match both config digests, the wallet registration,
+the original held count and the two proposed admission settings. Refuse an
+active writer, restore fence, changed recovery keys or mint URL, removed mint
+or unrelated configuration change. The review leaves financial rows intact.
+In a disposable wallet, run the authenticated installer with root-owned
+artifacts and the reviewed digests. Verify that it retains the config's
+ownership, mode and extended attributes. Verify the exact retry reports the
+previous installation. Refuse changed metadata, a running or unmasked unit,
+an unrelated process using the wallet UID, a competing maintenance command,
+an active wallet writer, and a recovery fence. Test systemd status responses
+with a fixture and test processes and locks directly. After a native restart,
+verify the original held request and both namespace registrations. The retained
+issuer test must refuse the original URL and its trailing-slash spelling under
+a new internal ID.
+
+## Original Cashu treasury cleanup
+
+Use the funded lost-melt-reply fixture with new wallet execution paused.
+Retain the original wallet report after the independent synthetic Strike
+verification. Refuse an unrelated report digest without contacting the mint,
+and leave the original CDK inputs and saga intact after unavailable or
+incomplete spent-state evidence. Interrupt the checkpoint after the validated
+local CDK updates and retry the same operation. Verify the exact report is
+preserved and the completed retry performs no mint lookup. Keep the original
+single melt submission, Strike deposit and simulated feeder confirmation.
+Use the native CLI fixture to check review-purpose, digest, exact config and
+missing-original refusals.
+
+## Original Cashu treasury settlement in core
+
+Verify the original retained intent and receive request under an exact protected
+configuration and approval. Preview both observations and verify that the
+financial ledger is intact. Simulate an unavailable wallet while core records
+the verified Strike deposit. Credit may support the original feed only after
+core retains the authenticated wallet report. Retry from the recorded deposit,
+verify completion once, and verify the exact completed retry contacts neither
+source. Refuse conflicting receipt IDs and wrong scopes. Verify one deposit,
+one wallet result, one completion, and one simulated feed.
+
+Use the actual core CLI in private namespaces to exercise stopped-service,
+configuration, approval, missing-original and restored-journal fence refusals.

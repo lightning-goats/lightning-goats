@@ -155,7 +155,14 @@ class OverlayBrowserTests(unittest.TestCase):
             members=[{"rank":i+1,"pubkey":f"{i+1:064x}","display_name":"Long member name " * 4,"amount_sats":"9007199254740993","points":"9007199254740993","share_percent":"1","picture":""} for i in range(10)]
             roster={"owner":"ab"*32,"cycle":1,"revision":1,"capacity":10,"minimum_sats":"10","member_percent":10,"total_members":10,"members":members}
             self.snapshot(credit=9007199254740991, cashu={**fixture,"enabled":True}, cyberherd=roster)
-            self.assertEqual(self.page.locator(".accordion-item").count(),10)
+            cards = self.page.locator(".accordion-item")
+            self.assertEqual(cards.count(),10)
+            scale = width / 1920
+            first = cards.nth(0).bounding_box()
+            self.assertAlmostEqual(first["x"], 8 * scale, delta=0.02)
+            self.assertAlmostEqual(first["y"], 8 * scale, delta=0.02)
+            self.assertAlmostEqual(cards.nth(2).bounding_box()["y"], first["y"], delta=0.02)
+            self.assertGreater(cards.nth(3).bounding_box()["y"], first["y"] + first["height"])
             separated()
             for seq, source in [(1,"cashu"),(2,"nutzap")]:
                 self.send({"type":"sats_received","source_type":"payment_received","source":source,"seq":seq,"feed_credit_sats":1000,"amount_sats":150,"message":"Cashu received"})

@@ -697,7 +697,9 @@ mod combined_fixture {
                 multi_mint || returned_change,
                 "residual mode requires returned change"
             );
-            assert!(ledger.begin_feed_attempt(1000).await?.is_none());
+            if multi_mint {
+                assert!(ledger.begin_feed_attempt(1000).await?.is_none());
+            }
             let request = crate::cashu::treasury_sweep::Request {
                 id: Uuid::new_v4(),
                 mint_id: "fixture".into(),
@@ -826,22 +828,12 @@ mod combined_fixture {
             if multi_mint {
                 println!("COMBINED_CORE_TWO_MINTS_FINANCIAL_PLAN_VERIFIED");
             }
-        } else if returned_change {
-            // The retained one-sat change remains custody and original credit,
-            // but is not yet settled coverage. Later native funding can proceed.
-            assert!(ledger.begin_feed_attempt(1000).await?.is_none());
-            lightning(&ledger, 1).await;
-            assert_eq!(ledger.feed_credit_sats().await?, 1001);
         }
         let feeding = ledger.begin_feed_attempt(1000).await?.unwrap();
         ledger.confirm_feed_attempt(feeding).await?;
         assert_eq!(
             ledger.feed_credit_sats().await?,
-            if settle_change {
-                16
-            } else {
-                u64::from(returned_change)
-            }
+            if settle_change { 16 } else { 0 }
         );
         if receipt_ipc {
             publish(&root, "credit-consumed.json", &feeding)?;
@@ -865,17 +857,13 @@ mod combined_fixture {
         }
         assert_eq!(
             ledger.feed_credit_sats().await?,
-            if settle_change {
-                16
-            } else {
-                u64::from(returned_change)
-            }
+            if settle_change { 16 } else { 0 }
         );
         assert!(ledger.begin_feed_attempt(1000).await?.is_none());
         assert_eq!(count(&pool, "feed_attempts").await?, 1);
         assert_eq!(
             count(&pool, "event_log").await?,
-            contribution_count + 1 + i64::from(returned_change && !settle_change)
+            contribution_count + 1
         );
         let reward: i64 =
             sqlx::query_scalar("SELECT strike_sats FROM feed_reward_funding WHERE request_id=?")
@@ -884,11 +872,11 @@ mod combined_fixture {
                 .await?;
         assert_eq!(
             reward,
-            if returned_change && !settle_change {
-                601
-            } else {
-                600
-            }
+            if multi_mint { 996 } else if settle_change {
+                // The second deposit includes one sat of change from the original
+                // 400. Its remaining 14 sats belong to the later 16-sat receipt.
+                999
+            } else { i64::try_from(1000 - conversion_fee_sats)? }
         );
         let result = if multi_mint {
             json!({"credit_sats":0,"contributions":3,"synthetic_confirmed_feeds":1,"treasury_deposit_sats":396,
@@ -899,10 +887,10 @@ mod combined_fixture {
                 "new_transfer_credit_sats":0,"original_granted_credit_sats":1016,"receive_fees_sats":3,"conversion_fee_sats":3,
                 "retained_change_sats":0,"supplemental_native_sats":0,"settlement_operations":2})
         } else if fees {
-            json!({"credit_sats":u64::from(returned_change),"contributions":contribution_count + i64::from(returned_change),"synthetic_confirmed_feeds":1,
+            json!({"credit_sats":0,"contributions":contribution_count,"synthetic_confirmed_feeds":1,
                 "treasury_deposit_sats":400-conversion_fee_sats,"new_transfer_credit_sats":0,
                 "original_granted_credit_sats":1000,"receive_fees_sats":receipt_count,
-                "conversion_fee_sats":conversion_fee_sats-u64::from(returned_change),"retained_change_sats":u64::from(returned_change),"supplemental_native_sats":u64::from(returned_change)})
+                "conversion_fee_sats":conversion_fee_sats-u64::from(returned_change),"retained_change_sats":u64::from(returned_change),"supplemental_native_sats":0})
         } else {
             json!({"credit_sats":0,"contributions":contribution_count,"synthetic_confirmed_feeds":1,
                 "treasury_deposit_sats":400,"new_transfer_credit_sats":0})

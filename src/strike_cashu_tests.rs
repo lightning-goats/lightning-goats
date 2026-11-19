@@ -607,7 +607,7 @@ mod cashu_treasury_tests {
                 .fetch_one(&f.pool)
                 .await
                 .unwrap();
-                assert_eq!(reward, 600);
+                assert_eq!(reward, 600 + i64::try_from(f.intent.deposit_sats).unwrap());
             }
         }
     }
@@ -1094,7 +1094,7 @@ mod cashu_treasury_tests {
                 .fetch_one(&f.pool)
                 .await
                 .unwrap();
-        assert_eq!(strike, 600); // Cashu reward provenance remains separately off.
+        assert_eq!(strike, 1000);
         assert_eq!(f.count("cashu_treasury_completions").await, 1);
         assert_eq!(f.count("zap_receipt_jobs").await, 0);
         for receipt in &f.receipts {
@@ -1126,6 +1126,42 @@ mod cashu_treasury_tests {
     }
 
     #[tokio::test]
+    async fn one_cashu_deposit_qualifies_two_gross_feeds_once_at_net_value() -> Result<()> {
+        let f = Fixture::new(&[700,1300],0,1995,5,unchanged).await;
+        f.issue().await;
+        f.runtime.reconcile_and_credit(&f.ledger,&f.event()).await?;
+        f.ledger.record_cashu_melt_result(&f.registration,&f.report(1,4)).await?;
+        let policy = crate::reward_funding::RewardPolicy {
+            owner: "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798".into(),
+            member_percent_ceiling: 10, max_sats_per_feed: 100, max_sats_per_24h: 200,
+        };
+        let mut qualified = 0;
+        for _ in 0..2 {
+            let feed = f.ledger.begin_feed_attempt(1000).await?.context("gross feed missing")?;
+            f.ledger.confirm_feed_attempt(feed).await?;
+            let epoch = f.registration.core_epoch;
+            let allowance = f.ledger.reward_allowance(&policy,epoch,feed).await?;
+            let budget = policy.budget(allowance.funding.strike_sats)?;
+            let reservation = f.ledger.reserve_reward(&policy,epoch,feed,&"ab".repeat(32),budget).await?;
+            let page = f.ledger.payout_funding_page(epoch,reservation.id,&policy.owner,0,Some(&policy),true).await?;
+            assert!(!page.more);
+            assert_eq!(page.parts.iter().map(|p|p.consumed_sats).sum::<u64>(),1000);
+            let anchors: Vec<_> = page.parts.iter().filter(|p|p.anchor.is_some()).collect();
+            assert_eq!(anchors.len(),1);
+            let anchor = anchors[0].anchor.as_ref().unwrap();
+            assert_eq!(anchor.receive_id,f.state.receive_id);
+            let verified = f.runtime.client.reconcile_completed_receive(&anchor.stored_request(),anchor.receive_id).await?;
+            assert_eq!(verified.amount_msat,1_995_000);
+            assert_eq!(anchors[0].consumed_sats,page.funding.strike_sats);
+            qualified += page.funding.strike_sats;
+        }
+        assert_eq!(qualified,1995);
+        assert!(f.ledger.begin_feed_attempt(1000).await?.is_none());
+        assert_eq!(f.count("cashu_treasury_completions").await,1);
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn actual_fees_and_owned_change_conserve_custody_and_never_reduce_original_credit() {
         let f = Fixture::new(&[400], 600, 398, 2, unchanged).await;
         f.issue().await;
@@ -1148,7 +1184,7 @@ mod cashu_treasury_tests {
         .unwrap();
         assert_eq!(totals, (400, 398, 1, 1));
         assert_eq!(f.ledger.feed_credit_sats().await.unwrap(), 1000);
-        assert!(f.ledger.begin_feed_attempt(1000).await.unwrap().is_none()); // The returned sat remains custody.
+        let id = f.ledger.begin_feed_attempt(1000).await.unwrap().unwrap();
         let source = f.intent.sources[0].ledger_id;
         let plan = crate::ledger::TreasuryPlan {
             id: Uuid::new_v4(),
@@ -1171,10 +1207,10 @@ mod cashu_treasury_tests {
                 .await
                 .is_err()
         );
-        lightning(&f.ledger, 1).await;
-        let id = f.ledger.begin_feed_attempt(1000).await.unwrap().unwrap();
         f.ledger.confirm_feed_attempt(id).await.unwrap();
-        assert_eq!(f.ledger.feed_credit_sats().await.unwrap(), 1);
+        assert_eq!(f.ledger.feed_credit_sats().await.unwrap(), 0);
+        let base: i64 = sqlx::query_scalar("SELECT strike_sats FROM feed_reward_funding WHERE request_id=?").bind(id.to_string()).fetch_one(&f.pool).await.unwrap();
+        assert_eq!(base,998);
         assert_eq!(f.count("cashu_treasury_deposits").await, 1);
     }
 

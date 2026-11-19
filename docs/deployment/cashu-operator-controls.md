@@ -1,9 +1,12 @@
 # Protected Cashu settlement planning
 
-When a queued feeding triggers a transfer, its returned fee reserve stays in
-Cashu for a later batch. The same feeding plan can settle additional source
-amounts within its limits. If verified funding still falls short, the feeding
-waits for sufficient settled coverage.
+A feed starts at 1,000 sats of contribution credit. For Cashu, the wallet
+must report the conversion and Strike must confirm its Lightning deposit.
+The original converted input qualifies for the feed, including the fee and
+returned change. The change stays in Cashu for a later batch. CyberHerd
+calculates its share from the Lightning sats received for the consumed
+contributions, including net Cashu deposits. Operator credits, fees and
+unconverted change do not increase that payout base.
 
 `lightning-goatsctl plan-cashu-settlement` previews or retains one bounded
 operator request through the existing source-allocation and treasury planner.

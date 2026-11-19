@@ -8,6 +8,7 @@ use sqlx::{Row, Sqlite, Transaction};
 use super::{LedgerStore, append_event_in_transaction, to_i64, to_u64};
 use crate::cashu::receipt_authority::{PeerReceipt, ReceiptPolicy, RemainingBudget};
 
+pub(super) mod feed_proceeds;
 mod financial_jobs;
 mod sweep_jobs;
 mod treasury;

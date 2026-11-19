@@ -24,10 +24,15 @@ pub struct StrikeFundingAnchor {
 }
 
 impl StrikeFundingAnchor {
+    pub(crate) fn is_cashu_treasury(&self) -> bool {
+        self.address_user == crate::cashu::treasury::TREASURY_USER
+            && self.credit_pool == crate::cashu::treasury::TREASURY_USER
+    }
+
     pub fn validate(&self) -> Result<()> {
         if self.receive_request_id.is_nil()
             || self.receive_id.is_nil()
-            || self.credit_pool != "herd"
+            || (self.credit_pool != "herd" && !self.is_cashu_treasury())
             || self.invoice.len() > 8192
             || self.settled_msat == 0
             || !self.settled_msat.is_multiple_of(1000)

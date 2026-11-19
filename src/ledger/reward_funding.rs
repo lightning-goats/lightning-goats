@@ -6,6 +6,7 @@ use sha2::{Digest, Sha256};
 use sqlx::{Row, Sqlite, Transaction};
 use uuid::Uuid;
 
+use super::cashu::feed_proceeds;
 use super::{LedgerStore, to_i64, to_u64};
 use crate::reward_funding::{
     Allowance, Funding, FundingPage, FundingPart, MAX_FUNDING_PARTS, Reservation, RewardPolicy,
@@ -63,14 +64,27 @@ impl LedgerStore {
         // A caller cannot manufacture a starting cursor that skips a source.
         // Clients still have to start at zero and complete the page sequence.
         if after > 0 {
-            let valid: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM feed_reward_funding_parts WHERE request_id=? AND ledger_id=?)")
-                .bind(reservation.request_id.to_string()).bind(after).fetch_one(&mut *tx).await?;
+            let valid: bool = sqlx::query_scalar(&format!(
+                "{} SELECT EXISTS(SELECT 1 FROM funding_parts WHERE ledger_id=?2)",
+                feed_proceeds::PAGE
+            ))
+            .bind(reservation.request_id.to_string())
+            .bind(after)
+            .fetch_one(&mut *tx)
+            .await?;
             if !valid {
                 bail!("payout funding cursor is not a consumed part");
             }
         }
-        let rows = sqlx::query("SELECT p.ledger_id,p.sats,l.kind,l.proof_hash FROM feed_reward_funding_parts p JOIN reward_funding_lots l ON l.ledger_id=p.ledger_id WHERE p.request_id=? AND p.ledger_id>? ORDER BY p.ledger_id LIMIT ?")
-            .bind(reservation.request_id.to_string()).bind(after).bind((MAX_FUNDING_PARTS+1) as i64).fetch_all(&mut *tx).await?;
+        let rows = sqlx::query(&format!(
+            "{} SELECT * FROM funding_parts WHERE ledger_id>?2 ORDER BY ledger_id LIMIT ?3",
+            feed_proceeds::PAGE
+        ))
+        .bind(reservation.request_id.to_string())
+        .bind(after)
+        .bind((MAX_FUNDING_PARTS + 1) as i64)
+        .fetch_all(&mut *tx)
+        .await?;
         let more = rows.len() > MAX_FUNDING_PARTS;
         let mut parts = Vec::new();
         let mut through = after;
@@ -78,14 +92,18 @@ impl LedgerStore {
             let ledger_id: i64 = row.try_get("ledger_id")?;
             let kind: String = row.try_get("kind")?;
             let hash: String = row.try_get("proof_hash")?;
-            let actual = lot_proof(&mut tx, ledger_id).await?;
-            if actual.0 != kind || actual.1 != hash {
-                bail!("consumed funding provenance changed");
-            }
-            let anchor = if kind == "strike_btc" {
-                Some(strike_anchor(&mut tx, ledger_id).await?)
+            let anchor = if let Some(intent) = row.try_get::<Option<String>, _>("intent_id")? {
+                Some(feed_proceeds::anchor(&mut tx, &intent).await?)
             } else {
-                None
+                let actual = lot_proof(&mut tx, ledger_id).await?;
+                if actual.0 != kind || actual.1 != hash {
+                    bail!("consumed funding provenance changed");
+                }
+                if kind == "strike_btc" {
+                    Some(strike_anchor(&mut tx, ledger_id).await?)
+                } else {
+                    None
+                }
             };
             parts.push(FundingPart {
                 ledger_id,
@@ -562,6 +580,9 @@ async fn consume(
             hash_part(&mut hash, &json!([ledger, take, kind, proof]))?;
             if kind == "strike_btc" {
                 strike = strike.checked_add(take).context("real funding overflow")?;
+            } else if let Some((id, _)) = feed {
+                feed_proceeds::freeze(tx, id, ledger).await?;
+                add_proceeds(tx, id, ledger, &mut hash, &mut strike).await?;
             }
             left -= take;
         }
@@ -570,6 +591,22 @@ async fn consume(
         }
     }
     Ok((strike, hex::encode(hash.finalize())))
+}
+
+async fn add_proceeds(
+    tx: &mut Transaction<'_, Sqlite>,
+    feed: Uuid,
+    ledger: i64,
+    hash: &mut Sha256,
+    strike: &mut u64,
+) -> Result<()> {
+    for (intent, sats) in feed_proceeds::parts(tx, feed, ledger).await? {
+        hash_part(hash, &json!(["cashu_deposit", ledger, intent, sats]))?;
+        *strike = strike
+            .checked_add(to_u64(sats, "net treasury funding")?)
+            .context("treasury funding overflow")?;
+    }
+    Ok(())
 }
 
 async fn audit_balance(tx: &mut Transaction<'_, Sqlite>) -> Result<()> {
@@ -632,6 +669,9 @@ pub(crate) async fn confirmed_funding(
                 strike = strike
                     .checked_add(sats)
                     .context("real funding sum overflow")?;
+            }
+            if kind != "strike_btc" {
+                add_proceeds(tx, id, ledger, &mut hash, &mut strike).await?;
             }
             cursor = ledger;
         }

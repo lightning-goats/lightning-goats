@@ -14,10 +14,11 @@ import uuid
 MINT = 'https://mint.minibits.cash/Bitcoin'
 MINT_ID = 'minibits'
 POLICY_VERSION = 'minibits-pilot-v1'
-CUSTODY_SATS = 999
+RECEIPT_SATS = 999
+SWEEP_SATS = 1000
+CUSTODY_SATS = SWEEP_SATS + RECEIPT_SATS
 FEE_SATS = 5
 ROLLING_FEE_SATS = 25
-HOLDING_SECONDS = 1800
 INTAKE = '/run/lightning-goats-cashu/intake.sock'
 RECEIPTS = '/run/lightning-goats-cashu-receipts/receipt.sock'
 TREASURY = '/run/lightning-goats-cashu/treasury.sock'
@@ -80,8 +81,8 @@ def validate(inputs):
             or not all(hex_value(inputs[key]) for key in ('client_pubkey', 'helper_sha256', 'strike_credential_fingerprint'))):
         raise ValueError('reviewed receiving key, client public key and exact digests required')
     if not number(inputs['daily_credit_sats'], CUSTODY_SATS, 2**63 - 1):
-        raise ValueError('rolling credit budget must cover the largest permitted receipt')
-    if (not number(inputs['minimum_deposit_sats'], 1, CUSTODY_SATS - FEE_SATS)
+        raise ValueError('rolling credit budget must cover the batch and receipt headroom')
+    if (not number(inputs['minimum_deposit_sats'], 1, SWEEP_SATS - FEE_SATS)
             or not number(inputs['relay_since_unix'], 1, 2**63 - 31)):
         raise ValueError('explicit minimum deposit and relay start required')
     keysets = inputs['mint_keysets']
@@ -164,7 +165,7 @@ def render(base, inputs, reviewed_request=None):
                   ipc_gid=inputs['wallet_gid'], state_directory='/var/lib/lightning-goats-cashu',
                   intake_socket=INTAKE, receiving_key=receiver, recipient=owner, descriptors=[],
                   receive_cashu=False, receive_nutzap=False, body_bytes=65536, proof_count=64,
-                  receipt_sats=CUSTODY_SATS, deadline_seconds=5, connections_per_second=8,
+                  receipt_sats=RECEIPT_SATS, deadline_seconds=5, connections_per_second=8,
                   custody_limits=dict(maximum_total_sats=CUSTODY_SATS, maximum_per_mint_sats={MINT_ID: CUSTODY_SATS}),
                   mints=[dict(id=MINT_ID, advertised_url=MINT, policy_version=POLICY_VERSION,
                               receive_cashu=True, receive_nutzap=True, bolt11_exit_qualified=True)],
@@ -203,14 +204,14 @@ def render(base, inputs, reviewed_request=None):
                                deadline_seconds=5, connections_per_second=8),
         'cashu_treasury': dict(socket=TREASURY, deadline_seconds=30),
         'cashu_treasury.controls': dict(plan=False, issue=False, deliver=False, inspect=False, maximum_attempts=8),
-        'cashu_treasury.controls.sweep': dict(enabled=False, maximum_holding_age_seconds=HOLDING_SECONDS),
+        'cashu_treasury.controls.sweep': dict(enabled=False, balance_trigger_sats=SWEEP_SATS),
         'cashu_treasury.policy': dict(enabled=False, version=POLICY_VERSION, invoice_expiry_seconds=300),
         'cashu_treasury.policy.destination': destination,
         'cashu_treasury.policy.limits': treasury,
         'cashu_treasury.policy.approved_mints.minibits': mint_limits,
     }
     core = append_core(base, groups, dict(mint_id=MINT_ID, policy_version=POLICY_VERSION,
-                                         maximum_gross_sats=CUSTODY_SATS, maximum_net_sats=CUSTODY_SATS))
+                                         maximum_gross_sats=RECEIPT_SATS, maximum_net_sats=RECEIPT_SATS))
     parsed = tomllib.loads(core.decode())
     if {name: parsed[name] for name in original} != original:
         raise ValueError('existing core configuration changed in the rendered copy')

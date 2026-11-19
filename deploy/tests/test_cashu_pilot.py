@@ -53,15 +53,23 @@ class PilotConfig(unittest.TestCase):
         self.assertEqual(wallet['relay_intake']['relays'], ['wss://relay.example'])
         self.assertEqual(wallet['mints'][0]['advertised_url'], 'https://mint.minibits.cash/Bitcoin')
         self.assertEqual(wallet['keysets'][0]['mint_id'], 'minibits')
-        self.assertEqual(receipts['maximum_custody_sats'], 999)
+        self.assertEqual(receipts['maximum_custody_sats'], 1999)
+        self.assertEqual(wallet['custody_limits'], {
+            'maximum_total_sats': 1999, 'maximum_per_mint_sats': {'minibits': 1999},
+        })
+        self.assertEqual(wallet['receipt_sats'], 999)
+        self.assertEqual(receipts['approved'][0]['maximum_gross_sats'], 999)
+        self.assertEqual(receipts['approved'][0]['maximum_net_sats'], 999)
         self.assertEqual(receipts['credit_sats_per_24h'], self.input['daily_credit_sats'])
         self.assertTrue(receipts['unlimited_receipts_per_24h'])
         for limits in (treasury['policy']['limits'], wallet['treasury_execution']):
+            self.assertEqual(limits['maximum_input_sats'], 1999)
+            self.assertEqual(limits['maximum_in_flight_sats'], 1999)
             self.assertEqual(limits['maximum_fee_sats'], 5)
             self.assertEqual(limits['fee_sats_per_24h'], 25)
             self.assertTrue(limits['unlimited_operations_per_24h'])
             self.assertTrue(limits['unlimited_input_sats_per_24h'])
-        self.assertEqual(treasury['controls']['sweep']['maximum_holding_age_seconds'], 1800)
+        self.assertEqual(treasury['controls']['sweep'], {'enabled': False, 'balance_trigger_sats': 1000})
         self.assertFalse(any((
             intake['receive_cashu'], intake['receive_nutzap'], receipts['import_enabled'],
             treasury['controls']['plan'], treasury['controls']['issue'], treasury['controls']['deliver'],
@@ -99,7 +107,7 @@ class PilotConfig(unittest.TestCase):
     def test_rejects_misbound_keys_identities_and_existing_cashu(self):
         for key, value in (
             ('signer_uid', self.input['wallet_uid']), ('client_pubkey', TWO),
-            ('wallet_epoch', self.input['core_epoch']), ('daily_credit_sats', 0),
+            ('wallet_epoch', self.input['core_epoch']), ('daily_credit_sats', 1998),
             ('minimum_deposit_sats', 999), ('mint_keysets', []), ('relay_since_unix', 0),
         ):
             with self.subTest(key=key), self.assertRaises(ValueError):
@@ -107,14 +115,15 @@ class PilotConfig(unittest.TestCase):
         with self.assertRaises(ValueError):
             TOOL['render'](self.core + b'\n[cashu]\nreceive_cashu = false\n', self.input)
 
-    def test_rolling_credit_budget_can_import_largest_allowed_receipt(self):
+    def test_rolling_credit_budget_covers_threshold_and_largest_receipt(self):
         original = TOOL['render'](self.core, self.input)
         maximum_receipt = json.loads(original['wallet.json'])['receipt_sats']
+        minimum_budget = 1000 + maximum_receipt
         with self.assertRaisesRegex(ValueError, 'rolling credit budget'):
-            TOOL['render'](self.core, dict(self.input, daily_credit_sats=maximum_receipt - 1))
-        at_limit = TOOL['render'](self.core, dict(self.input, daily_credit_sats=maximum_receipt))
+            TOOL['render'](self.core, dict(self.input, daily_credit_sats=minimum_budget - 1))
+        at_limit = TOOL['render'](self.core, dict(self.input, daily_credit_sats=minimum_budget))
         receipts = tomllib.loads(at_limit['core.toml'].decode())['cashu_receipts']
-        self.assertEqual(receipts['credit_sats_per_24h'], maximum_receipt)
+        self.assertEqual(receipts['credit_sats_per_24h'], minimum_budget)
         self.assertTrue(receipts['unlimited_receipts_per_24h'])
 
     def test_request_selection_keeps_receiving_disabled(self):

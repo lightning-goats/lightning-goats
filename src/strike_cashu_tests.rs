@@ -384,9 +384,11 @@ mod cashu_treasury_tests {
         let original: (String,String) = sqlx::query_as("SELECT result_digest,result_json FROM cashu_treasury_wallet_results")
             .fetch_one(&f.pool).await?;
         // Disposable schema-26 image. Keep the old result, completion and deposit bytes.
-        sqlx::raw_sql("DROP TABLE cashu_treasury_inspections;
+        sqlx::raw_sql("DROP TRIGGER freeze_cashu_settled_ranges;
+                     DROP TABLE feed_cashu_proceeds; DROP TABLE cashu_settled_ranges;
+                     DROP TABLE cashu_treasury_inspections;
                      DROP TABLE cashu_treasury_fee_observations;
-                     DELETE FROM _sqlx_migrations WHERE version IN (27,28);")
+                     DELETE FROM _sqlx_migrations WHERE version IN (27,28,29);")
             .execute(&f.pool).await?;
         sqlx::migrate!("./migrations").run(&f.pool).await?;
         let observed: i64 = sqlx::query_scalar("SELECT observed_at FROM cashu_treasury_fee_observations")
@@ -819,8 +821,10 @@ mod cashu_treasury_tests {
             if !delivery_still_enabled {
                 // Upgrade a historical wallet work row with exhausted delivery.
                 sqlx::raw_sql(
-                    "DROP TABLE cashu_treasury_inspections;
-                     DELETE FROM _sqlx_migrations WHERE version=28;",
+                    "DROP TRIGGER freeze_cashu_settled_ranges;
+                     DROP TABLE feed_cashu_proceeds; DROP TABLE cashu_settled_ranges;
+                     DROP TABLE cashu_treasury_inspections;
+                     DELETE FROM _sqlx_migrations WHERE version IN (28,29);",
                 )
                 .execute(&f.pool)
                 .await

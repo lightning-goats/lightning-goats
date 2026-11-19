@@ -25,6 +25,24 @@ make already consumed funds available again. A post-activation debit missing its
 atomic funding record requires recovery rather than reconstructed reward history.
 Changing or restoring an epoch/cursor still requires explicit operator recovery.
 
+## Net Cashu proceeds for confirmed feeds
+
+The 1,000-sat feeding threshold uses original credited contributions. A Cashu
+conversion qualifies its assigned input once both the wallet and Strike confirm
+settlement. Verified fees and returned fee reserve can reduce the actual Lightning
+deposit. At feed confirmation, schema 29 freezes the net sats from each such
+deposit attributable to the consumed contribution. The deposit occupies the
+first sats of its assigned source range, followed by fees and returned change.
+This ordering matches the wallet settlement allocation and apportions a receipt
+that funds more than one feed without rounding or duplicate payout capacity.
+
+CyberHerd applies its percentage to native Lightning proceeds plus these net
+deposits. The payout worker independently verifies each distinct Strike receive.
+Multiple contributions converted in one payment share one receive anchor.
+Funding page cursors identify parts within a single confirmed feed. The original
+credit ledger IDs and deposit allocations remain in the core ledger. Historical
+funding proofs and payout reservations retain their original amounts.
+
 ## Real and unavailable funding
 
 A lot is tied to its actual positive ledger entry. Strike BTC funding additionally

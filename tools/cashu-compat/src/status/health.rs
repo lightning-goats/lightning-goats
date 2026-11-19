@@ -92,7 +92,7 @@ impl TreasuryQueue {
                     exhausted,COUNT(*) OVER(),
                     SUM(continue_recovery AND action!='cleanup') OVER(),
                     SUM(action='cleanup') OVER(),SUM(exhausted) OVER(),
-                    MIN(CASE WHEN next_attempt<=?3 THEN next_attempt END) OVER()
+                    MIN(CASE WHEN NOT exhausted AND next_attempt<=?3 THEN next_attempt END) OVER()
              FROM (
                  SELECT scheduled.*,(NOT continue_recovery AND attempts>0 AND attempts>=?2) AS exhausted
                  FROM scheduled

@@ -643,6 +643,7 @@ pub(crate) async fn confirmed_funding(
     {
         bail!("reward proof lost its confirmed debit");
     }
+    let has_cashu_proceeds = super::core_schema_version(tx).await? >= 29;
     let mut hash = manifest(id, row.try_get("debit_id")?, total)?;
     let mut cursor = 0;
     let mut sum = 0u64;
@@ -670,7 +671,7 @@ pub(crate) async fn confirmed_funding(
                     .checked_add(sats)
                     .context("real funding sum overflow")?;
             }
-            if kind != "strike_btc" {
+            if has_cashu_proceeds && kind != "strike_btc" {
                 add_proceeds(tx, id, ledger, &mut hash, &mut strike).await?;
             }
             cursor = ledger;
@@ -808,6 +809,29 @@ mod tests {
             70
         );
         assert_eq!(store.feed_credit_sats().await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn historical_virtual_funding_verifies_before_cashu_schema() {
+        let (_root, _url, store) = store().await;
+        store.initialize_reward_funding().await.unwrap();
+        virtual_credit(&store, "operator", 1000).await;
+        let id = feed(&store, 1000).await;
+        let original = funding(&store, id).await.unwrap();
+        let mut tx = store.pool.begin().await.unwrap();
+        sqlx::query("DROP TABLE feed_cashu_proceeds")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        assert!(confirmed_funding(&mut tx, id).await.is_err());
+        sqlx::query("DELETE FROM _sqlx_migrations WHERE version >= 26")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        assert_eq!(
+            confirmed_funding(&mut tx, id).await.unwrap(),
+            Some(original)
+        );
     }
 
     #[tokio::test]

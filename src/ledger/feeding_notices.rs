@@ -116,7 +116,9 @@ pub(super) async fn export_proof(
         )),
         _ => bail!("feeding presentation lost triggering credit identity"),
     };
-    let actual = if super::feed_sources::frozen(tx, id).await? {
+    let actual = if super::core_schema_version(tx).await? >= 26
+        && super::feed_sources::frozen(tx, id).await?
+    {
         super::feed_sources::triggering_credit(tx, id).await?
     } else {
         super::feed::triggering_credit(tx, debit, credit).await?

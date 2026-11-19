@@ -333,6 +333,15 @@ pub(super) fn to_i64(value: u64, field: &str) -> Result<i64> {
     i64::try_from(value).with_context(|| format!("{field} exceeds SQLite INTEGER range"))
 }
 
+/// Historical maintenance snapshots are verified against their exact migration prefix.
+async fn core_schema_version(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>) -> Result<i64> {
+    Ok(
+        sqlx::query_scalar("SELECT MAX(version) FROM _sqlx_migrations")
+            .fetch_one(&mut **tx)
+            .await?,
+    )
+}
+
 pub(super) fn to_u64(value: i64, field: &str) -> Result<u64> {
     u64::try_from(value).with_context(|| format!("{field} is unexpectedly negative"))
 }

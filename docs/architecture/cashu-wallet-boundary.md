@@ -65,8 +65,10 @@ settled lots can fund the threshold, the transaction records the old plan's
 explicit release, creates the replacement and links the supersession. It does
 not erase or repeat any treasury operation. Threshold changes have their own
 release disposition. Offline retirement refuses lots held by a pending financial
-plan. Exact operator release exists as a ledger API; protected CLI integration
-is still required.
+plan. The protected `lightning-goatsctl release-financial-plan` command checks
+the original plan, threshold and ledger epoch with the core writer stopped. It
+releases only the undispatched feeding allocation. Treasury holds have their
+own recovery requirements.
 
 Automatic treasury planning reserves the uncovered Cashu portion of the pending
 plan in the same transaction as its treasury link. Age/balance sweeps and stable-ID
@@ -78,11 +80,14 @@ holdings. All new execution controls default off.
 
 The core creates a purpose-bound Strike invoice. The wallet's original-operation
 melt report and independently fetched Strike receipt must agree before completion
-releases source coverage. Coverage is original input minus verified returned
-change; bounded actual conversion costs do not retroactively reduce granted
-feeder credit. Returned change remains attributed wallet custody and is not
-settled funding. Treasury settlement creates no contribution, zap receipt or
-second grant. Cashu-derived reward authorization remains off.
+qualifies the assigned Cashu input for feeding. In schema 29, 1,000 sats of
+original contribution credit start the sequence. Once the assigned inputs have
+settled, fees and returned change cannot create a shortfall for that feed.
+Returned change remains in wallet custody for a later batch. At physical
+confirmation the core records the native Lightning sats and the share of each
+actual Strike deposit attributable to the consumed contributions. CyberHerd
+uses that net amount as its payout base. A later sweep of change creates no
+additional contribution. [CyberHerd reward funding](cyberherd-reward-funding.md#net-cashu-proceeds-for-confirmed-feeds)
 
 The [financial-plan checkpoint](../testing/cashu-financial-jobs-20261116.json)
 and [sweep checkpoint](../testing/cashu-sweeps-20261116.json) qualify these core
@@ -858,8 +863,8 @@ adapter in `ledger/feed_sources/financial.rs`. The current implementation freeze
 a proposed financial allocation before conversion and keeps it separate from
 physical actuation. The qualified core checkpoints above cover reservation,
 supersession, retirement refusal, actual confirmed debits and automatic treasury
-planning. Protected operator command wiring and full composed settlement
-acceptance remain outstanding.
+planning. Operator controls and independent-client acceptance are documented
+separately. [Cashu operator controls](../deployment/cashu-operator-controls.md)
 
 - Reserve exact credit parts atomically under the existing immediate writer
   transaction. Transfer custody reservations remain distinct from credit
@@ -881,19 +886,17 @@ acceptance remain outstanding.
   An undispatched financial plan may need an auditable cancellation/supersession
   to release its settled credit; its original treasury operations must remain
   retained and reconcile normally. Do not release an unknown physical attempt.
-- Coverage is original input minus recovered change, including bounded actual
-  conversion expense. Returned change is owned ecash, not verified Strike value.
-  A partially covered source remains pending until additional original-operation
-  settlement supplies the missing coverage; preserve completed portions and hold
-  uneconomic residuals truthfully. Never invent a fee or count change as settled
-  merely to make a proposed feed ready.
+- Count each assigned contribution once toward the feed threshold once its
+  conversion is verified. For example, two 1,000-sat feedings can share one
+  2,000-sat input that deposited 1,995 sats, cost 1 sat and returned 4 sats
+  of change. Across both feeds, that deposit contributes 1,995 sats to the
+  reward base. The wallet retains the 4 sats for a later batch.
 - Feed conversion, age/exposure sweeps and operator sweeps must share custody/proof
   reservations. Handle per-mint jobs and bounded source batches without repeating
   a completed mint transfer because another job remains pending.
 
-These are implementation and regression requirements, not claims that the planner
-or its acceptance matrix is complete. The core source remains unchanged while
-its current full verification run finishes.
+The acceptance matrix also tracks independent wallet payments and real-provider
+settlement. [Cashu acceptance matrix](../planning/cashu-nutnovember-implementation-plan.md#15-mandatory-acceptance-matrix)
 
 ## Denomination-split accounting foundation — execution not enabled
 

@@ -1002,7 +1002,8 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
         cashu_reference = json.loads((cashu_execution / 'backup/MANIFEST.json').read_text())['report']['rows']
         cashu_migrated = json.loads((cashu_execution / 'migrated/MANIFEST.json').read_text())['report']['rows']
         additions = cashu_migrated['core'].keys() - cashu_reference['core'].keys()
-        assert len(additions) == 22 and all(cashu_migrated['core'][table] == 0 for table in additions)
+        assert {'cashu_settled_ranges', 'feed_cashu_proceeds'} <= additions
+        assert len(additions) == 24 and all(cashu_migrated['core'][table] == 0 for table in additions)
         assert all(cashu_reference[role] == cashu_migrated[role] for role in ('membership', 'payout', 'signer'))
         assert counts['post'] == 0
         finished = True

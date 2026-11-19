@@ -377,21 +377,18 @@ impl<R: Query> Discovery<R> {
                 Ok(batch) => {
                     events.extend(batch.events);
                     if batch.saturated {
-                        0
+                        BTreeSet::new()
                     } else {
-                        batch.completed_relays
+                        batch.completed_urls
                     }
                 }
-                Err(_) => 0,
+                Err(_) => BTreeSet::new(),
             };
             for (key, outboxes) in &missing {
-                // The batch reports a count. Another author's relay may be the
-                // only one that completed, which cannot confirm this profile read.
-                let unrelated = relays
-                    .iter()
-                    .filter(|relay| !outboxes.contains(relay))
-                    .count();
-                availability.insert(key.clone(), complete && completed > unrelated);
+                availability.insert(
+                    key.clone(),
+                    complete && outboxes.iter().any(|relay| completed.contains(relay)),
+                );
             }
         }
         Ok((events, availability))

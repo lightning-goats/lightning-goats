@@ -833,6 +833,11 @@ impl Query for ProfileOutboxes {
                 .filter(|e| filters.iter().any(|f| f.matches(e)))
                 .cloned()
                 .collect(),
+            completed_urls: relays
+                .iter()
+                .filter(|url| self.complete && url.as_str() == "wss://outbox.example.com/")
+                .cloned()
+                .collect(),
             completed_relays: usize::from(self.complete),
             failed_relays: usize::from(!self.complete),
             saturated: self.saturated,
@@ -1038,13 +1043,14 @@ async fn one_completed_outbox_cannot_confirm_two_disjoint_profile_reads() {
         .refresh_reward_profiles(&f.store, &f.owner, &[public(2), public(3)], f.now)
         .await
         .unwrap();
-    for key in [2, 3] {
-        assert!(
+    for (key, expected) in [(2, false), (3, true)] {
+        assert_eq!(
             f.store
                 .reward_profile_read(&f.owner, &public(key), f.now, 3600)
                 .await
                 .unwrap()
-                .is_none()
+                .is_some(),
+            expected
         );
     }
 }
@@ -1128,6 +1134,7 @@ impl Query for RelayFixture {
                 .filter(|event| filters.iter().any(|f| f.matches(event)))
                 .cloned()
                 .collect(),
+            completed_urls: Default::default(),
             completed_relays: self.complete,
             failed_relays: usize::from(self.complete == 0),
             saturated: self.saturated,

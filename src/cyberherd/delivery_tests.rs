@@ -2079,6 +2079,7 @@ async fn nip65_recipient_read_relays_are_frozen_with_the_message_before_signing(
                 } else {
                     vec![]
                 },
+                completed_urls: Default::default(),
                 completed_relays: 1,
                 failed_relays: 0,
                 saturated: false,

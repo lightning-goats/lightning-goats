@@ -240,6 +240,7 @@ impl<Q: Query> Router<Q> {
                     .await
                     .unwrap_or(crate::cyberherd::relay::ReadBatch {
                         events: vec![],
+                        completed_urls: Default::default(),
                         completed_relays: 0,
                         failed_relays: 1,
                         saturated: false,
@@ -531,6 +532,7 @@ mod routing_tests {
                     .filter(|e| filters.iter().any(|f| f.matches(e)))
                     .cloned()
                     .collect(),
+                completed_urls: Default::default(),
                 completed_relays: 1,
                 failed_relays: 0,
                 saturated: false,
@@ -732,6 +734,7 @@ mod hint_tests {
             assert!(filters.iter().all(|f| f.kinds == vec![10002]));
             Ok(ReadBatch {
                 events: vec![],
+                completed_urls: Default::default(),
                 completed_relays: 1,
                 failed_relays: 0,
                 saturated: false,
@@ -742,6 +745,7 @@ mod hint_tests {
             assert!(filters.iter().any(|f| f.matches(&self.0)));
             Ok(ReadBatch {
                 events: vec![self.0.clone()],
+                completed_urls: Default::default(),
                 completed_relays: 1,
                 failed_relays: 0,
                 saturated: false,

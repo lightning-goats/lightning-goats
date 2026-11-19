@@ -165,6 +165,7 @@ pub(crate) fn engagement_scope_filters(
 #[derive(Debug)]
 pub struct ReadBatch {
     pub events: Vec<VerifiedEvent>,
+    pub completed_urls: BTreeSet<String>,
     pub completed_relays: usize,
     pub failed_relays: usize,
     /// Caller must paginate/backfill rather than advance its cursor past a cap.
@@ -189,6 +190,7 @@ pub trait Query {
     ) -> impl std::future::Future<Output = Result<ReadBatch>> + Send + 'a {
         std::future::ready(Ok(ReadBatch {
             events: vec![],
+            completed_urls: Default::default(),
             completed_relays: 0,
             failed_relays: 0,
             saturated: false,
@@ -232,15 +234,19 @@ impl Reader {
         let mut unique = BTreeMap::new();
         let mut result = ReadBatch {
             events: vec![],
+            completed_urls: Default::default(),
             completed_relays: 0,
             failed_relays: 0,
             saturated: false,
         };
         let mut bytes = 0usize;
-        for request in requests {
+        for (relay, request) in self.relays.iter().zip(requests) {
             match request {
                 Ok(batch) => {
-                    result.completed_relays += usize::from(batch.complete);
+                    if batch.complete {
+                        result.completed_urls.insert(relay.clone());
+                    }
+                    result.completed_relays = result.completed_urls.len();
                     result.failed_relays += usize::from(!batch.complete);
                     result.saturated |= batch.saturated;
                     for event in batch.events {

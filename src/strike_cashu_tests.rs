@@ -295,6 +295,73 @@ mod cashu_treasury_tests {
     }
 
     #[tokio::test]
+    async fn thousand_sat_balance_sweep_carries_fee_change_to_the_next_batch() -> Result<()> {
+        let mut f = Fixture::new(&[600, 400], 0, 995, 5, |_| {}).await;
+        f.registration.limits.credit_sats_per_24h = 1999;
+        f.registration.limits.maximum_custody_sats = 1999;
+        f.policy.limits.maximum_fee_sats = 5;
+        f.policy
+            .approved_mints
+            .get_mut("mint-a")
+            .unwrap()
+            .maximum_fee_sats = 5;
+        let sweep = crate::cashu::treasury_sweep::Policy {
+            enabled: true,
+            balance_trigger_sats: 1000,
+            ..Default::default()
+        };
+        f.issue().await;
+        assert_eq!(
+            f.runtime.reconcile_and_credit(&f.ledger, &f.event()).await?,
+            SettlementOutcome::TreasurySettlementAccepted
+        );
+        assert!(
+            f.ledger
+                .record_cashu_melt_result(&f.registration, &f.report(1, 4))
+                .await?
+        );
+        assert!(
+            f.ledger
+                .plan_cashu_sweep(&f.registration, &f.policy, &sweep)
+                .await?
+                .is_none()
+        );
+
+        let change_source = f.receipts[1].data();
+        for sats in [995, 1] {
+            let mut data = change_source.clone();
+            data.acquisition_id = Uuid::new_v4();
+            let digest = data.acquisition_id.simple();
+            data.acquisition_evidence_digest = format!("{digest}{digest}");
+            data.gross_sats = sats;
+            data.net_sats = sats;
+            let receipt = WireReceipt::validate(data)?;
+            f.ledger
+                .import_cashu_receipt(
+                    &f.registration,
+                    &fixture_authenticate(&f.registration, &receipt.encode()?)?,
+                )
+                .await?;
+            let batch = f
+                .ledger
+                .plan_cashu_sweep(&f.registration, &f.policy, &sweep)
+                .await?;
+            if sats == 995 {
+                assert!(batch.is_none());
+            } else {
+                let batch = batch.expect("1,000 sats of available Cashu");
+                assert_eq!((batch.input_sats, batch.deposit_sats), (1000, 995));
+                assert_eq!(batch.sources[0].acquisition_id, change_source.acquisition_id);
+                assert_eq!(batch.sources[0].input_sats, 4);
+            }
+        }
+        assert_eq!(f.count("cashu_treasury_intents").await, 2);
+        assert_eq!(f.count("cashu_treasury_deposits").await, 1);
+        assert_eq!(f.count("feed_attempts").await, 0);
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn late_wallet_fee_observation_delays_release_and_migrates_legacy_evidence() -> Result<()> {
         let f = Fixture::new(&[8], 0, 6, 2, |_| {}).await;
         f.issue().await;

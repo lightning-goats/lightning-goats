@@ -140,7 +140,7 @@
             border-radius: 8px;
         }
 
-        .qr-code-overlay {
+        .qr-code-overlay, .cashu-code-overlay {
             position: absolute;
             /* OBS canvas 1920×1080: QR is 180×180 at top 3 / right 8. */
             top: 0.2777777778%;
@@ -156,6 +156,42 @@
             outline: none;
             box-shadow: none;
         }
+
+        .cashu-code-overlay {
+            /* Cashu QR on the 1920×1080 OBS canvas starts at y=247. */
+            top: 22.8703703704%;
+            padding: 0;
+        }
+
+        .cashu-code-overlay:focus-visible {
+            opacity: 1;
+            outline: 3px solid var(--lg-yellow);
+            outline-offset: 2px;
+        }
+
+        .feed-panel {
+            margin-top: 14px;
+            padding: 14px 16px;
+            border: 1px solid var(--lg-border);
+            border-radius: 8px;
+            background: #161412;
+        }
+
+        .feed-panel-actions {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px 14px;
+            margin-top: 12px;
+        }
+
+        .feed-panel h2 { margin: 0; font-size: 1.2rem; }
+        .feed-lightning-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+        #feedLightningAmount { width: 6.75rem; }
+        #feedLightningStatus:empty { display: none; }
+        .feed-nutzap-link { color: var(--lg-yellow); }
+        .feed-nutzap-link:hover { color: #fff; }
+        #cashuQr { display: block; margin: 0 auto 12px; max-width: 100%; height: auto; }
 
         .chat-panel {
             min-width: 0;
@@ -501,24 +537,6 @@
         .chat-notice.error { color: var(--lg-danger); }
         .chat-notice.success { color: var(--lg-success); }
 
-        .lg-title {
-            width: 100%;
-            max-width: 1200px;
-            margin: 20px auto 0;
-            padding: 0 15px;
-            font-size: 1.2rem;
-            line-height: 1.5;
-            text-align: center;
-        }
-
-        .lg-title a {
-            color: var(--lg-yellow);
-            text-decoration: none;
-            transition: color 0.3s;
-        }
-
-        .lg-title a:hover { color: var(--lg-yellow-bright); }
-
         footer {
             flex-shrink: 0;
             width: 100%;
@@ -546,7 +564,6 @@
         }
 
         @media (max-width: 768px) {
-            .lg-title { font-size: 1rem; }
             .service-links a { font-size: 0.9rem; }
         }
 
@@ -555,7 +572,6 @@
             .media-grid { gap: 12px; }
             .chat-panel { height: 440px; }
             .service-links a { font-size: 0.8rem; }
-            .lg-title { font-size: 0.95rem; }
             .nostr-auth-button { max-width: 112px; }
         }
     </style>
@@ -590,8 +606,26 @@
                             class="qr-code-overlay"
                             aria-label="Send Lightning to herd@lightning-goats.com"
                         ></a>
+                        <button class="cashu-code-overlay" type="button" aria-label="Pay with Cashu"
+                            data-bs-toggle="modal" data-bs-target="#cashuModal" hidden></button>
                     </div>
                 </div>
+                <section id="feedPanel" class="feed-panel" aria-labelledby="feedPanelTitle" hidden>
+                    <h2 id="feedPanelTitle">Feed the Goats</h2>
+                    <div class="feed-panel-actions">
+                        <form id="feedLightningForm" class="feed-lightning-form">
+                            <label for="feedLightningAmount">Amount (sats)</label>
+                            <input id="feedLightningAmount" class="form-control" type="number"
+                                min="1" step="1" value="1000" inputmode="numeric" required>
+                            <button id="feedLightningButton" class="btn btn-warning" type="submit">Pay with Lightning</button>
+                        </form>
+                        <button id="feedCashuButton" class="btn btn-outline-light" type="button"
+                            data-bs-toggle="modal" data-bs-target="#cashuModal">Cashu</button>
+                        <a class="feed-nutzap-link" target="_blank" rel="noopener noreferrer"
+                            href="https://njump.me/nevent1qqsz972laf2re3qs9mkuvcrwv240ekkn5k3s3zmqsclczycgzmqcrxspzemhxue69uhhyetvv9ujuurjd9kkzmpwdejhgqghwaehxw309aex2mrp0yhxzun50qhx6ctjddjhgq3qv60thnx0gz0wq3n6xdnq46y069l9x70xgmjp6lprdl6fv0eux6mqh70zpp">Send a Nutzap on Nostr</a>
+                    </div>
+                    <p id="feedLightningStatus" class="small mt-2" role="status"></p>
+                </section>
             </section>
 
             <aside class="chat-panel" aria-label="Nostr live chat">
@@ -651,13 +685,6 @@
             </aside>
         </main>
 
-        <p class="lg-title">
-            Lightning payments build feed credit for the herd. Feeding follows the local override and safety controls.
-            <br>
-            The Lightning Goats bitcoin-powered interactive goat feeder is open for business from morning to evening Mountain Time.
-            Use <a href="/feed.html">native Lightning payments</a> or send sats to:
-            <a href="lightning:herd@lightning-goats.com">herd@lightning-goats.com</a>
-        </p>
     </div>
 
     <footer>© 2026 Lightning Goats. All rights reserved.</footer>
@@ -725,10 +752,34 @@
         </div>
     </div>
 
+    <div class="modal fade" id="cashuModal" tabindex="-1" aria-labelledby="cashuModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="cashuModalLabel">Pay with Cashu</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Use a compatible wallet funded with sats from the Minibits mint. Enter the amount in your wallet.</p>
+                    <div id="cashuRequestWrap" hidden>
+                        <img id="cashuQr" width="252" height="252" alt="Scan for the Lightning Goats Cashu payment request">
+                        <textarea id="cashuRequest" class="zap-invoice" readonly aria-label="Cashu payment request"></textarea>
+                    </div>
+                    <div id="cashuStatus" class="small mt-2" role="status"></div>
+                </div>
+                <div class="modal-footer">
+                    <button id="cashuRetryButton" type="button" class="btn btn-outline-light" hidden>Try again</button>
+                    <button id="cashuCopyButton" type="button" class="btn btn-warning" hidden>Copy payment request</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="/site-config.js"></script>
     <script src="/vendor/bootstrap.bundle.min.js"></script>
     <script src="/vendor/qrcode.js"></script>
     <script src="/lightning-payment.js"></script>
+    <script src="/homepage-payments.js" defer></script>
 
     <!-- Preserve an injected NIP-07 provider before nostr-login installs its fallback wrapper. -->
     <script>
@@ -1641,18 +1692,20 @@
         let paymentPending = false;
         let pendingInvoice = null;
         let paymentTarget = "herd";
+        const feedAmount = document.getElementById("feedLightningAmount");
+        const feedButton = document.getElementById("feedLightningButton");
+        const feedPaymentStatus = document.getElementById("feedLightningStatus");
+        const lightningControls = [elements.zapCreateButton, elements.zapAmount, feedAmount, feedButton];
 
-        async function createZapInvoice(sats) {
+        async function createZapInvoice(sats, target, goal) {
             let zap = null;
-            // Lightning payments do not require a Nostr account. A connected user
-            // may sign a zap; failure never silently changes the selected identity.
-            if (currentUserPubkey && activeNostrSigner) {
+            if (target !== "feed" && currentUserPubkey && activeNostrSigner) {
                 const payData = activeHerdPayData || await getZapPayData(LG_PUBKEY, activeRelays);
                 const tags = [
-                    ["relays", ...goalRelays(activeGoalEvent || { tags: [] }).slice(0, 8)],
+                    ["relays", ...goalRelays(goal || activeGoalEvent || { tags: [] }).slice(0, 8)],
                     ["amount", String(sats * 1000)], ["lnurl", payData.lnurl], ["p", LG_PUBKEY]
                 ];
-                if (paymentTarget === "goal" && activeGoalEvent) tags.push(["e", activeGoalEvent.id], ["k", String(ZAP_GOAL_KIND)]);
+                if (goal) tags.push(["e", goal.id], ["k", String(ZAP_GOAL_KIND)]);
                 const template = { kind: 9734, created_at: Math.floor(Date.now() / 1000), content: "", tags };
                 const request = await activeNostrSigner.signEvent(template);
                 if (!verifyEvent(request) || request.pubkey !== currentUserPubkey || request.kind !== template.kind ||
@@ -1664,73 +1717,102 @@
             return window.LightningGoatsPayment.createInvoice("herd", sats, zap);
         }
 
+        function invoiceKey(sats, target, goal) {
+            return JSON.stringify([sats, target, goal?.id ?? null, target === "feed" ? "" : currentUserPubkey]);
+        }
+
+        function displayInvoice(invoice) {
+            elements.zapInvoiceWrap.hidden = elements.zapCopyButton.hidden = elements.zapWalletButton.hidden = !invoice;
+            elements.zapInvoice.value = invoice || "";
+            if (invoice) {
+                elements.zapWalletButton.href = `lightning:${invoice}`;
+                window.LightningGoatsPayment.drawQr(elements.zapQr, invoice);
+            }
+        }
+
         function showPayment(target) {
             paymentTarget = target;
-            const ready = pendingInvoice !== null;
-            elements.zapInvoiceWrap.hidden = !ready;
-            elements.zapCopyButton.hidden = !ready;
-            elements.zapWalletButton.hidden = !ready;
-            if (!paymentPending) elements.zapStatus.textContent = ready
+            const key = invoiceKey(Number(elements.zapAmount.value), target, target === "goal" ? activeGoalEvent : null);
+            const invoice = pendingInvoice?.key === key ? pendingInvoice.invoice : null;
+            displayInvoice(invoice);
+            elements.zapStatus.className = "small text-muted mt-2";
+            elements.zapStatus.textContent = invoice
                 ? "Your invoice is ready. Check your wallet before paying again."
                 : "Choose an amount, then confirm in your wallet.";
             bootstrap.Modal.getOrCreateInstance(document.getElementById("zapModal")).show();
         }
-        elements.zapButton.addEventListener("click", () => showPayment("goal"));
+        elements.zapButton.addEventListener("click", () => {
+            if (!paymentPending) showPayment("goal");
+        });
         document.querySelector(".qr-code-overlay").addEventListener("click", (event) => {
             if (window.LightningGoatsSite?.paymentsEnabled !== true) return;
             event.preventDefault();
-            showPayment("herd");
+            if (!paymentPending) showPayment("herd");
         });
         elements.zapCreateButton.disabled = window.LightningGoatsSite?.paymentsEnabled !== true;
         elements.zapAmount.addEventListener("input", () => {
             if (paymentPending) return;
-            pendingInvoice = null;
-            elements.zapInvoiceWrap.hidden = elements.zapCopyButton.hidden = elements.zapWalletButton.hidden = true;
+            displayInvoice(null);
             elements.zapStatus.textContent = "Choose an amount, then confirm in your wallet.";
         });
+        feedAmount.addEventListener("input", () => { feedPaymentStatus.textContent = ""; });
 
-        elements.zapCreateButton.addEventListener("click", async () => {
+        async function payLightning(raw, target, status, fromFeedCard = false) {
             if (paymentPending || window.LightningGoatsSite?.paymentsEnabled !== true) return;
-            const raw = elements.zapAmount.value;
             const sats = Number(raw);
             if (!/^[1-9][0-9]*$/.test(raw) || !Number.isSafeInteger(sats * 1000)) {
-                elements.zapStatus.textContent = "Enter a positive whole number of sats.";
+                status.textContent = "Enter a positive whole number of sats.";
                 return;
             }
+            const goal = target === "goal" ? activeGoalEvent : null;
+            const key = invoiceKey(sats, target, goal);
+            let invoice = pendingInvoice?.key === key ? pendingInvoice.invoice : null;
             paymentPending = true;
-            elements.zapCreateButton.disabled = elements.zapAmount.disabled = true;
-            elements.zapStatus.className = "small text-muted mt-2";
+            for (const control of lightningControls) control.disabled = true;
+            status.className = "small text-muted mt-2";
             try {
                 const wallet = window.LightningGoatsPayment.wallet();
                 // Request extension permission from this user action, before
                 // creating an invoice. A refusal makes no provider request.
                 if (wallet) {
-                    elements.zapStatus.textContent = "Waiting for your Lightning wallet…";
+                    status.textContent = "Waiting for your Lightning wallet…";
                     await wallet.enable();
                 }
-                if (!pendingInvoice) pendingInvoice = { sats, invoice: await createZapInvoice(sats) };
-                const invoice = pendingInvoice.invoice;
-                elements.zapInvoice.value = invoice;
-                elements.zapWalletButton.href = `lightning:${invoice}`;
-                elements.zapInvoiceWrap.hidden = elements.zapCopyButton.hidden = elements.zapWalletButton.hidden = false;
-                window.LightningGoatsPayment.drawQr(elements.zapQr, invoice);
+                if (!invoice) {
+                    invoice = await createZapInvoice(sats, target, goal);
+                    pendingInvoice = { key, invoice };
+                }
+                if (!fromFeedCard) displayInvoice(invoice);
                 if (wallet) {
-                    elements.zapStatus.textContent = "Confirm the payment in your wallet…";
+                    status.textContent = "Confirm the payment in your wallet…";
                     await wallet.sendPayment(invoice);
-                    elements.zapStatus.textContent = "Wallet reports payment sent. Waiting for confirmation…";
-                    elements.zapStatus.className = "small text-success mt-2";
-                } else {
+                    status.textContent = "Wallet reports payment sent. Waiting for confirmation…";
+                    status.className = "small text-success mt-2";
+                } else if (fromFeedCard) {
+                    elements.zapAmount.value = raw;
+                    showPayment(target);
                     elements.zapStatus.textContent = "Scan the QR code or open your Lightning wallet.";
+                    status.textContent = "";
+                } else {
+                    status.textContent = "Scan the QR code or open your Lightning wallet.";
                 }
             } catch (_) {
-                elements.zapStatus.textContent = pendingInvoice
+                status.textContent = invoice
                     ? "Wallet payment was cancelled or could not be confirmed. Check your wallet before retrying this same invoice."
                     : "Payment could not be started. No automatic retry was made.";
-                elements.zapStatus.className = "small text-danger mt-2";
+                status.className = "small text-danger mt-2";
             } finally {
                 paymentPending = false;
-                elements.zapCreateButton.disabled = elements.zapAmount.disabled = false;
+                for (const control of lightningControls) control.disabled = false;
             }
+        }
+
+        elements.zapCreateButton.addEventListener("click", () => {
+            payLightning(elements.zapAmount.value, paymentTarget, elements.zapStatus);
+        });
+        document.getElementById("feedLightningForm").addEventListener("submit", (event) => {
+            event.preventDefault();
+            payLightning(feedAmount.value, "feed", feedPaymentStatus, true);
         });
 
         elements.zapCopyButton.addEventListener("click", async () => {

@@ -1,0 +1,235 @@
+diff --git a/cashu/lightning/__init__.py b/cashu/lightning/__init__.py
+index b735d81..2258c92 100644
+--- a/cashu/lightning/__init__.py
++++ b/cashu/lightning/__init__.py
+@@ -1,4 +1,5 @@
+ # type: ignore
++from .goats_reserve import GoatsReserve
+ from ..core.settings import settings
+ from .clnrest import CLNRestWallet  # noqa: F401
+ from .fake import FakeWallet  # noqa: F401
+diff --git a/cashu/mint/db/write.py b/cashu/mint/db/write.py
+index 4a19ed4..5d9bdbb 100644
+--- a/cashu/mint/db/write.py
++++ b/cashu/mint/db/write.py
+@@ -211,7 +211,9 @@ class DbWriteHelper:
+         if pending_proofs:
+             raise ProofsArePendingError()
+ 
+-    async def _set_mint_quote_pending(self, quote_id: str) -> MintQuote:
++    async def _set_mint_quote_pending(
++        self, quote_id: str, *, outer_conn: Optional[Connection] = None
++    ) -> MintQuote:
+         """Sets the mint quote as pending.
+ 
+         Args:
+@@ -219,6 +221,7 @@ class DbWriteHelper:
+         """
+         quote: Union[MintQuote, None] = None
+         async with self.db.get_connection(
++            outer_conn,
+             locks=[
+                 LockOptions(
+                     table="mint_quotes",
+@@ -249,7 +252,9 @@ class DbWriteHelper:
+             raise TransactionError("Mint quote not found.")
+         return quote
+ 
+-    async def _set_mint_quotes_pending(self, quote_ids: List[str]) -> List[MintQuote]:
++    async def _set_mint_quotes_pending(
++        self, quote_ids: List[str], *, outer_conn: Optional[Connection] = None
++    ) -> List[MintQuote]:
+         """Sets multiple mint quotes as pending.
+ 
+         Args:
+@@ -269,6 +274,7 @@ class DbWriteHelper:
+         )
+ 
+         async with self.db.get_connection(
++            outer_conn,
+             locks=[
+                 LockOptions(
+                     table="mint_quotes",
+diff --git a/cashu/mint/ledger.py b/cashu/mint/ledger.py
+index 15e96e6..973947b 100644
+--- a/cashu/mint/ledger.py
++++ b/cashu/mint/ledger.py
+@@ -69,6 +69,7 @@ from ..lightning.base import (
+     PaymentStatusResult,
+     StatusResponse,
+ )
++from ..lightning.goats_reserve import GoatsReserve
+ from ..mint.crud import LedgerCrudSqlite
+ from .conditions import LedgerSpendingConditions
+ from .db.lease import maintain_melt_lease
+@@ -639,7 +640,10 @@ class Ledger(
+ 
+     # ------- TRANSACTIONS -------
+ 
+-    async def mint_quote(self, quote_request: PostMintQuoteRequest) -> MintQuote:
++    async def mint_quote(
++        self, quote_request: PostMintQuoteRequest, *, project_id: Optional[str] = None,
++        description_hash: Optional[bytes] = None,
++    ) -> MintQuote:
+         """Creates a mint quote and stores it in the database.
+ 
+         Args:
+@@ -652,6 +656,15 @@ class Ledger(
+             MintQuote: Mint quote object.
+         """
+         logger.trace("called request_mint")
++        if project_id is not None:
++            original = await self.crud.get_mint_quote(quote_id=project_id, db=self.db)
++            if original is not None:
++                if (original.amount != quote_request.amount or original.pubkey != quote_request.pubkey
++                        or original.unit != quote_request.unit or description_hash is None
++                        or bolt11.decode(original.request).description_hash != description_hash.hex()):
++                    raise TransactionError("project quote differs from its original intent")
++                return await self.get_mint_quote(project_id)
++        quote_id = project_id or generate_uuid_v7()
+         if not quote_request.amount > 0:
+             raise TransactionError("amount must be positive")
+         if (
+@@ -682,12 +695,19 @@ class Ledger(
+                 raise NotAllowedError("Mint has reached maximum balance.")
+ 
+         logger.trace(f"requesting invoice for {unit.str(quote_request.amount)}")
+-        invoice_response: InvoiceResponse = await self.backends[method][
+-            unit
+-        ].create_invoice(
+-            amount=Amount(unit=unit, amount=quote_request.amount),
+-            memo=quote_request.description,
+-        )
++        backend = self.backends[method][unit]
++        if isinstance(backend, GoatsReserve):
++            invoice_response = await backend.create_invoice(
++                amount=Amount(unit, quote_request.amount), memo=quote_request.description,
++                description_hash=description_hash, quote_id=quote_id,
++                claim_pubkey=quote_request.pubkey,
++            )
++        else:
++            if project_id is not None:
++                raise NotAllowedError("reserve funding backend required for project quotes")
++            invoice_response = await backend.create_invoice(
++                amount=Amount(unit, quote_request.amount), memo=quote_request.description,
++            )
+         logger.trace(
+             f"got invoice {invoice_response.payment_request} with checking id"
+             f" {invoice_response.checking_id}"
+@@ -722,13 +742,13 @@ class Ledger(
+ 
+         now = int(time.time())
+         expiry = None
+-        if settings.mint_quote_ttl is not None:
++        if settings.mint_quote_ttl is not None and not isinstance(backend, GoatsReserve):
+             expiry = now + settings.mint_quote_ttl
+         elif invoice_obj.expiry is not None:
+             expiry = invoice_obj.date + invoice_obj.expiry
+ 
+         quote = MintQuote(
+-            quote=generate_uuid_v7(),
++            quote=quote_id,
+             method=method.name,
+             request=request,
+             checking_id=invoice_response.checking_id,
+@@ -875,27 +895,22 @@ class Ledger(
+             bolt11.decode(quote.request), Amount(Unit[quote.unit], quote.amount)
+         )
+ 
+-        previous_state = quote.state
+-        await self.db_write._set_mint_quote_pending(quote_id=quote_id)
+-        try:
+-            if not quote.unit == output_unit.name:
++        # Quote state, promises, and liability commit together. Restore can only
++        # expose promises from a completed claim after a lost response or crash.
++        async with self.db.get_connection() as conn:
++            quote = await self.db_write._set_mint_quote_pending(quote_id, outer_conn=conn)
++            if quote.unit != output_unit.name:
+                 raise TransactionError("quote unit does not match output unit")
+-            if not quote.amount == sum_amount_outputs:
++            if quote.amount != sum_amount_outputs:
+                 raise TransactionError("amount to mint does not match quote amount")
+-            if quote.expiry and quote.expiry < int(time.time()):
+-                raise QuoteExpiredError("quote expired")
++            self._verify_mint_claim_expiry(quote)
+             if not self._verify_mint_quote_witness(quote, outputs, signature):
+                 raise QuoteSignatureInvalidError()
+-            await self._store_blinded_messages(outputs, mint_id=quote_id)
+-            promises = await self._sign_blinded_messages(outputs)
+-        except Exception as e:
+-            await self.db_write._unset_mint_quote_pending(
+-                quote_id=quote_id, state=previous_state
+-            )
+-            raise e
+-        await self.db_write._unset_mint_quote_pending(
+-            quote_id=quote_id, state=MintQuoteState.issued
+-        )
++            await self._store_blinded_messages(outputs, mint_id=quote_id, conn=conn)
++            promises = await self._sign_blinded_messages(outputs, conn=conn)
++            self.db_write._set_mint_quote_state(quote, MintQuoteState.issued)
++            await self.crud.update_mint_quote(quote=quote, db=self.db, conn=conn)
++        await self.events.submit(quote)
+ 
+         return promises
+ 
+@@ -1002,34 +1017,30 @@ class Ledger(
+             if not self._verify_mint_quote_witness(quote, payload.outputs, sig):
+                 raise QuoteSignatureInvalidError()
+ 
+-        # Set all quotes to pending
+-        quotes = await self.db_write._set_mint_quotes_pending(quote_ids=payload.quotes)
+-
+-        try:
++        async with self.db.get_connection() as conn:
++            quotes = await self.db_write._set_mint_quotes_pending(payload.quotes, outer_conn=conn)
+             for quote in quotes:
+-                if quote.expiry and quote.expiry < int(time.time()):
+-                    raise QuoteExpiredError("quote expired")
++                self._verify_mint_claim_expiry(quote)
+ 
+-            # Store all blinded messages
+             await self._store_blinded_messages(
+-                payload.outputs, mint_id=payload.quotes[0]
++                payload.outputs, mint_id=payload.quotes[0], conn=conn
+             )
+-            promises = await self._sign_blinded_messages(payload.outputs)
+-
+-        except Exception as e:
+-            # Revert pending status
+-            await self.db_write._unset_mint_quotes_pending(
+-                quote_ids=payload.quotes, state=MintQuoteState.paid
+-            )
+-            raise e
+-
+-        # Set all quotes to issued
+-        await self.db_write._unset_mint_quotes_pending(
+-            quote_ids=payload.quotes, state=MintQuoteState.issued
+-        )
++            promises = await self._sign_blinded_messages(payload.outputs, conn=conn)
++            for quote in quotes:
++                self.db_write._set_mint_quote_state(quote, MintQuoteState.issued)
++                await self.crud.update_mint_quote(quote=quote, db=self.db, conn=conn)
++        for quote in quotes:
++            await self.events.submit(quote)
+ 
+         return promises
+ 
++    def _verify_mint_claim_expiry(self, quote: MintQuote) -> None:
++        # On the Goats backend, expiry controls Lightning invoice payment.
++        # A paid quote stays claimable after an outage crosses that deadline.
++        backend = self.backends[Method[quote.method]][Unit[quote.unit]]
++        if quote.expiry and quote.expiry < int(time.time()) and not isinstance(backend, GoatsReserve):
++            raise QuoteExpiredError("quote expired")
++
+     def create_internal_melt_quote(
+         self, mint_quote: MintQuote, melt_quote: PostMeltQuoteRequest
+     ) -> PaymentQuoteResponse:
+@@ -1132,6 +1143,8 @@ class Ledger(
+         # and therefore respond with internal transaction fees (0 for now)
+         mint_quote = await self.crud.get_mint_quote(request=request, db=self.db)
+         if mint_quote and mint_quote.unit == melt_quote.unit:
++            if mint_quote.quote.startswith("goats-"):
++                raise NotAllowedError("project quotes require an external Lightning payment")
+             # check if the melt quote is partial and error if it is.
+             # it's just not possible to handle this case
+             if melt_quote.is_mpp:

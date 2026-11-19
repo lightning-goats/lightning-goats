@@ -1,0 +1,51 @@
+# Include in http {} on HOME after installing site-specific certificates and
+# confirming the intended VPS WireGuard source address with the VPS operator.
+map $http_upgrade $goats_mint_connection {
+    default upgrade;
+    '' close;
+}
+
+upstream goats_cashu_mint {
+    server unix:/run/lightning-goats-reserve/mainnet/mint/http.sock;
+}
+upstream goats_reserve_receive {
+    server unix:/run/lightning-goats-reserve/mainnet/receive/http.sock;
+}
+
+server {
+    listen 10.8.0.6:8792 ssl;
+    server_name mint-home.internal;
+    ssl_certificate /etc/nginx/goats-mint/home.pem;
+    ssl_certificate_key /etc/nginx/goats-mint/home.key;
+    ssl_client_certificate /etc/nginx/goats-mint/public-edge-client-ca.pem;
+    ssl_verify_client on;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    client_max_body_size 256k;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $goats_mint_connection;
+    proxy_read_timeout 65s;
+    access_log off;
+    include /etc/nginx/goats-mint/public-routes.conf;
+}
+
+# The optional private endpoint has a different client trust root.
+server {
+    listen 10.8.0.6:8793 ssl;
+    server_name mint-home.internal;
+    ssl_certificate /etc/nginx/goats-mint/home.pem;
+    ssl_certificate_key /etc/nginx/goats-mint/home.key;
+    ssl_client_certificate /etc/nginx/goats-mint/private-client-ca.pem;
+    ssl_verify_client on;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    client_max_body_size 16k;
+    access_log off;
+    location = /wallet/health { proxy_pass http://goats_reserve_receive/health; }
+    location = /wallet/v1/invoices { proxy_pass http://goats_reserve_receive/v1/invoices; }
+    location ~ "^/wallet/v1/invoices/[0-9a-f]{64}$" {
+        rewrite ^/wallet(/.*)$ $1 break;
+        proxy_pass http://goats_reserve_receive;
+    }
+    location = /private/v1/project-quotes { proxy_pass http://goats_cashu_mint; }
+    location / { return 404; }
+}

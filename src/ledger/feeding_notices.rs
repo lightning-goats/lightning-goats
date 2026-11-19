@@ -116,7 +116,11 @@ pub(super) async fn export_proof(
         )),
         _ => bail!("feeding presentation lost triggering credit identity"),
     };
-    let actual = super::feed::triggering_credit(tx, debit, credit).await?;
+    let actual = if super::feed_sources::frozen(tx, id).await? {
+        super::feed_sources::triggering_credit(tx, id).await?
+    } else {
+        super::feed::triggering_credit(tx, debit, credit).await?
+    };
     if captured != actual {
         bail!("feeding presentation attribution contradicts consumed credit");
     }

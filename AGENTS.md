@@ -5,25 +5,17 @@
 Proceed with CyberHerd implementation after the restored live Lightning/Nostr/OBS
 path. Read `docs/planning/cyberherd-implementation-plan.md` and its pinned upstream
 behavioral reference. Membership does not require NIP-05; rewards follow confirmed
-feedings and preserve current accounting. This overrides the older CyberHerd
-deferral below. Preserve the feeder owner, receive-only daemon and paid state.
+feedings and preserve current accounting. Preserve the feeder owner,
+receive-only daemon and paid state.
 Keep production changes separate from isolated implementation and preserve
 the uploaded OBS artwork.
 
-## Current delivery order — operator decision, 2026-09-17
+## Current payment scope — operator decision, 2026-11-19
 
-Read [delivery-roadmap.md](docs/planning/delivery-roadmap.md) first.
-
-1. **Current: minimal Strike-backed Lightning payments**, real feeding through the
-   existing home gateway, Nostr/OBS presentation, and required VPS ModSecurity #106.
-2. **Next: Square fiat Feedings**, following the existing approved #104 contract.
-
-Square is an anonymous browser-account purchase/redemption product: integer
-Feedings, not sats/BTC, not a fiat deposit into the sats ledger. Share the physical
-owner, not the accounting balances. Lightning needs no account. Preserve #104's
-existing privacy, idempotency, refund/dispute and redemption requirements.
-CyberHerd, NIP-05, alternative backends and a general website rewrite remain later
-scope; old “CyberHerd Phase 2” wording does not override Square's new priority.
+Strike-backed Lightning and Cashu are live. Read the
+[delivery roadmap](docs/planning/delivery-roadmap.md) first. Preserve the
+[shared payment and feeder boundary](docs/architecture/phase1-strike-architecture.md#future-payment-sources)
+so future sources can contribute verified credit under their own receipt policy.
 
 ## Lightning pilot and first deliverable
 
@@ -50,7 +42,7 @@ and reject malicious traffic while retaining daemon verification.
 Current dated delivery roadmap takes precedence over older scope/launch-order
 instructions. Then read the [docs index](docs/README.md), execution plan, selected
 source and relevant issue. #6 tracks Lightning migration; #15 actual acceptance;
-#16 cutover; #104 Square; #106 WAF. #17 is agent coordination.
+#16 cutover; #106 WAF. #17 is agent coordination.
 
 - HOME owns the existing physical owner, gateway, project OpenHAB credential,
   local weather and home containment. Reference:

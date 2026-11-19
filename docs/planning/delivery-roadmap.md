@@ -1,31 +1,20 @@
-# Delivery roadmap — Lightning first, Square second
+# Delivery roadmap — Lightning and Cashu
 
-**Operator decision: 2026-09-17.** The delivery order puts the core Lightning
-payment and feeding flow first. Live activation follows the individual deployment
-and cutover approvals.
+**Operator decision, 2026-11-19.** Strike-backed Lightning and Cashu remain
+live. Preserve paid history, the shared feeder controls and the
+[architecture for future payment sources](../architecture/phase1-strike-architecture.md#future-payment-sources).
+Any future source needs its own verified receipt and credit policy.
 
-| Order | Deliverable | Tracking and disposition |
-| --- | --- | --- |
-| 1 — current | Minimal Strike-backed Lightning Goats | #6, #15/#16, existing gateway/presentation work, and VPS WAF #106 |
-| 2 — next | Square fiat purchases of anonymous stored Feedings | Existing approved product in #104; not a Lightning prerequisite |
+## Cashu — operator direction, 2026-11-15
 
-CyberHerd, NIP-05 verification, additional payment providers, a general website
-redesign and automated swaps/refunds are not added to either active deliverable.
-Older documents naming CyberHerd as “Phase 2” describe a future architecture, not
-the currently selected second payment deliverable.
-
-## Cashu exception — operator direction, 2026-11-15
-
-The [Nut November plan](cashu-nutnovember-implementation-plan.md) authorizes
-ordinary Cashu and NIP-61 receiving through one isolated wallet and acquisition
+The [Nut November plan](cashu-nutnovember-implementation-plan.md) covers
+ordinary Cashu and NIP-61 receiving through an isolated wallet and acquisition
 engine, shared herd credit, constrained Cashu-to-Strike treasury settlement and
-the specified two-QR overlay. This is the narrow exception to the alternative
-provider and automated conversion deferrals above. Preserve existing CyberHerd
-behavior and opt-outs, Lightning, Square entitlements and paid history.
-Production keys, mints, limits, schema upgrades, public announcements,
-financial activation and physical feeding remain operator-controlled.
+the two-QR overlay. Preserve existing CyberHerd behavior and opt-outs. Production
+keys, mints, limits, schema upgrades, public announcements, financial activation
+and physical feeding remain operator-controlled.
 
-## 1. Minimal Lightning deliverable
+## Lightning deliverable and acceptance
 
 Use the existing Strike backend and current daemon/gateway architecture, not a
 replacement wallet or a new framework. Start with the
@@ -66,34 +55,12 @@ Nostr/OBS presentation and applicable edge controls. Do not label source-only te
 or static website staging as live payment/feeder acceptance. The operator selects
 manual amounts/duration and the eventual public DNS/profile cutover.
 
-## 2. Square fiat Feedings
-
-[#104](https://github.com/lightning-goats/lightning-goats/issues/104) remains the
-product contract. Viewers buy integer **Feedings**, stored against an anonymous
-browser account, and redeem them later. Square handles card details; the project
-retains only the minimal identity, entitlement and reconciliation records needed.
-Lightning remains account-free and follows its existing automatic sats-threshold flow.
-
-**Square Feedings are separate entitlements.** Keep their balance separate from
-the herd sats ledger and use the shared physical-owner safeguards. A fiat purchase itself does not
-actuate the feeder: redemption durably reserves a Feeding and resolves the same
-correlated physical request without double-spending or ambiguous fresh-ID retries.
-
-Implement in bounded slices after the Lightning deliverable: anonymous identity
-and entitlement storage; verified Square checkout/payment reconciliation and
-idempotent grants; safe redemption; minimal browser controls; refund/dispute state,
-edge/WAF rules and acceptance tests. Revalidate current Square APIs when coding.
-Do not expand into Nostr login, broad PII collection or extra payment methods
-merely because a future platform might support them. Retain #104's existing
-acceptance criteria and operator decisions; this roadmap does not select pricing.
-
 ## Issue disposition and agent coordination
 
 | Issue/scope | Current handling |
 | --- | --- |
 | #6, #15/#16, core gateway/Lightning presentation | Current Lightning implementation and observed acceptance |
-| #106 | Current VPS WAF for Lightning; Square-specific additions in deliverable 2 |
-| #104 | Next deliverable: Square stored Feedings and redemption |
+| #106 | Completed VPS WAF acceptance for Lightning |
 
 Use #17 for concise source-pinned checkpoints. Lead prioritizes repository fixes,
 release preparation and reviews needed for Lightning. HOME retains the OpenHAB

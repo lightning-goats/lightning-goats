@@ -240,7 +240,7 @@ async fn process_payment(
                     let read = store
                         .reward_profile_read(owner, pubkey, env.now, 300)
                         .await?;
-                    if !read.is_some_and(|read| read.profile.is_none()) {
+                    if read.is_none_or(|read| read.profile.is_some()) {
                         return Ok(Step::Waiting);
                     }
                     Profile::default()

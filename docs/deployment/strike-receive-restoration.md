@@ -68,7 +68,7 @@ leaderboard/NIP-05 UI and ingress are removed. Unverified zap creation is hidden
 Native six-address payment controls are at `/feed.html`; `/overlay.html` is a
 separate OBS browser source with ledger-derived credit, same-stream cursor
 reconnect, gap reset, bounded presentation and confirmed-only feed animation.
-Replayed feeds do not animate and stale weather expires. No XMR/Square UI is added.
+Replayed feeds do not animate and stale weather expires.
 
 `deploy-strike-receive.py` defaults to a non-applying plan. `--install` verifies
 the complete release archive and CRS pin, backs up the inactive installation,

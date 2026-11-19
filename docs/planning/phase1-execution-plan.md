@@ -1,10 +1,8 @@
 # Phase 1 execution — minimal Lightning payments
 
 **Current operator decision: 2026-09-17.**
-[Delivery roadmap](delivery-roadmap.md): Lightning first, Square #104 second,
-Monero on hold until explicitly resumed. This replaces the previous immediate
-multi-asset work order; no XMR integration or dual-asset UI is a Lightning blocker.
-Preserve the merged foundations, tests and paid state rather than reverting them.
+The [delivery roadmap](delivery-roadmap.md) puts Lightning first and Square
+#104 second. Preserve the existing migrations, tests and paid state.
 
 ## Goal and operating policy
 
@@ -33,7 +31,7 @@ do not turn a historical mock result or unrun check into production acceptance.
 | 6 | Hand off the minimal complete release and cut over when operator chooses | Short tested commands/config inputs, actual observations, preserved paid state and recoverable old system |
 
 Steps 2/3 and browser-source work may run in parallel where file/host ownership
-is clear. WAF tuning is not a reason to expose speculative Square/XMR routes, turn
+is clear. WAF tuning is not a reason to expose speculative Square routes, turn
 off all payment inspection, or interrupt an existing pilot without a scoped decision.
 Its blocking-mode acceptance is required for calling the new public deliverable
 complete; detection-only mode is preparation, not equivalent protection.
@@ -54,22 +52,14 @@ counts. A 2,340-sat synthetic example with two 1,000-sat confirmed debits leaves
 340; it is a regression target, not a required real purchase or pilot budget.
 
 The public site is not the OBS rendering page. Core payment/feed display and the
-actual browser source belong to this deliverable; larger redesign, XMR fields,
-fiat account UI and CyberHerd do not. Preserve existing weather/info behavior;
+actual browser source belong to this deliverable. Preserve existing weather/info behavior;
 weather polish does not justify fabricating freshness or blocking unrelated tests.
 
 ## Next deliverable and deferred work
 
 After minimal Lightning, implement Square #104's anonymous stored integer Feedings
-and safe later redemption, separate from the sats ledger. Do not route fiat through
-XMR quoting, require Lightning accounts, or create a second feeder owner.
-
-Monero parent #94 and XMR-specific work in #95–#100 remain on hold. The exception
-requested now is preserving the prepared #97 work in draft PR #107 and merging
-only when appropriate under existing review requirements. No continued #98 coding,
-MoneroPay installation, new Monero tests/feature expansion or wallet/rate activation
-is authorized by the old plan. Ordinary shared CI may keep testing existing code.
-Core Lightning overlay work is not paused with #99's XMR-specific extension.
+and safe later redemption, separate from the sats ledger. Keep Lightning
+account-free and use the existing feeder owner for both paths.
 
 ## Responsibilities, verification and rollback
 

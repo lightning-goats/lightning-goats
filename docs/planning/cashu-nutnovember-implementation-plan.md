@@ -14,7 +14,7 @@ Build a lightweight, headless Lightning Goats Cashu wallet using external mints.
 
 Keep the current Lightning LNURL QR in the upper-right corner. Add a reusable Cashu payment-request QR directly below it, aligned to the right edge. Move the existing upper-left credit/status/BTC-price strip to the top center. Preserve the rest of the established artwork and presentation, making only the layout adjustments needed to avoid collisions.
 
-This is the dated, narrow Cashu exception to older documents deferring alternative payment providers and automated conversions. It supersedes earlier Cashu planning suggestions to support nutzaps only, use a single hard-coded mint, require manual-only withdrawals, replace the Lightning QR with a payment-page QR, or depend on a combined QR format. It does not resume Monero, replace Strike, change Square entitlements, or authorize unrelated redesigns. Preserve existing CyberHerd work, current opt-outs, live financial limits, and all paid history. Read [AGENTS.md](../../AGENTS.md), the [delivery roadmap](delivery-roadmap.md), and [implementation status](../implementation-status.md).
+This is the dated, narrow Cashu exception to older documents deferring alternative payment providers and automated conversions. It supersedes earlier Cashu planning suggestions to support nutzaps only, use a single hard-coded mint, require manual-only withdrawals, replace the Lightning QR with a payment-page QR, or depend on a combined QR format. Preserve Strike, Square entitlements, existing CyberHerd work, current opt-outs, live financial limits, and all paid history. Read [AGENTS.md](../../AGENTS.md), the [delivery roadmap](delivery-roadmap.md), and [implementation status](../implementation-status.md).
 
 The operator requested this scoped implementation handoff. Production keys, mint selection, spending/exposure limits, real payments, public receiving announcements, live service activation, schema upgrades, and physical feeding remain explicit operator-controlled steps. Missing production values must not prevent isolated implementation and testing. When placing this document in the repository, link it from `docs/README.md` and add a dated Cashu exception to `docs/planning/delivery-roadmap.md`, preserving all unrelated instructions.
 
@@ -38,7 +38,7 @@ Inspect these existing components before creating parallel machinery:
 
 | Existing component | Work to reuse or extend |
 | --- | --- |
-| `src/ledger/mod.rs`, `src/ledger/credit.rs` | Atomic contribution/credit records and asset provenance. Add a typed Cashu receipt path; do not fake a Strike payment or XMR valuation. |
+| `src/ledger/mod.rs`, `src/ledger/credit.rs` | Atomic contribution/credit records and asset provenance. Add a typed Cashu receipt path; use verified Cashu provenance. |
 | `src/ledger/operator_credit.rs` | Reuse its transactional/idempotent design, not its administrative capability or event type. Do not expose operator grants as a public payment endpoint. |
 | `src/ledger/feed.rs`, `src/ledger/feed_cap.rs` | Thresholds, caps, durable attempts, confirmation-only debits, and unresolved physical-attempt protection. Add pre-dispatch funding reservation/settlement. |
 | `src/ledger/reward_funding.rs` and related payout modules | Preserve source evidence, fee budgets, reservations, and actual consumed funding. |

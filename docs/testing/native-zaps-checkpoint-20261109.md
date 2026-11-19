@@ -62,4 +62,4 @@ interfaces. Existing core financial and physical authority are preserved.
 PR maintenance observed restoration #110 already merged at `18e0261`. Other older
 PRs were not blindly merged: #109 has a failed cargo-audit check; older ready-marked
 PRs have conflicts or outstanding review requirements. Source integration is not
-host activation, and the preserved Monero work remains on hold.
+host activation.

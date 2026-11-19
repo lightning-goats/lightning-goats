@@ -6,10 +6,6 @@ pub(crate) use cashu::TreasurySettlementState;
 #[cfg(unix)]
 pub use cashu::{CashuImportResult, CashuSettlementStatus, FinancialPlanStatus, TreasuryPlan};
 mod credit;
-mod quotes;
-pub use credit::{
-    CreditAllocation, CreditReceiptOutcome, XmrCreditIntent, XmrNetwork, XmrReceiptObservation,
-};
 mod inbox;
 pub use inbox::StrikeInboxWork;
 

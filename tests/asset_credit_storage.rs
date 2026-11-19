@@ -1,15 +1,9 @@
-//! Real file-backed SQLite, synthetic receipts only. No network or actuator.
+//! Real file-backed SQLite, synthetic receipts only.
 use lightning_goats::{
-    domain::{
-        credit::{Asset, AssetAmount, XmrBtcRate},
-        payment::SettledPayment,
-    },
-    ledger::{
-        CreditReceiptOutcome, LedgerStore, SettlementOutcome, XmrCreditIntent, XmrNetwork,
-        XmrReceiptObservation,
-    },
+    domain::payment::SettledPayment,
+    ledger::{LedgerStore, SettlementOutcome},
 };
-use serde_json::{Value, json};
+use serde_json::Value;
 use sqlx::{
     Row, SqlitePool,
     sqlite::{SqliteConnectOptions, SqlitePoolOptions},
@@ -17,7 +11,6 @@ use sqlx::{
 use std::{path::Path, str::FromStr, sync::Arc, time::Duration};
 use tempfile::TempDir;
 use tokio::sync::Barrier;
-use uuid::Uuid;
 
 struct Db {
     _dir: TempDir,
@@ -50,38 +43,6 @@ async fn db() -> Db {
         raw,
     }
 }
-fn intent(target: u64, atomic: u64) -> XmrCreditIntent {
-    // Synthetic rational: the resulting requested piconero is exactly `atomic`.
-    let quote = XmrBtcRate::new(target * 1_000_000_000_000, atomic, "synthetic", 90)
-        .unwrap()
-        .quote(target, 100, 200, 20)
-        .unwrap();
-    assert_eq!(quote.terms().expected_atomic(), atomic);
-    XmrCreditIntent {
-        id: Uuid::new_v4(),
-        provider: "moneropay".into(),
-        network: XmrNetwork::Stagenet,
-        account_scope: "project-wallet".into(),
-        receive_scope: format!("private-subaddress-{}", Uuid::new_v4()),
-        address_user: "nova".into(),
-        credit_pool: "herd".into(),
-        quote,
-        max_credit_sats: target * 10,
-    }
-}
-fn receipt(i: &XmrCreditIntent, key: &str, atomic: u64) -> XmrReceiptObservation {
-    XmrReceiptObservation {
-        provider: i.provider.clone(),
-        network: i.network,
-        account_scope: i.account_scope.clone(),
-        receive_scope: i.receive_scope.clone(),
-        receipt_key: key.into(),
-        amount: AssetAmount::new(Asset::Xmr, atomic).unwrap(),
-        first_seen_at: 150,
-        unlocked: true,
-        double_spend_seen: false,
-    }
-}
 fn btc(id: &str, sats: u64) -> SettledPayment {
     SettledPayment {
         source: "strike".into(),
@@ -102,30 +63,12 @@ async fn count(d: &Db, table: &str) -> i64 {
 }
 
 #[tokio::test]
-async fn mixed_assets_feed_the_same_ledger_and_replay_after_reopen() {
+async fn native_btc_feeds_the_ledger_and_replays_after_reopen() {
     let d = db().await;
-    let a = intent(425, 17);
-    let b = intent(1440, 29);
-    d.store.register_xmr_credit_intent(&a).await.unwrap();
-    d.store.register_xmr_credit_intent(&b).await.unwrap();
-    let p = btc("native-one", 300);
-    let q = btc("native-two", 175);
+    let p = btc("native-one", 1200);
+    let q = btc("native-two", 1140);
     d.store.record_payment(&p).await.unwrap();
-    assert_eq!(
-        d.store
-            .record_xmr_receipt(a.id, &receipt(&a, "private-tx-a", 17))
-            .await
-            .unwrap(),
-        CreditReceiptOutcome::Recorded {
-            delta_sats: 425,
-            feed_credit_sats: 725
-        }
-    );
     d.store.record_payment(&q).await.unwrap();
-    d.store
-        .record_xmr_receipt(b.id, &receipt(&b, "private-tx-b", 29))
-        .await
-        .unwrap();
     assert_eq!(d.store.feed_credit_sats().await.unwrap(), 2340);
     for _ in 0..2 {
         let id = d.store.begin_feed_attempt(1000).await.unwrap().unwrap();
@@ -141,22 +84,13 @@ async fn mixed_assets_feed_the_same_ledger_and_replay_after_reopen() {
         reopened.record_payment(&q).await.unwrap(),
         SettlementOutcome::Duplicate
     );
-    for (i, k, n) in [(&a, "private-tx-a", 17), (&b, "private-tx-b", 29)] {
-        assert_eq!(
-            reopened
-                .record_xmr_receipt(i.id, &receipt(i, k, n))
-                .await
-                .unwrap(),
-            CreditReceiptOutcome::Duplicate
-        );
-    }
     let events = reopened.events_after(0, 100).await.unwrap();
     assert_eq!(
         events
             .iter()
             .filter(|e| e.event_type == "payment_received")
             .count(),
-        4
+        2
     );
     assert_eq!(
         events
@@ -165,300 +99,12 @@ async fn mixed_assets_feed_the_same_ledger_and_replay_after_reopen() {
             .count(),
         2
     );
-    assert_eq!(count(&d, "credit_grants").await, 4);
+    assert_eq!(count(&d, "credit_grants").await, 2);
     let (_, snapshot) = reopened.overlay_snapshot_message(1000).await.unwrap();
     assert_eq!(
         serde_json::from_str::<Value>(&snapshot).unwrap()["feed_credit_sats"],
         340
     );
-}
-
-#[tokio::test]
-async fn dust_watermarks_survive_restart_and_fragmentation() {
-    let d = db().await;
-    let i = intent(1, 3);
-    d.store.register_xmr_credit_intent(&i).await.unwrap();
-    for index in 0..3 {
-        let store = LedgerStore::connect(&d.url).await.unwrap();
-        let o = receipt(&i, &format!("fragment{index}"), 1);
-        assert_eq!(
-            store.record_xmr_receipt(i.id, &o).await.unwrap(),
-            CreditReceiptOutcome::Recorded {
-                delta_sats: u64::from(index == 2),
-                feed_credit_sats: u64::from(index == 2)
-            }
-        );
-        assert_eq!(
-            store.record_xmr_receipt(i.id, &o).await.unwrap(),
-            CreditReceiptOutcome::Duplicate
-        );
-        assert_eq!(
-            store
-                .xmr_credit_allocation(i.id)
-                .await
-                .unwrap()
-                .eligible_atomic,
-            index + 1
-        );
-    }
-    assert_eq!(count(&d, "asset_receipts").await, 3);
-    assert_eq!(count(&d, "credit_grants").await, 3);
-    assert_eq!(count(&d, "ledger_entries").await, 1);
-    assert_eq!(count(&d, "event_log").await, 1);
-}
-
-#[tokio::test]
-async fn pending_funds_do_not_credit_and_timely_observation_honors_later_unlock() {
-    let d = db().await;
-    let i = intent(1000, 100);
-    d.store.register_xmr_credit_intent(&i).await.unwrap();
-    let mut o = receipt(&i, "first-seen-before-expiry", 100);
-    o.unlocked = false;
-    assert_eq!(
-        d.store.record_xmr_receipt(i.id, &o).await.unwrap(),
-        CreditReceiptOutcome::Pending
-    );
-    assert_eq!(count(&d, "asset_receipts").await, 1);
-    assert_eq!(d.store.feed_credit_sats().await.unwrap(), 0);
-    // Quote timestamps deliberately precede test execution: unlock is not repriced.
-    let store = LedgerStore::connect(&d.url).await.unwrap();
-    o.unlocked = true;
-    assert_eq!(
-        store.record_xmr_receipt(i.id, &o).await.unwrap(),
-        CreditReceiptOutcome::Recorded {
-            delta_sats: 1000,
-            feed_credit_sats: 1000
-        }
-    );
-}
-
-#[tokio::test]
-async fn late_topups_are_retained_without_blocking_timely_pending_receipts() {
-    let d = db().await;
-    let i = intent(1000, 100);
-    d.store.register_xmr_credit_intent(&i).await.unwrap();
-    let mut timely = receipt(&i, "timely", 50);
-    timely.unlocked = false;
-    d.store.record_xmr_receipt(i.id, &timely).await.unwrap();
-    for (key, time) in [("late", 200), ("before-quote", 99)] {
-        let mut late = receipt(&i, key, 50);
-        late.first_seen_at = time;
-        assert_eq!(
-            d.store.record_xmr_receipt(i.id, &late).await.unwrap(),
-            CreditReceiptOutcome::Held
-        );
-    }
-    timely.unlocked = true;
-    d.store.record_xmr_receipt(i.id, &timely).await.unwrap();
-    assert_eq!(d.store.feed_credit_sats().await.unwrap(), 500);
-    assert_eq!(count(&d, "asset_receipts").await, 3);
-    assert!(
-        d.store
-            .xmr_credit_allocation(i.id)
-            .await
-            .unwrap()
-            .hold_reason
-            .is_none()
-    );
-}
-
-#[tokio::test]
-async fn same_transaction_in_distinct_subaddresses_is_not_a_global_duplicate() {
-    let d = db().await;
-    let a = intent(500, 10);
-    let b = intent(700, 20);
-    for i in [&a, &b] {
-        d.store.register_xmr_credit_intent(i).await.unwrap();
-        d.store
-            .record_xmr_receipt(
-                i.id,
-                &receipt(i, "same-transaction", i.quote.terms().expected_atomic()),
-            )
-            .await
-            .unwrap();
-    }
-    assert_eq!(d.store.feed_credit_sats().await.unwrap(), 1200);
-    let mut alias = a.clone();
-    alias.id = Uuid::new_v4();
-    assert!(d.store.register_xmr_credit_intent(&alias).await.is_err());
-    assert_eq!(count(&d, "credit_valuations").await, 2);
-}
-
-#[tokio::test]
-async fn immutable_quote_roundtrips_full_rate_evidence_and_rejects_rebinding() {
-    let d = db().await;
-    let i = intent(1000, 33);
-    d.store.register_xmr_credit_intent(&i).await.unwrap();
-    d.store.register_xmr_credit_intent(&i).await.unwrap();
-    let got = LedgerStore::connect(&d.url)
-        .await
-        .unwrap()
-        .xmr_credit_intent(i.id)
-        .await
-        .unwrap();
-    assert_eq!(got.quote, i.quote);
-    assert_eq!(got.receive_scope, i.receive_scope);
-    assert_eq!(got.max_credit_sats, i.max_credit_sats);
-    for field in 0..7 {
-        let mut bad = i.clone();
-        match field {
-            0 => bad.receive_scope = "another-address".into(),
-            1 => bad.account_scope = "another-wallet".into(),
-            2 => bad.network = XmrNetwork::Mainnet,
-            3 => bad.address_user = "dexter".into(),
-            4 => bad.max_credit_sats += 1,
-            5 => bad.quote = intent(1000, 34).quote,
-            _ => bad.provider = "different-provider".into(),
-        }
-        assert!(d.store.register_xmr_credit_intent(&bad).await.is_err());
-    }
-    assert_eq!(count(&d, "credit_allocations").await, 1);
-}
-
-#[tokio::test]
-async fn receipt_binding_mismatch_is_rejected_before_any_observation_write() {
-    let d = db().await;
-    let i = intent(100, 10);
-    d.store.register_xmr_credit_intent(&i).await.unwrap();
-    for field in 0..4 {
-        let mut o = receipt(&i, "wrong-binding", 10);
-        match field {
-            0 => o.receive_scope = "other".into(),
-            1 => o.account_scope = "other".into(),
-            2 => o.provider = "other".into(),
-            _ => o.network = XmrNetwork::Mainnet,
-        }
-        assert!(d.store.record_xmr_receipt(i.id, &o).await.is_err());
-    }
-    assert_eq!(count(&d, "asset_receipts").await, 0);
-    assert_eq!(d.store.feed_credit_sats().await.unwrap(), 0);
-}
-
-#[tokio::test]
-async fn changed_receipts_regression_and_double_spend_hold_persistently() {
-    for defect in 0..4 {
-        let d = db().await;
-        let i = intent(1000, 100);
-        d.store.register_xmr_credit_intent(&i).await.unwrap();
-        let o = receipt(&i, "private-id", 50);
-        d.store.record_xmr_receipt(i.id, &o).await.unwrap();
-        let mut bad = o.clone();
-        match defect {
-            0 => bad.amount = AssetAmount::new(Asset::Xmr, 49).unwrap(),
-            1 => bad.first_seen_at += 1,
-            2 => bad.unlocked = false,
-            _ => bad.double_spend_seen = true,
-        }
-        for _ in 0..2 {
-            assert_eq!(
-                d.store.record_xmr_receipt(i.id, &bad).await.unwrap(),
-                CreditReceiptOutcome::Held
-            );
-        }
-        let reopened = LedgerStore::connect(&d.url).await.unwrap();
-        assert_eq!(
-            reopened.record_xmr_receipt(i.id, &o).await.unwrap(),
-            CreditReceiptOutcome::Held
-        );
-        assert_eq!(
-            reopened
-                .record_xmr_receipt(i.id, &receipt(&i, "new-receipt", 50))
-                .await
-                .unwrap(),
-            CreditReceiptOutcome::Held
-        );
-        assert_eq!(reopened.feed_credit_sats().await.unwrap(), 500);
-        assert!(
-            reopened
-                .xmr_credit_allocation(i.id)
-                .await
-                .unwrap()
-                .hold_reason
-                .is_some()
-        );
-        assert_eq!(count(&d, "credit_conflicts").await, 1);
-        assert_eq!(count(&d, "credit_grants").await, 1);
-    }
-}
-
-#[tokio::test]
-async fn first_observation_double_spend_cannot_grant() {
-    let d = db().await;
-    let i = intent(1000, 100);
-    d.store.register_xmr_credit_intent(&i).await.unwrap();
-    let mut o = receipt(&i, "bad-first", 100);
-    o.double_spend_seen = true;
-    assert_eq!(
-        d.store.record_xmr_receipt(i.id, &o).await.unwrap(),
-        CreditReceiptOutcome::Held
-    );
-    assert_eq!(count(&d, "asset_receipts").await, 1);
-    assert_eq!(count(&d, "credit_grants").await, 0);
-    assert!(
-        d.store
-            .xmr_credit_allocation(i.id)
-            .await
-            .unwrap()
-            .hold_reason
-            .is_some()
-    );
-}
-
-#[tokio::test]
-async fn provider_history_hold_is_persistent_but_does_not_block_native_btc() {
-    let d = db().await;
-    let i = intent(1000, 100);
-    d.store.register_xmr_credit_intent(&i).await.unwrap();
-    d.store.hold_xmr_credit_intent(i.id).await.unwrap();
-    let reopened = LedgerStore::connect(&d.url).await.unwrap();
-    assert_eq!(
-        reopened
-            .record_xmr_receipt(i.id, &receipt(&i, "recovered", 100))
-            .await
-            .unwrap(),
-        CreditReceiptOutcome::Held
-    );
-    reopened
-        .record_payment(&btc("still-working", 300))
-        .await
-        .unwrap();
-    assert_eq!(reopened.feed_credit_sats().await.unwrap(), 300);
-}
-
-#[tokio::test]
-async fn concurrent_duplicate_and_distinct_receipts_use_one_serialized_watermark() {
-    let d = db().await;
-    let i = intent(1000, 10);
-    d.store.register_xmr_credit_intent(&i).await.unwrap();
-    let barrier = Arc::new(Barrier::new(12));
-    let mut jobs = Vec::new();
-    for n in 0..12 {
-        let store = LedgerStore::connect(&d.url).await.unwrap();
-        let i = i.clone();
-        let barrier = barrier.clone();
-        jobs.push(tokio::spawn(async move {
-            let o = receipt(&i, &format!("fragment-{}", n % 6), 1);
-            barrier.wait().await;
-            store.record_xmr_receipt(i.id, &o).await.unwrap()
-        }));
-    }
-    let mut recorded = 0;
-    for job in jobs {
-        if matches!(job.await.unwrap(), CreditReceiptOutcome::Recorded { .. }) {
-            recorded += 1;
-        }
-    }
-    assert_eq!(recorded, 6);
-    assert_eq!(d.store.feed_credit_sats().await.unwrap(), 600);
-    assert_eq!(
-        d.store
-            .xmr_credit_allocation(i.id)
-            .await
-            .unwrap()
-            .eligible_atomic,
-        6
-    );
-    assert_eq!(count(&d, "credit_grants").await, 6);
 }
 
 #[tokio::test]
@@ -483,55 +129,6 @@ async fn concurrent_native_replays_preserve_single_receipt_event_and_grant() {
     assert_eq!(credited, 1);
     assert_eq!(count(&d, "credit_grants").await, 1);
     assert_eq!(count(&d, "event_log").await, 1);
-}
-
-#[tokio::test]
-async fn injected_failures_roll_back_receipt_allocation_ledger_and_event() {
-    for table in [
-        "ledger_entries",
-        "event_log",
-        "credit_grants",
-        "credit_allocations",
-    ] {
-        let d = db().await;
-        let i = intent(1000, 10);
-        d.store.register_xmr_credit_intent(&i).await.unwrap();
-        let op = if table == "credit_allocations" {
-            "UPDATE"
-        } else {
-            "INSERT"
-        };
-        sqlx::query(&format!("CREATE TRIGGER injected BEFORE {op} ON {table} BEGIN SELECT RAISE(ABORT,'injected'); END")).execute(&d.raw).await.unwrap();
-        let o = receipt(&i, "fault-retry", 10);
-        assert!(d.store.record_xmr_receipt(i.id, &o).await.is_err());
-        for t in [
-            "asset_receipts",
-            "credit_grants",
-            "ledger_entries",
-            "event_log",
-        ] {
-            assert_eq!(count(&d, t).await, 0, "{table} -> {t}");
-        }
-        assert_eq!(
-            d.store
-                .xmr_credit_allocation(i.id)
-                .await
-                .unwrap()
-                .eligible_atomic,
-            0
-        );
-        sqlx::query("DROP TRIGGER injected")
-            .execute(&d.raw)
-            .await
-            .unwrap();
-        assert_eq!(
-            d.store.record_xmr_receipt(i.id, &o).await.unwrap(),
-            CreditReceiptOutcome::Recorded {
-                delta_sats: 1000,
-                feed_credit_sats: 1000
-            }
-        );
-    }
 }
 
 #[tokio::test]
@@ -560,98 +157,9 @@ async fn native_provenance_failure_rolls_back_the_original_payment_transaction()
 }
 
 #[tokio::test]
-async fn public_credit_events_are_allowlisted_and_never_contain_private_receipt_data() {
+async fn schema_protects_native_provenance_and_replay_history() {
     let d = db().await;
-    let i = intent(425, 17);
-    d.store.register_xmr_credit_intent(&i).await.unwrap();
-    d.store
-        .record_xmr_receipt(i.id, &receipt(&i, "private-tx-output-key", 17))
-        .await
-        .unwrap();
-    let events = d.store.events_after(0, 10).await.unwrap();
-    assert_eq!(events.len(), 1);
-    let v: Value = serde_json::from_str(&events[0].payload_json).unwrap();
-    assert_eq!(
-        v,
-        json!({"amount_sats":425,"feed_credit_sats":425,"address_user":"nova","credit_pool":"herd"})
-    );
-    for secret in [
-        &i.receive_scope,
-        &i.account_scope,
-        &i.id.to_string(),
-        "private-tx-output-key",
-        "XMR",
-        "moneropay",
-    ] {
-        assert!(!events[0].payload_json.contains(secret));
-    }
-}
-
-#[tokio::test]
-async fn overpayment_limit_preserves_funds_and_holds_without_clipping_credit() {
-    let d = db().await;
-    let mut i = intent(1000, 100);
-    i.max_credit_sats = 1500;
-    d.store.register_xmr_credit_intent(&i).await.unwrap();
-    d.store
-        .record_xmr_receipt(i.id, &receipt(&i, "partial", 50))
-        .await
-        .unwrap();
-    assert_eq!(
-        d.store
-            .record_xmr_receipt(i.id, &receipt(&i, "too-much", 200))
-            .await
-            .unwrap(),
-        CreditReceiptOutcome::Held
-    );
-    assert_eq!(d.store.feed_credit_sats().await.unwrap(), 500);
-    assert_eq!(count(&d, "asset_receipts").await, 2);
-    assert_eq!(
-        d.store
-            .xmr_credit_allocation(i.id)
-            .await
-            .unwrap()
-            .credited_sats,
-        500
-    );
-}
-
-#[tokio::test]
-async fn corrupt_allocation_is_not_silently_repaired_or_credited_again() {
-    let d = db().await;
-    let i = intent(1000, 100);
-    d.store.register_xmr_credit_intent(&i).await.unwrap();
-    d.store
-        .record_xmr_receipt(i.id, &receipt(&i, "first", 50))
-        .await
-        .unwrap();
-    // Deliberate on-disk corruption simulation; ordinary APIs cannot do this.
-    sqlx::query("UPDATE credit_allocations SET credited_sats=501 WHERE valuation_id=?")
-        .bind(format!("xmr:{}", i.id))
-        .execute(&d.raw)
-        .await
-        .unwrap();
-    assert_eq!(
-        d.store
-            .record_xmr_receipt(i.id, &receipt(&i, "second", 50))
-            .await
-            .unwrap(),
-        CreditReceiptOutcome::Held
-    );
-    assert_eq!(d.store.feed_credit_sats().await.unwrap(), 500);
-    assert_eq!(count(&d, "credit_grants").await, 1);
-}
-
-#[tokio::test]
-async fn schema_protects_quotes_grants_and_replay_history() {
-    let d = db().await;
-    let i = intent(1000, 100);
-    d.store.register_xmr_credit_intent(&i).await.unwrap();
-    d.store
-        .record_xmr_receipt(i.id, &receipt(&i, "retained", 50))
-        .await
-        .unwrap();
-    d.store.hold_xmr_credit_intent(i.id).await.unwrap();
+    d.store.record_payment(&btc("retained", 500)).await.unwrap();
     for sql in [
         "UPDATE credit_valuations SET target_sats=2000",
         "DELETE FROM credit_valuations",
@@ -661,7 +169,6 @@ async fn schema_protects_quotes_grants_and_replay_history() {
         "DELETE FROM credit_grants",
         "DELETE FROM credit_allocations",
         "UPDATE credit_allocations SET eligible_atomic=0",
-        "UPDATE credit_allocations SET hold_reason=NULL",
     ] {
         assert!(sqlx::query(sql).execute(&d.raw).await.is_err(), "{sql}");
     }
@@ -795,125 +302,9 @@ async fn corrupt_historical_credit_fails_migration_without_partial_backfill() {
 }
 
 #[tokio::test]
-async fn invalid_or_unknown_receipts_cannot_create_accounting_state() {
-    let d = db().await;
-    let i = intent(100, 10);
-    let mut o = receipt(&i, "invalid", 10);
-    assert!(d.store.record_xmr_receipt(i.id, &o).await.is_err());
-    d.store.register_xmr_credit_intent(&i).await.unwrap();
-    for amount in [
-        AssetAmount::new(Asset::Btc, 10).unwrap(),
-        AssetAmount::new(Asset::Xmr, 0).unwrap(),
-    ] {
-        o.amount = amount;
-        assert!(d.store.record_xmr_receipt(i.id, &o).await.is_err());
-    }
-    assert_eq!(count(&d, "asset_receipts").await, 0);
-    assert_eq!(count(&d, "event_log").await, 0);
-}
-
-#[tokio::test]
-async fn native_and_xmr_writers_serialize_absolute_event_balances() {
-    let d = db().await;
-    let i = intent(100, 10);
-    d.store.register_xmr_credit_intent(&i).await.unwrap();
-    let barrier = Arc::new(Barrier::new(10));
-    let mut jobs = Vec::new();
-    for n in 0..10 {
-        let store = LedgerStore::connect(&d.url).await.unwrap();
-        let i = i.clone();
-        let b = barrier.clone();
-        jobs.push(tokio::spawn(async move {
-            b.wait().await;
-            if n % 2 == 0 {
-                store
-                    .record_payment(&btc(&format!("mixed-{n}"), 100))
-                    .await
-                    .unwrap();
-            } else {
-                store
-                    .record_xmr_receipt(i.id, &receipt(&i, &format!("mixed-{n}"), 10))
-                    .await
-                    .unwrap();
-            }
-        }));
-    }
-    for j in jobs {
-        j.await.unwrap();
-    }
-    assert_eq!(d.store.feed_credit_sats().await.unwrap(), 1000);
-    for (n, e) in d
-        .store
-        .events_after(0, 100)
-        .await
-        .unwrap()
-        .iter()
-        .enumerate()
-    {
-        let v: Value = serde_json::from_str(&e.payload_json).unwrap();
-        assert_eq!(v["feed_credit_sats"], ((n + 1) * 100) as u64);
-    }
-}
-
-#[tokio::test]
-async fn rate_rationals_beyond_sqlite_signed_range_roundtrip_as_decimal_text() {
-    let d = db().await;
-    let mut i = intent(1, 1);
-    i.quote = XmrBtcRate::new(3_000_000_000_000, u64::MAX, "synthetic-large", 90)
-        .unwrap()
-        .quote(1, 100, 200, 20)
-        .unwrap();
-    d.store.register_xmr_credit_intent(&i).await.unwrap();
-    let got = d.store.xmr_credit_intent(i.id).await.unwrap();
-    assert_eq!(got.quote, i.quote);
-    let kind: String = sqlx::query_scalar("SELECT typeof(rate_denominator) FROM credit_valuations")
-        .fetch_one(&d.raw)
-        .await
-        .unwrap();
-    assert_eq!(kind, "text");
-}
-
-#[tokio::test]
-async fn cumulative_atomic_overflow_holds_without_changing_granted_credit() {
-    let d = db().await;
-    let i = intent(1, i64::MAX as u64);
-    d.store.register_xmr_credit_intent(&i).await.unwrap();
-    d.store
-        .record_xmr_receipt(i.id, &receipt(&i, "max", i64::MAX as u64))
-        .await
-        .unwrap();
-    assert_eq!(
-        d.store
-            .record_xmr_receipt(i.id, &receipt(&i, "one-more", 1))
-            .await
-            .unwrap(),
-        CreditReceiptOutcome::Held
-    );
-    assert_eq!(d.store.feed_credit_sats().await.unwrap(), 1);
-    assert_eq!(count(&d, "asset_receipts").await, 2);
-    assert_eq!(
-        d.store
-            .xmr_credit_allocation(i.id)
-            .await
-            .unwrap()
-            .eligible_atomic,
-        i64::MAX as u64
-    );
-}
-
-#[tokio::test]
 async fn total_credit_overflow_is_not_promoted_to_float_or_partly_committed() {
     let d = db().await;
-    let i = intent(1, 1);
-    d.store.register_xmr_credit_intent(&i).await.unwrap();
     sqlx::query("INSERT INTO ledger_entries(entry_type,source_key,delta_sats) VALUES ('TEST_EXISTING_CREDIT','test-max',?)").bind(i64::MAX).execute(&d.raw).await.unwrap();
-    assert_eq!(
-        d.store
-            .record_xmr_receipt(i.id, &receipt(&i, "one-more", 1))
-            .await
-            .unwrap(),
-        CreditReceiptOutcome::Held
-    );
     assert_eq!(d.store.feed_credit_sats().await.unwrap(), i64::MAX as u64);
     assert_eq!(count(&d, "credit_grants").await, 0);
     assert!(
@@ -924,21 +315,4 @@ async fn total_credit_overflow_is_not_promoted_to_float_or_partly_committed() {
     );
     assert_eq!(count(&d, "settled_payments").await, 0);
     assert_eq!(count(&d, "event_log").await, 0);
-}
-
-#[tokio::test]
-async fn new_quotes_or_valuation_queries_never_revalue_existing_credit() {
-    let d = db().await;
-    let first = intent(1000, 100);
-    d.store.register_xmr_credit_intent(&first).await.unwrap();
-    d.store
-        .record_xmr_receipt(first.id, &receipt(&first, "first-payment", 50))
-        .await
-        .unwrap();
-    let later = intent(1000, 200);
-    d.store.register_xmr_credit_intent(&later).await.unwrap();
-    let restored = d.store.xmr_credit_intent(first.id).await.unwrap();
-    assert_eq!(restored.quote, first.quote);
-    assert_eq!(d.store.feed_credit_sats().await.unwrap(), 500);
-    assert_eq!(count(&d, "event_log").await, 1);
 }

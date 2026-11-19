@@ -1,8 +1,7 @@
 # Phase 1 execution — minimal Lightning payments
 
-**Current operator decision: 2026-09-17.**
-The [delivery roadmap](delivery-roadmap.md) puts Lightning first and Square
-#104 second. Preserve the existing migrations, tests and paid state.
+The [delivery roadmap](delivery-roadmap.md) tracks the live Lightning and
+Cashu paths. Preserve the existing migrations, tests and paid state.
 
 ## Goal and operating policy
 
@@ -31,8 +30,8 @@ do not turn a historical mock result or unrun check into production acceptance.
 | 6 | Hand off the minimal complete release and cut over when operator chooses | Short tested commands/config inputs, actual observations, preserved paid state and recoverable old system |
 
 Steps 2/3 and browser-source work may run in parallel where file/host ownership
-is clear. WAF tuning is not a reason to expose speculative Square routes, turn
-off all payment inspection, or interrupt an existing pilot without a scoped decision.
+is clear. Keep payment inspection active and obtain a scoped decision before
+interrupting an existing pilot for WAF tuning.
 Its blocking-mode acceptance is required for calling the new public deliverable
 complete; detection-only mode is preparation, not equivalent protection.
 
@@ -54,12 +53,6 @@ counts. A 2,340-sat synthetic example with two 1,000-sat confirmed debits leaves
 The public site is not the OBS rendering page. Core payment/feed display and the
 actual browser source belong to this deliverable. Preserve existing weather/info behavior;
 weather polish does not justify fabricating freshness or blocking unrelated tests.
-
-## Next deliverable and deferred work
-
-After minimal Lightning, implement Square #104's anonymous stored integer Feedings
-and safe later redemption, separate from the sats ledger. Keep Lightning
-account-free and use the existing feeder owner for both paths.
 
 ## Responsibilities, verification and rollback
 

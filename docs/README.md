@@ -134,11 +134,11 @@ documented in [`deployment/paused-feeding-queue.md`](deployment/paused-feeding-q
 Household NIP-46 client preparation and the remaining signer/activation steps are
 recorded in [`deployment/household-nostr-bunker.md`](deployment/household-nostr-bunker.md).
 
-## Current delivery order — 2026-09-17
+## Current payment scope — 2026-11-19
 
-Start with [the delivery roadmap](planning/delivery-roadmap.md). The delivery
-order is minimal Strike-backed Lightning, followed by Square fiat Feedings.
-Preserve applied migrations and paid state.
+Strike-backed Lightning and Cashu are live. Start with the
+[delivery roadmap](planning/delivery-roadmap.md). Preserve applied migrations
+and paid state.
 
 [The parallel live pilot](deployment/parallel-live-pilot.md) remains the practical
 path for `herd@feeder.lightning-goats.com` alongside the old system. The operator
@@ -151,8 +151,8 @@ services are already installed or that live acceptance has happened.
 
 1. [Agent guide](../AGENTS.md), [delivery roadmap](planning/delivery-roadmap.md) and
    [Lightning execution plan](planning/phase1-execution-plan.md).
-2. [VPS pilot runbook](deployment/new-vps-staging.md), with the required current
-   Lightning WAF work tracked in [#106](https://github.com/lightning-goats/lightning-goats/issues/106).
+2. [VPS pilot runbook](deployment/new-vps-staging.md), with Lightning WAF acceptance
+   recorded in [#106](https://github.com/lightning-goats/lightning-goats/issues/106).
 3. [Verification matrix](testing/phase1-verification-matrix.md): selected-source
    and actual pilot evidence, not a requirement to finish every future feature.
 4. [Cutover and rollback](deployment/production-cutover.md): explicit operator
@@ -184,13 +184,11 @@ Apply the current roadmap before following older launch instructions
 in these references. Reuse existing reviewed work. Do not ignore an actual defect,
 waive a required code review, or report a mock as live evidence.
 
-## Subsequent deliverables
+## Payment architecture
 
-[Square #104](https://github.com/lightning-goats/lightning-goats/issues/104) is next:
-anonymous browser accounts buy integer Feedings and redeem them through the same
-physical-owner safeguards. These are separate entitlements, not sats or a wallet
-balance. Lightning stays account-free. The existing Square product/acceptance plan
-is retained; no pricing or new fiat API is selected by this documentation.
+[Future payment sources](architecture/phase1-strike-architecture.md#future-payment-sources)
+can use the same durable credit and feeder boundary through a source-specific
+receipt and credit policy.
 
 [Native BTC receipt provenance](architecture/asset-credit-storage.md) documents
 the ledger records that support verified Strike receipts and their replay.
@@ -206,6 +204,6 @@ pilot/old ledgers and preserve real pilot credit at cutover. Never put the OpenH
 token on the VPS. The old WireGuard hub stays `10.8.0.1` during the pilot.
 
 #6 tracks migration; #15 observed acceptance; #16 cutover; #17 coordination;
-#21 weather; #106 WAF; #104 next Square deliverable. Keep unfinished acceptance
-and roadmap issues open with current dispositions.
+#21 records weather acceptance and #106 records WAF acceptance. Keep
+unfinished acceptance and roadmap issues open with current dispositions.
 Earlier CLN/clnaddress setup documents are historical, not new-runtime instructions.

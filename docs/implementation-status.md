@@ -363,8 +363,8 @@ not resolve the recovery-adoption blocker or complete the full CyberHerd plan.
 
 Current CyberHerd checkpoint: **2026-11-14**. The full
 [twelve-part implementation plan](planning/cyberherd-implementation-plan.md)
-remains incomplete. It supersedes older CyberHerd deferrals; it does not resume
-Monero or authorize financial/physical activation.
+remains incomplete and supersedes older CyberHerd deferrals. Financial and
+physical activation require operator approval.
 
 Current live state: the separately approved
 [future-only reward cutoff](testing/cyberherd-initial-reward-cutover-live-20261114.md)

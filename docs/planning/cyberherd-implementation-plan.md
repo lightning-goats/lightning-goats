@@ -2,8 +2,8 @@
 
 This is the current implementation work, following the restored live Strike,
 feeding, Nostr and OBS path. It supersedes the older roadmap's deferral of
-CyberHerd; it does not resume Monero or change the paid ledger, physical owner,
-domain/WireGuard setup or existing receive-only daemon credential.
+CyberHerd. Preserve the paid ledger, physical owner, domain/WireGuard setup
+and existing receive-only daemon credential.
 
 ## Authorities and explicit overrides
 

@@ -6,9 +6,9 @@ Proceed with CyberHerd implementation after the restored live Lightning/Nostr/OB
 path. Read `docs/planning/cyberherd-implementation-plan.md` and its pinned upstream
 behavioral reference. Membership does not require NIP-05; rewards follow confirmed
 feedings and preserve current accounting. This overrides the older CyberHerd
-deferral below, without resuming Monero, bypassing the feeder owner, adding spend
-authority to `lightning-goatsd`, or resetting paid state. Keep production changes
-separate from isolated implementation and preserve the uploaded OBS artwork.
+deferral below. Preserve the feeder owner, receive-only daemon and paid state.
+Keep production changes separate from isolated implementation and preserve
+the uploaded OBS artwork.
 
 ## Current delivery order — operator decision, 2026-09-17
 
@@ -17,16 +17,6 @@ Read [delivery-roadmap.md](docs/planning/delivery-roadmap.md) first.
 1. **Current: minimal Strike-backed Lightning payments**, real feeding through the
    existing home gateway, Nostr/OBS presentation, and required VPS ModSecurity #106.
 2. **Next: Square fiat Feedings**, following the existing approved #104 contract.
-3. **MoneroPay/XMR is ON HOLD until the operator explicitly resumes it.** Preserve
-   the already prepared #97 source in PR #107; merge only when reviewed/appropriate.
-   Do not continue #98, XMR deployment, oracle/wallet activation or XMR UI now.
-
-This supersedes the 2026-09-15 immediate multi-asset execution order, including
-instructions to finish two-rail overlay integration before Lightning. Retain the
-[future multi-asset design](docs/architecture/multi-asset-payments.md), merged
-#102/#103/#105 foundations and tests; do not revert schemas or paid accounting.
-Monero review/integration is not a prerequisite for Lightning or Square. A green
-PR, freed agent capacity or completion of Square does not lift the Monero hold.
 
 Square is an anonymous browser-account purchase/redemption product: integer
 Feedings, not sats/BTC, not a fiat deposit into the sats ledger. Share the physical
@@ -51,18 +41,16 @@ Block the affected unsafe path, not unrelated progress. No two-payment/220-sat/
 
 Minimal includes the existing payment/feed messages and usable OBS progress,
 not just invoice creation. Information/weather remain overlay-only. Complete the
-necessary public site and browser-source integration without a general redesign
-or Monero payment chooser. #106 is a concrete first-deliverable WAF requirement:
-nginx + compatible ModSecurity v3 connector + CRS must pass legitimate current
-routes and reject malicious traffic without weakening daemon verification.
-It does not require XMR routes or authorize interrupting an existing pilot.
+necessary public site and browser-source integration. Under #106, nginx, the
+compatible ModSecurity v3 connector and CRS must pass legitimate current routes
+and reject malicious traffic while retaining daemon verification.
 
 ## Ownership and reference order
 
 Current dated delivery roadmap takes precedence over older scope/launch-order
 instructions. Then read the [docs index](docs/README.md), execution plan, selected
 source and relevant issue. #6 tracks Lightning migration; #15 actual acceptance;
-#16 cutover; #104 Square; #94 deferred Monero; #106 WAF. #17 is agent coordination.
+#16 cutover; #104 Square; #106 WAF. #17 is agent coordination.
 
 - HOME owns the existing physical owner, gateway, project OpenHAB credential,
   local weather and home containment. Reference:
@@ -106,9 +94,8 @@ source integration is not deployed acceptance.
 - Payment/goat-fact and confirmed-feed messages go to Nostr/overlay; information
   and weather go only to overlay. Keep deterministic signed-event retries and
   observation-time freshness. Presentation failure never rewinds accounting.
-  BTC/Lightning amounts display sats only. The deferred native-plus-sats policy
-  never permits private addresses, transaction IDs, wallet data or capabilities
-  in broadcasts; do not implement that XMR extension while it is on hold.
+  BTC/Lightning amounts display sats only. Keep private addresses, transaction IDs,
+  wallet data and capabilities out of broadcasts.
 - WAF passage never authenticates a payment. Preserve exact Strike body/signature,
   prompt durable acknowledgement, HTTP/resource limits and application WebSocket
   validation. Use route-specific tested exclusions, not a whole payment-API bypass.
@@ -122,7 +109,7 @@ source integration is not deployed acceptance.
 Retain the required configured users `herd`, `dexter`, `rowan`, `cosmo`, `newton`,
 `nova`, all with `credit_pool=herd`. Restrict pilot edge exposure rather than invent
 an address-registry refactor. LNbits/CLN/CLNRest/clnaddress are not new-runtime
-requirements. No Square or Monero route is enabled by a roadmap edit.
+requirements.
 
 ## Verification and deployment discipline
 

@@ -49,12 +49,27 @@ impl LedgerStore {
                 reserved <= to_u64(row.try_get("remaining_sats")?, "source remaining credit")?,
                 "financial source credit consumed"
             );
-            let covered: i64 = sqlx::query_scalar("SELECT MAX(0,(SELECT COALESCE(SUM(r.input_sats-r.change_sats),0) FROM cashu_treasury_source_results r JOIN cashu_treasury_completions c ON c.intent_id=r.intent_id WHERE r.ledger_id=?)-(SELECT COALESCE(SUM(sats),0) FROM feed_reward_funding_parts WHERE ledger_id=?))")
-                .bind(ledger).bind(ledger).fetch_one(&mut *tx).await?;
+            // A completed transfer for this plan has already attempted its entire input.
+            // Keep its change for a later batch. Dispatch still checks actual settled coverage.
+            let assigned: i64 = sqlx::query_scalar(
+                "SELECT MAX(0,
+                    (SELECT COALESCE(SUM(r.input_sats -
+                        CASE WHEN j.intent_id IS NULL THEN r.change_sats ELSE 0 END), 0)
+                     FROM cashu_treasury_source_results r
+                     JOIN cashu_treasury_completions c ON c.intent_id = r.intent_id
+                     LEFT JOIN feed_financial_treasury j ON j.intent_id = r.intent_id AND j.plan_id = ?
+                     WHERE r.ledger_id = ?)
+                    - (SELECT COALESCE(SUM(sats), 0) FROM feed_reward_funding_parts WHERE ledger_id = ?))",
+            )
+            .bind(&plan)
+            .bind(ledger)
+            .bind(ledger)
+            .fetch_one(&mut *tx)
+            .await?;
             let pending: i64 = sqlx::query_scalar("SELECT COALESCE(SUM(s.input_sats),0) FROM cashu_treasury_sources s WHERE s.ledger_id=? AND NOT EXISTS(SELECT 1 FROM cashu_treasury_completions c WHERE c.intent_id=s.intent_id)")
                 .bind(ledger).fetch_one(&mut *tx).await?;
             let needed = reserved
-                .saturating_sub(to_u64(covered, "verified source coverage")?)
+                .saturating_sub(to_u64(assigned, "source already assigned to settlement")?)
                 .saturating_sub(to_u64(pending, "pending source reservation")?);
             let input = needed.min(available_custody(&mut tx, ledger).await?);
             if input > 0 {

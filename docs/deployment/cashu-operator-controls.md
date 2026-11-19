@@ -1,5 +1,10 @@
 # Protected Cashu settlement planning
 
+When a queued feeding triggers a transfer, its returned fee reserve stays in
+Cashu for a later batch. The same feeding plan can settle additional source
+amounts within its limits. If verified funding still falls short, the feeding
+waits for sufficient settled coverage.
+
 `lightning-goatsctl plan-cashu-settlement` previews or retains one bounded
 operator request through the existing source-allocation and treasury planner.
 It accepts no invoice, payment hash, destination, key or provider credential.

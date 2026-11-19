@@ -681,6 +681,17 @@ mod combined_fixture {
         assert_eq!(count(&pool, "settled_payments").await?, 1);
         assert_eq!(count(&pool, "event_log").await?, contribution_count);
         assert_eq!(ledger.feed_credit_sats().await?, initial_credit);
+        if returned_change && !multi_mint {
+            // Even with an affordable one-sat invoice, this plan must not spend its
+            // own returned fee reserve again. It is still available to a later batch.
+            assert!(
+                ledger
+                    .plan_cashu_feed_treasury(&registration, &policy)
+                    .await?
+                    .is_none()
+            );
+            assert_eq!(count(&pool, "cashu_treasury_intents").await?, 1);
+        }
         if settle_change || multi_mint {
             assert!(
                 multi_mint || returned_change,

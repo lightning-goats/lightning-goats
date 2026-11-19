@@ -215,9 +215,52 @@ class IndexBrowserTests(unittest.TestCase):
         self.assertEqual(self.page.locator("#cashuRequest").input_value(), CASHU_REQUEST["request"])
         self.page.locator("#cashuModal").get_by_role("button", name="Close").click()
         self.page.locator("#cashuModal").wait_for(state="hidden")
+        self.page.locator("#feedLightningAmount").fill("37")
         self.page.locator("#feedLightningButton").click()
         self.page.locator("#zapModal").wait_for(state="visible")
+        self.assertEqual(self.page.locator("#zapAmount").input_value(), "37")
+        self.assertEqual(self.page.locator("#zapWalletButton").get_attribute("href"), "lightning:" + INVOICE)
+        self.assertTrue(self.page.locator("#zapQr").is_visible())
+        self.assertEqual(len(self.invoices), 1)
+        self.assertEqual(urlsplit(self.invoices[0]).query, "amount=37000")
+        self.assertEqual(self.page.locator(".lg-title").count(), 0)
+        self.assertEqual(self.errors, [])
+
+    def test_feed_button_asks_alby_to_pay_the_visible_amount_in_one_click(self):
+        self.context.add_init_script("""
+            window.walletCalls = [];
+            window.refusePermission = true;
+            window.refusePayment = true;
+            window.alby = {webln: {
+                async enable() {
+                    walletCalls.push("enable");
+                    if (refusePermission) throw Error("permission cancelled");
+                },
+                async sendPayment(invoice) {
+                    walletCalls.push(invoice);
+                    if (refusePayment) throw Error("payment cancelled");
+                    return {preimage: "fixture"};
+                }
+            }};
+        """)
+        self.open()
+        self.page.locator("#feedLightningAmount").fill("42")
+        button = self.page.locator("#feedLightningButton")
+        button.click()
+        self.page.get_by_text("Payment could not be started. No automatic retry was made.", exact=True).wait_for()
         self.assertEqual(self.invoices, [])
+        self.page.evaluate("window.refusePermission = false")
+        button.click()
+        self.page.get_by_text("Wallet payment was cancelled", exact=False).wait_for()
+        self.assertEqual(len(self.invoices), 1)
+        self.assertEqual(urlsplit(self.invoices[0]).query, "amount=42000")
+        self.assertTrue(self.page.locator("#zapModal").is_hidden())
+        self.page.evaluate("window.refusePayment = false")
+        button.click()
+        self.page.get_by_text("Waiting for confirmation…", exact=False).wait_for()
+        self.assertEqual(len(self.invoices), 1)
+        self.assertEqual(self.page.evaluate("walletCalls"), ["enable", "enable", INVOICE, "enable", INVOICE])
+        self.assertTrue(self.page.locator("#zapModal").is_hidden())
         self.assertEqual(self.errors, [])
 
     def test_real_signed_herd_zaps_are_safe_deduplicated_and_forgery_refused(self):

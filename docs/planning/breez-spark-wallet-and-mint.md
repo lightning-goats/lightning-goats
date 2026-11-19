@@ -23,6 +23,8 @@ The **mint reserve** holds the underlying sats that back outstanding Goats token
 
 Baseline is [main at bd8e09a](https://github.com/lightning-goats/lightning-goats/commit/bd8e09afc25e07393c7485664d6a99b320ff1c33). The [Nut November implementation](cashu-nutnovember-implementation-plan.md) supports ordinary Cashu, nutzaps and Cashu-to-Strike verification. The [September Breez proposal](https://github.com/lightning-goats/lightning-goats/pull/92) is a design reference. This handoff changes the destination of earnings in the proposed Breez mode. Preserve the existing Strike path and its in-flight records. Check current source and host state before acting.
 
+The [HOME and VPS deployment handoff](../deployment/breez-wallet-mint-handoff.md) contains the standalone service packages and the nginx route for `https://mint.lightning-goats.com`.
+
 ## 1. HOME wallet
 
 **Assignment:** Build and install a standalone wallet service on `10.8.0.6`. Deliver its source as an isolated package, service definition, configuration sample, acceptance client and restart/restore instructions. Exercise the service independently of the Goats daemon.

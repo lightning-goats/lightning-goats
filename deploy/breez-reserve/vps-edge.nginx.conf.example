@@ -1,0 +1,39 @@
+# Place in nginx http {} on the VPS. Install the public certificate separately.
+map $http_upgrade $goats_mint_connection {
+    default upgrade;
+    '' close;
+}
+
+limit_req_zone $binary_remote_addr zone=goats_mint_ip:10m rate=6r/s;
+
+upstream goats_cashu_mint {
+    server 10.8.0.6:8792;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name mint.lightning-goats.com;
+    ssl_certificate /etc/letsencrypt/live/mint.lightning-goats.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/mint.lightning-goats.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    client_max_body_size 256k;
+    limit_req zone=goats_mint_ip burst=20 nodelay;
+    limit_req_status 429;
+    access_log off;
+    proxy_ssl_trusted_certificate /etc/nginx/goats-mint/home-ca.pem;
+    proxy_ssl_verify on;
+    proxy_ssl_server_name on;
+    proxy_ssl_name mint-home.internal;
+    proxy_ssl_certificate /etc/nginx/goats-mint/public-edge-client.pem;
+    proxy_ssl_certificate_key /etc/nginx/goats-mint/public-edge-client.key;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $goats_mint_connection;
+    proxy_set_header Host mint-home.internal;
+    proxy_set_header Authorization "";
+    proxy_connect_timeout 5s;
+    proxy_read_timeout 65s;
+    proxy_next_upstream off;
+    include /etc/nginx/goats-mint/public-routes.conf;
+}

@@ -107,6 +107,16 @@ class PilotConfig(unittest.TestCase):
         with self.assertRaises(ValueError):
             TOOL['render'](self.core + b'\n[cashu]\nreceive_cashu = false\n', self.input)
 
+    def test_rolling_credit_budget_can_import_largest_allowed_receipt(self):
+        original = TOOL['render'](self.core, self.input)
+        maximum_receipt = json.loads(original['wallet.json'])['receipt_sats']
+        with self.assertRaisesRegex(ValueError, 'rolling credit budget'):
+            TOOL['render'](self.core, dict(self.input, daily_credit_sats=maximum_receipt - 1))
+        at_limit = TOOL['render'](self.core, dict(self.input, daily_credit_sats=maximum_receipt))
+        receipts = tomllib.loads(at_limit['core.toml'].decode())['cashu_receipts']
+        self.assertEqual(receipts['credit_sats_per_24h'], maximum_receipt)
+        self.assertTrue(receipts['unlimited_receipts_per_24h'])
+
     def test_request_selection_keeps_receiving_disabled(self):
         endpoint = 'https://goats.example/api/v1/cashu'
         for encoding, request in (('creqA', 'creqAAb_CD'), ('creqB', 'CREQB1QPZR')):

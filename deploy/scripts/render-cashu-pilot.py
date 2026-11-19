@@ -79,10 +79,11 @@ def validate(inputs):
     if (not hex_value(inputs['receiving_key'], '0[23][0-9a-f]{64}')
             or not all(hex_value(inputs[key]) for key in ('client_pubkey', 'helper_sha256', 'strike_credential_fingerprint'))):
         raise ValueError('reviewed receiving key, client public key and exact digests required')
-    if (not number(inputs['daily_credit_sats'], 1, 2**63 - 1)
-            or not number(inputs['minimum_deposit_sats'], 1, CUSTODY_SATS - FEE_SATS)
+    if not number(inputs['daily_credit_sats'], CUSTODY_SATS, 2**63 - 1):
+        raise ValueError('rolling credit budget must cover the largest permitted receipt')
+    if (not number(inputs['minimum_deposit_sats'], 1, CUSTODY_SATS - FEE_SATS)
             or not number(inputs['relay_since_unix'], 1, 2**63 - 31)):
-        raise ValueError('explicit rolling credit budget, minimum deposit and relay start required')
+        raise ValueError('explicit minimum deposit and relay start required')
     keysets = inputs['mint_keysets']
     if not isinstance(keysets, list) or not 1 <= len(keysets) <= 16:
         raise ValueError('reviewed Minibits sat keysets required')

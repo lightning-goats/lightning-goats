@@ -80,7 +80,7 @@ The binding file has these fields.
 | `core_epoch`, `wallet_instance`, `wallet_epoch`, `broker_instance`, `broker_epoch` | Retained core epoch and the reviewed wallet and signer registration UUIDs |
 | `receiving_key`, `client_pubkey`, `helper_sha256` | Reviewed compressed receiving public key, dedicated x-only signer public key and exact installed signer helper digest |
 | `strike_account_id`, `strike_credential_fingerprint` | The reviewed Strike destination account UUID and receive-only credential fingerprint |
-| `daily_credit_sats`, `minimum_deposit_sats`, `relay_since_unix` | Explicit rolling credit-sat limit, qualified minimum Strike deposit and starting NIP-61 observation time |
+| `daily_credit_sats`, `minimum_deposit_sats`, `relay_since_unix` | Explicit rolling credit-sat limit of at least 999 sats, qualified minimum Strike deposit and starting NIP-61 observation time |
 | `mint_keysets` | Pinned Minibits sat records of the form `{"id":"…","keys":{"1":"…"}}`, copied from reviewed public mint evidence |
 | `nutzap_relays` (optional) | Nonempty reviewed subset of the existing core Nostr relay list |
 
@@ -97,6 +97,8 @@ The pilot uses
 per-conversion and 25-sat rolling fee ceilings, and a 1,800-second age trigger.
 It configures no fixed daily receipt or conversion count. Private keys, seed
 bytes and raw Strike credentials are not inputs.
+The rolling credit-sat limit must cover the largest permitted receipt so a
+qualifying payment can be credited once there is room in the rolling window.
 
 ```sh
 python3 -I -S -B deploy/scripts/render-cashu-pilot.py CORE_CONFIG BINDINGS REVIEW

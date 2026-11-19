@@ -735,8 +735,8 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
         fee_acceptance = json.loads((fee_review / 'BACKUP-ACCEPTED.json').read_text())
         assert fee_acceptance['cashu_core_source'] is True
         assert fee_acceptance['original_verifier_used'] is False and fee_acceptance['native'] is None
-        assert fee_before['report']['rows']['core']['_sqlx_migrations'] == 28
-        assert fee_after['report']['rows']['core']['_sqlx_migrations'] == 28
+        assert fee_before['report']['rows']['core']['_sqlx_migrations'] == 29
+        assert fee_after['report']['rows']['core']['_sqlx_migrations'] == 29
         assert fee_before['report']['rows']['payout']['_sqlx_migrations'] == 7
         assert fee_after['report']['rows']['payout']['_sqlx_migrations'] == 10
         fee_resumed = json.loads(run(*launcher, '--cyberherd-program-maintenance', 'resume-inclusive-fees',
@@ -1002,7 +1002,8 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
         cashu_reference = json.loads((cashu_execution / 'backup/MANIFEST.json').read_text())['report']['rows']
         cashu_migrated = json.loads((cashu_execution / 'migrated/MANIFEST.json').read_text())['report']['rows']
         additions = cashu_migrated['core'].keys() - cashu_reference['core'].keys()
-        assert len(additions) == 22 and all(cashu_migrated['core'][table] == 0 for table in additions)
+        assert {'cashu_settled_ranges', 'feed_cashu_proceeds'} <= additions
+        assert len(additions) == 24 and all(cashu_migrated['core'][table] == 0 for table in additions)
         assert all(cashu_reference[role] == cashu_migrated[role] for role in ('membership', 'payout', 'signer'))
         assert counts['post'] == 0
         finished = True

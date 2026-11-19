@@ -912,11 +912,11 @@ def main():
             expected = {'credit_sats': 0, 'contributions': 3, 'synthetic_confirmed_feeds': 1,
                         'treasury_deposit_sats': 400, 'new_transfer_credit_sats': 0}
             if args.fees:
-                expected = {'credit_sats': 1, 'contributions': 4, 'synthetic_confirmed_feeds': 1,
+                expected = {'credit_sats': 0, 'contributions': 3, 'synthetic_confirmed_feeds': 1,
                             'treasury_deposit_sats': 398, 'new_transfer_credit_sats': 0,
                             'original_granted_credit_sats': 1000, 'receive_fees_sats': 2,
                             'conversion_fee_sats': 1, 'retained_change_sats': 1,
-                            'supplemental_native_sats': 1}
+                            'supplemental_native_sats': 0}
             if args.no_change:
                 expected.update(credit_sats=0, contributions=3, conversion_fee_sats=2,
                                 retained_change_sats=0, supplemental_native_sats=0)

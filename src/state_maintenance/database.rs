@@ -25,7 +25,7 @@ static CORE: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 static MEMBERSHIP: sqlx::migrate::Migrator = sqlx::migrate!("./cyberherd-migrations");
 static PAYOUT: sqlx::migrate::Migrator = sqlx::migrate!("./payout-migrations");
 static SIGNER: sqlx::migrate::Migrator = sqlx::migrate!("./signer-migrations");
-pub(super) const CURRENT_CORE_SCHEMA: i64 = 28;
+pub(super) const CURRENT_CORE_SCHEMA: i64 = 29;
 
 #[derive(Clone, Copy)]
 enum ReviewScope {
@@ -346,8 +346,10 @@ async fn require_core_prefix(pool: &SqlitePool, version: i64) -> Result<()> {
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE
             (?<26 AND (name LIKE 'cashu_%' OR name LIKE 'feed_source_%'))
             OR (?<27 AND tbl_name='cashu_treasury_fee_observations')
-            OR tbl_name='cashu_treasury_inspections')",
+            OR (?<28 AND tbl_name='cashu_treasury_inspections')
+            OR tbl_name IN ('feed_cashu_proceeds','cashu_settled_ranges') OR name='freeze_cashu_settled_ranges')",
     )
+    .bind(version)
     .bind(version)
     .bind(version)
     .fetch_one(pool)

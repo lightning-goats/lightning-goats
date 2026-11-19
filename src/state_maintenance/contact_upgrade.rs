@@ -204,7 +204,7 @@ impl Operator {
     }
 
     /// Accept only a source-pinned schema-23 backup and a separate, already
-    /// migrated four-journal copy at exact schema 25 through 28. Cashu schemas permit
+    /// migrated four-journal copy at exact schema 25 through 29. Cashu schemas permit
     /// only the empty, inactive Cashu extension. Normal verify/restore still
     /// require the current schema and retain their separate custody restrictions.
     pub async fn compare_contact_upgrade(

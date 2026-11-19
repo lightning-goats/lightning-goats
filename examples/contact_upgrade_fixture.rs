@@ -13,7 +13,7 @@ use std::{os::unix::fs::MetadataExt as _, path::Path, time::Duration};
 const GUARD: &str = "/run/lightning-goats-contact-fixture/ALLOW";
 const ATTESTATION: &[u8] = b"LIGHTNING_GOATS_DISPOSABLE_CONTACT_UPGRADE_CI_v1\n";
 const DATABASE: &str = "/var/lib/lightning-goats/lightning-goats.db";
-const CURRENT_CORE_SCHEMA: usize = 28;
+const CURRENT_CORE_SCHEMA: usize = 29;
 
 fn isolated_fixture() -> Result<u32> {
     let uid = std::fs::metadata("/proc/self")?.uid();
@@ -57,6 +57,8 @@ fn isolated_fixture() -> Result<u32> {
 // Child-first order preserves foreign-key enforcement. This fixture accepts
 // only completely unused Cashu state; it is not a financial downgrade tool.
 const CASHU_FIXTURE_TABLES: &[&str] = &[
+    "feed_cashu_proceeds",
+    "cashu_settled_ranges",
     "cashu_treasury_inspections",
     "cashu_treasury_fee_observations",
     "cashu_sweep_jobs",
@@ -98,11 +100,11 @@ async fn strip_empty_cashu_fixture(
             .execute(&mut **transaction)
             .await?;
     }
-    if sqlx::query("DELETE FROM _sqlx_migrations WHERE version IN (26,27,28)")
+    if sqlx::query("DELETE FROM _sqlx_migrations WHERE version IN (26,27,28,29)")
         .execute(&mut **transaction)
         .await?
         .rows_affected()
-        != 3
+        != 4
     {
         bail!("synthetic Cashu migration missing");
     }
@@ -469,10 +471,11 @@ mod tests {
         let pool = current_fixture().await?;
         let mut tx = pool.begin().await?;
         super::strip_empty_cashu_fixture(&mut tx).await?;
-        let extension: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations WHERE version IN (26,27,28)")
-                .fetch_one(&mut *tx)
-                .await?;
+        let extension: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM _sqlx_migrations WHERE version IN (26,27,28,29)",
+        )
+        .fetch_one(&mut *tx)
+        .await?;
         let previous: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations WHERE version=25")
                 .fetch_one(&mut *tx)
@@ -516,6 +519,7 @@ mod tests {
             .lines()
             .chain(include_str!("../migrations/0027_cashu_fee_observations.sql").lines())
             .chain(include_str!("../migrations/0028_cashu_treasury_inspections.sql").lines())
+            .chain(include_str!("../migrations/0029_cashu_feed_proceeds.sql").lines())
             .filter_map(|line| line.strip_prefix("CREATE TABLE "))
             .map(|line| line.split_whitespace().next().unwrap())
             .collect::<std::collections::BTreeSet<_>>();

@@ -9,7 +9,9 @@ use super::{Manifest, Operator, Policy, Role, database, files, legacy::rows};
 
 use super::contact_upgrade::{Definition, catalog};
 // Child-first order also supports removal of empty additions in historical test fixtures.
-pub(super) const CASHU_TABLES: [&str; 22] = [
+pub(super) const CASHU_TABLES: [&str; 24] = [
+    "feed_cashu_proceeds",
+    "cashu_settled_ranges",
     "cashu_treasury_inspections",
     "cashu_treasury_fee_observations",
     "cashu_sweep_jobs",
@@ -35,6 +37,7 @@ pub(super) const CASHU_TABLES: [&str; 22] = [
 ];
 pub(super) fn tables_for_core(version: i64) -> impl Iterator<Item = &'static str> {
     CASHU_TABLES.into_iter().filter(move |name| match *name {
+        "feed_cashu_proceeds" | "cashu_settled_ranges" => version >= 29,
         "cashu_treasury_inspections" => version >= 28,
         "cashu_treasury_fee_observations" => version >= 27,
         _ => true,
@@ -68,6 +71,13 @@ pub(super) async fn private_catalog(version: i64) -> Result<BTreeMap<String, Def
         if version >= 28 {
             sqlx::raw_sql(include_str!(
                 "../../migrations/0028_cashu_treasury_inspections.sql"
+            ))
+            .execute(&pool)
+            .await?;
+        }
+        if version >= 29 {
+            sqlx::raw_sql(include_str!(
+                "../../migrations/0029_cashu_feed_proceeds.sql"
             ))
             .execute(&pool)
             .await?;

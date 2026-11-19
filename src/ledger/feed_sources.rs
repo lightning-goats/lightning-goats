@@ -12,13 +12,12 @@ pub(super) enum Selection {
 }
 
 // Cashu coverage requires both the independently verified Strike deposit and
-// the authenticated wallet result. Returned change is not covered and actual
-// feed debits consume coverage once.
+// the authenticated wallet result. The furthest verified input covers gross
+// contribution credit. Spending fee change again cannot duplicate that input.
 const SOURCE_COVERAGE: &str = "SELECT l.ledger_id,l.remaining_sats,
     CASE WHEN c.ledger_entry_id IS NULL THEN l.remaining_sats
          ELSE MIN(l.remaining_sats,MAX(0,
-           (SELECT COALESCE(SUM(r.input_sats-r.change_sats),0) FROM cashu_treasury_source_results r
-            JOIN cashu_treasury_completions t ON t.intent_id=r.intent_id WHERE r.ledger_id=l.ledger_id)
+           (SELECT COALESCE(MAX(start_sats+input_sats),0) FROM cashu_settled_ranges WHERE ledger_id=l.ledger_id)
            -(SELECT COALESCE(SUM(p.sats),0) FROM feed_reward_funding_parts p WHERE p.ledger_id=l.ledger_id)))
     END AS eligible_sats
     FROM reward_funding_lots l LEFT JOIN cashu_receipt_inbox c ON c.ledger_entry_id=l.ledger_id";

@@ -277,8 +277,12 @@ impl StrikeClient {
         stored: &StoredStrikeReceiveRequest,
         receive_id: Uuid,
     ) -> Result<ReconciledStrikeReceive> {
-        self.reconcile_completed_receive_inner(stored, receive_id, false)
-            .await
+        self.reconcile_completed_receive_inner(
+            stored,
+            receive_id,
+            stored.credit_pool == crate::cashu::treasury::TREASURY_USER,
+        )
+        .await
     }
 
     async fn reconcile_completed_receive_inner(

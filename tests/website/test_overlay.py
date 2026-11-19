@@ -95,8 +95,10 @@ class OverlayBrowserTests(unittest.TestCase):
                 lightning_payload = zxingcpp.read_barcode(Image.open(io.BytesIO(lightning_code.screenshot())))
                 self.assertIsNotNone(lightning_payload)
                 self.assertEqual(lightning_payload.text, lightning_code.get_attribute("data-lnurl"))
+                side = 180 * width / 1920
                 for dimension in ("width", "height"):
-                    self.assertAlmostEqual(lightning[dimension], cashu[dimension], places=2)
+                    self.assertAlmostEqual(lightning[dimension], side, places=2)
+                    self.assertAlmostEqual(cashu[dimension], side, places=2)
                 for code in (lightning_code, cashu_code):
                     self.assertEqual(code.evaluate("node => getComputedStyle(node).borderRadius"), "18px")
                 lightning_label = self.page.locator("#lightning-label")

@@ -415,9 +415,8 @@
         } catch { setFeedingState("unknown"); }
     }
     function showCashuRequest(descriptor) {
-        const frame = el("cashu-code"), image = el("cashu-image"), column = el("payment-column");
+        const frame = el("cashu-code"), image = el("cashu-image");
         frame.hidden = true; image.replaceChildren();
-        column.style.removeProperty("--payment-qr-size");
         // Presentation failure must not reset the financial event stream. Only
         // public receiving instructions belong here, never spendable tokens.
         if (!descriptor || descriptor.version !== 1 || descriptor.enabled !== true ||
@@ -430,17 +429,24 @@
         try {
             const qr = qrcode(0, "M");
             qr.addData(payload, descriptor.encoding === "creqB" ? "Alphanumeric" : "Byte"); qr.make();
-            const modules = qr.getModuleCount() + 8;
-            // Multiples of three preserve whole module pixels at 1080p and
-            // 720p fit=1. Refuse requests too dense for the reserved space.
-            const scale = Math.max(3, Math.floor(300 / modules / 3) * 3);
-            const side = modules * scale;
-            if (side > 384) return;
+            if (qr.getModuleCount() + 8 > 128) return;
             // Keep the four-module quiet zone inside the rounded white panels.
             image.append(qrSvg(qr));
-            column.style.setProperty("--payment-qr-size", `${side + 12}px`);
             frame.hidden = false;
+            fitCashuQr();
         } catch { /* Unrenderable metadata leaves the receiving QR hidden. */ }
+    }
+    function fitCashuQr() {
+        const image = el("cashu-image"), svg = image.firstElementChild;
+        if (!svg || !image.offsetWidth) return;
+        const scale = image.getBoundingClientRect().width / image.offsetWidth;
+        const padding = 2 * parseFloat(getComputedStyle(image).paddingLeft);
+        const modules = svg.viewBox.baseVal.width;
+        const pixelsPerModule = (image.clientWidth - padding) * scale / modules;
+        // At small scales, give dense codes one pixel per module instead of
+        // unevenly rounding narrow modules across the grid.
+        const side = pixelsPerModule >= 1 && pixelsPerModule < 1.4 ? `${modules / scale}px` : "";
+        svg.style.width = svg.style.height = side;
     }
     function qrSvg(qr) {
         const count = qr.getModuleCount(), ns = "http://www.w3.org/2000/svg";
@@ -484,6 +490,7 @@
             document.documentElement.style.height = "100%";
             document.body.style.transformOrigin = "top left";
             document.body.style.transform = `scale(${Math.min(innerWidth / 1920, innerHeight / 1080)})`;
+            fitCashuQr();
         };
         fit(); addEventListener("resize", fit);
     }

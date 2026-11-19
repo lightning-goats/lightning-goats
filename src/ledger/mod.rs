@@ -49,7 +49,6 @@ mod zap;
 mod zap_presentation;
 pub use events::DurableEvent;
 use events::append_event_in_transaction;
-use feed::feed_credit_in_transaction;
 pub use feed::{StoredFeedAttempt, StoredFeedAttemptStatus};
 pub use outbox::OutboxEntry;
 pub use strike::StoredStrikeReceiveRequest;

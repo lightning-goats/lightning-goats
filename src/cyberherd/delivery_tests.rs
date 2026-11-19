@@ -806,6 +806,10 @@ async fn overlay_import_enforces_pause_owner_epoch_role_and_exact_receipts_witho
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].seq, seq);
     assert_eq!(events[0].event_type, "cyberherd_message");
+    let payload: serde_json::Value = serde_json::from_str(&events[0].payload_json).unwrap();
+    let cards = &payload["interaction_cards"];
+    assert_eq!(cards["roster"]["total_members"], 1);
+    assert_eq!(cards["roster"]["members"][0]["pubkey"], cards["member"]);
     let exported = f
         .core
         .core_event_batch(Some(message.epoch), 0, 128)

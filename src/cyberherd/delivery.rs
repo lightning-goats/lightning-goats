@@ -25,6 +25,8 @@ pub struct Rendered {
     pub requires_joining: bool,
     pub additional_members: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interaction_cards: Option<super::overlay_delivery::InteractionCards>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub broadcast: Option<super::feeding_delivery::Broadcast>,
 }
 
@@ -280,6 +282,15 @@ fn interaction(event: &StoredEvent, catalog: &Catalog) -> Result<Option<Rendered
         accepted,
         requires_joining: false,
         additional_members,
+        interaction_cards: if accepted {
+            Some(super::overlay_delivery::InteractionCards {
+                occurred_at: i.occurred_at,
+                member: i.pubkey.clone(),
+                roster: super::view::Roster::from_snapshot(snapshot)?.cards(),
+            })
+        } else {
+            None
+        },
         broadcast: None,
     }))
 }
@@ -374,6 +385,7 @@ fn payout(event: &StoredEvent, catalog: &Catalog) -> Result<Option<Rendered>> {
         accepted: false,
         requires_joining: true,
         additional_members: vec![],
+        interaction_cards: None,
         broadcast: None,
     }))
 }
@@ -663,6 +675,7 @@ fn operator_member(event: &StoredEvent, catalog: &Catalog) -> Result<Option<Rend
         accepted: notice.activation,
         requires_joining: !notice.activation,
         additional_members: vec![],
+        interaction_cards: None,
         broadcast: None,
     }))
 }

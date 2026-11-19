@@ -134,6 +134,7 @@ impl Store {
             accepted: false,
             requires_joining: false,
             additional_members: vec![],
+            interaction_cards: None,
             broadcast: Some(Broadcast {
                 request_id: barrier.feeding.request_id,
                 proof: proof.clone(),
@@ -393,6 +394,7 @@ mod tests {
             accepted: false,
             requires_joining: false,
             additional_members: vec![],
+            interaction_cards: None,
             broadcast: Some(Broadcast {
                 request_id: uuid::Uuid::new_v4(),
                 proof: crate::cyberherd::feeding_delivery::Proof {

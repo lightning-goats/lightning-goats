@@ -192,14 +192,18 @@
         host.style.display = host.childElementCount ? "flex" : "none";
         cardTimer = later(() => { host.style.display = "none"; }, 18000);
     }
-    function acceptRoster(roster) {
+    let connectedSince = 0;
+    function clearMemberCards() {
+        const host = el("accordion-container");
+        if (host.dataset.cards === "members") { host.replaceChildren(); host.style.display = "none"; }
+    }
+    function validRoster(roster) {
         if (!roster || !Array.isArray(roster.members) || roster.members.length > 10 || !integer(roster.total_members)
             || roster.total_members > 1000 || roster.members.length !== Math.min(10, roster.total_members)
             || !integer(roster.revision) || !/^[0-9a-f]{64}$/.test(roster.owner || "")) return false;
         if (!roster.members.every((m, i) => m && m.rank === i + 1 && /^[0-9a-f]{64}$/.test(m.pubkey || "")
             && typeof m.amount_sats === "string" && /^(0|[1-9][0-9]{0,18})$/.test(m.amount_sats)
             && BigInt(m.amount_sats) <= 9223372036854775807n)) return false;
-        showCards(roster.members, true);
         return true;
     }
     function toggleQr() {
@@ -286,7 +290,7 @@
         clearPresentation(); socket.close();
     }
     function receive(event) {
-        if (typeof event.data !== "string" || event.data.length > 16384) return resetConnection();
+        if (typeof event.data !== "string" || event.data.length > 262144) return resetConnection();
         let data;
         try { data = JSON.parse(event.data); } catch { return resetConnection(); }
         if (!data || typeof data !== "object" || Array.isArray(data)) return resetConnection();
@@ -298,10 +302,11 @@
             if (data.version !== 1 || !identity(data.stream_id) || !integer(data.seq) || !integer(data.feed_credit_sats) || !integer(data.threshold_sats) || data.threshold_sats === 0) return resetConnection();
             if (data.stream_id === stream && data.seq < seq && !data.reset_reason) return;
             if (stream !== data.stream_id || data.reset_reason) clearPresentation();
+            connectedSince = integer(data.as_of) ? data.as_of : Math.floor(Date.now() / 1000);
             stream = data.stream_id; seq = data.seq; credit = data.feed_credit_sats; threshold = data.threshold_sats;
             awaitingConfirmation = typeof data.unresolved_feed_attempt === "string";
-            if (data.cyberherd === null) showCards([], true);
-            else if (data.cyberherd !== undefined && !acceptRoster(data.cyberherd)) return resetConnection();
+            if (data.cyberherd == null) clearMemberCards();
+            else if (data.cyberherd !== undefined && !validRoster(data.cyberherd)) return resetConnection();
             showCashuRequest(data.cashu);
             replaying = false; el("connection").dataset.state = "live"; el("connection").textContent = ""; el("connection").ariaLabel = "Connected"; render(); return;
         }
@@ -333,9 +338,14 @@
                 showFeed();
             }
             if (kind === "cyberherd_roster") {
-                if (!acceptRoster(data)) return resetConnection();
-            } else if (kind.startsWith("cyberherd_") && Array.isArray(data.members)) showCards(data.members, true, data.newest_pubkey);
-            if (kind === "cyberherd_daily_reset") { el("accordion-container").replaceChildren(); el("accordion-container").style.display = "none"; }
+                if (!validRoster(data)) return resetConnection();
+                if (!data.members.length) clearMemberCards();
+            } else if (kind === "cyberherd_message" && data.interaction_cards) {
+                const cards = data.interaction_cards;
+                if (integer(cards.occurred_at) && cards.occurred_at >= connectedSince && validRoster(cards.roster)) {
+                    showCards(cards.roster.members, true, cards.member);
+                }
+            } else if (kind === "cyberherd_daily_reset") clearMemberCards();
         }
         seq = data.seq;
     }

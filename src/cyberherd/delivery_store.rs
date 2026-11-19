@@ -476,6 +476,7 @@ impl Store {
                 identity: message.identity,
                 category: message.category,
                 message: message.overlay,
+                interaction_cards: message.interaction_cards,
             };
             value.validate()?;
             tx.commit().await?;
@@ -498,6 +499,7 @@ impl Store {
             .bind(&message.owner).bind(&message.identity).fetch_one(&mut *tx).await?;
         let original: Rendered = serde_json::from_str(&row.try_get::<String, _>("document_json")?)?;
         if original.category != message.category
+            || original.interaction_cards != message.interaction_cards
             || original.overlay != message.message
             || row
                 .try_get::<Option<i64>, _>("event_seq")?

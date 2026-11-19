@@ -434,6 +434,31 @@ async fn operator_fence_drains_bounded_presentation_tail_but_cannot_pass_a_confi
 }
 
 #[tokio::test]
+async fn completed_empty_profile_lookup_allows_paid_join_and_following_feed() {
+    let f = Fixture::new().await;
+    f.paid(10, 2, 1000, &f.note).await;
+    let feed = f.core.begin_feed_attempt(1000).await.unwrap().unwrap();
+    f.core.confirm_feed_attempt(feed).await.unwrap();
+    assert_eq!(f.ingest().await, 2);
+    assert_eq!(f.run(None, FeederAvailability::Ready).await, Step::Waiting);
+    f.store
+        .record_reward_profile_read(&f.owner, &public(2), true, f.now)
+        .await
+        .unwrap();
+    assert!(matches!(
+        f.run(None, FeederAvailability::Ready).await,
+        Step::Interaction(_)
+    ));
+    let roster = f.store.snapshot(&f.owner).await.unwrap().roster;
+    assert!(roster.members[&public(2)].active);
+    assert!(roster.members[&public(2)].profile.lud16.is_none());
+    assert!(matches!(
+        f.run(None, FeederAvailability::Ready).await,
+        Step::Feeding(_)
+    ));
+}
+
+#[tokio::test]
 async fn actual_core_payments_precede_feed_and_later_backdated_social_cannot_enter_snapshot() {
     let f = Fixture::new().await;
     let raw = f.paid(10, 2, 1000, &f.note).await;

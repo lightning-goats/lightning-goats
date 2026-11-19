@@ -821,7 +821,10 @@ impl Query for ProfileOutboxes {
         filters: &[Filter],
     ) -> anyhow::Result<ReadBatch> {
         assert!(!relays.is_empty() && relays.len() <= 8);
-        assert!(relays.iter().all(|r| r == "wss://outbox.example.com/"));
+        assert!(relays.iter().all(|r| matches!(
+            r.as_str(),
+            "wss://outbox.example.com/" | "wss://second.example.com/"
+        )));
         self.hints.lock().unwrap().push(relays.to_vec());
         Ok(ReadBatch {
             events: self
@@ -1016,6 +1019,34 @@ async fn signed_outbox_profile_resolves_second_member_like_and_repost_exactly_on
         .unwrap();
     assert_eq!(receipts, 3);
     task.abort();
+}
+
+#[tokio::test]
+async fn one_completed_outbox_cannot_confirm_two_disjoint_profile_reads() {
+    let f = Fixture::new().await;
+    let mut source = profile_outboxes(&f, 1, true, false);
+    source.base.events.retain(|e| e.event().kind != 0);
+    source.base.events.push(signed(
+        2,
+        10002,
+        f.now - 1,
+        "",
+        vec![tag(&["r", "wss://second.example.com", "write"])],
+    ));
+    let discovery = Discovery::new(source, 1).unwrap();
+    discovery
+        .refresh_reward_profiles(&f.store, &f.owner, &[public(2), public(3)], f.now)
+        .await
+        .unwrap();
+    for key in [2, 3] {
+        assert!(
+            f.store
+                .reward_profile_read(&f.owner, &public(key), f.now, 3600)
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
 }
 
 #[tokio::test]

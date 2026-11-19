@@ -376,12 +376,22 @@ impl<R: Query> Discovery<R> {
             let completed = match self.source.query_hints(&relays, &filters).await {
                 Ok(batch) => {
                     events.extend(batch.events);
-                    batch.completed_relays > 0 && !batch.saturated
+                    if batch.saturated {
+                        0
+                    } else {
+                        batch.completed_relays
+                    }
                 }
-                Err(_) => false,
+                Err(_) => 0,
             };
-            for key in missing.keys() {
-                availability.insert(key.clone(), complete && completed);
+            for (key, outboxes) in &missing {
+                // The batch reports a count. Another author's relay may be the
+                // only one that completed, which cannot confirm this profile read.
+                let unrelated = relays
+                    .iter()
+                    .filter(|relay| !outboxes.contains(relay))
+                    .count();
+                availability.insert(key.clone(), complete && completed > unrelated);
             }
         }
         Ok((events, availability))

@@ -765,7 +765,7 @@ mod tests {
         )?;
         for (id, stage, due) in [
             (prepared, "reserve", 5), // Old stage lag must not leak into current status.
-            (prepared, "submit", 990),
+            (prepared, "submit", 900), // Exhausted retries have no scheduled wakeup.
             (Uuid::from_u128(101), "reconcile", 1200),
             (Uuid::from_u128(102), "cleanup", 950),
         ] {
@@ -797,6 +797,16 @@ mod tests {
         let encoded = serde_json::to_string(&status)?;
         assert!(!encoded.contains(&issued.invoice));
         assert!(!encoded.contains(&issued.payment_hash));
+
+        // Once cleanup is deferred, only the exhausted stage has a past due time.
+        db.execute(
+            "UPDATE treasury_work_schedule SET next_attempt=1200 WHERE action='cleanup'",
+            [],
+        )?;
+        let deferred = crate::status::Status::read_at(&runtime.config, 1000)?;
+        assert_eq!(deferred.health.treasury.oldest_scheduled_due_at, None);
+        assert_eq!(deferred.health.queue.scheduled_lag_seconds, None);
+        assert_eq!(deferred.health.treasury.finite_retries_exhausted, 1);
 
         // An older read-only image has no exact rolling fee observations.
         db.execute("DROP TABLE treasury_fee_completions", [])?;

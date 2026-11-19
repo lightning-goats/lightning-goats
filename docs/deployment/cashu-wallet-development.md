@@ -82,6 +82,7 @@ with private intent IDs, attempt counts and persisted retry times. Submitted
 operations awaiting an outcome and paid melts awaiting cleanup appear first.
 They remain recoverable after the ordinary retry budget. The
 `finite_retries_exhausted` count covers only stages with a finite budget.
+An exhausted stage retains its recorded retry time for inspection. It stops contributing to queue lag once its retry budget is exhausted.
 Summary counts include rows beyond the displayed limit. The rolling fee
 commitment combines retained conversion fees with the maximum fees reserved
 by unresolved operations. Remaining sats use the configured wallet ceiling.

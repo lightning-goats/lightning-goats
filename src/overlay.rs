@@ -110,6 +110,7 @@ async fn snapshot(
     reason: Option<&str>,
     cashu: Option<&crate::cashu::intake::Forwarder>,
 ) -> Result<Queued> {
+    let as_of = crate::gateway::now_epoch()?;
     let (seq, encoded) = ledger.overlay_snapshot_message(threshold).await?;
     let mut value: Value = serde_json::from_str(&encoded)?;
     value["cashu"] = match cashu {
@@ -122,6 +123,7 @@ async fn snapshot(
             .unwrap_or(Value::Null),
         None => Value::Null,
     };
+    value["as_of"] = as_of.into();
     value["version"] = 1.into();
     value["stream_id"] = stream.to_string().into();
     if let Some(reason) = reason {
@@ -144,11 +146,16 @@ async fn render_window(
     let mut size = 0;
     for event in events {
         let seq = event.seq;
+        let message_limit = if event.event_type == "cyberherd_message" {
+            crate::core_bridge::MAX_FRAME
+        } else {
+            MAX_MESSAGE
+        };
         let is_weather = event.event_type == "weather_status";
         let zap = ledger.verified_zap_attribution(&event).await?;
         let body = durable_event_message_with_zap(event, renderer, threshold, zap.as_ref())?;
         size += body.len();
-        if body.len() > MAX_MESSAGE || size > MAX_QUEUE {
+        if body.len() > message_limit || size > MAX_QUEUE {
             bail!("overlay replay exceeds output bounds");
         }
         let weather_observed_at = if is_weather {

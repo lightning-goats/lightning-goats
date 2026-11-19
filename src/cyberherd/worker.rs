@@ -234,7 +234,17 @@ async fn process_payment(
                 {
                     Profile::default()
                 }
-                None => return Ok(Step::Waiting),
+                None => {
+                    // A completed profile lookup can legitimately find no kind-0
+                    // event. A verified paid zap can join without a payout address.
+                    let read = store
+                        .reward_profile_read(owner, pubkey, env.now, 300)
+                        .await?;
+                    if read.is_none_or(|read| read.profile.is_some()) {
+                        return Ok(Step::Waiting);
+                    }
+                    Profile::default()
+                }
             };
             Interaction {
                 source_id,

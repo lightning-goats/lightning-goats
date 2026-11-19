@@ -434,6 +434,31 @@ async fn operator_fence_drains_bounded_presentation_tail_but_cannot_pass_a_confi
 }
 
 #[tokio::test]
+async fn completed_empty_profile_lookup_allows_paid_join_and_following_feed() {
+    let f = Fixture::new().await;
+    f.paid(10, 2, 1000, &f.note).await;
+    let feed = f.core.begin_feed_attempt(1000).await.unwrap().unwrap();
+    f.core.confirm_feed_attempt(feed).await.unwrap();
+    assert_eq!(f.ingest().await, 2);
+    assert_eq!(f.run(None, FeederAvailability::Ready).await, Step::Waiting);
+    f.store
+        .record_reward_profile_read(&f.owner, &public(2), true, f.now)
+        .await
+        .unwrap();
+    assert!(matches!(
+        f.run(None, FeederAvailability::Ready).await,
+        Step::Interaction(_)
+    ));
+    let roster = f.store.snapshot(&f.owner).await.unwrap().roster;
+    assert!(roster.members[&public(2)].active);
+    assert!(roster.members[&public(2)].profile.lud16.is_none());
+    assert!(matches!(
+        f.run(None, FeederAvailability::Ready).await,
+        Step::Feeding(_)
+    ));
+}
+
+#[tokio::test]
 async fn actual_core_payments_precede_feed_and_later_backdated_social_cannot_enter_snapshot() {
     let f = Fixture::new().await;
     let raw = f.paid(10, 2, 1000, &f.note).await;
@@ -796,13 +821,21 @@ impl Query for ProfileOutboxes {
         filters: &[Filter],
     ) -> anyhow::Result<ReadBatch> {
         assert!(!relays.is_empty() && relays.len() <= 8);
-        assert!(relays.iter().all(|r| r == "wss://outbox.example.com/"));
+        assert!(relays.iter().all(|r| matches!(
+            r.as_str(),
+            "wss://outbox.example.com/" | "wss://second.example.com/"
+        )));
         self.hints.lock().unwrap().push(relays.to_vec());
         Ok(ReadBatch {
             events: self
                 .profiles
                 .iter()
                 .filter(|e| filters.iter().any(|f| f.matches(e)))
+                .cloned()
+                .collect(),
+            completed_urls: relays
+                .iter()
+                .filter(|url| self.complete && url.as_str() == "wss://outbox.example.com/")
                 .cloned()
                 .collect(),
             completed_relays: usize::from(self.complete),
@@ -994,6 +1027,35 @@ async fn signed_outbox_profile_resolves_second_member_like_and_repost_exactly_on
 }
 
 #[tokio::test]
+async fn one_completed_outbox_cannot_confirm_two_disjoint_profile_reads() {
+    let f = Fixture::new().await;
+    let mut source = profile_outboxes(&f, 1, true, false);
+    source.base.events.retain(|e| e.event().kind != 0);
+    source.base.events.push(signed(
+        2,
+        10002,
+        f.now - 1,
+        "",
+        vec![tag(&["r", "wss://second.example.com", "write"])],
+    ));
+    let discovery = Discovery::new(source, 1).unwrap();
+    discovery
+        .refresh_reward_profiles(&f.store, &f.owner, &[public(2), public(3)], f.now)
+        .await
+        .unwrap();
+    for (key, expected) in [(2, false), (3, true)] {
+        assert_eq!(
+            f.store
+                .reward_profile_read(&f.owner, &public(key), f.now, 3600)
+                .await
+                .unwrap()
+                .is_some(),
+            expected
+        );
+    }
+}
+
+#[tokio::test]
 async fn outbox_profiles_preserve_quorum_backoff_and_signed_address_removal() {
     for (quorum, complete, saturated) in [(0, true, false), (1, false, false), (1, true, true)] {
         let f = Fixture::new().await;
@@ -1072,6 +1134,7 @@ impl Query for RelayFixture {
                 .filter(|event| filters.iter().any(|f| f.matches(event)))
                 .cloned()
                 .collect(),
+            completed_urls: Default::default(),
             completed_relays: self.complete,
             failed_relays: usize::from(self.complete == 0),
             saturated: self.saturated,

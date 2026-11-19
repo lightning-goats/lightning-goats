@@ -663,6 +663,7 @@ async fn fresh_lookup_completion_is_required_and_failed_quorum_invalidates_cache
         async fn query(&self, _filters: &[Filter]) -> Result<ReadBatch> {
             Ok(ReadBatch {
                 events: vec![self.profile.clone()],
+                completed_urls: Default::default(),
                 completed_relays: usize::from(self.available),
                 failed_relays: usize::from(!self.available),
                 saturated: false,

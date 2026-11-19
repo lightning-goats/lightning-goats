@@ -55,7 +55,7 @@ impl LedgerStore {
             &mut tx,
             "cyberherd_message",
             &serde_json::json!({
-                "message":message.message,"category":message.category,"message_id":message.identity
+                "message":message.message,"category":message.category,"message_id":message.identity,"interaction_cards":message.interaction_cards
             }),
         )
         .await?;

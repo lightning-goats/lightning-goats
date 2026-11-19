@@ -376,12 +376,19 @@ impl<R: Query> Discovery<R> {
             let completed = match self.source.query_hints(&relays, &filters).await {
                 Ok(batch) => {
                     events.extend(batch.events);
-                    batch.completed_relays > 0 && !batch.saturated
+                    if batch.saturated {
+                        BTreeSet::new()
+                    } else {
+                        batch.completed_urls
+                    }
                 }
-                Err(_) => false,
+                Err(_) => BTreeSet::new(),
             };
-            for key in missing.keys() {
-                availability.insert(key.clone(), complete && completed);
+            for (key, outboxes) in &missing {
+                availability.insert(
+                    key.clone(),
+                    complete && outboxes.iter().any(|relay| completed.contains(relay)),
+                );
             }
         }
         Ok((events, availability))

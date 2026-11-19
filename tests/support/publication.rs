@@ -15,6 +15,7 @@ impl Query for NoMetadata {
     async fn query(&self, _filters: &[Filter]) -> Result<ReadBatch> {
         Ok(ReadBatch {
             events: vec![],
+            completed_urls: Default::default(),
             completed_relays: 1,
             failed_relays: 0,
             saturated: false,

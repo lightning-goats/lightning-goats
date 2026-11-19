@@ -3,48 +3,7 @@
     if (window.LightningGoatsSite?.paymentsEnabled !== true) return;
 
     const element = (id) => document.getElementById(id);
-    const panel = element("feedPanel");
-    const progress = element("feedProgress");
-    const progressLabel = element("feedProgressLabel");
-    const feederStatus = element("feedStatus");
-    const amountFormat = new Intl.NumberFormat("en-US");
     const { getJson } = window.LightningGoatsPayment;
-
-    async function refreshFeedProgress() {
-        if (!document.hidden) {
-            try {
-                const status = await getJson("/api/v1/status", 8192);
-                const credit = status.feed_credit_sats;
-                const threshold = status.threshold_sats;
-                if (!Number.isSafeInteger(credit) || credit < 0 ||
-                    !Number.isSafeInteger(threshold) || threshold <= 0) {
-                    throw new Error("Invalid feed progress");
-                }
-                const funded = Math.floor(credit / threshold);
-                progress.max = threshold;
-                progress.value = Math.min(credit, threshold);
-                progressLabel.textContent = funded > 0
-                    ? `${amountFormat.format(funded)} feeding${funded === 1 ? "" : "s"} funded`
-                    : `${amountFormat.format(threshold - credit)} sats to the next feeding`;
-                progress.hidden = false;
-                if (status.gateway_reachable !== true || typeof status.feeder_override_active !== "boolean") {
-                    feederStatus.textContent = "Feeder status unavailable";
-                } else if (status.mode !== "active" || status.remote_feeding_enabled !== true ||
-                    status.feeder_override_active === true) {
-                    feederStatus.textContent = "Feeding paused";
-                } else if (status.unresolved_feed_attempt) {
-                    feederStatus.textContent = "Checking the last feeding";
-                } else {
-                    feederStatus.textContent = "Feeding enabled";
-                }
-            } catch {
-                progress.hidden = true;
-                progressLabel.textContent = "Feed progress is temporarily unavailable.";
-                feederStatus.textContent = "";
-            }
-        }
-        setTimeout(refreshFeedProgress, 30000);
-    }
 
     const modal = element("cashuModal");
     const requestWrap = element("cashuRequestWrap");
@@ -108,7 +67,6 @@
         }
     });
 
-    panel.hidden = false;
+    element("feedPanel").hidden = false;
     document.querySelector(".cashu-code-overlay").hidden = false;
-    refreshFeedProgress();
 })();

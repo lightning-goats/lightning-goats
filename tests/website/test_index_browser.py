@@ -88,11 +88,6 @@ class IndexBrowserTests(unittest.TestCase):
         self.native = False
         self.cashu = {**CASHU_REQUEST, "enabled": True}
         self.cashu_requests = []
-        self.feed_status = {
-            "mode": "active", "gateway_reachable": True, "remote_feeding_enabled": True,
-            "feeder_override_active": False, "unresolved_feed_attempt": None,
-            "feed_credit_sats": 101, "threshold_sats": 1000,
-        }
 
     def route(self, route):
         url = urlsplit(route.request.url)
@@ -123,8 +118,6 @@ class IndexBrowserTests(unittest.TestCase):
                 route.fulfill(status=503, content_type="application/json", body="{}")
             else:
                 route.fulfill(content_type="application/json", body=json.dumps(self.cashu))
-        elif path == "/api/v1/status":
-            route.fulfill(content_type="application/json", body=json.dumps(self.feed_status))
         else:
             file = ROOT / ("index.html" if path == "/" else path.lstrip("/"))
             if file.is_file() and file.resolve().is_relative_to(ROOT):
@@ -205,11 +198,10 @@ class IndexBrowserTests(unittest.TestCase):
 
     def test_mobile_feed_card_handles_cashu_outage_and_preserves_lightning(self):
         self.cashu = None
-        self.feed_status["feeder_override_active"] = True
         self.page.set_viewport_size({"width": 390, "height": 844})
         self.open()
-        self.page.get_by_text("899 sats to the next feeding", exact=True).wait_for()
-        self.assertEqual(self.page.locator("#feedStatus").inner_text(), "Feeding paused")
+        self.page.locator("#feedPanel").wait_for(state="visible")
+        self.assertEqual(self.page.locator("#feedPanel progress, #feedStatus").count(), 0)
         panel = self.page.locator("#feedPanel").bounding_box()
         chat = self.page.locator(".chat-panel").bounding_box()
         self.assertLess(panel["y"] + panel["height"], chat["y"])

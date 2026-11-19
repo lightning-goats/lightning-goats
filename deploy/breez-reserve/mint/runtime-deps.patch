@@ -1,5 +1,5 @@
 diff --git a/poetry.lock b/poetry.lock
-index 5c2f959..ac6989b 100644
+index 5c2f959..27fe782 100644
 --- a/poetry.lock
 +++ b/poetry.lock
 @@ -19,6 +19,32 @@ typing_extensions = ">=4.0"
@@ -319,8 +319,9 @@ index 5c2f959..ac6989b 100644
  description = "cryptography is a package which provides cryptographic recipes and primitives to Python developers."
  optional = false
 -python-versions = ">=3.7"
+-groups = ["main", "dev"]
 +python-versions = "!=3.9.0,!=3.9.1,>=3.9"
- groups = ["main", "dev"]
++groups = ["dev"]
  files = [
 -    {file = "cryptography-43.0.3-cp37-abi3-macosx_10_9_universal2.whl", hash = "sha256:bf7a1932ac4176486eab36a19ed4c0492da5d97123f1406cf15e41b05e787d2e"},
 -    {file = "cryptography-43.0.3-cp37-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:63efa177ff54aec6e1c0aefaa1a241232dcd37413835a9b674b6e3f0ae2bfd3e"},
@@ -645,22 +646,18 @@ index 5c2f959..ac6989b 100644
  optional = false
 -python-versions = ">=3.9"
 +python-versions = ">=3.10"
- groups = ["main", "dev"]
++groups = ["main", "dev"]
 +markers = "python_version < \"3.13\""
- files = [
--    {file = "starlette-0.46.2-py3-none-any.whl", hash = "sha256:595633ce89f8ffa71a015caed34a5b2dc1c0cdb3f0f1fbd1e69339cf2abeec35"},
--    {file = "starlette-0.46.2.tar.gz", hash = "sha256:7f7361f34eed179294600af672f565727419830b54b7b084efe44bb82d2fccd5"},
++files = [
 +    {file = "starlette-1.7.0-py3-none-any.whl", hash = "sha256:67f8e99895493dd2911a03f11314af6ceebeae4e704bb9f43dfc6a9db151c93e"},
 +    {file = "starlette-1.7.0.tar.gz", hash = "sha256:c79f74ea63cff761804fbbfb182f1e0b440c2d07b164d24700c5a1bab5d6ff5d"},
- ]
- 
- [package.dependencies]
--anyio = ">=3.6.2,<5"
++]
++
++[package.dependencies]
 +anyio = ">=4.0.0,<5"
 +typing-extensions = {version = ">=4.10.0", markers = "python_version < \"3.13\""}
- 
- [package.extras]
--full = ["httpx (>=0.27.0,<0.29.0)", "itsdangerous", "jinja2", "python-multipart (>=0.0.18)", "pyyaml"]
++
++[package.extras]
 +full = ["httpx (>=0.27.0,<0.29.0)", "httpx2 (>=2.0.0)", "itsdangerous", "jinja2", "opentelemetry-api", "python-multipart (>=0.0.18)", "pyyaml"]
 +
 +[[package]]
@@ -669,17 +666,21 @@ index 5c2f959..ac6989b 100644
 +description = "The little ASGI library that shines."
 +optional = false
 +python-versions = ">=3.11"
-+groups = ["main", "dev"]
+ groups = ["main", "dev"]
 +markers = "python_version >= \"3.13\""
-+files = [
+ files = [
+-    {file = "starlette-0.46.2-py3-none-any.whl", hash = "sha256:595633ce89f8ffa71a015caed34a5b2dc1c0cdb3f0f1fbd1e69339cf2abeec35"},
+-    {file = "starlette-0.46.2.tar.gz", hash = "sha256:7f7361f34eed179294600af672f565727419830b54b7b084efe44bb82d2fccd5"},
 +    {file = "starlette-1.10.0-py3-none-any.whl", hash = "sha256:478c0ab3b4ced6e82719849c118fa406f0278a3499c1a898cd15cd31bdc38ce4"},
 +    {file = "starlette-1.10.0.tar.gz", hash = "sha256:b8399098d4c1e3522734f7235dc79b1fc967f96cf139c81e0fa30479e0685f9b"},
-+]
-+
-+[package.dependencies]
+ ]
+ 
+ [package.dependencies]
+-anyio = ">=3.6.2,<5"
 +anyio = ">=4.0.0,<5"
-+
-+[package.extras]
+ 
+ [package.extras]
+-full = ["httpx (>=0.27.0,<0.29.0)", "itsdangerous", "jinja2", "python-multipart (>=0.0.18)", "pyyaml"]
 +full = ["httpx (>=0.27.0,<0.29.0)", "httpx2 (>=2.0.0)", "itsdangerous", "jinja2", "opentelemetry-api", "python-multipart (>=0.0.18)", "pyyaml"]
  
  [[package]]
@@ -717,12 +718,12 @@ index 5c2f959..ac6989b 100644
  lock-version = "2.1"
  python-versions = "^3.10"
 -content-hash = "2189f11bf3a463da47307e091ff3d232e832847102594461112dac3951fb8e4a"
-+content-hash = "44276cce625ca4fd965911a966c9f013e4493baaab52dc638d6565b02321874d"
++content-hash = "24339d1165e2277a2a10119b0f8b293112c1c6e6f8c8e2e3c458d211c722815f"
 diff --git a/pyproject.toml b/pyproject.toml
-index 93c9c6f..ffc2d17 100644
+index 93c9c6f..04f8522 100644
 --- a/pyproject.toml
 +++ b/pyproject.toml
-@@ -16,18 +16,18 @@ click = "^8.5.0"
+@@ -16,18 +16,17 @@ click = "^8.5.0"
  pydantic = "^2.13.5"
  pydantic-settings = "^2.15.0"
  bech32 = "^1.2.0"
@@ -737,7 +738,6 @@ index 93c9c6f..ffc2d17 100644
 -h11 = "^0.14.0"
 -cryptography = "^43.0.3"
 +h11 = "^0.16.0"
-+cryptography = "^49.0.0"
  websocket-client = "^1.9.2"
  pycryptodomex = "^3.23.0"
 -setuptools = "^75.9.1"

@@ -295,6 +295,57 @@ mod cashu_treasury_tests {
     }
 
     #[tokio::test]
+    async fn balance_sweep_reaches_threshold_with_more_receipts_than_one_intent_can_hold()
+    -> Result<()> {
+        use lightning_goats_cashu_receipt::treasury::MAX_SOURCES;
+        let mut f = Fixture::new(&[8], 0, 6, 2, unchanged).await;
+        f.registration.limits.receipts_per_24h = MAX_SOURCES as u64 + 2;
+        let sweep = crate::cashu::treasury_sweep::Policy {
+            enabled: true,
+            balance_trigger_sats: 1000,
+            ..Default::default()
+        };
+        // The original fixture receipt is reserved. The next 128 one-sat
+        // receipts alone cannot produce a threshold-sized settlement.
+        for n in 0..=MAX_SOURCES {
+            let mut data = f.receipts[0].data().clone();
+            data.transport = "cashu".into();
+            data.source_ref = "reusable".into();
+            data.source_author = None;
+            data.acquisition_id = Uuid::new_v4();
+            let digest = data.acquisition_id.simple();
+            data.acquisition_evidence_digest = format!("{digest}{digest}");
+            data.net_sats = if n == MAX_SOURCES {
+                1001 - MAX_SOURCES as u64
+            } else {
+                1
+            };
+            data.gross_sats = data.net_sats;
+            let receipt = WireReceipt::validate(data)?;
+            f.ledger
+                .import_cashu_receipt(
+                    &f.registration,
+                    &fixture_authenticate(&f.registration, &receipt.encode()?)?,
+                )
+                .await?;
+        }
+        let batch = f
+            .ledger
+            .plan_cashu_sweep(&f.registration, &f.policy, &sweep)
+            .await?
+            .expect("threshold-sized sweep");
+        assert_eq!(batch.input_sats, 1000);
+        assert_eq!(batch.sources.len(), MAX_SOURCES);
+        assert!(
+            f.ledger
+                .plan_cashu_sweep(&f.registration, &f.policy, &sweep)
+                .await?
+                .is_none()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn thousand_sat_balance_sweep_carries_fee_change_to_the_next_batch() -> Result<()> {
         let mut f = Fixture::new(&[600, 400], 0, 995, 5, |_| {}).await;
         f.registration.limits.credit_sats_per_24h = 1999;

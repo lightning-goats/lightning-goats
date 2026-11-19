@@ -16,9 +16,34 @@ async fn available(
     tx: &mut Transaction<'_, Sqlite>,
     registration: &ReceiptPolicy,
     mint: &str,
+    largest_first: bool,
 ) -> Result<Option<Available>> {
-    let rows=sqlx::query("WITH custody AS (SELECT c.ledger_entry_id,c.accepted_at,c.net_sats-COALESCE((SELECT SUM(CASE WHEN t.intent_id IS NULL OR r.ledger_id IS NULL THEN s.input_sats ELSE r.input_sats-r.change_sats END) FROM cashu_treasury_sources s LEFT JOIN cashu_treasury_completions t ON t.intent_id=s.intent_id LEFT JOIN cashu_treasury_source_results r ON r.intent_id=s.intent_id AND r.ledger_id=s.ledger_id WHERE s.ledger_id=c.ledger_entry_id),0) AS available FROM cashu_receipt_inbox c WHERE c.wallet_instance=? AND c.wallet_epoch=? AND c.core_epoch=? AND c.mint_id=?), candidates AS (SELECT * FROM custody WHERE available!=0) SELECT *,SUM(available) OVER() AS balance,MIN(available) OVER() AS minimum,MIN(accepted_at) OVER() AS oldest FROM candidates ORDER BY ledger_entry_id LIMIT ?")
-        .bind(registration.wallet_instance.to_string()).bind(registration.wallet_epoch.to_string()).bind(registration.core_epoch.to_string()).bind(mint).bind(MAX_SOURCES as i64).fetch_all(&mut **tx).await?;
+    let rows = sqlx::query(
+        "WITH custody AS (
+            SELECT c.ledger_entry_id,c.accepted_at,c.net_sats-COALESCE((
+                SELECT SUM(CASE WHEN t.intent_id IS NULL OR r.ledger_id IS NULL
+                                THEN s.input_sats ELSE r.input_sats-r.change_sats END)
+                FROM cashu_treasury_sources s
+                LEFT JOIN cashu_treasury_completions t ON t.intent_id=s.intent_id
+                LEFT JOIN cashu_treasury_source_results r
+                    ON r.intent_id=s.intent_id AND r.ledger_id=s.ledger_id
+                WHERE s.ledger_id=c.ledger_entry_id
+            ),0) AS available
+            FROM cashu_receipt_inbox c
+            WHERE c.wallet_instance=? AND c.wallet_epoch=? AND c.core_epoch=? AND c.mint_id=?
+        ) SELECT *,SUM(available) OVER() AS balance,MIN(available) OVER() AS minimum,
+                 MIN(accepted_at) OVER() AS oldest
+          FROM custody WHERE available!=0
+          ORDER BY CASE WHEN ? THEN available END DESC,ledger_entry_id LIMIT ?",
+    )
+    .bind(registration.wallet_instance.to_string())
+    .bind(registration.wallet_epoch.to_string())
+    .bind(registration.core_epoch.to_string())
+    .bind(mint)
+    .bind(largest_first)
+    .bind(MAX_SOURCES as i64)
+    .fetch_all(&mut **tx)
+    .await?;
     let Some(first) = rows.first() else {
         return Ok(None);
     };
@@ -28,7 +53,7 @@ async fn available(
     );
     let balance = to_u64(first.try_get("balance")?, "available mint custody")?;
     let oldest = to_u64(first.try_get("oldest")?, "oldest available custody")?;
-    let parts = rows
+    let mut parts = rows
         .into_iter()
         .map(|r| {
             Ok((
@@ -37,6 +62,9 @@ async fn available(
             ))
         })
         .collect::<Result<Vec<_>>>()?;
+    if largest_first {
+        parts.sort_unstable_by_key(|(ledger, _)| *ledger);
+    }
     Ok(Some(Available {
         parts,
         balance,
@@ -157,7 +185,8 @@ impl LedgerStore {
                 }
                 continue;
             }
-            let Some(mut funds) = available(&mut tx, registration, &request.mint_id).await? else {
+            let Some(mut funds) = available(&mut tx, registration, &request.mint_id, false).await?
+            else {
                 continue;
             };
             let mut left = request.maximum_input_sats;
@@ -178,7 +207,7 @@ impl LedgerStore {
         let mut candidates = BTreeMap::new();
         let mut reasons = BTreeMap::new();
         for mint in policy.approved_mints.keys() {
-            let Some(funds) = available(&mut tx, registration, mint).await? else {
+            let Some(mut funds) = available(&mut tx, registration, mint, false).await? else {
                 continue;
             };
             ensure!(now >= funds.oldest, "sweep receipt time is in the future");
@@ -189,6 +218,16 @@ impl LedgerStore {
                 "age"
             } else if sweep.balance_trigger_sats > 0 && funds.balance >= sweep.balance_trigger_sats
             {
+                // A prefix of small receipts can hide a later receipt that would
+                // let this batch reach the trigger within the wire source limit.
+                if funds.parts.len() == MAX_SOURCES
+                    && funds.parts.iter().map(|(_, sats)| sats).sum::<u64>()
+                        < sweep.balance_trigger_sats
+                {
+                    funds = available(&mut tx, registration, mint, true)
+                        .await?
+                        .context("sweep custody disappeared within transaction")?;
+                }
                 "balance"
             } else {
                 continue;

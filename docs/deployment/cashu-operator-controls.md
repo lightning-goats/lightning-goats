@@ -8,6 +8,11 @@ calculates its share from the Lightning sats received for the consumed
 contributions, including net Cashu deposits. Operator credits, fees and
 unconverted change do not increase that payout base.
 
+A balance-triggered sweep uses up to 128 receipts per mint. If the oldest
+128 fall short of the trigger while that mint's available balance reaches it,
+the planner selects the largest available receipts, breaking ties by ledger
+order. Age-triggered and operator-requested sweeps keep their original order.
+
 `lightning-goatsctl plan-cashu-settlement` previews or retains one bounded
 operator request through the existing source-allocation and treasury planner.
 It accepts no invoice, payment hash, destination, key or provider credential.

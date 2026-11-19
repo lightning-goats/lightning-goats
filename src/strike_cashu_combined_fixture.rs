@@ -191,7 +191,15 @@ mod combined_fixture {
                             self.round as i64 + 1
                         );
                         assert_eq!(self.ledger.feed_credit_sats().await?, self.expected_credit);
-                        assert!(self.ledger.begin_feed_attempt(1000).await?.is_none());
+                        let status = self.ledger.inspect_cashu_settlement(issued.intent.id).await?;
+                        assert!(!status.settlement_complete);
+                        if status.linked_feed_plan.is_some() {
+                            assert!(self.ledger.begin_feed_attempt(1000).await?.is_none());
+                        } else {
+                            // A later operator sweep is independent of the fully funded feed.
+                            assert_eq!(self.round, 1);
+                            assert_eq!(count(&self.pool, "feed_attempts").await?, 0);
+                        }
                         publish(
                             &self.root,
                             if self.round == 0 {
@@ -697,6 +705,8 @@ mod combined_fixture {
                 multi_mint || returned_change,
                 "residual mode requires returned change"
             );
+            let first = ledger.inspect_cashu_settlement(intent.id).await?;
+            assert_eq!(first.linked_feed_plan.unwrap().pending_sources_covered, Some(settle_change));
             if multi_mint {
                 assert!(ledger.begin_feed_attempt(1000).await?.is_none());
             }

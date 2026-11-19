@@ -89,8 +89,16 @@ class OverlayBrowserTests(unittest.TestCase):
                 decoded = zxingcpp.read_barcode(image)
                 self.assertIsNotNone(decoded)
                 self.assertEqual(decoded.text, request["request"])
-                lightning = self.page.locator("#qr-code").bounding_box()
-                cashu = self.page.locator("#cashu-image").bounding_box()
+                lightning_code = self.page.locator("#qr-code")
+                cashu_code = self.page.locator("#cashu-image")
+                lightning, cashu = lightning_code.bounding_box(), cashu_code.bounding_box()
+                lightning_payload = zxingcpp.read_barcode(Image.open(io.BytesIO(lightning_code.screenshot())))
+                self.assertIsNotNone(lightning_payload)
+                self.assertEqual(lightning_payload.text, lightning_code.get_attribute("data-lnurl"))
+                for dimension in ("width", "height"):
+                    self.assertAlmostEqual(lightning[dimension], cashu[dimension], places=2)
+                for code in (lightning_code, cashu_code):
+                    self.assertEqual(code.evaluate("node => getComputedStyle(node).borderRadius"), "18px")
                 lightning_label = self.page.locator("#lightning-label")
                 cashu_label = self.page.locator("#cashu-code span")
                 for code, label, name in [(lightning, lightning_label, "Lightning"),
@@ -101,7 +109,7 @@ class OverlayBrowserTests(unittest.TestCase):
                 self.assertAlmostEqual(cashu["x"] + cashu["width"],
                                        lightning["x"] + lightning["width"], places=2)
                 lightning_label_box = lightning_label.bounding_box()
-                self.assertGreater(cashu["y"], lightning_label_box["y"] + lightning_label_box["height"])
+                self.assertGreaterEqual(cashu["y"] - lightning_label_box["y"] - lightning_label_box["height"], 20)
                 boxes = self.page.locator("#cashu-code, #top-left-container, #qr-code, #feeding-state").evaluate_all("nodes => nodes.map(n => { const r=n.getBoundingClientRect(); return {x:r.x,y:r.y,right:r.right,bottom:r.bottom}; })")
                 for index, a in enumerate(boxes):
                     for b in boxes[index+1:]:
@@ -119,6 +127,7 @@ class OverlayBrowserTests(unittest.TestCase):
             self.assertFalse(self.page.locator("#cashu-code").is_visible())
             self.assertEqual(self.page.locator("#credit").inner_text(), "600 sats credit")
             self.assertEqual(self.page.locator("#qr-image svg").count(), 1)
+            self.assertEqual(self.page.locator("#qr-code").bounding_box()["width"], 180)
         self.snapshot(seq=4, cashu=valid)
         self.page.evaluate("window.mockSocket.close()")
         self.assertFalse(self.page.locator("#cashu-code").is_visible())

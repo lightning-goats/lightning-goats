@@ -415,8 +415,9 @@
         } catch { setFeedingState("unknown"); }
     }
     function showCashuRequest(descriptor) {
-        const frame = el("cashu-code"), image = el("cashu-image");
+        const frame = el("cashu-code"), image = el("cashu-image"), column = el("payment-column");
         frame.hidden = true; image.replaceChildren();
+        column.style.removeProperty("--payment-qr-size");
         // Presentation failure must not reset the financial event stream. Only
         // public receiving instructions belong here, never spendable tokens.
         if (!descriptor || descriptor.version !== 1 || descriptor.enabled !== true ||
@@ -435,8 +436,10 @@
             const scale = Math.max(3, Math.floor(300 / modules / 3) * 3);
             const side = modules * scale;
             if (side > 384) return;
-            const svg = qrSvg(qr); svg.style.width = svg.style.height = `${side}px`;
-            image.append(svg); frame.hidden = false;
+            // Keep the four-module quiet zone inside the rounded white panels.
+            image.append(qrSvg(qr));
+            column.style.setProperty("--payment-qr-size", `${side + 12}px`);
+            frame.hidden = false;
         } catch { /* Unrenderable metadata leaves the receiving QR hidden. */ }
     }
     function qrSvg(qr) {

@@ -215,6 +215,8 @@ async fn concurrent_ack_loss_and_conflicting_replay_never_reset_credit_or_caps()
 #[tokio::test]
 async fn held_earlier_cashu_does_not_block_later_native_sources_or_reward_provenance() {
     let (_dir, _url, store, policy) = fixture().await;
+    let owner = crate::nostr_event::test_event(1, 1, 100, "", vec![]).pubkey;
+    store.configure_feeding_notices(Some(&owner)).await.unwrap();
     let receipt = wire(&policy, 600);
     store
         .import_cashu_receipt(&policy, &authenticated(&policy, &receipt))
@@ -328,6 +330,21 @@ async fn held_earlier_cashu_does_not_block_later_native_sources_or_reward_proven
     .unwrap()
     .unwrap();
     assert_eq!(funding.strike_sats, 1000);
+    let batch = store.core_event_batch(None, 0, 128).await.unwrap();
+    let feeding = batch
+        .events
+        .iter()
+        .find_map(|event| match &event.body {
+            crate::core_bridge::EventBody::Feeding(feed) if feed.request_id == request => {
+                Some(feed)
+            }
+            _ => None,
+        })
+        .expect("the confirmed feed must reach CyberHerd");
+    assert_eq!(feeding.funding.as_ref(), Some(&funding));
+    let notice = feeding.presentation.as_ref().unwrap();
+    assert_eq!(notice.triggering_payment_amount_sats, Some(600));
+    assert_eq!(notice.feed_credit_sats, 700);
     let cashu_remaining:i64=sqlx::query_scalar("SELECT l.remaining_sats FROM reward_funding_lots l JOIN cashu_receipt_inbox c ON c.ledger_entry_id=l.ledger_id")
         .fetch_one(&store.pool).await.unwrap();
     assert_eq!(cashu_remaining, 600);

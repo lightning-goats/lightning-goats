@@ -140,7 +140,7 @@
             border-radius: 8px;
         }
 
-        .qr-code-overlay {
+        .qr-code-overlay, .cashu-code-overlay {
             position: absolute;
             /* OBS canvas 1920×1080: QR is 180×180 at top 3 / right 8. */
             top: 0.2777777778%;
@@ -156,6 +156,46 @@
             outline: none;
             box-shadow: none;
         }
+
+        .cashu-code-overlay {
+            /* Cashu QR on the 1920×1080 OBS canvas starts at y=247. */
+            top: 22.8703703704%;
+            padding: 0;
+        }
+
+        .cashu-code-overlay:focus-visible {
+            opacity: 1;
+            outline: 3px solid var(--lg-yellow);
+            outline-offset: 2px;
+        }
+
+        .feed-panel {
+            margin-top: 14px;
+            padding: 14px 16px;
+            border: 1px solid var(--lg-border);
+            border-radius: 8px;
+            background: #161412;
+        }
+
+        .feed-panel-heading, .feed-panel-actions {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px 14px;
+        }
+
+        .feed-panel-heading {
+            justify-content: space-between;
+        }
+
+        .feed-panel h2 { margin: 0; font-size: 1.2rem; }
+        #feedStatus { margin: 0; color: var(--lg-yellow); font-size: .875rem; }
+        #feedProgressLabel { margin: 8px 0 0; }
+        #feedProgress { width: 100%; height: .6rem; accent-color: var(--lg-yellow); }
+        .feed-panel-actions { margin-top: 12px; }
+        .feed-nutzap-link { color: var(--lg-yellow); }
+        .feed-nutzap-link:hover { color: #fff; }
+        #cashuQr { display: block; margin: 0 auto 12px; max-width: 100%; height: auto; }
 
         .chat-panel {
             min-width: 0;
@@ -590,8 +630,25 @@
                             class="qr-code-overlay"
                             aria-label="Send Lightning to herd@lightning-goats.com"
                         ></a>
+                        <button class="cashu-code-overlay" type="button" aria-label="Pay with Cashu"
+                            data-bs-toggle="modal" data-bs-target="#cashuModal" hidden></button>
                     </div>
                 </div>
+                <section id="feedPanel" class="feed-panel" aria-labelledby="feedPanelTitle" hidden>
+                    <div class="feed-panel-heading">
+                        <h2 id="feedPanelTitle">Feed the Goats</h2>
+                        <p id="feedStatus" role="status">Checking feeder status…</p>
+                    </div>
+                    <p id="feedProgressLabel">Loading feed credit…</p>
+                    <progress id="feedProgress" aria-label="Sats toward the next feeding" hidden></progress>
+                    <div class="feed-panel-actions">
+                        <button id="feedLightningButton" class="btn btn-warning" type="button">Lightning</button>
+                        <button id="feedCashuButton" class="btn btn-outline-light" type="button"
+                            data-bs-toggle="modal" data-bs-target="#cashuModal">Cashu</button>
+                        <a class="feed-nutzap-link" target="_blank" rel="noopener noreferrer"
+                            href="https://njump.me/nevent1qqsz972laf2re3qs9mkuvcrwv240ekkn5k3s3zmqsclczycgzmqcrxspzemhxue69uhhyetvv9ujuurjd9kkzmpwdejhgqghwaehxw309aex2mrp0yhxzun50qhx6ctjddjhgq3qv60thnx0gz0wq3n6xdnq46y069l9x70xgmjp6lprdl6fv0eux6mqh70zpp">Send a Nutzap on Nostr</a>
+                    </div>
+                </section>
             </section>
 
             <aside class="chat-panel" aria-label="Nostr live chat">
@@ -652,7 +709,7 @@
         </main>
 
         <p class="lg-title">
-            Lightning payments build feed credit for the herd. Feeding follows the local override and safety controls.
+            Lightning and Cashu payments build feed credit for the herd. Feeding follows the local override and safety controls.
             <br>
             The Lightning Goats bitcoin-powered interactive goat feeder is open for business from morning to evening Mountain Time.
             Use <a href="/feed.html">native Lightning payments</a> or send sats to:
@@ -725,10 +782,34 @@
         </div>
     </div>
 
+    <div class="modal fade" id="cashuModal" tabindex="-1" aria-labelledby="cashuModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="cashuModalLabel">Pay with Cashu</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Use a compatible wallet funded with sats from the Minibits mint. Enter the amount in your wallet.</p>
+                    <div id="cashuRequestWrap" hidden>
+                        <img id="cashuQr" width="252" height="252" alt="Scan for the Lightning Goats Cashu payment request">
+                        <textarea id="cashuRequest" class="zap-invoice" readonly aria-label="Cashu payment request"></textarea>
+                    </div>
+                    <div id="cashuStatus" class="small mt-2" role="status"></div>
+                </div>
+                <div class="modal-footer">
+                    <button id="cashuRetryButton" type="button" class="btn btn-outline-light" hidden>Try again</button>
+                    <button id="cashuCopyButton" type="button" class="btn btn-warning" hidden>Copy payment request</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="/site-config.js"></script>
     <script src="/vendor/bootstrap.bundle.min.js"></script>
     <script src="/vendor/qrcode.js"></script>
     <script src="/lightning-payment.js"></script>
+    <script src="/homepage-payments.js" defer></script>
 
     <!-- Preserve an injected NIP-07 provider before nostr-login installs its fallback wrapper. -->
     <script>
@@ -1676,11 +1757,13 @@
             bootstrap.Modal.getOrCreateInstance(document.getElementById("zapModal")).show();
         }
         elements.zapButton.addEventListener("click", () => showPayment("goal"));
-        document.querySelector(".qr-code-overlay").addEventListener("click", (event) => {
+        function openHerdPayment(event) {
             if (window.LightningGoatsSite?.paymentsEnabled !== true) return;
             event.preventDefault();
             showPayment("herd");
-        });
+        }
+        document.querySelector(".qr-code-overlay").addEventListener("click", openHerdPayment);
+        document.getElementById("feedLightningButton").addEventListener("click", openHerdPayment);
         elements.zapCreateButton.disabled = window.LightningGoatsSite?.paymentsEnabled !== true;
         elements.zapAmount.addEventListener("input", () => {
             if (paymentPending) return;

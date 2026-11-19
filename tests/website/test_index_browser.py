@@ -3,6 +3,7 @@
 Zap fixtures use the shipped native Schnorr implementation for both signatures.
 Their BOLT11 strings exercise the receipt display parser, not invoice settlement.
 """
+import io
 import json
 import mimetypes
 import os
@@ -11,11 +12,14 @@ import unittest
 from urllib.parse import urlsplit
 
 from playwright.sync_api import sync_playwright
+from PIL import Image
+import zxingcpp
 
 ROOT = Path(__file__).resolve().parents[2] / "web"
 ORIGIN = "https://lightning-goats.com"
 LG = "669ebbcccf409ee0467a33660ae88fd17e5379e646e41d7c236ff4963f3c36b6"
 INVOICE = "lnbc10u1" + "q" * 120
+CASHU_REQUEST = json.loads((Path(__file__).parent / "fixtures/cashu-requests.json").read_text())["requests"]["creqA"]
 POOL = """
 window.mockSubscriptions = [];
 class FixturePool {
@@ -82,6 +86,13 @@ class IndexBrowserTests(unittest.TestCase):
         self.page.on("pageerror", lambda error: self.errors.append(str(error)))
         self.invoices = []
         self.native = False
+        self.cashu = {**CASHU_REQUEST, "enabled": True}
+        self.cashu_requests = []
+        self.feed_status = {
+            "mode": "active", "gateway_reachable": True, "remote_feeding_enabled": True,
+            "feeder_override_active": False, "unresolved_feed_attempt": None,
+            "feed_credit_sats": 101, "threshold_sats": 1000,
+        }
 
     def route(self, route):
         url = urlsplit(route.request.url)
@@ -106,6 +117,14 @@ class IndexBrowserTests(unittest.TestCase):
             route.fulfill(content_type="application/json", body=json.dumps({"pr": INVOICE}))
         elif path == "/api/v1/cyberherd":
             route.fulfill(status=503, content_type="application/json", body="{}")
+        elif path == "/api/v1/cashu/request":
+            self.cashu_requests.append((route.request.method, url.query))
+            if self.cashu is None:
+                route.fulfill(status=503, content_type="application/json", body="{}")
+            else:
+                route.fulfill(content_type="application/json", body=json.dumps(self.cashu))
+        elif path == "/api/v1/status":
+            route.fulfill(content_type="application/json", body=json.dumps(self.feed_status))
         else:
             file = ROOT / ("index.html" if path == "/" else path.lstrip("/"))
             if file.is_file() and file.resolve().is_relative_to(ROOT):
@@ -156,6 +175,57 @@ class IndexBrowserTests(unittest.TestCase):
         self.assertEqual(len(self.invoices), 1)
         self.assertEqual(self.page.locator("#zapWalletButton").get_attribute("href"), "lightning:" + INVOICE)
         self.assertTrue(self.page.locator("#zapQr").is_visible())
+        self.assertEqual(self.errors, [])
+
+    def test_cashu_video_target_matches_stream_and_opens_case_sensitive_request(self):
+        self.context.grant_permissions(["clipboard-read", "clipboard-write"], origin=ORIGIN)
+        self.page.set_viewport_size({"width": 1440, "height": 900})
+        self.open()
+        video = self.page.locator("#video-container").bounding_box()
+        cashu = self.page.get_by_role("button", name="Pay with Cashu", exact=True)
+        self.assertTrue(cashu.is_visible())
+        lower = cashu.bounding_box()
+        upper = self.page.locator(".qr-code-overlay").bounding_box()
+        self.assertAlmostEqual(lower["x"], upper["x"], delta=.05)
+        self.assertAlmostEqual(lower["y"] - video["y"], video["height"] * 247 / 1080, delta=.05)
+        self.assertAlmostEqual(lower["width"], video["width"] * 180 / 1920, delta=.05)
+        self.assertGreater(lower["y"], upper["y"] + upper["height"])
+        self.assertEqual(self.cashu_requests, [])
+        cashu.click()
+        self.page.locator("#cashuCopyButton").wait_for(state="visible")
+        qr = zxingcpp.read_barcode(Image.open(io.BytesIO(self.page.locator("#cashuQr").screenshot())))
+        self.assertIsNotNone(qr)
+        self.assertEqual(qr.text, CASHU_REQUEST["request"])
+        self.page.locator("#cashuCopyButton").click()
+        self.page.get_by_text("Payment request copied.", exact=True).wait_for()
+        self.assertEqual(self.page.evaluate("navigator.clipboard.readText()"), CASHU_REQUEST["request"])
+        self.assertEqual(self.cashu_requests, [("GET", "")])
+        self.assertEqual(self.invoices, [])
+        self.assertEqual(self.errors, [])
+
+    def test_mobile_feed_card_handles_cashu_outage_and_preserves_lightning(self):
+        self.cashu = None
+        self.feed_status["feeder_override_active"] = True
+        self.page.set_viewport_size({"width": 390, "height": 844})
+        self.open()
+        self.page.get_by_text("899 sats to the next feeding", exact=True).wait_for()
+        self.assertEqual(self.page.locator("#feedStatus").inner_text(), "Feeding paused")
+        panel = self.page.locator("#feedPanel").bounding_box()
+        chat = self.page.locator(".chat-panel").bounding_box()
+        self.assertLess(panel["y"] + panel["height"], chat["y"])
+        self.assertTrue(self.page.get_by_role("link", name="Send a Nutzap on Nostr").is_visible())
+        self.page.locator("#feedCashuButton").click()
+        self.page.get_by_text("Cashu is temporarily unavailable. You can still pay with Lightning.", exact=True).wait_for()
+        self.assertTrue(self.page.locator("#cashuRequestWrap").is_hidden())
+        self.cashu = {**CASHU_REQUEST, "enabled": True}
+        self.page.locator("#cashuRetryButton").click()
+        self.page.locator("#cashuCopyButton").wait_for(state="visible")
+        self.assertEqual(self.page.locator("#cashuRequest").input_value(), CASHU_REQUEST["request"])
+        self.page.locator("#cashuModal").get_by_role("button", name="Close").click()
+        self.page.locator("#cashuModal").wait_for(state="hidden")
+        self.page.locator("#feedLightningButton").click()
+        self.page.locator("#zapModal").wait_for(state="visible")
+        self.assertEqual(self.invoices, [])
         self.assertEqual(self.errors, [])
 
     def test_real_signed_herd_zaps_are_safe_deduplicated_and_forgery_refused(self):

@@ -389,6 +389,16 @@ The latter mock services/native calls; root UID/native-store qualification runs
 separately. Combined installed-systemd, provider/recipient, recovery adoption and
 explicit production activation remain separate acceptance requirements.
 
+## Homepage Cashu payments
+
+For the public homepage, verify that the lower Cashu hit target scales with
+the embedded 1920 × 1080 stream and stays separate from the upper Lightning
+target. Both the Cashu video target and the feed card must open the same
+live payment request. Decode the QR and compare the copied value byte for
+byte. Check the mobile layout, shared feeder progress and paused status,
+and the original Lightning flow during a Cashu request outage. The browser
+fixture uses public metadata and does not send payments.
+
 ## Dated Cashu exception: private operational health
 
 For the [Cashu implementation plan](../planning/cashu-nutnovember-implementation-plan.md),

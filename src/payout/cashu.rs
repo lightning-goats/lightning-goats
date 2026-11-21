@@ -6,6 +6,10 @@ use sha2::{Digest, Sha256};
 #[derive(Deserialize)]
 #[serde(tag = "state", rename_all = "UPPERCASE", deny_unknown_fields)]
 pub enum CollectorResult {
+    Unquoted,
+    Unpaid {
+        quote: String,
+    },
     Pending {
         quote: String,
     },
@@ -27,7 +31,8 @@ impl CollectorResult {
         fee_limit: u64,
     ) -> Result<Option<u64>> {
         let quote = match self {
-            Self::Pending { quote } | Self::Paid { quote, .. } => quote,
+            Self::Unquoted => return Ok(None),
+            Self::Unpaid { quote } | Self::Pending { quote } | Self::Paid { quote, .. } => quote,
         };
         ensure!(
             !quote.is_empty() && quote.len() <= 1024 && !quote.chars().any(char::is_control),
@@ -56,10 +61,83 @@ impl CollectorResult {
     }
 }
 
+/// Query the saved disposition over the collector socket. This request contains
+/// no grant allocations and cannot create a quote or submit proofs.
+#[cfg(unix)]
+pub async fn lookup(
+    socket: &std::path::Path,
+    peer_uid: u32,
+    invoice: &super::invoice::ValidatedInvoice,
+    fee_limit: u64,
+) -> Result<CollectorResult> {
+    let reply =
+        lookup_disposition(socket, peer_uid, invoice.intent_id(), invoice.encoded()).await?;
+    reply.verified_fee(invoice.payment_hash(), invoice.amount_sats(), fee_limit)?;
+    Ok(reply)
+}
+
+#[cfg(unix)]
+async fn lookup_disposition(
+    socket: &std::path::Path,
+    peer_uid: u32,
+    id: uuid::Uuid,
+    invoice: &str,
+) -> Result<CollectorResult> {
+    crate::private_ipc::socket_path(socket)?;
+    crate::private_ipc::request(
+        socket,
+        peer_uid,
+        &serde_json::json!({"reconcile_disposition":id,"invoice":invoice}),
+        65536,
+        30,
+    )
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn lookup_sends_only_the_original_identity_and_invoice() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("collector.sock");
+        let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+        let uid = crate::private_ipc::uid().unwrap();
+        let id = uuid::Uuid::new_v4();
+        let server = tokio::spawn(async move {
+            for state in [
+                json!({"state":"UNQUOTED"}),
+                json!({"state":"UNPAID","quote":"saved"}),
+            ] {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let request: serde_json::Value =
+                    crate::private_ipc::read(&mut stream, 65536).await.unwrap();
+                assert_eq!(
+                    request,
+                    json!({"reconcile_disposition":id,"invoice":"fixture"})
+                );
+                crate::private_ipc::write(&mut stream, &state, 65536)
+                    .await
+                    .unwrap();
+            }
+        });
+        assert!(matches!(
+            lookup_disposition(&socket, uid, id, "fixture")
+                .await
+                .unwrap(),
+            CollectorResult::Unquoted
+        ));
+        assert!(matches!(
+            lookup_disposition(&socket, uid, id, "fixture")
+                .await
+                .unwrap(),
+            CollectorResult::Unpaid { .. }
+        ));
+        server.await.unwrap();
+    }
 
     #[test]
     fn only_an_exact_paid_receipt_reports_a_fee() {

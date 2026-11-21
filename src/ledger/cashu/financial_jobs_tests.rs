@@ -280,6 +280,18 @@ async fn project_treasury_invoice_reopens_without_issuing_or_crediting_again() {
     let issued = ledger.issue_breez_treasury_invoice(&collector, &registration, &policy, intent.id).await.unwrap();
     server.await.unwrap();
     assert_eq!(issued.invoice, invoice);
+    let fee = intent.maximum_fee_sats.min(1);
+    let change = intent.input_sats - intent.deposit_sats - fee;
+    let report = lightning_goats_cashu_receipt::treasury::MeltData {
+        version: 1, intent_id: intent.id, intent_digest: digest,
+        quote_id: "original-foreign-mint-quote".into(), operation_evidence_digest: "ef".repeat(32),
+        sources: intent.allocate_result(fee, change).unwrap(),
+    };
+    let report = crate::cashu::treasury::PeerMelt::authenticate(&registration,
+        &crate::cashu::receipt_authority::fixture_peer(&registration),
+        &serde_json::to_vec(&report).unwrap()).unwrap();
+    assert!(!ledger.record_cashu_melt_result(&registration, &report).await.unwrap());
+    assert_eq!(count(&ledger, "breez_treasury_source_results").await, 0);
     drop(ledger);
     let ledger = LedgerStore::connect(&url).await.unwrap();
     assert_eq!(ledger.issue_breez_treasury_invoice(&collector, &registration, &policy, intent.id)
@@ -297,6 +309,10 @@ async fn project_treasury_invoice_reopens_without_issuing_or_crediting_again() {
     });
     assert!(ledger.poll_breez_claim(&collector).await.unwrap());
     server.await.unwrap();
+    assert!(ledger.record_cashu_melt_result(&registration, &report).await.unwrap());
+    let amounts: (i64,i64,i64) = sqlx::query_as("SELECT deposit_sats,fee_sats,change_sats FROM breez_treasury_source_results WHERE intent_id=?")
+        .bind(intent.id.to_string()).fetch_one(&ledger.pool).await.unwrap();
+    assert_eq!(amounts, (intent.deposit_sats as i64, fee as i64, change as i64));
     assert_eq!(count(&ledger, "breez_collected_claims").await, 1);
     assert!(!ledger.poll_breez_claim(&collector).await.unwrap());
     assert!(ledger.record_payment(&SettledPayment {

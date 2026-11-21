@@ -39,12 +39,14 @@ pub(super) fn tables_for_core(version: i64) -> impl Iterator<Item = &'static str
     CASHU_TABLES
         .into_iter()
         .chain([
+            "breez_treasury_wallet_results",
             "cashu_payout_execution_claims",
             "retained_cashu_lots",
             "breez_collected_claims",
             "breez_project_invoices",
         ])
         .filter(move |name| match *name {
+            "breez_treasury_wallet_results" => version >= 32,
             "cashu_payout_execution_claims" => version >= 31,
             "retained_cashu_lots" | "breez_collected_claims" | "breez_project_invoices" => {
                 version >= 30
@@ -128,6 +130,13 @@ pub(super) async fn apply_breez_catalog(
     if version >= 31 {
         sqlx::raw_sql(include_str!(
             "../../migrations/0031_cashu_payout_execution.sql"
+        ))
+        .execute(&pool)
+        .await?;
+    }
+    if version >= 32 {
+        sqlx::raw_sql(include_str!(
+            "../../migrations/0032_project_conversion_results.sql"
         ))
         .execute(&pool)
         .await?;

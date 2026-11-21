@@ -319,6 +319,37 @@ impl LedgerStore {
             .context("unknown treasury intent")?;
         let data = report.validate(registration, &intent)?;
         let digest = hex_digest(data.digest()?);
+        if intent.destination.origin == "https://mint.lightning-goats.com/" {
+            let id = intent.id.to_string();
+            let changed = sqlx::query(
+                "INSERT INTO breez_treasury_wallet_results(intent_id,result_digest,result_json,observed_at)
+                 SELECT i.id,?,?,MAX(unixepoch(),?,COALESCE((SELECT MAX(observed_at) FROM breez_treasury_wallet_results),0))
+                 FROM breez_project_invoices i WHERE i.id=? AND i.invoice IS NOT NULL
+                   AND json_extract(i.intent,'$.purpose')='treasury_conversion'
+                   AND json_extract(i.intent,'$.description_hash')=? AND json_extract(i.intent,'$.amount_sat')=?
+                 ON CONFLICT(intent_id) DO NOTHING")
+                .bind(&digest).bind(serde_json::to_string(data)?).bind(report.fee_recorded_at().unwrap_or(0))
+                .bind(&id).bind(&data.intent_digest).bind(to_i64(intent.deposit_sats,"conversion amount")?)
+                .execute(&mut *tx).await?;
+            if changed.rows_affected() == 0 {
+                let row = sqlx::query("SELECT result_digest,observed_at FROM breez_treasury_wallet_results WHERE intent_id=?")
+                    .bind(&id).fetch_one(&mut *tx).await?;
+                ensure!(
+                    row.try_get::<String, _>("result_digest")? == digest
+                        && report.fee_recorded_at().unwrap_or(0)
+                            <= row.try_get::<i64, _>("observed_at")?,
+                    "conflicting conversion wallet result"
+                );
+            }
+            let ready: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM breez_treasury_source_results WHERE intent_id=?)",
+            )
+            .bind(&id)
+            .fetch_one(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            return Ok(ready);
+        }
         if let Some(previous) = sqlx::query_scalar::<_, String>(
             "SELECT result_digest FROM cashu_treasury_wallet_results WHERE intent_id=?",
         )

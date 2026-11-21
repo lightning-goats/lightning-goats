@@ -1011,6 +1011,27 @@ async fn complete_bounded_pages_qualify_actual_p2p_amounts_and_exclude_virtual_f
 }
 
 #[tokio::test]
+async fn missing_retained_cashu_evidence_rejects_the_last_page() {
+    let f = Fixture::new().await;
+    let (verifier, task) = verifier(&f, None, "0.00000001").await;
+    let mut first = f.page(0, true).await;
+    first.funding.retained_cashu_sats = 1;
+    let mut page = authenticate(first).await;
+    let mut session = Session::new(f.expected(), &page).unwrap();
+    while page.page().more {
+        session.accept(&page, &verifier).await.unwrap();
+        let mut next = f.page(session.after(), true).await;
+        next.funding.retained_cashu_sats = 1;
+        page = authenticate(next).await;
+    }
+    let cursor = session.after();
+    assert!(session.accept(&page, &verifier).await.is_err());
+    assert_eq!(session.after(), cursor);
+    assert!(!session.is_complete());
+    task.abort();
+}
+
+#[tokio::test]
 async fn failed_provider_read_rolls_back_page_progress_and_retry_checks_same_sources() {
     let f = Fixture::new().await;
     let first = f.page(0, true).await;

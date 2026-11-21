@@ -159,6 +159,7 @@ pub struct Session {
     through: i64,
     total_sats: u64,
     real_sats: u64,
+    retained_cashu_sats: u64,
     count: usize,
     done: bool,
     provider: Option<ProviderScope>,
@@ -194,6 +195,7 @@ impl Session {
             through: 0,
             total_sats: 0,
             real_sats: 0,
+            retained_cashu_sats: 0,
             count: 0,
             done: false,
             provider: None,
@@ -234,12 +236,18 @@ impl Session {
         }
         let mut total = self.total_sats;
         let mut real = self.real_sats;
+        let mut retained = self.retained_cashu_sats;
         let mut sources = Vec::new();
         let mut seen = self.seen.clone();
         for part in &p.parts {
             total = total
                 .checked_add(part.consumed_sats)
                 .context("funding sum overflow")?;
+            if part.cashu_anchor.is_some() {
+                retained = retained
+                    .checked_add(part.consumed_sats)
+                    .context("retained Cashu funding sum overflow")?;
+            }
             if let Some(anchor) = &part.anchor {
                 if !seen.insert(anchor.receive_id) {
                     bail!("same provider receive appears in multiple consumed lots");
@@ -259,13 +267,18 @@ impl Session {
         }
         if total > self.threshold_sats
             || real > self.funding.strike_sats
-            || (!p.more && (total != self.threshold_sats || real != self.funding.strike_sats))
+            || retained > self.funding.retained_cashu_sats
+            || (!p.more
+                && (total != self.threshold_sats
+                    || real != self.funding.strike_sats
+                    || retained != self.funding.retained_cashu_sats))
         {
             bail!("incomplete or excessive payout funding sequence");
         }
         self.through = p.through;
         self.total_sats = total;
         self.real_sats = real;
+        self.retained_cashu_sats = retained;
         self.count += p.parts.len();
         self.done = !p.more;
         self.provider = Some(verifier.scope.clone());

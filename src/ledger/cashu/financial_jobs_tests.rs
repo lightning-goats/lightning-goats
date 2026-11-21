@@ -225,6 +225,10 @@ async fn local_ecash_funds_confirmed_feeding_and_only_legacy_lots_can_be_swept()
     let request = reopened.begin_feed_attempt(1000).await.unwrap().unwrap();
     reopened.confirm_feed_attempt(request).await.unwrap();
     assert_eq!(reopened.feed_credit_sats().await.unwrap(),400);
+    let mut tx = reopened.pool.begin().await.unwrap();
+    let funding = crate::ledger::inspect_confirmed_reward_funding(&mut tx,request).await.unwrap().unwrap();
+    assert_eq!((funding.strike_sats,funding.retained_cashu_sats),(0,1000));
+    tx.rollback().await.unwrap();
     assert_eq!(count(&reopened,"cashu_treasury_intents").await,0);
     let sweep=crate::cashu::treasury_sweep::Request {id:Uuid::new_v4(),mint_id:"mint-a".into(),maximum_input_sats:1000};
     let planned=reopened.plan_operator_cashu_settlement(&policy,&feed_treasury_policy(),&sweep,false).await.unwrap().unwrap();

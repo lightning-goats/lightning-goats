@@ -75,11 +75,38 @@ impl StrikeFundingAnchor {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CashuFundingSource {
+    ProjectInvoice,
+    Acquisition,
+}
+
+/// Private custody evidence for the separate payout role. No bearer proof is exported.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct CashuFundingAnchor {
+    pub source: CashuFundingSource,
+    pub claim_id: Uuid,
+    pub evidence_digest: String,
+}
+
+impl CashuFundingAnchor {
+    fn validate(&self) -> Result<()> {
+        if self.claim_id.is_nil() {
+            bail!("missing Cashu claim identity");
+        }
+        crate::nostr_event::validate_hex(&self.evidence_digest, 32)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct FundingPart {
     pub ledger_id: i64,
     pub consumed_sats: u64,
     pub anchor: Option<StrikeFundingAnchor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cashu_anchor: Option<CashuFundingAnchor>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -125,6 +152,12 @@ impl FundingPage {
         for part in &self.parts {
             if part.ledger_id <= cursor || part.consumed_sats == 0 {
                 bail!("funding page is not strictly ordered");
+            }
+            if let Some(anchor) = &part.cashu_anchor {
+                if part.anchor.is_some() || part.consumed_sats > self.funding.retained_cashu_sats {
+                    bail!("invalid retained Cashu funding part");
+                }
+                anchor.validate()?;
             }
             if let Some(anchor) = &part.anchor {
                 anchor.validate()?;
@@ -180,6 +213,8 @@ impl RewardPolicy {
 #[serde(deny_unknown_fields)]
 pub struct Funding {
     pub strike_sats: u64,
+    #[serde(default, skip_serializing_if = "zero_sats")]
+    pub retained_cashu_sats: u64,
     pub proof_hash: String,
 }
 
@@ -217,9 +252,17 @@ impl Allowance {
     }
 }
 
+fn zero_sats(amount: &u64) -> bool {
+    *amount == 0
+}
+
 impl Funding {
     pub fn validate(&self, threshold_sats: u64) -> Result<()> {
-        if self.strike_sats > threshold_sats {
+        if self
+            .strike_sats
+            .checked_add(self.retained_cashu_sats)
+            .is_none_or(|total| total > threshold_sats)
+        {
             bail!("funding exceeds confirmed debit");
         }
         crate::nostr_event::validate_hex(&self.proof_hash, 32)

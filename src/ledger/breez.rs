@@ -98,6 +98,7 @@ mod tests {
             directory.path().join("core.sqlite").display()
         );
         let ledger = LedgerStore::connect(&url).await.unwrap();
+        ledger.initialize_reward_funding().await.unwrap();
         let id = Uuid::new_v4();
         let hash = "ac".repeat(32);
         let terms = json!({"amount_sat":10,"user":"dexter","credit_pool":"herd","zap":false});
@@ -143,5 +144,14 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(user, "dexter");
+        let feed = reopened.begin_feed_attempt(10).await.unwrap().unwrap();
+        reopened.confirm_feed_attempt(feed).await.unwrap();
+        let mut tx = reopened.pool.begin().await.unwrap();
+        let funding = crate::ledger::inspect_confirmed_reward_funding(&mut tx, feed)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!((funding.strike_sats, funding.retained_cashu_sats), (0, 10));
+        tx.rollback().await.unwrap();
     }
 }

@@ -9,8 +9,8 @@ use uuid::Uuid;
 use super::cashu::feed_proceeds;
 use super::{LedgerStore, to_i64, to_u64};
 use crate::reward_funding::{
-    Allowance, Funding, FundingPage, FundingPart, MAX_FUNDING_PARTS, Reservation, RewardPolicy,
-    StrikeFundingAnchor,
+    Allowance, CashuFundingAnchor, CashuFundingSource, Funding, FundingPage, FundingPart,
+    MAX_FUNDING_PARTS, Reservation, RewardPolicy, StrikeFundingAnchor,
 };
 
 impl LedgerStore {
@@ -105,10 +105,16 @@ impl LedgerStore {
                     None
                 }
             };
+            let cashu_anchor = if anchor.is_none() && funding.retained_cashu_sats > 0 {
+                retained_anchor(&mut tx, ledger_id).await?
+            } else {
+                None
+            };
             parts.push(FundingPart {
                 ledger_id,
                 consumed_sats: to_u64(row.try_get("sats")?, "consumed sats")?,
                 anchor,
+                cashu_anchor,
             });
             through = ledger_id;
         }
@@ -581,6 +587,7 @@ async fn consume(
             if kind == "strike_btc" {
                 strike = strike.checked_add(take).context("real funding overflow")?;
             } else if let Some((id, _)) = feed {
+                hash_retained_claim(tx, ledger, take, &mut hash).await?;
                 feed_proceeds::freeze(tx, id, ledger).await?;
                 add_proceeds(tx, id, ledger, &mut hash, &mut strike).await?;
             }
@@ -591,6 +598,64 @@ async fn consume(
         }
     }
     Ok((strike, hex::encode(hash.finalize())))
+}
+
+/// Bind confirmed consumption to the project-owned proof evidence. Neither an
+/// invoice alone nor an ordinary viewer mint quote can contribute here.
+async fn hash_retained_claim(
+    tx: &mut Transaction<'_, Sqlite>,
+    ledger: i64,
+    sats: u64,
+    hash: &mut Sha256,
+) -> Result<u64> {
+    if let Some(anchor) = retained_anchor(tx, ledger).await? {
+        hash_part(
+            hash,
+            &json!([
+                "retained_cashu",
+                ledger,
+                anchor.source,
+                anchor.claim_id,
+                anchor.evidence_digest,
+                sats
+            ]),
+        )?;
+        return Ok(sats);
+    }
+    Ok(0)
+}
+
+async fn retained_anchor(
+    tx: &mut Transaction<'_, Sqlite>,
+    ledger: i64,
+) -> Result<Option<CashuFundingAnchor>> {
+    let evidence: Option<(String, String, String)> = sqlx::query_as(
+        "SELECT 'project_invoice',q.id,c.proof_digest FROM ledger_entries l
+         JOIN breez_project_invoices q ON q.id=l.payment_source_id AND q.payment_hash=l.payment_hash
+         JOIN breez_collected_claims c ON c.request_id=q.id
+         WHERE l.id=?1 AND l.entry_type='HERD_RECEIPT' AND l.payment_source='breez'
+         UNION ALL
+         SELECT 'acquisition',i.acquisition_id,i.evidence_digest FROM cashu_receipt_inbox i
+         JOIN retained_cashu_lots g ON g.ledger_id=i.ledger_entry_id WHERE g.ledger_id=?1",
+    )
+    .bind(ledger)
+    .fetch_optional(&mut **tx)
+    .await?;
+    evidence
+        .map(|(source, id, digest)| {
+            crate::nostr_event::validate_hex(&digest, 32)?;
+            let source = match source.as_str() {
+                "project_invoice" => CashuFundingSource::ProjectInvoice,
+                "acquisition" => CashuFundingSource::Acquisition,
+                _ => bail!("invalid retained funding source"),
+            };
+            Ok(CashuFundingAnchor {
+                source,
+                claim_id: id.parse()?,
+                evidence_digest: digest,
+            })
+        })
+        .transpose()
 }
 
 async fn add_proceeds(
@@ -643,7 +708,8 @@ pub(crate) async fn confirmed_funding(
     {
         bail!("reward proof lost its confirmed debit");
     }
-    let has_cashu_proceeds = super::core_schema_version(tx).await? >= 29;
+    let schema = super::core_schema_version(tx).await?;
+    let mut retained_cashu_sats = 0u64;
     let mut hash = manifest(id, row.try_get("debit_id")?, total)?;
     let mut cursor = 0;
     let mut sum = 0u64;
@@ -671,13 +737,19 @@ pub(crate) async fn confirmed_funding(
                     .checked_add(sats)
                     .context("real funding sum overflow")?;
             }
-            if has_cashu_proceeds && kind != "strike_btc" {
+            if schema >= 30 && kind != "strike_btc" {
+                retained_cashu_sats = retained_cashu_sats
+                    .checked_add(hash_retained_claim(tx, ledger, sats, &mut hash).await?)
+                    .context("retained Cashu funding overflow")?;
+            }
+            if schema >= 29 && kind != "strike_btc" {
                 add_proceeds(tx, id, ledger, &mut hash, &mut strike).await?;
             }
             cursor = ledger;
         }
     }
     let funding = Funding {
+        retained_cashu_sats,
         strike_sats: strike,
         proof_hash: hex::encode(hash.finalize()),
     };

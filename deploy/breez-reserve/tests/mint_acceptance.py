@@ -402,7 +402,8 @@ def main():
                 funded = create({"claim_status": funded_id}, claims, None, None, None)
                 payment_id = str(uuid.uuid4())
                 digest = bolt11.decode(reserve.destination[0]).payment_hash
-                [payout_proof] = claims.reserve_payout(payment_id, str(uuid.uuid4()), digest, 12, 4,
+                payout_feed = str(uuid.uuid4())
+                [payout_proof] = claims.reserve_payout(payment_id, payout_feed, digest, 12, 4,
                     {funded_id: {"consumed_sats": 16, "evidence_digest": funded["proof_digest"]}})
                 class CrashBeforeDispatch:
                     get = viewer.get
@@ -458,10 +459,13 @@ def main():
                 fee, saved_change = claims.db.execute("""
                     SELECT fee_sat,change_proofs FROM payout_melt_result WHERE disposition_id=?
                 """, (payment_id,)).fetchone()
+                selected_change = claims.reserve_payout(str(uuid.uuid4()), payout_feed, "55"*32, 3, 0,
+                    {funded_id: {"consumed_sats": 16, "evidence_digest": funded["proof_digest"]}})
+                assert {p["secret"] for p in selected_change} == {p["secret"] for p in json.loads(saved_change)}
                 claims.db.close()
                 assert fee == 1
                 spend_change, _ = new_outputs(keyset, [1, 2])
-                expect(viewer.post("/v1/swap", json={"inputs": json.loads(saved_change),
+                expect(viewer.post("/v1/swap", json={"inputs": selected_change,
                                                      "outputs": encode_outputs(spend_change)}))
                 assert final_melt["state"].upper() == "PAID", final_melt
                 assert sum(change["amount"] for change in final_melt["change"]) == 3

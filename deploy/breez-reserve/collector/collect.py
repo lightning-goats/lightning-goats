@@ -82,6 +82,9 @@ def collect(store, client, request_id, pinned_keys):
 
 def execute_payout(store, client, request, keyset, pinned_keys):
     """Execute an authenticated payout worker request using its admitted grant evidence."""
+    if set(request) == {"reconcile_disposition", "invoice"}:
+        return submit_payout(store, client, request["reconcile_disposition"], request["invoice"],
+                             keyset, pinned_keys, reconcile_only=True)
     if set(request) != {"disposition_id", "feed_id", "invoice", "payment_hash", "amount_sat",
                         "maximum_fee_sat", "retained_allocations"}:
         raise ValueError("invalid payout request")
@@ -110,15 +113,15 @@ def execute_payout(store, client, request, keyset, pinned_keys):
     return {"state": result["state"], "quote": result["quote"]}
 
 
-def submit_payout(store, client, disposition_id, invoice_text, keyset, pinned_keys):
+def submit_payout(store, client, disposition_id, invoice_text, keyset, pinned_keys, *, reconcile_only=False):
     """Serialize dispatch and recovery across processes sharing this custody journal."""
     database = Path(store.db.execute("PRAGMA database_list").fetchone()[2])
     with database.with_suffix(".melt.lock").open("ab") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        return _submit_payout(store, client, disposition_id, invoice_text, keyset, pinned_keys)
+        return _submit_payout(store, client, disposition_id, invoice_text, keyset, pinned_keys, reconcile_only)
 
 
-def _submit_payout(store, client, disposition_id, invoice_text, keyset, pinned_keys):
+def _submit_payout(store, client, disposition_id, invoice_text, keyset, pinned_keys, reconcile_only):
     row = store.db.execute(
         "SELECT binding FROM proof_disposition WHERE id=? AND purpose='cyberherd_payout'",
         (disposition_id,),
@@ -147,6 +150,8 @@ def _submit_payout(store, client, disposition_id, invoice_text, keyset, pinned_k
     prior = store.db.execute("SELECT quote_id FROM payout_melt WHERE disposition_id=?",
                              (disposition_id,)).fetchone()
     if prior is None:
+        if reconcile_only:
+            return {"state": "UNQUOTED"}
         if invoice.expiry_time <= time.time():
             raise ValueError("expired payout invoice")
         status = client.post("/v1/melt/quote/bolt11", json={
@@ -204,7 +209,11 @@ def _submit_payout(store, client, disposition_id, invoice_text, keyset, pinned_k
     if status["state"] != "UNPAID":
         if prior != (quote_id,) or status["state"] not in ("PENDING", "PAID"):
             raise ValueError("unexpected payout quote state")
+        if reconcile_only and status["state"] == "PENDING":
+            return {"state": "PENDING", "quote": quote_id}
         return verify_result(status)
+    if reconcile_only:
+        return {"state": "UNPAID", "quote": quote_id}
     if invoice.expiry_time <= time.time() or status["expiry"] <= time.time():
         raise ValueError("expired payout quote or invoice")
     inputs = [json.loads(r[0]) for r in store.db.execute("""

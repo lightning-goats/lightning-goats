@@ -448,6 +448,8 @@ def main():
                 assert not claims.db.execute("SELECT 1 FROM proof_disposition WHERE id=?", (payment_id,)).fetchone()
                 [payout_proof] = claims.reserve_payout(payment_id, payout_feed, digest, 12, 4,
                     {funded_id: {"consumed_sats": 16, "evidence_digest": funded["proof_digest"]}})
+                lookup = {"reconcile_disposition": payment_id, "invoice": reserve.destination[0]}
+                assert execute_payout(claims, None, lookup, keyset, {keyset: keys}) == {"state": "UNQUOTED"}
                 class FeeBearingKeyset:
                     def post(self, path, **kwargs):
                         assert path == "/v1/melt/quote/bolt11"
@@ -486,6 +488,11 @@ def main():
                 claims.db.close()
                 claims = ClaimStore(claim_dir)
                 body = json.dumps(authorization).encode()
+                class LookupOnly:
+                    get = viewer.get
+
+                assert execute_payout(claims, LookupOnly(), lookup, keyset, {keyset: keys})["state"] == "UNPAID"
+                assert reserve.pay_attempts == 0
                 def dispatch_payout(request):
                     return execute_payout(claims, viewer, request, keyset, {keyset: keys})
 
@@ -529,7 +536,8 @@ def main():
                     raise AssertionError("restored project quote never became paid")
                 reserve.complete_sends = True
                 claims = ClaimStore(claim_dir)
-                final_melt = execute_payout(claims, viewer, authorization, keyset, {keyset: keys})
+                LookupOnly.get = viewer.get
+                final_melt = execute_payout(claims, LookupOnly(), lookup, keyset, {keyset: keys})
                 claims.db.close()
                 claims = ClaimStore(claim_dir)
                 assert submit_payout(claims, None, payment_id, reserve.destination[0], keyset, {keyset: keys}) == final_melt

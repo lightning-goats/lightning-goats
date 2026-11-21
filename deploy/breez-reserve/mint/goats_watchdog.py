@@ -4,6 +4,7 @@ import asyncio
 import time
 
 from loguru import logger
+from cashu.core.base import Amount
 from cashu.core.db import LockOptions
 from cashu.core.settings import settings
 
@@ -14,13 +15,21 @@ async def check_sample(ledger, backend, unit):
         # The issuer commits signatures, liability and ISSUED in one transaction.
         # Take the reserve sample while that transaction cannot cross our checkpoint.
         sampled_at = int(time.time())
-        status = await backend.status()
-        if status.error_message:
-            raise RuntimeError("reserve balance unavailable")
-        reserve = status.balance
+        funding = await backend._call("GET", "/v1/funding/balance")
+        backend._verify_wallet(funding)
+        reserve = Amount(unit, funding["balance_sat"])
         issued, fees = await ledger.get_unit_balance_and_fees(unit, db, conn)
         gap = reserve.amount - issued.amount - fees.amount
-        if gap < 0:
+        # Pending inputs have already been removed from keyset balance. Even
+        # at the maximum permitted Lightning fee, their residual value is owed.
+        pending = await conn.fetchone("""
+            SELECT COUNT(*) AS operations, COALESCE(SUM(residual), 0) AS owed FROM (
+                SELECT MAX(0, SUM(p.amount) - q.amount - q.fee_reserve) AS residual
+                FROM proofs_pending p JOIN melt_quotes q ON q.quote = p.melt_quote
+                WHERE q.unit = :unit GROUP BY q.quote
+            )
+        """, {"unit": unit.name})
+        if gap < pending["owed"]:
             raise RuntimeError("reserve is below issued liability and fees")
 
         await conn.execute("""
@@ -56,6 +65,16 @@ async def check_sample(ledger, backend, unit):
                         explained += claim["amount"]
                 if explained < old_gap - gap:
                     raise RuntimeError("decrease in reserve surplus lacks settled quote evidence")
+
+        # Keep checking backing and the last accepted floor during an outgoing
+        # operation. Locked inputs, unposted change/fees, and a delayed reserve
+        # debit cannot establish a new surplus floor.
+        unsynced_melt = await conn.fetchone("""
+            SELECT 1 FROM melt_quotes WHERE unit = :unit AND state = 'PAID'
+              AND paid_time >= :synced LIMIT 1
+        """, {"unit": unit.name, "synced": funding["last_synced_at"]})
+        if pending["operations"] or unsynced_melt:
+            return
 
         await ledger.crud.store_balance_log(reserve, issued, fees, db=db, conn=conn)
         await conn.execute("DELETE FROM goats_watchdog_open_quotes")

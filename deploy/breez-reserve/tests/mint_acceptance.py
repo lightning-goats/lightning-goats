@@ -48,6 +48,7 @@ class Fixture(UnixStreamServer):
         super().__init__(str(path), Handler)
         self.receives = {}
         self.balance = 100
+        self.synced_at = int(time.time())
         self.settlements = {}
         self.paid = set()
         self.sends = {}
@@ -76,7 +77,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/health":
             self.response(identity)
         elif self.path == "/v1/funding/balance":
-            self.response({**identity, "balance_sat": self.server.balance})
+            self.response({**identity, "balance_sat": self.server.balance, "last_synced_at": self.server.synced_at})
         elif self.path.startswith("/v1/invoices/"):
             payment_hash = self.path.rsplit("/", 1)[1]
             self.response({"payment_hash": payment_hash, "state": "settled" if payment_hash in self.server.paid else "pending",
@@ -163,7 +164,7 @@ def wallet_state(client, item):
     return expect(client.post("/v1/checkstate", json={"Ys": [y]}))["states"][0]["state"]
 
 
-def start_mint(directory, socket, reserve, credentials, *, watchdog=False):
+def start_mint(directory, socket, reserve, credentials, *, watchdog=False, input_fee_ppk=0):
     log = (directory / "process.log").open("ab")
     env = {**os.environ, "STATE_DIRECTORY": str(directory), "CREDENTIALS_DIRECTORY": str(credentials),
            "LG_RESERVE_FUND_SOCKET": str(reserve), "LG_MINT_SOCKET": str(socket),
@@ -171,7 +172,7 @@ def start_mint(directory, socket, reserve, credentials, *, watchdog=False):
            "MINT_BACKEND_BOLT11_SAT": "GoatsReserve", "MINT_DATABASE": str(directory / "db"),
            "CASHU_DIR": str(directory), "MINT_RPC_SERVER_ENABLE": "false",
            "MINT_WATCHDOG_ENABLED": str(watchdog).lower(), "MINT_WATCHDOG_BALANCE_CHECK_INTERVAL_SECONDS": "0.25", "MINT_RATE_LIMIT": "false", "DEBUG": "false",
-           "MINT_INPUT_FEE_PPK": "0", "MINT_QUOTE_BACKEND_CHECK_RATE_LIMIT": "0", "LOG_LEVEL": "INFO"}
+           "MINT_INPUT_FEE_PPK": str(input_fee_ppk), "MINT_QUOTE_BACKEND_CHECK_RATE_LIMIT": "0", "LOG_LEVEL": "INFO"}
     process = subprocess.Popen([sys.executable, "-m", "lg_mint"], cwd=directory, env=env, stdout=log, stderr=log)
     client = httpx.Client(transport=httpx.HTTPTransport(uds=str(socket)), base_url="http://mint", timeout=6)
     for _ in range(100):

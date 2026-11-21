@@ -126,13 +126,16 @@ impl CollectorResult {
     }
 }
 
-/// Obtain the routing reserve for the signed probe invoice before choosing
+/// Obtain the routing reserve and exact input fees for the signed probe before choosing
 /// the recipient amount. The collector keeps proofs out of this request.
 #[cfg(unix)]
-pub async fn routing_reserve(
+pub async fn payout_fee(
     socket: &std::path::Path,
     peer_uid: u32,
     invoice: &super::invoice::ValidatedInvoice,
+    feed_id: uuid::Uuid,
+    gross_sat: u64,
+    allocations: &[super::funding::RetainedAllocation],
 ) -> Result<u64> {
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
@@ -140,6 +143,7 @@ pub async fn routing_reserve(
         payment_hash: String,
         amount_sat: u64,
         routing_reserve_sat: u64,
+        input_fee_sat: u64,
         expires_at: u64,
     }
     crate::private_ipc::socket_path(socket)?;
@@ -147,7 +151,8 @@ pub async fn routing_reserve(
         socket,
         peer_uid,
         &serde_json::json!({
-            "quote_invoice": invoice.encoded(), "amount_sat": invoice.amount_sats()
+            "quote_invoice": invoice.encoded(), "amount_sat": invoice.amount_sats(),
+            "feed_id": feed_id, "gross_sat": gross_sat, "retained_allocations": allocations
         }),
         65536,
         30,
@@ -160,7 +165,10 @@ pub async fn routing_reserve(
             && now < quote.expires_at.min(invoice.expires_at()),
         "fee observation differs from live payout invoice"
     );
-    Ok(quote.routing_reserve_sat)
+    quote
+        .routing_reserve_sat
+        .checked_add(quote.input_fee_sat)
+        .ok_or_else(|| anyhow::anyhow!("Cashu fee sum overflow"))
 }
 
 /// Read settlement from the collector's core-only socket. An absent receipt

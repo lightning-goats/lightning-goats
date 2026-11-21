@@ -168,6 +168,50 @@ class ClaimStore:
                 raise ValueError("disposition inputs changed")
             return [json.loads(r[1]) for r in rows]
 
+    def payout_inputs(self, feed_id, gross, allocations):
+        """Select exact inputs using the same allocation bounds for quotes and reservations."""
+        if type(gross) is not int or gross <= 0:
+            raise ValueError("invalid payout input total")
+        left = gross
+        selected = []
+        remaining = {}
+        candidates = []
+        for claim_id, terms in sorted(allocations.items()):
+            digest, budget = terms["evidence_digest"], terms["consumed_sats"]
+            row = self.db.execute("SELECT proofs,terms FROM project_claim WHERE id=?",
+                                  (claim_id,)).fetchone()
+            if (row is None or row[0] is None or hashlib.sha256(row[0].encode()).hexdigest() != digest
+                    or json.loads(row[1])["attribution"].get("credit_pool") != "herd"
+                    or type(budget) is not int or budget <= 0
+                    or budget > sum(p["amount"] for p in json.loads(row[0]))):
+                raise ValueError("payout allocation conflicts with local custody")
+            used, original = self.db.execute("""
+                SELECT COALESCE(SUM(reserved_sat-COALESCE(returned_sat,0)),0),MIN(budget_sat)
+                FROM payout_claim_allocation LEFT JOIN payout_change_credit USING(disposition_id)
+                WHERE feed_id=? AND claim_id=?
+            """, (feed_id, claim_id)).fetchone()
+            if original is not None and original != budget:
+                raise ValueError("confirmed feed allocation changed")
+            remaining[claim_id] = budget - used
+            candidates.extend((sats, claim_id, secret) for secret,sats in self.db.execute("""
+                SELECT secret,amount_sat FROM collected_output o
+                WHERE request_id=? AND NOT EXISTS
+                (SELECT 1 FROM disposition_input i WHERE i.secret=o.secret)
+                ORDER BY amount_sat DESC,secret
+            """, (claim_id,)))
+        taken = {}
+        for sats, claim_id, secret in sorted(candidates, key=lambda x: (-x[0], x[1], x[2])):
+            if sats <= min(remaining[claim_id], left):
+                selected.append(secret)
+                remaining[claim_id] -= sats
+                taken[claim_id] = taken.get(claim_id, 0) + sats
+                left -= sats
+                if not left:
+                    break
+        if left:
+            raise ValueError("confirmed allocation lacks exact available payout inputs")
+        return selected, taken
+
     def reserve_payout(self, disposition_id, feed_id, invoice_hash, amount, fee_limit, allocations, *, invoice_expiry=None, invoice_digest=None):
         """Reserve exact project inputs against an authenticated confirmed-feed allocation."""
         disposition_id = str(UUID(disposition_id))
@@ -195,46 +239,12 @@ class ClaimStore:
                 self.db.execute("INSERT INTO proof_disposition VALUES (?,'cyberherd_payout',?)",
                                 (disposition_id, binding))
                 self.db.execute("INSERT INTO payout_invoice VALUES (?,?)", (invoice_hash, disposition_id))
-                left = amount + fee_limit
-                remaining = {}
-                candidates = []
-                for claim_id, terms in sorted(allocations.items()):
-                    digest, budget = terms["evidence_digest"], terms["consumed_sats"]
-                    row = self.db.execute("SELECT proofs,terms FROM project_claim WHERE id=?",
-                                          (claim_id,)).fetchone()
-                    if (row is None or row[0] is None or hashlib.sha256(row[0].encode()).hexdigest() != digest
-                            or json.loads(row[1])["attribution"].get("credit_pool") != "herd"
-                            or type(budget) is not int or budget <= 0
-                            or budget > sum(p["amount"] for p in json.loads(row[0]))):
-                        raise ValueError("payout allocation conflicts with local custody")
-                    used, original = self.db.execute("""
-                        SELECT COALESCE(SUM(reserved_sat-COALESCE(returned_sat,0)),0),MIN(budget_sat)
-                        FROM payout_claim_allocation LEFT JOIN payout_change_credit USING(disposition_id)
-                        WHERE feed_id=? AND claim_id=?
-                    """, (feed_id, claim_id)).fetchone()
-                    if original is not None and original != budget:
-                        raise ValueError("confirmed feed allocation changed")
-                    remaining[claim_id] = budget - used
-                    candidates.extend((sats, claim_id, secret) for secret,sats in self.db.execute("""
-                        SELECT secret,amount_sat FROM collected_output o
-                        WHERE request_id=? AND NOT EXISTS
-                        (SELECT 1 FROM disposition_input i WHERE i.secret=o.secret)
-                        ORDER BY amount_sat DESC,secret
-                    """, (claim_id,)))
-                taken = {}
-                for sats, claim_id, secret in sorted(candidates, key=lambda x: (-x[0], x[1], x[2])):
-                    if sats <= min(remaining[claim_id], left):
-                        self.db.execute("INSERT INTO disposition_input VALUES (?,?)", (secret, disposition_id))
-                        remaining[claim_id] -= sats
-                        taken[claim_id] = taken.get(claim_id, 0) + sats
-                        left -= sats
-                        if not left:
-                            break
+                selected, taken = self.payout_inputs(feed_id, amount + fee_limit, allocations)
+                self.db.executemany("INSERT INTO disposition_input VALUES (?,?)",
+                                    ((secret, disposition_id) for secret in selected))
                 for claim_id, sats in taken.items():
                     self.db.execute("INSERT INTO payout_claim_allocation VALUES (?,?,?,?,?)",
                                     (disposition_id, feed_id, claim_id, allocations[claim_id]["consumed_sats"], sats))
-                if left:
-                    raise ValueError("confirmed allocation lacks exact available payout inputs")
             return [json.loads(r[0]) for r in self.db.execute("""
                 SELECT o.proof FROM collected_output o JOIN disposition_input i USING(secret)
                 WHERE i.disposition_id=? ORDER BY o.secret

@@ -80,9 +80,39 @@ def collect(store, client, request_id, pinned_keys):
     return True
 
 
+def payout_input_fee(client, input_keysets):
+    keysets = client.get("/v1/keysets").raise_for_status().json()["keysets"]
+    rates = {}
+    for item in keysets:
+        if item["unit"] == "sat":
+            rate = item.get("input_fee_ppk", 0)
+            if type(rate) is not int or rate < 0 or item["id"] in rates:
+                raise ValueError("invalid mint input fee schedule")
+            rates[item["id"]] = rate
+    return (sum(rates[keyset] for keyset in input_keysets) + 999) // 1000
+
+
+def project_allocations(parts):
+    allocations = {}
+    ledger_ids = set()
+    for part in parts:
+        anchor = part["anchor"]
+        ident = anchor["claim_id"]
+        if (anchor["source"] != "project_invoice" or ident in allocations
+                or type(part["ledger_id"]) is not int or part["ledger_id"] <= 0
+                or part["ledger_id"] in ledger_ids):
+            raise ValueError("invalid project payout allocation")
+        ledger_ids.add(part["ledger_id"])
+        allocations[ident] = {"consumed_sats": part["consumed_sats"],
+                              "evidence_digest": anchor["evidence_digest"]}
+    return allocations
+
+
 def execute_payout(store, client, request, keyset, pinned_keys):
     """Execute an authenticated payout worker request using its admitted grant evidence."""
-    if set(request) == {"quote_invoice", "amount_sat"}:
+    probe = {"quote_invoice", "amount_sat"}
+    with_inputs = probe | {"feed_id", "gross_sat", "retained_allocations"}
+    if set(request) in (probe, with_inputs):
         invoice_text = request["quote_invoice"]
         invoice = bolt11.decode(invoice_text)
         amount = request["amount_sat"]
@@ -98,8 +128,15 @@ def execute_payout(store, client, request, keyset, pinned_keys):
                 or status["fee_reserve"] < 0 or type(status.get("expiry")) is not int
                 or status["expiry"] <= time.time()):
             raise ValueError("invalid payout fee quote")
-        return {"payment_hash": invoice.payment_hash, "amount_sat": amount,
-                "routing_reserve_sat": status["fee_reserve"], "expires_at": status["expiry"]}
+        result = {"payment_hash": invoice.payment_hash, "amount_sat": amount,
+                  "routing_reserve_sat": status["fee_reserve"], "expires_at": status["expiry"]}
+        if set(request) == with_inputs:
+            selected, _ = store.payout_inputs(request["feed_id"], request["gross_sat"],
+                                              project_allocations(request["retained_allocations"]))
+            keysets = [json.loads(store.db.execute("SELECT proof FROM collected_output WHERE secret=?",
+                                                   (secret,)).fetchone()[0])["id"] for secret in selected]
+            result["input_fee_sat"] = payout_input_fee(client, keysets)
+        return result
     if set(request) == {"reconcile_disposition", "invoice"}:
         return submit_payout(store, client, request["reconcile_disposition"], request["invoice"],
                              keyset, pinned_keys, reconcile_only=True)
@@ -111,18 +148,7 @@ def execute_payout(store, client, request, keyset, pinned_keys):
             or invoice.amount_msat != request["amount_sat"] * 1000
             or invoice.payment_hash != request["payment_hash"]):
         raise ValueError("recipient invoice differs from payout authorization")
-    allocations = {}
-    ledger_ids = set()
-    for part in request["retained_allocations"]:
-        anchor = part["anchor"]
-        ident = anchor["claim_id"]
-        if (anchor["source"] != "project_invoice" or ident in allocations
-                or type(part["ledger_id"]) is not int or part["ledger_id"] <= 0
-                or part["ledger_id"] in ledger_ids):
-            raise ValueError("invalid project payout allocation")
-        ledger_ids.add(part["ledger_id"])
-        allocations[ident] = {"consumed_sats": part["consumed_sats"],
-                              "evidence_digest": anchor["evidence_digest"]}
+    allocations = project_allocations(request["retained_allocations"])
     store.reserve_payout(request["disposition_id"], request["feed_id"], invoice.payment_hash,
                          request["amount_sat"], request["maximum_fee_sat"], allocations,
                          invoice_expiry=invoice.expiry_time,
@@ -248,15 +274,7 @@ def _submit_payout(store, client, disposition_id, invoice_text, keyset, pinned_k
         raise ValueError("payout inputs differ from reserved total")
     # NUT-02 charges per input, including proofs from inactive keysets.
     # The NUT-05 routing reserve is additional to those mint fees.
-    keysets = client.get("/v1/keysets").raise_for_status().json()["keysets"]
-    rates = {}
-    for item in keysets:
-        if item["unit"] == "sat":
-            rate = item.get("input_fee_ppk", 0)
-            if type(rate) is not int or rate < 0 or item["id"] in rates:
-                raise ValueError("invalid mint input fee schedule")
-            rates[item["id"]] = rate
-    input_fee = (sum(rates[p["id"]] for p in inputs) + 999) // 1000
+    input_fee = payout_input_fee(client, [p["id"] for p in inputs])
     if status["fee_reserve"] + input_fee > terms["maximum_fee_sat"]:
         raise ValueError("mint input fees and routing reserve exceed payout allowance")
     blanks = store.prepare_melt(disposition_id, invoice.payment_hash, quote_id, generate_change)

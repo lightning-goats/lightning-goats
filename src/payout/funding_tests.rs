@@ -108,6 +108,7 @@ fn copy_evidence(q: &QualifiedFunding, plan: &crate::cyberherd::rewards::Plan) -
         reservation,
         provider: q.provider().clone(),
         sources: q.sources().to_vec(),
+        retained_allocations: q.retained_allocations().to_vec(),
     }
 }
 
@@ -1007,6 +1008,44 @@ async fn complete_bounded_pages_qualify_actual_p2p_amounts_and_exclude_virtual_f
         20
     );
     assert_eq!(f.ledger.feed_credit_sats().await.unwrap(), 0);
+    task.abort();
+}
+
+#[tokio::test]
+async fn mixed_funding_keeps_the_consumed_claim_for_custody_verification() {
+    use crate::reward_funding::{CashuFundingAnchor, CashuFundingSource};
+    let f = Fixture::new().await;
+    let (verifier, task) = verifier(&f, None, "0.00000001").await;
+    let mut first = f.page(0, true).await;
+    let anchor = CashuFundingAnchor {
+        source: CashuFundingSource::ProjectInvoice,
+        claim_id: Uuid::new_v4(),
+        evidence_digest: "ab".repeat(32),
+    };
+    let part = &mut first.parts[0];
+    assert!(part.anchor.is_none());
+    part.cashu_anchor = Some(anchor.clone());
+    let allocation = RetainedAllocation {
+        ledger_id: part.ledger_id,
+        consumed_sats: part.consumed_sats,
+        anchor,
+    };
+    first.funding.retained_cashu_sats = allocation.consumed_sats;
+    let mut page = authenticate(first).await;
+    let mut session = Session::new(f.expected(), &page).unwrap();
+    loop {
+        session.accept(&page, &verifier).await.unwrap();
+        if session.is_complete() {
+            break;
+        }
+        let mut next = f.page(session.after(), true).await;
+        next.funding.retained_cashu_sats = allocation.consumed_sats;
+        page = authenticate(next).await;
+    }
+    assert_eq!(
+        session.finish().unwrap().retained_allocations(),
+        &[allocation]
+    );
     task.abort();
 }
 

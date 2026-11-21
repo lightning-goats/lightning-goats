@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::{
     core_bridge::AuthenticatedFundingPage,
-    reward_funding::{Funding, Reservation, StrikeFundingAnchor},
+    reward_funding::{CashuFundingAnchor, Funding, Reservation, StrikeFundingAnchor},
     strike::StrikeClient,
 };
 
@@ -119,6 +119,14 @@ pub struct QualifiedSource {
     pub received_sats: u64,
 }
 
+/// Core evidence for the custody journal to match before reserving bearer proofs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RetainedAllocation {
+    pub ledger_id: i64,
+    pub consumed_sats: u64,
+    pub anchor: CashuFundingAnchor,
+}
+
 /// Not deserializable or constructible from copied funding/plan JSON. A future
 /// payout store must independently retain source consumption across grants.
 pub struct QualifiedFunding {
@@ -128,6 +136,7 @@ pub struct QualifiedFunding {
     reservation: Reservation,
     provider: ProviderScope,
     sources: Vec<QualifiedSource>,
+    retained_allocations: Vec<RetainedAllocation>,
 }
 
 impl QualifiedFunding {
@@ -145,6 +154,9 @@ impl QualifiedFunding {
     }
     pub fn provider(&self) -> &ProviderScope {
         &self.provider
+    }
+    pub fn retained_allocations(&self) -> &[RetainedAllocation] {
+        &self.retained_allocations
     }
     pub fn sources(&self) -> &[QualifiedSource] {
         &self.sources
@@ -164,6 +176,7 @@ pub struct Session {
     done: bool,
     provider: Option<ProviderScope>,
     sources: Vec<QualifiedSource>,
+    retained_allocations: Vec<RetainedAllocation>,
     seen: BTreeSet<Uuid>,
 }
 
@@ -200,6 +213,7 @@ impl Session {
             done: false,
             provider: None,
             sources: vec![],
+            retained_allocations: vec![],
             seen: BTreeSet::new(),
         })
     }
@@ -238,12 +252,18 @@ impl Session {
         let mut real = self.real_sats;
         let mut retained = self.retained_cashu_sats;
         let mut sources = Vec::new();
+        let mut allocations = Vec::new();
         let mut seen = self.seen.clone();
         for part in &p.parts {
             total = total
                 .checked_add(part.consumed_sats)
                 .context("funding sum overflow")?;
-            if part.cashu_anchor.is_some() {
+            if let Some(anchor) = &part.cashu_anchor {
+                allocations.push(RetainedAllocation {
+                    ledger_id: part.ledger_id,
+                    consumed_sats: part.consumed_sats,
+                    anchor: anchor.clone(),
+                });
                 retained = retained
                     .checked_add(part.consumed_sats)
                     .context("retained Cashu funding sum overflow")?;
@@ -284,6 +304,7 @@ impl Session {
         self.provider = Some(verifier.scope.clone());
         self.seen = seen;
         self.sources.extend(sources);
+        self.retained_allocations.extend(allocations);
         Ok(())
     }
 
@@ -298,6 +319,7 @@ impl Session {
             reservation: self.reservation,
             provider: self.provider.context("provider qualification missing")?,
             sources: self.sources,
+            retained_allocations: self.retained_allocations,
         })
     }
 }

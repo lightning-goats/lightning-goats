@@ -340,9 +340,12 @@ def main():
                 assert claims.reserve_payout(payout_id, feed_id, "33"*32, 7, 1, allocation) == [payout_input]
                 change = [{"secret": uuid.uuid4().hex, "blind": uuid.uuid4().hex}]
                 assert claims.prepare_melt(payout_id, "33"*32, "quote-a", lambda: change) == change
+                assert claims.begin_melt_submission(payout_id, "quote-a")
                 claims.db.close()
                 claims = ClaimStore(claim_dir)
                 assert claims.reserve_payout(payout_id, feed_id, "33"*32, 7, 1, allocation) == [payout_input]
+                assert not claims.begin_melt_submission(payout_id, "quote-a")
+
                 def unexpected_generation():
                     raise AssertionError("regenerated change on restart")
 

@@ -94,6 +94,11 @@ class ClaimStore:
                     change_material TEXT NOT NULL
                 )
             """)
+            self.db.execute("""
+                CREATE TABLE IF NOT EXISTS payout_melt_submission (
+                    disposition_id TEXT PRIMARY KEY NOT NULL REFERENCES payout_melt(disposition_id)
+                )
+            """)
             for ident, proofs in self.db.execute("""
                 SELECT id,proofs FROM project_claim c WHERE proofs IS NOT NULL AND NOT EXISTS
                     (SELECT 1 FROM collected_output o WHERE o.request_id=c.id)
@@ -235,6 +240,18 @@ class ClaimStore:
             self.db.execute("INSERT INTO payout_melt VALUES (?,?,?)",
                             (disposition_id, quote_id, encode(material)))
             return material
+
+    def begin_melt_submission(self, disposition_id, quote_id):
+        """Only the first caller may submit. Others must reconcile the saved quote."""
+        with self.write():
+            bound = self.db.execute("SELECT quote_id FROM payout_melt WHERE disposition_id=?",
+                                    (disposition_id,)).fetchone()
+            if bound != (quote_id,):
+                raise ValueError("unknown payout melt quote")
+            return self.db.execute("""
+                INSERT INTO payout_melt_submission(disposition_id) VALUES (?)
+                ON CONFLICT(disposition_id) DO NOTHING
+            """, (disposition_id,)).rowcount == 1
 
     def reserve_poll(self, now, lease_seconds):
         """Claim one due invoice. An interrupted attempt becomes eligible after its lease."""

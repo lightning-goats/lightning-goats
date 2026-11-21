@@ -211,7 +211,7 @@ impl LedgerStore {
         let inserted = sqlx::query("UPDATE private_contact_intents SET state='issuing',issuance_claim=? WHERE id=? AND state='new' AND capability_hash=?")
             .bind(&id).bind(&id).bind(capability_hash(capability)?).execute(&mut *tx).await?.rows_affected();
         if inserted == 1 {
-            sqlx::query("INSERT INTO breez_project_invoices(id,intent) VALUES (?,?)")
+            sqlx::query("INSERT INTO breez_project_invoices(id,intent,next_poll) VALUES (?,?,unixepoch()+30)")
                 .bind(&id)
                 .bind(&terms)
                 .execute(&mut *tx)
@@ -221,29 +221,46 @@ impl LedgerStore {
             .bind(&id).bind(&terms).fetch_one(&mut *tx).await?;
         tx.commit().await?;
         if owned {
-            #[derive(serde::Deserialize)]
-            struct Reply {
-                invoice: String,
-            }
-            let reservation = self
-                .reserve_invoice()
-                .await?
-                .context("invoice capacity exhausted")?;
-            let result: Result<()> = async {
-                let reply: Reply = crate::private_ipc::request(&collector.socket, collector.peer_uid,
-                    &serde_json::json!({"contact_id":id, "description_hash":intent.description_hash}), 65536, 20).await?;
-                let invoice: lightning_invoice::Bolt11Invoice = reply.invoice.parse()?;
-                let hash = invoice.payment_hash().to_string();
-                let signed = crate::bolt11::verify(&reply.invoice,FEE_MSAT,&hash,&intent.description_hash)?;
-                crate::bolt11::verify_issuance_expiry(&signed, 900)?;
-                self.bind_breez_invoice(intent.id, &reply.invoice, &hash).await
-            }.await;
-            self.finish_invoice_admission(reservation).await?;
-            result?;
+            self.issue_reserved_contact(collector, intent.id, &intent.description_hash)
+                .await?;
         }
         self.contact_status(intent.id, capability)
             .await?
             .context("contact capability refused")
+    }
+
+    pub(super) async fn issue_reserved_contact(
+        &self,
+        collector: &crate::config::BreezCollectorConfig,
+        id: Uuid,
+        description_hash: &str,
+    ) -> Result<()> {
+        #[derive(serde::Deserialize)]
+        struct Reply {
+            invoice: String,
+        }
+        let reservation = self
+            .reserve_invoice()
+            .await?
+            .context("invoice capacity exhausted")?;
+        let result: Result<()> = async {
+            let reply: Reply = crate::private_ipc::request(
+                &collector.socket,
+                collector.peer_uid,
+                &serde_json::json!({"contact_id":id, "description_hash":description_hash}),
+                65536,
+                20,
+            )
+            .await?;
+            let invoice: lightning_invoice::Bolt11Invoice = reply.invoice.parse()?;
+            let hash = invoice.payment_hash().to_string();
+            let signed = crate::bolt11::verify(&reply.invoice, FEE_MSAT, &hash, description_hash)?;
+            crate::bolt11::verify_issuance_expiry(&signed, 900)?;
+            self.bind_breez_invoice(id, &reply.invoice, &hash).await
+        }
+        .await;
+        self.finish_invoice_admission(reservation).await?;
+        result
     }
 
     pub(crate) async fn accept_breez_contact_claim(

@@ -558,13 +558,17 @@ async fn breez_daemon_serves_discovery_without_strike_credentials() {
     config["gateway"]["url"] = "http://127.0.0.1:9/".into();
     config["database"]["url"] =
         format!("sqlite://{}", directory.path().join("daemon.db").display()).into();
-    config["lnurl"]["wallet_backend"] = "breez".into();
-    config["lnurl"]["invoice_expiry_seconds"] = 900.into();
-    config["lnurl"]["breez_collector"] = toml::toml! {
-        socket = "/run/lightning-goats/project.sock"
-        peer_uid = 1001
-    }
-    .into();
+    let lnurl = config["lnurl"].as_table_mut().unwrap();
+    lnurl.insert("wallet_backend".into(), "breez".into());
+    lnurl.insert("invoice_expiry_seconds".into(), 900.into());
+    lnurl.insert(
+        "breez_collector".into(),
+        toml::toml! {
+            socket = "/run/lightning-goats/project.sock"
+            peer_uid = 1001
+        }
+        .into(),
+    );
     let _daemon = launch_daemon(directory.path(), address, &config).await;
     let client = Client::new();
     let discovery: serde_json::Value = client

@@ -11,6 +11,87 @@ use sqlx::{Sqlite, Transaction};
 use uuid::Uuid;
 
 impl LedgerStore {
+    /// Persist the original Cashu invoice before a collector may submit proofs.
+    /// Historical matches still require fresh authority before another submission.
+    pub async fn claim_cashu_execution(
+        &self,
+        request: &crate::payout::cashu::ExecutionRequest,
+        policy: &crate::reward_funding::RewardPolicy,
+        enabled: bool,
+        nostr_enabled: bool,
+    ) -> Result<i64> {
+        let expiry = request.validate()?;
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let row = sqlx::query("SELECT * FROM reward_reservations WHERE id=?")
+            .bind(request.reservation.id.to_string())
+            .fetch_one(&mut *tx)
+            .await?;
+        let frozen: crate::reward_funding::RewardPolicy =
+            serde_json::from_str(&row.try_get::<String, _>("policy_json")?)?;
+        let epoch: String =
+            sqlx::query_scalar("SELECT stream_id FROM overlay_identity WHERE singleton=1")
+                .fetch_one(&mut *tx)
+                .await?;
+        if !enabled
+            || (request.nip57 && !nostr_enabled)
+            || policy.funding_source.is_strike()
+            || frozen.funding_source != policy.funding_source
+            || frozen.owner != policy.owner
+            || policy.owner != request.reservation.owner
+            || decode_reservation(&row)? != request.reservation
+            || epoch != request.reservation.epoch.to_string()
+        {
+            bail!("Cashu execution scope or current permission changed");
+        }
+        let funding = confirmed_funding(&mut tx, request.reservation.request_id)
+            .await?
+            .context("missing Cashu funding")?;
+        let now = budget_time(&mut tx, true).await?;
+        let used = budget_usage(&mut tx, now).await?;
+        let reported: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM reward_outcome_manifests WHERE reservation_id=?)",
+        )
+        .bind(request.reservation.id.to_string())
+        .fetch_one(&mut *tx)
+        .await?;
+        if reported
+            || u64::try_from(now)? >= expiry
+            || funding.proof_hash != request.reservation.funding_hash
+            || request.reservation.reserved_sats > policy.budget(funding.retained_cashu_sats)?
+            || request.reservation.reserved_sats > frozen.budget(funding.retained_cashu_sats)?
+            || used > policy.max_sats_per_24h
+        {
+            bail!("Cashu execution exceeds current or frozen funding policy");
+        }
+        let id = request.reservation.id.to_string();
+        let document = serde_json::to_string(request)?;
+        let saved: Option<String> = sqlx::query_scalar("SELECT document_json FROM cashu_payout_execution_claims WHERE reservation_id=? AND member=?")
+            .bind(&id).bind(&request.member).fetch_optional(&mut *tx).await?;
+        match saved {
+            Some(old) if old != document => bail!("Cashu execution retry changed original claim"),
+            Some(_) => {}
+            None => {
+                let gross = request
+                    .amount_sat
+                    .checked_add(request.maximum_fee_sat)
+                    .context("Cashu gross overflow")?;
+                let previous: i64 = sqlx::query_scalar("SELECT COALESCE(SUM(gross_sats),0) FROM cashu_payout_execution_claims WHERE reservation_id=?")
+                    .bind(&id).fetch_one(&mut *tx).await?;
+                if u64::try_from(previous)?
+                    .checked_add(gross)
+                    .is_none_or(|sum| sum > request.reservation.reserved_sats)
+                {
+                    bail!("Cashu execution claims exceed grant");
+                }
+                sqlx::query("INSERT INTO cashu_payout_execution_claims(reservation_id,member,disposition_id,invoice_hash,gross_sats,document_json,created_at) VALUES(?,?,?,?,?,?,?)")
+                    .bind(id).bind(&request.member).bind(request.disposition_id.to_string()).bind(&request.payment_hash)
+                    .bind(to_i64(gross,"Cashu gross")?).bind(document).bind(now).execute(&mut *tx).await?;
+            }
+        }
+        tx.commit().await?;
+        Ok(now)
+    }
+
     pub(crate) async fn payout_execution_state(
         &self,
         epoch: Uuid,

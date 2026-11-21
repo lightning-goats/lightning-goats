@@ -161,7 +161,7 @@ pub(super) async fn compare_images(before: &Path, after: &Path, policy: &Policy)
                 }
             }
             if role == Role::Core && version >= 30 {
-                super::cashu_upgrade::apply_breez_catalog(&mut expected).await?;
+                super::cashu_upgrade::apply_breez_catalog(&mut expected, version).await?;
             }
             if catalog(&new).await? != expected {
                 bail!("upgrade changed original schema or added unqualified private definitions");

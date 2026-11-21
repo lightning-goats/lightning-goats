@@ -39,11 +39,13 @@ pub(super) fn tables_for_core(version: i64) -> impl Iterator<Item = &'static str
     CASHU_TABLES
         .into_iter()
         .chain([
+            "cashu_payout_execution_claims",
             "retained_cashu_lots",
             "breez_collected_claims",
             "breez_project_invoices",
         ])
         .filter(move |name| match *name {
+            "cashu_payout_execution_claims" => version >= 31,
             "retained_cashu_lots" | "breez_collected_claims" | "breez_project_invoices" => {
                 version >= 30
             }
@@ -105,7 +107,10 @@ pub(super) async fn private_catalog(version: i64) -> Result<BTreeMap<String, Def
 
 /// Apply only the catalog changes produced by the exact checked-in Breez migration.
 /// A changed legacy definition must match its original pinned definition first.
-pub(super) async fn apply_breez_catalog(expected: &mut BTreeMap<String, Definition>) -> Result<()> {
+pub(super) async fn apply_breez_catalog(
+    expected: &mut BTreeMap<String, Definition>,
+    version: i64,
+) -> Result<()> {
     let pool = sqlx::sqlite::SqlitePoolOptions::new()
         .max_connections(1)
         .connect("sqlite::memory:")
@@ -120,6 +125,13 @@ pub(super) async fn apply_breez_catalog(expected: &mut BTreeMap<String, Definiti
     ))
     .execute(&pool)
     .await?;
+    if version >= 31 {
+        sqlx::raw_sql(include_str!(
+            "../../migrations/0031_cashu_payout_execution.sql"
+        ))
+        .execute(&pool)
+        .await?;
+    }
     let new = catalog(&pool).await?;
     for (key, definition) in &old {
         if new.get(key) != Some(definition) && expected.remove(key).as_ref() != Some(definition) {
@@ -195,7 +207,7 @@ pub(super) async fn compare_images(before: &Path, after: &Path, policy: &Policy)
                 }
             }
             if role == Role::Core && version >= 30 {
-                super::cashu_upgrade::apply_breez_catalog(&mut expected).await?;
+                super::cashu_upgrade::apply_breez_catalog(&mut expected, version).await?;
             }
             if catalog(&new).await? != expected {
                 bail!("upgrade changed original schema or added unqualified private definitions");

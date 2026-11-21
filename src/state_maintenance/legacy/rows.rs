@@ -309,6 +309,7 @@ pub(super) async fn compare(directory: &Path, original: &Report) -> Result<()> {
                 "retained_cashu_lots",
                 "breez_collected_claims",
                 "breez_project_invoices",
+                "cashu_payout_execution_claims",
                 "reward_funding_state",
                 "reward_funding_lots",
                 "feed_reward_funding",

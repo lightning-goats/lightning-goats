@@ -112,6 +112,8 @@ pub struct FundingPart {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct FundingPage {
+    #[serde(default, skip_serializing_if = "RewardFundingSource::is_strike")]
+    pub funding_source: RewardFundingSource,
     pub reservation: Reservation,
     pub funding: Funding,
     pub threshold_sats: u64,
@@ -139,7 +141,7 @@ impl FundingPage {
             || self.observed_at < 0
             || self.threshold_sats > i64::MAX as u64
             || self.funding.proof_hash != self.reservation.funding_hash
-            || self.reservation.reserved_sats > self.funding.strike_sats
+            || self.reservation.reserved_sats > self.funding_source.available(&self.funding)
             || self.after < 0
             || self.through < self.after
             || self.parts.len() > MAX_FUNDING_PARTS
@@ -180,9 +182,32 @@ impl FundingPage {
     }
 }
 
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RewardFundingSource {
+    #[default]
+    Strike,
+    RetainedCashu,
+}
+
+impl RewardFundingSource {
+    pub fn is_strike(&self) -> bool {
+        *self == Self::Strike
+    }
+
+    pub fn available(self, funding: &Funding) -> u64 {
+        match self {
+            Self::Strike => funding.strike_sats,
+            Self::RetainedCashu => funding.retained_cashu_sats,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RewardPolicy {
+    #[serde(default, skip_serializing_if = "RewardFundingSource::is_strike")]
+    pub funding_source: RewardFundingSource,
     pub owner: String,
     pub member_percent_ceiling: u8,
     pub max_sats_per_feed: u64,
@@ -223,6 +248,8 @@ pub struct Funding {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Allowance {
+    #[serde(default, skip_serializing_if = "RewardFundingSource::is_strike")]
+    pub funding_source: RewardFundingSource,
     pub epoch: Uuid,
     pub request_id: Uuid,
     pub owner: String,

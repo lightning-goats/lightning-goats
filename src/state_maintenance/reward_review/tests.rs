@@ -204,6 +204,7 @@ impl Fixture {
         let funding = barrier.feeding.funding.as_ref().unwrap();
         let no_payout = stage == Stage::NoPayout;
         let root_policy = RewardPolicy {
+            funding_source: Default::default(),
             owner: self.policy.owner.clone(),
             member_percent_ceiling: if no_payout { 0 } else { 10 },
             max_sats_per_feed: 100,

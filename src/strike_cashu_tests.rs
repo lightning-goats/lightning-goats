@@ -1193,6 +1193,7 @@ mod cashu_treasury_tests {
         f.runtime.reconcile_and_credit(&f.ledger,&f.event()).await?;
         f.ledger.record_cashu_melt_result(&f.registration,&f.report(1,4)).await?;
         let policy = crate::reward_funding::RewardPolicy {
+            funding_source: Default::default(),
             owner: "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798".into(),
             member_percent_ceiling: 10, max_sats_per_feed: 100, max_sats_per_24h: 200,
         };

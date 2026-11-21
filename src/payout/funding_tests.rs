@@ -797,6 +797,7 @@ impl Fixture {
         let feed = ledger.begin_feed_attempt(23).await.unwrap().unwrap();
         ledger.confirm_feed_attempt(feed).await.unwrap();
         let policy = RewardPolicy {
+            funding_source: Default::default(),
             owner: owner(),
             member_percent_ceiling: 10,
             max_sats_per_feed: 100,

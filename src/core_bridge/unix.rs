@@ -1388,6 +1388,7 @@ mod tests {
             let owner = test_event(1, 1, 100, "", vec![]).pubkey;
             if enabled {
                 config.reward_policy = Some(RewardPolicy {
+                    funding_source: Default::default(),
                     owner: owner.clone(),
                     member_percent_ceiling: 10,
                     max_sats_per_feed: 100,
@@ -1449,6 +1450,7 @@ mod tests {
             let owner = test_event(1, 1, 100, "", vec![]).pubkey;
             if enabled {
                 config.reward_policy = Some(RewardPolicy {
+                    funding_source: Default::default(),
                     owner: owner.clone(),
                     member_percent_ceiling: 10,
                     max_sats_per_feed: 100,

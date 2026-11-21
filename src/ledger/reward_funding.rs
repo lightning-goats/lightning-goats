@@ -52,7 +52,8 @@ impl LedgerStore {
         let frozen: RewardPolicy = serde_json::from_str(&row.try_get::<String, _>("policy_json")?)?;
         if frozen.owner != owner
             || funding.proof_hash != reservation.funding_hash
-            || reservation.reserved_sats > frozen.budget(funding.strike_sats)?
+            || reservation.reserved_sats
+                > frozen.budget(frozen.funding_source.available(&funding))?
         {
             bail!("reservation violates frozen financial scope");
         }
@@ -130,12 +131,15 @@ impl LedgerStore {
             && match policy {
                 Some(p) => {
                     p.owner == owner
+                        && p.funding_source == frozen.funding_source
+                        && frozen.funding_source.is_strike()
                         && reservation.reserved_sats <= p.budget(funding.strike_sats)?
                         && used <= p.max_sats_per_24h
                 }
                 None => false,
             };
         let page = FundingPage {
+            funding_source: frozen.funding_source,
             reservation,
             funding,
             threshold_sats: to_u64(threshold, "funded threshold")?,
@@ -178,6 +182,7 @@ impl LedgerStore {
         let budget_now = super::reward_outcomes::budget_time(&mut tx, false).await?;
         let used = super::reward_outcomes::budget_usage(&mut tx, budget_now).await?;
         let value = Allowance {
+            funding_source: policy.funding_source,
             epoch,
             request_id,
             owner: policy.owner.clone(),
@@ -258,7 +263,7 @@ impl LedgerStore {
             let frozen: RewardPolicy =
                 serde_json::from_str(&row.try_get::<String, _>("policy_json")?)?;
             if frozen.owner != old.owner
-                || old.reserved_sats > frozen.budget(funding.strike_sats)?
+                || old.reserved_sats > frozen.budget(frozen.funding_source.available(&funding))?
             {
                 bail!("reservation exceeds its frozen policy");
             }
@@ -268,7 +273,7 @@ impl LedgerStore {
         let funding = confirmed_funding(&mut tx, request_id)
             .await?
             .context("feeding has no eligible funding proof")?;
-        if amount_sats > policy.budget(funding.strike_sats)? {
+        if amount_sats > policy.budget(policy.funding_source.available(&funding))? {
             bail!("reward exceeds real funding or root per-feed ceiling");
         }
         let now = super::reward_outcomes::budget_time(&mut tx, true).await?;
@@ -797,6 +802,7 @@ mod tests {
     }
     fn policy() -> RewardPolicy {
         RewardPolicy {
+            funding_source: Default::default(),
             owner: test_event(1, 1, 100, "", vec![]).pubkey,
             member_percent_ceiling: 10,
             max_sats_per_feed: 100,

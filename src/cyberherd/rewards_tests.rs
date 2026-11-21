@@ -285,6 +285,7 @@ impl Fixture {
             .unwrap();
         }
         let root_policy = RewardPolicy {
+            funding_source: Default::default(),
             owner: owner.clone(),
             member_percent_ceiling: 10,
             max_sats_per_feed: 100,

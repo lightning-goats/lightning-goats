@@ -81,7 +81,8 @@ impl LedgerStore {
             && !reported
             && Some(quote.request.scope.account_id) == limits.account
             && limits.policy.is_some_and(|p| {
-                p.owner == request.reservation.owner
+                p.funding_source.is_strike()
+                    && p.owner == request.reservation.owner
                     && p.budget(funding.strike_sats)
                         .is_ok_and(|cap| request.reservation.reserved_sats <= cap)
                     && used <= p.max_sats_per_24h
@@ -145,6 +146,11 @@ async fn validate_scope(tx: &mut Transaction<'_, Sqlite>, request: &Request) -> 
         .bind(request.reservation.id.to_string())
         .fetch_one(&mut **tx)
         .await?;
+    let policy: crate::reward_funding::RewardPolicy =
+        serde_json::from_str(&row.try_get::<String, _>("policy_json")?)?;
+    if !policy.funding_source.is_strike() {
+        bail!("Strike execution requires a Strike reservation");
+    }
     if epoch != request.reservation.epoch.to_string()
         || decode_reservation(&row)? != request.reservation
     {

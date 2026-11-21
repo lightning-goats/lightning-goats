@@ -126,6 +126,43 @@ impl CollectorResult {
     }
 }
 
+/// Obtain the routing reserve for the signed probe invoice before choosing
+/// the recipient amount. The collector keeps proofs out of this request.
+#[cfg(unix)]
+pub async fn routing_reserve(
+    socket: &std::path::Path,
+    peer_uid: u32,
+    invoice: &super::invoice::ValidatedInvoice,
+) -> Result<u64> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Quote {
+        payment_hash: String,
+        amount_sat: u64,
+        routing_reserve_sat: u64,
+        expires_at: u64,
+    }
+    crate::private_ipc::socket_path(socket)?;
+    let quote: Quote = crate::private_ipc::request(
+        socket,
+        peer_uid,
+        &serde_json::json!({
+            "quote_invoice": invoice.encoded(), "amount_sat": invoice.amount_sats()
+        }),
+        65536,
+        30,
+    )
+    .await?;
+    let now = u64::try_from(crate::cyberherd::calendar::now()?)?;
+    ensure!(
+        quote.payment_hash == invoice.payment_hash()
+            && quote.amount_sat == invoice.amount_sats()
+            && now < quote.expires_at.min(invoice.expires_at()),
+        "fee observation differs from live payout invoice"
+    );
+    Ok(quote.routing_reserve_sat)
+}
+
 /// Read settlement from the collector's core-only socket. An absent receipt
 /// leaves the reservation outstanding, including after invoice expiry.
 #[cfg(unix)]

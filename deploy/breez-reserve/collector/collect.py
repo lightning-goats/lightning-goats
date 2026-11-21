@@ -82,6 +82,24 @@ def collect(store, client, request_id, pinned_keys):
 
 def execute_payout(store, client, request, keyset, pinned_keys):
     """Execute an authenticated payout worker request using its admitted grant evidence."""
+    if set(request) == {"quote_invoice", "amount_sat"}:
+        invoice_text = request["quote_invoice"]
+        invoice = bolt11.decode(invoice_text)
+        amount = request["amount_sat"]
+        if (type(amount) is not int or not 0 < amount <= 1_000_000 or invoice.currency != "bc"
+                or invoice.amount_msat != amount * 1000 or invoice.expiry_time <= time.time()):
+            raise ValueError("invalid payout fee discovery invoice")
+        status = client.post("/v1/melt/quote/bolt11", json={
+            "request": invoice_text, "unit": "sat",
+        }).raise_for_status().json()
+        if (status.get("request") != invoice_text or status.get("unit") != "sat"
+                or status.get("state") != "UNPAID" or type(status.get("amount")) is not int
+                or status["amount"] != amount or type(status.get("fee_reserve")) is not int
+                or status["fee_reserve"] < 0 or type(status.get("expiry")) is not int
+                or status["expiry"] <= time.time()):
+            raise ValueError("invalid payout fee quote")
+        return {"payment_hash": invoice.payment_hash, "amount_sat": amount,
+                "routing_reserve_sat": status["fee_reserve"], "expires_at": status["expiry"]}
     if set(request) == {"reconcile_disposition", "invoice"}:
         return submit_payout(store, client, request["reconcile_disposition"], request["invoice"],
                              keyset, pinned_keys, reconcile_only=True)

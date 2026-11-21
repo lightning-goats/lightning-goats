@@ -140,21 +140,25 @@ mod tests {
         );
         let reply = json!({"invoice":invoice});
         let expected = json!({"contact_id":intent.id,"description_hash":intent.description_hash});
+        let claim_lookup = json!({"contact_claim_status":intent.id});
+        let claim_reply = json!({"request_id":intent.id, "amount_sat":100,
+            "payment_hash":"ad".repeat(32), "proof_digest":"cd".repeat(32)});
         let listener = tokio::net::UnixListener::bind(&collector.socket).unwrap();
         let server = tokio::spawn(async move {
-            let (mut stream, _) = listener.accept().await.unwrap();
-            let req: Value = crate::private_ipc::read(&mut stream, 65536).await.unwrap();
-            assert_eq!(req, expected);
-            crate::private_ipc::write(&mut stream, &reply, 65536)
-                .await
-                .unwrap();
+            for (expected, reply) in [(expected, reply), (claim_lookup, claim_reply)] {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let req: Value = crate::private_ipc::read(&mut stream, 65536).await.unwrap();
+                assert_eq!(req, expected);
+                crate::private_ipc::write(&mut stream, &reply, 65536)
+                    .await
+                    .unwrap();
+            }
         });
         sqlx::query("UPDATE breez_project_invoices SET next_poll=0")
             .execute(&ledger.pool)
             .await
             .unwrap();
         assert!(ledger.poll_breez_claim(&collector).await.unwrap());
-        server.await.unwrap();
         let status = ledger
             .contact_status(intent.id, &capability)
             .await
@@ -162,6 +166,30 @@ mod tests {
             .unwrap();
         assert_eq!(status.state, "issued");
         assert_eq!(status.invoice, Some(invoice));
+        assert!(ledger.reserve_contact_delivery().await.unwrap().is_none());
+        sqlx::query("UPDATE breez_project_invoices SET next_poll=0")
+            .execute(&ledger.pool)
+            .await
+            .unwrap();
+        assert!(ledger.poll_breez_claim(&collector).await.unwrap());
+        server.await.unwrap();
+        let delivery = ledger.reserve_contact_delivery().await.unwrap().unwrap();
+        assert_eq!(delivery.contact_id, intent.id);
+        assert_eq!(delivery.envelope_json, intent.envelope_json);
+        ledger
+            .finish_contact_delivery(&delivery, Some(&delivery.relays[0]))
+            .await
+            .unwrap();
+        assert_eq!(
+            ledger
+                .contact_status(intent.id, &capability)
+                .await
+                .unwrap()
+                .unwrap()
+                .state,
+            "delivered"
+        );
+        assert!(ledger.reserve_contact_delivery().await.unwrap().is_none());
         assert_eq!(ledger.feed_credit_sats().await.unwrap(), 0);
     }
 

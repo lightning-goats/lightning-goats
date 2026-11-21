@@ -14,6 +14,24 @@ from cashu.core.crypto.secp import PrivateKey, PublicKey
 from cashu.core.nuts import nut20
 
 
+def unblind(item, promise, pinned_keys):
+    amount, keyset = promise["amount"], promise["id"]
+    if type(amount) is not int or amount <= 0 or keyset != item["id"]:
+        raise ValueError("invalid mint promise denomination or keyset")
+    mint_key = PublicKey(bytes.fromhex(pinned_keys[keyset][str(amount)]))
+    blind_signature = PublicKey(bytes.fromhex(promise["C_"]))
+    dleq = promise["dleq"]
+    if not b_dhke.alice_verify_dleq(
+        PublicKey(bytes.fromhex(item["B_"])), blind_signature,
+        PrivateKey(bytes.fromhex(dleq["e"])), PrivateKey(bytes.fromhex(dleq["s"])), mint_key,
+    ):
+        raise ValueError("invalid project mint signature")
+    signature = b_dhke.step3_alice(blind_signature, PrivateKey(bytes.fromhex(item["blind"])), mint_key)
+    return {"id": keyset, "amount": amount, "secret": item["secret"],
+                   "C": signature.format().hex(),
+                   "dleq": {"e": dleq["e"], "s": dleq["s"], "r": item["blind"]}}
+
+
 def collect(store, client, request_id, pinned_keys):
     row = store.db.execute("""
         SELECT terms, material, invoice, payment_hash, proofs FROM project_claim
@@ -53,25 +71,14 @@ def collect(store, client, request_id, pinned_keys):
         amount, keyset = item["amount"], item["id"]
         if amount != promise["amount"] or keyset != promise["id"]:
             raise ValueError("project promise terms differ")
-        mint_key = PublicKey(bytes.fromhex(pinned_keys[keyset][str(amount)]))
-        blind_signature = PublicKey(bytes.fromhex(promise["C_"]))
-        dleq = promise["dleq"]
-        if not b_dhke.alice_verify_dleq(
-            PublicKey(bytes.fromhex(item["B_"])), blind_signature,
-            PrivateKey(bytes.fromhex(dleq["e"])), PrivateKey(bytes.fromhex(dleq["s"])), mint_key,
-        ):
-            raise ValueError("invalid project mint signature")
-        signature = b_dhke.step3_alice(blind_signature, PrivateKey(bytes.fromhex(item["blind"])), mint_key)
-        proofs.append({"id": keyset, "amount": amount, "secret": item["secret"],
-                       "C": signature.format().hex(),
-                       "dleq": {"e": dleq["e"], "s": dleq["s"], "r": item["blind"]}})
+        proofs.append(unblind(item, promise, pinned_keys))
     if sum(p["amount"] for p in proofs) != json.loads(terms)["amount"]:
         raise ValueError("project claim amount differs")
     store.record_proofs(request_id, payment_hash, proofs)
     return True
 
 
-def submit_payout(store, client, disposition_id, invoice_text, quote_id, keyset):
+def submit_payout(store, client, disposition_id, invoice_text, quote_id, keyset, pinned_keys):
     """Submit reserved inputs once, or read the bound quote after an interruption."""
     row = store.db.execute(
         "SELECT binding FROM proof_disposition WHERE id=? AND purpose='cyberherd_payout'",
@@ -111,6 +118,21 @@ def submit_payout(store, client, disposition_id, invoice_text, quote_id, keyset)
             preimage = bytes.fromhex(result["payment_preimage"])
             if len(preimage) != 32 or hashlib.sha256(preimage).hexdigest() != invoice.payment_hash:
                 raise ValueError("invalid payout preimage")
+            saved = store.db.execute("""
+                SELECT change_material FROM payout_melt JOIN payout_melt_submission USING(disposition_id)
+                WHERE disposition_id=? AND quote_id=?
+            """, (disposition_id, quote_id)).fetchone()
+            if saved is None:
+                raise ValueError("missing payout submission")
+            blanks = json.loads(saved[0])
+            promises = result.get("change") or []
+            if len(promises) > len(blanks):
+                raise ValueError("too many change promises")
+            proofs = [unblind(item, promise, pinned_keys) for item, promise in zip(blanks, promises)]
+            fee = terms["maximum_fee_sat"] - sum(p["amount"] for p in proofs)
+            if fee < 0:
+                raise ValueError("excess payout change")
+            store.record_melt_result(disposition_id, fee, preimage.hex(), proofs)
         return result
 
     if status["state"] != "UNPAID":

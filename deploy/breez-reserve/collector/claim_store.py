@@ -99,6 +99,13 @@ class ClaimStore:
                     disposition_id TEXT PRIMARY KEY NOT NULL REFERENCES payout_melt(disposition_id)
                 )
             """)
+            self.db.execute("""
+                CREATE TABLE IF NOT EXISTS payout_melt_result (
+                    disposition_id TEXT PRIMARY KEY NOT NULL REFERENCES payout_melt_submission(disposition_id),
+                    fee_sat INTEGER NOT NULL CHECK(fee_sat>=0),
+                    preimage TEXT NOT NULL, change_proofs TEXT NOT NULL
+                )
+            """)
             for ident, proofs in self.db.execute("""
                 SELECT id,proofs FROM project_claim c WHERE proofs IS NOT NULL AND NOT EXISTS
                     (SELECT 1 FROM collected_output o WHERE o.request_id=c.id)
@@ -252,6 +259,19 @@ class ClaimStore:
                 INSERT INTO payout_melt_submission(disposition_id) VALUES (?)
                 ON CONFLICT(disposition_id) DO NOTHING
             """, (disposition_id,)).rowcount == 1
+
+    def record_melt_result(self, disposition_id, fee, preimage, proofs):
+        values = (fee, preimage, encode(proofs))
+        with self.write():
+            self.db.execute("""
+                INSERT INTO payout_melt_result VALUES (?,?,?,?)
+                ON CONFLICT(disposition_id) DO NOTHING
+            """, (disposition_id, *values))
+            saved = self.db.execute("""
+                SELECT fee_sat,preimage,change_proofs FROM payout_melt_result WHERE disposition_id=?
+            """, (disposition_id,)).fetchone()
+            if saved != values:
+                raise ValueError("settled payout result changed")
 
     def reserve_poll(self, now, lease_seconds):
         """Claim one due invoice. An interrupted attempt becomes eligible after its lease."""

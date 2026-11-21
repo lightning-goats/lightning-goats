@@ -404,7 +404,7 @@ def main():
                 digest = bolt11.decode(reserve.destination[0]).payment_hash
                 [payout_proof] = claims.reserve_payout(payment_id, str(uuid.uuid4()), digest, 12, 4,
                     {funded_id: {"consumed_sats": 16, "evidence_digest": funded["proof_digest"]}})
-                paid = submit_payout(claims, viewer, payment_id, reserve.destination[0], melt["quote"], keyset)
+                paid = submit_payout(claims, viewer, payment_id, reserve.destination[0], melt["quote"], keyset, {keyset: keys})
                 assert paid["state"].upper() == "PENDING"
                 assert wallet_state(viewer, payout_proof) == "PENDING"
                 claims.db.close()
@@ -435,8 +435,17 @@ def main():
                     raise AssertionError("restored project quote never became paid")
                 reserve.complete_sends = True
                 claims = ClaimStore(claim_dir)
-                final_melt = submit_payout(claims, viewer, payment_id, reserve.destination[0], melt["quote"], keyset)
+                final_melt = submit_payout(claims, viewer, payment_id, reserve.destination[0], melt["quote"], keyset, {keyset: keys})
                 claims.db.close()
+                claims = ClaimStore(claim_dir)
+                fee, saved_change = claims.db.execute("""
+                    SELECT fee_sat,change_proofs FROM payout_melt_result WHERE disposition_id=?
+                """, (payment_id,)).fetchone()
+                claims.db.close()
+                assert fee == 1
+                spend_change, _ = new_outputs(keyset, [1, 2])
+                expect(viewer.post("/v1/swap", json={"inputs": json.loads(saved_change),
+                                                     "outputs": encode_outputs(spend_change)}))
                 assert final_melt["state"].upper() == "PAID", final_melt
                 assert sum(change["amount"] for change in final_melt["change"]) == 3
                 assert wallet_state(viewer, payout_proof) == "SPENT"

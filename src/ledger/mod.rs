@@ -164,15 +164,7 @@ impl LedgerStore {
                 terms_match,
                 "claimed project invoice conflicts with core terms"
             );
-            sqlx::query("INSERT INTO breez_collected_claims(request_id,proof_digest) VALUES (?,?) ON CONFLICT(request_id) DO NOTHING")
-                .bind(&payment.source_id).bind(digest).execute(&mut *transaction).await?;
-            let original: String = sqlx::query_scalar(
-                "SELECT proof_digest FROM breez_collected_claims WHERE request_id=?",
-            )
-            .bind(&payment.source_id)
-            .fetch_one(&mut *transaction)
-            .await?;
-            anyhow::ensure!(original == digest, "conflicting project proof evidence");
+            breez::retain_claim(&mut transaction, &payment.source_id, digest).await?;
         }
         let contact_collision: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM private_contact_intents i JOIN strike_receive_requests r ON r.receive_request_id=i.receive_request_id WHERE r.payment_hash=lower(?)) OR EXISTS(SELECT 1 FROM breez_project_invoices WHERE payment_hash=lower(?) AND json_extract(intent,'$.purpose')='contact_fee') OR EXISTS(SELECT 1 FROM private_contact_fees WHERE ?='strike' AND receive_id=?)",

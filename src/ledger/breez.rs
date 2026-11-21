@@ -15,6 +15,22 @@ struct ClaimStatus {
     proof_digest: Option<String>,
 }
 
+pub(super) async fn retain_claim(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    id: &str,
+    digest: &str,
+) -> Result<()> {
+    sqlx::query("INSERT INTO breez_collected_claims(request_id,proof_digest) VALUES (?,?) ON CONFLICT(request_id) DO NOTHING")
+        .bind(id).bind(digest).execute(&mut **tx).await?;
+    let original: String =
+        sqlx::query_scalar("SELECT proof_digest FROM breez_collected_claims WHERE request_id=?")
+            .bind(id)
+            .fetch_one(&mut **tx)
+            .await?;
+    ensure!(original == digest, "conflicting project proof evidence");
+    Ok(())
+}
+
 impl LedgerStore {
     /// Issue or recover the original project invoice for a reserved foreign-mint sweep.
     pub async fn issue_breez_treasury_invoice(
@@ -99,14 +115,14 @@ impl LedgerStore {
         })
     }
 
-    async fn poll_breez_claim(&self, collector: &BreezCollectorConfig) -> Result<bool> {
+    pub(super) async fn poll_breez_claim(&self, collector: &BreezCollectorConfig) -> Result<bool> {
         let row = sqlx::query(
             "UPDATE breez_project_invoices SET next_poll=unixepoch()+30
              WHERE id=(SELECT i.id FROM breez_project_invoices i
                 WHERE (i.invoice IS NOT NULL OR
                   (json_extract(i.intent,'$.purpose')='contact_fee' AND i.created_at>unixepoch()-900))
                   AND (json_type(i.intent,'$.purpose') IS NULL
-                       OR json_extract(i.intent,'$.purpose')='contact_fee')
+                       OR json_extract(i.intent,'$.purpose') IN ('contact_fee','treasury_conversion'))
                   AND i.next_poll<=unixepoch()
                   AND NOT EXISTS(SELECT 1 FROM breez_collected_claims c WHERE c.request_id=i.id)
                   AND NOT EXISTS(SELECT 1 FROM settled_payments s WHERE s.source='breez' AND s.source_id=i.id)
@@ -132,7 +148,10 @@ impl LedgerStore {
             .await?;
             return Ok(true);
         };
-        let lookup = if contact {
+        let conversion = terms["purpose"] == "treasury_conversion";
+        let lookup = if conversion {
+            json!({"treasury_claim_status":id})
+        } else if contact {
             json!({"contact_claim_status":id})
         } else {
             json!({"claim_status":id})
@@ -147,6 +166,25 @@ impl LedgerStore {
             "project claim differs from issued invoice"
         );
         if let Some(digest) = status.proof_digest {
+            if conversion {
+                let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+                let valid: bool = sqlx::query_scalar(
+                    "SELECT EXISTS(SELECT 1 FROM breez_project_invoices b
+                     JOIN cashu_treasury_intents t ON t.id=b.id
+                     WHERE b.id=? AND b.payment_hash=? AND b.invoice IS NOT NULL
+                       AND json_extract(b.intent,'$.purpose')='treasury_conversion'
+                       AND json_extract(b.intent,'$.description_hash')=t.intent_digest
+                       AND json_extract(b.intent,'$.amount_sat')=t.deposit_sats AND t.deposit_sats=?
+                       AND NOT EXISTS(SELECT 1 FROM settled_payments WHERE payment_hash=b.payment_hash COLLATE NOCASE))")
+                    .bind(&id).bind(&hash).bind(i64::try_from(status.amount_sat)?).fetch_one(&mut *tx).await?;
+                ensure!(
+                    valid,
+                    "conversion claim differs from original treasury intent"
+                );
+                retain_claim(&mut tx, &id, &digest).await?;
+                tx.commit().await?;
+                return Ok(true);
+            }
             if contact {
                 self.accept_breez_contact_claim(&id, &hash, &digest).await?;
                 return Ok(true);

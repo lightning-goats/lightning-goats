@@ -281,17 +281,7 @@ impl LedgerStore {
         if !valid {
             bail!("private claim differs from bound contact invoice");
         }
-        sqlx::query("INSERT INTO breez_collected_claims(request_id,proof_digest) VALUES (?,?) ON CONFLICT(request_id) DO NOTHING")
-            .bind(id).bind(digest).execute(&mut *tx).await?;
-        let saved: String = sqlx::query_scalar(
-            "SELECT proof_digest FROM breez_collected_claims WHERE request_id=?",
-        )
-        .bind(id)
-        .fetch_one(&mut *tx)
-        .await?;
-        if saved != digest {
-            bail!("conflicting private contact proof evidence");
-        }
+        super::breez::retain_claim(&mut tx, id, digest).await?;
         sqlx::query("INSERT INTO private_contact_fees(contact_id,receive_id,invoice_payment_hash,amount_msat)
                      VALUES(?,?,?,?) ON CONFLICT(contact_id) DO NOTHING")
             .bind(id).bind(id).bind(hash).bind(i64::try_from(FEE_MSAT)?).execute(&mut *tx).await?;

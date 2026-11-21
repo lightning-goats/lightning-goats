@@ -284,6 +284,21 @@ async fn project_treasury_invoice_reopens_without_issuing_or_crediting_again() {
     let ledger = LedgerStore::connect(&url).await.unwrap();
     assert_eq!(ledger.issue_breez_treasury_invoice(&collector, &registration, &policy, intent.id)
         .await.unwrap().invoice, invoice);
+    if collector.socket.exists() { std::fs::remove_file(&collector.socket).unwrap(); }
+    let listener = tokio::net::UnixListener::bind(&collector.socket).unwrap();
+    let lookup = serde_json::json!({"treasury_claim_status":intent.id});
+    let reply = serde_json::json!({"request_id":intent.id, "payment_hash":issued.payment_hash,
+                                  "amount_sat":intent.deposit_sats, "proof_digest":"ab".repeat(32)});
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let request: serde_json::Value = crate::private_ipc::read(&mut stream, 65536).await.unwrap();
+        assert_eq!(request, lookup);
+        crate::private_ipc::write(&mut stream, &reply, 65536).await.unwrap();
+    });
+    assert!(ledger.poll_breez_claim(&collector).await.unwrap());
+    server.await.unwrap();
+    assert_eq!(count(&ledger, "breez_collected_claims").await, 1);
+    assert!(!ledger.poll_breez_claim(&collector).await.unwrap());
     assert!(ledger.record_payment(&SettledPayment {
         source: "strike".into(), source_id: Uuid::new_v4().to_string(),
         payment_hash: Some(issued.payment_hash), address_user: "dexter".into(),

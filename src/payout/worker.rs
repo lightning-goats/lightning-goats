@@ -155,7 +155,8 @@ impl Worker {
             return Ok(Step::Closed);
         }
         if saved.is_none() {
-            return self.invoice(&intent, fresh.page(), fetcher).await;
+            return prepare_callback(&self.store, &self.signer, &intent, fresh.page(), fetcher)
+                .await;
         }
         let quote = match quote {
             Some(quote) => quote,
@@ -390,36 +391,6 @@ impl Worker {
         }
         Ok(Some(page))
     }
-    async fn invoice<F: InvoiceFetcher>(
-        &self,
-        intent: &Intent,
-        fresh: &AuthenticatedFundingPage,
-        fetcher: &F,
-    ) -> Result<Step> {
-        let callback = self.store.callback_request(intent.id()).await?;
-        if !fresh.page().execution_permitted(calendar::now()?) {
-            return Ok(Step::Waiting);
-        }
-        let request = match callback {
-            Some(request) => request,
-            None => {
-                let raw = if intent.uses_nostr() {
-                    self.signer.sign(intent).await.ok()
-                } else {
-                    None
-                };
-                self.store
-                    .freeze_request(intent.id(), raw.as_deref(), calendar::now()?)
-                    .await?;
-                return Ok(Step::InvoiceSigned);
-            }
-        };
-        let invoice = fetcher.fetch(&request).await?;
-        self.store
-            .freeze_invoice(&invoice, calendar::now()?)
-            .await?;
-        Ok(Step::InvoiceSaved)
-    }
     async fn submit(
         &self,
         quote: uuid::Uuid,
@@ -437,5 +408,106 @@ impl Worker {
         let observed = self.sender.execute(&permitted, &claim).await?;
         self.store.bind_payment(&observed, calendar::now()?).await?;
         Ok(Step::Submitted)
+    }
+}
+
+async fn prepare_callback<F: InvoiceFetcher>(
+    store: &Store,
+    signer: &Signer,
+    intent: &Intent,
+    fresh: &AuthenticatedFundingPage,
+    fetcher: &F,
+) -> Result<Step> {
+    let callback = store.callback_request(intent.id()).await?;
+    let now = calendar::now()?;
+    if !(fresh.page().execution_permitted(now) || fresh.page().cashu_invoice_permitted(now)) {
+        return Ok(Step::Waiting);
+    }
+    let request = match callback {
+        Some(request) => request,
+        None => {
+            let raw = if intent.uses_nostr() {
+                signer.sign(intent).await.ok()
+            } else {
+                None
+            };
+            store
+                .freeze_request(intent.id(), raw.as_deref(), calendar::now()?)
+                .await?;
+            return Ok(Step::InvoiceSigned);
+        }
+    };
+    let invoice = fetcher.fetch(&request).await?;
+    store.freeze_invoice(&invoice, calendar::now()?).await?;
+    Ok(Step::InvoiceSaved)
+}
+
+pub(crate) struct CashuWorker {
+    pub store: Store,
+    pub core: Core,
+    pub signer: Signer,
+    pub plans: crate::cyberherd::payout_bridge::Client,
+}
+impl CashuWorker {
+    pub async fn tick(&self) -> Result<Step> {
+        let policy = self.store.policy();
+        if !policy.execution_enabled || !policy.fee_mode.is_fixed() {
+            return Ok(Step::Waiting);
+        }
+        let Some(work) = self
+            .store
+            .take_provider_work(calendar::now()?, "cashu")
+            .await?
+        else {
+            return Ok(Step::Idle);
+        };
+        let Some(member) = work.member else {
+            return Ok(Step::Waiting);
+        };
+        if self.store.grant_fee_mode(work.grant).await? != policy.fee_mode {
+            return Ok(Step::Waiting);
+        }
+        let intent = self.store.saved_invoice_intent(work.grant, &member).await?;
+        if let Some(intent) = &intent
+            && (self.store.saved_invoice(intent.id()).await?.is_some()
+                || intent.0.net_sats > policy.max_net_sats)
+        {
+            return Ok(Step::Waiting);
+        }
+        let grant = self
+            .store
+            .grant(work.grant)
+            .await?
+            .context("Cashu grant missing")?;
+        let nostr = self.store.row_uses_nostr(work.grant, &member).await?;
+        let joining = if intent.is_none() && nostr {
+            self.plans
+                .joining(grant.request_id, &member)
+                .await
+                .unwrap_or(None)
+        } else {
+            None
+        };
+        let fresh = self
+            .core
+            .payout_funding(policy.scope.epoch, grant.id, &policy.scope.owner, 0)
+            .await?;
+        let page = fresh.page();
+        if !page.cashu_invoice_permitted(calendar::now()?)
+            || (nostr && !page.nostr_enabled)
+            || page.reservation.request_id != grant.request_id
+            || page.reservation.plan_hash != grant.plan_hash
+            || page.reservation.reserved_sats != grant.reserved_sats
+        {
+            return Ok(Step::Waiting);
+        }
+        if let Some(intent) = intent {
+            return prepare_callback(&self.store, &self.signer, &intent, &fresh, &HttpFetcher)
+                .await;
+        }
+        self.store
+            .prepare_invoice_with_reference(grant.id, &member, calendar::now()?, joining.as_ref())
+            .await?;
+        Ok(Step::InvoiceIntent)
     }
 }

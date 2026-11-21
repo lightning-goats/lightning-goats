@@ -140,29 +140,39 @@ impl Store {
         Ok(())
     }
     pub(crate) async fn take_work(&self, now: i64) -> Result<Option<Work>> {
+        self.take_provider_work(now, "strike").await
+    }
+
+    pub(crate) async fn take_provider_work(
+        &self,
+        now: i64,
+        provider: &str,
+    ) -> Result<Option<Work>> {
         let mut tx = self.pool.begin().await?;
         write_lock(&mut tx).await?;
         touch_clock(&mut tx, now).await?;
         // Completed/failed rows are not repeatedly read, and a conflicted row
         // stays held for operator recovery. Other rows/grants continue fairly.
         let row=sqlx::query(r#"
-WITH state AS (
+WITH grants AS (
+ SELECT * FROM payout_grants WHERE COALESCE(json_extract(qualification_json,'$.execution_provider'),'strike')=?1
+), state AS (
  SELECT r.grant_id,r.member,g.admitted_at,
  EXISTS(SELECT 1 FROM payout_unsubmitted c WHERE c.grant_id=r.grant_id AND c.member=r.member) AS closed,
  EXISTS(SELECT 1 FROM payout_invoice_intents i JOIN payout_quote_intents q ON q.invoice_id=i.id JOIN payout_payment_bindings b ON b.intent_id=q.id JOIN payout_payment_records p ON p.payment_id=b.payment_id
  WHERE i.grant_id=r.grant_id AND i.member=r.member AND p.seq=(SELECT MAX(p2.seq) FROM payout_payment_records p2 WHERE p2.payment_id=b.payment_id) AND p.state IN ('COMPLETED','FAILED')) AS terminal,
  EXISTS(SELECT 1 FROM payout_invoice_intents i JOIN payout_quote_intents q ON q.invoice_id=i.id JOIN payout_payment_bindings b ON b.intent_id=q.id JOIN payout_payment_conflicts c ON c.payment_id=b.payment_id WHERE i.grant_id=r.grant_id AND i.member=r.member) AS conflicted
- FROM payout_rows r JOIN payout_grants g ON g.id=r.grant_id
+ FROM payout_rows r JOIN grants g ON g.id=r.grant_id
 ), jobs AS (
  SELECT 'row:'||s.grant_id||':'||s.member AS work_key,s.grant_id,s.member,s.admitted_at FROM state s
  WHERE NOT s.closed AND NOT s.terminal AND NOT s.conflicted AND NOT EXISTS(SELECT 1 FROM payout_outcome_manifests m WHERE m.grant_id=s.grant_id)
  UNION ALL
- SELECT 'outcome:'||g.id,g.id,NULL,g.admitted_at FROM payout_grants g
+ SELECT 'outcome:'||g.id,g.id,NULL,g.admitted_at FROM grants g
  WHERE NOT EXISTS(SELECT 1 FROM payout_outcome_acks a WHERE a.grant_id=g.id)
  AND NOT EXISTS(SELECT 1 FROM state s WHERE s.grant_id=g.id AND (s.conflicted OR (NOT s.closed AND NOT s.terminal)))
 )
 SELECT j.* FROM jobs j LEFT JOIN payout_worker_attempts a ON a.work_key=j.work_key ORDER BY COALESCE(a.sequence,0),j.admitted_at,j.work_key LIMIT 1
-"#).fetch_optional(&mut *tx).await?;
+"#).bind(provider).fetch_optional(&mut *tx).await?;
         let Some(row) = row else { return Ok(None) };
         let old: i64 =
             sqlx::query_scalar("SELECT sequence FROM payout_worker_clock WHERE singleton=1")

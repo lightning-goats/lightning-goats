@@ -1105,6 +1105,14 @@ async fn mixed_funding_keeps_the_consumed_claim_for_custody_verification() {
             .unwrap(),
         grant
     );
+    assert!(reopened.take_work(now).await.unwrap().is_none());
+    let work = reopened
+        .take_provider_work(now, "cashu")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(work.grant, grant.id);
+    assert_eq!(work.member.as_ref(), Some(&f.plan.rows[0].pubkey));
     let intent = reopened
         .prepare_invoice(grant.id, &f.plan.rows[0].pubkey, now)
         .await

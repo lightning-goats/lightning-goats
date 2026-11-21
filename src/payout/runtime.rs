@@ -5,7 +5,7 @@ use super::{
     provider::Client as Sender,
     signer::Client as Signer,
     store::{Policy, Store},
-    worker::Worker,
+    worker::{CashuWorker, Worker},
 };
 use crate::{
     core_bridge::unix::Client as Core,
@@ -207,9 +207,21 @@ impl Config {
                     self.policy.scope.owner.clone(),
                 )?),
             };
-            (Some(worker), Some(verifier))
+            (RuntimeWorker::Strike(Box::new(worker)), Some(verifier))
         } else {
-            (None, None)
+            (
+                RuntimeWorker::Cashu(Box::new(CashuWorker {
+                    store: store.clone(),
+                    core: core.clone(),
+                    signer: Signer::new(self.signer_socket.clone(), self.signer_uid)?,
+                    plans: Plans::new(
+                        self.intake_socket.clone(),
+                        self.intake_uid,
+                        self.policy.scope.owner.clone(),
+                    )?,
+                })),
+                None,
+            )
         };
         let intake = Intake {
             store,
@@ -307,8 +319,12 @@ impl Intake {
         Ok(true)
     }
 }
+enum RuntimeWorker {
+    Strike(Box<Worker>),
+    Cashu(Box<CashuWorker>),
+}
 pub struct Runtime {
-    worker: Option<Worker>,
+    worker: RuntimeWorker,
     intake: Intake,
     config: Config,
     _singleton: std::os::unix::net::UnixListener,
@@ -329,14 +345,19 @@ impl Runtime {
                 }
             }
         });
-        if let Some(worker) = self.worker {
+        {
+            let worker = self.worker;
             let millis = self.config.poll_millis;
             tasks.spawn(async move {
                 let mut ticks = tokio::time::interval(Duration::from_millis(millis));
                 ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
                 loop {
                     ticks.tick().await;
-                    if worker.tick().await.is_err() {
+                    let step = match &worker {
+                        RuntimeWorker::Strike(w) => w.tick().await,
+                        RuntimeWorker::Cashu(w) => w.tick().await,
+                    };
+                    if step.is_err() {
                         tracing::warn!("payout work held; retaining original journal identity");
                     }
                 }

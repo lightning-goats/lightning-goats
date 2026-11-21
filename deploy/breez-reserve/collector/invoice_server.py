@@ -38,13 +38,19 @@ def create(request, store, client, token, keyset):
         invoice = issue(store, client, token, request["contact_id"], 100,
                         request["description_hash"], keyset, {"purpose": "contact_fee"})
         return {"invoice": invoice}
-    if set(request) in ({"claim_status"}, {"contact_claim_status"}):
-        contact = "contact_claim_status" in request
+    if set(request) == {"treasury_id", "amount_sat", "description_hash"}:
+        invoice = issue(store, client, token, request["treasury_id"], request["amount_sat"],
+                        request["description_hash"], keyset, {"purpose": "treasury_conversion"})
+        return {"invoice": invoice}
+    claim_purposes = {"claim_status": None, "contact_claim_status": "contact_fee",
+                      "treasury_claim_status": "treasury_conversion"}
+    if len(request) == 1 and next(iter(request)) in claim_purposes:
+        field = next(iter(request))
         row = store.db.execute("""
             SELECT id,payment_hash,terms,proofs FROM project_claim
             WHERE id=? AND invoice IS NOT NULL
-        """, (request["contact_claim_status" if contact else "claim_status"],)).fetchone()
-        if row is None or (json.loads(row[2])["attribution"].get("purpose") == "contact_fee") != contact:
+        """, (request[field],)).fetchone()
+        if row is None or json.loads(row[2])["attribution"].get("purpose") != claim_purposes[field]:
             raise ValueError("unknown project invoice")
         return {"request_id": row[0], "payment_hash": row[1],
                 "amount_sat": json.loads(row[2])["amount"], "proof_digest": hashlib.sha256(row[3].encode()).hexdigest() if row[3] else None}

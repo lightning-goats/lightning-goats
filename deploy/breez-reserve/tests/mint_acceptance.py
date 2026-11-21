@@ -595,6 +595,26 @@ def main():
                 assert sum(change["amount"] for change in selected_change) == 3
                 assert wallet_state(viewer, payout_proof) == "SPENT"
                 assert reserve.pay_attempts == 1
+                claims = ClaimStore(claim_dir)
+                conversion_id = str(uuid.uuid4())
+                conversion = {"treasury_id": conversion_id, "amount_sat": 8, "description_hash": "ab"*32}
+                conversion_invoice = create(conversion, claims, viewer, PROJECT_TOKEN, keyset)["invoice"]
+                assert create(conversion, claims, viewer, PROJECT_TOKEN, keyset)["invoice"] == conversion_invoice
+                reserve.paid.add(bolt11.decode(conversion_invoice).payment_hash)
+                for _ in range(20):
+                    if collect(claims, viewer, conversion_id, {keyset: keys}):
+                        break
+                    time.sleep(.1)
+                status = create({"treasury_claim_status": conversion_id}, claims, None, None, None)
+                assert status["amount_sat"] == 8 and status["proof_digest"]
+                for field in ("claim_status", "contact_claim_status"):
+                    try:
+                        create({field: conversion_id}, claims, None, None, None)
+                    except ValueError:
+                        pass
+                    else:
+                        raise AssertionError("conversion appeared as a new contribution or contact fee")
+                claims.db.close()
             finally:
                 viewer.close()
                 process.terminate()

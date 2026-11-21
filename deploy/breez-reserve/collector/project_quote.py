@@ -1,0 +1,53 @@
+"""VPS project invoice issuance with the pinned Nutshell wallet primitives."""
+
+import hashlib
+import secrets
+import time
+from uuid import UUID
+
+import bolt11
+from cashu.core.crypto import b_dhke
+from coincurve import PrivateKey
+
+
+def prepare_claim(amount, keyset):
+    owner = PrivateKey()
+    outputs = []
+    for bit in range(amount.bit_length()):
+        denomination = 1 << bit
+        if amount & denomination:
+            secret = secrets.token_hex(32)
+            blinded, factor = b_dhke.step1_alice(secret)
+            outputs.append({
+                "amount": denomination, "id": keyset, "B_": blinded.format().hex(),
+                "secret": secret, "blind": factor.secret.hex(),
+            })
+    return {"owner": owner.secret.hex(), "outputs": outputs}
+
+
+def issue(store, private_client, token, request_id, amount, description, keyset, attribution):
+    """private_client is scoped to the HOME mTLS origin with redirects disabled."""
+    if type(amount) is not int or not 1 <= amount <= 100_000:
+        raise ValueError("project invoice amount outside HOME bounds")
+    request_id = str(UUID(request_id))
+    digest = hashlib.sha256(description).hexdigest()
+    terms = {"amount": amount, "description_hash": digest, "attribution": attribution}
+    material = store.prepare(request_id, terms, lambda: prepare_claim(amount, keyset))
+    owner = PrivateKey(bytes.fromhex(material["owner"])).public_key.format().hex()
+    response = private_client.post("/private/v1/project-quotes", headers={
+        "Authorization": "Bearer " + token,
+    }, json={
+        "request_id": request_id, "amount_sat": amount,
+        "description_hash": digest, "claim_pubkey": owner,
+    }, follow_redirects=False)
+    response.raise_for_status()
+    quote = response.json()
+    if quote["quote"] != "goats-" + request_id or quote["pubkey"] != owner:
+        raise ValueError("project quote owner or identity differs")
+    invoice = bolt11.decode(quote["request"])
+    if (invoice.currency != "bc" or invoice.amount_msat != amount * 1000
+            or invoice.description_hash != digest or invoice.expiry_time <= time.time()
+            or not 0 < invoice.expiry <= 3600):
+        raise ValueError("signed project invoice differs from requested terms")
+    store.record_invoice(request_id, quote["request"], invoice.payment_hash)
+    return quote["request"]

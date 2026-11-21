@@ -67,6 +67,12 @@ impl AppConfig {
             bail!("strike.api_url must not contain credentials, query, or fragment");
         }
 
+        if let Some(collector) = &self.lnurl.breez_collector {
+            crate::private_ipc::socket_path(&collector.socket)?;
+            if collector.peer_uid == 0 {
+                bail!("Breez collector requires a non-root peer UID");
+            }
+        }
         self.validate_lnurl()?;
         if self.feeder.threshold_sats == 0 {
             bail!("feeder.threshold_sats must be greater than zero");
@@ -297,10 +303,27 @@ pub struct StrikeConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct LnurlConfig {
+    #[serde(default)]
+    pub wallet_backend: WalletBackend,
+    pub breez_collector: Option<BreezCollectorConfig>,
     pub public_base_url: String,
     pub invoice_expiry_seconds: u64,
     #[serde(default)]
     pub zap: Option<ZapConfig>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum WalletBackend {
+    #[default]
+    Strike,
+    Breez,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct BreezCollectorConfig {
+    pub socket: PathBuf,
+    pub peer_uid: u32,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -436,6 +459,8 @@ mod tests {
             lnurl: LnurlConfig {
                 public_base_url: "https://lightning-goats.com/".to_owned(),
                 invoice_expiry_seconds: 300,
+                wallet_backend: Default::default(),
+                breez_collector: None,
                 zap: None,
             },
             lightning_address: phase1_addresses(),

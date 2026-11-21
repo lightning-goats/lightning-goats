@@ -113,6 +113,8 @@ async fn service(state: StrikeMockState) -> (TempDir, LnurlService) {
         &LnurlConfig {
             public_base_url: "https://lightning-goats.com/".to_owned(),
             invoice_expiry_seconds: 300,
+            wallet_backend: Default::default(),
+            breez_collector: None,
             zap: None,
         },
         &addresses(),

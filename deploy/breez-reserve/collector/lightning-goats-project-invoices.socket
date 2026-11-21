@@ -1,0 +1,12 @@
+[Unit]
+Description=Lightning Goats private Breez project invoice socket
+
+[Socket]
+ListenStream=/run/lightning-goats-project-invoices.sock
+SocketUser=root
+SocketGroup=lightning-goats
+SocketMode=0660
+RemoveOnStop=yes
+
+[Install]
+WantedBy=sockets.target

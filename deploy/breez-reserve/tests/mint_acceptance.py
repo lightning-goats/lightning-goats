@@ -171,7 +171,8 @@ def start_mint(directory, socket, reserve, credentials):
            "MINT_INPUT_FEE_PPK": "0", "MINT_QUOTE_BACKEND_CHECK_RATE_LIMIT": "0", "LOG_LEVEL": "INFO"}
     process = subprocess.Popen([sys.executable, "-m", "lg_mint"], cwd=directory, env=env, stdout=log, stderr=log)
     client = httpx.Client(transport=httpx.HTTPTransport(uds=str(socket)), base_url="http://mint", timeout=6)
-    for _ in range(100):
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
         if process.poll() is not None:
             break
         try:
@@ -179,7 +180,8 @@ def start_mint(directory, socket, reserve, credentials):
                 log.close()
                 return process, client
         except httpx.TransportError:
-            time.sleep(.1)
+            pass
+        time.sleep(.1)
     process.terminate() if process.poll() is None else None
     process.wait(timeout=10)
     log.close()
@@ -258,6 +260,68 @@ def main():
                 assert len(promise) == 1
                 project_proof = proof(promise[0], project_material[0], keys)
                 assert wallet_state(viewer, project_proof) == "UNSPENT"
+
+                # Run the VPS collector against this mint and its simulated reserve.
+                sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "collector"))
+                from claim_store import ClaimStore
+                from collect import collect
+                from invoice_server import create, handle
+                import socket
+                import struct
+
+                claim_dir = home / "vps-claims"
+                claim_dir.mkdir(mode=0o700)
+                claims = ClaimStore(claim_dir)
+                claim_id = str(uuid.uuid4())
+                with httpx.Client(transport=httpx.HTTPTransport(uds=str(mint_path)), base_url="http://mint") as private:
+                    left, right = socket.socketpair()
+                    with left, right, left.makefile("rb") as replies:
+                        body = json.dumps({"request_id": claim_id, "amount_sat": 10, "user": "dexter",
+                                           "credit_pool": "herd", "description": "collector fixture",
+                                           "zap": False}).encode()
+                        left.sendall(struct.pack("!I", len(body)) + body)
+                        handle(right, os.getuid(), claims, private, PROJECT_TOKEN, keyset)
+                        size, = struct.unpack("!I", replies.read(4))
+                        invoice_text = json.loads(replies.read(size))["invoice"]
+                    terms = claims.db.execute("SELECT terms FROM project_claim WHERE id=?", (claim_id,)).fetchone()[0]
+                    assert json.loads(terms)["attribution"] == {"user": "dexter", "credit_pool": "herd"}
+                assert claims.reserve_poll(100, 15) == claim_id
+                assert claims.reserve_poll(101, 15) is None
+                assert claims.reserve_poll(115, 15) == claim_id
+                assert not collect(claims, viewer, claim_id, {keyset: keys})
+                expired_at = bolt11.decode(invoice_text).expiry_time
+                claims.schedule_unpaid(claim_id, expired_at + 1, expired_at)
+                assert claims.reserve_poll(expired_at + 300, 15) is None
+                assert claims.reserve_poll(expired_at + 301, 15) == claim_id
+                reserve.paid.add(bolt11.decode(invoice_text).payment_hash)
+                class LostClaimResponse:
+                    get = viewer.get
+
+                    def post(self, path, **kwargs):
+                        assert path == "/v1/mint/bolt11"
+                        viewer.post(path, **kwargs).raise_for_status()
+                        raise httpx.ReadTimeout("fixture discarded claim response")
+
+                for _ in range(15):
+                    try:
+                        collect(claims, LostClaimResponse(), claim_id, {keyset: keys})
+                    except httpx.ReadTimeout:
+                        break
+                    time.sleep(.1)
+                else:
+                    raise AssertionError("fixture did not reach lost project claim response")
+                claims.db.close()
+                claims = ClaimStore(claim_dir)
+                assert collect(claims, viewer, claim_id, {keyset: keys})
+                status = create({"claim_status": claim_id}, claims, None, None, None)
+                assert status == {"request_id": claim_id, "payment_hash": bolt11.decode(invoice_text).payment_hash,
+                                  "amount_sat": 10, "proof_digest": hashlib.sha256(claims.db.execute(
+                                      "SELECT proofs FROM project_claim WHERE id=?", (claim_id,)
+                                  ).fetchone()[0].encode()).hexdigest()}
+                assert claims.reserve_poll(130, 15) is None
+                saved = claims.db.execute("SELECT proofs FROM project_claim WHERE id=?", (claim_id,)).fetchone()[0]
+                assert sum(p["amount"] for p in json.loads(saved)) == 10
+                claims.db.close()
 
                 pending_request = {**request, "request_id": str(uuid.uuid4()),
                     "description_hash": hashlib.sha256(b'[["text/plain","Goats"]]').hexdigest()}

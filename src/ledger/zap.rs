@@ -24,7 +24,7 @@ pub(super) async fn stage_receipt(
     settlement_id: i64,
     event_seq: u64,
 ) -> Result<()> {
-    if payment.source != "strike" {
+    if !matches!(payment.source.as_str(), "strike" | "breez") {
         return Ok(());
     }
     let Some(context) = payment.context_json.as_ref() else {
@@ -34,8 +34,8 @@ pub(super) async fn stage_receipt(
     let Some(id) = context["receive_request_id"].as_str() else {
         return Ok(());
     };
-    let row=sqlx::query("SELECT z.request_json,z.payee_pubkey,z.receipt_pubkey,r.amount_msat,r.address_user,r.credit_pool,r.description_hash FROM zap_receive_context z JOIN strike_receive_requests r USING(receive_request_id) WHERE z.receive_request_id=?")
-        .bind(id).fetch_optional(&mut **tx).await?;
+    let row=sqlx::query("SELECT z.request_json,z.payee_pubkey,z.receipt_pubkey,z.amount_msat,z.address_user,z.credit_pool,z.description_hash FROM zap_invoice_terms z WHERE z.receive_request_id=? AND z.provider=?")
+        .bind(id).bind(&payment.source).fetch_optional(&mut **tx).await?;
     let Some(row) = row else {
         return Ok(());
     };
@@ -80,14 +80,14 @@ fn decode_request(row: &sqlx::sqlite::SqliteRow) -> Result<ZapRequest> {
 
 impl LedgerStore {
     pub async fn zap_request(&self, id: Uuid) -> Result<Option<ZapRequest>> {
-        let row=sqlx::query("SELECT z.request_json,z.payee_pubkey,z.receipt_pubkey,r.amount_msat,r.description_hash FROM zap_receive_context z JOIN strike_receive_requests r USING(receive_request_id) WHERE z.receive_request_id=?")
+        let row=sqlx::query("SELECT z.request_json,z.payee_pubkey,z.receipt_pubkey,z.amount_msat,z.description_hash FROM zap_invoice_terms z WHERE z.receive_request_id=?")
             .bind(id.to_string()).fetch_optional(&self.pool).await?;
         row.as_ref().map(decode_request).transpose()
     }
 
     pub async fn reserve_zap_receipt(&self) -> Result<Option<ZapReceiptJob>> {
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        let row=sqlx::query("SELECT j.settlement_id,j.source_event_seq,j.paid_at,j.signed_json,r.invoice,z.request_json,z.payee_pubkey,z.receipt_pubkey,r.amount_msat,r.description_hash,d.relay FROM zap_receipt_jobs j JOIN zap_receive_context z USING(receive_request_id) JOIN strike_receive_requests r USING(receive_request_id) LEFT JOIN zap_receipt_relays d ON d.settlement_id=j.settlement_id AND d.published=0 AND d.next_attempt<=unixepoch() WHERE j.next_attempt<=unixepoch() AND (j.lease_until IS NULL OR j.lease_until<unixepoch()) AND (d.relay IS NOT NULL OR NOT EXISTS(SELECT 1 FROM zap_receipt_relays WHERE settlement_id=j.settlement_id)) ORDER BY j.source_event_seq,d.next_attempt,d.relay LIMIT 1")
+        let row=sqlx::query("SELECT j.settlement_id,j.source_event_seq,j.paid_at,j.signed_json,z.invoice,z.request_json,z.payee_pubkey,z.receipt_pubkey,z.amount_msat,z.description_hash,d.relay FROM zap_receipt_jobs j JOIN zap_invoice_terms z USING(receive_request_id) LEFT JOIN zap_receipt_relays d ON d.settlement_id=j.settlement_id AND d.published=0 AND d.next_attempt<=unixepoch() WHERE j.next_attempt<=unixepoch() AND (j.lease_until IS NULL OR j.lease_until<unixepoch()) AND (d.relay IS NOT NULL OR NOT EXISTS(SELECT 1 FROM zap_receipt_relays WHERE settlement_id=j.settlement_id)) ORDER BY j.source_event_seq,d.next_attempt,d.relay LIMIT 1")
             .fetch_optional(&mut *tx).await?;
         let Some(row) = row else {
             tx.commit().await?;
@@ -143,7 +143,7 @@ impl LedgerStore {
         }
         let json = serde_json::to_string(signed)?;
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        let current=sqlx::query("SELECT j.signed_json,j.lease_id,j.paid_at,r.invoice,z.request_json,z.payee_pubkey,z.receipt_pubkey,r.amount_msat,r.description_hash FROM zap_receipt_jobs j JOIN zap_receive_context z USING(receive_request_id) JOIN strike_receive_requests r USING(receive_request_id) WHERE j.settlement_id=?").bind(job.settlement_id).fetch_one(&mut *tx).await?;
+        let current=sqlx::query("SELECT j.signed_json,j.lease_id,j.paid_at,z.invoice,z.request_json,z.payee_pubkey,z.receipt_pubkey,z.amount_msat,z.description_hash FROM zap_receipt_jobs j JOIN zap_invoice_terms z USING(receive_request_id) WHERE j.settlement_id=?").bind(job.settlement_id).fetch_one(&mut *tx).await?;
         let original = decode_request(&current)?;
         if signed.created_at != u64::try_from(current.try_get::<i64, _>("paid_at")?)?
             || signed.pubkey != original.receipt_signer()

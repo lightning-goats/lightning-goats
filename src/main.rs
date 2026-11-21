@@ -291,6 +291,17 @@ async fn main() -> Result<()> {
         }
     });
 
+    let mut breez_claims = tokio::spawn({
+        let ledger = ledger.clone();
+        let collector = config.lnurl.breez_collector.clone();
+        async move {
+            match collector {
+                Some(collector) => ledger.run_breez_claim_recovery(collector).await,
+                None => pending::<Result<()>>().await,
+            }
+        }
+    });
+
     let mut cashu_receipts = tokio::spawn(async move {
         match cashu_receipts {
             Some(server) => server.serve(pending()).await,
@@ -311,6 +322,7 @@ async fn main() -> Result<()> {
             Ok(())
         }
         result = &mut server => task_exit("HTTP server", result),
+        result = &mut breez_claims => task_exit("Breez claim recovery", result),
         result = &mut recovery => task_exit("settlement recovery", result),
         result = &mut feeder => task_exit("feed worker", result),
         result = &mut informational => task_exit("informational worker", result),
@@ -326,6 +338,7 @@ async fn main() -> Result<()> {
 
     server.abort();
     recovery.abort();
+    breez_claims.abort();
     feeder.abort();
     informational.abort();
     feeding_presentation.abort();

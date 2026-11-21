@@ -1090,6 +1090,8 @@ async fn mixed_funding_keeps_the_consumed_claim_for_custody_verification() {
         "invoice":encoded, "payment_hash":invoice.payment_hash(), "amount_sat":1,
         "maximum_fee_sat":1, "retained_allocations":[allocation]})
     );
+    reopened.prepare_quote(intent.id(), now + 4).await.unwrap();
+    assert!(reopened.cashu_payout_request(intent.id()).await.is_err());
     qualified.retained_allocations[0].anchor.evidence_digest = "ef".repeat(32);
     assert!(reopened.admit(&f.plan, &qualified, now).await.is_err());
     task.abort();

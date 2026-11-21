@@ -166,6 +166,15 @@ impl Store {
     /// Dispatch still requires a fresh execution lease and exclusive provider binding.
     pub async fn cashu_payout_request(&self, intent_id: Uuid) -> Result<serde_json::Value> {
         let mut tx = self.pool.begin().await?;
+        let strike_quote: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM payout_quote_intents WHERE invoice_id=?)",
+        )
+        .bind(intent_id.to_string())
+        .fetch_one(&mut *tx)
+        .await?;
+        if strike_quote {
+            bail!("payout invoice already has a Strike quote identity");
+        }
         let invoice = load_invoice(&mut tx, intent_id, &self.policy.scope.owner)
             .await?
             .context("missing frozen payout invoice")?;

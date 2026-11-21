@@ -470,6 +470,9 @@ def main():
                     assert "differs from reserved terms" in str(exc)
                 else:
                     raise AssertionError("reconciliation accepted a different invoice with the same hash")
+                core_lookup = {"payout_receipt": payment_id, "feed_id": payout_feed, "payment_hash": digest,
+                               "invoice_digest": hashlib.sha256(reserve.destination[0].encode()).hexdigest()}
+                assert create(core_lookup, claims, None, None, None) is None
                 class FeeBearingKeyset:
                     def post(self, path, **kwargs):
                         assert path == "/v1/melt/quote/bolt11"
@@ -560,6 +563,13 @@ def main():
                 final_melt = execute_payout(claims, LookupOnly(), lookup, keyset, {keyset: keys})
                 claims.db.close()
                 claims = ClaimStore(claim_dir)
+                assert create(core_lookup, claims, None, None, None) == final_melt
+                try:
+                    create({**core_lookup, "feed_id": str(uuid.uuid4())}, claims, None, None, None)
+                except ValueError:
+                    pass
+                else:
+                    raise AssertionError("core accepted receipt for a different feed")
                 assert submit_payout(claims, None, payment_id, reserve.destination[0], keyset, {keyset: keys}) == final_melt
                 fee, saved_change = claims.db.execute("""
                     SELECT fee_sat,change_proofs FROM payout_melt_result WHERE disposition_id=?

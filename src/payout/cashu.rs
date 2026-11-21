@@ -124,6 +124,32 @@ impl CollectorResult {
     }
 }
 
+/// Read settlement from the collector's core-only socket. An absent receipt
+/// leaves the reservation outstanding, including after invoice expiry.
+#[cfg(unix)]
+pub async fn settled_fee(
+    collector: &crate::config::BreezCollectorConfig,
+    claim: &ExecutionRequest,
+) -> Result<Option<u64>> {
+    claim.validate()?;
+    let lookup = serde_json::json!({
+        "payout_receipt": claim.disposition_id,
+        "feed_id": claim.reservation.request_id,
+        "invoice_digest": hex::encode(Sha256::digest(claim.invoice.as_bytes())),
+        "payment_hash": claim.payment_hash,
+    });
+    let receipt: Option<CollectorResult> =
+        crate::private_ipc::request(&collector.socket, collector.peer_uid, &lookup, 65536, 20)
+            .await?;
+    match receipt {
+        None => Ok(None),
+        Some(receipt @ CollectorResult::Paid { .. }) => {
+            receipt.verified_fee(&claim.payment_hash, claim.amount_sat, claim.maximum_fee_sat)
+        }
+        Some(_) => anyhow::bail!("unexpected core payout receipt state"),
+    }
+}
+
 /// Submit only the collector payload committed by the fresh core claim.
 #[cfg(unix)]
 pub async fn submit(

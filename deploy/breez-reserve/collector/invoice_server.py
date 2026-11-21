@@ -19,6 +19,21 @@ MAX_FRAME = 65536
 
 
 def create(request, store, client, token, keyset):
+    if set(request) == {"payout_receipt", "feed_id", "invoice_digest", "payment_hash"}:
+        row = store.db.execute("""
+            SELECT d.binding,m.quote_id,r.fee_sat,r.preimage FROM proof_disposition d
+            JOIN payout_melt m ON m.disposition_id=d.id
+            JOIN payout_melt_result r ON r.disposition_id=d.id
+            WHERE d.id=? AND d.purpose='cyberherd_payout'
+        """, (request["payout_receipt"],)).fetchone()
+        if row is None:
+            return None
+        terms = json.loads(row[0])
+        if (terms["feed"] != request["feed_id"] or terms.get("invoice_digest") != request["invoice_digest"]
+                or terms["invoice_hash"] != request["payment_hash"]):
+            raise ValueError("payout receipt differs from core claim")
+        return {"state": "PAID", "quote": row[1], "amount_sat": terms["amount_sat"], "fee_sat": row[2],
+                "payment_hash": terms["invoice_hash"], "payment_preimage": row[3]}
     if set(request) == {"contact_id", "description_hash"}:
         invoice = issue(store, client, token, request["contact_id"], 100,
                         request["description_hash"], keyset, {"purpose": "contact_fee"})

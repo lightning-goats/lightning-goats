@@ -335,13 +335,26 @@ def main():
                 payout_input = next(p for p in proofs if p["amount"] == 8)
                 change_input = next(p for p in proofs if p["amount"] == 2)
                 payout_id = str(uuid.uuid4())
-                payout_intent = {"invoice_hash": "33" * 32, "amount_sats": 8}
-                assert claims.reserve_inputs(payout_id, "cyberherd_payout", payout_intent,
-                                             [payout_input["secret"]]) == [payout_input]
+                feed_id = str(uuid.uuid4())
+                allocation = {claim_id: {"evidence_digest": status["proof_digest"], "consumed_sats": 8}}
+                assert claims.reserve_payout(payout_id, feed_id, "33"*32, 7, 1, allocation) == [payout_input]
                 claims.db.close()
                 claims = ClaimStore(claim_dir)
-                assert claims.reserve_inputs(payout_id, "cyberherd_payout", payout_intent,
-                                             [payout_input["secret"]]) == [payout_input]
+                assert claims.reserve_payout(payout_id, feed_id, "33"*32, 7, 1, allocation) == [payout_input]
+                try:
+                    claims.reserve_payout(str(uuid.uuid4()), str(uuid.uuid4()), "33"*32, 2, 0,
+                                          {claim_id: {**allocation[claim_id], "consumed_sats": 2}})
+                except sqlite3.IntegrityError:
+                    pass
+                else:
+                    raise AssertionError("second disposition accepted the same payment hash")
+                for invalid in [allocation, {claim_id: {**allocation[claim_id], "consumed_sats": 10}}]:
+                    try:
+                        claims.reserve_payout(str(uuid.uuid4()), feed_id, "44"*32, 2, 0, invalid)
+                    except ValueError:
+                        pass
+                    else:
+                        raise AssertionError("payout exceeded confirmed portion of a donation")
                 transfer_id = str(uuid.uuid4())
                 transfer_intent = {"request": "fixture", "amount_sats": 10}
                 try:

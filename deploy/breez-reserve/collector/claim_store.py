@@ -1,5 +1,6 @@
 """Private VPS journal for NUT-20 claims and exact-output recovery."""
 
+import hashlib
 import json
 import sqlite3
 from contextlib import contextmanager
@@ -68,6 +69,24 @@ class ClaimStore:
                     disposition_id TEXT NOT NULL REFERENCES proof_disposition(id)
                 )
             """)
+            self.db.execute("""
+                CREATE TABLE IF NOT EXISTS payout_invoice (
+                    payment_hash TEXT PRIMARY KEY NOT NULL,
+                    disposition_id TEXT UNIQUE NOT NULL REFERENCES proof_disposition(id)
+                )
+            """)
+            self.db.execute("""
+                CREATE TABLE IF NOT EXISTS payout_claim_allocation (
+                    disposition_id TEXT NOT NULL REFERENCES proof_disposition(id),
+                    feed_id TEXT NOT NULL, claim_id TEXT NOT NULL REFERENCES project_claim(id),
+                    budget_sat INTEGER NOT NULL CHECK(budget_sat>0),
+                    reserved_sat INTEGER NOT NULL CHECK(reserved_sat>0 AND reserved_sat<=budget_sat),
+                    PRIMARY KEY(disposition_id,claim_id)
+                )
+            """)
+            self.db.execute("""
+                CREATE INDEX IF NOT EXISTS payout_claim_feed ON payout_claim_allocation(feed_id,claim_id)
+            """)
             for ident, proofs in self.db.execute("""
                 SELECT id,proofs FROM project_claim c WHERE proofs IS NOT NULL AND NOT EXISTS
                     (SELECT 1 FROM collected_output o WHERE o.request_id=c.id)
@@ -94,6 +113,8 @@ class ClaimStore:
     def reserve_inputs(self, disposition_id, purpose, intent, secrets):
         """Reserve inputs chosen by the authorized payout or transfer planner."""
         disposition_id = str(UUID(disposition_id))
+        if purpose != "operator_transfer":
+            raise ValueError("payout inputs require a confirmed feed allocation")
         if not secrets or len(secrets) != len(set(secrets)):
             raise ValueError("missing or duplicate disposition inputs")
         binding = encode(intent)
@@ -120,6 +141,70 @@ class ClaimStore:
             if [r[0] for r in rows] != sorted(secrets):
                 raise ValueError("disposition inputs changed")
             return [json.loads(r[1]) for r in rows]
+
+    def reserve_payout(self, disposition_id, feed_id, invoice_hash, amount, fee_limit, allocations):
+        """Reserve exact project inputs against an authenticated confirmed-feed allocation."""
+        disposition_id = str(UUID(disposition_id))
+        feed_id = str(UUID(feed_id))
+        if (not isinstance(invoice_hash, str) or len(invoice_hash) != 64
+                or any(c not in "0123456789abcdef" for c in invoice_hash)
+                or type(amount) is not int or not 0 < amount <= 1_000_000
+                or type(fee_limit) is not int or not 0 <= fee_limit <= 1_000_000
+                or not allocations):
+            raise ValueError("invalid payout terms")
+        binding = encode({"feed": feed_id, "invoice_hash": invoice_hash, "amount_sat": amount,
+                          "maximum_fee_sat": fee_limit, "claims": allocations})
+        with self.write():
+            previous = self.db.execute("SELECT purpose,binding FROM proof_disposition WHERE id=?",
+                                       (disposition_id,)).fetchone()
+            if previous and previous != ("cyberherd_payout", binding):
+                raise ValueError("payout replay differs")
+            if previous is None:
+                self.db.execute("INSERT INTO proof_disposition VALUES (?,'cyberherd_payout',?)",
+                                (disposition_id, binding))
+                self.db.execute("INSERT INTO payout_invoice VALUES (?,?)", (invoice_hash, disposition_id))
+                left = amount + fee_limit
+                remaining = {}
+                candidates = []
+                for claim_id, terms in sorted(allocations.items()):
+                    digest, budget = terms["evidence_digest"], terms["consumed_sats"]
+                    row = self.db.execute("SELECT proofs FROM project_claim WHERE id=?",
+                                          (claim_id,)).fetchone()
+                    if (row is None or row[0] is None or hashlib.sha256(row[0].encode()).hexdigest() != digest
+                            or type(budget) is not int or budget <= 0
+                            or budget > sum(p["amount"] for p in json.loads(row[0]))):
+                        raise ValueError("payout allocation conflicts with local custody")
+                    used, original = self.db.execute("""
+                        SELECT COALESCE(SUM(reserved_sat),0),MIN(budget_sat)
+                        FROM payout_claim_allocation WHERE feed_id=? AND claim_id=?
+                    """, (feed_id, claim_id)).fetchone()
+                    if original is not None and original != budget:
+                        raise ValueError("confirmed feed allocation changed")
+                    remaining[claim_id] = budget - used
+                    candidates.extend((sats, claim_id, secret) for secret,sats in self.db.execute("""
+                        SELECT secret,amount_sat FROM collected_output o
+                        WHERE request_id=? AND NOT EXISTS
+                        (SELECT 1 FROM disposition_input i WHERE i.secret=o.secret)
+                        ORDER BY amount_sat DESC,secret
+                    """, (claim_id,)))
+                taken = {}
+                for sats, claim_id, secret in sorted(candidates, key=lambda x: (-x[0], x[1], x[2])):
+                    if sats <= min(remaining[claim_id], left):
+                        self.db.execute("INSERT INTO disposition_input VALUES (?,?)", (secret, disposition_id))
+                        remaining[claim_id] -= sats
+                        taken[claim_id] = taken.get(claim_id, 0) + sats
+                        left -= sats
+                        if not left:
+                            break
+                for claim_id, sats in taken.items():
+                    self.db.execute("INSERT INTO payout_claim_allocation VALUES (?,?,?,?,?)",
+                                    (disposition_id, feed_id, claim_id, allocations[claim_id]["consumed_sats"], sats))
+                if left:
+                    raise ValueError("confirmed allocation lacks exact available payout inputs")
+            return [json.loads(r[0]) for r in self.db.execute("""
+                SELECT o.proof FROM collected_output o JOIN disposition_input i USING(secret)
+                WHERE i.disposition_id=? ORDER BY o.secret
+            """, (disposition_id,))]
 
     def reserve_poll(self, now, lease_seconds):
         """Claim one due invoice. An interrupted attempt becomes eligible after its lease."""

@@ -210,3 +210,25 @@ async fn financial_job_planning_skips_a_mint_with_no_exposure_capacity() {
     );
     assert_eq!(count(&store, "cashu_treasury_intents").await, 2);
 }
+
+#[tokio::test]
+async fn local_ecash_funds_confirmed_feeding_and_only_legacy_lots_can_be_swept() {
+    let (_dir,url,store,policy) = fixture().await;
+    let older = wire(&policy, 400);
+    store.import_cashu_receipt(&policy, &authenticated(&policy,&older)).await.unwrap();
+    let local = wire(&policy, 1000);
+    let peer = authenticated(&policy,&local);
+    store.import_cashu_with_custody(&policy,&peer,Some("mint-a")).await.unwrap();
+    let reopened = LedgerStore::connect(&url).await.unwrap();
+    reopened.import_cashu_receipt(&policy,&peer).await.unwrap();
+    assert_eq!(count(&reopened,"retained_cashu_lots").await,1);
+    let request = reopened.begin_feed_attempt(1000).await.unwrap().unwrap();
+    reopened.confirm_feed_attempt(request).await.unwrap();
+    assert_eq!(reopened.feed_credit_sats().await.unwrap(),400);
+    assert_eq!(count(&reopened,"cashu_treasury_intents").await,0);
+    let sweep=crate::cashu::treasury_sweep::Request {id:Uuid::new_v4(),mint_id:"mint-a".into(),maximum_input_sats:1000};
+    let planned=reopened.plan_operator_cashu_settlement(&policy,&feed_treasury_policy(),&sweep,false).await.unwrap().unwrap();
+    assert_eq!(planned.input_sats,400);
+    assert_eq!(planned.sources.len(),1);
+    assert_eq!(planned.sources[0].acquisition_id,older.data().acquisition_id);
+}

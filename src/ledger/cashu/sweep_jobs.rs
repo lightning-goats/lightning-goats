@@ -31,6 +31,7 @@ async fn available(
             ),0) AS available
             FROM cashu_receipt_inbox c
             WHERE c.wallet_instance=? AND c.wallet_epoch=? AND c.core_epoch=? AND c.mint_id=?
+              AND NOT EXISTS(SELECT 1 FROM retained_cashu_lots g WHERE g.ledger_id=c.ledger_entry_id)
         ) SELECT *,SUM(available) OVER() AS balance,MIN(available) OVER() AS minimum,
                  MIN(accepted_at) OVER() AS oldest
           FROM custody WHERE available!=0

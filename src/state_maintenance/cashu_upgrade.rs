@@ -38,9 +38,15 @@ pub(super) const CASHU_TABLES: [&str; 24] = [
 pub(super) fn tables_for_core(version: i64) -> impl Iterator<Item = &'static str> {
     CASHU_TABLES
         .into_iter()
-        .chain(["breez_collected_claims", "breez_project_invoices"])
+        .chain([
+            "retained_cashu_lots",
+            "breez_collected_claims",
+            "breez_project_invoices",
+        ])
         .filter(move |name| match *name {
-            "breez_collected_claims" | "breez_project_invoices" => version >= 30,
+            "retained_cashu_lots" | "breez_collected_claims" | "breez_project_invoices" => {
+                version >= 30
+            }
             "feed_cashu_proceeds" | "cashu_settled_ranges" => version >= 29,
             "cashu_treasury_inspections" => version >= 28,
             "cashu_treasury_fee_observations" => version >= 27,

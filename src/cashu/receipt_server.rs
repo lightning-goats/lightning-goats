@@ -134,6 +134,7 @@ impl Config {
 }
 
 pub struct Server {
+    retained_mint: Option<String>,
     config: Config,
     policy: ReceiptPolicy,
     ledger: LedgerStore,
@@ -147,15 +148,27 @@ impl Server {
             "receipt server requires a separate non-root identity"
         );
         Ok(Self {
+            retained_mint: None,
             config,
             policy,
             ledger,
         })
     }
+    pub fn retain_mint(mut self, mint_id: &str) -> Result<Self> {
+        ensure!(
+            self.config
+                .approved
+                .iter()
+                .any(|mint| mint.mint_id == mint_id),
+            "retained Cashu mint requires an approved registration"
+        );
+        self.retained_mint = Some(mint_id.to_owned());
+        Ok(self)
+    }
     async fn commit(&self, receipt: &PeerReceipt) -> Result<Acknowledgment> {
         let result = self
             .ledger
-            .import_cashu_receipt(&self.policy, receipt)
+            .import_cashu_with_custody(&self.policy, receipt, self.retained_mint.as_deref())
             .await?;
         let ack = Acknowledgment {
             version: 1,

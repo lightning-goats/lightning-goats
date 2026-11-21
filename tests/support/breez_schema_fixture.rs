@@ -2,13 +2,13 @@
 use anyhow::{Context, Result, ensure};
 
 pub async fn strip_empty(transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>) -> Result<()> {
-    let rows:i64=sqlx::query_scalar("SELECT (SELECT COUNT(*) FROM breez_collected_claims)+(SELECT COUNT(*) FROM breez_project_invoices)").fetch_one(&mut **transaction).await?;
+    let rows:i64=sqlx::query_scalar("SELECT (SELECT COUNT(*) FROM retained_cashu_lots)+(SELECT COUNT(*) FROM breez_collected_claims)+(SELECT COUNT(*) FROM breez_project_invoices)").fetch_one(&mut **transaction).await?;
     ensure!(
         rows == 0,
         "fixture contains Breez invoice or custody history"
     );
     // Restore the original Strike-only receipt schema while retaining its rows.
-    sqlx::raw_sql("DROP TRIGGER zap_receipt_requires_invoice;
+    sqlx::raw_sql("DROP TRIGGER retained_cashu_no_strike_sweep; DROP TABLE retained_cashu_lots; DROP TRIGGER zap_receipt_requires_invoice;
         DROP TRIGGER strike_invoice_id_conflict; DROP TRIGGER strike_invoice_hash_conflict;
         DROP VIEW zap_invoice_terms; DROP TABLE breez_collected_claims; DROP TABLE breez_project_invoices;
         ALTER TABLE zap_receipt_relays RENAME TO fixture_relays;

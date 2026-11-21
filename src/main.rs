@@ -154,7 +154,13 @@ async fn main() -> Result<()> {
     let cashu_receipts = config
         .cashu_receipts
         .clone()
-        .map(|c| lightning_goats::cashu::receipt_server::Server::new(c, ledger.clone()))
+        .map(|c| {
+            let server = lightning_goats::cashu::receipt_server::Server::new(c, ledger.clone())?;
+            match config.lnurl.wallet_backend {
+                lightning_goats::config::WalletBackend::Strike => Ok(server),
+                lightning_goats::config::WalletBackend::Breez => server.retain_mint("goats"),
+            }
+        })
         .transpose()?;
     let cashu_treasury = config
         .cashu_treasury

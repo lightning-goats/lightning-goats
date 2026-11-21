@@ -85,3 +85,16 @@ CREATE TRIGGER breez_claim_no_update BEFORE UPDATE ON breez_collected_claims
 BEGIN SELECT RAISE(ABORT,'collected claim evidence is immutable'); END;
 CREATE TRIGGER breez_claim_no_delete BEFORE DELETE ON breez_collected_claims
 BEGIN SELECT RAISE(ABORT,'collected claim evidence is retained'); END;
+
+-- New local ecash remains project property after credit and confirmed feeding.
+-- Old receipts retain their previous treasury terms through configuration changes.
+CREATE TABLE retained_cashu_lots (
+    ledger_id INTEGER PRIMARY KEY REFERENCES cashu_receipt_inbox(ledger_entry_id)
+);
+CREATE TRIGGER retained_cashu_lot_no_update BEFORE UPDATE ON retained_cashu_lots
+BEGIN SELECT RAISE(ABORT,'immutable Cashu custody policy'); END;
+CREATE TRIGGER retained_cashu_lot_no_delete BEFORE DELETE ON retained_cashu_lots
+BEGIN SELECT RAISE(ABORT,'retained Cashu custody policy'); END;
+CREATE TRIGGER retained_cashu_no_strike_sweep BEFORE INSERT ON cashu_treasury_sources
+WHEN EXISTS(SELECT 1 FROM retained_cashu_lots WHERE ledger_id=NEW.ledger_id)
+BEGIN SELECT RAISE(ABORT,'retained Cashu lot cannot fund a Strike sweep'); END;

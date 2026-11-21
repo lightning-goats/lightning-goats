@@ -29,7 +29,7 @@ impl LedgerStore {
         let Some(plan) = plan else {
             return Ok(None);
         };
-        let rows = sqlx::query("SELECT p.ledger_id,p.sats,c.mint_id,c.wallet_instance,c.wallet_epoch,c.core_epoch,l.remaining_sats FROM feed_financial_parts p JOIN cashu_receipt_inbox c ON c.ledger_entry_id=p.ledger_id JOIN reward_funding_lots l ON l.ledger_id=p.ledger_id WHERE p.plan_id=? ORDER BY p.ledger_id LIMIT 4097")
+        let rows = sqlx::query("SELECT p.ledger_id,p.sats,c.mint_id,c.wallet_instance,c.wallet_epoch,c.core_epoch,l.remaining_sats FROM feed_financial_parts p JOIN cashu_receipt_inbox c ON c.ledger_entry_id=p.ledger_id JOIN reward_funding_lots l ON l.ledger_id=p.ledger_id WHERE p.plan_id=? AND NOT EXISTS(SELECT 1 FROM retained_cashu_lots g WHERE g.ledger_id=p.ledger_id) ORDER BY p.ledger_id LIMIT 4097")
             .bind(&plan).fetch_all(&mut *tx).await?;
         ensure!(rows.len() <= 4096, "financial source bound exceeded");
         let mut by_mint: BTreeMap<String, Vec<(i64, u64)>> = BTreeMap::new();

@@ -1,5 +1,9 @@
 #![forbid(unsafe_code)]
 
+#[cfg(test)]
+#[path = "../tests/support/breez_schema_fixture.rs"]
+mod breez_schema_fixture;
+
 mod bolt11;
 #[cfg(unix)]
 mod private_ipc;

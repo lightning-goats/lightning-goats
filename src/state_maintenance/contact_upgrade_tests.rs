@@ -85,6 +85,11 @@ pub(in crate::state_maintenance) async fn seed(root: &Path) -> (Policy, Keep) {
     .await
     .unwrap();
     let pool = crate::sqlite::connect_durable(&core_url, 1).await.unwrap();
+    let mut tx = pool.begin().await.unwrap();
+    crate::breez_schema_fixture::strip_empty(&mut tx)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
     // Fixture-only removal of the empty Cashu addition before constructing
     // historical sources; no runtime downgrade path exists.
     for table in crate::state_maintenance::cashu_upgrade::CASHU_TABLES {

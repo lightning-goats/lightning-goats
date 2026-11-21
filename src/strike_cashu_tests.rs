@@ -434,6 +434,9 @@ mod cashu_treasury_tests {
 
         let original: (String,String) = sqlx::query_as("SELECT result_digest,result_json FROM cashu_treasury_wallet_results")
             .fetch_one(&f.pool).await?;
+        let mut tx = f.pool.begin().await.unwrap();
+        crate::breez_schema_fixture::strip_empty(&mut tx).await.unwrap();
+        tx.commit().await.unwrap();
         // Disposable schema-26 image. Keep the old result, completion and deposit bytes.
         sqlx::raw_sql("DROP TRIGGER freeze_cashu_settled_ranges;
                      DROP TABLE feed_cashu_proceeds; DROP TABLE cashu_settled_ranges;
@@ -870,6 +873,9 @@ mod cashu_treasury_tests {
             assert_eq!(worker.tick(now + 2).await.unwrap(), Tick::Idle);
             drop(worker);
             if !delivery_still_enabled {
+                let mut tx = f.pool.begin().await.unwrap();
+                crate::breez_schema_fixture::strip_empty(&mut tx).await.unwrap();
+                tx.commit().await.unwrap();
                 // Upgrade a historical wallet work row with exhausted delivery.
                 sqlx::raw_sql(
                     "DROP TRIGGER freeze_cashu_settled_ranges;

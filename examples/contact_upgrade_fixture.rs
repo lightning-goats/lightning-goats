@@ -3,6 +3,9 @@
 //! operation exists. The stand-in does not open configuration, state or secrets.
 #![forbid(unsafe_code)]
 
+#[path = "../tests/support/breez_schema_fixture.rs"]
+mod breez_schema_fixture;
+
 use anyhow::{Result, bail};
 use sqlx::{
     Row as _,
@@ -13,7 +16,7 @@ use std::{os::unix::fs::MetadataExt as _, path::Path, time::Duration};
 const GUARD: &str = "/run/lightning-goats-contact-fixture/ALLOW";
 const ATTESTATION: &[u8] = b"LIGHTNING_GOATS_DISPOSABLE_CONTACT_UPGRADE_CI_v1\n";
 const DATABASE: &str = "/var/lib/lightning-goats/lightning-goats.db";
-const CURRENT_CORE_SCHEMA: usize = 29;
+const CURRENT_CORE_SCHEMA: usize = 30;
 
 fn isolated_fixture() -> Result<u32> {
     let uid = std::fs::metadata("/proc/self")?.uid();
@@ -87,7 +90,11 @@ async fn strip_empty_cashu_fixture(
 ) -> Result<()> {
     // Inspect the entire extension before any DDL. Even a monotonic clock row
     // means the extension was used and must retain its state.
-    for table in CASHU_FIXTURE_TABLES {
+    for table in CASHU_FIXTURE_TABLES
+        .iter()
+        .copied()
+        .chain(["breez_collected_claims", "breez_project_invoices"])
+    {
         let count: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
             .fetch_one(&mut **transaction)
             .await?;
@@ -95,6 +102,7 @@ async fn strip_empty_cashu_fixture(
             bail!("Cashu/financial fixture state must be entirely unused");
         }
     }
+    breez_schema_fixture::strip_empty(transaction).await?;
     for table in CASHU_FIXTURE_TABLES {
         sqlx::query(&format!("DROP TABLE {table}"))
             .execute(&mut **transaction)
@@ -472,7 +480,7 @@ mod tests {
         let mut tx = pool.begin().await?;
         super::strip_empty_cashu_fixture(&mut tx).await?;
         let extension: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM _sqlx_migrations WHERE version IN (26,27,28,29)",
+            "SELECT COUNT(*) FROM _sqlx_migrations WHERE version IN (26,27,28,29,30)",
         )
         .fetch_one(&mut *tx)
         .await?;

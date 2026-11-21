@@ -306,6 +306,8 @@ pub(super) async fn compare(directory: &Path, original: &Report) -> Result<()> {
         for table in super::super::cashu_upgrade::CASHU_TABLES
             .into_iter()
             .chain([
+                "breez_collected_claims",
+                "breez_project_invoices",
                 "reward_funding_state",
                 "reward_funding_lots",
                 "feed_reward_funding",

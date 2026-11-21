@@ -194,6 +194,11 @@ async fn frozen_cashu_journals_preserve_native_correlations_without_restore_auth
     let pool = crate::sqlite::connect_durable(&format!("sqlite://{}", legacy_core.display()), 1)
         .await
         .unwrap();
+    let mut tx = pool.begin().await.unwrap();
+    crate::breez_schema_fixture::strip_empty(&mut tx)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
     sqlx::raw_sql(
         "DROP TRIGGER freeze_cashu_settled_ranges; DROP TABLE feed_cashu_proceeds; DROP TABLE cashu_settled_ranges; DROP TABLE cashu_treasury_inspections;
          DROP TABLE cashu_treasury_fee_observations;

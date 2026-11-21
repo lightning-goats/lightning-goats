@@ -230,6 +230,17 @@ async fn local_ecash_funds_confirmed_feeding_and_only_legacy_lots_can_be_swept()
     assert_eq!((funding.strike_sats,funding.retained_cashu_sats),(0,1000));
     tx.rollback().await.unwrap();
     assert_eq!(count(&reopened,"cashu_treasury_intents").await,0);
+    let retained_id: i64 = sqlx::query_scalar("SELECT ledger_id FROM retained_cashu_lots")
+        .fetch_one(&reopened.pool).await.unwrap();
+    let direct = crate::ledger::TreasuryPlan {
+        id: Uuid::new_v4(),
+        mint_id: "mint-a".into(),
+        sources: vec![(retained_id, 1000)],
+        deposit_sats: 990,
+        maximum_fee_sats: 10,
+    };
+    assert!(reopened.reserve_cashu_treasury(&policy, &feed_treasury_policy(), &direct).await.is_err());
+    assert_eq!(count(&reopened,"cashu_treasury_intents").await,0);
     let sweep=crate::cashu::treasury_sweep::Request {id:Uuid::new_v4(),mint_id:"mint-a".into(),maximum_input_sats:1000};
     let planned=reopened.plan_operator_cashu_settlement(&policy,&feed_treasury_policy(),&sweep,false).await.unwrap().unwrap();
     assert_eq!(planned.input_sats,400);

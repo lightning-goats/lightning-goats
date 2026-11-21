@@ -571,7 +571,10 @@ pub(super) async fn available_custody(
     ledger: i64,
 ) -> Result<u64> {
     let acquired: i64 =
-        sqlx::query_scalar("SELECT net_sats FROM cashu_receipt_inbox WHERE ledger_entry_id=?")
+        sqlx::query_scalar(
+            "SELECT c.net_sats FROM cashu_receipt_inbox c WHERE c.ledger_entry_id=?
+             AND NOT EXISTS(SELECT 1 FROM retained_cashu_lots r WHERE r.ledger_id=c.ledger_entry_id)",
+        )
             .bind(ledger)
             .fetch_one(&mut **tx)
             .await?;

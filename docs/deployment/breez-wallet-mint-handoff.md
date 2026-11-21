@@ -93,3 +93,11 @@ To finish the exchange, provide `public-edge-client.csr` from the VPS handoff di
 The VPS agent verified the HOME CA fingerprint and the public-edge certificate's match to its private key. From `10.8.0.1` over WireGuard, authenticated requests to `10.8.0.6:8792` returned HTTP 200 for both `/v1/info` and `/v1/keysets`. The responses identified Lightning Goats Cashu Mint on Nutshell 0.22.1, one active sat keyset, a 1,000-sat mint limit and disabled Lightning melts. The public origin returned HTTP 404 for `/wallet/health`.
 
 HOME resolved `mint.lightning-goats.com` to `64.177.40.118`. An HTTPS request failed hostname verification before HTTP. With the mint hostname supplied as TLS SNI, the endpoint served a certificate covering only `blackmetalbuddha.com` and `www.blackmetalbuddha.com`. The VPS agent should verify the intended DNS target and activate the mint virtual host with a matching certificate, then repeat discovery and private-route exclusion checks through the public URL before funding.
+
+### Public wallet acceptance and Lightning melt activation · 2026-11-21
+
+The canonical HTTPS endpoint passed certificate verification, returned mint discovery and the active sat keyset, and excluded private routes. The operator observed a 28-sat Minibits top-up and the corresponding Breez receipt. HOME reconciled 28 sats in the reserve to 28 sats of issued liability, with zero paid-unissued sats and zero pending melts before activation.
+
+At the operator's request HOME enabled reserve spending and Lightning melts. Current limits are 1,000,000 sats per top-up, 10,000,000 sats of aggregate issued balance at quote admission and 1,000 sats per melt. The running reserve reported spending enabled. Public NUT-05 discovery advertised enabled BOLT11 melts; the public melt quote endpoint rejected a malformed invoice, and the private funding endpoint returned 404. The reserve, issuer and public origin services were active and enabled at boot.
+
+A funded outgoing Lightning redemption and recovery of a paired, funded reserve and issuer snapshot remain open. The operator holds the test proofs in Minibits. Reconcile the first funded melt against its original quote, the independent receiving wallet, actual fees, reserve balance and outstanding liability.

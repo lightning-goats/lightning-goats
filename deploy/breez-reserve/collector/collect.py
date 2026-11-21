@@ -80,15 +80,15 @@ def collect(store, client, request_id, pinned_keys):
     return True
 
 
-def submit_payout(store, client, disposition_id, invoice_text, quote_id, keyset, pinned_keys):
+def submit_payout(store, client, disposition_id, invoice_text, keyset, pinned_keys):
     """Serialize dispatch and recovery across processes sharing this custody journal."""
     database = Path(store.db.execute("PRAGMA database_list").fetchone()[2])
     with database.with_suffix(".melt.lock").open("ab") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        return _submit_payout(store, client, disposition_id, invoice_text, quote_id, keyset, pinned_keys)
+        return _submit_payout(store, client, disposition_id, invoice_text, keyset, pinned_keys)
 
 
-def _submit_payout(store, client, disposition_id, invoice_text, quote_id, keyset, pinned_keys):
+def _submit_payout(store, client, disposition_id, invoice_text, keyset, pinned_keys):
     row = store.db.execute(
         "SELECT binding FROM proof_disposition WHERE id=? AND purpose='cyberherd_payout'",
         (disposition_id,),
@@ -100,7 +100,20 @@ def _submit_payout(store, client, disposition_id, invoice_text, quote_id, keyset
     if (invoice.currency != "bc" or invoice.payment_hash != terms["invoice_hash"]
             or invoice.amount_msat != 1000 * terms["amount_sat"]):
         raise ValueError("signed payout invoice differs from reserved terms")
-    status = client.get("/v1/melt/quote/bolt11/" + escape(quote_id, safe="")).raise_for_status().json()
+    prior = store.db.execute("SELECT quote_id FROM payout_melt WHERE disposition_id=?",
+                             (disposition_id,)).fetchone()
+    if prior is None:
+        if invoice.expiry_time <= time.time():
+            raise ValueError("expired payout invoice")
+        status = client.post("/v1/melt/quote/bolt11", json={
+            "request": invoice_text, "unit": "sat",
+        }).raise_for_status().json()
+        quote_id = status["quote"]
+        if not isinstance(quote_id, str) or not quote_id.strip():
+            raise ValueError("missing mint melt quote")
+    else:
+        quote_id = prior[0]
+        status = client.get("/v1/melt/quote/bolt11/" + escape(quote_id, safe="")).raise_for_status().json()
     if (status["quote"] != quote_id or status["request"] != invoice_text
             or status["unit"] != "sat" or status["amount"] != terms["amount_sat"]
             or type(status["fee_reserve"]) is not int
@@ -118,8 +131,6 @@ def _submit_payout(store, client, disposition_id, invoice_text, quote_id, keyset
                            "secret": secret, "blind": factor.secret.hex()})
         return blanks
 
-    prior = store.db.execute("SELECT quote_id FROM payout_melt WHERE disposition_id=?",
-                             (disposition_id,)).fetchone()
     def verify_result(result):
         if result["quote"] != quote_id or result["state"] not in ("PAID", "PENDING"):
             raise ValueError("unexpected payout result")

@@ -393,8 +393,6 @@ def main():
                 pending_request = {**request, "request_id": str(uuid.uuid4()),
                     "description_hash": hashlib.sha256(b'[["text/plain","Goats"]]').hexdigest()}
                 pending_quote = expect(viewer.post(path, json=pending_request, headers=auth))
-                melt = expect(viewer.post("/v1/melt/quote/bolt11", json={"request": reserve.destination[0], "unit": "sat"}))
-                assert melt["fee_reserve"] == 4
                 claims = ClaimStore(claim_dir)
                 contact_id = str(uuid.uuid4())
                 contact_hash = hashlib.sha256(b"private contact fixture").hexdigest()
@@ -442,12 +440,14 @@ def main():
                     get = viewer.get
 
                     def post(self, path, **kwargs):
+                        if path == "/v1/melt/quote/bolt11":
+                            return viewer.post(path, **kwargs)
                         assert path == "/v1/melt/bolt11"
                         raise httpx.ConnectError("fixture interrupted before sending request")
 
                 try:
                     submit_payout(claims, CrashBeforeDispatch(), payment_id, reserve.destination[0],
-                                  melt["quote"], keyset, {keyset: keys})
+                                  keyset, {keyset: keys})
                 except httpx.ConnectError:
                     pass
                 else:
@@ -455,7 +455,7 @@ def main():
                 assert reserve.pay_attempts == 0
                 claims.db.close()
                 claims = ClaimStore(claim_dir)
-                paid = submit_payout(claims, viewer, payment_id, reserve.destination[0], melt["quote"], keyset, {keyset: keys})
+                paid = submit_payout(claims, viewer, payment_id, reserve.destination[0], keyset, {keyset: keys})
                 assert paid["state"].upper() == "PENDING"
                 assert wallet_state(viewer, payout_proof) == "PENDING"
                 claims.db.close()
@@ -486,7 +486,7 @@ def main():
                     raise AssertionError("restored project quote never became paid")
                 reserve.complete_sends = True
                 claims = ClaimStore(claim_dir)
-                final_melt = submit_payout(claims, viewer, payment_id, reserve.destination[0], melt["quote"], keyset, {keyset: keys})
+                final_melt = submit_payout(claims, viewer, payment_id, reserve.destination[0], keyset, {keyset: keys})
                 claims.db.close()
                 claims = ClaimStore(claim_dir)
                 fee, saved_change = claims.db.execute("""

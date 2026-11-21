@@ -274,7 +274,8 @@ def main():
                 # Run the VPS collector against this mint and its simulated reserve.
                 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "collector"))
                 from claim_store import ClaimStore
-                from collect import collect
+                from project_quote import issue
+                from collect import collect, submit_payout
                 from invoice_server import create, handle
                 import socket
                 import struct
@@ -389,10 +390,24 @@ def main():
                 pending_quote = expect(viewer.post(path, json=pending_request, headers=auth))
                 melt = expect(viewer.post("/v1/melt/quote/bolt11", json={"request": reserve.destination[0], "unit": "sat"}))
                 assert melt["fee_reserve"] == 4
-                blanks, _ = new_outputs(keyset, [0, 0])
-                paid = expect(viewer.post("/v1/melt/bolt11", json={"quote": melt["quote"], "inputs": [swapped], "outputs": encode_outputs(blanks)}))
+                claims = ClaimStore(claim_dir)
+                funded_id = str(uuid.uuid4())
+                funding = issue(claims, viewer, PROJECT_TOKEN, funded_id, 16, b"payout fixture",
+                                keyset, {"user": "dexter", "credit_pool": "herd"})
+                reserve.paid.add(bolt11.decode(funding).payment_hash)
+                for _ in range(15):
+                    if collect(claims, viewer, funded_id, {keyset: keys}):
+                        break
+                    time.sleep(.1)
+                funded = create({"claim_status": funded_id}, claims, None, None, None)
+                payment_id = str(uuid.uuid4())
+                digest = bolt11.decode(reserve.destination[0]).payment_hash
+                [payout_proof] = claims.reserve_payout(payment_id, str(uuid.uuid4()), digest, 12, 4,
+                    {funded_id: {"consumed_sats": 16, "evidence_digest": funded["proof_digest"]}})
+                paid = submit_payout(claims, viewer, payment_id, reserve.destination[0], melt["quote"], keyset)
                 assert paid["state"].upper() == "PENDING"
-                assert wallet_state(viewer, swapped) == "PENDING"
+                assert wallet_state(viewer, payout_proof) == "PENDING"
+                claims.db.close()
             finally:
                 viewer.close()
                 process.terminate()
@@ -419,10 +434,12 @@ def main():
                 else:
                     raise AssertionError("restored project quote never became paid")
                 reserve.complete_sends = True
-                final_melt = expect(viewer.get(f"/v1/melt/quote/bolt11/{melt['quote']}"))
+                claims = ClaimStore(claim_dir)
+                final_melt = submit_payout(claims, viewer, payment_id, reserve.destination[0], melt["quote"], keyset)
+                claims.db.close()
                 assert final_melt["state"].upper() == "PAID", final_melt
                 assert sum(change["amount"] for change in final_melt["change"]) == 3
-                assert wallet_state(viewer, swapped) == "SPENT"
+                assert wallet_state(viewer, payout_proof) == "SPENT"
                 assert reserve.pay_attempts == 1
             finally:
                 viewer.close()

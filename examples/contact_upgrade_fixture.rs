@@ -16,7 +16,7 @@ use std::{os::unix::fs::MetadataExt as _, path::Path, time::Duration};
 const GUARD: &str = "/run/lightning-goats-contact-fixture/ALLOW";
 const ATTESTATION: &[u8] = b"LIGHTNING_GOATS_DISPOSABLE_CONTACT_UPGRADE_CI_v1\n";
 const DATABASE: &str = "/var/lib/lightning-goats/lightning-goats.db";
-const CURRENT_CORE_SCHEMA: usize = 30;
+const CURRENT_CORE_SCHEMA: usize = 35;
 
 fn isolated_fixture() -> Result<u32> {
     let uid = std::fs::metadata("/proc/self")?.uid();
@@ -479,11 +479,10 @@ mod tests {
         let pool = current_fixture().await?;
         let mut tx = pool.begin().await?;
         super::strip_empty_cashu_fixture(&mut tx).await?;
-        let extension: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM _sqlx_migrations WHERE version IN (26,27,28,29,30)",
-        )
-        .fetch_one(&mut *tx)
-        .await?;
+        let extension: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations WHERE version >= 26")
+                .fetch_one(&mut *tx)
+                .await?;
         let previous: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations WHERE version=25")
                 .fetch_one(&mut *tx)

@@ -272,9 +272,18 @@ impl Intake {
                         )
                         .await?;
                 }
-                self.store
-                    .admit(&export.plan, &session.finish()?, calendar::now()?)
-                    .await?;
+                let qualified = session.finish()?;
+                let now = calendar::now()?;
+                match qualified.funding_source() {
+                    crate::reward_funding::RewardFundingSource::Strike => {
+                        self.store.admit(&export.plan, &qualified, now).await?;
+                    }
+                    crate::reward_funding::RewardFundingSource::RetainedCashu => {
+                        self.store
+                            .admit_cashu(&export.plan, &qualified, now)
+                            .await?;
+                    }
+                }
             }
         }
         // Admission and this receipt may be separated by a crash. Exact retry

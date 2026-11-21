@@ -104,6 +104,7 @@ fn copy_evidence(q: &QualifiedFunding, plan: &crate::cyberherd::rewards::Plan) -
     QualifiedFunding {
         core_uid: q.core_uid(),
         funding: q.funding().clone(),
+        funding_source: q.funding_source(),
         threshold_sats: q.threshold_sats(),
         reservation,
         provider: q.provider().clone(),
@@ -1015,9 +1016,19 @@ async fn complete_bounded_pages_qualify_actual_p2p_amounts_and_exclude_virtual_f
 #[tokio::test]
 async fn mixed_funding_keeps_the_consumed_claim_for_custody_verification() {
     use crate::reward_funding::{CashuFundingAnchor, CashuFundingSource};
-    let f = Fixture::new().await;
+    let mut f = Fixture::new().await;
     let (verifier, task) = verifier(&f, None, "0.00000001").await;
     let mut first = f.page(0, true).await;
+    // Model equal Strike and retained funding on this authenticated test feed.
+    f.plan.threshold_sats = 40;
+    f.plan.operations_sats = 38;
+    let plan_hash = f.plan.hash().unwrap();
+    let select_cashu = |page: &mut FundingPage| {
+        page.funding_source = crate::reward_funding::RewardFundingSource::RetainedCashu;
+        page.threshold_sats = 40;
+        page.reservation.plan_hash = plan_hash.clone();
+    };
+    select_cashu(&mut first);
     let anchor = CashuFundingAnchor {
         source: CashuFundingSource::ProjectInvoice,
         claim_id: Uuid::new_v4(),
@@ -1025,6 +1036,7 @@ async fn mixed_funding_keeps_the_consumed_claim_for_custody_verification() {
     };
     let part = &mut first.parts[0];
     assert!(part.anchor.is_none());
+    part.consumed_sats = 20;
     part.cashu_anchor = Some(anchor.clone());
     let allocation = RetainedAllocation {
         ledger_id: part.ledger_id,
@@ -1033,7 +1045,9 @@ async fn mixed_funding_keeps_the_consumed_claim_for_custody_verification() {
     };
     first.funding.retained_cashu_sats = allocation.consumed_sats;
     let mut page = authenticate(first).await;
-    let mut session = Session::new(f.expected(), &page).unwrap();
+    let mut expected = f.expected();
+    expected.plan_hash = plan_hash.clone();
+    let mut session = Session::new(expected, &page).unwrap();
     loop {
         session.accept(&page, &verifier).await.unwrap();
         if session.is_complete() {
@@ -1041,6 +1055,15 @@ async fn mixed_funding_keeps_the_consumed_claim_for_custody_verification() {
         }
         let mut next = f.page(session.after(), true).await;
         next.funding.retained_cashu_sats = allocation.consumed_sats;
+        select_cashu(&mut next);
+        let mut wrong = next.clone();
+        wrong.funding_source = Default::default();
+        assert!(
+            session
+                .accept(&authenticate(wrong).await, &verifier)
+                .await
+                .is_err()
+        );
         page = authenticate(next).await;
     }
     let mut qualified = session.finish().unwrap();
@@ -1123,8 +1146,10 @@ async fn mixed_funding_keeps_the_consumed_claim_for_custody_verification() {
     let legacy = crate::payout::store::Store::connect(&legacy_url, journal_policy(&qualified))
         .await
         .unwrap();
+    qualified.funding_source = Default::default();
     legacy.admit(&f.plan, &qualified, now).await.unwrap();
     assert!(legacy.admit_cashu(&f.plan, &qualified, now).await.is_err());
+    qualified.funding_source = crate::reward_funding::RewardFundingSource::RetainedCashu;
     qualified.retained_allocations[0].anchor.evidence_digest = "ef".repeat(32);
     assert!(
         reopened

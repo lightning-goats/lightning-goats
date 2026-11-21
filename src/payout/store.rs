@@ -281,6 +281,9 @@ impl Store {
         now: i64,
         cashu: bool,
     ) -> Result<Grant> {
+        if cashu == qualified.funding_source().is_strike() {
+            bail!("grant execution provider differs from the core reservation");
+        }
         validate_admission(plan, qualified, &self.policy, now)?;
         let plan_json = serde_json::to_string(plan)?;
         let mut evidence = serde_json::json!({
@@ -428,7 +431,7 @@ fn validate_admission(plan: &Plan, q: &QualifiedFunding, policy: &Policy, now: i
         || plan.hash()? != r.plan_hash
         || plan.funding_hash.as_deref() != Some(&r.funding_hash)
         || q.funding().proof_hash != r.funding_hash
-        || plan.real_sats != q.funding().strike_sats
+        || plan.real_sats != q.funding_source().available(q.funding())
         || plan.threshold_sats != q.threshold_sats()
         || plan.reserved_sats != r.reserved_sats
         || plan.root_policy_hash.as_deref() != Some(&r.policy_hash)
@@ -532,7 +535,7 @@ fn validate_admission(plan: &Plan, q: &QualifiedFunding, policy: &Policy, now: i
             .checked_add(source.consumed_sats)
             .context("payout funding overflow")?;
     }
-    if total != plan.reserved_sats || real != plan.real_sats {
+    if total != plan.reserved_sats || real != q.funding().strike_sats {
         bail!("payout allocation/funding total mismatch");
     }
     Ok(())

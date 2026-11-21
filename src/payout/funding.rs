@@ -9,7 +9,9 @@ use uuid::Uuid;
 
 use crate::{
     core_bridge::AuthenticatedFundingPage,
-    reward_funding::{CashuFundingAnchor, Funding, Reservation, StrikeFundingAnchor},
+    reward_funding::{
+        CashuFundingAnchor, Funding, Reservation, RewardFundingSource, StrikeFundingAnchor,
+    },
     strike::StrikeClient,
 };
 
@@ -133,6 +135,7 @@ pub struct RetainedAllocation {
 pub struct QualifiedFunding {
     core_uid: u32,
     funding: Funding,
+    funding_source: RewardFundingSource,
     threshold_sats: u64,
     reservation: Reservation,
     provider: ProviderScope,
@@ -141,6 +144,9 @@ pub struct QualifiedFunding {
 }
 
 impl QualifiedFunding {
+    pub fn funding_source(&self) -> RewardFundingSource {
+        self.funding_source
+    }
     pub fn funding(&self) -> &Funding {
         &self.funding
     }
@@ -168,6 +174,7 @@ pub struct Session {
     expected: ExpectedPlan,
     reservation: Reservation,
     funding: Funding,
+    funding_source: RewardFundingSource,
     threshold_sats: u64,
     through: i64,
     total_sats: u64,
@@ -195,7 +202,9 @@ impl Session {
             bail!("payout qualification requires first authenticated page for exact plan/core");
         }
         let ceiling = u64::try_from(
-            u128::from(p.funding.strike_sats) * u128::from(expected.member_percent_ceiling) / 100,
+            u128::from(p.funding_source.available(&p.funding))
+                * u128::from(expected.member_percent_ceiling)
+                / 100,
         )?
         .min(expected.per_feed_sats);
         if p.reservation.reserved_sats > ceiling {
@@ -205,6 +214,7 @@ impl Session {
             expected,
             reservation: p.reservation.clone(),
             funding: p.funding.clone(),
+            funding_source: p.funding_source,
             threshold_sats: p.threshold_sats,
             through: 0,
             total_sats: 0,
@@ -239,6 +249,7 @@ impl Session {
             || page.core_uid() != self.expected.core_uid
             || p.after != self.through
             || p.reservation != self.reservation
+            || p.funding_source != self.funding_source
             || p.funding != self.funding
             || p.threshold_sats != self.threshold_sats
             || self
@@ -316,6 +327,7 @@ impl Session {
         Ok(QualifiedFunding {
             core_uid: self.expected.core_uid,
             funding: self.funding,
+            funding_source: self.funding_source,
             threshold_sats: self.threshold_sats,
             reservation: self.reservation,
             provider: self.provider.context("provider qualification missing")?,

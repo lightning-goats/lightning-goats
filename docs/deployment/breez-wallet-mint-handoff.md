@@ -87,3 +87,9 @@ The VPS operator confirmed the public edge uses `10.8.0.1/32` via `wg0`. HOME ru
 HOME verified the service was active and enabled, listening only at `10.8.0.6:8792`, with a UFW allow rule restricted to TCP from `10.8.0.1` on `wg0`. The server certificate verified against the published CA fingerprint and the origin rejected a request lacking a client certificate. Port 8793 is closed for the Minibits test. Preserve the private-project CSR on the VPS for a separate activation.
 
 To finish the exchange, provide `public-edge-client.csr` from the VPS handoff directory. HOME signs that request with the public-edge client CA and returns `public-edge-client.pem` and `home-ca.pem`. From the confirmed VPS source, verify `/v1/info` and `/v1/keysets` with the client certificate and confirm rejection of the private routes before enabling the public hostname. HOME's DNS resolver returned `NXDOMAIN` at activation.
+
+### VPS origin acceptance and public TLS check · 2026-11-21
+
+The VPS agent verified the HOME CA fingerprint and the public-edge certificate's match to its private key. From `10.8.0.1` over WireGuard, authenticated requests to `10.8.0.6:8792` returned HTTP 200 for both `/v1/info` and `/v1/keysets`. The responses identified Lightning Goats Cashu Mint on Nutshell 0.22.1, one active sat keyset, a 1,000-sat mint limit and disabled Lightning melts. The public origin returned HTTP 404 for `/wallet/health`.
+
+HOME resolved `mint.lightning-goats.com` to `64.177.40.118`. An HTTPS request failed hostname verification before HTTP. With the mint hostname supplied as TLS SNI, the endpoint served a certificate covering only `blackmetalbuddha.com` and `www.blackmetalbuddha.com`. The VPS agent should verify the intended DNS target and activate the mint virtual host with a matching certificate, then repeat discovery and private-route exclusion checks through the public URL before funding.

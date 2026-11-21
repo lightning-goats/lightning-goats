@@ -177,7 +177,7 @@ impl LnurlService {
                 credit_pool: configured.credit_pool.clone(),
                 min_sendable_msat: configured.min_sendable_msat,
                 max_sendable_msat: if breez.is_some() {
-                    configured.max_sendable_msat.min(100_000_000)
+                    configured.max_sendable_msat.min(1_000_000_000)
                 } else {
                     configured.max_sendable_msat
                 },

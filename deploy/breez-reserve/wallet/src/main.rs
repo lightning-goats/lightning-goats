@@ -32,8 +32,8 @@ use uuid::Uuid;
 use sha2::{Digest, Sha256};
 use store::{Admission, Journal};
 
-const INVOICE_MAX_SAT: u64 = 100_000;
-const MELT_MAX_SAT: u64 = 25_000;
+const INVOICE_MAX_SAT: u64 = 1_000_000;
+const MELT_MAX_SAT: u64 = INVOICE_MAX_SAT;
 const FEE_MAX_SAT: u64 = 100;
 
 struct Wallet {

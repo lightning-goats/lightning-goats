@@ -7,6 +7,7 @@ import secrets
 import shutil
 import subprocess
 import sys
+import sqlite3
 import threading
 import time
 import traceback
@@ -168,6 +169,7 @@ def start_mint(directory, socket, reserve, credentials):
            "MINT_BACKEND_BOLT11_SAT": "GoatsReserve", "MINT_DATABASE": str(directory / "db"),
            "CASHU_DIR": str(directory), "MINT_RPC_SERVER_ENABLE": "false",
            "MINT_WATCHDOG_ENABLED": "false", "MINT_RATE_LIMIT": "false", "DEBUG": "false",
+           "MINT_MAX_MINT_BOLT11_SAT": "1000000", "MINT_MAX_MELT_BOLT11_SAT": "1000000",
            "MINT_INPUT_FEE_PPK": "0", "MINT_QUOTE_BACKEND_CHECK_RATE_LIMIT": "0", "LOG_LEVEL": "INFO"}
     process = subprocess.Popen([sys.executable, "-m", "lg_mint"], cwd=directory, env=env, stdout=log, stderr=log)
     client = httpx.Client(transport=httpx.HTTPTransport(uds=str(socket)), base_url="http://mint", timeout=6)
@@ -203,6 +205,14 @@ def main():
             try:
                 info = expect(viewer.get("/v1/info"))
                 assert "20" in info["nuts"]
+                for nut in ("4", "5"):
+                    assert info["nuts"][nut]["methods"][0]["max_amount"] == 1_000_000
+                maximum = expect(viewer.post("/v1/mint/quote/bolt11", json={"amount": 1_000_000, "unit": "sat"}))
+                assert bolt11.decode(maximum["request"]).amount_msat == 1_000_000_000
+                expect(viewer.post("/v1/mint/quote/bolt11", json={"amount": 1_000_001, "unit": "sat"}), 400)
+                for amount, code in [(1_000_000, 200), (1_000_001, 400)]:
+                    outbound, _ = invoice(amount, memo="boundary fixture")
+                    expect(viewer.post("/v1/melt/quote/bolt11", json={"request": outbound, "unit": "sat"}), code)
                 current = expect(viewer.get("/v1/keys"))["keysets"][0]
                 keyset, keys = current["id"], current["keys"]
                 viewer_quote = expect(viewer.post("/v1/mint/quote/bolt11", json={"amount": 16, "unit": "sat"}))
@@ -321,6 +331,28 @@ def main():
                 assert claims.reserve_poll(130, 15) is None
                 saved = claims.db.execute("SELECT proofs FROM project_claim WHERE id=?", (claim_id,)).fetchone()[0]
                 assert sum(p["amount"] for p in json.loads(saved)) == 10
+                proofs = json.loads(saved)
+                payout_input = next(p for p in proofs if p["amount"] == 8)
+                change_input = next(p for p in proofs if p["amount"] == 2)
+                payout_id = str(uuid.uuid4())
+                payout_intent = {"invoice_hash": "33" * 32, "amount_sats": 8}
+                assert claims.reserve_inputs(payout_id, "cyberherd_payout", payout_intent,
+                                             [payout_input["secret"]]) == [payout_input]
+                claims.db.close()
+                claims = ClaimStore(claim_dir)
+                assert claims.reserve_inputs(payout_id, "cyberherd_payout", payout_intent,
+                                             [payout_input["secret"]]) == [payout_input]
+                transfer_id = str(uuid.uuid4())
+                transfer_intent = {"request": "fixture", "amount_sats": 10}
+                try:
+                    claims.reserve_inputs(transfer_id, "operator_transfer", transfer_intent,
+                                          [change_input["secret"], payout_input["secret"]])
+                except sqlite3.IntegrityError:
+                    pass
+                else:
+                    raise AssertionError("overlapping claim reservations succeeded")
+                assert claims.reserve_inputs(transfer_id, "operator_transfer", {"amount_sats": 2},
+                                             [change_input["secret"]]) == [change_input]
                 claims.db.close()
 
                 pending_request = {**request, "request_id": str(uuid.uuid4()),

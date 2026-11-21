@@ -34,7 +34,7 @@ project_lock = asyncio.Lock()
 class ProjectQuote(BaseModel):
     model_config = ConfigDict(extra="forbid")
     request_id: UUID
-    amount_sat: Annotated[int, Field(strict=True, gt=0, le=100_000)]
+    amount_sat: Annotated[int, Field(strict=True, gt=0, le=1_000_000)]
     description_hash: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
     claim_pubkey: Annotated[str, Field(pattern=r"^(02|03)[0-9a-f]{64}$")]
 

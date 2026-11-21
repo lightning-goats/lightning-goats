@@ -20,6 +20,7 @@ class ClaimStore:
             raise PermissionError("claim directory must be private")
         self.db = sqlite3.connect(directory / "project-claims.sqlite", isolation_level=None)
         self.db.execute("PRAGMA synchronous=FULL")
+        self.db.execute("PRAGMA foreign_keys=ON")
         self.db.execute("""
             CREATE TABLE IF NOT EXISTS project_claim (
                 id TEXT PRIMARY KEY,
@@ -39,6 +40,86 @@ class ClaimStore:
                 next_attempt INTEGER NOT NULL CHECK(next_attempt >= 0)
             )
         """)
+
+        # Tokens remain in this private journal throughout their lifetime.  A
+        # separately indexed output can fund at most one pending disposition.
+        with self.write():
+            self.db.execute("""
+                CREATE TABLE IF NOT EXISTS collected_output (
+                    secret TEXT PRIMARY KEY NOT NULL,
+                    request_id TEXT NOT NULL REFERENCES project_claim(id),
+                    amount_sat INTEGER NOT NULL CHECK(amount_sat > 0),
+                    proof TEXT NOT NULL
+                )
+            """)
+            self.db.execute("""
+                CREATE INDEX IF NOT EXISTS collected_output_request ON collected_output(request_id)
+            """)
+            self.db.execute("""
+                CREATE TABLE IF NOT EXISTS proof_disposition (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    purpose TEXT NOT NULL CHECK(purpose IN ('cyberherd_payout','operator_transfer')),
+                    binding TEXT NOT NULL
+                )
+            """)
+            self.db.execute("""
+                CREATE TABLE IF NOT EXISTS disposition_input (
+                    secret TEXT PRIMARY KEY REFERENCES collected_output(secret),
+                    disposition_id TEXT NOT NULL REFERENCES proof_disposition(id)
+                )
+            """)
+            for ident, proofs in self.db.execute("""
+                SELECT id,proofs FROM project_claim c WHERE proofs IS NOT NULL AND NOT EXISTS
+                    (SELECT 1 FROM collected_output o WHERE o.request_id=c.id)
+            """):
+                self._index_outputs(ident, json.loads(proofs))
+
+    def _index_outputs(self, request_id, proofs):
+        if len({p["secret"] for p in proofs}) != len(proofs):
+            raise ValueError("duplicate project proof")
+        for proof in proofs:
+            secret, amount = proof["secret"], proof["amount"]
+            if type(amount) is not int or amount <= 0:
+                raise ValueError("invalid project proof amount")
+            self.db.execute("""
+                INSERT INTO collected_output(secret, request_id, amount_sat, proof) VALUES (?,?,?,?)
+                ON CONFLICT(secret) DO NOTHING
+            """, (secret, request_id, amount, encode(proof)))
+            row = self.db.execute("""
+                SELECT request_id,proof FROM collected_output WHERE secret=?
+            """, (secret,)).fetchone()
+            if row != (request_id, encode(proof)):
+                raise ValueError("project proof already belongs to another claim")
+
+    def reserve_inputs(self, disposition_id, purpose, intent, secrets):
+        """Reserve inputs chosen by the authorized payout or transfer planner."""
+        disposition_id = str(UUID(disposition_id))
+        if not secrets or len(secrets) != len(set(secrets)):
+            raise ValueError("missing or duplicate disposition inputs")
+        binding = encode(intent)
+        with self.write():
+            previous = self.db.execute(
+                "SELECT purpose,binding FROM proof_disposition WHERE id=?", (disposition_id,)
+            ).fetchone()
+            if previous is None:
+                self.db.execute("INSERT INTO proof_disposition VALUES (?,?,?)",
+                                (disposition_id, purpose, binding))
+                for secret in secrets:
+                    changed = self.db.execute("""
+                        INSERT INTO disposition_input(secret,disposition_id)
+                        SELECT secret,? FROM collected_output WHERE secret=?
+                    """, (disposition_id, secret)).rowcount
+                    if changed != 1:
+                        raise ValueError("unknown disposition input")
+            elif previous != (purpose, binding):
+                raise ValueError("disposition intent changed")
+            rows = self.db.execute("""
+                SELECT o.secret,o.proof FROM disposition_input i JOIN collected_output o USING(secret)
+                WHERE disposition_id=? ORDER BY o.secret
+            """, (disposition_id,)).fetchall()
+            if [r[0] for r in rows] != sorted(secrets):
+                raise ValueError("disposition inputs changed")
+            return [json.loads(r[1]) for r in rows]
 
     def reserve_poll(self, now, lease_seconds):
         """Claim one due invoice. An interrupted attempt becomes eligible after its lease."""
@@ -122,3 +203,4 @@ class ClaimStore:
             """, (payload, request_id, payment_hash, payload)).rowcount
             if changed != 1:
                 raise ValueError("unknown or conflicting project claim")
+            self._index_outputs(request_id, proofs)

@@ -1,6 +1,9 @@
 # Review-only placeholders. Both process and execution start disabled. Operator
 # selects limits and provisions separate identities before any activation.
 enabled = false
+# retained_cashu enables intake without a Strike credential. Outgoing Cashu
+# execution is pending integration. Use strike for original-provider recovery.
+funding_source = "retained_cashu"
 state_dir = "/var/lib/cyberherd-payout"
 core_socket = "/run/lightning-goats-bridge/core.sock"
 intake_socket = "/run/cyberherd-plans/plans.sock"

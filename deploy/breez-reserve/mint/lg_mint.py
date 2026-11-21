@@ -23,6 +23,15 @@ project_secret = (credentials / "project-quote-token").read_bytes().strip()
 if len(project_secret) < 32 or not project_secret.isascii():
     raise RuntimeError("invalid project quote credential")
 
+# Nutshell treats an unset or zero per-invoice limit as unlimited. Preserve
+# narrower positive site limits while enforcing the feeder's public ceiling.
+MAX_INVOICE_SAT = 1_000_000
+for name in ("MINT_MAX_MINT_BOLT11_SAT", "MINT_MAX_MELT_BOLT11_SAT"):
+    configured = int(os.environ.get(name, MAX_INVOICE_SAT))
+    if configured < 0:
+        raise ValueError(f"negative invoice limit in {name}")
+    os.environ[name] = str(min(configured or MAX_INVOICE_SAT, MAX_INVOICE_SAT))
+
 # Nutshell reads settings and constructs its ledger on import.
 from cashu.core.models import PostMintQuoteRequest, PostMintQuoteResponse
 from cashu.mint.app import app
@@ -34,7 +43,7 @@ project_lock = asyncio.Lock()
 class ProjectQuote(BaseModel):
     model_config = ConfigDict(extra="forbid")
     request_id: UUID
-    amount_sat: Annotated[int, Field(strict=True, gt=0, le=1_000_000)]
+    amount_sat: Annotated[int, Field(strict=True, gt=0, le=MAX_INVOICE_SAT)]
     description_hash: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
     claim_pubkey: Annotated[str, Field(pattern=r"^(02|03)[0-9a-f]{64}$")]
 

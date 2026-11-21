@@ -169,7 +169,7 @@ def start_mint(directory, socket, reserve, credentials):
            "MINT_BACKEND_BOLT11_SAT": "GoatsReserve", "MINT_DATABASE": str(directory / "db"),
            "CASHU_DIR": str(directory), "MINT_RPC_SERVER_ENABLE": "false",
            "MINT_WATCHDOG_ENABLED": "false", "MINT_RATE_LIMIT": "false", "DEBUG": "false",
-           "MINT_MAX_MINT_BOLT11_SAT": "1000000", "MINT_MAX_MELT_BOLT11_SAT": "1000000",
+           "MINT_MAX_MINT_BOLT11_SAT": "0", "MINT_MAX_MELT_BOLT11_SAT": "1000001",
            "MINT_INPUT_FEE_PPK": "0", "MINT_QUOTE_BACKEND_CHECK_RATE_LIMIT": "0", "LOG_LEVEL": "INFO"}
     process = subprocess.Popen([sys.executable, "-m", "lg_mint"], cwd=directory, env=env, stdout=log, stderr=log)
     client = httpx.Client(transport=httpx.HTTPTransport(uds=str(socket)), base_url="http://mint", timeout=6)

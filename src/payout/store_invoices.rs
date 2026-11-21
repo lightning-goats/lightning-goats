@@ -170,7 +170,7 @@ impl Store {
             .await?
             .context("missing frozen payout invoice")?;
         let row = sqlx::query(
-            "SELECT g.request_id,g.qualification_json,r.gross_sats
+            "SELECT g.request_id,g.qualification_json,r.gross_sats,r.fee_limit_sats
             FROM payout_invoice_intents i JOIN payout_grants g ON g.id=i.grant_id
             JOIN payout_rows r ON r.grant_id=g.id AND r.member=i.member WHERE i.id=?",
         )
@@ -199,6 +199,11 @@ impl Store {
             .checked_sub(invoice.amount_sats())
             .context("invoice exceeds member share")?
             .min(self.policy.max_fee_sats);
+        let fee = if self.policy.fee_mode.is_fixed() {
+            fee.min(u64::try_from(row.try_get::<i64, _>("fee_limit_sats")?)?)
+        } else {
+            fee
+        };
         let available = allocations.iter().try_fold(0u64, |sum, part| {
             sum.checked_add(part.consumed_sats)
                 .context("Cashu allocation overflow")

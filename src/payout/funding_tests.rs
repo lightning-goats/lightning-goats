@@ -1062,6 +1062,34 @@ async fn mixed_funding_keeps_the_consumed_claim_for_custody_verification() {
         reopened.admit(&f.plan, &qualified, now).await.unwrap(),
         grant
     );
+    let intent = reopened
+        .prepare_invoice(grant.id, &f.plan.rows[0].pubkey, now)
+        .await
+        .unwrap();
+    assert!(reopened.cashu_payout_request(intent.id()).await.is_err());
+    let request = reopened
+        .freeze_request(intent.id(), None, now + 1)
+        .await
+        .unwrap();
+    let encoded = crate::test_invoices::invoice_at(
+        1000,
+        request.description_hash(),
+        std::time::Duration::from_secs((now + 2).try_into().unwrap()),
+    );
+    let invoice = request
+        .validate_response(
+            &serde_json::to_vec(&json!({"pr":encoded})).unwrap(),
+            now + 2,
+        )
+        .unwrap();
+    reopened.freeze_invoice(&invoice, now + 3).await.unwrap();
+    let payload = reopened.cashu_payout_request(intent.id()).await.unwrap();
+    assert_eq!(
+        payload,
+        json!({"disposition_id":intent.id(), "feed_id":f.plan.request_id,
+        "invoice":encoded, "payment_hash":invoice.payment_hash(), "amount_sat":1,
+        "maximum_fee_sat":1, "retained_allocations":[allocation]})
+    );
     qualified.retained_allocations[0].anchor.evidence_digest = "ef".repeat(32);
     assert!(reopened.admit(&f.plan, &qualified, now).await.is_err());
     task.abort();

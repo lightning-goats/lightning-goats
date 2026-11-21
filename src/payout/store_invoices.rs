@@ -164,7 +164,10 @@ impl Store {
 
     /// Prepare the collector payload from a frozen invoice and the original grant.
     /// Dispatch still requires a fresh execution lease and exclusive provider binding.
-    pub async fn cashu_payout_request(&self, intent_id: Uuid) -> Result<serde_json::Value> {
+    pub async fn cashu_payout_request(
+        &self,
+        intent_id: Uuid,
+    ) -> Result<(crate::payout::cashu::ExecutionRequest, serde_json::Value)> {
         let mut tx = self.pool.begin().await?;
         let strike_quote: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM payout_quote_intents WHERE invoice_id=?)",
@@ -179,7 +182,7 @@ impl Store {
             .await?
             .context("missing frozen payout invoice")?;
         let row = sqlx::query(
-            "SELECT g.request_id,g.qualification_json,r.gross_sats,r.fee_limit_sats
+            "SELECT i.member,g.request_id,g.qualification_json,r.gross_sats,r.fee_limit_sats
             FROM payout_invoice_intents i JOIN payout_grants g ON g.id=i.grant_id
             JOIN payout_rows r ON r.grant_id=g.id AND r.member=i.member WHERE i.id=?",
         )
@@ -228,8 +231,22 @@ impl Store {
             "invoice": invoice.encoded(), "payment_hash": invoice.payment_hash(),
             "amount_sat": invoice.amount_sats(), "maximum_fee_sat": fee, "retained_allocations": allocations
         });
+        use sha2::{Digest, Sha256};
+        let claim = crate::payout::cashu::ExecutionRequest {
+            reservation: serde_json::from_value(evidence["reservation"].clone())?,
+            member: row.try_get("member")?,
+            disposition_id: intent_id,
+            invoice: invoice.encoded().into(),
+            payment_hash: invoice.payment_hash().into(),
+            description_hash: invoice.description_hash().into(),
+            amount_sat: invoice.amount_sats(),
+            maximum_fee_sat: fee,
+            nip57: invoice.nip57(),
+            collector_payload_digest: hex::encode(Sha256::digest(serde_json::to_vec(&request)?)),
+        };
+        claim.validate()?;
         tx.commit().await?;
-        Ok(request)
+        Ok((claim, request))
     }
 
     /// Historical validation remains readable after expiry for reconciliation.

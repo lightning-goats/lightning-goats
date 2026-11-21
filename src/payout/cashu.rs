@@ -1,7 +1,69 @@
 //! Settlement evidence returned by the project custody collector.
 use anyhow::{Result, ensure};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+
+/// Immutable terms for a core execution claim. The payload digest binds the
+/// collector's allocation list without copying private claim evidence into core.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ExecutionRequest {
+    pub reservation: crate::reward_funding::Reservation,
+    pub member: String,
+    pub disposition_id: uuid::Uuid,
+    pub invoice: String,
+    pub payment_hash: String,
+    pub description_hash: String,
+    pub amount_sat: u64,
+    pub maximum_fee_sat: u64,
+    pub nip57: bool,
+    pub collector_payload_digest: String,
+}
+
+impl ExecutionRequest {
+    pub fn validate(&self) -> Result<u64> {
+        self.reservation.validate()?;
+        crate::nostr_event::validate_public_key(&self.member)?;
+        for digest in [
+            &self.payment_hash,
+            &self.description_hash,
+            &self.collector_payload_digest,
+        ] {
+            crate::nostr_event::validate_hex(digest, 32)?;
+        }
+        ensure!(
+            self.member != self.reservation.owner
+                && !self.disposition_id.is_nil()
+                && self.invoice.len() <= 8192
+                && self.amount_sat > 0
+                && self
+                    .amount_sat
+                    .checked_add(self.maximum_fee_sat)
+                    .is_some_and(|gross| gross <= self.reservation.reserved_sats),
+            "Cashu payout exceeds its reservation or has an invalid identity"
+        );
+        let msat = self
+            .amount_sat
+            .checked_mul(1000)
+            .ok_or_else(|| anyhow::anyhow!("payout amount overflow"))?;
+        let verifier = if self.nip57 {
+            crate::bolt11::verify
+        } else {
+            crate::bolt11::verify_payout
+        };
+        let parsed = verifier(
+            &self.invoice,
+            msat,
+            &self.payment_hash,
+            &self.description_hash,
+        )
+        .map_err(|_| anyhow::anyhow!("Cashu payout differs from the signed invoice"))?;
+        Ok(parsed
+            .expires_at()
+            .ok_or_else(|| anyhow::anyhow!("invalid Cashu payout expiry"))?
+            .as_secs())
+    }
+}
 
 #[derive(Deserialize)]
 #[serde(tag = "state", rename_all = "UPPERCASE", deny_unknown_fields)]

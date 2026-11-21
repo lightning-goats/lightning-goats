@@ -1134,7 +1134,14 @@ async fn mixed_funding_keeps_the_consumed_claim_for_custody_verification() {
         )
         .unwrap();
     reopened.freeze_invoice(&invoice, now + 3).await.unwrap();
-    let payload = reopened.cashu_payout_request(intent.id()).await.unwrap();
+    let (claim, payload) = reopened.cashu_payout_request(intent.id()).await.unwrap();
+    assert_eq!(claim.validate().unwrap(), invoice.expires_at());
+    let mut changed = claim.clone();
+    changed.payment_hash = "ab".repeat(32);
+    assert!(changed.validate().is_err());
+    let mut changed = claim;
+    changed.maximum_fee_sat = changed.reservation.reserved_sats;
+    assert!(changed.validate().is_err());
     assert_eq!(
         payload,
         json!({"disposition_id":intent.id(), "feed_id":f.plan.request_id,

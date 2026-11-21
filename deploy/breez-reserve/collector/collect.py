@@ -80,6 +80,36 @@ def collect(store, client, request_id, pinned_keys):
     return True
 
 
+def execute_payout(store, client, request, keyset, pinned_keys):
+    """Execute an authenticated payout worker request using its admitted grant evidence."""
+    if set(request) != {"disposition_id", "feed_id", "invoice", "payment_hash", "amount_sat",
+                        "maximum_fee_sat", "retained_allocations"}:
+        raise ValueError("invalid payout request")
+    invoice = bolt11.decode(request["invoice"])
+    if (type(request["amount_sat"]) is not int or invoice.currency != "bc"
+            or invoice.amount_msat != request["amount_sat"] * 1000
+            or invoice.payment_hash != request["payment_hash"]):
+        raise ValueError("recipient invoice differs from payout authorization")
+    allocations = {}
+    ledger_ids = set()
+    for part in request["retained_allocations"]:
+        anchor = part["anchor"]
+        ident = anchor["claim_id"]
+        if (anchor["source"] != "project_invoice" or ident in allocations
+                or type(part["ledger_id"]) is not int or part["ledger_id"] <= 0
+                or part["ledger_id"] in ledger_ids):
+            raise ValueError("invalid project payout allocation")
+        ledger_ids.add(part["ledger_id"])
+        allocations[ident] = {"consumed_sats": part["consumed_sats"],
+                              "evidence_digest": anchor["evidence_digest"]}
+    store.reserve_payout(request["disposition_id"], request["feed_id"], invoice.payment_hash,
+                         request["amount_sat"], request["maximum_fee_sat"], allocations)
+    result = submit_payout(store, client, request["disposition_id"], request["invoice"], keyset, pinned_keys)
+    if result["state"] == "PAID":
+        return result
+    return {"state": result["state"], "quote": result["quote"]}
+
+
 def submit_payout(store, client, disposition_id, invoice_text, keyset, pinned_keys):
     """Serialize dispatch and recovery across processes sharing this custody journal."""
     database = Path(store.db.execute("PRAGMA database_list").fetchone()[2])

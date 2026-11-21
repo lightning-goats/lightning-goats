@@ -280,7 +280,7 @@ def main():
                 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "collector"))
                 from claim_store import ClaimStore
                 from project_quote import issue
-                from collect import collect, submit_payout
+                from collect import collect, execute_payout, submit_payout
                 from invoice_server import create, handle
                 import socket
                 import struct
@@ -434,6 +434,18 @@ def main():
                 payment_id = str(uuid.uuid4())
                 digest = bolt11.decode(reserve.destination[0]).payment_hash
                 payout_feed = str(uuid.uuid4())
+                authorization = {"disposition_id": payment_id, "feed_id": payout_feed,
+                    "invoice": reserve.destination[0], "payment_hash": digest, "amount_sat": 12,
+                    "maximum_fee_sat": 4, "retained_allocations": [{"ledger_id": 1, "consumed_sats": 16,
+                    "anchor": {"source": "project_invoice", "claim_id": funded_id,
+                               "evidence_digest": funded["proof_digest"]}}]}
+                try:
+                    execute_payout(claims, None, {**authorization, "amount_sat": 13}, keyset, {keyset: keys})
+                except ValueError:
+                    pass
+                else:
+                    raise AssertionError("mismatched payer authorization consumed funds")
+                assert not claims.db.execute("SELECT 1 FROM proof_disposition WHERE id=?", (payment_id,)).fetchone()
                 [payout_proof] = claims.reserve_payout(payment_id, payout_feed, digest, 12, 4,
                     {funded_id: {"consumed_sats": 16, "evidence_digest": funded["proof_digest"]}})
                 class FeeBearingKeyset:
@@ -473,7 +485,7 @@ def main():
                 assert reserve.pay_attempts == 0
                 claims.db.close()
                 claims = ClaimStore(claim_dir)
-                paid = submit_payout(claims, viewer, payment_id, reserve.destination[0], keyset, {keyset: keys})
+                paid = execute_payout(claims, viewer, authorization, keyset, {keyset: keys})
                 assert paid["state"].upper() == "PENDING"
                 assert wallet_state(viewer, payout_proof) == "PENDING"
                 claims.db.close()
@@ -504,7 +516,7 @@ def main():
                     raise AssertionError("restored project quote never became paid")
                 reserve.complete_sends = True
                 claims = ClaimStore(claim_dir)
-                final_melt = submit_payout(claims, viewer, payment_id, reserve.destination[0], keyset, {keyset: keys})
+                final_melt = execute_payout(claims, viewer, authorization, keyset, {keyset: keys})
                 claims.db.close()
                 claims = ClaimStore(claim_dir)
                 assert submit_payout(claims, None, payment_id, reserve.destination[0], keyset, {keyset: keys}) == final_melt

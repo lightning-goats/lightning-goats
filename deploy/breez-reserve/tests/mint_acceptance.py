@@ -240,6 +240,11 @@ def main():
                 path = "/private/v1/project-quotes"
                 expect(viewer.post(path, json=request), 401)
                 with httpx.Client(transport=httpx.HTTPTransport(uds=str(mint_path)), base_url="http://mint") as collector:
+                    boundary = {**request, "request_id": str(uuid.uuid4()), "amount_sat": 1_000_000}
+                    max_project = expect(collector.post(path, json=boundary, headers=auth))
+                    assert bolt11.decode(max_project["request"]).amount_msat == 1_000_000_000
+                    expect(collector.post(path, json={**boundary, "request_id": str(uuid.uuid4()),
+                                                      "amount_sat": 1_000_001}, headers=auth), 422)
                     project = expect(collector.post(path, json=request, headers=auth))
                     assert bolt11.decode(project["request"]).description_hash == request["description_hash"]
                     assert expect(collector.post(path, json=request, headers=auth))["request"] == project["request"]

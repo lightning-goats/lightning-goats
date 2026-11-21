@@ -15,6 +15,18 @@ impl Store {
         now: i64,
         joining: Option<&crate::cyberherd::conversation::PublishedReference>,
     ) -> Result<Intent> {
+        self.prepare_member_invoice(grant_id, member, now, joining, None)
+            .await
+    }
+
+    pub(crate) async fn prepare_member_invoice(
+        &self,
+        grant_id: Uuid,
+        member: &str,
+        now: i64,
+        joining: Option<&crate::cyberherd::conversation::PublishedReference>,
+        cashu_fee: Option<u64>,
+    ) -> Result<Intent> {
         crate::nostr_event::validate_public_key(member)?;
         let mut tx = self.pool.begin().await?;
         write_lock(&mut tx).await?;
@@ -45,7 +57,10 @@ impl Store {
         }
         let plan: crate::cyberherd::rewards::Plan =
             serde_json::from_str(&row.try_get::<String, _>("plan_json")?)?;
-        if !plan.planning_policy.fee_mode.is_fixed() || !self.policy.fee_mode.is_fixed() {
+        if plan.planning_policy.fee_mode != self.policy.fee_mode
+            || self.policy.fee_mode.is_fixed() == cashu_fee.is_some()
+            || (cashu_fee.is_some() && plan.funding_source.is_strike())
+        {
             bail!("inclusive payouts require their separate probe and promotion path");
         }
         let planned = plan
@@ -53,17 +68,43 @@ impl Store {
             .iter()
             .find(|r| r.pubkey == member)
             .context("invoice lost its frozen plan row")?;
+        let recipient: crate::payout::recipient::Recipient =
+            serde_json::from_str(&row.try_get::<String, _>("recipient_json")?)?;
+        let net_sats = if let Some(fee) = cashu_fee {
+            let net = planned
+                .gross_sats
+                .checked_sub(fee)
+                .context("Cashu fee exceeds member share")?;
+            if fee > self.policy.max_fee_sats
+                || net
+                    < recipient
+                        .min_msat
+                        .div_ceil(1000)
+                        .max(plan.planning_policy.minimum_net_sats)
+                || net > recipient.max_msat / 1000
+                || net > self.policy.max_net_sats
+            {
+                bail!("Cashu fee-adjusted invoice outside recipient or policy bounds");
+            }
+            net
+        } else {
+            planned.net_sats
+        };
         let intent = Intent::restore(invoice::Document {
             id: Uuid::new_v4(),
             grant_id,
             owner: self.policy.scope.owner.clone(),
             member: member.into(),
             address: row.try_get("address")?,
-            recipient: serde_json::from_str(&row.try_get::<String, _>("recipient_json")?)?,
-            net_sats: row.try_get::<i64, _>("net_sats")?.try_into()?,
+            recipient,
+            net_sats,
             created_at: now,
             relays: invoice::receipt_relays(&self.policy.receipt_relays)?,
-            content: planned.zap_content.clone().unwrap_or_default(),
+            content: if cashu_fee.is_some() {
+                planned.render_zap(net_sats)?
+            } else {
+                planned.zap_content.clone().unwrap_or_default()
+            },
             joining: joining.cloned(),
         })?;
         touch_clock(&mut tx, now).await?;
@@ -162,16 +203,33 @@ impl Store {
         Ok(verified)
     }
 
-    /// Fixed fees remain bound to the original member row across policy changes.
-    pub(crate) async fn saved_fee_limit(&self, grant: Uuid, member: &str) -> Result<u64> {
-        let limit: i64 = sqlx::query_scalar(
-            "SELECT fee_limit_sats FROM payout_rows WHERE grant_id=? AND member=?",
-        )
-        .bind(grant.to_string())
-        .bind(member)
-        .fetch_one(&self.pool)
-        .await?;
-        Ok(limit.try_into()?)
+    pub(crate) async fn cashu_member_fee_limit(
+        &self,
+        grant: Uuid,
+        member: &str,
+        amount: u64,
+    ) -> Result<u64> {
+        let gross: i64 =
+            sqlx::query_scalar("SELECT gross_sats FROM payout_rows WHERE grant_id=? AND member=?")
+                .bind(grant.to_string())
+                .bind(member)
+                .fetch_one(&self.pool)
+                .await?;
+        u64::try_from(gross)?
+            .checked_sub(amount)
+            .context("invoice exceeds member allocation")
+    }
+
+    pub(crate) async fn cashu_probe_allocations(
+        &self,
+        grant_id: Uuid,
+    ) -> Result<Vec<crate::payout::funding::RetainedAllocation>> {
+        let evidence: String =
+            sqlx::query_scalar("SELECT qualification_json FROM payout_grants WHERE id=?")
+                .bind(grant_id.to_string())
+                .fetch_one(&self.pool)
+                .await?;
+        project_allocations(&serde_json::from_str(&evidence)?)
     }
 
     /// Prepare the collector payload from a frozen invoice and the original grant.
@@ -203,24 +261,7 @@ impl Store {
         .await?;
         let evidence: serde_json::Value =
             serde_json::from_str(&row.try_get::<String, _>("qualification_json")?)?;
-        if evidence["execution_provider"] != "cashu" {
-            bail!("grant is not bound to Cashu execution");
-        }
-        let allocations: Vec<crate::payout::funding::RetainedAllocation> = serde_json::from_value(
-            evidence
-                .get("retained_allocations")
-                .context("grant lacks Cashu custody evidence")?
-                .clone(),
-        )?;
-        let allocations: Vec<_> = allocations
-            .into_iter()
-            .filter(|part| {
-                matches!(
-                    part.anchor.source,
-                    crate::reward_funding::CashuFundingSource::ProjectInvoice
-                )
-            })
-            .collect();
+        let allocations = project_allocations(&evidence)?;
         let gross = u64::try_from(row.try_get::<i64, _>("gross_sats")?)?;
         let fee = gross
             .checked_sub(invoice.amount_sats())
@@ -270,6 +311,30 @@ impl Store {
         tx.commit().await?;
         Ok(invoice)
     }
+}
+
+fn project_allocations(
+    evidence: &serde_json::Value,
+) -> Result<Vec<crate::payout::funding::RetainedAllocation>> {
+    if evidence["execution_provider"] != "cashu" {
+        bail!("grant is not bound to Cashu execution");
+    }
+    let allocations: Vec<crate::payout::funding::RetainedAllocation> = serde_json::from_value(
+        evidence
+            .get("retained_allocations")
+            .context("grant lacks Cashu custody evidence")?
+            .clone(),
+    )?;
+    let allocations: Vec<_> = allocations
+        .into_iter()
+        .filter(|part| {
+            matches!(
+                part.anchor.source,
+                crate::reward_funding::CashuFundingSource::ProjectInvoice
+            )
+        })
+        .collect();
+    Ok(allocations)
 }
 
 pub(super) async fn ensure_strike_grant(

@@ -1087,6 +1087,54 @@ async fn mixed_funding_keeps_the_consumed_claim_for_custody_verification() {
         .await
         .unwrap();
     let now = f.reservation.created_at + 10;
+    let mut inclusive = f.plan.clone();
+    inclusive.planning_policy.fee_mode = crate::payout::inclusive_fees::Mode::DeductFromShare;
+    inclusive.planning_policy.minimum_fee_sats = 0;
+    inclusive.rows[0].net_sats = 2;
+    inclusive.rows[0].fee_limit_sats = 0;
+    let mut inclusive_policy = policy.clone();
+    inclusive_policy.fee_mode = inclusive.planning_policy.fee_mode;
+    let inclusive_url = format!(
+        "sqlite://{}",
+        f.root.path().join("inclusive-cashu.db").display()
+    );
+    let journal = crate::payout::store::Store::connect(&inclusive_url, inclusive_policy.clone())
+        .await
+        .unwrap();
+    let grant = journal
+        .admit_cashu(&inclusive, &copy_evidence(&qualified, &inclusive), now)
+        .await
+        .unwrap();
+    let member = &inclusive.rows[0].pubkey;
+    let probe = journal
+        .prepare_fee_probe(grant.id, member, 0, now, None)
+        .await
+        .unwrap();
+    assert_eq!(probe.0.net_sats, 2);
+    assert!(
+        journal
+            .prepare_fee_probe_quote(probe.id(), now)
+            .await
+            .is_err()
+    );
+    let adjusted = journal
+        .prepare_member_invoice(grant.id, member, now, None, Some(1))
+        .await
+        .unwrap();
+    assert_eq!(adjusted.0.net_sats, 1);
+    drop(journal);
+    let journal = crate::payout::store::Store::connect(&inclusive_url, inclusive_policy)
+        .await
+        .unwrap();
+    assert_eq!(
+        journal
+            .saved_invoice_intent(grant.id, member)
+            .await
+            .unwrap()
+            .unwrap()
+            .id(),
+        adjusted.id()
+    );
     qualified.retained_allocations[0].anchor.source = CashuFundingSource::Acquisition;
     assert!(store.admit_cashu(&f.plan, &qualified, now).await.is_err());
     qualified.retained_allocations[0] = allocation.clone();

@@ -95,7 +95,7 @@ impl Store {
         grant: Uuid,
         socket: &std::path::Path,
     ) -> Result<bool> {
-        let rows = sqlx::query("SELECT r.member,r.fee_limit_sats,v.intent_id FROM payout_rows r LEFT JOIN payout_invoice_intents i ON i.grant_id=r.grant_id AND i.member=r.member LEFT JOIN payout_invoices v ON v.intent_id=i.id WHERE r.grant_id=? ORDER BY r.member")
+        let rows = sqlx::query("SELECT r.member,r.gross_sats,v.intent_id FROM payout_rows r LEFT JOIN payout_invoice_intents i ON i.grant_id=r.grant_id AND i.member=r.member LEFT JOIN payout_invoices v ON v.intent_id=i.id WHERE r.grant_id=? ORDER BY r.member")
             .bind(grant.to_string()).fetch_all(&self.pool).await?;
         let mut paid = std::collections::BTreeMap::new();
         for row in rows {
@@ -106,7 +106,9 @@ impl Store {
                 .saved_invoice(id.parse()?)
                 .await?
                 .context("missing Cashu payout invoice")?;
-            let fee_limit = u64::try_from(row.try_get::<i64, _>("fee_limit_sats")?)?;
+            let fee_limit = u64::try_from(row.try_get::<i64, _>("gross_sats")?)?
+                .checked_sub(invoice.amount_sats())
+                .context("invoice exceeds member allocation")?;
             let receipt = crate::payout::cashu::lookup(socket, 0, &invoice, fee_limit).await?;
             let Some(fee_sats) =
                 receipt.verified_fee(invoice.payment_hash(), invoice.amount_sats(), fee_limit)?

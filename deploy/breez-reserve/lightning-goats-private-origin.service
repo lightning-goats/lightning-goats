@@ -1,0 +1,29 @@
+[Unit]
+Description=Lightning Goats private wallet and project quote origin on WireGuard
+After=network-online.target wg-quick@wg0.service lightning-goats-mint@mainnet.service
+Wants=network-online.target
+
+[Service]
+DynamicUser=yes
+SupplementaryGroups=www-data
+RuntimeDirectory=lightning-goats-private-origin
+RuntimeDirectoryMode=0700
+LoadCredential=home.pem:/etc/nginx/goats-mint/home.pem
+LoadCredential=home.key:/etc/nginx/goats-mint/home.key
+LoadCredential=private-client-ca.pem:/etc/nginx/goats-mint/private-client-ca.pem
+ExecStartPre=/usr/sbin/nginx -t -e stderr -p /run/lightning-goats-private-origin/ -c /etc/lightning-goats-reserve/private-origin.nginx.conf
+ExecStart=/usr/sbin/nginx -e stderr -p /run/lightning-goats-private-origin/ -c /etc/lightning-goats-reserve/private-origin.nginx.conf
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET
+InaccessiblePaths=-/run/lightning-goats-reserve/mainnet/funding
+
+[Install]
+WantedBy=multi-user.target

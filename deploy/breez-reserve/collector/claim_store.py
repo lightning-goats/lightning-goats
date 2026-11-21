@@ -13,6 +13,13 @@ def encode(value):
     return json.dumps(value, separators=(",", ":"), sort_keys=True)
 
 
+class SplitRequired(ValueError):
+    def __init__(self, selected, splits):
+        super().__init__("confirmed payout requires exact change")
+        self.selected = selected
+        self.splits = splits
+
+
 class ClaimStore:
     """The caller owns a private state directory and a connection per worker."""
 
@@ -113,6 +120,13 @@ class ClaimStore:
                     returned_sat INTEGER NOT NULL CHECK(returned_sat>0)
                 )
             """)
+            self.db.execute("""
+                CREATE TABLE IF NOT EXISTS proof_split (
+                    secret TEXT PRIMARY KEY REFERENCES disposition_input(secret),
+                    material TEXT NOT NULL,
+                    complete INTEGER NOT NULL DEFAULT 0 CHECK(complete IN (0,1))
+                )
+            """)
             for ident, proofs in self.db.execute("""
                 SELECT id,proofs FROM project_claim c WHERE proofs IS NOT NULL AND NOT EXISTS
                     (SELECT 1 FROM collected_output o WHERE o.request_id=c.id)
@@ -196,8 +210,9 @@ class ClaimStore:
             remaining[claim_id] = budget - used
             candidates.extend((sats, claim_id, secret) for secret,sats in self.db.execute("""
                 SELECT secret,amount_sat FROM collected_output o
-                WHERE request_id=? AND NOT EXISTS
+                WHERE request_id=? AND (NOT EXISTS
                 (SELECT 1 FROM disposition_input i WHERE i.secret=o.secret)
+                OR EXISTS(SELECT 1 FROM proof_split s WHERE s.secret=o.secret AND s.complete=0))
                 ORDER BY amount_sat DESC,secret
             """, (claim_id,)))
         taken = {}
@@ -209,8 +224,24 @@ class ClaimStore:
                 left -= sats
                 if not left:
                     break
+        pending = {secret for (secret,) in self.db.execute("SELECT secret FROM proof_split WHERE complete=0")}
+        splits = [(secret, None) for secret in selected if secret in pending]
         if left:
-            raise ValueError("confirmed allocation lacks exact available payout inputs")
+            used_secrets = set(selected)
+            for sats, claim_id, secret in sorted(candidates):
+                if secret in used_secrets:
+                    continue
+                portion = min(left, remaining[claim_id], sats)
+                if portion:
+                    splits.append((secret, portion))
+                    remaining[claim_id] -= portion
+                    left -= portion
+                if not left:
+                    break
+            if left:
+                raise ValueError("confirmed allocation lacks available payout inputs")
+        if splits:
+            raise SplitRequired(selected, splits)
         return selected, taken
 
     def reserve_payout(self, disposition_id, feed_id, invoice_hash, amount, fee_limit, allocations, *, invoice_expiry=None, invoice_digest=None):

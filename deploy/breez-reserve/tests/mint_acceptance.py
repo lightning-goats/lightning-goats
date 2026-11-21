@@ -597,7 +597,7 @@ def main():
                 assert reserve.pay_attempts == 1
                 claims = ClaimStore(claim_dir)
                 conversion_id = str(uuid.uuid4())
-                conversion = {"treasury_id": conversion_id, "amount_sat": 8, "description_hash": "ab"*32}
+                conversion = {"treasury_id": conversion_id, "amount_sat": 32, "description_hash": "ab"*32}
                 conversion_invoice = create(conversion, claims, viewer, PROJECT_TOKEN, keyset)["invoice"]
                 assert create(conversion, claims, viewer, PROJECT_TOKEN, keyset)["invoice"] == conversion_invoice
                 reserve.paid.add(bolt11.decode(conversion_invoice).payment_hash)
@@ -606,10 +606,45 @@ def main():
                         break
                     time.sleep(.1)
                 status = create({"treasury_claim_status": conversion_id}, claims, None, None, None)
-                assert status["amount_sat"] == 8 and status["proof_digest"]
-                conversion_inputs = claims.reserve_payout(str(uuid.uuid4()), str(uuid.uuid4()), "cc"*32,
-                    7, 1, {conversion_id: {"consumed_sats": 8, "evidence_digest": status["proof_digest"]}})
-                assert sum(p["amount"] for p in conversion_inputs) == 8
+                assert status["amount_sat"] == 32 and status["proof_digest"]
+                reserve.destination = invoice(12, memo="split fixture")
+                split_request = {**authorization, "invoice":reserve.destination[0],
+                    "payment_hash":bolt11.decode(reserve.destination[0]).payment_hash,
+                    "disposition_id":str(uuid.uuid4()), "feed_id":str(uuid.uuid4()),
+                    "retained_allocations":[{"ledger_id":2,"consumed_sats":16,"anchor":{
+                        "source":"project_invoice","claim_id":conversion_id,"evidence_digest":status["proof_digest"]}}]}
+                probe = execute_payout(claims, viewer, {"quote_invoice":reserve.destination[0],
+                    "amount_sat":12,"gross_sat":16,"feed_id":split_request["feed_id"],
+                    "retained_allocations":split_request["retained_allocations"]},keyset,{keyset:keys})
+                assert probe["input_fee_sat"] == 0 and not claims.db.execute("SELECT 1 FROM proof_split").fetchone()
+                class LostSplitResponse:
+                    get = viewer.get
+                    def post(self, path, **kwargs):
+                        response = viewer.post(path, **kwargs)
+                        if path == "/v1/swap":
+                            response.raise_for_status()
+                            raise httpx.ReadTimeout("discarded split response")
+                        return response
+                try:
+                    execute_payout(claims, LostSplitResponse(), split_request, keyset, {keyset:keys})
+                except httpx.ReadTimeout:
+                    pass
+                else:
+                    raise AssertionError("failed to exercise lost swap response")
+                claims.db.close()
+                claims = ClaimStore(claim_dir)
+                result = execute_payout(claims, viewer, split_request, keyset, {keyset:keys})
+                for _ in range(30):
+                    if result["state"] == "PAID":
+                        break
+                    time.sleep(.1)
+                    result = execute_payout(claims, viewer, {"reconcile_disposition":split_request["disposition_id"],
+                        "invoice":reserve.destination[0]}, keyset, {keyset:keys})
+                assert result["state"] == "PAID" and result["fee_sat"] == 1
+                assert reserve.pay_attempts == 2
+                remaining = claims.db.execute("SELECT SUM(amount_sat) FROM collected_output o WHERE request_id=? "
+                    "AND NOT EXISTS(SELECT 1 FROM disposition_input i WHERE i.secret=o.secret)",(conversion_id,)).fetchone()[0]
+                assert remaining == 19
                 for field in ("claim_status", "contact_claim_status"):
                     try:
                         create({field: conversion_id}, claims, None, None, None)

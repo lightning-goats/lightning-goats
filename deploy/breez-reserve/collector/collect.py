@@ -6,6 +6,10 @@ import json
 from pathlib import Path
 import secrets
 from urllib.parse import quote as escape
+from uuid import uuid4
+
+from project_quote import prepare_outputs
+from claim_store import SplitRequired
 import time
 
 import bolt11
@@ -92,6 +96,50 @@ def payout_input_fee(client, input_keysets):
     return (sum(rates[keyset] for keyset in input_keysets) + 999) // 1000
 
 
+def split_payout_proof(store, client, secret, portion, keyset, pinned_keys):
+    """Make exact change without consuming a payout fee or changing claim ownership."""
+    row = store.db.execute("SELECT request_id,proof FROM collected_output WHERE secret=?", (secret,)).fetchone()
+    if row is None:
+        raise ValueError("missing split input")
+    claim_id, proof = row[0], json.loads(row[1])
+    known = store.db.execute("SELECT 1 FROM proof_split WHERE secret=?", (secret,)).fetchone()
+    if not known and payout_input_fee(client, [proof["id"], keyset]):
+        raise ValueError("proof split requires zero-fee keysets")
+    with store.write():
+        prior = store.db.execute("SELECT material,complete FROM proof_split WHERE secret=?", (secret,)).fetchone()
+        if prior:
+            if prior[1]:
+                return
+            material = json.loads(prior[0])
+        else:
+            if type(portion) is not int or not 0 < portion < proof["amount"]:
+                raise ValueError("invalid split portion")
+            if store.db.execute("SELECT 1 FROM disposition_input WHERE secret=?", (secret,)).fetchone():
+                raise ValueError("split input already reserved")
+            material = prepare_outputs(portion, keyset) + prepare_outputs(proof["amount"] - portion, keyset)
+            split_id = str(uuid4())
+            store.db.execute("INSERT INTO proof_disposition VALUES (?,'operator_transfer',?)",
+                             (split_id, json.dumps({"purpose": "make_change", "claim": claim_id})))
+            store.db.execute("INSERT INTO disposition_input VALUES (?,?)", (secret, split_id))
+            store.db.execute("INSERT INTO proof_split(secret,material) VALUES (?,?)", (secret, json.dumps(material)))
+    outputs = [{k: item[k] for k in ("amount", "id", "B_")} for item in material]
+    restored = client.post("/v1/restore", json={"outputs": outputs}).raise_for_status().json()
+    if restored["outputs"] or restored["signatures"]:
+        if [{k: o[k] for k in ("amount","id","B_")} for o in restored["outputs"]] != outputs:
+            raise ValueError("split restoration differs from original outputs")
+        promises = restored["signatures"]
+    else:
+        if payout_input_fee(client, [proof["id"]]):
+            raise ValueError("proof split requires a zero-fee swap")
+        promises = client.post("/v1/swap", json={"inputs": [proof], "outputs": outputs}).raise_for_status().json()["signatures"]
+    if [p["amount"] for p in promises] != [o["amount"] for o in outputs]:
+        raise ValueError("split promise amounts changed")
+    proofs = [unblind(item, promise, pinned_keys) for item, promise in zip(material, promises, strict=True)]
+    with store.write():
+        store._index_outputs(claim_id, proofs)
+        store.db.execute("UPDATE proof_split SET complete=1 WHERE secret=?", (secret,))
+
+
 def project_allocations(parts):
     allocations = {}
     ledger_ids = set()
@@ -131,8 +179,16 @@ def execute_payout(store, client, request, keyset, pinned_keys):
         result = {"payment_hash": invoice.payment_hash, "amount_sat": amount,
                   "routing_reserve_sat": status["fee_reserve"], "expires_at": status["expiry"]}
         if set(request) == with_inputs:
-            selected, _ = store.payout_inputs(request["feed_id"], request["gross_sat"],
-                                              project_allocations(request["retained_allocations"]))
+            try:
+                selected, _ = store.payout_inputs(request["feed_id"], request["gross_sat"],
+                                                  project_allocations(request["retained_allocations"]))
+            except SplitRequired as plan:
+                # Only a lossless swap is supported. Fee discovery never submits inputs.
+                split_keys = [json.loads(store.db.execute("SELECT proof FROM collected_output WHERE secret=?",
+                              (secret,)).fetchone()[0])["id"] for secret, _ in plan.splits]
+                if payout_input_fee(client, split_keys + [keyset]):
+                    raise ValueError("proof split requires zero-fee keysets")
+                selected = plan.selected
             keysets = [json.loads(store.db.execute("SELECT proof FROM collected_output WHERE secret=?",
                                                    (secret,)).fetchone()[0])["id"] for secret in selected]
             result["input_fee_sat"] = payout_input_fee(client, keysets)
@@ -149,10 +205,16 @@ def execute_payout(store, client, request, keyset, pinned_keys):
             or invoice.payment_hash != request["payment_hash"]):
         raise ValueError("recipient invoice differs from payout authorization")
     allocations = project_allocations(request["retained_allocations"])
-    store.reserve_payout(request["disposition_id"], request["feed_id"], invoice.payment_hash,
-                         request["amount_sat"], request["maximum_fee_sat"], allocations,
-                         invoice_expiry=invoice.expiry_time,
-                         invoice_digest=hashlib.sha256(request["invoice"].encode()).hexdigest())
+    while True:
+        try:
+            store.reserve_payout(request["disposition_id"], request["feed_id"], invoice.payment_hash,
+                                 request["amount_sat"], request["maximum_fee_sat"], allocations,
+                                 invoice_expiry=invoice.expiry_time,
+                                 invoice_digest=hashlib.sha256(request["invoice"].encode()).hexdigest())
+            break
+        except SplitRequired as plan:
+            for secret, portion in plan.splits:
+                split_payout_proof(store, client, secret, portion, keyset, pinned_keys)
     result = submit_payout(store, client, request["disposition_id"], request["invoice"], keyset, pinned_keys)
     if result["state"] == "PAID":
         return result

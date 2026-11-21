@@ -10,8 +10,7 @@ from cashu.core.crypto import b_dhke
 from coincurve import PrivateKey
 
 
-def prepare_claim(amount, keyset):
-    owner = PrivateKey()
+def prepare_outputs(amount, keyset):
     outputs = []
     for bit in range(amount.bit_length()):
         denomination = 1 << bit
@@ -22,7 +21,11 @@ def prepare_claim(amount, keyset):
                 "amount": denomination, "id": keyset, "B_": blinded.format().hex(),
                 "secret": secret, "blind": factor.secret.hex(),
             })
-    return {"owner": owner.secret.hex(), "outputs": outputs}
+    return outputs
+
+
+def prepare_claim(amount, keyset):
+    return {"owner": PrivateKey().secret.hex(), "outputs": prepare_outputs(amount, keyset)}
 
 
 def issue(store, private_client, token, request_id, amount, digest, keyset, attribution):

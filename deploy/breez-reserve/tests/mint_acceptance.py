@@ -47,6 +47,8 @@ class Fixture(UnixStreamServer):
     def __init__(self, path):
         super().__init__(str(path), Handler)
         self.receives = {}
+        self.balance = 100
+        self.settlements = {}
         self.paid = set()
         self.sends = {}
         self.pay_attempts = 0
@@ -74,10 +76,11 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/health":
             self.response(identity)
         elif self.path == "/v1/funding/balance":
-            self.response({**identity, "balance_sat": 100})
+            self.response({**identity, "balance_sat": self.server.balance})
         elif self.path.startswith("/v1/invoices/"):
             payment_hash = self.path.rsplit("/", 1)[1]
-            self.response({"payment_hash": payment_hash, "state": "settled" if payment_hash in self.server.paid else "pending"})
+            self.response({"payment_hash": payment_hash, "state": "settled" if payment_hash in self.server.paid else "pending",
+                           **self.server.settlements.get(payment_hash, {})})
         elif self.path.startswith("/v1/funding/payments/"):
             operation_id = self.path.rsplit("/", 1)[1]
             self.response(self.server.sends[operation_id] if self.server.complete_sends else
@@ -160,14 +163,14 @@ def wallet_state(client, item):
     return expect(client.post("/v1/checkstate", json={"Ys": [y]}))["states"][0]["state"]
 
 
-def start_mint(directory, socket, reserve, credentials):
+def start_mint(directory, socket, reserve, credentials, *, watchdog=False):
     log = (directory / "process.log").open("ab")
     env = {**os.environ, "STATE_DIRECTORY": str(directory), "CREDENTIALS_DIRECTORY": str(credentials),
            "LG_RESERVE_FUND_SOCKET": str(reserve), "LG_MINT_SOCKET": str(socket),
            "LG_RESERVE_WALLET": WALLET, "LG_RESERVE_NETWORK": "mainnet",
            "MINT_BACKEND_BOLT11_SAT": "GoatsReserve", "MINT_DATABASE": str(directory / "db"),
            "CASHU_DIR": str(directory), "MINT_RPC_SERVER_ENABLE": "false",
-           "MINT_WATCHDOG_ENABLED": "false", "MINT_RATE_LIMIT": "false", "DEBUG": "false",
+           "MINT_WATCHDOG_ENABLED": str(watchdog).lower(), "MINT_WATCHDOG_BALANCE_CHECK_INTERVAL_SECONDS": "0.25", "MINT_RATE_LIMIT": "false", "DEBUG": "false",
            "MINT_INPUT_FEE_PPK": "0", "MINT_QUOTE_BACKEND_CHECK_RATE_LIMIT": "0", "LOG_LEVEL": "INFO"}
     process = subprocess.Popen([sys.executable, "-m", "lg_mint"], cwd=directory, env=env, stdout=log, stderr=log)
     client = httpx.Client(transport=httpx.HTTPTransport(uds=str(socket)), base_url="http://mint", timeout=6)

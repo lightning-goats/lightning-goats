@@ -101,3 +101,11 @@ The canonical HTTPS endpoint passed certificate verification, returned mint disc
 At the operator's request HOME enabled reserve spending and Lightning melts. Current limits are 1,000,000 sats per top-up, 10,000,000 sats of aggregate issued balance at quote admission and 1,000 sats per melt. The running reserve reported spending enabled. Public NUT-05 discovery advertised enabled BOLT11 melts; the public melt quote endpoint rejected a malformed invoice, and the private funding endpoint returned 404. The reserve, issuer and public origin services were active and enabled at boot.
 
 A funded outgoing Lightning redemption and recovery of a paired, funded reserve and issuer snapshot remain open. The operator holds the test proofs in Minibits. Reconcile the first funded melt against its original quote, the independent receiving wallet, actual fees, reserve balance and outstanding liability.
+
+### Reserve watchdog and delayed claims
+
+The HOME issuer records the identifiers and amounts of open quotes when a watchdog sample shows a positive reserve surplus. It saves those candidates and the raw balance sample in one SQLite transaction. If the surplus subsequently falls while the reserve stays flat or grows, the watchdog checks which of those specific quotes became issued. It requires the original reserve receipt, matching payment hash and amount, and settlement by the earlier sample. Accepted samples replace the candidate list. A restart retains the last committed sample and its candidates.
+
+A reserve below outstanding liability plus fees, a decline in both reserve and surplus, or a surplus decrease exceeding the verified claims still stops the issuer. An unavailable reserve or missing evidence fails closed. Existing checkpoints without candidate evidence use the original conservative comparison. Keep the watchdog enabled and mismatch overrides disabled.
+
+The package build runs a disposable real-issuer regression for deposit, delayed issuance and restart. It also checks rejection of an incorrect receipt amount, a later receipt, a loss of surplus and an outright deficit. The ordinary issue, swap, restore and melt fixture runs separately.

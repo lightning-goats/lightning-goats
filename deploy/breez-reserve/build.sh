@@ -25,6 +25,7 @@ git -C "$build/nutshell" apply "$here/mint/nutshell.patch" "$here/mint/runtime-d
 mkdir "$build/spark/crates/lg-reserve"
 cp -a "$here/wallet/Cargo.toml" "$here/wallet/src" "$build/spark/crates/lg-reserve/"
 install -m 0644 "$here/mint/adapter.py" "$build/nutshell/cashu/lightning/goats_reserve.py"
+install -m 0644 "$here/mint/goats_watchdog.py" "$build/nutshell/cashu/lightning/goats_watchdog.py"
 install -m 0644 "$here/mint/lg_mint.py" "$build/nutshell/lg_mint.py"
 
 (
@@ -42,6 +43,7 @@ install -m 0644 "$here/mint/lg_mint.py" "$build/nutshell/lg_mint.py"
     poetry env use "$python"
     poetry install --only main --no-root --no-interaction
     PYTHONPATH="$build/nutshell" .venv/bin/python "$here/tests/mint_acceptance.py"
+    PYTHONPATH="$build/nutshell" .venv/bin/python "$here/tests/watchdog_acceptance.py"
 )
 
 bundle=$build/bundle

@@ -25,6 +25,7 @@ pub struct Config {
     pub enabled: bool,
     #[serde(default)]
     pub funding_source: crate::reward_funding::RewardFundingSource,
+    pub cashu_payout_socket: Option<PathBuf>,
     pub state_dir: PathBuf,
     pub core_socket: PathBuf,
     pub intake_socket: PathBuf,
@@ -115,6 +116,14 @@ impl Config {
     }
     pub fn validate(&self) -> Result<()> {
         self.policy.validate()?;
+        if let Some(socket) = &self.cashu_payout_socket {
+            ipc::socket_path(socket)?;
+            if self.funding_source.is_strike()
+                || [&self.core_socket, &self.signer_socket, &self.intake_socket].contains(&socket)
+            {
+                bail!("Cashu payout requires its separate collector socket");
+            }
+        }
         for socket in [&self.core_socket, &self.intake_socket, &self.signer_socket] {
             ipc::socket_path(socket)?;
         }
@@ -211,6 +220,7 @@ impl Config {
         } else {
             (
                 RuntimeWorker::Cashu(Box::new(CashuWorker {
+                    collector_socket: self.cashu_payout_socket.clone(),
                     store: store.clone(),
                     core: core.clone(),
                     signer: Signer::new(self.signer_socket.clone(), self.signer_uid)?,

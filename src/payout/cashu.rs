@@ -68,6 +68,7 @@ impl ExecutionRequest {
 #[derive(Deserialize)]
 #[serde(tag = "state", rename_all = "UPPERCASE", deny_unknown_fields)]
 pub enum CollectorResult {
+    Unreserved,
     Unquoted,
     Unpaid {
         quote: String,
@@ -93,7 +94,7 @@ impl CollectorResult {
         fee_limit: u64,
     ) -> Result<Option<u64>> {
         let quote = match self {
-            Self::Unquoted => return Ok(None),
+            Self::Unreserved | Self::Unquoted => return Ok(None),
             Self::Unpaid { quote } | Self::Pending { quote } | Self::Paid { quote, .. } => quote,
         };
         ensure!(

@@ -129,6 +129,8 @@ def _submit_payout(store, client, disposition_id, invoice_text, keyset, pinned_k
         (disposition_id,),
     ).fetchone()
     if row is None:
+        if reconcile_only:
+            return {"state": "UNRESERVED"}
         raise ValueError("unknown reserved payout")
     terms = json.loads(row[0])
     invoice = bolt11.decode(invoice_text)

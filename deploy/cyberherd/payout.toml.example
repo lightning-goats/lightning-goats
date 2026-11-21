@@ -3,8 +3,9 @@
 enabled = false
 # The base unit uses Strike for original-provider recovery. For Cashu intake,
 # select retained_cashu and install the 00-retained-cashu.conf service drop-in.
-# Outgoing Cashu execution is pending integration.
+# For fixed-fee Cashu execution, set cashu_payout_socket to the dedicated socket.
 funding_source = "strike"
+# cashu_payout_socket = "/run/lightning-goats-project-payouts.sock"
 state_dir = "/var/lib/cyberherd-payout"
 core_socket = "/run/lightning-goats-bridge/core.sock"
 intake_socket = "/run/cyberherd-plans/plans.sock"

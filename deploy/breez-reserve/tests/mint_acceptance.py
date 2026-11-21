@@ -455,6 +455,8 @@ def main():
                 else:
                     raise AssertionError("expired invoice reserved payout inputs")
                 assert not claims.db.execute("SELECT 1 FROM proof_disposition WHERE id=?", (payment_id,)).fetchone()
+                absent = {"reconcile_disposition": payment_id, "invoice": reserve.destination[0]}
+                assert execute_payout(claims, None, absent, keyset, {keyset: keys}) == {"state": "UNRESERVED"}
                 [payout_proof] = claims.reserve_payout(payment_id, payout_feed, digest, 12, 4,
                     {funded_id: {"consumed_sats": 16, "evidence_digest": funded["proof_digest"]}},
                     invoice_digest=hashlib.sha256(reserve.destination[0].encode()).hexdigest())

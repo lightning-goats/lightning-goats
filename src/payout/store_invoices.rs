@@ -162,6 +162,18 @@ impl Store {
         Ok(verified)
     }
 
+    /// Fixed fees remain bound to the original member row across policy changes.
+    pub(crate) async fn saved_fee_limit(&self, grant: Uuid, member: &str) -> Result<u64> {
+        let limit: i64 = sqlx::query_scalar(
+            "SELECT fee_limit_sats FROM payout_rows WHERE grant_id=? AND member=?",
+        )
+        .bind(grant.to_string())
+        .bind(member)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(limit.try_into()?)
+    }
+
     /// Prepare the collector payload from a frozen invoice and the original grant.
     /// Dispatch still requires a fresh execution lease and exclusive provider binding.
     pub async fn cashu_payout_request(

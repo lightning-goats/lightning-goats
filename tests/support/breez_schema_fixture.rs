@@ -2,6 +2,16 @@
 use anyhow::{Context, Result, ensure};
 
 pub async fn strip_empty(transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>) -> Result<()> {
+    let has_claims: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='cashu_payout_execution_claims')")
+        .fetch_one(&mut **transaction).await?;
+    if has_claims {
+        let empty: bool =
+            sqlx::query_scalar("SELECT NOT EXISTS(SELECT 1 FROM cashu_payout_execution_claims)")
+                .fetch_one(&mut **transaction)
+                .await?;
+        ensure!(empty, "fixture contains Cashu payout execution history");
+        sqlx::raw_sql("DROP TRIGGER strike_execution_provider_conflict; DROP TABLE cashu_payout_execution_claims;").execute(&mut **transaction).await?;
+    }
     let rows:i64=sqlx::query_scalar("SELECT (SELECT COUNT(*) FROM retained_cashu_lots)+(SELECT COUNT(*) FROM breez_collected_claims)+(SELECT COUNT(*) FROM breez_project_invoices)").fetch_one(&mut **transaction).await?;
     ensure!(
         rows == 0,

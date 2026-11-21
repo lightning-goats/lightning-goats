@@ -443,6 +443,7 @@ async fn prepare_callback<F: InvoiceFetcher>(
 }
 
 pub(crate) struct CashuWorker {
+    pub collector_socket: Option<std::path::PathBuf>,
     pub store: Store,
     pub core: Core,
     pub signer: Signer,
@@ -451,9 +452,6 @@ pub(crate) struct CashuWorker {
 impl CashuWorker {
     pub async fn tick(&self) -> Result<Step> {
         let policy = self.store.policy();
-        if !policy.execution_enabled || !policy.fee_mode.is_fixed() {
-            return Ok(Step::Waiting);
-        }
         let Some(work) = self
             .store
             .take_provider_work(calendar::now()?, "cashu")
@@ -464,13 +462,36 @@ impl CashuWorker {
         let Some(member) = work.member else {
             return Ok(Step::Waiting);
         };
-        if self.store.grant_fee_mode(work.grant).await? != policy.fee_mode {
-            return Ok(Step::Waiting);
-        }
         let intent = self.store.saved_invoice_intent(work.grant, &member).await?;
+        let enabled = policy.execution_enabled
+            && policy.fee_mode.is_fixed()
+            && self.store.grant_fee_mode(work.grant).await? == policy.fee_mode;
         if let Some(intent) = &intent
-            && (self.store.saved_invoice(intent.id()).await?.is_some()
-                || intent.0.net_sats > policy.max_net_sats)
+            && let Some(invoice) = self.store.saved_invoice(intent.id()).await?
+        {
+            let Some(socket) = &self.collector_socket else {
+                return Ok(Step::Waiting);
+            };
+            // PID 1 owns the listening socket passed to the dedicated collector service.
+            let limit = self.store.saved_fee_limit(work.grant, &member).await?;
+            let status = super::cashu::lookup(socket, 0, &invoice, limit).await?;
+            match status {
+                super::cashu::CollectorResult::Paid { .. } => return Ok(Step::Observed),
+                super::cashu::CollectorResult::Pending { .. } => return Ok(Step::Waiting),
+                _ => {}
+            }
+            if !enabled || invoice.amount_sats() > policy.max_net_sats {
+                return Ok(Step::Waiting);
+            }
+            let (claim, payload) = self.store.cashu_payout_request(intent.id()).await?;
+            let lease = self.core.claim_cashu_execution(&claim).await?;
+            super::cashu::submit(socket, 0, &lease, &payload).await?;
+            return Ok(Step::Submitted);
+        }
+        if !enabled
+            || intent
+                .as_ref()
+                .is_some_and(|i| i.0.net_sats > policy.max_net_sats)
         {
             return Ok(Step::Waiting);
         }

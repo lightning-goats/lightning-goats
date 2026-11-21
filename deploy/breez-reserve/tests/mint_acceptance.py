@@ -436,6 +436,24 @@ def main():
                 payout_feed = str(uuid.uuid4())
                 [payout_proof] = claims.reserve_payout(payment_id, payout_feed, digest, 12, 4,
                     {funded_id: {"consumed_sats": 16, "evidence_digest": funded["proof_digest"]}})
+                class FeeBearingKeyset:
+                    def post(self, path, **kwargs):
+                        assert path == "/v1/melt/quote/bolt11"
+                        return viewer.post(path, **kwargs)
+
+                    def get(self, path):
+                        assert path == "/v1/keysets"
+                        return httpx.Response(200, request=httpx.Request("GET", "http://fixture/v1/keysets"),
+                            json={"keysets": [{"id": keyset, "unit": "sat", "input_fee_ppk": 100}]})
+
+                try:
+                    submit_payout(claims, FeeBearingKeyset(), payment_id, reserve.destination[0], keyset, {keyset: keys})
+                except ValueError as error:
+                    assert "exceed payout allowance" in str(error)
+                else:
+                    raise AssertionError("input fee exceeded the authorized payout budget")
+                assert reserve.pay_attempts == 0
+                assert not claims.db.execute("SELECT 1 FROM payout_melt WHERE disposition_id=?", (payment_id,)).fetchone()
                 class CrashBeforeDispatch:
                     get = viewer.get
 

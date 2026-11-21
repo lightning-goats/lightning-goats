@@ -161,13 +161,26 @@ def _submit_payout(store, client, disposition_id, invoice_text, keyset, pinned_k
         return verify_result(status)
     if invoice.expiry_time <= time.time() or status["expiry"] <= time.time():
         raise ValueError("expired payout quote or invoice")
-    blanks = store.prepare_melt(disposition_id, invoice.payment_hash, quote_id, generate_change)
     inputs = [json.loads(r[0]) for r in store.db.execute("""
         SELECT o.proof FROM collected_output o JOIN disposition_input i USING(secret)
         WHERE i.disposition_id=? ORDER BY o.secret
     """, (disposition_id,))]
     if sum(p["amount"] for p in inputs) != terms["amount_sat"] + terms["maximum_fee_sat"]:
         raise ValueError("payout inputs differ from reserved total")
+    # NUT-02 charges per input, including proofs from inactive keysets.
+    # The NUT-05 routing reserve is additional to those mint fees.
+    keysets = client.get("/v1/keysets").raise_for_status().json()["keysets"]
+    rates = {}
+    for item in keysets:
+        if item["unit"] == "sat":
+            rate = item.get("input_fee_ppk", 0)
+            if type(rate) is not int or rate < 0 or item["id"] in rates:
+                raise ValueError("invalid mint input fee schedule")
+            rates[item["id"]] = rate
+    input_fee = (sum(rates[p["id"]] for p in inputs) + 999) // 1000
+    if status["fee_reserve"] + input_fee > terms["maximum_fee_sat"]:
+        raise ValueError("mint input fees and routing reserve exceed payout allowance")
+    blanks = store.prepare_melt(disposition_id, invoice.payment_hash, quote_id, generate_change)
     outputs = [{k: item[k] for k in ("amount", "id", "B_")} for item in blanks]
     if not store.begin_melt_submission(disposition_id, quote_id):
         # Only replay the identical request if every reserved input is still available.

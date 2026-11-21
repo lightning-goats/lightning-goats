@@ -162,6 +162,59 @@ impl Store {
         Ok(verified)
     }
 
+    /// Prepare the collector payload from a frozen invoice and the original grant.
+    /// Dispatch still requires a fresh execution lease and exclusive provider binding.
+    pub async fn cashu_payout_request(&self, intent_id: Uuid) -> Result<serde_json::Value> {
+        let mut tx = self.pool.begin().await?;
+        let invoice = load_invoice(&mut tx, intent_id, &self.policy.scope.owner)
+            .await?
+            .context("missing frozen payout invoice")?;
+        let row = sqlx::query(
+            "SELECT g.request_id,g.qualification_json,r.gross_sats
+            FROM payout_invoice_intents i JOIN payout_grants g ON g.id=i.grant_id
+            JOIN payout_rows r ON r.grant_id=g.id AND r.member=i.member WHERE i.id=?",
+        )
+        .bind(intent_id.to_string())
+        .fetch_one(&mut *tx)
+        .await?;
+        let evidence: serde_json::Value =
+            serde_json::from_str(&row.try_get::<String, _>("qualification_json")?)?;
+        let allocations: Vec<crate::payout::funding::RetainedAllocation> = serde_json::from_value(
+            evidence
+                .get("retained_allocations")
+                .context("grant lacks Cashu custody evidence")?
+                .clone(),
+        )?;
+        let allocations: Vec<_> = allocations
+            .into_iter()
+            .filter(|part| {
+                matches!(
+                    part.anchor.source,
+                    crate::reward_funding::CashuFundingSource::ProjectInvoice
+                )
+            })
+            .collect();
+        let gross = u64::try_from(row.try_get::<i64, _>("gross_sats")?)?;
+        let fee = gross
+            .checked_sub(invoice.amount_sats())
+            .context("invoice exceeds member share")?
+            .min(self.policy.max_fee_sats);
+        let available = allocations.iter().try_fold(0u64, |sum, part| {
+            sum.checked_add(part.consumed_sats)
+                .context("Cashu allocation overflow")
+        })?;
+        if available < invoice.amount_sats() + fee {
+            bail!("insufficient project custody for payout");
+        }
+        let request = serde_json::json!({
+            "disposition_id": intent_id, "feed_id": row.try_get::<String,_>("request_id")?,
+            "invoice": invoice.encoded(), "payment_hash": invoice.payment_hash(),
+            "amount_sat": invoice.amount_sats(), "maximum_fee_sat": fee, "retained_allocations": allocations
+        });
+        tx.commit().await?;
+        Ok(request)
+    }
+
     /// Historical validation remains readable after expiry for reconciliation.
     /// Quote/execute must independently check current expiry and policy later.
     pub async fn saved_invoice(&self, intent_id: Uuid) -> Result<Option<ValidatedInvoice>> {

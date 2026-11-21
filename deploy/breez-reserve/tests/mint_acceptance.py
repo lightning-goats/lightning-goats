@@ -338,9 +338,22 @@ def main():
                 feed_id = str(uuid.uuid4())
                 allocation = {claim_id: {"evidence_digest": status["proof_digest"], "consumed_sats": 8}}
                 assert claims.reserve_payout(payout_id, feed_id, "33"*32, 7, 1, allocation) == [payout_input]
+                change = [{"secret": uuid.uuid4().hex, "blind": uuid.uuid4().hex}]
+                assert claims.prepare_melt(payout_id, "33"*32, "quote-a", lambda: change) == change
                 claims.db.close()
                 claims = ClaimStore(claim_dir)
                 assert claims.reserve_payout(payout_id, feed_id, "33"*32, 7, 1, allocation) == [payout_input]
+                def unexpected_generation():
+                    raise AssertionError("regenerated change on restart")
+
+                assert claims.prepare_melt(payout_id, "33"*32, "quote-a", unexpected_generation) == change
+                for digest, quote in [("44"*32, "quote-a"), ("33"*32, "quote-b")]:
+                    try:
+                        claims.prepare_melt(payout_id, digest, quote, unexpected_generation)
+                    except ValueError:
+                        pass
+                    else:
+                        raise AssertionError("melt replay changed its invoice or quote")
                 try:
                     claims.reserve_payout(str(uuid.uuid4()), str(uuid.uuid4()), "33"*32, 2, 0,
                                           {claim_id: {**allocation[claim_id], "consumed_sats": 2}})

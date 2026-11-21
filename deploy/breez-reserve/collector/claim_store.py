@@ -87,6 +87,13 @@ class ClaimStore:
             self.db.execute("""
                 CREATE INDEX IF NOT EXISTS payout_claim_feed ON payout_claim_allocation(feed_id,claim_id)
             """)
+            self.db.execute("""
+                CREATE TABLE IF NOT EXISTS payout_melt (
+                    disposition_id TEXT PRIMARY KEY REFERENCES payout_invoice(disposition_id),
+                    quote_id TEXT UNIQUE NOT NULL,
+                    change_material TEXT NOT NULL
+                )
+            """)
             for ident, proofs in self.db.execute("""
                 SELECT id,proofs FROM project_claim c WHERE proofs IS NOT NULL AND NOT EXISTS
                     (SELECT 1 FROM collected_output o WHERE o.request_id=c.id)
@@ -205,6 +212,29 @@ class ClaimStore:
                 SELECT o.proof FROM collected_output o JOIN disposition_input i USING(secret)
                 WHERE i.disposition_id=? ORDER BY o.secret
             """, (disposition_id,))]
+
+    def prepare_melt(self, disposition_id, payment_hash, quote_id, generate_change):
+        """Bind a verified mint quote and private change blinds before submitting inputs."""
+        if not isinstance(quote_id, str) or not quote_id.strip():
+            raise ValueError("missing melt quote")
+        with self.write():
+            invoice = self.db.execute(
+                "SELECT payment_hash FROM payout_invoice WHERE disposition_id=?", (disposition_id,)
+            ).fetchone()
+            if invoice != (payment_hash,):
+                raise ValueError("melt invoice differs from reserved payout")
+            previous = self.db.execute(
+                "SELECT quote_id,change_material FROM payout_melt WHERE disposition_id=?",
+                (disposition_id,),
+            ).fetchone()
+            if previous:
+                if previous[0] != quote_id:
+                    raise ValueError("reserved payout already bound to a different melt quote")
+                return json.loads(previous[1])
+            material = generate_change()
+            self.db.execute("INSERT INTO payout_melt VALUES (?,?,?)",
+                            (disposition_id, quote_id, encode(material)))
+            return material
 
     def reserve_poll(self, now, lease_seconds):
         """Claim one due invoice. An interrupted attempt becomes eligible after its lease."""

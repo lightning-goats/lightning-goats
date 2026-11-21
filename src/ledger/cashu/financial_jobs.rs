@@ -66,7 +66,7 @@ impl LedgerStore {
             if processed >= target {
                 continue;
             }
-            let pending: i64 = sqlx::query_scalar("SELECT COALESCE(SUM(s.input_sats),0) FROM cashu_treasury_sources s WHERE s.ledger_id=? AND NOT EXISTS(SELECT 1 FROM cashu_treasury_completions c WHERE c.intent_id=s.intent_id)")
+            let pending: i64 = sqlx::query_scalar(concat!(include_str!("treasury_balances.sql"), "SELECT COALESCE(SUM(s.input_sats),0) FROM cashu_treasury_sources s WHERE s.ledger_id=? AND NOT EXISTS(SELECT 1 FROM settled_intents c WHERE c.intent_id=s.intent_id)"))
                 .bind(ledger).fetch_one(&mut *tx).await?;
             let committed = to_u64(spent, "spent custody")?
                 .checked_add(to_u64(pending, "pending custody")?)

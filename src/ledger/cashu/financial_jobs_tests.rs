@@ -313,6 +313,11 @@ async fn project_treasury_invoice_reopens_without_issuing_or_crediting_again() {
     let amounts: (i64,i64,i64) = sqlx::query_as("SELECT deposit_sats,fee_sats,change_sats FROM breez_treasury_source_results WHERE intent_id=?")
         .bind(intent.id.to_string()).fetch_one(&ledger.pool).await.unwrap();
     assert_eq!(amounts, (intent.deposit_sats as i64, fee as i64, change as i64));
+    let mut tx = ledger.pool.begin().await.unwrap();
+    assert_eq!(super::treasury::available_custody(&mut tx,intent.sources[0].ledger_id).await.unwrap(), change);
+    let now: i64 = sqlx::query_scalar("SELECT unixepoch()").fetch_one(&mut *tx).await.unwrap();
+    assert_eq!(super::treasury::daily_fee_remaining(&mut tx,now,100).await.unwrap(), 100-fee);
+    tx.rollback().await.unwrap();
     assert_eq!(count(&ledger, "breez_collected_claims").await, 1);
     assert!(!ledger.poll_breez_claim(&collector).await.unwrap());
     assert!(ledger.record_payment(&SettledPayment {

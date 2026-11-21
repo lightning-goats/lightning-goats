@@ -98,7 +98,7 @@ impl LedgerStore {
         // Until a verified treasury allocation consumes custody, every acquired
         // sat remains exposure, including credit retired by the payment cap.
         let custody: i64 =
-            sqlx::query_scalar("SELECT (SELECT COALESCE(SUM(net_sats),0) FROM cashu_receipt_inbox)-(SELECT COALESCE(SUM(input_sats-change_sats),0) FROM cashu_treasury_source_results)")
+            sqlx::query_scalar(concat!(include_str!("cashu/treasury_balances.sql"), "SELECT (SELECT COALESCE(SUM(net_sats),0) FROM cashu_receipt_inbox)-(SELECT COALESCE(SUM(input_sats-change_sats),0) FROM settled_sources)"))
                 .fetch_one(&mut *tx)
                 .await?;
         let limits = &policy.limits;

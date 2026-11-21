@@ -27,7 +27,7 @@ pub(super) async fn reserve_first(
     {
         return Ok(None);
     }
-    let pending: i64 = sqlx::query_scalar("SELECT COALESCE(SUM(i.input_sats),0) FROM cashu_treasury_intents i WHERE NOT EXISTS(SELECT 1 FROM cashu_treasury_completions c WHERE c.intent_id=i.id)")
+    let pending: i64 = sqlx::query_scalar(concat!(include_str!("treasury_balances.sql"), "SELECT COALESCE(SUM(i.input_sats),0) FROM cashu_treasury_intents i WHERE NOT EXISTS(SELECT 1 FROM settled_intents c WHERE c.intent_id=i.id)"))
             .fetch_one(&mut **tx).await?;
     let global_available = policy
         .limits
@@ -57,7 +57,7 @@ pub(super) async fn reserve_first(
         let Some(mint) = policy.approved_mints.get(&mint_id) else {
             continue;
         };
-        let mint_pending:i64=sqlx::query_scalar("SELECT COALESCE(SUM(i.input_sats),0) FROM cashu_treasury_intents i WHERE i.mint_id=? AND NOT EXISTS(SELECT 1 FROM cashu_treasury_completions c WHERE c.intent_id=i.id)")
+        let mint_pending:i64=sqlx::query_scalar(concat!(include_str!("treasury_balances.sql"), "SELECT COALESCE(SUM(i.input_sats),0) FROM cashu_treasury_intents i WHERE i.mint_id=? AND NOT EXISTS(SELECT 1 FROM settled_intents c WHERE c.intent_id=i.id)"))
                 .bind(&mint_id).fetch_one(&mut **tx).await?;
         let mint_available = mint
             .maximum_in_flight_sats

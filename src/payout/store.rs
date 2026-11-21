@@ -259,12 +259,6 @@ impl Store {
         let available = qualified
             .retained_allocations()
             .iter()
-            .filter(|part| {
-                matches!(
-                    part.anchor.source,
-                    crate::reward_funding::CashuFundingSource::ProjectInvoice
-                )
-            })
             .try_fold(0u64, |total, part| {
                 total
                     .checked_add(part.consumed_sats)

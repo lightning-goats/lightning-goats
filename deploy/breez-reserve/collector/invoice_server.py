@@ -75,7 +75,7 @@ def handle(connection, peer_uid, store, client, token, keyset):
     handle_request(connection, peer_uid, lambda request: create(request, store, client, token, keyset))
 
 
-def handle_request(connection, peer_uid, dispatch):
+def handle_request(connection, peer_uid, dispatch, max_frame=MAX_FRAME):
     _, uid, _ = struct.unpack("3i", connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
     if uid != peer_uid:
         return
@@ -85,7 +85,7 @@ def handle_request(connection, peer_uid, dispatch):
         if len(header) != 4:
             return
         size, = struct.unpack("!I", header)
-        if not 0 < size <= MAX_FRAME:
+        if not 0 < size <= max_frame:
             return
         body = reader.read(size)
         if len(body) != size:

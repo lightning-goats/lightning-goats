@@ -124,8 +124,12 @@ impl Custody {
         let (split_preparation_fee_sats, unsettled_preparation_fee_sats): (u64, u64) = db.query_row(
             "SELECT COALESCE(SUM(s.fee_sats),0),COALESCE(SUM(CASE WHEN r.intent_id IS NULL THEN s.fee_sats ELSE 0 END),0) FROM treasury_split_results s JOIN treasury_instructions i ON i.id=s.intent_id LEFT JOIN treasury_results r ON r.intent_id=s.intent_id WHERE ?1 IS NULL OR json_extract(i.issued_json,'$.intent.mint_id')=?1",
             params![mint], |r| Ok((r.get(0)?,r.get(1)?)))?;
+        let handed_off: u64 = db.query_row("SELECT COALESCE(SUM(a.net),0) FROM acquisitions a
+            JOIN collector_handoffs h ON h.acquisition_id=a.id WHERE h.delivered=1 AND (?1 IS NULL OR a.mint_id=?1)",
+            [mint], |r| r.get(0))?;
         let retained_sats = acquired_net_sats
             .checked_sub(consumed_sats)
+            .and_then(|v| v.checked_sub(handed_off))
             .and_then(|v| v.checked_sub(unsettled_preparation_fee_sats))
             .ok_or_else(|| anyhow::anyhow!("journal custody conservation mismatch"))?;
         Ok(Self {

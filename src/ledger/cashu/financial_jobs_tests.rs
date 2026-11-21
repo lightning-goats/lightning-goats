@@ -218,9 +218,9 @@ async fn local_ecash_funds_confirmed_feeding_and_only_legacy_lots_can_be_swept()
     store.import_cashu_receipt(&policy, &authenticated(&policy,&older)).await.unwrap();
     let local = wire(&policy, 1000);
     let peer = authenticated(&policy,&local);
-    store.import_cashu_with_custody(&policy,&peer,Some("mint-a")).await.unwrap();
+    assert!(store.import_cashu_with_custody(&policy,&peer,Some("mint-a")).await.unwrap().retained_cashu);
     let reopened = LedgerStore::connect(&url).await.unwrap();
-    reopened.import_cashu_receipt(&policy,&peer).await.unwrap();
+    assert!(reopened.import_cashu_receipt(&policy,&peer).await.unwrap().retained_cashu);
     assert_eq!(count(&reopened,"retained_cashu_lots").await,1);
     let request = reopened.begin_feed_attempt(1000).await.unwrap().unwrap();
     reopened.confirm_feed_attempt(request).await.unwrap();

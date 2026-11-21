@@ -1099,6 +1099,7 @@ async fn mixed_funding_keeps_the_consumed_claim_for_custody_verification() {
     inclusive_policy.scope.provider.account_id = inclusive_policy.scope.epoch;
     let mut inclusive_evidence = copy_evidence(&qualified, &inclusive);
     inclusive_evidence.provider = inclusive_policy.scope.provider.clone();
+    inclusive_evidence.retained_allocations[0].anchor.source = CashuFundingSource::Acquisition;
     let inclusive_url = format!(
         "sqlite://{}",
         f.root.path().join("inclusive-cashu.db").display()
@@ -1162,9 +1163,10 @@ async fn mixed_funding_keeps_the_consumed_claim_for_custody_verification() {
         (2, 1, 1)
     );
     assert_eq!(payload["maximum_fee_sat"], 1);
-    qualified.retained_allocations[0].anchor.source = CashuFundingSource::Acquisition;
-    assert!(store.admit_cashu(&f.plan, &qualified, now).await.is_err());
-    qualified.retained_allocations[0] = allocation.clone();
+    assert_eq!(
+        payload["retained_allocations"][0]["anchor"]["source"],
+        "acquisition"
+    );
     qualified.retained_allocations[0].consumed_sats = f.plan.reserved_sats - 1;
     assert!(store.admit_cashu(&f.plan, &qualified, now).await.is_err());
     qualified.retained_allocations[0] = allocation.clone();

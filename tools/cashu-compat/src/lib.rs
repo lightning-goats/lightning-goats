@@ -41,6 +41,8 @@ pub mod service_keys;
 
 pub mod service;
 
+#[cfg(unix)]
+mod collector_handoff;
 pub mod receipt_delivery;
 pub mod receipt_outbox;
 pub mod relay;

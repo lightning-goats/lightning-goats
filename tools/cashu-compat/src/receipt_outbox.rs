@@ -10,6 +10,8 @@ use uuid::Uuid;
 pub struct Config {
     #[serde(default)]
     pub enabled: bool,
+    #[serde(default)]
+    pub collector_handoff: bool,
     pub socket: PathBuf,
     pub core_epoch: Uuid,
     #[serde(default)]

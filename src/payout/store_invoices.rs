@@ -324,15 +324,6 @@ fn project_allocations(
             .context("grant lacks Cashu custody evidence")?
             .clone(),
     )?;
-    let allocations: Vec<_> = allocations
-        .into_iter()
-        .filter(|part| {
-            matches!(
-                part.anchor.source,
-                crate::reward_funding::CashuFundingSource::ProjectInvoice
-            )
-        })
-        .collect();
     Ok(allocations)
 }
 

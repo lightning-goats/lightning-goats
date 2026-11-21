@@ -44,7 +44,7 @@ def main():
             connection, _ = listener.accept()
             with connection:
                 try:
-                    handle_request(connection, peer_uid, dispatch)
+                    handle_request(connection, peer_uid, dispatch, 1048576 if args.role == "acquisition" else 65536)
                 except (TimeoutError, ConnectionError):
                     continue
 

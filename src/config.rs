@@ -320,6 +320,15 @@ pub enum WalletBackend {
     Breez,
 }
 
+impl WalletBackend {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Strike => "strike",
+            Self::Breez => "breez",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct BreezCollectorConfig {
     pub socket: PathBuf,

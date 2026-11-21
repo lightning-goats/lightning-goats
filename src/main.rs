@@ -192,7 +192,7 @@ async fn main() -> Result<()> {
     info!(
         listen = %config.service.listen,
         mode = config.service.mode.as_str(),
-        payment_backend = "strike",
+        payment_backend = config.lnurl.wallet_backend.as_str(),
         gateway = %config.gateway.url,
         "lightning-goatsd listening"
     );
@@ -473,7 +473,7 @@ async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse>, S
 
     Ok(Json(StatusResponse {
         mode: state.config.service.mode.as_str(),
-        payment_backend: "strike",
+        payment_backend: state.config.lnurl.wallet_backend.as_str(),
         lightning_address_users: state.lnurl.configured_users(),
         gateway_reachable,
         feed_credit_sats,

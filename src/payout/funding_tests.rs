@@ -1095,6 +1095,10 @@ async fn mixed_funding_keeps_the_consumed_claim_for_custody_verification() {
     let mut inclusive_policy = policy.clone();
     inclusive_policy.fee_mode = inclusive.planning_policy.fee_mode;
     inclusive_policy.max_fee_sats = 0;
+    inclusive_policy.scope.provider.environment = "retained-cashu".into();
+    inclusive_policy.scope.provider.account_id = inclusive_policy.scope.epoch;
+    let mut inclusive_evidence = copy_evidence(&qualified, &inclusive);
+    inclusive_evidence.provider = inclusive_policy.scope.provider.clone();
     let inclusive_url = format!(
         "sqlite://{}",
         f.root.path().join("inclusive-cashu.db").display()
@@ -1103,7 +1107,7 @@ async fn mixed_funding_keeps_the_consumed_claim_for_custody_verification() {
         .await
         .unwrap();
     let grant = journal
-        .admit_cashu(&inclusive, &copy_evidence(&qualified, &inclusive), now)
+        .admit_cashu(&inclusive, &inclusive_evidence, now)
         .await
         .unwrap();
     let member = &inclusive.rows[0].pubkey;

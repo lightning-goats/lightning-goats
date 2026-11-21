@@ -45,7 +45,9 @@ impl Scope {
         crate::nostr_event::validate_hex(&self.provider.credential_fingerprint, 32)?;
         if self.core_uid == 0
             || self.epoch.is_nil()
-            || self.provider.environment != "strike-production"
+            || !(self.provider.environment == "strike-production"
+                || (self.provider.environment == "retained-cashu"
+                    && self.provider.account_id == self.epoch))
             || self.provider.account_id.is_nil()
         {
             bail!("invalid root payout scope");

@@ -116,6 +116,11 @@ impl Config {
     }
     pub fn validate(&self) -> Result<()> {
         self.policy.validate()?;
+        if self.funding_source.is_strike()
+            && self.policy.scope.provider.environment != "strike-production"
+        {
+            bail!("Strike execution requires the original Strike journal scope");
+        }
         if let Some(socket) = &self.cashu_payout_socket {
             ipc::socket_path(socket)?;
             if self.funding_source.is_strike()

@@ -449,3 +449,27 @@ async fn breez_contact_claim_replays_without_feed_credit_or_duplicate_delivery()
     assert_eq!(count(&ledger, "settled_payments").await, 0);
     assert_eq!(ledger.feed_credit_sats().await.unwrap(), 0);
 }
+
+#[tokio::test]
+async fn breez_cutover_keeps_interrupted_strike_contact_with_original_provider() {
+    let (dir, _url, ledger) = store().await;
+    let intent = fixture();
+    let capability = "ab".repeat(32);
+    ledger.create_contact_intent(&intent).await.unwrap();
+    ledger
+        .claim_contact_issuance(intent.id, &capability)
+        .await
+        .unwrap()
+        .unwrap();
+    let collector = crate::config::BreezCollectorConfig {
+        socket: dir.path().join("absent.sock"),
+        peer_uid: 1001,
+    };
+    let status = ledger
+        .create_breez_contact_invoice(&collector, &intent, &capability)
+        .await
+        .unwrap();
+    assert_eq!(status.state, "issuing");
+    assert!(status.invoice.is_none());
+    assert_eq!(count(&ledger, "breez_project_invoices").await, 0);
+}

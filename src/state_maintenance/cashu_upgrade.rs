@@ -39,6 +39,7 @@ pub(super) fn tables_for_core(version: i64) -> impl Iterator<Item = &'static str
     CASHU_TABLES
         .into_iter()
         .chain([
+            "breez_treasury_inspections",
             "breez_treasury_wallet_results",
             "cashu_payout_execution_claims",
             "retained_cashu_lots",
@@ -46,6 +47,7 @@ pub(super) fn tables_for_core(version: i64) -> impl Iterator<Item = &'static str
             "breez_project_invoices",
         ])
         .filter(move |name| match *name {
+            "breez_treasury_inspections" => version >= 33,
             "breez_treasury_wallet_results" => version >= 32,
             "cashu_payout_execution_claims" => version >= 31,
             "retained_cashu_lots" | "breez_collected_claims" | "breez_project_invoices" => {
@@ -122,24 +124,11 @@ pub(super) async fn apply_breez_catalog(
         sqlx::raw_sql(&migration.sql).execute(&pool).await?;
     }
     let old = catalog(&pool).await?;
-    sqlx::raw_sql(include_str!(
-        "../../migrations/0030_breez_project_invoices.sql"
-    ))
-    .execute(&pool)
-    .await?;
-    if version >= 31 {
-        sqlx::raw_sql(include_str!(
-            "../../migrations/0031_cashu_payout_execution.sql"
-        ))
-        .execute(&pool)
-        .await?;
-    }
-    if version >= 32 {
-        sqlx::raw_sql(include_str!(
-            "../../migrations/0032_project_conversion_results.sql"
-        ))
-        .execute(&pool)
-        .await?;
+    for migration in migrations
+        .iter()
+        .filter(|m| (30..=version).contains(&m.version))
+    {
+        sqlx::raw_sql(&migration.sql).execute(&pool).await?;
     }
     let new = catalog(&pool).await?;
     for (key, definition) in &old {

@@ -261,6 +261,11 @@ async fn project_treasury_invoice_reopens_without_issuing_or_crediting_again() {
     };
     let intent = ledger.plan_operator_cashu_settlement(&registration, &policy, &sweep, true)
         .await.unwrap().unwrap();
+    use crate::cashu::treasury_worker::{Controls, Stage};
+    let controls = Controls {issue:true, deliver:true, inspect:true, maximum_attempts:3, ..Default::default()};
+    assert!(ledger.claim_cashu_treasury_work(&registration, &controls, false, 100, 10).await.unwrap().is_none());
+    let issue = ledger.claim_cashu_treasury_work(&registration, &controls, true, 100, 10).await.unwrap().unwrap();
+    assert_eq!((issue.id,issue.stage),(intent.id,Stage::Issue));
     let collector = crate::config::BreezCollectorConfig {
         socket: dir.path().join("collector.sock"), peer_uid: crate::private_ipc::uid().unwrap(),
     };
@@ -280,6 +285,12 @@ async fn project_treasury_invoice_reopens_without_issuing_or_crediting_again() {
     let issued = ledger.issue_breez_treasury_invoice(&collector, &registration, &policy, intent.id).await.unwrap();
     server.await.unwrap();
     assert_eq!(issued.invoice, invoice);
+    assert_eq!(ledger.cashu_treasury_invoice(intent.id).await.unwrap().unwrap().invoice, invoice);
+    let deliver = ledger.claim_cashu_treasury_work(&registration,&controls,true,101,10).await.unwrap().unwrap();
+    assert_eq!((deliver.id,deliver.stage),(intent.id,Stage::Deliver));
+    ledger.close_cashu_treasury_delivery(intent.id,true).await.unwrap();
+    let inspect = ledger.claim_cashu_treasury_work(&registration,&controls,true,117,10).await.unwrap().unwrap();
+    assert_eq!((inspect.id,inspect.stage),(intent.id,Stage::Inspect));
     let fee = intent.maximum_fee_sats.min(1);
     let change = intent.input_sats - intent.deposit_sats - fee;
     let report = lightning_goats_cashu_receipt::treasury::MeltData {
@@ -292,6 +303,7 @@ async fn project_treasury_invoice_reopens_without_issuing_or_crediting_again() {
         &serde_json::to_vec(&report).unwrap()).unwrap();
     assert!(!ledger.record_cashu_melt_result(&registration, &report).await.unwrap());
     assert_eq!(count(&ledger, "breez_treasury_source_results").await, 0);
+    assert!(ledger.claim_cashu_treasury_work(&registration,&controls,true,1000,10).await.unwrap().is_none());
     drop(ledger);
     let ledger = LedgerStore::connect(&url).await.unwrap();
     assert_eq!(ledger.issue_breez_treasury_invoice(&collector, &registration, &policy, intent.id)

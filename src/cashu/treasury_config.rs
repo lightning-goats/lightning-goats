@@ -5,7 +5,7 @@ use super::{
     treasury_client::Client,
     treasury_worker::{Controls, Worker},
 };
-use crate::{ledger::LedgerStore, strike::StrikeRuntime};
+use crate::ledger::LedgerStore;
 use anyhow::{Result, ensure};
 use serde::Deserialize;
 use std::{path::PathBuf, sync::Arc, time::Duration};
@@ -63,7 +63,7 @@ impl Config {
         &self,
         receipts: &receipt_server::Config,
         ledger: LedgerStore,
-        strike: StrikeRuntime,
+        backend: super::treasury_worker::InvoiceBackend,
     ) -> Result<Option<Worker>> {
         self.validate(Some(receipts), None)?;
         if !(self.controls.plan
@@ -84,7 +84,7 @@ impl Config {
         let client = Client::new(self.socket.clone(), registration.clone(), deadline, 1)?;
         Ok(Some(Worker::new(
             ledger,
-            strike,
+            backend,
             registration,
             Arc::new(self.policy.clone()),
             client,

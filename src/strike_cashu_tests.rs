@@ -471,21 +471,21 @@ mod cashu_treasury_tests {
         };
         assert!(
             f.ledger
-                .claim_cashu_treasury_work(&f.registration, &Controls::default(), 10, 30)
+                .claim_cashu_treasury_work(&f.registration, &Controls::default(), false, 10, 30)
                 .await
                 .unwrap()
                 .is_none()
         );
         assert!(
             f.ledger
-                .claim_cashu_treasury_work(&f.registration, &controls, i64::MAX, 30)
+                .claim_cashu_treasury_work(&f.registration, &controls, false, i64::MAX, 30)
                 .await
                 .is_err()
         );
         assert_eq!(f.count("cashu_treasury_work").await, 0);
         let first = f
             .ledger
-            .claim_cashu_treasury_work(&f.registration, &controls, 10, 30)
+            .claim_cashu_treasury_work(&f.registration, &controls, false, 10, 30)
             .await
             .unwrap()
             .unwrap();
@@ -493,7 +493,7 @@ mod cashu_treasury_tests {
         assert_eq!(first.stage, Stage::Issue);
         assert!(
             f.ledger
-                .claim_cashu_treasury_work(&f.registration, &controls, 44, 30)
+                .claim_cashu_treasury_work(&f.registration, &controls, false, 44, 30)
                 .await
                 .unwrap()
                 .is_none()
@@ -506,14 +506,14 @@ mod cashu_treasury_tests {
         .unwrap();
         assert!(
             reopened
-                .claim_cashu_treasury_work(&f.registration, &controls, 45, 30)
+                .claim_cashu_treasury_work(&f.registration, &controls, false, 45, 30)
                 .await
                 .unwrap()
                 .is_some()
         );
         assert!(
             reopened
-                .claim_cashu_treasury_work(&f.registration, &controls, 1000, 30)
+                .claim_cashu_treasury_work(&f.registration, &controls, false, 1000, 30)
                 .await
                 .unwrap()
                 .is_none()
@@ -531,7 +531,7 @@ mod cashu_treasury_tests {
         };
         assert!(
             reopened
-                .claim_cashu_treasury_work(&f.registration, &more, 2000, 30)
+                .claim_cashu_treasury_work(&f.registration, &more, false, 2000, 30)
                 .await
                 .unwrap()
                 .is_none()

@@ -2,6 +2,28 @@
 use anyhow::{Context, Result, ensure};
 
 pub async fn strip_empty(transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>) -> Result<()> {
+    let has_inspections: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='breez_treasury_inspections')",
+    )
+    .fetch_one(&mut **transaction)
+    .await?;
+    if has_inspections {
+        let empty: bool =
+            sqlx::query_scalar("SELECT NOT EXISTS(SELECT 1 FROM breez_treasury_inspections)")
+                .fetch_one(&mut **transaction)
+                .await?;
+        ensure!(empty, "fixture contains conversion inspection history");
+        sqlx::query("DROP TABLE breez_treasury_inspections")
+            .execute(&mut **transaction)
+            .await?;
+        let removed = sqlx::query("DELETE FROM _sqlx_migrations WHERE version=33")
+            .execute(&mut **transaction)
+            .await?;
+        ensure!(
+            removed.rows_affected() == 1,
+            "missing conversion inspection migration"
+        );
+    }
     let has_conversions: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='breez_treasury_wallet_results')")
         .fetch_one(&mut **transaction).await?;
     if has_conversions {

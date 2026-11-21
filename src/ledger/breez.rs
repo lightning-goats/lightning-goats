@@ -51,7 +51,7 @@ impl LedgerStore {
             intent.core_epoch == registration.core_epoch
                 && intent.wallet_epoch == registration.wallet_epoch
                 && intent.wallet_instance == registration.wallet_instance
-                && intent.destination.origin == "https://mint.lightning-goats.com/",
+                && intent.destination.origin == crate::cashu::treasury::PROJECT_MINT_ORIGIN,
             "project treasury destination or registration changed"
         );
         let digest = hex_digest(intent.digest()?);

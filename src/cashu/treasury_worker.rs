@@ -71,9 +71,19 @@ impl Wallet for Client {
         self.send(request).await
     }
 }
+pub enum InvoiceBackend {
+    Strike(StrikeRuntime),
+    Project(crate::config::BreezCollectorConfig),
+}
+impl From<StrikeRuntime> for InvoiceBackend {
+    fn from(strike: StrikeRuntime) -> Self {
+        Self::Strike(strike)
+    }
+}
+
 pub struct Worker<W: Wallet = Client> {
     ledger: LedgerStore,
-    strike: StrikeRuntime,
+    backend: InvoiceBackend,
     registration: Arc<ReceiptPolicy>,
     policy: Arc<Policy>,
     wallet: W,
@@ -83,7 +93,7 @@ pub struct Worker<W: Wallet = Client> {
 impl<W: Wallet> Worker<W> {
     pub fn new(
         ledger: LedgerStore,
-        strike: StrikeRuntime,
+        backend: impl Into<InvoiceBackend>,
         registration: Arc<ReceiptPolicy>,
         policy: Arc<Policy>,
         wallet: W,
@@ -98,7 +108,7 @@ impl<W: Wallet> Worker<W> {
         );
         Ok(Self {
             ledger,
-            strike,
+            backend: backend.into(),
             registration,
             policy,
             wallet,
@@ -114,7 +124,13 @@ impl<W: Wallet> Worker<W> {
         };
         let Some(work) = self
             .ledger
-            .claim_cashu_treasury_work(&self.registration, &controls, now, self.deadline.as_secs())
+            .claim_cashu_treasury_work(
+                &self.registration,
+                &controls,
+                matches!(self.backend, InvoiceBackend::Project(_)),
+                now,
+                self.deadline.as_secs(),
+            )
             .await?
         else {
             if self.controls.plan && self.policy.enabled {
@@ -170,16 +186,28 @@ impl<W: Wallet> Worker<W> {
     }
     async fn advance(&self, work: Work, now: i64) -> Result<bool> {
         match work.stage {
-            Stage::Issue => Ok(self
-                .strike
-                .create_cashu_treasury_invoice(
-                    &self.ledger,
-                    &self.registration,
-                    &self.policy,
-                    work.id,
-                )
-                .await?
-                .is_some()),
+            Stage::Issue => match &self.backend {
+                InvoiceBackend::Strike(strike) => Ok(strike
+                    .create_cashu_treasury_invoice(
+                        &self.ledger,
+                        &self.registration,
+                        &self.policy,
+                        work.id,
+                    )
+                    .await?
+                    .is_some()),
+                InvoiceBackend::Project(collector) => {
+                    self.ledger
+                        .issue_breez_treasury_invoice(
+                            collector,
+                            &self.registration,
+                            &self.policy,
+                            work.id,
+                        )
+                        .await?;
+                    Ok(true)
+                }
+            },
             Stage::Deliver | Stage::Inspect => {
                 let issued = self
                     .ledger
@@ -192,7 +220,12 @@ impl<W: Wallet> Worker<W> {
                     let invoice: lightning_invoice::Bolt11Invoice = issued.invoice.parse()?;
                     let now = Duration::from_secs(u64::try_from(now)?);
                     if invoice.expires_at().is_none_or(|expiry| now >= expiry) {
-                        self.ledger.close_cashu_treasury_delivery(work.id).await?;
+                        self.ledger
+                            .close_cashu_treasury_delivery(
+                                work.id,
+                                matches!(self.backend, InvoiceBackend::Project(_)),
+                            )
+                            .await?;
                         deliver = false;
                     }
                 }
@@ -224,7 +257,12 @@ impl<W: Wallet> Worker<W> {
                     Ok(true)
                 } else {
                     // A valid reply proves the original instruction is retained.
-                    self.ledger.close_cashu_treasury_delivery(work.id).await?;
+                    self.ledger
+                        .close_cashu_treasury_delivery(
+                            work.id,
+                            matches!(self.backend, InvoiceBackend::Project(_)),
+                        )
+                        .await?;
                     Ok(false)
                 }
             }

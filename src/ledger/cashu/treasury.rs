@@ -198,6 +198,24 @@ impl LedgerStore {
         let mut epoch_tx = self.pool.begin().await?;
         require_epoch(&mut epoch_tx, intent.core_epoch).await?;
         epoch_tx.commit().await?;
+        if intent.destination.origin == crate::cashu::treasury::PROJECT_MINT_ORIGIN {
+            let digest = hex_digest(intent.digest()?);
+            let row = sqlx::query("SELECT invoice,payment_hash FROM breez_project_invoices
+                WHERE id=? AND invoice IS NOT NULL AND json_extract(intent,'$.purpose')='treasury_conversion'
+                  AND json_extract(intent,'$.description_hash')=? AND json_extract(intent,'$.amount_sat')=?")
+                .bind(id.to_string()).bind(&digest).bind(to_i64(intent.deposit_sats, "conversion amount")?)
+                .fetch_optional(&self.pool).await?;
+            let Some(row) = row else { return Ok(None) };
+            let invoice: String = row.try_get("invoice")?;
+            let payment_hash: String = row.try_get("payment_hash")?;
+            crate::bolt11::verify(&invoice, intent.deposit_sats * 1000, &payment_hash, &digest)?;
+            return Ok(Some(Issued {
+                intent,
+                receive_request_id: id,
+                payment_hash,
+                invoice,
+            }));
+        }
         let request: Option<String> = sqlx::query_scalar(
             "SELECT receive_request_id FROM cashu_treasury_issuances WHERE intent_id=?",
         )
@@ -319,7 +337,7 @@ impl LedgerStore {
             .context("unknown treasury intent")?;
         let data = report.validate(registration, &intent)?;
         let digest = hex_digest(data.digest()?);
-        if intent.destination.origin == "https://mint.lightning-goats.com/" {
+        if intent.destination.origin == crate::cashu::treasury::PROJECT_MINT_ORIGIN {
             let id = intent.id.to_string();
             let changed = sqlx::query(
                 "INSERT INTO breez_treasury_wallet_results(intent_id,result_digest,result_json,observed_at)

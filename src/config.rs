@@ -69,7 +69,9 @@ impl AppConfig {
             }
         } else if self.lnurl.wallet_backend != WalletBackend::Breez
             || self.lnurl.breez_collector.is_none()
-            || self.cashu_treasury.is_some()
+            || self.cashu_treasury.as_ref().is_some_and(|t| {
+                t.policy.destination.origin != crate::cashu::treasury::PROJECT_MINT_ORIGIN
+            })
             || self
                 .core_bridge
                 .as_ref()

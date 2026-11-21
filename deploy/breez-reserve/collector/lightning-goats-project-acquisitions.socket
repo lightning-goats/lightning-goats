@@ -1,0 +1,12 @@
+[Unit]
+Description=Lightning Goats private Cashu acquisition handoff socket
+
+[Socket]
+ListenStream=/run/lightning-goats-project-acquisitions.sock
+SocketUser=root
+SocketGroup=lg-cashu-ipc
+SocketMode=0660
+RemoveOnStop=yes
+
+[Install]
+WantedBy=sockets.target

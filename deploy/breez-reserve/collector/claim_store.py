@@ -127,6 +127,13 @@ class ClaimStore:
                     complete INTEGER NOT NULL DEFAULT 0 CHECK(complete IN (0,1))
                 )
             """)
+            self.db.execute("""
+                CREATE TABLE IF NOT EXISTS acquired_custody (
+                    claim_id TEXT PRIMARY KEY REFERENCES project_claim(id),
+                    evidence_digest TEXT UNIQUE NOT NULL,
+                    proofs TEXT NOT NULL
+                )
+            """)
             for ident, proofs in self.db.execute("""
                 SELECT id,proofs FROM project_claim c WHERE proofs IS NOT NULL AND NOT EXISTS
                     (SELECT 1 FROM collected_output o WHERE o.request_id=c.id)
@@ -192,10 +199,16 @@ class ClaimStore:
         candidates = []
         for claim_id, terms in sorted(allocations.items()):
             digest, budget = terms["evidence_digest"], terms["consumed_sats"]
-            row = self.db.execute("SELECT proofs,terms FROM project_claim WHERE id=?",
-                                  (claim_id,)).fetchone()
+            if terms.get("source", "project_invoice") == "acquisition":
+                row = self.db.execute("SELECT a.proofs,q.terms,a.evidence_digest FROM acquired_custody a "
+                    "JOIN project_claim q ON q.id=a.claim_id WHERE a.claim_id=?", (claim_id,)).fetchone()
+                verified_digest = row[2] if row else None
+            else:
+                row = self.db.execute("SELECT proofs,terms FROM project_claim WHERE id=?",
+                                      (claim_id,)).fetchone()
+                verified_digest = hashlib.sha256(row[0].encode()).hexdigest() if row and row[0] else None
             attribution = json.loads(row[1])["attribution"] if row else {}
-            if (row is None or row[0] is None or hashlib.sha256(row[0].encode()).hexdigest() != digest
+            if (row is None or row[0] is None or verified_digest != digest
                     or (attribution.get("credit_pool") != "herd" and attribution.get("purpose") != "treasury_conversion")
                     or type(budget) is not int or budget <= 0
                     or budget > sum(p["amount"] for p in json.loads(row[0]))):

@@ -9,7 +9,7 @@ from urllib.parse import quote as escape
 from uuid import uuid4
 
 from project_quote import prepare_outputs
-from claim_store import SplitRequired
+from claim_store import SplitRequired, encode
 import time
 
 import bolt11
@@ -96,6 +96,22 @@ def payout_input_fee(client, input_keysets):
     return (sum(rates[keyset] for keyset in input_keysets) + 999) // 1000
 
 
+def recover_swap(client, inputs, material, pinned_keys):
+    outputs = [{k: item[k] for k in ("amount", "id", "B_")} for item in material]
+    restored = client.post("/v1/restore", json={"outputs": outputs}).raise_for_status().json()
+    if restored["outputs"] or restored["signatures"]:
+        if [{k: o[k] for k in ("amount","id","B_")} for o in restored["outputs"]] != outputs:
+            raise ValueError("swap restoration differs from original outputs")
+        promises = restored["signatures"]
+    else:
+        if payout_input_fee(client, [p["id"] for p in inputs]):
+            raise ValueError("custody transfer requires a zero-fee swap")
+        promises = client.post("/v1/swap", json={"inputs": inputs, "outputs": outputs}).raise_for_status().json()["signatures"]
+    if [p["amount"] for p in promises] != [o["amount"] for o in outputs]:
+        raise ValueError("swap promise amounts changed")
+    return [unblind(item, promise, pinned_keys) for item, promise in zip(material, promises, strict=True)]
+
+
 def split_payout_proof(store, client, secret, portion, keyset, pinned_keys):
     """Make exact change without consuming a payout fee or changing claim ownership."""
     row = store.db.execute("SELECT request_id,proof FROM collected_output WHERE secret=?", (secret,)).fetchone()
@@ -122,22 +138,37 @@ def split_payout_proof(store, client, secret, portion, keyset, pinned_keys):
                              (split_id, json.dumps({"purpose": "make_change", "claim": claim_id})))
             store.db.execute("INSERT INTO disposition_input VALUES (?,?)", (secret, split_id))
             store.db.execute("INSERT INTO proof_split(secret,material) VALUES (?,?)", (secret, json.dumps(material)))
-    outputs = [{k: item[k] for k in ("amount", "id", "B_")} for item in material]
-    restored = client.post("/v1/restore", json={"outputs": outputs}).raise_for_status().json()
-    if restored["outputs"] or restored["signatures"]:
-        if [{k: o[k] for k in ("amount","id","B_")} for o in restored["outputs"]] != outputs:
-            raise ValueError("split restoration differs from original outputs")
-        promises = restored["signatures"]
-    else:
-        if payout_input_fee(client, [proof["id"]]):
-            raise ValueError("proof split requires a zero-fee swap")
-        promises = client.post("/v1/swap", json={"inputs": [proof], "outputs": outputs}).raise_for_status().json()["signatures"]
-    if [p["amount"] for p in promises] != [o["amount"] for o in outputs]:
-        raise ValueError("split promise amounts changed")
-    proofs = [unblind(item, promise, pinned_keys) for item, promise in zip(material, promises, strict=True)]
+    proofs = recover_swap(client, [proof], material, pinned_keys)
     with store.write():
         store._index_outputs(claim_id, proofs)
         store.db.execute("UPDATE proof_split SET complete=1 WHERE secret=?", (secret,))
+
+
+def collect_acquisition(store, client, claim_id, evidence_digest, inputs, keyset, pinned_keys):
+    """Receive wallet-owned project tokens by swapping once into collector-owned outputs."""
+    if (not isinstance(evidence_digest, str) or len(evidence_digest) != 64
+            or any(c not in "0123456789abcdef" for c in evidence_digest)
+            or not isinstance(inputs, list) or not 0 < len(inputs) <= 1024):
+        raise ValueError("invalid acquisition handoff")
+    if any(type(p["amount"]) is not int or p["amount"] <= 0 or p["id"] not in pinned_keys
+           for p in inputs) or len({p["secret"] for p in inputs}) != len(inputs):
+        raise ValueError("invalid acquisition proofs")
+    amount = sum(p["amount"] for p in inputs)
+    if amount > 1_000_000:
+        raise ValueError("acquisition exceeds mint limit")
+    inputs = sorted(inputs, key=lambda p: p["secret"])
+    terms = {"amount":amount, "attribution":{"purpose":"acquisition","credit_pool":"herd"},
+             "input_digest":hashlib.sha256(encode(inputs).encode()).hexdigest(), "evidence_digest":evidence_digest}
+    material = store.prepare(claim_id, terms, lambda: prepare_outputs(amount, keyset))
+    if store.db.execute("SELECT 1 FROM acquired_custody WHERE claim_id=?", (claim_id,)).fetchone():
+        return
+    proofs = recover_swap(client, inputs, material, pinned_keys)
+    with store.write():
+        store.db.execute("INSERT INTO acquired_custody VALUES (?,?,?) ON CONFLICT(claim_id) DO NOTHING",
+                         (claim_id,evidence_digest,encode(proofs)))
+        if store.db.execute("SELECT proofs FROM acquired_custody WHERE claim_id=?", (claim_id,)).fetchone() != (encode(proofs),):
+            raise ValueError("acquisition handoff evidence changed")
+        store._index_outputs(claim_id, proofs)
 
 
 def project_allocations(parts):
@@ -146,13 +177,15 @@ def project_allocations(parts):
     for part in parts:
         anchor = part["anchor"]
         ident = anchor["claim_id"]
-        if (anchor["source"] != "project_invoice" or ident in allocations
+        if (anchor["source"] not in ("acquisition", "project_invoice") or ident in allocations
                 or type(part["ledger_id"]) is not int or part["ledger_id"] <= 0
                 or part["ledger_id"] in ledger_ids):
             raise ValueError("invalid project payout allocation")
         ledger_ids.add(part["ledger_id"])
         allocations[ident] = {"consumed_sats": part["consumed_sats"],
                               "evidence_digest": anchor["evidence_digest"]}
+        if anchor["source"] == "acquisition":
+            allocations[ident]["source"] = "acquisition"
     return allocations
 
 

@@ -280,7 +280,7 @@ def main():
                 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "collector"))
                 from claim_store import ClaimStore
                 from project_quote import issue
-                from collect import collect, execute_payout, submit_payout
+                from collect import collect, collect_acquisition, execute_payout, submit_payout
                 from invoice_server import create, handle, handle_request
                 import socket
                 import struct
@@ -587,8 +587,8 @@ def main():
                 assert {p["secret"] for p in selected_change} == {p["secret"] for p in json.loads(saved_change)}
                 claims.db.close()
                 assert fee == 1
-                spend_change, _ = new_outputs(keyset, [1, 2])
-                expect(viewer.post("/v1/swap", json={"inputs": selected_change,
+                spend_change, spend_material = new_outputs(keyset, [1, 2])
+                acquired_signatures = expect(viewer.post("/v1/swap", json={"inputs": selected_change,
                                                      "outputs": encode_outputs(spend_change)}))
                 assert final_melt["state"].upper() == "PAID", final_melt
                 assert final_melt["fee_sat"] == 1 and final_melt["amount_sat"] == 12
@@ -645,6 +645,23 @@ def main():
                 remaining = claims.db.execute("SELECT SUM(amount_sat) FROM collected_output o WHERE request_id=? "
                     "AND NOT EXISTS(SELECT 1 FROM disposition_input i WHERE i.secret=o.secret)",(conversion_id,)).fetchone()[0]
                 assert remaining == 19
+                acquired = [proof(p,m,keys) for p,m in zip(acquired_signatures["signatures"],spend_material,strict=True)]
+                acquisition_id = str(uuid.uuid4())
+                evidence = "ba"*32
+                try:
+                    collect_acquisition(claims, LostSplitResponse(), acquisition_id, evidence, acquired, keyset, {keyset:keys})
+                except httpx.ReadTimeout:
+                    pass
+                else:
+                    raise AssertionError("fixture did not discard acquisition swap response")
+                claims.db.close()
+                claims = ClaimStore(claim_dir)
+                collect_acquisition(claims, viewer, acquisition_id, evidence, acquired, keyset, {keyset:keys})
+                collect_acquisition(claims, None, acquisition_id, evidence, acquired, keyset, {keyset:keys})
+                owned = claims.reserve_payout(str(uuid.uuid4()),str(uuid.uuid4()),"ad"*32,2,1,
+                    {acquisition_id: {"source":"acquisition","consumed_sats":3,"evidence_digest":evidence}})
+                assert sum(p["amount"] for p in owned) == 3
+                assert all(wallet_state(viewer,p) == "SPENT" for p in acquired)
                 for field in ("claim_status", "contact_claim_status"):
                     try:
                         create({field: conversion_id}, claims, None, None, None)

@@ -247,3 +247,49 @@ async fn local_ecash_funds_confirmed_feeding_and_only_legacy_lots_can_be_swept()
     assert_eq!(planned.sources.len(),1);
     assert_eq!(planned.sources[0].acquisition_id,older.data().acquisition_id);
 }
+
+#[tokio::test]
+async fn project_treasury_invoice_reopens_without_issuing_or_crediting_again() {
+    let (dir, url, ledger, registration) = fixture().await;
+    let receipt = wire(&registration, 1000);
+    ledger.import_cashu_receipt(&registration, &authenticated(&registration, &receipt)).await.unwrap();
+    let mut policy = feed_treasury_policy();
+    policy.destination.origin = "https://mint.lightning-goats.com/".into();
+    policy.invoice_expiry_seconds = 900;
+    let sweep = crate::cashu::treasury_sweep::Request {
+        id: Uuid::new_v4(), mint_id: "mint-a".into(), maximum_input_sats: 1000,
+    };
+    let intent = ledger.plan_operator_cashu_settlement(&registration, &policy, &sweep, true)
+        .await.unwrap().unwrap();
+    let collector = crate::config::BreezCollectorConfig {
+        socket: dir.path().join("collector.sock"), peer_uid: crate::private_ipc::uid().unwrap(),
+    };
+    let digest = lightning_goats_cashu_receipt::treasury::hex_digest(intent.digest().unwrap());
+    let invoice = crate::test_invoices::invoice_with_expiry(intent.deposit_sats * 1000, &digest,
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap(),
+        [0x53; 32], std::time::Duration::from_secs(900));
+    let expected = serde_json::json!({"treasury_id":intent.id,"amount_sat":intent.deposit_sats,"description_hash":digest});
+    let reply = serde_json::json!({"invoice":invoice});
+    let listener = tokio::net::UnixListener::bind(&collector.socket).unwrap();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let request: serde_json::Value = crate::private_ipc::read(&mut stream, 65536).await.unwrap();
+        assert_eq!(request, expected);
+        crate::private_ipc::write(&mut stream, &reply, 65536).await.unwrap();
+    });
+    let issued = ledger.issue_breez_treasury_invoice(&collector, &registration, &policy, intent.id).await.unwrap();
+    server.await.unwrap();
+    assert_eq!(issued.invoice, invoice);
+    drop(ledger);
+    let ledger = LedgerStore::connect(&url).await.unwrap();
+    assert_eq!(ledger.issue_breez_treasury_invoice(&collector, &registration, &policy, intent.id)
+        .await.unwrap().invoice, invoice);
+    assert!(ledger.record_payment(&SettledPayment {
+        source: "strike".into(), source_id: Uuid::new_v4().to_string(),
+        payment_hash: Some(issued.payment_hash), address_user: "dexter".into(),
+        credit_pool: "herd".into(), amount_msat: intent.deposit_sats * 1000,
+        settled_at: None, context_json: None,
+    }).await.is_err());
+    assert_eq!(count(&ledger, "settled_payments").await, 0);
+    assert_eq!(ledger.feed_credit_sats().await.unwrap(), 1000);
+}

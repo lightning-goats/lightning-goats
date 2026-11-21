@@ -16,12 +16,97 @@ struct ClaimStatus {
 }
 
 impl LedgerStore {
+    /// Issue or recover the original project invoice for a reserved foreign-mint sweep.
+    pub async fn issue_breez_treasury_invoice(
+        &self,
+        collector: &BreezCollectorConfig,
+        registration: &crate::cashu::receipt_authority::ReceiptPolicy,
+        policy: &crate::cashu::treasury::Policy,
+        id: uuid::Uuid,
+    ) -> Result<lightning_goats_cashu_receipt::treasury::Issued> {
+        use lightning_goats_cashu_receipt::treasury::{Issued, hex_digest};
+        collector.validate()?;
+        let intent = self
+            .cashu_treasury_intent(id)
+            .await?
+            .context("unknown treasury intent")?;
+        policy.check_new(&intent)?;
+        ensure!(
+            intent.core_epoch == registration.core_epoch
+                && intent.wallet_epoch == registration.wallet_epoch
+                && intent.wallet_instance == registration.wallet_instance
+                && intent.destination.origin == "https://mint.lightning-goats.com/",
+            "project treasury destination or registration changed"
+        );
+        let digest = hex_digest(intent.digest()?);
+        let terms = json!({"purpose":"treasury_conversion","amount_sat":intent.deposit_sats,
+                            "description_hash":digest})
+        .to_string();
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        sqlx::query(
+            "INSERT INTO breez_project_invoices(id,intent) VALUES (?,?) ON CONFLICT(id) DO NOTHING",
+        )
+        .bind(id.to_string())
+        .bind(&terms)
+        .execute(&mut *tx)
+        .await?;
+        let row = sqlx::query("SELECT intent,invoice FROM breez_project_invoices WHERE id=?")
+            .bind(id.to_string())
+            .fetch_one(&mut *tx)
+            .await?;
+        ensure!(
+            row.try_get::<String, _>("intent")? == terms,
+            "treasury invoice identity conflict"
+        );
+        tx.commit().await?;
+        let existing: Option<String> = row.try_get("invoice")?;
+        let invoice = if let Some(invoice) = existing {
+            invoice
+        } else {
+            #[derive(Deserialize)]
+            struct Reply {
+                invoice: String,
+            }
+            let request = json!({"treasury_id":id,"amount_sat":intent.deposit_sats,"description_hash":digest});
+            let reply: Reply = crate::private_ipc::request(
+                &collector.socket,
+                collector.peer_uid,
+                &request,
+                65536,
+                20,
+            )
+            .await?;
+            reply.invoice
+        };
+        let parsed: lightning_invoice::Bolt11Invoice = invoice.parse()?;
+        let payment_hash = parsed.payment_hash().to_string();
+        let signed = crate::bolt11::verify(
+            &invoice,
+            intent
+                .deposit_sats
+                .checked_mul(1000)
+                .context("treasury amount overflow")?,
+            &payment_hash,
+            &digest,
+        )?;
+        crate::bolt11::verify_issuance_expiry(&signed, intent.invoice_expiry_seconds)?;
+        self.bind_breez_invoice(id, &invoice, &payment_hash).await?;
+        Ok(Issued {
+            intent,
+            receive_request_id: id,
+            payment_hash,
+            invoice,
+        })
+    }
+
     async fn poll_breez_claim(&self, collector: &BreezCollectorConfig) -> Result<bool> {
         let row = sqlx::query(
             "UPDATE breez_project_invoices SET next_poll=unixepoch()+30
              WHERE id=(SELECT i.id FROM breez_project_invoices i
                 WHERE (i.invoice IS NOT NULL OR
                   (json_extract(i.intent,'$.purpose')='contact_fee' AND i.created_at>unixepoch()-900))
+                  AND (json_type(i.intent,'$.purpose') IS NULL
+                       OR json_extract(i.intent,'$.purpose')='contact_fee')
                   AND i.next_poll<=unixepoch()
                   AND NOT EXISTS(SELECT 1 FROM breez_collected_claims c WHERE c.request_id=i.id)
                   AND NOT EXISTS(SELECT 1 FROM settled_payments s WHERE s.source='breez' AND s.source_id=i.id)

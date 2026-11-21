@@ -79,10 +79,7 @@ impl AppConfig {
         }
 
         if let Some(collector) = &self.lnurl.breez_collector {
-            crate::private_ipc::socket_path(&collector.socket)?;
-            if collector.peer_uid == 0 {
-                bail!("Breez collector requires a non-root peer UID");
-            }
+            collector.validate()?;
         }
         self.validate_lnurl()?;
         if self.feeder.threshold_sats == 0 {
@@ -346,6 +343,19 @@ pub struct BreezCollectorConfig {
     pub peer_uid: u32,
 }
 
+impl BreezCollectorConfig {
+    pub(crate) fn validate(&self) -> Result<()> {
+        const INVOICE_SOCKET: &str = "/run/lightning-goats-project-invoices.sock";
+        crate::private_ipc::socket_path(&self.socket)?;
+        // SO_PEERCRED identifies the process that created the listening socket.
+        // The shipped invoice unit inherits its listener from the system manager.
+        if self.peer_uid == 0 && self.socket != Path::new(INVOICE_SOCKET) {
+            bail!("root peer UID is scoped to the systemd project invoice socket");
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct ZapConfig {
     pub receipt_pubkey: String,
@@ -521,6 +531,11 @@ mod tests {
             socket: "/run/lightning-goats/project.sock".into(),
             peer_uid: 1001,
         });
+        config.validate().unwrap();
+        config.lnurl.breez_collector.as_mut().unwrap().peer_uid = 0;
+        assert!(config.validate().is_err());
+        config.lnurl.breez_collector.as_mut().unwrap().socket =
+            "/run/lightning-goats-project-invoices.sock".into();
         config.validate().unwrap();
     }
 

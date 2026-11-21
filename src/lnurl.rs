@@ -132,11 +132,9 @@ impl LnurlService {
                     .breez_collector
                     .as_ref()
                     .context("Breez requires a private collector")?;
-                crate::private_ipc::socket_path(&collector.socket)?;
-                if collector.peer_uid == 0 || config.invoice_expiry_seconds != 900 {
-                    bail!(
-                        "Breez requires a non-root collector and the HOME invoice expiry of 900 seconds"
-                    );
+                collector.validate()?;
+                if config.invoice_expiry_seconds != 900 {
+                    bail!("Breez requires the HOME invoice expiry of 900 seconds");
                 }
                 InvoiceBackend::Breez(collector.clone())
             }

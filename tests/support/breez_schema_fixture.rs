@@ -2,6 +2,27 @@
 use anyhow::{Context, Result, ensure};
 
 pub async fn strip_empty(transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>) -> Result<()> {
+    let has_ranges: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='cashu_funding_ranges')",
+    )
+    .fetch_one(&mut **transaction)
+    .await?;
+    if has_ranges {
+        let empty: bool =
+            sqlx::query_scalar("SELECT NOT EXISTS(SELECT 1 FROM cashu_funding_ranges)")
+                .fetch_one(&mut **transaction)
+                .await?;
+        ensure!(empty, "fixture contains settled funding ranges");
+        sqlx::raw_sql("DROP TRIGGER freeze_legacy_funding_range; DROP TRIGGER freeze_conversion_range_on_wallet;
+            DROP TRIGGER freeze_conversion_range_on_proof; DROP TABLE cashu_funding_ranges;").execute(&mut **transaction).await?;
+        let removed = sqlx::query("DELETE FROM _sqlx_migrations WHERE version=34")
+            .execute(&mut **transaction)
+            .await?;
+        ensure!(
+            removed.rows_affected() == 1,
+            "missing funding range migration"
+        );
+    }
     let has_inspections: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='breez_treasury_inspections')",
     )

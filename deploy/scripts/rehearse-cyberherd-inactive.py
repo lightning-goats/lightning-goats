@@ -735,8 +735,8 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
         fee_acceptance = json.loads((fee_review / 'BACKUP-ACCEPTED.json').read_text())
         assert fee_acceptance['cashu_core_source'] is True
         assert fee_acceptance['original_verifier_used'] is False and fee_acceptance['native'] is None
-        assert fee_before['report']['rows']['core']['_sqlx_migrations'] == 33
-        assert fee_after['report']['rows']['core']['_sqlx_migrations'] == 33
+        assert fee_before['report']['rows']['core']['_sqlx_migrations'] == 34
+        assert fee_after['report']['rows']['core']['_sqlx_migrations'] == 34
         assert fee_before['report']['rows']['payout']['_sqlx_migrations'] == 7
         assert fee_after['report']['rows']['payout']['_sqlx_migrations'] == 10
         fee_resumed = json.loads(run(*launcher, '--cyberherd-program-maintenance', 'resume-inclusive-fees',

@@ -51,9 +51,9 @@ impl LedgerStore {
             );
             let (processed, spent, consumed): (i64,i64,i64) = sqlx::query_as(
                 "SELECT COALESCE(MAX(g.start_sats+g.input_sats),0),
-                        COALESCE(SUM(r.input_sats-r.change_sats),0),
+                        COALESCE(SUM(g.input_sats-g.change_sats),0),
                         (SELECT COALESCE(SUM(sats),0) FROM feed_reward_funding_parts WHERE ledger_id=?1)
-                 FROM cashu_settled_ranges g JOIN cashu_treasury_source_results r USING(intent_id,ledger_id)
+                 FROM cashu_funding_ranges g
                  WHERE g.ledger_id=?1",
             )
             .bind(ledger)

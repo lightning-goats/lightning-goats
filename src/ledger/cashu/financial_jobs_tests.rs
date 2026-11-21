@@ -319,6 +319,7 @@ async fn project_treasury_invoice_reopens_without_issuing_or_crediting_again() {
         assert_eq!(request, lookup);
         crate::private_ipc::write(&mut stream, &reply, 65536).await.unwrap();
     });
+    assert!(ledger.begin_feed_attempt(1000).await.unwrap().is_none());
     assert!(ledger.poll_breez_claim(&collector).await.unwrap());
     server.await.unwrap();
     assert!(ledger.record_cashu_melt_result(&registration, &report).await.unwrap());
@@ -340,4 +341,8 @@ async fn project_treasury_invoice_reopens_without_issuing_or_crediting_again() {
     }).await.is_err());
     assert_eq!(count(&ledger, "settled_payments").await, 0);
     assert_eq!(ledger.feed_credit_sats().await.unwrap(), 1000);
+    let range: (i64,i64,i64) = sqlx::query_as("SELECT start_sats,input_sats,deposit_sats FROM cashu_funding_ranges WHERE intent_id=?")
+        .bind(intent.id.to_string()).fetch_one(&ledger.pool).await.unwrap();
+    assert_eq!(range, (0, 1000, intent.deposit_sats as i64));
+    assert!(ledger.begin_feed_attempt(1000).await.unwrap().is_some());
 }

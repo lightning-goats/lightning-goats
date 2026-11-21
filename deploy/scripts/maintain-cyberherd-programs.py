@@ -334,8 +334,8 @@ def inclusive_backup(directory, m, r):
             raise ValueError('Cashu-core snapshot and source verification identities differ')
         manifest = C.read_json(directory / 'backup/MANIFEST.json')
         count = manifest['report']['rows']['core'].get('_sqlx_migrations')
-        if type(count) is not int or count not in (26, 27, 28, 29, 30, 31, 32, 33):
-            raise ValueError('reviewed Cashu-core source requires exact core schema 26 through 33')
+        if type(count) is not int or count not in (26, 27, 28, 29, 30, 31, 32, 33, 34):
+            raise ValueError('reviewed Cashu-core source requires exact core schema 26 through 34')
     elif original['id'] != selected['id']:
         raise ValueError('original and selected source verifiers accepted different backups')
     U.sources_match(m, r, observed)
@@ -669,7 +669,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--inclusive-fee-upgrade', action='store_true', help='prepare a distinct schema-upgrade review; does not apply it')
     parser.add_argument('--cashu-core-source', action='store_true',
-                        help='explicitly review an empty core at schema 26 through 33 with the selected native prefix verifier')
+                        help='explicitly review an empty core at schema 26 through 34 with the selected native prefix verifier')
     commands = parser.add_subparsers(dest='operation', required=True)
     preparation = commands.add_parser('prepare')
     for name in ('archive', 'review_archive', 'source', 'archive_sha256', 'review_sha256', 'directory'):

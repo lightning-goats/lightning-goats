@@ -39,6 +39,7 @@ pub(super) fn tables_for_core(version: i64) -> impl Iterator<Item = &'static str
     CASHU_TABLES
         .into_iter()
         .chain([
+            "cashu_funding_ranges",
             "breez_treasury_inspections",
             "breez_treasury_wallet_results",
             "cashu_payout_execution_claims",
@@ -47,6 +48,7 @@ pub(super) fn tables_for_core(version: i64) -> impl Iterator<Item = &'static str
             "breez_project_invoices",
         ])
         .filter(move |name| match *name {
+            "cashu_funding_ranges" => version >= 34,
             "breez_treasury_inspections" => version >= 33,
             "breez_treasury_wallet_results" => version >= 32,
             "cashu_payout_execution_claims" => version >= 31,

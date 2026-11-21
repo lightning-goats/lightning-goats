@@ -19,12 +19,17 @@ MAX_FRAME = 65536
 
 
 def create(request, store, client, token, keyset):
-    if set(request) == {"claim_status"}:
+    if set(request) == {"contact_id", "description_hash"}:
+        invoice = issue(store, client, token, request["contact_id"], 100,
+                        request["description_hash"], keyset, {"purpose": "contact_fee"})
+        return {"invoice": invoice}
+    if set(request) in ({"claim_status"}, {"contact_claim_status"}):
+        contact = "contact_claim_status" in request
         row = store.db.execute("""
             SELECT id,payment_hash,terms,proofs FROM project_claim
             WHERE id=? AND invoice IS NOT NULL
-        """, (request["claim_status"],)).fetchone()
-        if row is None:
+        """, (request["contact_claim_status" if contact else "claim_status"],)).fetchone()
+        if row is None or (json.loads(row[2])["attribution"].get("purpose") == "contact_fee") != contact:
             raise ValueError("unknown project invoice")
         return {"request_id": row[0], "payment_hash": row[1],
                 "amount_sat": json.loads(row[2])["amount"], "proof_digest": hashlib.sha256(row[3].encode()).hexdigest() if row[3] else None}
@@ -41,7 +46,7 @@ def create(request, store, client, token, keyset):
     if request["zap"]:
         attribution["zap_request"] = raw
     invoice = issue(store, client, token, request["request_id"], request["amount_sat"],
-                    raw.encode(), keyset, attribution)
+                    hashlib.sha256(raw.encode()).hexdigest(), keyset, attribution)
     return {"invoice": invoice}
 
 

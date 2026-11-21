@@ -396,8 +396,36 @@ def main():
                 melt = expect(viewer.post("/v1/melt/quote/bolt11", json={"request": reserve.destination[0], "unit": "sat"}))
                 assert melt["fee_reserve"] == 4
                 claims = ClaimStore(claim_dir)
+                contact_id = str(uuid.uuid4())
+                contact_hash = hashlib.sha256(b"private contact fixture").hexdigest()
+                contact_request = {"contact_id": contact_id, "description_hash": contact_hash}
+                contact = create(contact_request, claims, viewer, PROJECT_TOKEN, keyset)
+                signed_contact = bolt11.decode(contact["invoice"])
+                assert signed_contact.amount_msat == 100_000 and signed_contact.description_hash == contact_hash
+                assert create(contact_request, claims, viewer, PROJECT_TOKEN, keyset) == contact
+                reserve.paid.add(signed_contact.payment_hash)
+                for _ in range(15):
+                    if collect(claims, viewer, contact_id, {keyset: keys}):
+                        break
+                    time.sleep(.1)
+                contact_digest = create({"contact_claim_status": contact_id}, claims, None, None, None)["proof_digest"]
+                assert contact_digest
+                try:
+                    claims.reserve_payout(str(uuid.uuid4()), str(uuid.uuid4()), "66"*32, 4, 0,
+                                          {contact_id: {"consumed_sats": 100, "evidence_digest": contact_digest}})
+                except ValueError:
+                    pass
+                else:
+                    raise AssertionError("private contact fee funded a feeding payout")
+                for wrong in [{"claim_status": contact_id}, {"contact_claim_status": claim_id}]:
+                    try:
+                        create(wrong, claims, None, None, None)
+                    except ValueError:
+                        pass
+                    else:
+                        raise AssertionError("contact and feeder custody evidence confused")
                 funded_id = str(uuid.uuid4())
-                funding = issue(claims, viewer, PROJECT_TOKEN, funded_id, 16, b"payout fixture",
+                funding = issue(claims, viewer, PROJECT_TOKEN, funded_id, 16, hashlib.sha256(b"payout fixture").hexdigest(),
                                 keyset, {"user": "dexter", "credit_pool": "herd"})
                 reserve.paid.add(bolt11.decode(funding).payment_hash)
                 for _ in range(15):

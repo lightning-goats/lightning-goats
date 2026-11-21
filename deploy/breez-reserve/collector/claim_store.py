@@ -193,9 +193,10 @@ class ClaimStore:
                 candidates = []
                 for claim_id, terms in sorted(allocations.items()):
                     digest, budget = terms["evidence_digest"], terms["consumed_sats"]
-                    row = self.db.execute("SELECT proofs FROM project_claim WHERE id=?",
+                    row = self.db.execute("SELECT proofs,terms FROM project_claim WHERE id=?",
                                           (claim_id,)).fetchone()
                     if (row is None or row[0] is None or hashlib.sha256(row[0].encode()).hexdigest() != digest
+                            or json.loads(row[1])["attribution"].get("credit_pool") != "herd"
                             or type(budget) is not int or budget <= 0
                             or budget > sum(p["amount"] for p in json.loads(row[0]))):
                         raise ValueError("payout allocation conflicts with local custody")

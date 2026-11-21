@@ -1,6 +1,6 @@
 """VPS project invoice issuance with the pinned Nutshell wallet primitives."""
 
-import hashlib
+import re
 import secrets
 import time
 from uuid import UUID
@@ -25,12 +25,13 @@ def prepare_claim(amount, keyset):
     return {"owner": owner.secret.hex(), "outputs": outputs}
 
 
-def issue(store, private_client, token, request_id, amount, description, keyset, attribution):
+def issue(store, private_client, token, request_id, amount, digest, keyset, attribution):
     """private_client is scoped to the HOME mTLS origin with redirects disabled."""
     if type(amount) is not int or not 1 <= amount <= 1_000_000:
         raise ValueError("project invoice amount outside HOME bounds")
     request_id = str(UUID(request_id))
-    digest = hashlib.sha256(description).hexdigest()
+    if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise ValueError("invalid project description hash")
     terms = {"amount": amount, "description_hash": digest, "attribution": attribution}
     material = store.prepare(request_id, terms, lambda: prepare_claim(amount, keyset))
     owner = PrivateKey(bytes.fromhex(material["owner"])).public_key.format().hex()

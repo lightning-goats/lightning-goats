@@ -1,7 +1,9 @@
 """Claim settled project quotes using only their original, journaled outputs."""
 
+import fcntl
 import hashlib
 import json
+from pathlib import Path
 import secrets
 from urllib.parse import quote as escape
 import time
@@ -79,7 +81,14 @@ def collect(store, client, request_id, pinned_keys):
 
 
 def submit_payout(store, client, disposition_id, invoice_text, quote_id, keyset, pinned_keys):
-    """Submit reserved inputs once, or read the bound quote after an interruption."""
+    """Serialize dispatch and recovery across processes sharing this custody journal."""
+    database = Path(store.db.execute("PRAGMA database_list").fetchone()[2])
+    with database.with_suffix(".melt.lock").open("ab") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        return _submit_payout(store, client, disposition_id, invoice_text, quote_id, keyset, pinned_keys)
+
+
+def _submit_payout(store, client, disposition_id, invoice_text, quote_id, keyset, pinned_keys):
     row = store.db.execute(
         "SELECT binding FROM proof_disposition WHERE id=? AND purpose='cyberherd_payout'",
         (disposition_id,),
@@ -150,7 +159,13 @@ def submit_payout(store, client, disposition_id, invoice_text, quote_id, keyset,
         raise ValueError("payout inputs differ from reserved total")
     outputs = [{k: item[k] for k in ("amount", "id", "B_")} for item in blanks]
     if not store.begin_melt_submission(disposition_id, quote_id):
-        return status
+        # Only replay the identical request if every reserved input is still available.
+        ys = [b_dhke.hash_to_curve(p["secret"].encode()).format().hex() for p in inputs]
+        checked = client.post("/v1/checkstate", json={"Ys": ys}).raise_for_status().json()["states"]
+        if sorted(item["Y"] for item in checked) != sorted(ys):
+            raise ValueError("incomplete payout input status")
+        if any(item["state"] != "UNSPENT" for item in checked):
+            raise ValueError("unpaid payout has unavailable inputs")
     return verify_result(client.post("/v1/melt/bolt11", json={
         "quote": quote_id, "inputs": inputs, "outputs": outputs,
     }).raise_for_status().json())

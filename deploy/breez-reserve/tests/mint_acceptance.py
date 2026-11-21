@@ -404,6 +404,23 @@ def main():
                 digest = bolt11.decode(reserve.destination[0]).payment_hash
                 [payout_proof] = claims.reserve_payout(payment_id, str(uuid.uuid4()), digest, 12, 4,
                     {funded_id: {"consumed_sats": 16, "evidence_digest": funded["proof_digest"]}})
+                class CrashBeforeDispatch:
+                    get = viewer.get
+
+                    def post(self, path, **kwargs):
+                        assert path == "/v1/melt/bolt11"
+                        raise httpx.ConnectError("fixture interrupted before sending request")
+
+                try:
+                    submit_payout(claims, CrashBeforeDispatch(), payment_id, reserve.destination[0],
+                                  melt["quote"], keyset, {keyset: keys})
+                except httpx.ConnectError:
+                    pass
+                else:
+                    raise AssertionError("missing simulated payout interruption")
+                assert reserve.pay_attempts == 0
+                claims.db.close()
+                claims = ClaimStore(claim_dir)
                 paid = submit_payout(claims, viewer, payment_id, reserve.destination[0], melt["quote"], keyset, {keyset: keys})
                 assert paid["state"].upper() == "PENDING"
                 assert wallet_state(viewer, payout_proof) == "PENDING"

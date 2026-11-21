@@ -280,7 +280,7 @@ def main():
                 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "collector"))
                 from claim_store import ClaimStore
                 from project_quote import issue
-                from collect import collect, collect_acquisition, execute_payout, submit_payout
+                from collect import collect, collect_acquisition, execute_payout, recover_payout_refund, submit_payout
                 from invoice_server import create, handle, handle_request
                 import socket
                 import struct
@@ -662,6 +662,32 @@ def main():
                     {acquisition_id: {"source":"acquisition","consumed_sats":3,"evidence_digest":evidence}})
                 assert sum(p["amount"] for p in owned) == 3
                 assert all(wallet_state(viewer,p) == "SPENT" for p in acquired)
+                # Model three 1-sat reservations with one real 2-sat fee refund.
+                refund_id = str(uuid.uuid4())
+                change = [p for p in owned if p["amount"] == 2]
+                assert len(change) == 1
+                with claims.write():
+                    claims.db.execute("INSERT INTO proof_disposition VALUES (?,'cyberherd_payout','{}')",(refund_id,))
+                    claims.db.execute("INSERT INTO payout_invoice VALUES (?,?)",("ae"*32,refund_id))
+                    claims.db.execute("INSERT INTO payout_melt VALUES (?,?,'[]')",(refund_id,refund_id))
+                    claims.db.execute("INSERT INTO payout_melt_submission VALUES (?)",(refund_id,))
+                    for source in (funded_id,conversion_id,acquisition_id):
+                        claims.db.execute("INSERT INTO payout_claim_allocation VALUES (?,?,?,1,1)",
+                                          (refund_id,payout_feed,source))
+                claims.record_melt_result(refund_id,0,"fixture",change)
+                try:
+                    recover_payout_refund(claims, LostSplitResponse(), refund_id, keyset, {keyset:keys})
+                except httpx.ReadTimeout:
+                    pass
+                else:
+                    raise AssertionError("fixture did not discard refund swap response")
+                claims.db.close()
+                claims = ClaimStore(claim_dir)
+                recover_payout_refund(claims, viewer, refund_id, keyset, {keyset:keys})
+                recover_payout_refund(claims, None, refund_id, keyset, {keyset:keys})
+                credits = claims.db.execute("SELECT returned_sat FROM payout_claim_refund WHERE disposition_id=?",
+                                            (refund_id,)).fetchall()
+                assert credits == [(1,), (1,)] and wallet_state(viewer,change[0]) == "SPENT"
                 for field in ("claim_status", "contact_claim_status"):
                     try:
                         create({field: conversion_id}, claims, None, None, None)

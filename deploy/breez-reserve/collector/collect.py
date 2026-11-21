@@ -144,6 +144,47 @@ def split_payout_proof(store, client, secret, portion, keyset, pinned_keys):
         store.db.execute("UPDATE proof_split SET complete=1 WHERE secret=?", (secret,))
 
 
+def recover_payout_refund(store, client, disposition_id, keyset, pinned_keys):
+    """Restore mixed-claim fee change using the original private swap outputs."""
+    with store.write():
+        if store.db.execute("SELECT 1 FROM payout_claim_refund WHERE disposition_id=?",
+                            (disposition_id,)).fetchone():
+            return
+        row = store.db.execute("SELECT change_proofs FROM payout_melt_result WHERE disposition_id=?",
+                               (disposition_id,)).fetchone()
+        inputs = json.loads(row[0])
+        remaining = sum(p["amount"] for p in inputs)
+        if not remaining:
+            return
+        prior = store.db.execute("SELECT material FROM payout_refund_swap WHERE disposition_id=?",
+                                 (disposition_id,)).fetchone()
+        if prior:
+            plan = json.loads(prior[0])
+        else:
+            plan = []
+            for claim, reserved in store.db.execute("""
+                SELECT claim_id,reserved_sat FROM payout_claim_allocation
+                WHERE disposition_id=? ORDER BY reserved_sat DESC,claim_id
+            """, (disposition_id,)):
+                share = min(remaining, reserved)
+                plan.extend((claim, output) for output in prepare_outputs(share, keyset))
+                remaining -= share
+                if not remaining:
+                    break
+            if remaining:
+                raise ValueError("refund exceeds reserved inputs")
+            store.db.execute("INSERT INTO payout_refund_swap VALUES (?,?)", (disposition_id, encode(plan)))
+    outputs = recover_swap(client, inputs, [output for _, output in plan], pinned_keys)
+    by_claim = {}
+    for (claim, _), proof in zip(plan, outputs, strict=True):
+        by_claim.setdefault(claim, []).append(proof)
+    with store.write():
+        for claim, proofs in by_claim.items():
+            store._index_outputs(claim, proofs)
+            store.db.execute("INSERT INTO payout_claim_refund VALUES (?,?,?)",
+                             (disposition_id, claim, sum(p["amount"] for p in proofs)))
+
+
 def collect_acquisition(store, client, claim_id, evidence_digest, inputs, keyset, pinned_keys):
     """Receive wallet-owned project tokens by swapping once into collector-owned outputs."""
     if (not isinstance(evidence_digest, str) or len(evidence_digest) != 64

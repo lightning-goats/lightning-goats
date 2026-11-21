@@ -121,6 +121,27 @@ class ClaimStore:
                 )
             """)
             self.db.execute("""
+                CREATE TABLE IF NOT EXISTS payout_claim_refund (
+                    disposition_id TEXT NOT NULL, claim_id TEXT NOT NULL,
+                    returned_sat INTEGER NOT NULL CHECK(returned_sat>0),
+                    PRIMARY KEY(disposition_id,claim_id),
+                    FOREIGN KEY(disposition_id,claim_id)
+                        REFERENCES payout_claim_allocation(disposition_id,claim_id)
+                )
+            """)
+            self.db.execute("""
+                INSERT INTO payout_claim_refund
+                SELECT c.disposition_id,a.claim_id,c.returned_sat FROM payout_change_credit c
+                JOIN payout_claim_allocation a USING(disposition_id)
+                WHERE 1 ON CONFLICT(disposition_id,claim_id) DO NOTHING
+            """)
+            self.db.execute("""
+                CREATE TABLE IF NOT EXISTS payout_refund_swap (
+                    disposition_id TEXT PRIMARY KEY REFERENCES payout_melt_result(disposition_id),
+                    material TEXT NOT NULL
+                )
+            """)
+            self.db.execute("""
                 CREATE TABLE IF NOT EXISTS proof_split (
                     secret TEXT PRIMARY KEY REFERENCES disposition_input(secret),
                     material TEXT NOT NULL,
@@ -215,7 +236,7 @@ class ClaimStore:
                 raise ValueError("payout allocation conflicts with local custody")
             used, original = self.db.execute("""
                 SELECT COALESCE(SUM(reserved_sat-COALESCE(returned_sat,0)),0),MIN(budget_sat)
-                FROM payout_claim_allocation LEFT JOIN payout_change_credit USING(disposition_id)
+                FROM payout_claim_allocation LEFT JOIN payout_claim_refund USING(disposition_id,claim_id)
                 WHERE feed_id=? AND claim_id=?
             """, (feed_id, claim_id)).fetchone()
             if original is not None and original != budget:
@@ -342,21 +363,30 @@ class ClaimStore:
             """, (disposition_id,)).fetchone()
             if saved != values:
                 raise ValueError("settled payout result changed")
-            # A single-source melt returns the fee change to its original claim.
-            # Mixed-source change stays in custody until ownership is apportioned.
-            sources = self.db.execute("""
+            sources = dict(self.db.execute("""
                 SELECT claim_id,reserved_sat FROM payout_claim_allocation WHERE disposition_id=?
-            """, (disposition_id,)).fetchall()
-            if proofs and len(sources) == 1:
-                claim_id, reserved = sources[0]
-                returned = sum(proof["amount"] for proof in proofs)
-                if returned >= reserved:
-                    raise ValueError("payout change exceeds available allocation")
-                self._index_outputs(claim_id, proofs)
+            """, (disposition_id,)))
+            if not proofs:
+                return
+            if sum(p["amount"] for p in proofs) >= sum(sources.values()):
+                raise ValueError("payout change exceeds available allocation")
+            refunds = {}
+            for proof in sorted(proofs, key=lambda p: (-p["amount"], p["secret"])):
+                amount = proof["amount"]
+                eligible = [(room, claim) for claim, room in sources.items() if room >= amount]
+                if not eligible:
+                    # This denomination spans claims. Preserve all proofs in the result
+                    # until a swap can divide it without moving value between claims.
+                    return
+                _, claim = min(eligible)
+                sources[claim] -= amount
+                refunds.setdefault(claim, []).append(proof)
+            for claim, outputs in refunds.items():
+                self._index_outputs(claim, outputs)
                 self.db.execute("""
-                    INSERT INTO payout_change_credit VALUES (?,?)
-                    ON CONFLICT(disposition_id) DO NOTHING
-                """, (disposition_id, returned))
+                    INSERT INTO payout_claim_refund VALUES (?,?,?)
+                    ON CONFLICT(disposition_id,claim_id) DO NOTHING
+                """, (disposition_id, claim, sum(p["amount"] for p in outputs)))
 
     def reserve_poll(self, now, lease_seconds):
         """Claim one due invoice. An interrupted attempt becomes eligible after its lease."""

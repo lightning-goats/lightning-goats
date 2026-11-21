@@ -9,7 +9,7 @@ from pathlib import Path
 import httpx
 
 from claim_store import ClaimStore
-from collect import collect
+from collect import collect, recover_payout_refund
 
 
 def main():
@@ -21,7 +21,24 @@ def main():
     store = ClaimStore(args.state_directory)
     with httpx.Client(base_url="https://mint.lightning-goats.com", timeout=10,
                       follow_redirects=False, trust_env=False) as client:
+        refund_cursor = ""
+        next_refund = 0
         while True:
+            if time.monotonic() >= next_refund:
+                refund = store.db.execute("""
+                    SELECT disposition_id,json_extract(change_proofs,'$[0].id')
+                    FROM payout_melt_result r WHERE json_array_length(change_proofs)>0
+                      AND NOT EXISTS (SELECT 1 FROM payout_claim_refund c
+                                      WHERE c.disposition_id=r.disposition_id)
+                    ORDER BY disposition_id<=?,disposition_id LIMIT 1
+                """, (refund_cursor,)).fetchone()
+                if refund:
+                    refund_cursor, keyset = refund
+                    try:
+                        recover_payout_refund(store, client, refund_cursor, keyset, keys)
+                    except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:
+                        logging.warning("Payout change recovery deferred (%s)", type(error).__name__)
+                next_refund = time.monotonic() + 15
             request_id = store.reserve_poll(int(time.time()), 15)
             if request_id is None:
                 time.sleep(1)

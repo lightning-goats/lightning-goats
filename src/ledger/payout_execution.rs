@@ -71,10 +71,7 @@ impl LedgerStore {
             Some(old) if old != document => bail!("Cashu execution retry changed original claim"),
             Some(_) => {}
             None => {
-                let gross = request
-                    .amount_sat
-                    .checked_add(request.maximum_fee_sat)
-                    .context("Cashu gross overflow")?;
+                let gross = request.gross_sats;
                 let previous: i64 = sqlx::query_scalar("SELECT COALESCE(SUM(gross_sats),0) FROM cashu_payout_execution_claims WHERE reservation_id=?")
                     .bind(&id).fetch_one(&mut *tx).await?;
                 if u64::try_from(previous)?
@@ -281,6 +278,28 @@ pub(super) async fn validate_outcome(
     tx: &mut Transaction<'_, Sqlite>,
     packet: &crate::payout::outcome::Packet,
 ) -> Result<()> {
+    let policy: String =
+        sqlx::query_scalar("SELECT policy_json FROM reward_reservations WHERE id=?")
+            .bind(packet.header.reservation.id.to_string())
+            .fetch_one(&mut **tx)
+            .await?;
+    let policy: crate::reward_funding::RewardPolicy = serde_json::from_str(&policy)?;
+    if let crate::payout::outcome::Disposition::CashuPaid {
+        disposition_id,
+        payment_hash,
+        ..
+    } = &packet.row.disposition
+    {
+        let found: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM cashu_payout_execution_claims WHERE reservation_id=? AND member=? AND disposition_id=? AND invoice_hash=?)")
+            .bind(packet.header.reservation.id.to_string()).bind(&packet.row.member).bind(disposition_id.to_string()).bind(payment_hash).fetch_one(&mut **tx).await?;
+        if !found || policy.funding_source.is_strike() {
+            bail!("missing original Cashu payout claim");
+        }
+        return Ok(());
+    }
+    if !policy.funding_source.is_strike() {
+        bail!("Cashu reservation requires a custody settlement outcome");
+    }
     let claim = load(tx, packet.header.reservation.id, &packet.row.member).await?;
     match (&packet.row.disposition, claim) {
         (crate::payout::outcome::Disposition::Unsubmitted { .. }, None) => Ok(()),

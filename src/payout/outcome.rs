@@ -21,6 +21,12 @@ pub enum UnsubmittedReason {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Disposition {
+    CashuPaid {
+        disposition_id: Uuid,
+        payment_hash: String,
+        amount_sats: u64,
+        fee_sats: u64,
+    },
     Unsubmitted {
         reason: UnsubmittedReason,
     },
@@ -103,6 +109,23 @@ impl Packet {
         }
         next_hash(&self.before_hash, &self.row)?;
         match &self.row.disposition {
+            Disposition::CashuPaid {
+                disposition_id,
+                payment_hash,
+                amount_sats,
+                fee_sats,
+            } => {
+                crate::nostr_event::validate_hex(payment_hash, 32)?;
+                if disposition_id.is_nil()
+                    || *amount_sats == 0
+                    || amount_sats
+                        .checked_add(*fee_sats)
+                        .is_none_or(|total| total > self.row.gross_sats)
+                {
+                    bail!("Cashu settlement exceeds member allocation");
+                }
+                Ok(None)
+            }
             Disposition::Unsubmitted { .. } => Ok(None),
             Disposition::Payment {
                 binding_json,
@@ -189,6 +212,9 @@ impl Reader {
     }
     pub(crate) async fn verify(&self, packet: &Packet) -> Result<VerifiedRow> {
         let binding = packet.validate()?;
+        if matches!(packet.row.disposition, Disposition::CashuPaid { .. }) {
+            bail!("Cashu outcome requires custody verification");
+        }
         if packet.header.scope.account_id != self.account_id {
             bail!("outcome account differs from read-only core binding");
         }
@@ -244,6 +270,42 @@ pub(crate) struct VerifiedRow {
     invoice_hash: Option<String>,
 }
 impl VerifiedRow {
+    pub async fn from_cashu(
+        packet: &Packet,
+        claim: &crate::payout::cashu::ExecutionRequest,
+        collector: &crate::config::BreezCollectorConfig,
+    ) -> Result<Self> {
+        packet.validate()?;
+        let Disposition::CashuPaid {
+            disposition_id,
+            payment_hash,
+            amount_sats,
+            fee_sats,
+        } = &packet.row.disposition
+        else {
+            bail!("missing Cashu settlement");
+        };
+        if claim.reservation != packet.header.reservation
+            || claim.member != packet.row.member
+            || claim.disposition_id != *disposition_id
+            || claim.payment_hash != *payment_hash
+            || claim.amount_sat != *amount_sats
+            || claim.gross_sats != packet.row.gross_sats
+            || crate::payout::cashu::settled_fee(collector, claim).await? != Some(*fee_sats)
+        {
+            bail!("Cashu receipt differs from reported settlement");
+        }
+        Ok(Self {
+            packet: packet.clone(),
+            spent: amount_sats
+                .checked_add(*fee_sats)
+                .context("Cashu settlement overflow")?,
+            held: 0,
+            payment_id: Some(*disposition_id),
+            invoice_hash: Some(payment_hash.clone()),
+        })
+    }
+
     pub(crate) fn packet(&self) -> &Packet {
         &self.packet
     }

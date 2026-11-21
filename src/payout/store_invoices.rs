@@ -251,6 +251,7 @@ impl Store {
             invoice: invoice.encoded().into(),
             payment_hash: invoice.payment_hash().into(),
             description_hash: invoice.description_hash().into(),
+            gross_sats: gross,
             amount_sat: invoice.amount_sats(),
             maximum_fee_sat: fee,
             nip57: invoice.nip57(),

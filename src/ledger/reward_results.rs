@@ -64,6 +64,19 @@ impl LedgerStore {
                 bail!("verified result row columns changed");
             }
             let result = match &row.disposition {
+                Disposition::CashuPaid {
+                    amount_sats,
+                    fee_sats,
+                    ..
+                } => {
+                    if amount_sats.checked_add(*fee_sats) != Some(spent) || held != 0 {
+                        bail!("Cashu settlement cost changed");
+                    }
+                    Status::Completed {
+                        net_sats: *amount_sats,
+                        fee_sats: *fee_sats,
+                    }
+                }
                 Disposition::Payment {
                     state: crate::payout::provider::PaymentState::Completed,
                     fee_sats,

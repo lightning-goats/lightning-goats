@@ -14,6 +14,7 @@ pub struct ExecutionRequest {
     pub invoice: String,
     pub payment_hash: String,
     pub description_hash: String,
+    pub gross_sats: u64,
     pub amount_sat: u64,
     pub maximum_fee_sat: u64,
     pub nip57: bool,
@@ -36,10 +37,11 @@ impl ExecutionRequest {
                 && !self.disposition_id.is_nil()
                 && self.invoice.len() <= 8192
                 && self.amount_sat > 0
+                && self.gross_sats <= self.reservation.reserved_sats
                 && self
                     .amount_sat
                     .checked_add(self.maximum_fee_sat)
-                    .is_some_and(|gross| gross <= self.reservation.reserved_sats),
+                    .is_some_and(|total| total <= self.gross_sats),
             "Cashu payout exceeds its reservation or has an invalid identity"
         );
         let msat = self

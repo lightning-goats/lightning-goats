@@ -107,7 +107,8 @@ def execute_payout(store, client, request, keyset, pinned_keys):
                               "evidence_digest": anchor["evidence_digest"]}
     store.reserve_payout(request["disposition_id"], request["feed_id"], invoice.payment_hash,
                          request["amount_sat"], request["maximum_fee_sat"], allocations,
-                         invoice_expiry=invoice.expiry_time)
+                         invoice_expiry=invoice.expiry_time,
+                         invoice_digest=hashlib.sha256(request["invoice"].encode()).hexdigest())
     result = submit_payout(store, client, request["disposition_id"], request["invoice"], keyset, pinned_keys)
     if result["state"] == "PAID":
         return result
@@ -131,6 +132,8 @@ def _submit_payout(store, client, disposition_id, invoice_text, keyset, pinned_k
         raise ValueError("unknown reserved payout")
     terms = json.loads(row[0])
     invoice = bolt11.decode(invoice_text)
+    if "invoice_digest" in terms and terms["invoice_digest"] != hashlib.sha256(invoice_text.encode()).hexdigest():
+        raise ValueError("signed payout invoice differs from reserved terms")
     if (invoice.currency != "bc" or invoice.payment_hash != terms["invoice_hash"]
             or invoice.amount_msat != 1000 * terms["amount_sat"]):
         raise ValueError("signed payout invoice differs from reserved terms")

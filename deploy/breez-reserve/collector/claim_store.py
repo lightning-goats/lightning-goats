@@ -168,7 +168,7 @@ class ClaimStore:
                 raise ValueError("disposition inputs changed")
             return [json.loads(r[1]) for r in rows]
 
-    def reserve_payout(self, disposition_id, feed_id, invoice_hash, amount, fee_limit, allocations, *, invoice_expiry=None):
+    def reserve_payout(self, disposition_id, feed_id, invoice_hash, amount, fee_limit, allocations, *, invoice_expiry=None, invoice_digest=None):
         """Reserve exact project inputs against an authenticated confirmed-feed allocation."""
         disposition_id = str(UUID(disposition_id))
         feed_id = str(UUID(feed_id))
@@ -178,12 +178,16 @@ class ClaimStore:
                 or type(fee_limit) is not int or not 0 <= fee_limit <= 1_000_000
                 or not allocations):
             raise ValueError("invalid payout terms")
-        binding = encode({"feed": feed_id, "invoice_hash": invoice_hash, "amount_sat": amount,
-                          "maximum_fee_sat": fee_limit, "claims": allocations})
+        terms = {"feed": feed_id, "invoice_hash": invoice_hash, "amount_sat": amount,
+                 "maximum_fee_sat": fee_limit, "claims": allocations}
+        legacy_binding = encode(terms)
+        if invoice_digest is not None:
+            terms["invoice_digest"] = invoice_digest
+        binding = encode(terms)
         with self.write():
             previous = self.db.execute("SELECT purpose,binding FROM proof_disposition WHERE id=?",
                                        (disposition_id,)).fetchone()
-            if previous and previous != ("cyberherd_payout", binding):
+            if previous and previous not in (("cyberherd_payout", binding), ("cyberherd_payout", legacy_binding)):
                 raise ValueError("payout replay differs")
             if previous is None:
                 if invoice_expiry is not None and invoice_expiry <= time.time():

@@ -456,9 +456,18 @@ def main():
                     raise AssertionError("expired invoice reserved payout inputs")
                 assert not claims.db.execute("SELECT 1 FROM proof_disposition WHERE id=?", (payment_id,)).fetchone()
                 [payout_proof] = claims.reserve_payout(payment_id, payout_feed, digest, 12, 4,
-                    {funded_id: {"consumed_sats": 16, "evidence_digest": funded["proof_digest"]}})
+                    {funded_id: {"consumed_sats": 16, "evidence_digest": funded["proof_digest"]}},
+                    invoice_digest=hashlib.sha256(reserve.destination[0].encode()).hexdigest())
                 lookup = {"reconcile_disposition": payment_id, "invoice": reserve.destination[0]}
                 assert execute_payout(claims, None, lookup, keyset, {keyset: keys}) == {"state": "UNQUOTED"}
+                replacement, _ = invoice(12, memo="different signed terms", key=reserve.destination[1])
+                assert bolt11.decode(replacement).payment_hash == digest
+                try:
+                    execute_payout(claims, None, {**lookup, "invoice": replacement}, keyset, {keyset: keys})
+                except ValueError as exc:
+                    assert "differs from reserved terms" in str(exc)
+                else:
+                    raise AssertionError("reconciliation accepted a different invoice with the same hash")
                 class FeeBearingKeyset:
                     def post(self, path, **kwargs):
                         assert path == "/v1/melt/quote/bolt11"

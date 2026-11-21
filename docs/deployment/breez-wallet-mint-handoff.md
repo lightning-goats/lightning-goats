@@ -117,3 +117,7 @@ A second timing window occurs during redemption. Nutshell deducts locked proofs 
 ### Private origin activation · 2026-11-21
 
 The operator authorized port 8793. HOME enabled the dedicated `lightning-goats-private-origin.service` with `private-origin.nginx.conf` from `deploy/breez-reserve/`. Nginx listens on `10.8.0.6:8793`, requires a client certificate signed by the private client CA, and permits the VPS source `10.8.0.1`. UFW permits that source on TCP 8793 via `wg0`. HOME verified rejection without a client certificate and observed a ready mainnet receive socket. Verify `GET /wallet/health` from the VPS with the project-receive certificate and its matching private key.
+
+### Public transaction amounts
+
+The HOME operator removed the project-defined principal ceilings for ordinary Lightning top-ups and Cashu-to-Lightning melts. Configure `MINT_MAX_MINT_BOLT11_SAT=0`, `MINT_MAX_MELT_BOLT11_SAT=0` and `MINT_MAX_BALANCE=0`. Public NUT-04 and NUT-05 discovery omit the optional maximum. The reserve accepts positive whole-sat amounts representable in its Lightning invoice format. A melt still requires sufficient proofs to cover principal and fees, an acceptable provider route, and a routing fee within the reserve's 100-sat fee ceiling. The authenticated project-quote interface retains its own request validation.

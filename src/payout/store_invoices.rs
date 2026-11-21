@@ -188,6 +188,9 @@ impl Store {
         .await?;
         let evidence: serde_json::Value =
             serde_json::from_str(&row.try_get::<String, _>("qualification_json")?)?;
+        if evidence["execution_provider"] != "cashu" {
+            bail!("grant is not bound to Cashu execution");
+        }
         let allocations: Vec<crate::payout::funding::RetainedAllocation> = serde_json::from_value(
             evidence
                 .get("retained_allocations")
@@ -237,6 +240,24 @@ impl Store {
         tx.commit().await?;
         Ok(invoice)
     }
+}
+
+pub(super) async fn ensure_strike_grant(
+    tx: &mut Transaction<'_, Sqlite>,
+    grant: Uuid,
+) -> Result<()> {
+    let evidence: String =
+        sqlx::query_scalar("SELECT qualification_json FROM payout_grants WHERE id=?")
+            .bind(grant.to_string())
+            .fetch_one(&mut **tx)
+            .await?;
+    if serde_json::from_str::<serde_json::Value>(&evidence)?
+        .get("execution_provider")
+        .is_some()
+    {
+        bail!("grant is bound to another execution provider");
+    }
+    Ok(())
 }
 
 pub(super) async fn write_lock(tx: &mut Transaction<'_, Sqlite>) -> Result<()> {

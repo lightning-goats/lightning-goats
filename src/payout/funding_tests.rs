@@ -1053,13 +1053,16 @@ async fn mixed_funding_keeps_the_consumed_claim_for_custody_verification() {
         .await
         .unwrap();
     let now = f.reservation.created_at + 10;
-    let grant = store.admit(&f.plan, &qualified, now).await.unwrap();
+    let grant = store.admit_cashu(&f.plan, &qualified, now).await.unwrap();
     drop(store);
     let reopened = crate::payout::store::Store::connect(&url, policy)
         .await
         .unwrap();
     assert_eq!(
-        reopened.admit(&f.plan, &qualified, now).await.unwrap(),
+        reopened
+            .admit_cashu(&f.plan, &qualified, now)
+            .await
+            .unwrap(),
         grant
     );
     let intent = reopened
@@ -1090,10 +1093,38 @@ async fn mixed_funding_keeps_the_consumed_claim_for_custody_verification() {
         "invoice":encoded, "payment_hash":invoice.payment_hash(), "amount_sat":1,
         "maximum_fee_sat":1, "retained_allocations":[allocation]})
     );
-    reopened.prepare_quote(intent.id(), now + 4).await.unwrap();
-    assert!(reopened.cashu_payout_request(intent.id()).await.is_err());
-    qualified.retained_allocations[0].anchor.evidence_digest = "ef".repeat(32);
+    assert!(reopened.prepare_quote(intent.id(), now + 4).await.is_err());
     assert!(reopened.admit(&f.plan, &qualified, now).await.is_err());
+    assert!(
+        reopened
+            .prepare_fee_probe(grant.id, &f.plan.rows[0].pubkey, 0, now, None)
+            .await
+            .is_err()
+    );
+    assert!(
+        reopened
+            .close_unsubmitted(
+                grant.id,
+                &f.plan.rows[0].pubkey,
+                crate::payout::outcome::UnsubmittedReason::Expired,
+                now + 4
+            )
+            .await
+            .is_err()
+    );
+    let legacy_url = format!("sqlite://{}", f.root.path().join("legacy.db").display());
+    let legacy = crate::payout::store::Store::connect(&legacy_url, journal_policy(&qualified))
+        .await
+        .unwrap();
+    legacy.admit(&f.plan, &qualified, now).await.unwrap();
+    assert!(legacy.admit_cashu(&f.plan, &qualified, now).await.is_err());
+    qualified.retained_allocations[0].anchor.evidence_digest = "ef".repeat(32);
+    assert!(
+        reopened
+            .admit_cashu(&f.plan, &qualified, now)
+            .await
+            .is_err()
+    );
     task.abort();
 }
 

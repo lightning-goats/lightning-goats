@@ -48,6 +48,8 @@ impl Store {
     ) -> Result<()> {
         let mut tx = self.pool.begin().await?;
         write_lock(&mut tx).await?;
+        // Only the original execution provider can attest that no payment was submitted.
+        super::invoices::ensure_strike_grant(&mut tx, grant).await?;
         let row=sqlx::query("SELECT g.admitted_at FROM payout_rows r JOIN payout_grants g ON g.id=r.grant_id WHERE r.grant_id=? AND r.member=?")
             .bind(grant.to_string()).bind(member).fetch_one(&mut *tx).await?;
         if now < row.try_get::<i64, _>("admitted_at")? {

@@ -245,6 +245,28 @@ impl Store {
         qualified: &QualifiedFunding,
         now: i64,
     ) -> Result<Grant> {
+        self.admit_for_provider(plan, qualified, now, false).await
+    }
+
+    pub async fn admit_cashu(
+        &self,
+        plan: &Plan,
+        qualified: &QualifiedFunding,
+        now: i64,
+    ) -> Result<Grant> {
+        if qualified.retained_allocations().is_empty() {
+            bail!("Cashu payout requires retained funding");
+        }
+        self.admit_for_provider(plan, qualified, now, true).await
+    }
+
+    async fn admit_for_provider(
+        &self,
+        plan: &Plan,
+        qualified: &QualifiedFunding,
+        now: i64,
+        cashu: bool,
+    ) -> Result<Grant> {
         validate_admission(plan, qualified, &self.policy, now)?;
         let plan_json = serde_json::to_string(plan)?;
         let mut evidence = serde_json::json!({
@@ -252,6 +274,9 @@ impl Store {
             "threshold_sats":qualified.threshold_sats(),"core_uid":qualified.core_uid(),
             "provider":qualified.provider(),"sources":qualified.sources(),
         });
+        if cashu {
+            evidence["execution_provider"] = serde_json::json!("cashu");
+        }
         // Keep legacy grant evidence byte-identical when it has no Cashu allocation.
         if !qualified.retained_allocations().is_empty() {
             evidence["retained_allocations"] =

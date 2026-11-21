@@ -27,6 +27,7 @@ impl Store {
         }
         let mut tx = self.pool.begin().await?;
         write_lock(&mut tx).await?;
+        super::invoices::ensure_strike_grant(&mut tx, grant).await?;
         super::outcomes::ensure_open(&mut tx, grant, member).await?;
         let old: Option<String> = sqlx::query_scalar(
             "SELECT id FROM payout_fee_probe_intents WHERE grant_id=? AND member=? AND round=?",

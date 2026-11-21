@@ -258,7 +258,11 @@ impl Intake {
                 };
                 let mut session = Session::new(expected, &page)?;
                 loop {
-                    session.accept(&page, &self.verifier).await?;
+                    if export.plan.funding_source.is_strike() {
+                        session.accept(&page, &self.verifier).await?;
+                    } else {
+                        session.accept_cashu(&page, &policy.scope.provider).await?;
+                    }
                     if session.is_complete() {
                         break;
                     }

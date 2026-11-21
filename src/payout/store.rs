@@ -536,7 +536,12 @@ fn validate_admission(plan: &Plan, q: &QualifiedFunding, policy: &Policy, now: i
             .checked_add(source.consumed_sats)
             .context("payout funding overflow")?;
     }
-    if total != plan.reserved_sats || real != q.funding().strike_sats {
+    let expected_strike = if q.funding_source().is_strike() {
+        q.funding().strike_sats
+    } else {
+        0
+    };
+    if total != plan.reserved_sats || real != expected_strike {
         bail!("payout allocation/funding total mismatch");
     }
     Ok(())

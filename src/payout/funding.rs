@@ -243,6 +243,29 @@ impl Session {
         page: &AuthenticatedFundingPage,
         verifier: &SourceVerifier,
     ) -> Result<()> {
+        self.accept_page(page, &verifier.scope, Some(verifier))
+            .await
+    }
+
+    /// Mixed historical feeds may contain Strike anchors. They confer no
+    /// spending authority on a grant reserved against retained Cashu.
+    pub async fn accept_cashu(
+        &mut self,
+        page: &AuthenticatedFundingPage,
+        journal_scope: &ProviderScope,
+    ) -> Result<()> {
+        if self.funding_source.is_strike() {
+            bail!("Strike funding requires provider verification");
+        }
+        self.accept_page(page, journal_scope, None).await
+    }
+
+    async fn accept_page(
+        &mut self,
+        page: &AuthenticatedFundingPage,
+        scope: &ProviderScope,
+        verifier: Option<&SourceVerifier>,
+    ) -> Result<()> {
         let p = page.page();
         p.validate()?;
         if self.done
@@ -252,10 +275,7 @@ impl Session {
             || p.funding_source != self.funding_source
             || p.funding != self.funding
             || p.threshold_sats != self.threshold_sats
-            || self
-                .provider
-                .as_ref()
-                .is_some_and(|old| old != &verifier.scope)
+            || self.provider.as_ref().is_some_and(|old| old != scope)
             || self.count + p.parts.len() > usize::from(self.expected.max_parts)
         {
             bail!("payout funding sequence/provider changed or exceeded bound");
@@ -284,10 +304,17 @@ impl Session {
                 if !seen.insert(anchor.receive_id) {
                     bail!("same provider receive appears in multiple consumed lots");
                 }
-                verifier.verify(anchor).await?;
+
                 real = real
                     .checked_add(part.consumed_sats)
                     .context("real funding sum overflow")?;
+                if !self.funding_source.is_strike() {
+                    continue;
+                }
+                verifier
+                    .context("missing Strike funding verifier")?
+                    .verify(anchor)
+                    .await?;
                 sources.push(QualifiedSource {
                     ledger_id: part.ledger_id,
                     consumed_sats: part.consumed_sats,
@@ -313,7 +340,7 @@ impl Session {
         self.retained_cashu_sats = retained;
         self.count += p.parts.len();
         self.done = !p.more;
-        self.provider = Some(verifier.scope.clone());
+        self.provider = Some(scope.clone());
         self.seen = seen;
         self.sources.extend(sources);
         self.retained_allocations.extend(allocations);

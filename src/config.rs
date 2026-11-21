@@ -19,7 +19,7 @@ pub const REQUIRED_PHASE1_LIGHTNING_USERS: [&str; 6] =
 pub struct AppConfig {
     pub service: ServiceConfig,
     pub database: DatabaseConfig,
-    pub strike: StrikeConfig,
+    pub strike: Option<StrikeConfig>,
     pub lnurl: LnurlConfig,
     #[serde(default)]
     pub lightning_address: Vec<LightningAddressConfig>,
@@ -55,16 +55,28 @@ impl AppConfig {
         }
         crate::sqlite::durable_options(&self.database.url).context("invalid database.url")?;
 
-        let strike_url = Url::parse(&self.strike.api_url).context("invalid strike.api_url")?;
-        if strike_url.scheme() != "https" || strike_url.host_str().is_none() {
-            bail!("strike.api_url must use https:// with a host");
-        }
-        if !strike_url.username().is_empty()
-            || strike_url.password().is_some()
-            || strike_url.query().is_some()
-            || strike_url.fragment().is_some()
+        if let Some(strike) = &self.strike {
+            let strike_url = Url::parse(&strike.api_url).context("invalid strike.api_url")?;
+            if strike_url.scheme() != "https" || strike_url.host_str().is_none() {
+                bail!("strike.api_url must use https:// with a host");
+            }
+            if !strike_url.username().is_empty()
+                || strike_url.password().is_some()
+                || strike_url.query().is_some()
+                || strike_url.fragment().is_some()
+            {
+                bail!("strike.api_url must not contain credentials, query, or fragment");
+            }
+        } else if self.lnurl.wallet_backend != WalletBackend::Breez
+            || self.lnurl.breez_collector.is_none()
+            || self.cashu_treasury.is_some()
+            || self.contact.is_some()
+            || self
+                .core_bridge
+                .as_ref()
+                .is_some_and(|b| b.payout_account_id.is_some())
         {
-            bail!("strike.api_url must not contain credentials, query, or fragment");
+            bail!("configuration requests a Strike-dependent service without a Strike backend");
         }
 
         if let Some(collector) = &self.lnurl.breez_collector {
@@ -462,9 +474,9 @@ mod tests {
             database: DatabaseConfig {
                 url: "sqlite:///var/lib/lightning-goats/lightning-goats.db".to_owned(),
             },
-            strike: StrikeConfig {
+            strike: Some(StrikeConfig {
                 api_url: "https://api.strike.me/".to_owned(),
-            },
+            }),
             lnurl: LnurlConfig {
                 public_base_url: "https://lightning-goats.com/".to_owned(),
                 invoice_expiry_seconds: 300,
@@ -497,6 +509,20 @@ mod tests {
             core_bridge: None,
             contact: None,
         }
+    }
+
+    #[test]
+    fn breez_can_run_without_strike_configuration() {
+        let mut config = valid_config();
+        config.strike = None;
+        assert!(config.validate().is_err());
+        config.lnurl.wallet_backend = WalletBackend::Breez;
+        config.lnurl.invoice_expiry_seconds = 900;
+        config.lnurl.breez_collector = Some(BreezCollectorConfig {
+            socket: "/run/lightning-goats/project.sock".into(),
+            peer_uid: 1001,
+        });
+        config.validate().unwrap();
     }
 
     #[test]
@@ -543,7 +569,7 @@ mod tests {
     #[test]
     fn rejects_insecure_strike_api_url() {
         let mut config = valid_config();
-        config.strike.api_url = "http://api.strike.me/".to_owned();
+        config.strike.as_mut().unwrap().api_url = "http://api.strike.me/".to_owned();
         assert!(config.validate().is_err());
     }
 

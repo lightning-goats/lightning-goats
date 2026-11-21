@@ -176,7 +176,7 @@ mod tests {
         assert!(prepare(&root, &"a".repeat(40)).await.is_err());
         assert_eq!(before, fs::read(root.join("PREPARED.json")).unwrap());
         let cfg = AppConfig::load(&root.join("daemon.toml")).unwrap();
-        assert_eq!(cfg.strike.api_url, "https://127.0.0.1:9/");
+        assert_eq!(cfg.strike.as_ref().unwrap().api_url, "https://127.0.0.1:9/");
         assert_eq!(cfg.service.mode, RuntimeMode::Canary);
         assert_eq!(
             fs::metadata(root.join("synthetic-credentials/strike-api-key"))

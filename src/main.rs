@@ -51,7 +51,7 @@ struct AppState {
     config: Arc<AppConfig>,
     ledger: LedgerStore,
     gateway: GatewayClient,
-    strike: StrikeRuntime,
+    strike: Option<StrikeRuntime>,
     lnurl: LnurlService,
     renderer: MessageRenderer,
     status_slots: Arc<tokio::sync::Semaphore>,
@@ -132,7 +132,10 @@ async fn main() -> Result<()> {
     {
         tracing::warn!(%error,"initial feeding message state unavailable; settlement is unaffected");
     }
-    let strike = StrikeRuntime::from_config(&config.strike).await?;
+    let strike = match &config.strike {
+        Some(config) => Some(StrikeRuntime::from_config(config).await?),
+        None => None,
+    };
     let lnurl = LnurlService::new(
         &config.lnurl,
         &config.lightning_address,
@@ -170,7 +173,11 @@ async fn main() -> Result<()> {
                 .cashu_receipts
                 .as_ref()
                 .context("treasury wallet registration missing")?;
-            treasury.worker(receipts, ledger.clone(), strike.clone())
+            treasury.worker(
+                receipts,
+                ledger.clone(),
+                strike.clone().context("Strike treasury backend missing")?,
+            )
         })
         .transpose()?
         .flatten();
@@ -204,7 +211,12 @@ async fn main() -> Result<()> {
         .core_bridge
         .as_ref()
         .and_then(|bridge| bridge.payout_account_id)
-        .map(|id| strike.payout_reader(id))
+        .map(|id| {
+            strike
+                .as_ref()
+                .context("Strike payout backend missing")?
+                .payout_reader(id)
+        })
         .transpose()?;
     #[cfg(unix)]
     let core_bridge = config.core_bridge.clone().map(|bridge| {
@@ -217,7 +229,13 @@ async fn main() -> Result<()> {
             ),
         )
     });
-    let mut recovery = tokio::spawn(strike.run_recovery_worker(ledger.clone()));
+    let recovery_ledger = ledger.clone();
+    let mut recovery = tokio::spawn(async move {
+        match strike {
+            Some(runtime) => runtime.run_recovery_worker(recovery_ledger).await,
+            None => std::future::pending().await,
+        }
+    });
     let mut feeder = tokio::spawn(run_feed_worker(
         ledger.clone(),
         gateway.clone(),
@@ -555,6 +573,9 @@ async fn strike_webhook(
     headers: HeaderMap,
     body: Bytes,
 ) -> StatusCode {
+    let Some(strike) = &state.strike else {
+        return StatusCode::NOT_FOUND;
+    };
     if !headers
         .get("content-type")
         .and_then(|v| v.to_str().ok())
@@ -580,11 +601,11 @@ async fn strike_webhook(
         return StatusCode::UNAUTHORIZED;
     };
 
-    if let Err(error) = state.strike.verify_webhook_signature(&body, signature) {
+    if let Err(error) = strike.verify_webhook_signature(&body, signature) {
         tracing::warn!(%error, "rejected Strike webhook with invalid signature");
         return StatusCode::UNAUTHORIZED;
     }
-    let event = match state.strike.parse_completed_event(&body) {
+    let event = match strike.parse_completed_event(&body) {
         Ok(event) => event,
         Err(error) => {
             tracing::warn!(%error, "rejected unsupported or malformed signed Strike webhook");
@@ -685,8 +706,10 @@ async fn contact_create(
         );
     };
     // No raw body, deserializer, capability or provider error enters diagnostics.
-    match state
-        .strike
+    let Some(strike) = &state.strike else {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    };
+    match strike
         .create_contact_invoice(&state.ledger, &intent, &capability)
         .await
     {
@@ -870,7 +893,7 @@ mod tests {
             config: Arc::new(config),
             ledger: ledger.clone(),
             gateway: GatewayClient::new("http://127.0.0.1:9/").unwrap(),
-            strike,
+            strike: Some(strike),
             lnurl,
             renderer: MessageRenderer::embedded().unwrap(),
             status_slots: Arc::new(tokio::sync::Semaphore::new(4)),

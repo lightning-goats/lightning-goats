@@ -567,11 +567,14 @@ async fn main() -> Result<()> {
                 }
                 let existing = ledger.preview_failed_cost(decision).await?;
                 let receipt = if apply && existing.is_none() {
-                    if config.strike.api_url.trim_end_matches('/') != "https://api.strike.me" {
+                    let strike = config
+                        .strike
+                        .as_ref()
+                        .ok_or_else(|| anyhow::anyhow!("Strike settlement backend missing"))?;
+                    if strike.api_url.trim_end_matches('/') != "https://api.strike.me" {
                         bail!("cost recovery requires the fixed production Strike API");
                     }
-                    let client =
-                        lightning_goats::strike::StrikeClient::from_config(&config.strike).await?;
+                    let client = lightning_goats::strike::StrikeClient::from_config(strike).await?;
                     let reader =
                         lightning_goats::payout::outcome::Reader::new(client, decision.account_id)?;
                     Some(ledger.reconcile_failed_cost(&approved, &reader).await?)

@@ -1053,6 +1053,12 @@ async fn mixed_funding_keeps_the_consumed_claim_for_custody_verification() {
         .await
         .unwrap();
     let now = f.reservation.created_at + 10;
+    qualified.retained_allocations[0].anchor.source = CashuFundingSource::Acquisition;
+    assert!(store.admit_cashu(&f.plan, &qualified, now).await.is_err());
+    qualified.retained_allocations[0] = allocation.clone();
+    qualified.retained_allocations[0].consumed_sats = f.plan.reserved_sats - 1;
+    assert!(store.admit_cashu(&f.plan, &qualified, now).await.is_err());
+    qualified.retained_allocations[0] = allocation.clone();
     let grant = store.admit_cashu(&f.plan, &qualified, now).await.unwrap();
     drop(store);
     let reopened = crate::payout::store::Store::connect(&url, policy)

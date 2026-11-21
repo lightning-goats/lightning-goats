@@ -254,8 +254,22 @@ impl Store {
         qualified: &QualifiedFunding,
         now: i64,
     ) -> Result<Grant> {
-        if qualified.retained_allocations().is_empty() {
-            bail!("Cashu payout requires retained funding");
+        let available = qualified
+            .retained_allocations()
+            .iter()
+            .filter(|part| {
+                matches!(
+                    part.anchor.source,
+                    crate::reward_funding::CashuFundingSource::ProjectInvoice
+                )
+            })
+            .try_fold(0u64, |total, part| {
+                total
+                    .checked_add(part.consumed_sats)
+                    .context("Cashu grant funding overflow")
+            })?;
+        if available == 0 || plan.reserved_sats > available {
+            bail!("Cashu grant exceeds available project custody");
         }
         self.admit_for_provider(plan, qualified, now, true).await
     }

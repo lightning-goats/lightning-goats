@@ -93,7 +93,9 @@ impl LedgerStore {
             let ledger_id: i64 = row.try_get("ledger_id")?;
             let kind: String = row.try_get("kind")?;
             let hash: String = row.try_get("proof_hash")?;
-            let anchor = if let Some(intent) = row.try_get::<Option<String>, _>("intent_id")? {
+            let anchor = if kind == "conversion" {
+                None
+            } else if let Some(intent) = row.try_get::<Option<String>, _>("intent_id")? {
                 Some(feed_proceeds::anchor(&mut tx, &intent).await?)
             } else {
                 let actual = lot_proof(&mut tx, ledger_id).await?;
@@ -106,7 +108,13 @@ impl LedgerStore {
                     None
                 }
             };
-            let cashu_anchor = if anchor.is_none() && funding.retained_cashu_sats > 0 {
+            let cashu_anchor = if kind == "conversion" {
+                Some(CashuFundingAnchor {
+                    source: CashuFundingSource::ProjectInvoice,
+                    claim_id: row.try_get::<String, _>("intent_id")?.parse()?,
+                    evidence_digest: hash,
+                })
+            } else if anchor.is_none() && funding.retained_cashu_sats > 0 {
                 retained_anchor(&mut tx, ledger_id).await?
             } else {
                 None
@@ -597,6 +605,7 @@ async fn consume(
             } else if let Some((id, _)) = feed {
                 hash_retained_claim(tx, ledger, take, &mut hash).await?;
                 feed_proceeds::freeze(tx, id, ledger).await?;
+                hash_conversion_proceeds(tx, id, ledger, &mut hash).await?;
                 add_proceeds(tx, id, ledger, &mut hash, &mut strike).await?;
             }
             left -= take;
@@ -664,6 +673,37 @@ async fn retained_anchor(
             })
         })
         .transpose()
+}
+
+async fn hash_conversion_proceeds(
+    tx: &mut Transaction<'_, Sqlite>,
+    feed: Uuid,
+    ledger: i64,
+    hash: &mut Sha256,
+) -> Result<u64> {
+    let rows = sqlx::query(
+        "SELECT p.intent_id,p.sats,c.proof_digest FROM feed_conversion_proceeds p
+        JOIN breez_collected_claims c ON c.request_id=p.intent_id
+        WHERE p.request_id=? AND p.ledger_id=? ORDER BY p.intent_id",
+    )
+    .bind(feed.to_string())
+    .bind(ledger)
+    .fetch_all(&mut **tx)
+    .await?;
+    let mut total = 0u64;
+    for row in rows {
+        let id: String = row.try_get("intent_id")?;
+        let digest: String = row.try_get("proof_digest")?;
+        let sats = to_u64(row.try_get("sats")?, "conversion proceeds")?;
+        hash_part(
+            hash,
+            &json!(["conversion_proceeds", ledger, id, digest, sats]),
+        )?;
+        total = total
+            .checked_add(sats)
+            .context("conversion proceeds overflow")?;
+    }
+    Ok(total)
 }
 
 async fn add_proceeds(
@@ -749,6 +789,11 @@ pub(crate) async fn confirmed_funding(
                 retained_cashu_sats = retained_cashu_sats
                     .checked_add(hash_retained_claim(tx, ledger, sats, &mut hash).await?)
                     .context("retained Cashu funding overflow")?;
+            }
+            if schema >= 35 && kind != "strike_btc" {
+                retained_cashu_sats = retained_cashu_sats
+                    .checked_add(hash_conversion_proceeds(tx, id, ledger, &mut hash).await?)
+                    .context("retained conversion funding overflow")?;
             }
             if schema >= 29 && kind != "strike_btc" {
                 add_proceeds(tx, id, ledger, &mut hash, &mut strike).await?;

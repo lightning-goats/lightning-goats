@@ -180,8 +180,9 @@ class ClaimStore:
             digest, budget = terms["evidence_digest"], terms["consumed_sats"]
             row = self.db.execute("SELECT proofs,terms FROM project_claim WHERE id=?",
                                   (claim_id,)).fetchone()
+            attribution = json.loads(row[1])["attribution"] if row else {}
             if (row is None or row[0] is None or hashlib.sha256(row[0].encode()).hexdigest() != digest
-                    or json.loads(row[1])["attribution"].get("credit_pool") != "herd"
+                    or (attribution.get("credit_pool") != "herd" and attribution.get("purpose") != "treasury_conversion")
                     or type(budget) is not int or budget <= 0
                     or budget > sum(p["amount"] for p in json.loads(row[0]))):
                 raise ValueError("payout allocation conflicts with local custody")

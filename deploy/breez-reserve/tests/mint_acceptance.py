@@ -607,6 +607,9 @@ def main():
                     time.sleep(.1)
                 status = create({"treasury_claim_status": conversion_id}, claims, None, None, None)
                 assert status["amount_sat"] == 8 and status["proof_digest"]
+                conversion_inputs = claims.reserve_payout(str(uuid.uuid4()), str(uuid.uuid4()), "cc"*32,
+                    7, 1, {conversion_id: {"consumed_sats": 8, "evidence_digest": status["proof_digest"]}})
+                assert sum(p["amount"] for p in conversion_inputs) == 8
                 for field in ("claim_status", "contact_claim_status"):
                     try:
                         create({field: conversion_id}, claims, None, None, None)

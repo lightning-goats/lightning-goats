@@ -25,7 +25,7 @@ static CORE: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 static MEMBERSHIP: sqlx::migrate::Migrator = sqlx::migrate!("./cyberherd-migrations");
 static PAYOUT: sqlx::migrate::Migrator = sqlx::migrate!("./payout-migrations");
 static SIGNER: sqlx::migrate::Migrator = sqlx::migrate!("./signer-migrations");
-pub(super) const CURRENT_CORE_SCHEMA: i64 = 34;
+pub(super) const CURRENT_CORE_SCHEMA: i64 = 35;
 
 #[derive(Clone, Copy)]
 enum ReviewScope {

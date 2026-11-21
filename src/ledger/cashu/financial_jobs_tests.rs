@@ -344,5 +344,10 @@ async fn project_treasury_invoice_reopens_without_issuing_or_crediting_again() {
     let range: (i64,i64,i64) = sqlx::query_as("SELECT start_sats,input_sats,deposit_sats FROM cashu_funding_ranges WHERE intent_id=?")
         .bind(intent.id.to_string()).fetch_one(&ledger.pool).await.unwrap();
     assert_eq!(range, (0, 1000, intent.deposit_sats as i64));
-    assert!(ledger.begin_feed_attempt(1000).await.unwrap().is_some());
+    let feed = ledger.begin_feed_attempt(1000).await.unwrap().unwrap();
+    ledger.confirm_feed_attempt(feed).await.unwrap();
+    let mut tx = ledger.pool.begin().await.unwrap();
+    let funding = crate::ledger::inspect_confirmed_reward_funding(&mut tx,feed).await.unwrap().unwrap();
+    assert_eq!((funding.strike_sats, funding.retained_cashu_sats),(0,intent.deposit_sats));
+    tx.rollback().await.unwrap();
 }

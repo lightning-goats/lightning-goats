@@ -18,9 +18,23 @@ pub(in crate::ledger) async fn freeze(
                SUM(sats) AS last FROM feed_reward_funding_parts WHERE ledger_id=?2
     ), proceeds AS (
         SELECT intent_id, MIN(last,start_sats+deposit_sats)-MAX(first,start_sats) AS sats
-        FROM cashu_settled_ranges,consumed WHERE ledger_id=?2
+        FROM cashu_funding_ranges g,consumed WHERE ledger_id=?2
+          AND EXISTS(SELECT 1 FROM cashu_treasury_completions c WHERE c.intent_id=g.intent_id)
     ) INSERT INTO feed_cashu_proceeds(request_id,ledger_id,intent_id,sats)
       SELECT ?1,?2,intent_id,sats FROM proceeds WHERE sats>0",
+    )
+    .bind(feed.to_string())
+    .bind(ledger)
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query(
+        "WITH consumed AS (
+            SELECT COALESCE(SUM(CASE WHEN request_id!=?1 THEN sats ELSE 0 END),0) AS first,
+                   SUM(sats) AS last FROM feed_reward_funding_parts WHERE ledger_id=?2
+        ) INSERT INTO feed_conversion_proceeds(request_id,ledger_id,intent_id,sats)
+          SELECT ?1,?2,g.intent_id,MIN(last,g.start_sats+g.deposit_sats)-MAX(first,g.start_sats)
+          FROM cashu_funding_ranges g JOIN breez_treasury_wallet_results w USING(intent_id),consumed
+          WHERE g.ledger_id=?2 AND MIN(last,g.start_sats+g.deposit_sats)>MAX(first,g.start_sats)",
     )
     .bind(feed.to_string())
     .bind(ledger)
@@ -78,6 +92,8 @@ pub(in crate::ledger) async fn anchor(
 // cursor per distinct Lightning receive so payout qualifies a batch only once.
 pub(in crate::ledger) const PAGE: &str = "WITH original AS (
     SELECT p.ledger_id,p.sats-COALESCE((SELECT SUM(c.sats) FROM feed_cashu_proceeds c
+        WHERE c.request_id=p.request_id AND c.ledger_id=p.ledger_id),0)
+        -COALESCE((SELECT SUM(c.sats) FROM feed_conversion_proceeds c
         WHERE c.request_id=p.request_id AND c.ledger_id=p.ledger_id),0) AS sats,
         l.kind,l.proof_hash,NULL AS intent_id FROM feed_reward_funding_parts p
         JOIN reward_funding_lots l USING(ledger_id) WHERE p.request_id=?1
@@ -85,6 +101,11 @@ pub(in crate::ledger) const PAGE: &str = "WITH original AS (
     SELECT (SELECT MAX(ledger_id) FROM original)+ROW_NUMBER() OVER(ORDER BY intent_id) AS ledger_id,
         SUM(sats) AS sats,'cashu_deposit' AS kind,'' AS proof_hash,intent_id FROM feed_cashu_proceeds
         WHERE request_id=?1 GROUP BY intent_id
+), conversions AS (
+    SELECT (SELECT MAX(ledger_id) FROM original)+(SELECT COUNT(*) FROM deposits)
+        +ROW_NUMBER() OVER(ORDER BY intent_id) AS ledger_id,SUM(sats) AS sats,
+        'conversion' AS kind,c.proof_digest AS proof_hash,intent_id FROM feed_conversion_proceeds p
+        JOIN breez_collected_claims c ON c.request_id=p.intent_id WHERE p.request_id=?1 GROUP BY intent_id
 ), funding_parts AS (
-    SELECT * FROM original WHERE sats>0 UNION ALL SELECT * FROM deposits
+    SELECT * FROM original WHERE sats>0 UNION ALL SELECT * FROM deposits UNION ALL SELECT * FROM conversions
 )";

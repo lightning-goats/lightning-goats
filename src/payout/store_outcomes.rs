@@ -86,6 +86,54 @@ impl Store {
     /// Freeze all rows once, only after every row is terminal or durably closed.
     /// This is an attestation, not permission to release a single reserved sat.
     pub async fn freeze_outcomes(&self, grant: Uuid, now: i64) -> Result<Header> {
+        self.freeze_verified_rows(grant, now, None).await
+    }
+
+    #[cfg(unix)]
+    pub(crate) async fn freeze_cashu_outcomes(
+        &self,
+        grant: Uuid,
+        socket: &std::path::Path,
+    ) -> Result<bool> {
+        let rows = sqlx::query("SELECT r.member,r.fee_limit_sats,v.intent_id FROM payout_rows r LEFT JOIN payout_invoice_intents i ON i.grant_id=r.grant_id AND i.member=r.member LEFT JOIN payout_invoices v ON v.intent_id=i.id WHERE r.grant_id=? ORDER BY r.member")
+            .bind(grant.to_string()).fetch_all(&self.pool).await?;
+        let mut paid = std::collections::BTreeMap::new();
+        for row in rows {
+            let Some(id) = row.try_get::<Option<String>, _>("intent_id")? else {
+                return Ok(false);
+            };
+            let invoice = self
+                .saved_invoice(id.parse()?)
+                .await?
+                .context("missing Cashu payout invoice")?;
+            let fee_limit = u64::try_from(row.try_get::<i64, _>("fee_limit_sats")?)?;
+            let receipt = crate::payout::cashu::lookup(socket, 0, &invoice, fee_limit).await?;
+            let Some(fee_sats) =
+                receipt.verified_fee(invoice.payment_hash(), invoice.amount_sats(), fee_limit)?
+            else {
+                return Ok(false);
+            };
+            paid.insert(
+                row.try_get::<String, _>("member")?,
+                Disposition::CashuPaid {
+                    disposition_id: invoice.intent_id(),
+                    payment_hash: invoice.payment_hash().to_string(),
+                    amount_sats: invoice.amount_sats(),
+                    fee_sats,
+                },
+            );
+        }
+        self.freeze_verified_rows(grant, crate::cyberherd::calendar::now()?, Some(&paid))
+            .await?;
+        Ok(true)
+    }
+
+    async fn freeze_verified_rows(
+        &self,
+        grant: Uuid,
+        now: i64,
+        paid: Option<&std::collections::BTreeMap<String, Disposition>>,
+    ) -> Result<Header> {
         let mut tx = self.pool.begin().await?;
         write_lock(&mut tx).await?;
         if let Some((header, _)) = load_manifest(&mut tx, grant).await? {
@@ -97,6 +145,9 @@ impl Store {
                 .fetch_one(&mut *tx)
                 .await?;
         let evidence: serde_json::Value = serde_json::from_str(&evidence)?;
+        if (evidence["execution_provider"] == "cashu") != paid.is_some() {
+            bail!("outcome verifier differs from grant");
+        }
         let reservation: crate::reward_funding::Reservation =
             serde_json::from_value(evidence["reservation"].clone())?;
         if reservation.id != grant || now < reservation.created_at {
@@ -123,7 +174,12 @@ impl Store {
             .bind(&member)
             .fetch_optional(&mut *tx)
             .await?;
-            let disposition = if let Some(reason) = closure {
+            let disposition = if let Some(paid) = paid {
+                if closure.is_some() {
+                    bail!("Cashu payout conflicts with unsubmitted closure");
+                }
+                paid.get(&member).context("missing Cashu receipt")?.clone()
+            } else if let Some(reason) = closure {
                 Disposition::Unsubmitted {
                     reason: serde_json::from_str(&reason)?,
                 }

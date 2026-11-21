@@ -221,11 +221,12 @@ async fn main() -> Result<()> {
     #[cfg(unix)]
     let core_bridge = config.core_bridge.clone().map(|bridge| {
         tokio::spawn(
-            lightning_goats::core_bridge::unix::run_optional_with_reader(
+            lightning_goats::core_bridge::unix::run_optional_with_readers(
                 Some(bridge),
                 ledger.clone(),
                 config.service.mode,
                 payout_reader,
+                config.lnurl.breez_collector.clone(),
             ),
         )
     });

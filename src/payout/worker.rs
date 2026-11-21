@@ -460,7 +460,11 @@ impl CashuWorker {
             return Ok(Step::Idle);
         };
         let Some(member) = work.member else {
-            return Ok(Step::Waiting);
+            return Ok(Step::Outcome(
+                self.store
+                    .reconcile_outcomes(&self.core, work.grant)
+                    .await?,
+            ));
         };
         let intent = self.store.saved_invoice_intent(work.grant, &member).await?;
         let enabled = policy.execution_enabled
@@ -476,7 +480,10 @@ impl CashuWorker {
             let limit = self.store.saved_fee_limit(work.grant, &member).await?;
             let status = super::cashu::lookup(socket, 0, &invoice, limit).await?;
             match status {
-                super::cashu::CollectorResult::Paid { .. } => return Ok(Step::Observed),
+                super::cashu::CollectorResult::Paid { .. } => {
+                    self.store.freeze_cashu_outcomes(work.grant, socket).await?;
+                    return Ok(Step::Observed);
+                }
                 super::cashu::CollectorResult::Pending { .. } => return Ok(Step::Waiting),
                 _ => {}
             }

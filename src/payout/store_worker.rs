@@ -169,7 +169,7 @@ WITH grants AS (
  UNION ALL
  SELECT 'outcome:'||g.id,g.id,NULL,g.admitted_at FROM grants g
  WHERE NOT EXISTS(SELECT 1 FROM payout_outcome_acks a WHERE a.grant_id=g.id)
- AND NOT EXISTS(SELECT 1 FROM state s WHERE s.grant_id=g.id AND (s.conflicted OR (NOT s.closed AND NOT s.terminal)))
+ AND (EXISTS(SELECT 1 FROM payout_outcome_manifests m WHERE m.grant_id=g.id) OR NOT EXISTS(SELECT 1 FROM state s WHERE s.grant_id=g.id AND (s.conflicted OR (NOT s.closed AND NOT s.terminal))))
 )
 SELECT j.* FROM jobs j LEFT JOIN payout_worker_attempts a ON a.work_key=j.work_key ORDER BY COALESCE(a.sequence,0),j.admitted_at,j.work_key LIMIT 1
 "#).bind(provider).fetch_optional(&mut *tx).await?;

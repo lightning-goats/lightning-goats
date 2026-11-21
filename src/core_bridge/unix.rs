@@ -40,9 +40,11 @@ pub struct Server {
     payout_peer_uid: Option<u32>,
     payout_execution_enabled: bool,
     payout_account_id: Option<uuid::Uuid>,
+    collector: Option<crate::config::BreezCollectorConfig>,
 }
 
 struct Resources {
+    collector: Option<crate::config::BreezCollectorConfig>,
     reads: Arc<Semaphore>,
     verification: Arc<Semaphore>,
     reader: Option<Arc<crate::payout::outcome::Reader>>,
@@ -200,6 +202,7 @@ impl Server {
             payout_peer_uid: config.payout_peer_uid,
             payout_execution_enabled: config.payout_execution_enabled,
             payout_account_id: config.payout_account_id,
+            collector: None,
         })
     }
 
@@ -228,6 +231,7 @@ impl Server {
         // A short FIFO wait
         // lets synchronized intake/view calls take turns; expiry still rejects.
         let resources = Arc::new(Resources {
+            collector: self.collector,
             reads: Arc::new(Semaphore::new(1)),
             verification: Arc::new(Semaphore::new(1)),
             reader,
@@ -303,19 +307,32 @@ async fn serve_one(
     // Provider waits do not hold the ordinary event/safety IPC permit or a DB
     // transaction. At most one verification request exists, with no wait queue.
     if let Request::PayoutOutcome { packet } = &request {
-        let response = match (
-            &resources.reader,
-            Arc::clone(&resources.verification).try_acquire_owned(),
-        ) {
-            (Some(reader), Ok(_permit)) => {
-                match ledger.reconcile_payout_outcome(packet, reader).await {
-                    Ok(progress) => Response::PayoutOutcome {
-                        progress: Box::new(progress),
-                    },
-                    Err(_) => Response::Rejected,
+        let response = if let Ok(_permit) = Arc::clone(&resources.verification).try_acquire_owned()
+        {
+            let verified = match (
+                &packet.row.disposition,
+                &resources.collector,
+                &resources.reader,
+            ) {
+                (crate::payout::outcome::Disposition::CashuPaid { .. }, Some(collector), _) => {
+                    ledger.reconcile_cashu_outcome(packet, collector).await
                 }
+                (
+                    crate::payout::outcome::Disposition::Payment { .. }
+                    | crate::payout::outcome::Disposition::Unsubmitted { .. },
+                    _,
+                    Some(reader),
+                ) => ledger.reconcile_payout_outcome(packet, reader).await,
+                _ => Err(anyhow::anyhow!("original payout verifier unavailable")),
+            };
+            match verified {
+                Ok(progress) => Response::PayoutOutcome {
+                    progress: Box::new(progress),
+                },
+                Err(_) => Response::Rejected,
             }
-            _ => Response::Rejected,
+        } else {
+            Response::Rejected
         };
         return write_frame(&mut stream, &response).await;
     }
@@ -1090,6 +1107,16 @@ pub async fn run_optional_with_reader(
     mode: RuntimeMode,
     reader: Option<crate::payout::outcome::Reader>,
 ) {
+    run_optional_with_readers(config, ledger, mode, reader, None).await;
+}
+
+pub async fn run_optional_with_readers(
+    config: Option<BridgeConfig>,
+    ledger: LedgerStore,
+    mode: RuntimeMode,
+    reader: Option<crate::payout::outcome::Reader>,
+    collector: Option<crate::config::BreezCollectorConfig>,
+) {
     let reader = reader.map(Arc::new);
     let Some(config) = config else {
         std::future::pending::<()>().await;
@@ -1113,7 +1140,8 @@ pub async fn run_optional_with_reader(
             continue;
         }
         match Server::bind(&config).await {
-            Ok(server) => {
+            Ok(mut server) => {
+                server.collector = collector.clone();
                 let _ = server
                     .run_with_reader(ledger.clone(), mode, reader.clone())
                     .await;
@@ -1212,6 +1240,7 @@ mod tests {
         use std::task::Poll;
         let (_root, _config, ledger) = fixture(0).await;
         let resources = Resources {
+            collector: None,
             reads: Arc::new(Semaphore::new(1)),
             verification: Arc::new(Semaphore::new(1)),
             reader: None,
@@ -1271,6 +1300,7 @@ mod tests {
     async fn occupied_read_turn_expires_and_does_not_strand_a_later_request() {
         let (_root, _config, ledger) = fixture(0).await;
         let resources = Resources {
+            collector: None,
             reads: Arc::new(Semaphore::new(1)),
             verification: Arc::new(Semaphore::new(1)),
             reader: None,

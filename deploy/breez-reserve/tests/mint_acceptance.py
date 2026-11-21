@@ -281,7 +281,7 @@ def main():
                 from claim_store import ClaimStore
                 from project_quote import issue
                 from collect import collect, execute_payout, submit_payout
-                from invoice_server import create, handle
+                from invoice_server import create, handle, handle_request
                 import socket
                 import struct
 
@@ -485,7 +485,20 @@ def main():
                 assert reserve.pay_attempts == 0
                 claims.db.close()
                 claims = ClaimStore(claim_dir)
-                paid = execute_payout(claims, viewer, authorization, keyset, {keyset: keys})
+                body = json.dumps(authorization).encode()
+                def dispatch_payout(request):
+                    return execute_payout(claims, viewer, request, keyset, {keyset: keys})
+
+                for expected_uid in (os.getuid() + 1, os.getuid()):
+                    left, right = socket.socketpair()
+                    with left, right, left.makefile("rb") as replies:
+                        left.sendall(struct.pack("!I", len(body)) + body)
+                        handle_request(right, expected_uid, dispatch_payout)
+                        if expected_uid != os.getuid():
+                            assert reserve.pay_attempts == 0
+                            continue
+                        size, = struct.unpack("!I", replies.read(4))
+                        paid = json.loads(replies.read(size))
                 assert paid["state"].upper() == "PENDING"
                 assert wallet_state(viewer, payout_proof) == "PENDING"
                 claims.db.close()

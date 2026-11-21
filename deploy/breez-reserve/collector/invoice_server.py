@@ -51,6 +51,10 @@ def create(request, store, client, token, keyset):
 
 
 def handle(connection, peer_uid, store, client, token, keyset):
+    handle_request(connection, peer_uid, lambda request: create(request, store, client, token, keyset))
+
+
+def handle_request(connection, peer_uid, dispatch):
     _, uid, _ = struct.unpack("3i", connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
     if uid != peer_uid:
         return
@@ -66,9 +70,9 @@ def handle(connection, peer_uid, store, client, token, keyset):
         if len(body) != size:
             return
         try:
-            reply = create(json.loads(body), store, client, token, keyset)
+            reply = dispatch(json.loads(body))
         except (KeyError, TypeError, ValueError, httpx.HTTPError):
-            reply = {"error": "project invoice unavailable"}
+            reply = {"error": "project request unavailable"}
         encoded = json.dumps(reply).encode()
         connection.sendall(struct.pack("!I", len(encoded)) + encoded)
 

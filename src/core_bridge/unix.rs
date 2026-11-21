@@ -74,6 +74,7 @@ impl Role {
                 request,
                 Request::FailedPayoutCost { .. }
                     | Request::PayoutFunding { .. }
+                    | Request::ClaimCashuExecution { .. }
                     | Request::ClaimPayoutExecution { .. }
                     | Request::PayoutExecutionState { .. }
                     | Request::PayoutOutcome { .. }
@@ -371,6 +372,27 @@ async fn serve_one(
                         page: page.map(Box::new),
                     },
                     Err(_) => Response::Rejected,
+                }
+            }
+            Request::ClaimCashuExecution { request } => {
+                if let Some(policy) = reward_policy {
+                    match ledger
+                        .claim_cashu_execution(
+                            &request,
+                            policy,
+                            payout_execution_enabled && mode.feeder_enabled(),
+                            mode.nostr_enabled(),
+                        )
+                        .await
+                    {
+                        Ok(observed_at) => Response::CashuExecutionClaim {
+                            request,
+                            observed_at,
+                        },
+                        Err(_) => Response::Rejected,
+                    }
+                } else {
+                    Response::Rejected
                 }
             }
             Request::ClaimPayoutExecution { request } => match ledger
@@ -674,6 +696,31 @@ impl Client {
             }
             Response::RewardResults { page: None } => Ok(None),
             _ => bail!("core rejected verified result read"),
+        }
+    }
+    pub async fn claim_cashu_execution(
+        &self,
+        original: &crate::payout::cashu::ExecutionRequest,
+    ) -> Result<super::AuthenticatedCashuLease> {
+        original.validate()?;
+        match self
+            .request(&Request::ClaimCashuExecution {
+                request: Box::new(original.clone()),
+            })
+            .await?
+        {
+            Response::CashuExecutionClaim {
+                request,
+                observed_at,
+            } if *request == *original => {
+                let lease = super::AuthenticatedCashuLease {
+                    request: *request,
+                    observed_at,
+                };
+                lease.terms(crate::cyberherd::calendar::now()?)?;
+                Ok(lease)
+            }
+            _ => bail!("core rejected Cashu execution claim or returned different terms"),
         }
     }
     pub async fn claim_execution(

@@ -86,6 +86,9 @@ pub enum Request {
         reservation: Box<crate::reward_funding::Reservation>,
         after: u16,
     },
+    ClaimCashuExecution {
+        request: Box<crate::payout::cashu::ExecutionRequest>,
+    },
     ClaimPayoutExecution {
         request: Box<crate::payout::execution::Request>,
     },
@@ -148,6 +151,10 @@ pub enum Response {
     },
     RewardResults {
         page: Option<Box<crate::payout::results::Page>>,
+    },
+    CashuExecutionClaim {
+        request: Box<crate::payout::cashu::ExecutionRequest>,
+        observed_at: i64,
     },
     PayoutExecutionClaim {
         lease: Box<crate::payout::execution::Lease>,
@@ -558,6 +565,28 @@ pub struct Feeding {
     pub funding: Option<crate::reward_funding::Funding>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub presentation: Option<crate::cyberherd::feeding_delivery::Proof>,
+}
+
+/// Constructed only after authenticating the core peer and matching its reply.
+pub struct AuthenticatedCashuLease {
+    request: crate::payout::cashu::ExecutionRequest,
+    observed_at: i64,
+}
+impl AuthenticatedCashuLease {
+    pub(crate) fn terms(
+        &self,
+        now: i64,
+    ) -> anyhow::Result<&crate::payout::cashu::ExecutionRequest> {
+        let expiry = self.request.validate()?;
+        anyhow::ensure!(
+            self.observed_at >= 0
+                && self.observed_at <= now
+                && now - self.observed_at <= 5
+                && u64::try_from(now)? < expiry,
+            "expired Cashu execution authority"
+        );
+        Ok(&self.request)
+    }
 }
 
 #[cfg(test)]

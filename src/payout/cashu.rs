@@ -123,6 +123,27 @@ impl CollectorResult {
     }
 }
 
+/// Submit only the collector payload committed by the fresh core claim.
+#[cfg(unix)]
+pub async fn submit(
+    socket: &std::path::Path,
+    peer_uid: u32,
+    lease: &crate::core_bridge::AuthenticatedCashuLease,
+    payload: &serde_json::Value,
+) -> Result<CollectorResult> {
+    crate::private_ipc::socket_path(socket)?;
+    let digest = hex::encode(Sha256::digest(serde_json::to_vec(payload)?));
+    let terms = lease.terms(crate::cyberherd::calendar::now()?)?;
+    ensure!(
+        terms.collector_payload_digest == digest,
+        "collector request differs from core execution claim"
+    );
+    let reply: CollectorResult =
+        crate::private_ipc::request(socket, peer_uid, payload, 65536, 30).await?;
+    reply.verified_fee(&terms.payment_hash, terms.amount_sat, terms.maximum_fee_sat)?;
+    Ok(reply)
+}
+
 /// Query the saved disposition over the collector socket. This request contains
 /// no grant allocations and cannot create a quote or submit proofs.
 #[cfg(unix)]

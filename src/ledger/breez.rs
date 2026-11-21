@@ -21,6 +21,7 @@ impl LedgerStore {
             "UPDATE breez_project_invoices SET next_poll=unixepoch()+30
              WHERE id=(SELECT i.id FROM breez_project_invoices i
                 WHERE i.invoice IS NOT NULL AND i.next_poll<=unixepoch()
+                  AND NOT EXISTS(SELECT 1 FROM breez_collected_claims c WHERE c.request_id=i.id)
                   AND NOT EXISTS(SELECT 1 FROM settled_payments s WHERE s.source='breez' AND s.source_id=i.id)
                 ORDER BY i.next_poll,i.created_at,i.id LIMIT 1)
              RETURNING id,payment_hash,intent",
@@ -31,14 +32,15 @@ impl LedgerStore {
         let id: String = row.try_get("id")?;
         let hash: String = row.try_get("payment_hash")?;
         let terms: Value = serde_json::from_str(&row.try_get::<String, _>("intent")?)?;
-        let status: ClaimStatus = crate::private_ipc::request(
-            &collector.socket,
-            collector.peer_uid,
-            &json!({"claim_status":id}),
-            65536,
-            20,
-        )
-        .await?;
+        let contact = terms["purpose"] == "contact_fee";
+        let lookup = if contact {
+            json!({"contact_claim_status":id})
+        } else {
+            json!({"claim_status":id})
+        };
+        let status: ClaimStatus =
+            crate::private_ipc::request(&collector.socket, collector.peer_uid, &lookup, 65536, 20)
+                .await?;
         ensure!(
             status.request_id == id
                 && status.payment_hash == hash
@@ -46,6 +48,10 @@ impl LedgerStore {
             "project claim differs from issued invoice"
         );
         if let Some(digest) = status.proof_digest {
+            if contact {
+                self.accept_breez_contact_claim(&id, &hash, &digest).await?;
+                return Ok(true);
+            }
             self.record_verified_payment(
                 &SettledPayment {
                     source: "breez".into(),

@@ -175,8 +175,8 @@ impl LedgerStore {
             anyhow::ensure!(original == digest, "conflicting project proof evidence");
         }
         let contact_collision: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM private_contact_intents i JOIN strike_receive_requests r ON r.receive_request_id=i.receive_request_id WHERE r.payment_hash=lower(?)) OR EXISTS(SELECT 1 FROM private_contact_fees WHERE ?='strike' AND receive_id=?)",
-        ).bind(payment.payment_hash.as_deref()).bind(&payment.source).bind(&payment.source_id).fetch_one(&mut *transaction).await?;
+            "SELECT EXISTS(SELECT 1 FROM private_contact_intents i JOIN strike_receive_requests r ON r.receive_request_id=i.receive_request_id WHERE r.payment_hash=lower(?)) OR EXISTS(SELECT 1 FROM breez_project_invoices WHERE payment_hash=lower(?) AND json_extract(intent,'$.purpose')='contact_fee') OR EXISTS(SELECT 1 FROM private_contact_fees WHERE ?='strike' AND receive_id=?)",
+        ).bind(payment.payment_hash.as_deref()).bind(payment.payment_hash.as_deref()).bind(&payment.source).bind(&payment.source_id).fetch_one(&mut *transaction).await?;
         if contact_collision
             || payment.address_user == "contact"
             || payment.credit_pool == "contact"

@@ -399,3 +399,53 @@ async fn native_retention_verifier_refuses_changed_private_commitment_or_missing
         .unwrap();
     assert!(crate::contact_state::verify(&ledger.pool).await.is_err());
 }
+
+#[tokio::test]
+async fn breez_contact_claim_replays_without_feed_credit_or_duplicate_delivery() {
+    let (_dir, url, ledger) = store().await;
+    let intent = fixture();
+    ledger.create_contact_intent(&intent).await.unwrap();
+    ledger
+        .claim_contact_issuance(intent.id, &"ab".repeat(32))
+        .await
+        .unwrap()
+        .unwrap();
+    let request = invoice(&intent);
+    ledger.prepare_breez_invoice(intent.id, &serde_json::json!({
+        "purpose":"contact_fee", "amount_sat":100, "description_hash":intent.description_hash
+    })).await.unwrap();
+    ledger
+        .bind_breez_invoice(intent.id, &request.invoice, &request.payment_hash)
+        .await
+        .unwrap();
+    assert!(
+        ledger
+            .record_payment(&ordinary(
+                Uuid::new_v4(),
+                Some(request.payment_hash.clone())
+            ))
+            .await
+            .is_err()
+    );
+    let id = intent.id.to_string();
+    let digest = "cd".repeat(32);
+    ledger
+        .accept_breez_contact_claim(&id, &request.payment_hash, &digest)
+        .await
+        .unwrap();
+    drop(ledger);
+    let ledger = LedgerStore::connect(&url).await.unwrap();
+    ledger
+        .accept_breez_contact_claim(&id, &request.payment_hash, &digest)
+        .await
+        .unwrap();
+    assert!(
+        ledger
+            .accept_breez_contact_claim(&id, &request.payment_hash, &"de".repeat(32))
+            .await
+            .is_err()
+    );
+    assert_eq!(count(&ledger, "private_contact_delivery").await, 1);
+    assert_eq!(count(&ledger, "settled_payments").await, 0);
+    assert_eq!(ledger.feed_credit_sats().await.unwrap(), 0);
+}

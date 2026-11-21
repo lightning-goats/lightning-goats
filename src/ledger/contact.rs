@@ -186,6 +186,49 @@ impl LedgerStore {
         Ok(true)
     }
 
+    pub(crate) async fn accept_breez_contact_claim(
+        &self,
+        id: &str,
+        hash: &str,
+        digest: &str,
+    ) -> Result<()> {
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let valid: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM breez_project_invoices q JOIN private_contact_intents i ON i.id=q.id
+             WHERE q.id=? AND q.payment_hash=? AND q.invoice IS NOT NULL AND i.receive_request_id IS NULL
+               AND i.state='issuing' AND json_extract(q.intent,'$.purpose')='contact_fee'
+               AND json_extract(q.intent,'$.description_hash')=i.description_hash
+               AND json_extract(q.intent,'$.amount_sat')=?
+               AND NOT EXISTS(SELECT 1 FROM settled_payments WHERE payment_hash=q.payment_hash COLLATE NOCASE))")
+            .bind(id).bind(hash).bind(i64::try_from(FEE_MSAT / 1000)?).fetch_one(&mut *tx).await?;
+        if !valid {
+            bail!("private claim differs from bound contact invoice");
+        }
+        sqlx::query("INSERT INTO breez_collected_claims(request_id,proof_digest) VALUES (?,?) ON CONFLICT(request_id) DO NOTHING")
+            .bind(id).bind(digest).execute(&mut *tx).await?;
+        let saved: String = sqlx::query_scalar(
+            "SELECT proof_digest FROM breez_collected_claims WHERE request_id=?",
+        )
+        .bind(id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if saved != digest {
+            bail!("conflicting private contact proof evidence");
+        }
+        sqlx::query("INSERT INTO private_contact_fees(contact_id,receive_id,invoice_payment_hash,amount_msat)
+                     VALUES(?,?,?,?) ON CONFLICT(contact_id) DO NOTHING")
+            .bind(id).bind(id).bind(hash).bind(i64::try_from(FEE_MSAT)?).execute(&mut *tx).await?;
+        let matched: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM private_contact_fees WHERE contact_id=? AND receive_id=? AND invoice_payment_hash=?)")
+            .bind(id).bind(id).bind(hash).fetch_one(&mut *tx).await?;
+        if !matched {
+            bail!("conflicting contact settlement");
+        }
+        sqlx::query("INSERT INTO private_contact_delivery(contact_id) VALUES(?) ON CONFLICT(contact_id) DO NOTHING")
+            .bind(id).execute(&mut *tx).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
     pub async fn reserve_contact_delivery(&self) -> Result<Option<ContactDelivery>> {
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let row=sqlx::query("SELECT i.id,i.envelope_json,i.recipient,i.relays_json FROM private_contact_delivery d JOIN private_contact_intents i ON i.id=d.contact_id WHERE d.accepted_at IS NULL AND d.next_attempt<=unixepoch() AND (d.lease_until IS NULL OR d.lease_until<unixepoch()) ORDER BY d.next_attempt,i.id LIMIT 1")

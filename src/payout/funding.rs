@@ -120,7 +120,7 @@ pub struct QualifiedSource {
 }
 
 /// Core evidence for the custody journal to match before reserving bearer proofs.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct RetainedAllocation {
     pub ledger_id: i64,
     pub consumed_sats: u64,

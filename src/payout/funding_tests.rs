@@ -1042,10 +1042,28 @@ async fn mixed_funding_keeps_the_consumed_claim_for_custody_verification() {
         next.funding.retained_cashu_sats = allocation.consumed_sats;
         page = authenticate(next).await;
     }
+    let mut qualified = session.finish().unwrap();
     assert_eq!(
-        session.finish().unwrap().retained_allocations(),
-        &[allocation]
+        qualified.retained_allocations(),
+        std::slice::from_ref(&allocation)
     );
+    let url = format!("sqlite://{}", f.root.path().join("payout.db").display());
+    let policy = journal_policy(&qualified);
+    let store = crate::payout::store::Store::connect(&url, policy.clone())
+        .await
+        .unwrap();
+    let now = f.reservation.created_at + 10;
+    let grant = store.admit(&f.plan, &qualified, now).await.unwrap();
+    drop(store);
+    let reopened = crate::payout::store::Store::connect(&url, policy)
+        .await
+        .unwrap();
+    assert_eq!(
+        reopened.admit(&f.plan, &qualified, now).await.unwrap(),
+        grant
+    );
+    qualified.retained_allocations[0].anchor.evidence_digest = "ef".repeat(32);
+    assert!(reopened.admit(&f.plan, &qualified, now).await.is_err());
     task.abort();
 }
 

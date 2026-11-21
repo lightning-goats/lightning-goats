@@ -247,11 +247,17 @@ impl Store {
     ) -> Result<Grant> {
         validate_admission(plan, qualified, &self.policy, now)?;
         let plan_json = serde_json::to_string(plan)?;
-        let qualification_json = serde_json::to_string(&serde_json::json!({
+        let mut evidence = serde_json::json!({
             "reservation":qualified.reservation(),"funding":qualified.funding(),
             "threshold_sats":qualified.threshold_sats(),"core_uid":qualified.core_uid(),
             "provider":qualified.provider(),"sources":qualified.sources(),
-        }))?;
+        });
+        // Keep legacy grant evidence byte-identical when it has no Cashu allocation.
+        if !qualified.retained_allocations().is_empty() {
+            evidence["retained_allocations"] =
+                serde_json::to_value(qualified.retained_allocations())?;
+        }
+        let qualification_json = serde_json::to_string(&evidence)?;
         if plan_json.len() > 4 * 1024 * 1024 || qualification_json.len() > 4 * 1024 * 1024 {
             bail!("payout grant exceeds private storage bound");
         }
@@ -395,7 +401,7 @@ fn validate_admission(plan: &Plan, q: &QualifiedFunding, policy: &Policy, now: i
         || now < plan.created_at
         || now < r.created_at
         || plan.rows.len() > 1000
-        || q.sources().len() > usize::from(policy.max_source_parts)
+        || q.sources().len() + q.retained_allocations().len() > usize::from(policy.max_source_parts)
     {
         bail!("plan differs from authenticated funding/root scope");
     }

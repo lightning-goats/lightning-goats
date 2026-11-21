@@ -170,6 +170,11 @@ impl Row {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Plan {
+    #[serde(
+        default,
+        skip_serializing_if = "crate::reward_funding::RewardFundingSource::is_strike"
+    )]
+    pub funding_source: crate::reward_funding::RewardFundingSource,
     pub version: u8,
     pub owner: String,
     pub epoch: Uuid,
@@ -231,7 +236,8 @@ pub(super) fn build(
         bail!("invalid reward plan time/scope");
     }
     let funding = barrier.feeding.funding.as_ref();
-    let real_sats = funding.map_or(0, |f| f.strike_sats);
+    let funding_source = allowance.map_or_else(Default::default, |a| a.funding_source);
+    let real_sats = funding.map_or(0, |f| funding_source.available(f));
     let mut percent = snapshot.settings.member_percent;
     let mut cap = 0;
     if let Some(a) = allowance {
@@ -251,6 +257,7 @@ pub(super) fn build(
     }
     let budget = u64::try_from(u128::from(real_sats) * u128::from(percent) / 100)?.min(cap);
     let mut plan = Plan {
+        funding_source,
         version: 1,
         owner: snapshot.owner.clone(),
         epoch: binding.epoch,
@@ -444,18 +451,21 @@ mod tests {
     proptest! {
         #[test]
         fn fee_and_rounding_budget_is_conserved_without_carry(
-            real in 0u64..1_000_001, percent in 0u8..=100, ceiling in 0u8..=100, cap in 0u64..100_001,
+            cashu in any::<bool>(), real in 0u64..1_000_001, percent in 0u8..=100, ceiling in 0u8..=100, cap in 0u64..100_001,
             bps in 0u16..=10_000, min_fee in 0u64..101, amount in 1u64..1_000_001,
         ) {
             let public=|n|crate::nostr_event::test_event(n,0,100,"{}",vec![]).pubkey;
             let owner=public(1);let member=public(2);
             let profile=Profile{name:"Member".into(),picture:None,lud16:Some("member@example.com".into())};
             let binding=CoreBinding{core_uid:10001,epoch:Uuid::new_v4(),start_after:0,credit_pool:"herd".into(),payees:BTreeMap::from([("herd".into(),owner.clone())])};
-            let funding=Funding{strike_sats:real,proof_hash:"ab".repeat(32)};
+            let (funding_source,strike_sats,retained_cashu_sats) = if cashu {
+                (crate::reward_funding::RewardFundingSource::RetainedCashu,1_000_000-real,real)
+            } else {(crate::reward_funding::RewardFundingSource::Strike,real,1_000_000-real)};
+            let funding=Funding{strike_sats,retained_cashu_sats,proof_hash:"ab".repeat(32)};
             let barrier=FeedingBarrier{ingress_seq:1,conversations:BTreeMap::new(),feeding:Feeding{request_id:Uuid::new_v4(),threshold_sats:1_000_000,confirmed_at:100,presentation:None,funding:Some(funding.clone())},
                 snapshot:Snapshot{owner:owner.clone(),settings:Settings{minimum_sats:10,max_members:10,member_percent:percent},roster:Roster{
                     members:BTreeMap::from([(member.clone(),Member{profile:profile.clone(),active:true,amount_sats:amount,lifetime_sats:amount})]),..Roster::default()},cycle:1,cycle_start:0,revision:1}};
-            let allowance=Allowance{epoch:binding.epoch,request_id:barrier.feeding.request_id,owner,funding,threshold_sats:1_000_000,
+            let allowance=Allowance{funding_source,epoch:binding.epoch,request_id:barrier.feeding.request_id,owner,funding,threshold_sats:1_000_000,
                 member_percent_ceiling:ceiling,max_sats_per_feed:cap,available_sats:i64::MAX as u64,policy_hash:"cd".repeat(32)};
             let planning=PlanningPolicy{fee_mode:crate::payout::inclusive_fees::Mode::FixedAllowance,fee_basis_points:bps,minimum_fee_sats:min_fee,minimum_net_sats:1,maximum_net_sats:i64::MAX as u64 / 1000,profile_max_age_seconds:3600,operation_addresses:vec![]};
             let read=ProfileRead{pubkey:member.clone(),head_id:Some("ef".repeat(32)),profile:Some(profile),observed_at:100};

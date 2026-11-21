@@ -36,12 +36,30 @@ pub(super) const CASHU_TABLES: [&str; 24] = [
     "feed_source_reservations",
 ];
 pub(super) fn tables_for_core(version: i64) -> impl Iterator<Item = &'static str> {
-    CASHU_TABLES.into_iter().filter(move |name| match *name {
-        "feed_cashu_proceeds" | "cashu_settled_ranges" => version >= 29,
-        "cashu_treasury_inspections" => version >= 28,
-        "cashu_treasury_fee_observations" => version >= 27,
-        _ => true,
-    })
+    CASHU_TABLES
+        .into_iter()
+        .chain([
+            "cashu_funding_ranges",
+            "breez_treasury_inspections",
+            "breez_treasury_wallet_results",
+            "cashu_payout_execution_claims",
+            "retained_cashu_lots",
+            "breez_collected_claims",
+            "breez_project_invoices",
+        ])
+        .filter(move |name| match *name {
+            "cashu_funding_ranges" => version >= 34,
+            "breez_treasury_inspections" => version >= 33,
+            "breez_treasury_wallet_results" => version >= 32,
+            "cashu_payout_execution_claims" => version >= 31,
+            "retained_cashu_lots" | "breez_collected_claims" | "breez_project_invoices" => {
+                version >= 30
+            }
+            "feed_cashu_proceeds" | "cashu_settled_ranges" => version >= 29,
+            "cashu_treasury_inspections" => version >= 28,
+            "cashu_treasury_fee_observations" => version >= 27,
+            _ => true,
+        })
 }
 
 pub(super) async fn private_catalog(version: i64) -> Result<BTreeMap<String, Definition>> {
@@ -91,6 +109,42 @@ pub(super) async fn private_catalog(version: i64) -> Result<BTreeMap<String, Def
     .await;
     pool.close().await;
     result
+}
+
+/// Apply only the catalog changes produced by the exact checked-in Breez migration.
+/// A changed legacy definition must match its original pinned definition first.
+pub(super) async fn apply_breez_catalog(
+    expected: &mut BTreeMap<String, Definition>,
+    version: i64,
+) -> Result<()> {
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await?;
+    let migrations = sqlx::migrate!("./migrations");
+    for migration in migrations.iter().take_while(|m| m.version < 30) {
+        sqlx::raw_sql(&migration.sql).execute(&pool).await?;
+    }
+    let old = catalog(&pool).await?;
+    for migration in migrations
+        .iter()
+        .filter(|m| (30..=version).contains(&m.version))
+    {
+        sqlx::raw_sql(&migration.sql).execute(&pool).await?;
+    }
+    let new = catalog(&pool).await?;
+    for (key, definition) in &old {
+        if new.get(key) != Some(definition) && expected.remove(key).as_ref() != Some(definition) {
+            bail!("unexpected original schema for Breez migration");
+        }
+    }
+    for (key, definition) in new {
+        if old.get(&key) != Some(&definition) && expected.insert(key, definition).is_some() {
+            bail!("Breez migration catalog collision");
+        }
+    }
+    pool.close().await;
+    Ok(())
 }
 
 pub(super) async fn compare_images(before: &Path, after: &Path, policy: &Policy) -> Result<()> {
@@ -151,6 +205,9 @@ pub(super) async fn compare_images(before: &Path, after: &Path, policy: &Policy)
                         bail!("new Cashu schema collides with an existing object");
                     }
                 }
+            }
+            if role == Role::Core && version >= 30 {
+                super::cashu_upgrade::apply_breez_catalog(&mut expected, version).await?;
             }
             if catalog(&new).await? != expected {
                 bail!("upgrade changed original schema or added unqualified private definitions");

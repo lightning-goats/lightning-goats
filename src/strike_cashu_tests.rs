@@ -434,6 +434,9 @@ mod cashu_treasury_tests {
 
         let original: (String,String) = sqlx::query_as("SELECT result_digest,result_json FROM cashu_treasury_wallet_results")
             .fetch_one(&f.pool).await?;
+        let mut tx = f.pool.begin().await.unwrap();
+        crate::breez_schema_fixture::strip_empty(&mut tx).await.unwrap();
+        tx.commit().await.unwrap();
         // Disposable schema-26 image. Keep the old result, completion and deposit bytes.
         sqlx::raw_sql("DROP TRIGGER freeze_cashu_settled_ranges;
                      DROP TABLE feed_cashu_proceeds; DROP TABLE cashu_settled_ranges;
@@ -468,21 +471,21 @@ mod cashu_treasury_tests {
         };
         assert!(
             f.ledger
-                .claim_cashu_treasury_work(&f.registration, &Controls::default(), 10, 30)
+                .claim_cashu_treasury_work(&f.registration, &Controls::default(), false, 10, 30)
                 .await
                 .unwrap()
                 .is_none()
         );
         assert!(
             f.ledger
-                .claim_cashu_treasury_work(&f.registration, &controls, i64::MAX, 30)
+                .claim_cashu_treasury_work(&f.registration, &controls, false, i64::MAX, 30)
                 .await
                 .is_err()
         );
         assert_eq!(f.count("cashu_treasury_work").await, 0);
         let first = f
             .ledger
-            .claim_cashu_treasury_work(&f.registration, &controls, 10, 30)
+            .claim_cashu_treasury_work(&f.registration, &controls, false, 10, 30)
             .await
             .unwrap()
             .unwrap();
@@ -490,7 +493,7 @@ mod cashu_treasury_tests {
         assert_eq!(first.stage, Stage::Issue);
         assert!(
             f.ledger
-                .claim_cashu_treasury_work(&f.registration, &controls, 44, 30)
+                .claim_cashu_treasury_work(&f.registration, &controls, false, 44, 30)
                 .await
                 .unwrap()
                 .is_none()
@@ -503,14 +506,14 @@ mod cashu_treasury_tests {
         .unwrap();
         assert!(
             reopened
-                .claim_cashu_treasury_work(&f.registration, &controls, 45, 30)
+                .claim_cashu_treasury_work(&f.registration, &controls, false, 45, 30)
                 .await
                 .unwrap()
                 .is_some()
         );
         assert!(
             reopened
-                .claim_cashu_treasury_work(&f.registration, &controls, 1000, 30)
+                .claim_cashu_treasury_work(&f.registration, &controls, false, 1000, 30)
                 .await
                 .unwrap()
                 .is_none()
@@ -528,7 +531,7 @@ mod cashu_treasury_tests {
         };
         assert!(
             reopened
-                .claim_cashu_treasury_work(&f.registration, &more, 2000, 30)
+                .claim_cashu_treasury_work(&f.registration, &more, false, 2000, 30)
                 .await
                 .unwrap()
                 .is_none()
@@ -870,6 +873,9 @@ mod cashu_treasury_tests {
             assert_eq!(worker.tick(now + 2).await.unwrap(), Tick::Idle);
             drop(worker);
             if !delivery_still_enabled {
+                let mut tx = f.pool.begin().await.unwrap();
+                crate::breez_schema_fixture::strip_empty(&mut tx).await.unwrap();
+                tx.commit().await.unwrap();
                 // Upgrade a historical wallet work row with exhausted delivery.
                 sqlx::raw_sql(
                     "DROP TRIGGER freeze_cashu_settled_ranges;
@@ -1187,6 +1193,7 @@ mod cashu_treasury_tests {
         f.runtime.reconcile_and_credit(&f.ledger,&f.event()).await?;
         f.ledger.record_cashu_melt_result(&f.registration,&f.report(1,4)).await?;
         let policy = crate::reward_funding::RewardPolicy {
+            funding_source: Default::default(),
             owner: "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798".into(),
             member_percent_ceiling: 10, max_sats_per_feed: 100, max_sats_per_24h: 200,
         };

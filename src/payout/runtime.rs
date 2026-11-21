@@ -5,7 +5,7 @@ use super::{
     provider::Client as Sender,
     signer::Client as Signer,
     store::{Policy, Store},
-    worker::Worker,
+    worker::{CashuWorker, Worker},
 };
 use crate::{
     core_bridge::unix::Client as Core,
@@ -23,6 +23,9 @@ use std::{
 #[serde(deny_unknown_fields)]
 pub struct Config {
     pub enabled: bool,
+    #[serde(default)]
+    pub funding_source: crate::reward_funding::RewardFundingSource,
+    pub cashu_payout_socket: Option<PathBuf>,
     pub state_dir: PathBuf,
     pub core_socket: PathBuf,
     pub intake_socket: PathBuf,
@@ -113,6 +116,19 @@ impl Config {
     }
     pub fn validate(&self) -> Result<()> {
         self.policy.validate()?;
+        if self.funding_source.is_strike()
+            && self.policy.scope.provider.environment != "strike-production"
+        {
+            bail!("Strike execution requires the original Strike journal scope");
+        }
+        if let Some(socket) = &self.cashu_payout_socket {
+            ipc::socket_path(socket)?;
+            if self.funding_source.is_strike()
+                || [&self.core_socket, &self.signer_socket, &self.intake_socket].contains(&socket)
+            {
+                bail!("Cashu payout requires its separate collector socket");
+            }
+        }
         for socket in [&self.core_socket, &self.intake_socket, &self.signer_socket] {
             ipc::socket_path(socket)?;
         }
@@ -181,28 +197,46 @@ impl Config {
         )
         .await?;
         store.initialize_intake(self.intake_uid).await?;
-        let key = crate::secrets::read_systemd_credential("strike-payout-api-key").await?;
-        let provider = &self.policy.scope.provider;
-        let verifier = SourceVerifier::new(
-            provider.account_id,
-            &provider.credential_fingerprint,
-            key.clone(),
-        )?;
-        let sender = Sender::new(provider.clone(), key)?;
         // Both loops use the same FIFO and the payout role's one/second core
         // quota. Separate clients let synchronized retries exhaust admission.
         let core = Core::new(self.core_socket.clone(), self.policy.scope.core_uid)?
             .with_request_spacing(Duration::from_secs(1));
-        let worker = Worker {
-            store: store.clone(),
-            core: core.clone(),
-            signer: Signer::new(self.signer_socket.clone(), self.signer_uid)?,
-            sender,
-            presentation: Some(Plans::new(
-                self.intake_socket.clone(),
-                self.intake_uid,
-                self.policy.scope.owner.clone(),
-            )?),
+        let (worker, verifier) = if self.funding_source.is_strike() {
+            let key = crate::secrets::read_systemd_credential("strike-payout-api-key").await?;
+            let provider = &self.policy.scope.provider;
+            let verifier = SourceVerifier::new(
+                provider.account_id,
+                &provider.credential_fingerprint,
+                key.clone(),
+            )?;
+            let sender = Sender::new(provider.clone(), key)?;
+            let worker = Worker {
+                store: store.clone(),
+                core: core.clone(),
+                signer: Signer::new(self.signer_socket.clone(), self.signer_uid)?,
+                sender,
+                presentation: Some(Plans::new(
+                    self.intake_socket.clone(),
+                    self.intake_uid,
+                    self.policy.scope.owner.clone(),
+                )?),
+            };
+            (RuntimeWorker::Strike(Box::new(worker)), Some(verifier))
+        } else {
+            (
+                RuntimeWorker::Cashu(Box::new(CashuWorker {
+                    collector_socket: self.cashu_payout_socket.clone(),
+                    store: store.clone(),
+                    core: core.clone(),
+                    signer: Signer::new(self.signer_socket.clone(), self.signer_uid)?,
+                    plans: Plans::new(
+                        self.intake_socket.clone(),
+                        self.intake_uid,
+                        self.policy.scope.owner.clone(),
+                    )?,
+                })),
+                None,
+            )
         };
         let intake = Intake {
             store,
@@ -226,7 +260,7 @@ pub struct Intake {
     pub store: Store,
     pub core: Core,
     pub plans: Plans,
-    pub verifier: SourceVerifier,
+    pub verifier: Option<SourceVerifier>,
 }
 impl Intake {
     pub async fn tick(&self) -> Result<bool> {
@@ -258,7 +292,15 @@ impl Intake {
                 };
                 let mut session = Session::new(expected, &page)?;
                 loop {
-                    session.accept(&page, &self.verifier).await?;
+                    if export.plan.funding_source.is_strike() {
+                        let verifier = self
+                            .verifier
+                            .as_ref()
+                            .context("original Strike grant requires its recovery credential")?;
+                        session.accept(&page, verifier).await?;
+                    } else {
+                        session.accept_cashu(&page, &policy.scope.provider).await?;
+                    }
                     if session.is_complete() {
                         break;
                     }
@@ -272,9 +314,18 @@ impl Intake {
                         )
                         .await?;
                 }
-                self.store
-                    .admit(&export.plan, &session.finish()?, calendar::now()?)
-                    .await?;
+                let qualified = session.finish()?;
+                let now = calendar::now()?;
+                match qualified.funding_source() {
+                    crate::reward_funding::RewardFundingSource::Strike => {
+                        self.store.admit(&export.plan, &qualified, now).await?;
+                    }
+                    crate::reward_funding::RewardFundingSource::RetainedCashu => {
+                        self.store
+                            .admit_cashu(&export.plan, &qualified, now)
+                            .await?;
+                    }
+                }
             }
         }
         // Admission and this receipt may be separated by a crash. Exact retry
@@ -283,8 +334,12 @@ impl Intake {
         Ok(true)
     }
 }
+enum RuntimeWorker {
+    Strike(Box<Worker>),
+    Cashu(Box<CashuWorker>),
+}
 pub struct Runtime {
-    worker: Worker,
+    worker: RuntimeWorker,
     intake: Intake,
     config: Config,
     _singleton: std::os::unix::net::UnixListener,
@@ -305,18 +360,24 @@ impl Runtime {
                 }
             }
         });
-        let worker = self.worker;
-        let millis = self.config.poll_millis;
-        tasks.spawn(async move {
-            let mut ticks = tokio::time::interval(Duration::from_millis(millis));
-            ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            loop {
-                ticks.tick().await;
-                if worker.tick().await.is_err() {
-                    tracing::warn!("payout work held; retaining original journal identity");
+        {
+            let worker = self.worker;
+            let millis = self.config.poll_millis;
+            tasks.spawn(async move {
+                let mut ticks = tokio::time::interval(Duration::from_millis(millis));
+                ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                loop {
+                    ticks.tick().await;
+                    let step = match &worker {
+                        RuntimeWorker::Strike(w) => w.tick().await,
+                        RuntimeWorker::Cashu(w) => w.tick().await,
+                    };
+                    if step.is_err() {
+                        tracing::warn!("payout work held; retaining original journal identity");
+                    }
                 }
-            }
-        });
+            });
+        }
         tokio::select! {
             _=tokio::signal::ctrl_c()=>Ok(()),
             _=tasks.join_next()=>bail!("payout child worker stopped unexpectedly"),

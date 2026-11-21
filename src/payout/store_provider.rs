@@ -223,6 +223,12 @@ impl Store {
         let mut tx = self.pool.begin().await?;
         write_lock(&mut tx).await?;
         super::outcomes::ensure_invoice_open(&mut tx, invoice_id).await?;
+        let grant: String =
+            sqlx::query_scalar("SELECT grant_id FROM payout_invoice_intents WHERE id=?")
+                .bind(invoice_id.to_string())
+                .fetch_one(&mut *tx)
+                .await?;
+        super::invoices::ensure_strike_grant(&mut tx, grant.parse()?).await?;
         let executed:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM payout_execute_intents e JOIN payout_quote_intents q ON q.id=e.intent_id WHERE q.invoice_id=?)")
             .bind(invoice_id.to_string()).fetch_one(&mut *tx).await?;
         if executed {

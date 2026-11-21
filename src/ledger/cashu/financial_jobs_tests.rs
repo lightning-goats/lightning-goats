@@ -210,3 +210,139 @@ async fn financial_job_planning_skips_a_mint_with_no_exposure_capacity() {
     );
     assert_eq!(count(&store, "cashu_treasury_intents").await, 2);
 }
+
+#[tokio::test]
+async fn local_ecash_funds_confirmed_feeding_and_only_legacy_lots_can_be_swept() {
+    let (_dir,url,store,policy) = fixture().await;
+    let older = wire(&policy, 400);
+    store.import_cashu_receipt(&policy, &authenticated(&policy,&older)).await.unwrap();
+    let local = wire(&policy, 1000);
+    let peer = authenticated(&policy,&local);
+    store.import_cashu_with_custody(&policy,&peer,Some("mint-a")).await.unwrap();
+    let reopened = LedgerStore::connect(&url).await.unwrap();
+    reopened.import_cashu_receipt(&policy,&peer).await.unwrap();
+    assert_eq!(count(&reopened,"retained_cashu_lots").await,1);
+    let request = reopened.begin_feed_attempt(1000).await.unwrap().unwrap();
+    reopened.confirm_feed_attempt(request).await.unwrap();
+    assert_eq!(reopened.feed_credit_sats().await.unwrap(),400);
+    let mut tx = reopened.pool.begin().await.unwrap();
+    let funding = crate::ledger::inspect_confirmed_reward_funding(&mut tx,request).await.unwrap().unwrap();
+    assert_eq!((funding.strike_sats,funding.retained_cashu_sats),(0,1000));
+    tx.rollback().await.unwrap();
+    assert_eq!(count(&reopened,"cashu_treasury_intents").await,0);
+    let retained_id: i64 = sqlx::query_scalar("SELECT ledger_id FROM retained_cashu_lots")
+        .fetch_one(&reopened.pool).await.unwrap();
+    let direct = crate::ledger::TreasuryPlan {
+        id: Uuid::new_v4(),
+        mint_id: "mint-a".into(),
+        sources: vec![(retained_id, 1000)],
+        deposit_sats: 990,
+        maximum_fee_sats: 10,
+    };
+    assert!(reopened.reserve_cashu_treasury(&policy, &feed_treasury_policy(), &direct).await.is_err());
+    assert_eq!(count(&reopened,"cashu_treasury_intents").await,0);
+    let sweep=crate::cashu::treasury_sweep::Request {id:Uuid::new_v4(),mint_id:"mint-a".into(),maximum_input_sats:1000};
+    let planned=reopened.plan_operator_cashu_settlement(&policy,&feed_treasury_policy(),&sweep,false).await.unwrap().unwrap();
+    assert_eq!(planned.input_sats,400);
+    assert_eq!(planned.sources.len(),1);
+    assert_eq!(planned.sources[0].acquisition_id,older.data().acquisition_id);
+}
+
+#[tokio::test]
+async fn project_treasury_invoice_reopens_without_issuing_or_crediting_again() {
+    let (dir, url, ledger, registration) = fixture().await;
+    let receipt = wire(&registration, 1000);
+    ledger.import_cashu_receipt(&registration, &authenticated(&registration, &receipt)).await.unwrap();
+    let mut policy = feed_treasury_policy();
+    policy.destination.origin = "https://mint.lightning-goats.com/".into();
+    policy.invoice_expiry_seconds = 900;
+    let sweep = crate::cashu::treasury_sweep::Request {
+        id: Uuid::new_v4(), mint_id: "mint-a".into(), maximum_input_sats: 1000,
+    };
+    let intent = ledger.plan_operator_cashu_settlement(&registration, &policy, &sweep, true)
+        .await.unwrap().unwrap();
+    use crate::cashu::treasury_worker::{Controls, Stage};
+    let controls = Controls {issue:true, deliver:true, inspect:true, maximum_attempts:3, ..Default::default()};
+    assert!(ledger.claim_cashu_treasury_work(&registration, &controls, false, 100, 10).await.unwrap().is_none());
+    let issue = ledger.claim_cashu_treasury_work(&registration, &controls, true, 100, 10).await.unwrap().unwrap();
+    assert_eq!((issue.id,issue.stage),(intent.id,Stage::Issue));
+    let collector = crate::config::BreezCollectorConfig {
+        socket: dir.path().join("collector.sock"), peer_uid: crate::private_ipc::uid().unwrap(),
+    };
+    let digest = lightning_goats_cashu_receipt::treasury::hex_digest(intent.digest().unwrap());
+    let invoice = crate::test_invoices::invoice_with_expiry(intent.deposit_sats * 1000, &digest,
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap(),
+        [0x53; 32], std::time::Duration::from_secs(900));
+    let expected = serde_json::json!({"treasury_id":intent.id,"amount_sat":intent.deposit_sats,"description_hash":digest});
+    let reply = serde_json::json!({"invoice":invoice});
+    let listener = tokio::net::UnixListener::bind(&collector.socket).unwrap();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let request: serde_json::Value = crate::private_ipc::read(&mut stream, 65536).await.unwrap();
+        assert_eq!(request, expected);
+        crate::private_ipc::write(&mut stream, &reply, 65536).await.unwrap();
+    });
+    let issued = ledger.issue_breez_treasury_invoice(&collector, &registration, &policy, intent.id).await.unwrap();
+    server.await.unwrap();
+    assert_eq!(issued.invoice, invoice);
+    assert_eq!(ledger.cashu_treasury_invoice(intent.id).await.unwrap().unwrap().invoice, invoice);
+    let deliver = ledger.claim_cashu_treasury_work(&registration,&controls,true,101,10).await.unwrap().unwrap();
+    assert_eq!((deliver.id,deliver.stage),(intent.id,Stage::Deliver));
+    ledger.close_cashu_treasury_delivery(intent.id,true).await.unwrap();
+    let inspect = ledger.claim_cashu_treasury_work(&registration,&controls,true,117,10).await.unwrap().unwrap();
+    assert_eq!((inspect.id,inspect.stage),(intent.id,Stage::Inspect));
+    let fee = intent.maximum_fee_sats.min(1);
+    let change = intent.input_sats - intent.deposit_sats - fee;
+    let report = lightning_goats_cashu_receipt::treasury::MeltData {
+        version: 1, intent_id: intent.id, intent_digest: digest,
+        quote_id: "original-foreign-mint-quote".into(), operation_evidence_digest: "ef".repeat(32),
+        sources: intent.allocate_result(fee, change).unwrap(),
+    };
+    let report = crate::cashu::treasury::PeerMelt::authenticate(&registration,
+        &crate::cashu::receipt_authority::fixture_peer(&registration),
+        &serde_json::to_vec(&report).unwrap()).unwrap();
+    assert!(!ledger.record_cashu_melt_result(&registration, &report).await.unwrap());
+    assert_eq!(count(&ledger, "breez_treasury_source_results").await, 0);
+    assert!(ledger.claim_cashu_treasury_work(&registration,&controls,true,1000,10).await.unwrap().is_none());
+    drop(ledger);
+    let ledger = LedgerStore::connect(&url).await.unwrap();
+    assert_eq!(ledger.issue_breez_treasury_invoice(&collector, &registration, &policy, intent.id)
+        .await.unwrap().invoice, invoice);
+    if collector.socket.exists() { std::fs::remove_file(&collector.socket).unwrap(); }
+    let listener = tokio::net::UnixListener::bind(&collector.socket).unwrap();
+    let lookup = serde_json::json!({"treasury_claim_status":intent.id});
+    let reply = serde_json::json!({"request_id":intent.id, "payment_hash":issued.payment_hash,
+                                  "amount_sat":intent.deposit_sats, "proof_digest":"ab".repeat(32)});
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let request: serde_json::Value = crate::private_ipc::read(&mut stream, 65536).await.unwrap();
+        assert_eq!(request, lookup);
+        crate::private_ipc::write(&mut stream, &reply, 65536).await.unwrap();
+    });
+    assert!(ledger.begin_feed_attempt(1000).await.unwrap().is_none());
+    assert!(ledger.poll_breez_claim(&collector).await.unwrap());
+    server.await.unwrap();
+    assert!(ledger.record_cashu_melt_result(&registration, &report).await.unwrap());
+    let amounts: (i64,i64,i64) = sqlx::query_as("SELECT deposit_sats,fee_sats,change_sats FROM breez_treasury_source_results WHERE intent_id=?")
+        .bind(intent.id.to_string()).fetch_one(&ledger.pool).await.unwrap();
+    assert_eq!(amounts, (intent.deposit_sats as i64, fee as i64, change as i64));
+    let mut tx = ledger.pool.begin().await.unwrap();
+    assert_eq!(super::treasury::available_custody(&mut tx,intent.sources[0].ledger_id).await.unwrap(), change);
+    let now: i64 = sqlx::query_scalar("SELECT unixepoch()").fetch_one(&mut *tx).await.unwrap();
+    assert_eq!(super::treasury::daily_fee_remaining(&mut tx,now,100).await.unwrap(), 100-fee);
+    tx.rollback().await.unwrap();
+    assert_eq!(count(&ledger, "breez_collected_claims").await, 1);
+    assert!(!ledger.poll_breez_claim(&collector).await.unwrap());
+    assert!(ledger.record_payment(&SettledPayment {
+        source: "strike".into(), source_id: Uuid::new_v4().to_string(),
+        payment_hash: Some(issued.payment_hash), address_user: "dexter".into(),
+        credit_pool: "herd".into(), amount_msat: intent.deposit_sats * 1000,
+        settled_at: None, context_json: None,
+    }).await.is_err());
+    assert_eq!(count(&ledger, "settled_payments").await, 0);
+    assert_eq!(ledger.feed_credit_sats().await.unwrap(), 1000);
+    let range: (i64,i64,i64) = sqlx::query_as("SELECT start_sats,input_sats,deposit_sats FROM cashu_funding_ranges WHERE intent_id=?")
+        .bind(intent.id.to_string()).fetch_one(&ledger.pool).await.unwrap();
+    assert_eq!(range, (0, 1000, intent.deposit_sats as i64));
+    assert!(ledger.begin_feed_attempt(1000).await.unwrap().is_some());
+}

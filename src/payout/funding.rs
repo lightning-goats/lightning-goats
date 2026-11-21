@@ -9,7 +9,9 @@ use uuid::Uuid;
 
 use crate::{
     core_bridge::AuthenticatedFundingPage,
-    reward_funding::{Funding, Reservation, StrikeFundingAnchor},
+    reward_funding::{
+        CashuFundingAnchor, Funding, Reservation, RewardFundingSource, StrikeFundingAnchor,
+    },
     strike::StrikeClient,
 };
 
@@ -119,18 +121,32 @@ pub struct QualifiedSource {
     pub received_sats: u64,
 }
 
+/// Core evidence for the custody journal to match before reserving bearer proofs.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RetainedAllocation {
+    pub ledger_id: i64,
+    pub consumed_sats: u64,
+    pub anchor: CashuFundingAnchor,
+}
+
 /// Not deserializable or constructible from copied funding/plan JSON. A future
 /// payout store must independently retain source consumption across grants.
 pub struct QualifiedFunding {
     core_uid: u32,
     funding: Funding,
+    funding_source: RewardFundingSource,
     threshold_sats: u64,
     reservation: Reservation,
     provider: ProviderScope,
     sources: Vec<QualifiedSource>,
+    retained_allocations: Vec<RetainedAllocation>,
 }
 
 impl QualifiedFunding {
+    pub fn funding_source(&self) -> RewardFundingSource {
+        self.funding_source
+    }
     pub fn funding(&self) -> &Funding {
         &self.funding
     }
@@ -146,6 +162,9 @@ impl QualifiedFunding {
     pub fn provider(&self) -> &ProviderScope {
         &self.provider
     }
+    pub fn retained_allocations(&self) -> &[RetainedAllocation] {
+        &self.retained_allocations
+    }
     pub fn sources(&self) -> &[QualifiedSource] {
         &self.sources
     }
@@ -155,14 +174,17 @@ pub struct Session {
     expected: ExpectedPlan,
     reservation: Reservation,
     funding: Funding,
+    funding_source: RewardFundingSource,
     threshold_sats: u64,
     through: i64,
     total_sats: u64,
     real_sats: u64,
+    retained_cashu_sats: u64,
     count: usize,
     done: bool,
     provider: Option<ProviderScope>,
     sources: Vec<QualifiedSource>,
+    retained_allocations: Vec<RetainedAllocation>,
     seen: BTreeSet<Uuid>,
 }
 
@@ -180,7 +202,9 @@ impl Session {
             bail!("payout qualification requires first authenticated page for exact plan/core");
         }
         let ceiling = u64::try_from(
-            u128::from(p.funding.strike_sats) * u128::from(expected.member_percent_ceiling) / 100,
+            u128::from(p.funding_source.available(&p.funding))
+                * u128::from(expected.member_percent_ceiling)
+                / 100,
         )?
         .min(expected.per_feed_sats);
         if p.reservation.reserved_sats > ceiling {
@@ -190,14 +214,17 @@ impl Session {
             expected,
             reservation: p.reservation.clone(),
             funding: p.funding.clone(),
+            funding_source: p.funding_source,
             threshold_sats: p.threshold_sats,
             through: 0,
             total_sats: 0,
             real_sats: 0,
+            retained_cashu_sats: 0,
             count: 0,
             done: false,
             provider: None,
             sources: vec![],
+            retained_allocations: vec![],
             seen: BTreeSet::new(),
         })
     }
@@ -216,38 +243,78 @@ impl Session {
         page: &AuthenticatedFundingPage,
         verifier: &SourceVerifier,
     ) -> Result<()> {
+        self.accept_page(page, &verifier.scope, Some(verifier))
+            .await
+    }
+
+    /// Mixed historical feeds may contain Strike anchors. They confer no
+    /// spending authority on a grant reserved against retained Cashu.
+    pub async fn accept_cashu(
+        &mut self,
+        page: &AuthenticatedFundingPage,
+        journal_scope: &ProviderScope,
+    ) -> Result<()> {
+        if self.funding_source.is_strike() {
+            bail!("Strike funding requires provider verification");
+        }
+        self.accept_page(page, journal_scope, None).await
+    }
+
+    async fn accept_page(
+        &mut self,
+        page: &AuthenticatedFundingPage,
+        scope: &ProviderScope,
+        verifier: Option<&SourceVerifier>,
+    ) -> Result<()> {
         let p = page.page();
         p.validate()?;
         if self.done
             || page.core_uid() != self.expected.core_uid
             || p.after != self.through
             || p.reservation != self.reservation
+            || p.funding_source != self.funding_source
             || p.funding != self.funding
             || p.threshold_sats != self.threshold_sats
-            || self
-                .provider
-                .as_ref()
-                .is_some_and(|old| old != &verifier.scope)
+            || self.provider.as_ref().is_some_and(|old| old != scope)
             || self.count + p.parts.len() > usize::from(self.expected.max_parts)
         {
             bail!("payout funding sequence/provider changed or exceeded bound");
         }
         let mut total = self.total_sats;
         let mut real = self.real_sats;
+        let mut retained = self.retained_cashu_sats;
         let mut sources = Vec::new();
+        let mut allocations = Vec::new();
         let mut seen = self.seen.clone();
         for part in &p.parts {
             total = total
                 .checked_add(part.consumed_sats)
                 .context("funding sum overflow")?;
+            if let Some(anchor) = &part.cashu_anchor {
+                allocations.push(RetainedAllocation {
+                    ledger_id: part.ledger_id,
+                    consumed_sats: part.consumed_sats,
+                    anchor: anchor.clone(),
+                });
+                retained = retained
+                    .checked_add(part.consumed_sats)
+                    .context("retained Cashu funding sum overflow")?;
+            }
             if let Some(anchor) = &part.anchor {
                 if !seen.insert(anchor.receive_id) {
                     bail!("same provider receive appears in multiple consumed lots");
                 }
-                verifier.verify(anchor).await?;
+
                 real = real
                     .checked_add(part.consumed_sats)
                     .context("real funding sum overflow")?;
+                if !self.funding_source.is_strike() {
+                    continue;
+                }
+                verifier
+                    .context("missing Strike funding verifier")?
+                    .verify(anchor)
+                    .await?;
                 sources.push(QualifiedSource {
                     ledger_id: part.ledger_id,
                     consumed_sats: part.consumed_sats,
@@ -259,18 +326,24 @@ impl Session {
         }
         if total > self.threshold_sats
             || real > self.funding.strike_sats
-            || (!p.more && (total != self.threshold_sats || real != self.funding.strike_sats))
+            || retained > self.funding.retained_cashu_sats
+            || (!p.more
+                && (total != self.threshold_sats
+                    || real != self.funding.strike_sats
+                    || retained != self.funding.retained_cashu_sats))
         {
             bail!("incomplete or excessive payout funding sequence");
         }
         self.through = p.through;
         self.total_sats = total;
         self.real_sats = real;
+        self.retained_cashu_sats = retained;
         self.count += p.parts.len();
         self.done = !p.more;
-        self.provider = Some(verifier.scope.clone());
+        self.provider = Some(scope.clone());
         self.seen = seen;
         self.sources.extend(sources);
+        self.retained_allocations.extend(allocations);
         Ok(())
     }
 
@@ -281,10 +354,12 @@ impl Session {
         Ok(QualifiedFunding {
             core_uid: self.expected.core_uid,
             funding: self.funding,
+            funding_source: self.funding_source,
             threshold_sats: self.threshold_sats,
             reservation: self.reservation,
             provider: self.provider.context("provider qualification missing")?,
             sources: self.sources,
+            retained_allocations: self.retained_allocations,
         })
     }
 }

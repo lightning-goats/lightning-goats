@@ -27,6 +27,9 @@ impl Store {
         }
         let mut tx = self.pool.begin().await?;
         write_lock(&mut tx).await?;
+        if round != 0 || self.policy.fee_mode.is_fixed() {
+            super::invoices::ensure_strike_grant(&mut tx, grant).await?;
+        }
         super::outcomes::ensure_open(&mut tx, grant, member).await?;
         let old: Option<String> = sqlx::query_scalar(
             "SELECT id FROM payout_fee_probe_intents WHERE grant_id=? AND member=? AND round=?",
@@ -212,6 +215,7 @@ impl Store {
         let mut tx = self.pool.begin().await?;
         write_lock(&mut tx).await?;
         let intent = load_intent(&mut tx, id, &self.policy.scope.owner).await?;
+        super::invoices::ensure_strike_grant(&mut tx, intent.grant_id()).await?;
         super::outcomes::ensure_open(&mut tx, intent.grant_id(), intent.member()).await?;
         if let Some(old) = sqlx::query_scalar::<_, String>(
             "SELECT id FROM payout_fee_probe_quotes WHERE invoice_id=?",
@@ -441,6 +445,7 @@ impl Store {
         }
         let mut tx = self.pool.begin().await?;
         write_lock(&mut tx).await?;
+        super::invoices::ensure_strike_grant(&mut tx, grant).await?;
         super::outcomes::ensure_open(&mut tx, grant, member).await?;
         let row = sqlx::query("SELECT o.*,g.plan_json FROM payout_fee_observations o JOIN payout_grants g ON g.id=o.grant_id WHERE o.grant_id=? AND o.member=? ORDER BY o.round DESC LIMIT 1")
             .bind(grant.to_string()).bind(member).fetch_one(&mut *tx).await?;

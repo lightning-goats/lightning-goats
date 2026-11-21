@@ -45,6 +45,7 @@ async fn fixture() -> (tempfile::TempDir, LedgerStore, RewardPolicy, Vec<Uuid>) 
         feeds.push(id);
     }
     let policy = RewardPolicy {
+        funding_source: Default::default(),
         owner: crate::nostr_event::test_event(1, 0, 100, "", vec![]).pubkey,
         member_percent_ceiling: 10,
         max_sats_per_feed: 100,

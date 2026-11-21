@@ -7,6 +7,8 @@ use std::collections::BTreeMap;
 
 use super::receipt_authority::{KernelPeer, ReceiptPolicy};
 
+pub const PROJECT_MINT_ORIGIN: &str = "https://mint.lightning-goats.com/";
+
 pub(crate) const TREASURY_USER: &str = "cashu_treasury";
 
 #[derive(Clone, Default, Deserialize)]

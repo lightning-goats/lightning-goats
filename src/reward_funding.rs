@@ -75,20 +75,51 @@ impl StrikeFundingAnchor {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CashuFundingSource {
+    ProjectInvoice,
+    Acquisition,
+}
+
+/// Private custody evidence for the separate payout role. No bearer proof is exported.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct CashuFundingAnchor {
+    pub source: CashuFundingSource,
+    pub claim_id: Uuid,
+    pub evidence_digest: String,
+}
+
+impl CashuFundingAnchor {
+    fn validate(&self) -> Result<()> {
+        if self.claim_id.is_nil() {
+            bail!("missing Cashu claim identity");
+        }
+        crate::nostr_event::validate_hex(&self.evidence_digest, 32)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct FundingPart {
     pub ledger_id: i64,
     pub consumed_sats: u64,
     pub anchor: Option<StrikeFundingAnchor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cashu_anchor: Option<CashuFundingAnchor>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct FundingPage {
+    #[serde(default, skip_serializing_if = "RewardFundingSource::is_strike")]
+    pub funding_source: RewardFundingSource,
     pub reservation: Reservation,
     pub funding: Funding,
     pub threshold_sats: u64,
     pub execution_enabled: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cashu_invoice_enabled: bool,
     #[serde(default)]
     pub nostr_enabled: bool,
     pub observed_at: i64,
@@ -100,19 +131,24 @@ pub struct FundingPage {
 
 impl FundingPage {
     pub fn execution_permitted(&self, now: i64) -> bool {
-        self.execution_enabled
-            && self.observed_at >= 0
-            && self.observed_at <= now
-            && now - self.observed_at <= 5
+        self.funding_source.is_strike() && self.execution_enabled && self.is_fresh(now)
+    }
+    pub fn cashu_invoice_permitted(&self, now: i64) -> bool {
+        !self.funding_source.is_strike() && self.cashu_invoice_enabled && self.is_fresh(now)
+    }
+    fn is_fresh(&self, now: i64) -> bool {
+        self.observed_at >= 0 && self.observed_at <= now && now - self.observed_at <= 5
     }
     pub fn validate(&self) -> Result<()> {
         self.reservation.validate()?;
         self.funding.validate(self.threshold_sats)?;
-        if self.threshold_sats == 0
+        if (self.cashu_invoice_enabled && self.funding_source.is_strike())
+            || (self.execution_enabled && !self.funding_source.is_strike())
+            || self.threshold_sats == 0
             || self.observed_at < 0
             || self.threshold_sats > i64::MAX as u64
             || self.funding.proof_hash != self.reservation.funding_hash
-            || self.reservation.reserved_sats > self.funding.strike_sats
+            || self.reservation.reserved_sats > self.funding_source.available(&self.funding)
             || self.after < 0
             || self.through < self.after
             || self.parts.len() > MAX_FUNDING_PARTS
@@ -125,6 +161,12 @@ impl FundingPage {
         for part in &self.parts {
             if part.ledger_id <= cursor || part.consumed_sats == 0 {
                 bail!("funding page is not strictly ordered");
+            }
+            if let Some(anchor) = &part.cashu_anchor {
+                if part.anchor.is_some() || part.consumed_sats > self.funding.retained_cashu_sats {
+                    bail!("invalid retained Cashu funding part");
+                }
+                anchor.validate()?;
             }
             if let Some(anchor) = &part.anchor {
                 anchor.validate()?;
@@ -147,9 +189,32 @@ impl FundingPage {
     }
 }
 
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RewardFundingSource {
+    #[default]
+    Strike,
+    RetainedCashu,
+}
+
+impl RewardFundingSource {
+    pub fn is_strike(&self) -> bool {
+        *self == Self::Strike
+    }
+
+    pub fn available(self, funding: &Funding) -> u64 {
+        match self {
+            Self::Strike => funding.strike_sats,
+            Self::RetainedCashu => funding.retained_cashu_sats,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RewardPolicy {
+    #[serde(default, skip_serializing_if = "RewardFundingSource::is_strike")]
+    pub funding_source: RewardFundingSource,
     pub owner: String,
     pub member_percent_ceiling: u8,
     pub max_sats_per_feed: u64,
@@ -180,6 +245,8 @@ impl RewardPolicy {
 #[serde(deny_unknown_fields)]
 pub struct Funding {
     pub strike_sats: u64,
+    #[serde(default, skip_serializing_if = "zero_sats")]
+    pub retained_cashu_sats: u64,
     pub proof_hash: String,
 }
 
@@ -188,6 +255,8 @@ pub struct Funding {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Allowance {
+    #[serde(default, skip_serializing_if = "RewardFundingSource::is_strike")]
+    pub funding_source: RewardFundingSource,
     pub epoch: Uuid,
     pub request_id: Uuid,
     pub owner: String,
@@ -217,9 +286,17 @@ impl Allowance {
     }
 }
 
+fn zero_sats(amount: &u64) -> bool {
+    *amount == 0
+}
+
 impl Funding {
     pub fn validate(&self, threshold_sats: u64) -> Result<()> {
-        if self.strike_sats > threshold_sats {
+        if self
+            .strike_sats
+            .checked_add(self.retained_cashu_sats)
+            .is_none_or(|total| total > threshold_sats)
+        {
             bail!("funding exceeds confirmed debit");
         }
         crate::nostr_event::validate_hex(&self.proof_hash, 32)

@@ -40,9 +40,11 @@ pub struct Server {
     payout_peer_uid: Option<u32>,
     payout_execution_enabled: bool,
     payout_account_id: Option<uuid::Uuid>,
+    collector: Option<crate::config::BreezCollectorConfig>,
 }
 
 struct Resources {
+    collector: Option<crate::config::BreezCollectorConfig>,
     reads: Arc<Semaphore>,
     verification: Arc<Semaphore>,
     reader: Option<Arc<crate::payout::outcome::Reader>>,
@@ -74,6 +76,7 @@ impl Role {
                 request,
                 Request::FailedPayoutCost { .. }
                     | Request::PayoutFunding { .. }
+                    | Request::ClaimCashuExecution { .. }
                     | Request::ClaimPayoutExecution { .. }
                     | Request::PayoutExecutionState { .. }
                     | Request::PayoutOutcome { .. }
@@ -199,6 +202,7 @@ impl Server {
             payout_peer_uid: config.payout_peer_uid,
             payout_execution_enabled: config.payout_execution_enabled,
             payout_account_id: config.payout_account_id,
+            collector: None,
         })
     }
 
@@ -227,6 +231,7 @@ impl Server {
         // A short FIFO wait
         // lets synchronized intake/view calls take turns; expiry still rejects.
         let resources = Arc::new(Resources {
+            collector: self.collector,
             reads: Arc::new(Semaphore::new(1)),
             verification: Arc::new(Semaphore::new(1)),
             reader,
@@ -302,19 +307,32 @@ async fn serve_one(
     // Provider waits do not hold the ordinary event/safety IPC permit or a DB
     // transaction. At most one verification request exists, with no wait queue.
     if let Request::PayoutOutcome { packet } = &request {
-        let response = match (
-            &resources.reader,
-            Arc::clone(&resources.verification).try_acquire_owned(),
-        ) {
-            (Some(reader), Ok(_permit)) => {
-                match ledger.reconcile_payout_outcome(packet, reader).await {
-                    Ok(progress) => Response::PayoutOutcome {
-                        progress: Box::new(progress),
-                    },
-                    Err(_) => Response::Rejected,
+        let response = if let Ok(_permit) = Arc::clone(&resources.verification).try_acquire_owned()
+        {
+            let verified = match (
+                &packet.row.disposition,
+                &resources.collector,
+                &resources.reader,
+            ) {
+                (crate::payout::outcome::Disposition::CashuPaid { .. }, Some(collector), _) => {
+                    ledger.reconcile_cashu_outcome(packet, collector).await
                 }
+                (
+                    crate::payout::outcome::Disposition::Payment { .. }
+                    | crate::payout::outcome::Disposition::Unsubmitted { .. },
+                    _,
+                    Some(reader),
+                ) => ledger.reconcile_payout_outcome(packet, reader).await,
+                _ => Err(anyhow::anyhow!("original payout verifier unavailable")),
+            };
+            match verified {
+                Ok(progress) => Response::PayoutOutcome {
+                    progress: Box::new(progress),
+                },
+                Err(_) => Response::Rejected,
             }
-            _ => Response::Rejected,
+        } else {
+            Response::Rejected
         };
         return write_frame(&mut stream, &response).await;
     }
@@ -371,6 +389,27 @@ async fn serve_one(
                         page: page.map(Box::new),
                     },
                     Err(_) => Response::Rejected,
+                }
+            }
+            Request::ClaimCashuExecution { request } => {
+                if let Some(policy) = reward_policy {
+                    match ledger
+                        .claim_cashu_execution(
+                            &request,
+                            policy,
+                            payout_execution_enabled && mode.feeder_enabled(),
+                            mode.nostr_enabled(),
+                        )
+                        .await
+                    {
+                        Ok(observed_at) => Response::CashuExecutionClaim {
+                            request,
+                            observed_at,
+                        },
+                        Err(_) => Response::Rejected,
+                    }
+                } else {
+                    Response::Rejected
                 }
             }
             Request::ClaimPayoutExecution { request } => match ledger
@@ -462,9 +501,11 @@ async fn serve_one(
                     &owner,
                     after,
                     reward_policy,
-                    // Legacy clients may qualify funding but cannot execute
-                    // without the new independently retained claim protocol.
-                    false,
+                    // Cashu preparation can request the recipient invoice. Sending
+                    // funds still requires an independently retained execution claim.
+                    payout_execution_enabled
+                        && mode.feeder_enabled()
+                        && reward_policy.is_some_and(|policy| !policy.funding_source.is_strike()),
                 )
                 .await
             {
@@ -672,6 +713,31 @@ impl Client {
             }
             Response::RewardResults { page: None } => Ok(None),
             _ => bail!("core rejected verified result read"),
+        }
+    }
+    pub async fn claim_cashu_execution(
+        &self,
+        original: &crate::payout::cashu::ExecutionRequest,
+    ) -> Result<super::AuthenticatedCashuLease> {
+        original.validate()?;
+        match self
+            .request(&Request::ClaimCashuExecution {
+                request: Box::new(original.clone()),
+            })
+            .await?
+        {
+            Response::CashuExecutionClaim {
+                request,
+                observed_at,
+            } if *request == *original => {
+                let lease = super::AuthenticatedCashuLease {
+                    request: *request,
+                    observed_at,
+                };
+                lease.terms(crate::cyberherd::calendar::now()?)?;
+                Ok(lease)
+            }
+            _ => bail!("core rejected Cashu execution claim or returned different terms"),
         }
     }
     pub async fn claim_execution(
@@ -956,8 +1022,9 @@ impl Client {
         {
             Response::PayoutFunding { mut page } => {
                 page.validate()?;
-                page.execution_enabled =
-                    page.execution_permitted(crate::cyberherd::calendar::now()?);
+                let now = crate::cyberherd::calendar::now()?;
+                page.execution_enabled = page.execution_permitted(now);
+                page.cashu_invoice_enabled = page.cashu_invoice_permitted(now);
                 if page.reservation.epoch != epoch
                     || page.reservation.id != reservation_id
                     || page.reservation.owner != owner
@@ -1040,6 +1107,16 @@ pub async fn run_optional_with_reader(
     mode: RuntimeMode,
     reader: Option<crate::payout::outcome::Reader>,
 ) {
+    run_optional_with_readers(config, ledger, mode, reader, None).await;
+}
+
+pub async fn run_optional_with_readers(
+    config: Option<BridgeConfig>,
+    ledger: LedgerStore,
+    mode: RuntimeMode,
+    reader: Option<crate::payout::outcome::Reader>,
+    collector: Option<crate::config::BreezCollectorConfig>,
+) {
     let reader = reader.map(Arc::new);
     let Some(config) = config else {
         std::future::pending::<()>().await;
@@ -1063,7 +1140,8 @@ pub async fn run_optional_with_reader(
             continue;
         }
         match Server::bind(&config).await {
-            Ok(server) => {
+            Ok(mut server) => {
+                server.collector = collector.clone();
                 let _ = server
                     .run_with_reader(ledger.clone(), mode, reader.clone())
                     .await;
@@ -1162,6 +1240,7 @@ mod tests {
         use std::task::Poll;
         let (_root, _config, ledger) = fixture(0).await;
         let resources = Resources {
+            collector: None,
             reads: Arc::new(Semaphore::new(1)),
             verification: Arc::new(Semaphore::new(1)),
             reader: None,
@@ -1221,6 +1300,7 @@ mod tests {
     async fn occupied_read_turn_expires_and_does_not_strand_a_later_request() {
         let (_root, _config, ledger) = fixture(0).await;
         let resources = Resources {
+            collector: None,
             reads: Arc::new(Semaphore::new(1)),
             verification: Arc::new(Semaphore::new(1)),
             reader: None,
@@ -1388,6 +1468,7 @@ mod tests {
             let owner = test_event(1, 1, 100, "", vec![]).pubkey;
             if enabled {
                 config.reward_policy = Some(RewardPolicy {
+                    funding_source: Default::default(),
                     owner: owner.clone(),
                     member_percent_ceiling: 10,
                     max_sats_per_feed: 100,
@@ -1449,6 +1530,7 @@ mod tests {
             let owner = test_event(1, 1, 100, "", vec![]).pubkey;
             if enabled {
                 config.reward_policy = Some(RewardPolicy {
+                    funding_source: Default::default(),
                     owner: owner.clone(),
                     member_percent_ceiling: 10,
                     max_sats_per_feed: 100,

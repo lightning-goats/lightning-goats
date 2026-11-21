@@ -18,24 +18,22 @@ async fn available(
     mint: &str,
     largest_first: bool,
 ) -> Result<Option<Available>> {
-    let rows = sqlx::query(
-        "WITH custody AS (
+    let rows = sqlx::query(concat!(include_str!("treasury_balances.sql"), ", custody AS (
             SELECT c.ledger_entry_id,c.accepted_at,c.net_sats-COALESCE((
-                SELECT SUM(CASE WHEN t.intent_id IS NULL OR r.ledger_id IS NULL
+                SELECT SUM(CASE WHEN r.ledger_id IS NULL
                                 THEN s.input_sats ELSE r.input_sats-r.change_sats END)
                 FROM cashu_treasury_sources s
-                LEFT JOIN cashu_treasury_completions t ON t.intent_id=s.intent_id
-                LEFT JOIN cashu_treasury_source_results r
+                LEFT JOIN settled_sources r
                     ON r.intent_id=s.intent_id AND r.ledger_id=s.ledger_id
                 WHERE s.ledger_id=c.ledger_entry_id
             ),0) AS available
             FROM cashu_receipt_inbox c
             WHERE c.wallet_instance=? AND c.wallet_epoch=? AND c.core_epoch=? AND c.mint_id=?
+              AND NOT EXISTS(SELECT 1 FROM retained_cashu_lots g WHERE g.ledger_id=c.ledger_entry_id)
         ) SELECT *,SUM(available) OVER() AS balance,MIN(available) OVER() AS minimum,
                  MIN(accepted_at) OVER() AS oldest
           FROM custody WHERE available!=0
-          ORDER BY CASE WHEN ? THEN available END DESC,ledger_entry_id LIMIT ?",
-    )
+          ORDER BY CASE WHEN ? THEN available END DESC,ledger_entry_id LIMIT ?"))
     .bind(registration.wallet_instance.to_string())
     .bind(registration.wallet_epoch.to_string())
     .bind(registration.core_epoch.to_string())

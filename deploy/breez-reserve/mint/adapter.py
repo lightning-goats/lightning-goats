@@ -66,7 +66,9 @@ class GoatsReserve(LightningBackend):
             raise RuntimeError("reserve identity mismatch")
 
     def _invoice(self, request):
-        invoice = bolt11.decode(request)
+        if request != request.lower() and request != request.upper():
+            raise ValueError("mixed-case Lightning invoice")
+        invoice = bolt11.decode(request.lower())
         if invoice.currency != self.currency:
             raise ValueError("invoice network differs from the reserve network")
         if not invoice.amount_msat or invoice.amount_msat % 1000:
@@ -121,7 +123,7 @@ class GoatsReserve(LightningBackend):
 
     async def get_payment_quote(self, melt_quote: PostMeltQuoteRequest):
         invoice = self._invoice(melt_quote.request)
-        result = await self._call("POST", "/v1/funding/fee", {"invoice": melt_quote.request})
+        result = await self._call("POST", "/v1/funding/fee", {"invoice": melt_quote.request.lower()})
         if (result["payment_hash"], result["amount_sat"]) != (invoice.payment_hash, int(invoice.amount_msat) // 1000):
             raise ValueError("reserve fee estimate does not match the invoice")
         return PaymentQuoteResponse(checking_id=invoice.payment_hash,
@@ -137,7 +139,7 @@ class GoatsReserve(LightningBackend):
             if fee_limit_msat % 1000:
                 raise ValueError("fee limit must encode whole sats")
             result = await self._call("POST", "/v1/funding/payments", {
-                "operation_id": operation_id, "invoice": quote.request, "max_fee_sat": fee_limit_msat // 1000,
+                "operation_id": operation_id, "invoice": quote.request.lower(), "max_fee_sat": fee_limit_msat // 1000,
             })
             status = self._outgoing_status(operation_id, result)
             if status.settled:

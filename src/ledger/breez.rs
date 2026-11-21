@@ -256,5 +256,135 @@ mod tests {
             .unwrap();
         assert_eq!((funding.strike_sats, funding.retained_cashu_sats), (0, 10));
         tx.rollback().await.unwrap();
+        verify_cashu_reward_recovery(&reopened, &url, directory.path(), feed).await;
+    }
+
+    async fn verify_cashu_reward_recovery(
+        ledger: &LedgerStore,
+        url: &str,
+        directory: &std::path::Path,
+        feed: Uuid,
+    ) {
+        use crate::payout::{
+            cashu::ExecutionRequest,
+            outcome::{Disposition, Header, Packet, Row, next_hash},
+        };
+        use crate::reward_funding::{RewardFundingSource, RewardPolicy};
+        use sha2::{Digest, Sha256};
+        let key = |index| crate::nostr_event::test_event(index, 1, 100, "", vec![]).pubkey;
+        let policy = RewardPolicy {
+            owner: key(1),
+            funding_source: RewardFundingSource::RetainedCashu,
+            member_percent_ceiling: 50,
+            max_sats_per_feed: 5,
+            max_sats_per_24h: 10,
+        };
+        let epoch = ledger.overlay_stream_id().await.unwrap();
+        let reservation = ledger
+            .reserve_reward(&policy, epoch, feed, &"aa".repeat(32), 5)
+            .await
+            .unwrap();
+        let preimage = [7u8; 32];
+        let hash: [u8; 32] = Sha256::digest(preimage).into();
+        let description_hash = "ab".repeat(32);
+        let invoice = crate::test_invoices::invoice_with_payment_hash(
+            3000,
+            &description_hash,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap(),
+            hash,
+        );
+        let claim = ExecutionRequest {
+            reservation: reservation.clone(),
+            member: key(2),
+            disposition_id: Uuid::new_v4(),
+            invoice,
+            description_hash,
+            payment_hash: hex::encode(hash),
+            gross_sats: 5,
+            amount_sat: 3,
+            maximum_fee_sat: 2,
+            nip57: false,
+            collector_payload_digest: "ef".repeat(32),
+        };
+        ledger
+            .claim_cashu_execution(&claim, &policy, true, false)
+            .await
+            .unwrap();
+        let row = Row {
+            member: claim.member.clone(),
+            gross_sats: 5,
+            disposition: Disposition::CashuPaid {
+                disposition_id: claim.disposition_id,
+                payment_hash: claim.payment_hash.clone(),
+                amount_sats: 3,
+                fee_sats: 1,
+            },
+        };
+        let mut header = Header {
+            scope: Header::cashu_scope(&reservation),
+            reservation,
+            rows: 1,
+            final_hash: "00".repeat(32),
+        };
+        let before_hash = header.seed().unwrap();
+        header.final_hash = next_hash(&before_hash, &row).unwrap();
+        let packet = Packet {
+            header,
+            after: 0,
+            before_hash,
+            row,
+        };
+        let socket = directory.join("payout-receipt.sock");
+        let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+        let collector = BreezCollectorConfig {
+            socket,
+            peer_uid: crate::private_ipc::uid().unwrap(),
+        };
+        let serve = tokio::spawn(async move {
+            for paid in [false, true] {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let request: Value = crate::private_ipc::read(&mut stream, 65536).await.unwrap();
+                assert_eq!(
+                    request,
+                    json!({"payout_receipt":claim.disposition_id,"feed_id":feed,"payment_hash":claim.payment_hash,"invoice_digest":hex::encode(Sha256::digest(claim.invoice.as_bytes()))})
+                );
+                let result = paid.then(|| json!({"state":"PAID","quote":"fixture","amount_sat":3,"fee_sat":1,"payment_hash":hex::encode(hash),"payment_preimage":hex::encode(preimage)}));
+                crate::private_ipc::write(&mut stream, &result, 65536)
+                    .await
+                    .unwrap();
+            }
+        });
+        assert!(
+            ledger
+                .reconcile_cashu_outcome(&packet, &collector)
+                .await
+                .is_err()
+        );
+        let pending = ledger
+            .payout_outcome_progress(&packet.header)
+            .await
+            .unwrap();
+        assert_eq!((pending.through, pending.released_sats), (0, 0));
+        let settled = ledger
+            .reconcile_cashu_outcome(&packet, &collector)
+            .await
+            .unwrap();
+        serve.await.unwrap();
+        assert!(settled.finalized);
+        assert_eq!(
+            (settled.spent_sats, settled.held_sats, settled.released_sats),
+            (4, 0, 1)
+        );
+        let restarted = LedgerStore::connect(url).await.unwrap();
+        assert_eq!(
+            restarted
+                .reconcile_cashu_outcome(&packet, &collector)
+                .await
+                .unwrap(),
+            settled
+        );
+        assert_eq!(restarted.feed_credit_sats().await.unwrap(), 0);
     }
 }

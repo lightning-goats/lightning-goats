@@ -54,11 +54,19 @@ pub struct Header {
     pub final_hash: String,
 }
 impl Header {
+    pub(crate) fn cashu_scope(reservation: &Reservation) -> ProviderScope {
+        ProviderScope {
+            environment: "retained-cashu".into(),
+            account_id: reservation.epoch,
+            credential_fingerprint: reservation.policy_hash.clone(),
+        }
+    }
     pub fn validate(&self) -> Result<()> {
         self.reservation.validate()?;
         crate::nostr_event::validate_hex(&self.scope.credential_fingerprint, 32)?;
         crate::nostr_event::validate_hex(&self.final_hash, 32)?;
-        if self.scope.environment != "strike-production"
+        if (self.scope.environment != "strike-production"
+            && self.scope != Self::cashu_scope(&self.reservation))
             || self.scope.account_id.is_nil()
             || !(1..=1000).contains(&self.rows)
         {
@@ -108,6 +116,11 @@ impl Packet {
             bail!("invalid payout outcome row scope/amount");
         }
         next_hash(&self.before_hash, &self.row)?;
+        if matches!(self.row.disposition, Disposition::CashuPaid { .. })
+            != (self.header.scope.environment == "retained-cashu")
+        {
+            bail!("settlement row differs from manifest provider");
+        }
         match &self.row.disposition {
             Disposition::CashuPaid {
                 disposition_id,

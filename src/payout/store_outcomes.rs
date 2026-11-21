@@ -226,9 +226,14 @@ impl Store {
         if gross != reservation.reserved_sats {
             bail!("manifest gross differs from reservation");
         }
+        let scope = if paid.is_some() {
+            Header::cashu_scope(&reservation)
+        } else {
+            self.policy.scope.provider.clone()
+        };
         let mut header = Header {
             reservation,
-            scope: self.policy.scope.provider.clone(),
+            scope,
             rows: outcomes.len().try_into()?,
             final_hash: "00".repeat(32),
         };

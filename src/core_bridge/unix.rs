@@ -462,9 +462,11 @@ async fn serve_one(
                     &owner,
                     after,
                     reward_policy,
-                    // Legacy clients may qualify funding but cannot execute
-                    // without the new independently retained claim protocol.
-                    false,
+                    // Cashu preparation can request the recipient invoice. Sending
+                    // funds still requires an independently retained execution claim.
+                    payout_execution_enabled
+                        && mode.feeder_enabled()
+                        && reward_policy.is_some_and(|policy| !policy.funding_source.is_strike()),
                 )
                 .await
             {
@@ -956,8 +958,9 @@ impl Client {
         {
             Response::PayoutFunding { mut page } => {
                 page.validate()?;
-                page.execution_enabled =
-                    page.execution_permitted(crate::cyberherd::calendar::now()?);
+                let now = crate::cyberherd::calendar::now()?;
+                page.execution_enabled = page.execution_permitted(now);
+                page.cashu_invoice_enabled = page.cashu_invoice_permitted(now);
                 if page.reservation.epoch != epoch
                     || page.reservation.id != reservation_id
                     || page.reservation.owner != owner

@@ -132,8 +132,8 @@ impl LedgerStore {
                 Some(p) => {
                     p.owner == owner
                         && p.funding_source == frozen.funding_source
-                        && frozen.funding_source.is_strike()
-                        && reservation.reserved_sats <= p.budget(funding.strike_sats)?
+                        && reservation.reserved_sats
+                            <= p.budget(p.funding_source.available(&funding))?
                         && used <= p.max_sats_per_24h
                 }
                 None => false,
@@ -143,7 +143,10 @@ impl LedgerStore {
             reservation,
             funding,
             threshold_sats: to_u64(threshold, "funded threshold")?,
-            execution_enabled: execution_enabled && allowed,
+            execution_enabled: execution_enabled && allowed && frozen.funding_source.is_strike(),
+            cashu_invoice_enabled: execution_enabled
+                && allowed
+                && !frozen.funding_source.is_strike(),
             nostr_enabled: false,
             observed_at: crate::cyberherd::calendar::now()?,
             after,

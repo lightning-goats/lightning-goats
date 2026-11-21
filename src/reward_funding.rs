@@ -118,6 +118,8 @@ pub struct FundingPage {
     pub funding: Funding,
     pub threshold_sats: u64,
     pub execution_enabled: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cashu_invoice_enabled: bool,
     #[serde(default)]
     pub nostr_enabled: bool,
     pub observed_at: i64,
@@ -129,15 +131,20 @@ pub struct FundingPage {
 
 impl FundingPage {
     pub fn execution_permitted(&self, now: i64) -> bool {
-        self.execution_enabled
-            && self.observed_at >= 0
-            && self.observed_at <= now
-            && now - self.observed_at <= 5
+        self.funding_source.is_strike() && self.execution_enabled && self.is_fresh(now)
+    }
+    pub fn cashu_invoice_permitted(&self, now: i64) -> bool {
+        !self.funding_source.is_strike() && self.cashu_invoice_enabled && self.is_fresh(now)
+    }
+    fn is_fresh(&self, now: i64) -> bool {
+        self.observed_at >= 0 && self.observed_at <= now && now - self.observed_at <= 5
     }
     pub fn validate(&self) -> Result<()> {
         self.reservation.validate()?;
         self.funding.validate(self.threshold_sats)?;
-        if self.threshold_sats == 0
+        if (self.cashu_invoice_enabled && self.funding_source.is_strike())
+            || (self.execution_enabled && !self.funding_source.is_strike())
+            || self.threshold_sats == 0
             || self.observed_at < 0
             || self.threshold_sats > i64::MAX as u64
             || self.funding.proof_hash != self.reservation.funding_hash

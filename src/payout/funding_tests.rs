@@ -1028,10 +1028,15 @@ async fn mixed_funding_keeps_the_consumed_claim_for_custody_verification() {
     let plan_hash = f.plan.hash().unwrap();
     let select_cashu = |page: &mut FundingPage| {
         page.funding_source = crate::reward_funding::RewardFundingSource::RetainedCashu;
+        page.execution_enabled = false;
+        page.cashu_invoice_enabled = true;
         page.threshold_sats = 40;
         page.reservation.plan_hash = plan_hash.clone();
     };
     select_cashu(&mut first);
+    assert!(first.cashu_invoice_permitted(first.observed_at));
+    assert!(!first.execution_permitted(first.observed_at));
+    assert!(!first.cashu_invoice_permitted(first.observed_at + 6));
     let anchor = CashuFundingAnchor {
         source: CashuFundingSource::ProjectInvoice,
         claim_id: Uuid::new_v4(),
@@ -1061,6 +1066,7 @@ async fn mixed_funding_keeps_the_consumed_claim_for_custody_verification() {
         select_cashu(&mut next);
         let mut wrong = next.clone();
         wrong.funding_source = Default::default();
+        wrong.cashu_invoice_enabled = false;
         assert!(
             session
                 .accept_cashu(&authenticate(wrong).await, journal_scope)

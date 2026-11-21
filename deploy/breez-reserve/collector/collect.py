@@ -100,6 +100,20 @@ def _submit_payout(store, client, disposition_id, invoice_text, keyset, pinned_k
     if (invoice.currency != "bc" or invoice.payment_hash != terms["invoice_hash"]
             or invoice.amount_msat != 1000 * terms["amount_sat"]):
         raise ValueError("signed payout invoice differs from reserved terms")
+    def paid_receipt(quote, fee, preimage):
+        if (type(fee) is not int or not 0 <= fee <= terms["maximum_fee_sat"]
+                or len(preimage) != 64 or hashlib.sha256(bytes.fromhex(preimage)).hexdigest() != invoice.payment_hash):
+            raise ValueError("invalid journaled payout settlement")
+        return {"state": "PAID", "quote": quote, "amount_sat": terms["amount_sat"],
+                "fee_sat": fee, "payment_hash": invoice.payment_hash, "payment_preimage": preimage}
+
+    saved = store.db.execute("""
+        SELECT m.quote_id,r.fee_sat,r.preimage FROM payout_melt m
+        JOIN payout_melt_result r USING(disposition_id) WHERE m.disposition_id=?
+    """, (disposition_id,)).fetchone()
+    if saved is not None:
+        return paid_receipt(*saved)
+
     prior = store.db.execute("SELECT quote_id FROM payout_melt WHERE disposition_id=?",
                              (disposition_id,)).fetchone()
     if prior is None:
@@ -152,7 +166,9 @@ def _submit_payout(store, client, disposition_id, invoice_text, keyset, pinned_k
             fee = terms["maximum_fee_sat"] - sum(p["amount"] for p in proofs)
             if fee < 0:
                 raise ValueError("excess payout change")
+            receipt = paid_receipt(quote_id, fee, preimage.hex())
             store.record_melt_result(disposition_id, fee, preimage.hex(), proofs)
+            return receipt
         return result
 
     if status["state"] != "UNPAID":

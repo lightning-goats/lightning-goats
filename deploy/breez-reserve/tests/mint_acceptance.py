@@ -507,6 +507,7 @@ def main():
                 final_melt = submit_payout(claims, viewer, payment_id, reserve.destination[0], keyset, {keyset: keys})
                 claims.db.close()
                 claims = ClaimStore(claim_dir)
+                assert submit_payout(claims, None, payment_id, reserve.destination[0], keyset, {keyset: keys}) == final_melt
                 fee, saved_change = claims.db.execute("""
                     SELECT fee_sat,change_proofs FROM payout_melt_result WHERE disposition_id=?
                 """, (payment_id,)).fetchone()
@@ -519,7 +520,8 @@ def main():
                 expect(viewer.post("/v1/swap", json={"inputs": selected_change,
                                                      "outputs": encode_outputs(spend_change)}))
                 assert final_melt["state"].upper() == "PAID", final_melt
-                assert sum(change["amount"] for change in final_melt["change"]) == 3
+                assert final_melt["fee_sat"] == 1 and final_melt["amount_sat"] == 12
+                assert sum(change["amount"] for change in selected_change) == 3
                 assert wallet_state(viewer, payout_proof) == "SPENT"
                 assert reserve.pay_attempts == 1
             finally:

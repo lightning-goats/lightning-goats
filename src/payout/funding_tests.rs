@@ -1094,6 +1094,7 @@ async fn mixed_funding_keeps_the_consumed_claim_for_custody_verification() {
     inclusive.rows[0].fee_limit_sats = 0;
     let mut inclusive_policy = policy.clone();
     inclusive_policy.fee_mode = inclusive.planning_policy.fee_mode;
+    inclusive_policy.max_fee_sats = 0;
     let inclusive_url = format!(
         "sqlite://{}",
         f.root.path().join("inclusive-cashu.db").display()
@@ -1135,6 +1136,28 @@ async fn mixed_funding_keeps_the_consumed_claim_for_custody_verification() {
             .id(),
         adjusted.id()
     );
+    let callback = journal
+        .freeze_request(adjusted.id(), None, now + 1)
+        .await
+        .unwrap();
+    let signed = crate::test_invoices::invoice_at(
+        1000,
+        callback.description_hash(),
+        std::time::Duration::from_secs((now + 2).try_into().unwrap()),
+    );
+    let final_invoice = callback
+        .validate_response(&serde_json::to_vec(&json!({"pr":signed})).unwrap(), now + 2)
+        .unwrap();
+    journal
+        .freeze_invoice(&final_invoice, now + 3)
+        .await
+        .unwrap();
+    let (claim, payload) = journal.cashu_payout_request(adjusted.id()).await.unwrap();
+    assert_eq!(
+        (claim.gross_sats, claim.amount_sat, claim.maximum_fee_sat),
+        (2, 1, 1)
+    );
+    assert_eq!(payload["maximum_fee_sat"], 1);
     qualified.retained_allocations[0].anchor.source = CashuFundingSource::Acquisition;
     assert!(store.admit_cashu(&f.plan, &qualified, now).await.is_err());
     qualified.retained_allocations[0] = allocation.clone();

@@ -75,12 +75,11 @@ impl Store {
                 .gross_sats
                 .checked_sub(fee)
                 .context("Cashu fee exceeds member share")?;
-            if fee > self.policy.max_fee_sats
-                || net
-                    < recipient
-                        .min_msat
-                        .div_ceil(1000)
-                        .max(plan.planning_policy.minimum_net_sats)
+            if net
+                < recipient
+                    .min_msat
+                    .div_ceil(1000)
+                    .max(plan.planning_policy.minimum_net_sats)
                 || net > recipient.max_msat / 1000
                 || net > self.policy.max_net_sats
             {
@@ -265,10 +264,10 @@ impl Store {
         let gross = u64::try_from(row.try_get::<i64, _>("gross_sats")?)?;
         let fee = gross
             .checked_sub(invoice.amount_sats())
-            .context("invoice exceeds member share")?
-            .min(self.policy.max_fee_sats);
+            .context("invoice exceeds member share")?;
         let fee = if self.policy.fee_mode.is_fixed() {
-            fee.min(u64::try_from(row.try_get::<i64, _>("fee_limit_sats")?)?)
+            fee.min(self.policy.max_fee_sats)
+                .min(u64::try_from(row.try_get::<i64, _>("fee_limit_sats")?)?)
         } else {
             fee
         };

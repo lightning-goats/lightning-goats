@@ -170,6 +170,11 @@ impl Row {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Plan {
+    #[serde(
+        default,
+        skip_serializing_if = "crate::reward_funding::RewardFundingSource::is_strike"
+    )]
+    pub funding_source: crate::reward_funding::RewardFundingSource,
     pub version: u8,
     pub owner: String,
     pub epoch: Uuid,
@@ -231,11 +236,8 @@ pub(super) fn build(
         bail!("invalid reward plan time/scope");
     }
     let funding = barrier.feeding.funding.as_ref();
-    let real_sats = funding.map_or(0, |f| {
-        allowance
-            .map_or_else(Default::default, |a| a.funding_source)
-            .available(f)
-    });
+    let funding_source = allowance.map_or_else(Default::default, |a| a.funding_source);
+    let real_sats = funding.map_or(0, |f| funding_source.available(f));
     let mut percent = snapshot.settings.member_percent;
     let mut cap = 0;
     if let Some(a) = allowance {
@@ -255,6 +257,7 @@ pub(super) fn build(
     }
     let budget = u64::try_from(u128::from(real_sats) * u128::from(percent) / 100)?.min(cap);
     let mut plan = Plan {
+        funding_source,
         version: 1,
         owner: snapshot.owner.clone(),
         epoch: binding.epoch,

@@ -431,6 +431,7 @@ fn validate_admission(plan: &Plan, q: &QualifiedFunding, policy: &Policy, now: i
         || plan.hash()? != r.plan_hash
         || plan.funding_hash.as_deref() != Some(&r.funding_hash)
         || q.funding().proof_hash != r.funding_hash
+        || plan.funding_source != q.funding_source()
         || plan.real_sats != q.funding_source().available(q.funding())
         || plan.threshold_sats != q.threshold_sats()
         || plan.reserved_sats != r.reserved_sats

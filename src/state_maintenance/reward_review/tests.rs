@@ -217,6 +217,7 @@ impl Fixture {
             .unwrap();
         let recipient = crate::payout::recipient::Recipient::parse("member@example.com", br#"{"tag":"payRequest","callback":"https://pay.example.com/member","minSendable":1000,"maxSendable":1000000,"metadata":"[[\"text/plain\",\"Synthetic treats\"]]"}"#).unwrap();
         let plan = Plan {
+            funding_source: root_policy.funding_source,
             version: 1,
             owner: self.policy.owner.clone(),
             epoch: self.policy.epoch,

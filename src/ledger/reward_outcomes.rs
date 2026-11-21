@@ -116,6 +116,12 @@ pub(super) async fn validate_scope(
     {
         bail!("outcome does not match current core reservation");
     }
+    // This manifest verifier only authenticates Strike records and unsubmitted attestations.
+    let policy: crate::reward_funding::RewardPolicy =
+        serde_json::from_str(&row.try_get::<String, _>("policy_json")?)?;
+    if !policy.funding_source.is_strike() {
+        bail!("Cashu reservation requires a custody settlement outcome");
+    }
     let funding = super::reward_funding::confirmed_funding(tx, header.reservation.request_id)
         .await?
         .context("outcome reservation lost confirmed funding")?;

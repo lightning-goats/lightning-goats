@@ -44,7 +44,7 @@ fn sample_plan(
     };
     let key = crate::nostr_event::test_event(2, 0, 100, "{}", vec![]).pubkey;
     let address = "member@example.com";
-    Plan{version:1,owner:owner(),epoch,core_uid:self_credentials().unwrap().0,request_id:feed,
+    Plan{funding_source:a.funding_source,version:1,owner:owner(),epoch,core_uid:self_credentials().unwrap().0,request_id:feed,
         barrier_hash:"11".repeat(32),cycle:1,roster_revision:1,funding_hash:Some(a.funding.proof_hash.clone()),
         real_sats:20,threshold_sats:23,member_percent:10,budget_sats:2,reserved_sats:2,operations_sats:21,
         root_policy_hash:Some(a.policy_hash.clone()),created_at:crate::cyberherd::calendar::now().unwrap(),
@@ -1020,6 +1020,7 @@ async fn mixed_funding_keeps_the_consumed_claim_for_custody_verification() {
     let (verifier, task) = verifier(&f, None, "0.00000001").await;
     let mut first = f.page(0, true).await;
     // Model equal Strike and retained funding on this authenticated test feed.
+    f.plan.funding_source = crate::reward_funding::RewardFundingSource::RetainedCashu;
     f.plan.threshold_sats = 40;
     f.plan.operations_sats = 38;
     let plan_hash = f.plan.hash().unwrap();
@@ -1147,7 +1148,13 @@ async fn mixed_funding_keeps_the_consumed_claim_for_custody_verification() {
         .await
         .unwrap();
     qualified.funding_source = Default::default();
-    legacy.admit(&f.plan, &qualified, now).await.unwrap();
+    let mut legacy_plan = f.plan.clone();
+    legacy_plan.funding_source = Default::default();
+    let legacy_evidence = copy_evidence(&qualified, &legacy_plan);
+    legacy
+        .admit(&legacy_plan, &legacy_evidence, now)
+        .await
+        .unwrap();
     assert!(legacy.admit_cashu(&f.plan, &qualified, now).await.is_err());
     qualified.funding_source = crate::reward_funding::RewardFundingSource::RetainedCashu;
     qualified.retained_allocations[0].anchor.evidence_digest = "ef".repeat(32);

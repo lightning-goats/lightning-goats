@@ -186,7 +186,7 @@ class ContactBrowserTests(unittest.TestCase):
         self.page.locator("#contactEmail").fill("visitor@example.org")
         self.page.locator("#contactMessage").fill("Private paid contact fixture")
         self.page.locator("#contactSend").click()
-        self.page.wait_for_function("document.getElementById('contactStatus').textContent.includes('Waiting for Strike')")
+        self.page.wait_for_function("document.getElementById('contactStatus').textContent.includes('Waiting for payment confirmation')")
         self.assertEqual(len(self.contact_creates), 1)
         self.assertEqual(self.page.evaluate("walletCalls"), ["enable", CONTACT_INVOICE])
         self.assertEqual(self.page.evaluate("published.length"), 0)

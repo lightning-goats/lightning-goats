@@ -32,7 +32,7 @@ PROJECT_TOKEN = "fixture-token-" + "a" * 36
 TEST_SIGNER = "11" * 32
 
 
-def invoice(sats, *, memo=None, digest=None, key=None):
+def invoice(sats, *, memo=None, digest=None, key=None, created_at=None):
     preimage = key or secrets.token_hex(32)
     payment_hash = hashlib.sha256(bytes.fromhex(preimage)).hexdigest()
     tags = bolt11.Tags([
@@ -41,7 +41,7 @@ def invoice(sats, *, memo=None, digest=None, key=None):
         bolt11.Tag(bolt11.TagChar.expire_time, 900),
         bolt11.Tag(bolt11.TagChar.description_hash if digest else bolt11.TagChar.description, digest or memo),
     ])
-    return bolt11.encode(bolt11.Bolt11("bc", int(time.time()), tags, bolt11.MilliSatoshi(sats * 1000)), private_key=TEST_SIGNER), preimage
+    return bolt11.encode(bolt11.Bolt11("bc", int(time.time()) if created_at is None else created_at, tags, bolt11.MilliSatoshi(sats * 1000)), private_key=TEST_SIGNER), preimage
 
 
 class Fixture(UnixStreamServer):
@@ -445,6 +445,15 @@ def main():
                     pass
                 else:
                     raise AssertionError("mismatched payer authorization consumed funds")
+                assert not claims.db.execute("SELECT 1 FROM proof_disposition WHERE id=?", (payment_id,)).fetchone()
+                expired_invoice, _ = invoice(12, memo="expired fixture", created_at=int(time.time()) - 1000)
+                try:
+                    execute_payout(claims, None, {**authorization, "invoice": expired_invoice,
+                                   "payment_hash": bolt11.decode(expired_invoice).payment_hash}, keyset, {keyset: keys})
+                except ValueError as exc:
+                    assert str(exc) == "expired payout invoice"
+                else:
+                    raise AssertionError("expired invoice reserved payout inputs")
                 assert not claims.db.execute("SELECT 1 FROM proof_disposition WHERE id=?", (payment_id,)).fetchone()
                 [payout_proof] = claims.reserve_payout(payment_id, payout_feed, digest, 12, 4,
                     {funded_id: {"consumed_sats": 16, "evidence_digest": funded["proof_digest"]}})

@@ -106,7 +106,8 @@ def execute_payout(store, client, request, keyset, pinned_keys):
         allocations[ident] = {"consumed_sats": part["consumed_sats"],
                               "evidence_digest": anchor["evidence_digest"]}
     store.reserve_payout(request["disposition_id"], request["feed_id"], invoice.payment_hash,
-                         request["amount_sat"], request["maximum_fee_sat"], allocations)
+                         request["amount_sat"], request["maximum_fee_sat"], allocations,
+                         invoice_expiry=invoice.expiry_time)
     result = submit_payout(store, client, request["disposition_id"], request["invoice"], keyset, pinned_keys)
     if result["state"] == "PAID":
         return result

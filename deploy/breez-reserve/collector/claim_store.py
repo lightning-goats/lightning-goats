@@ -3,6 +3,7 @@
 import hashlib
 import json
 import sqlite3
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from uuid import UUID
@@ -167,7 +168,7 @@ class ClaimStore:
                 raise ValueError("disposition inputs changed")
             return [json.loads(r[1]) for r in rows]
 
-    def reserve_payout(self, disposition_id, feed_id, invoice_hash, amount, fee_limit, allocations):
+    def reserve_payout(self, disposition_id, feed_id, invoice_hash, amount, fee_limit, allocations, *, invoice_expiry=None):
         """Reserve exact project inputs against an authenticated confirmed-feed allocation."""
         disposition_id = str(UUID(disposition_id))
         feed_id = str(UUID(feed_id))
@@ -185,6 +186,8 @@ class ClaimStore:
             if previous and previous != ("cyberherd_payout", binding):
                 raise ValueError("payout replay differs")
             if previous is None:
+                if invoice_expiry is not None and invoice_expiry <= time.time():
+                    raise ValueError("expired payout invoice")
                 self.db.execute("INSERT INTO proof_disposition VALUES (?,'cyberherd_payout',?)",
                                 (disposition_id, binding))
                 self.db.execute("INSERT INTO payout_invoice VALUES (?,?)", (invoice_hash, disposition_id))

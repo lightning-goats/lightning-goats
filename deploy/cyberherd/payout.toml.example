@@ -27,7 +27,7 @@ max_sats_per_24h = 0
 max_fee_sats = 0
 max_net_sats = 0
 max_source_parts = 8192
-operation_addresses = ["herd@lightning-goats.com", "herd@lnb.bolverker.com"]
+operation_addresses = ["sat@lightning-goats.com", "herd@lightning-goats.com", "herd@lnb.bolverker.com"]
 receipt_relays = ["wss://nostr.chaima.info/", "wss://relay.artx.market/", "wss://relay.damus.io/"]
 
 [policy.scope]

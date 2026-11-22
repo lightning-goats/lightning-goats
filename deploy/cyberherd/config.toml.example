@@ -41,7 +41,7 @@ herd = "0000000000000000000000000000000000000000000000000000000000000000"
 # maximum_net_sats = 0 # explicit per-payment limit; zero skips new payouts
 # minimum_net_sats = 1
 # profile_max_age_seconds = 3600
-# operation_addresses = ["herd@lightning-goats.com", "herd@lnb.bolverker.com"]
+# operation_addresses = ["sat@lightning-goats.com", "herd@lightning-goats.com", "herd@lnb.bolverker.com"]
 # Include every operational wallet/address alias to exclude self-transfers.
 
 # Optional read-only ordered export to the separate payout UID. No spend or

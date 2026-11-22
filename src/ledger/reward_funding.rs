@@ -89,6 +89,7 @@ impl LedgerStore {
         let more = rows.len() > MAX_FUNDING_PARTS;
         let mut parts = Vec::new();
         let mut through = after;
+        let has_collector_handoffs = super::core_schema_version(&mut tx).await? >= 36;
         for row in rows.into_iter().take(MAX_FUNDING_PARTS) {
             let ledger_id: i64 = row.try_get("ledger_id")?;
             let kind: String = row.try_get("kind")?;
@@ -119,12 +120,11 @@ impl LedgerStore {
             } else {
                 None
             };
-            let collected_sats =
-                if kind != "conversion" && super::core_schema_version(&mut tx).await? >= 36 {
-                    acquisition_proceeds(&mut tx, reservation.request_id, ledger_id).await?
-                } else {
-                    None
-                };
+            let collected_sats = if kind != "conversion" && has_collector_handoffs {
+                acquisition_proceeds(&mut tx, reservation.request_id, ledger_id).await?
+            } else {
+                None
+            };
             parts.push(FundingPart {
                 collected_sats,
                 ledger_id,
@@ -612,7 +612,7 @@ async fn consume(
             } else if let Some((id, _)) = feed {
                 sqlx::query("INSERT INTO feed_acquisition_proceeds(request_id,ledger_id,sats)
                     SELECT ?1,h.ledger_id, MIN(?2,MAX(0,h.collected_sats-COALESCE((
-                      SELECT SUM(prior.sats) FROM feed_acquisition_proceeds prior WHERE prior.ledger_id=h.ledger_id),0)))
+                      SELECT SUM(prior.sats) FROM feed_reward_funding_parts prior WHERE prior.ledger_id=h.ledger_id AND prior.request_id!=?1),0)))
                     FROM collector_handoff_amounts h WHERE h.ledger_id=?3")
                     .bind(id.to_string()).bind(to_i64(take,"consumed credit")?).bind(ledger).execute(&mut **tx).await?;
                 hash_retained_claim(tx, id, ledger, take, &mut hash, true).await?;

@@ -86,6 +86,13 @@ async fn admitted_plan_recovers_lost_intake_checkpoint_without_core_or_new_provi
     .fetch_one(&db)
     .await
     .unwrap();
+    let reopened = Store::connect(&url, store.policy().clone()).await.unwrap();
+    let allocation = reopened.operator_allocation(2).await.unwrap().unwrap();
+    assert_eq!(allocation.request_id, operator_plan.request_id);
+    assert_eq!(allocation.plan_hash, operator_plan.hash().unwrap());
+    assert_eq!(allocation.member_grant, None);
+    assert_eq!(allocation.operator_sats, operator_plan.real_sats);
+    assert!(reopened.operator_allocation(1).await.unwrap().is_none());
     let real = i64::try_from(operator_plan.real_sats).unwrap();
     assert_eq!(saved, (real, 0, real));
     assert!(sqlx::query("INSERT OR REPLACE INTO payout_operator_allocations SELECT sequence,funding_hash,collected_sats,1,collected_sats-1 FROM payout_operator_allocations")

@@ -1021,12 +1021,11 @@ impl Client {
     /// Read the exact confirmed Cashu lots backing a frozen operator allocation.
     pub async fn operator_funding(
         &self,
-        plan: &crate::cyberherd::rewards::Plan,
+        plan: &crate::reward_funding::OperatorAllocation,
         after: i64,
     ) -> Result<crate::reward_funding::OperatorFundingPage> {
-        if plan.version != 2
-            || plan.funding_source.is_strike()
-            || !plan.valid_operations_remainder()
+        if plan.collected_sats.checked_sub(plan.member_reserved_sats) != Some(plan.operator_sats)
+            || plan.operator_sats == 0
             || plan.core_uid != self.expected_uid
             || after < 0
         {
@@ -1046,9 +1045,10 @@ impl Client {
         if page.epoch != plan.epoch
             || page.request_id != plan.request_id
             || page.owner != plan.owner
-            || plan.funding_hash.as_ref() != Some(&page.funding.proof_hash)
-            || page.funding.retained_cashu_sats != plan.real_sats
-            || page.reservation.as_ref().map_or(0, |r| r.reserved_sats) != plan.reserved_sats
+            || plan.funding_hash != page.funding.proof_hash
+            || page.funding.retained_cashu_sats != plan.collected_sats
+            || page.reservation.as_ref().map_or(0, |r| r.reserved_sats) != plan.member_reserved_sats
+            || page.reservation.as_ref().map(|r| r.id) != plan.member_grant
             || page.after != after
             || page.through < after
             || (page.more && page.through == after)
@@ -1061,7 +1061,7 @@ impl Client {
             if reservation.owner != plan.owner
                 || reservation.epoch != plan.epoch
                 || reservation.request_id != plan.request_id
-                || reservation.plan_hash != plan.hash()?
+                || reservation.plan_hash != plan.plan_hash
                 || reservation.funding_hash != page.funding.proof_hash
             {
                 bail!("member reservation differs from operator plan");
@@ -1073,7 +1073,7 @@ impl Client {
             if allocation.ledger_id <= cursor
                 || allocation.ledger_id > page.through
                 || allocation.consumed_sats == 0
-                || allocation.consumed_sats > plan.real_sats
+                || allocation.consumed_sats > plan.collected_sats
             {
                 bail!("invalid operator funding allocation");
             }

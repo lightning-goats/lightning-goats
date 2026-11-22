@@ -131,6 +131,21 @@ pub struct FundingPage {
     pub parts: Vec<FundingPart>,
 }
 
+/// Payout-journal checkpoint bound to its original intake receipt and core scope.
+#[derive(Debug, Clone)]
+pub struct OperatorAllocation {
+    pub epoch: Uuid,
+    pub owner: String,
+    pub core_uid: u32,
+    pub request_id: Uuid,
+    pub plan_hash: String,
+    pub funding_hash: String,
+    pub member_grant: Option<Uuid>,
+    pub collected_sats: u64,
+    pub member_reserved_sats: u64,
+    pub operator_sats: u64,
+}
+
 /// Authenticated readback of a confirmed feed, including feeds with no member grant.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]

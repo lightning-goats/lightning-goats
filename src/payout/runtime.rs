@@ -263,6 +263,46 @@ pub struct Intake {
     pub verifier: Option<SourceVerifier>,
 }
 impl Intake {
+    /// Recover a checkpoint independently of the member worker's current intake cursor.
+    pub async fn qualified_operator_funding(
+        &self,
+        sequence: i64,
+    ) -> Result<(
+        crate::reward_funding::OperatorAllocation,
+        Vec<super::funding::RetainedAllocation>,
+    )> {
+        let allocation = self
+            .store
+            .operator_allocation(sequence)
+            .await?
+            .context("operator allocation missing")?;
+        let limit = usize::from(self.store.policy().max_source_parts);
+        let mut cursor = 0;
+        let mut collected = 0_u64;
+        let mut claims = std::collections::BTreeSet::new();
+        let mut lots = Vec::new();
+        for _ in 0..limit.div_ceil(crate::reward_funding::MAX_FUNDING_PARTS) {
+            let page = self.core.operator_funding(&allocation, cursor).await?;
+            for lot in page.allocations {
+                if !claims.insert(lot.anchor.claim_id) || lots.len() >= limit {
+                    bail!("duplicate or excessive operator custody claims");
+                }
+                collected = collected
+                    .checked_add(lot.consumed_sats)
+                    .context("operator custody sum overflow")?;
+                lots.push(lot);
+            }
+            if !page.more {
+                if collected != allocation.collected_sats {
+                    bail!("operator custody differs from confirmed spendable funding");
+                }
+                return Ok((allocation, lots));
+            }
+            cursor = page.through;
+        }
+        bail!("operator funding exceeds configured source bound")
+    }
+
     pub async fn tick(&self) -> Result<bool> {
         let Some(authenticated) = self.plans.next(self.store.intake_cursor().await?).await? else {
             return Ok(false);

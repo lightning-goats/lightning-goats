@@ -1233,3 +1233,55 @@ async fn solar_route_is_sanitized_read_only_and_has_no_item_proxy_or_commands() 
     assert!(owner.commands.lock().unwrap().is_empty());
     mock.abort();
 }
+
+#[tokio::test]
+async fn pulse_is_visible_before_completion_without_spending_or_redispatch() {
+    let owner = Owner {
+        owner_v1: true,
+        ..Owner::default()
+    };
+    let (mock, url) = mock_owner(owner.clone()).await;
+    let dir = TempDir::new().unwrap();
+    let (_gateway, base) = gateway_protocol(&dir, &url, 1, true).await;
+    let ledger = credited(&dir, 1000).await;
+    let worker_ledger = ledger.clone();
+    let worker = tokio::spawn(async move {
+        lightning_goats::feeder::run_feed_step(
+            &worker_ledger,
+            &lightning_goats::gateway::GatewayClient::new(&base).unwrap(),
+            1000,
+            lightning_goats::config::RuntimeMode::Active,
+        )
+        .await
+        .unwrap()
+    });
+    tokio::time::timeout(Duration::from_secs(15), async {
+        let id = loop {
+            if let Some(id) = owner.commands.lock().unwrap().first().cloned() {
+                break id;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        };
+        *owner.ack.lock().unwrap() = owner_result(&id, "running", "pulse_started");
+        loop {
+            if ledger
+                .events_after(0, 100)
+                .await
+                .unwrap()
+                .iter()
+                .any(|e| e.event_type == "feeder_pulse_started")
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(ledger.feed_credit_sats().await.unwrap(), 1000);
+        *owner.ack.lock().unwrap() = owner_result(&id, "complete", "complete");
+        worker.await.unwrap();
+    })
+    .await
+    .unwrap();
+    assert_eq!(ledger.feed_credit_sats().await.unwrap(), 0);
+    assert_eq!(owner.commands.lock().unwrap().len(), 1);
+    mock.abort();
+}

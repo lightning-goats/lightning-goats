@@ -20,6 +20,7 @@ pub enum OwnerProtocol {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OwnerOutcome {
+    PulseStarted,
     Absent,
     Pending,
     Complete,
@@ -291,6 +292,16 @@ impl OpenHabClient {
             return parse_result_v2(&self.item_state(&self.ack_item).await?, request_id);
         };
         if entry.status == "accepted" {
+            // Only the correlated post-ON notification can advance presentation.
+            // The retained ledger still owns completion and reconciliation.
+            if let Ok(raw) = self.item_state(&self.ack_item).await
+                && matches!(
+                    parse_result_v2(&raw, request_id),
+                    Ok(OwnerOutcome::PulseStarted)
+                )
+            {
+                return Ok(OwnerOutcome::PulseStarted);
+            }
             return Ok(OwnerOutcome::Pending);
         }
         let completed_at = parse_v2_time(
@@ -499,7 +510,8 @@ fn parse_result_v2(raw: &str, expected: Uuid) -> Result<OwnerOutcome> {
     match (result.status.as_str(), result.reason.as_str()) {
         // Notification alone never certifies durable completion.
         ("complete", "complete") => Ok(OwnerOutcome::Ambiguous),
-        ("accepted", "accepted") | ("running", "pulse_started") => Ok(OwnerOutcome::Pending),
+        ("accepted", "accepted") => Ok(OwnerOutcome::Pending),
+        ("running", "pulse_started") => Ok(OwnerOutcome::PulseStarted),
         (
             "denied",
             "request_invalid"
@@ -563,9 +575,8 @@ fn parse_owner_result(raw: &str, expected: Uuid) -> Result<OwnerOutcome> {
     }
     match (result.status, result.reason.as_str()) {
         (OwnerStatus::Complete, "complete") => Ok(OwnerOutcome::Complete),
-        (OwnerStatus::Accepted, "accepted") | (OwnerStatus::Running, "pulse_started") => {
-            Ok(OwnerOutcome::Pending)
-        }
+        (OwnerStatus::Accepted, "accepted") => Ok(OwnerOutcome::Pending),
+        (OwnerStatus::Running, "pulse_started") => Ok(OwnerOutcome::PulseStarted),
         (
             OwnerStatus::Denied,
             "request_invalid"

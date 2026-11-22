@@ -212,10 +212,14 @@ async fn temperature(State(state): State<GatewayState>) -> Response {
 async fn feed_request(
     AxumPath(request_id): AxumPath<Uuid>,
     State(state): State<GatewayState>,
+    headers: axum::http::HeaderMap,
 ) -> Response {
+    let pulse_notice = headers
+        .get("X-Goats-Pulse-Notice")
+        .is_some_and(|v| v == "1");
     match timeout(
         Duration::from_secs(140),
-        submit_feed_request(request_id, state),
+        submit_feed_request(request_id, state, pulse_notice),
     )
     .await
     {
@@ -228,7 +232,11 @@ async fn feed_request(
     }
 }
 
-async fn submit_feed_request(request_id: Uuid, state: GatewayState) -> Response {
+async fn submit_feed_request(
+    request_id: Uuid,
+    state: GatewayState,
+    pulse_notice: bool,
+) -> Response {
     match state.store.status(request_id).await {
         Ok(Some(status)) => return existing_response(&state, request_id, status).await,
         Ok(None) => {}
@@ -261,7 +269,7 @@ async fn submit_feed_request(request_id: Uuid, state: GatewayState) -> Response 
         tracing::warn!(%error, "command outcome ambiguous after durable admission");
         return outcome_response(StatusCode::CONFLICT, request_id, FeedOutcome::Ambiguous);
     }
-    wait_for_ack(&state, request_id).await
+    wait_for_ack(&state, request_id, pulse_notice).await
 }
 
 async fn existing_response(
@@ -315,7 +323,7 @@ async fn handle_existing_pending(state: &GatewayState, request_id: Uuid) -> Resp
             }
             outcome_response(StatusCode::OK, request_id, FeedOutcome::Confirmed)
         }
-        Ok(OwnerOutcome::Absent | OwnerOutcome::Pending) => {
+        Ok(OwnerOutcome::Absent | OwnerOutcome::Pending | OwnerOutcome::PulseStarted) => {
             outcome_response(StatusCode::ACCEPTED, request_id, FeedOutcome::Pending)
         }
         Ok(OwnerOutcome::Rejected | OwnerOutcome::Ambiguous) => {
@@ -325,7 +333,7 @@ async fn handle_existing_pending(state: &GatewayState, request_id: Uuid) -> Resp
     }
 }
 
-async fn wait_for_ack(state: &GatewayState, request_id: Uuid) -> Response {
+async fn wait_for_ack(state: &GatewayState, request_id: Uuid, pulse_notice: bool) -> Response {
     let deadline = Instant::now() + state.ack_timeout;
     loop {
         match timeout_at(deadline, state.openhab.feeder_result(request_id)).await {
@@ -335,7 +343,14 @@ async fn wait_for_ack(state: &GatewayState, request_id: Uuid) -> Response {
                 }
                 return outcome_response(StatusCode::OK, request_id, FeedOutcome::Confirmed);
             }
-            Ok(Ok(OwnerOutcome::Absent | OwnerOutcome::Pending)) => {}
+            Ok(Ok(OwnerOutcome::PulseStarted)) if pulse_notice => {
+                return outcome_response(
+                    StatusCode::ACCEPTED,
+                    request_id,
+                    FeedOutcome::PulseStarted,
+                );
+            }
+            Ok(Ok(OwnerOutcome::Absent | OwnerOutcome::Pending | OwnerOutcome::PulseStarted)) => {}
             Ok(Ok(OwnerOutcome::Rejected | OwnerOutcome::Ambiguous)) | Ok(Err(_)) | Err(_) => {
                 return outcome_response(StatusCode::CONFLICT, request_id, FeedOutcome::Ambiguous);
             }

@@ -12,6 +12,7 @@
     let stream = null, seq = null, credit = 0, threshold = 1000;
     let replaying = false, socket, retry = 500, reconnectTimer;
     let weatherTime = null, marketTime = null, statusTime = null;
+    let displayedPulse = null, feedStateRevision = 0;
     let feeding = false, qrBusy = false, paymentBusy = false;
     let availability = "unknown", awaitingConfirmation = false;
     let marqueeFrame = null, lastFrame = null, cardTimer = null;
@@ -241,7 +242,7 @@
     }
     function showFeed() {
         if (feeding || !feeds.length) return;
-        feeds.shift(); feeding = true;
+        feeds.shift(); feeding = true; renderFeedingBanner();
         el("sats-received-overlay").style.display = "none";
         el("container").classList.add("fed");
         const fill = el("progress-fill");
@@ -301,7 +302,9 @@
         if (data.type === "snapshot") {
             if (data.version !== 1 || !identity(data.stream_id) || !integer(data.seq) || !integer(data.feed_credit_sats) || !integer(data.threshold_sats) || data.threshold_sats === 0) return resetConnection();
             if (data.stream_id === stream && data.seq < seq && !data.reset_reason) return;
+            if (stream !== data.stream_id) displayedPulse = null;
             if (stream !== data.stream_id || data.reset_reason) clearPresentation();
+            feedStateRevision++;
             connectedSince = integer(data.as_of) ? data.as_of : Math.floor(Date.now() / 1000);
             stream = data.stream_id; seq = data.seq; credit = data.feed_credit_sats; threshold = data.threshold_sats;
             awaitingConfirmation = typeof data.unresolved_feed_attempt === "string";
@@ -313,8 +316,12 @@
         if (!integer(data.seq) || seq === null || stream === null) return resetConnection();
         if (data.seq <= seq) return;
         if (data.seq !== seq + 1) return resetConnection();
+        if (typeof data.feeding?.awaiting_confirmation === "boolean" || ["feeder_pulse_started", "feeder_confirmed"].includes(data.source_type)) feedStateRevision++;
         if (typeof data.feeding?.awaiting_confirmation === "boolean") awaitingConfirmation = data.feeding.awaiting_confirmation;
-        if (data.source_type === "feeder_confirmed") awaitingConfirmation = false;
+        if (data.source_type === "feeder_confirmed") {
+            awaitingConfirmation = false;
+            if (availability === "pending") setFeedingState("ready");
+        }
         if (data.source_type === "processing_error" && typeof data.feed_attempt_id === "string") awaitingConfirmation = true;
         if (integer(data.feed_credit_sats)) { credit = data.feed_credit_sats; render(); }
         // Replays advance durable state without replaying announcements/effects.
@@ -325,6 +332,14 @@
             // Match the server's per-credit announcement threshold. Progress
             // still advances for sub-threshold payments and replay skip markers.
             if (isPayment && (!integer(data.amount_sats) || data.amount_sats < 10)) { seq = data.seq; return; }
+            const pulse = kind === "feeder_pulse_started" && identity(data.feed_attempt_id);
+            if (pulse || kind === "feeder_confirmed") {
+                if (!displayedPulse || displayedPulse !== data.feed_attempt_id) {
+                    if (feeds.length < 8) feeds.push(data.seq);
+                    showFeed();
+                }
+                displayedPulse = pulse ? data.feed_attempt_id : null;
+            }
             if (kind === "weather_status") acceptWeather(data.data, data.message);
             else addMessage(data.message);
             if (isPayment) {
@@ -333,10 +348,7 @@
                 if (data.source !== "cashu" && data.source !== "nutzap") toggleQr();
                 showPayment();
             }
-            if (kind === "feeder_confirmed") {
-                if (feeds.length < 8) feeds.push(data.seq);
-                showFeed();
-            }
+
             if (kind === "cyberherd_roster") {
                 if (!validRoster(data)) return resetConnection();
                 if (!data.members.length) clearMemberCards();
@@ -398,7 +410,7 @@
     function renderFeedingBanner() {
         const banner = el("feeding-state");
         banner.dataset.state = availability;
-        banner.hidden = availability === "ready";
+        banner.hidden = availability === "ready" || (feeding && availability === "pending");
         el("feeding-state-label").textContent = availability === "paused" ? "⏸ Feeder Paused"
             : availability === "unknown" ? "⏸ Feeder Paused · status unavailable"
             : availability === "pending" ? "Feeding pending confirmation" : "";
@@ -410,13 +422,14 @@
     }
     function setFeedingState(state) { availability = state; renderFeedingBanner(); }
     async function status() {
+        const revision = feedStateRevision;
         try {
             const data = await readJson("/api/v1/status");
             if (!["shadow", "canary", "active"].includes(data.mode)) return;
             statusTime = Date.now();
-            awaitingConfirmation = typeof data.unresolved_feed_attempt === "string";
+            if (revision === feedStateRevision) awaitingConfirmation = typeof data.unresolved_feed_attempt === "string";
             const paused = data.mode === "shadow" || !data.gateway_reachable || data.remote_feeding_enabled !== true || data.feeder_override_active !== false;
-            setFeedingState(paused ? "paused" : data.unresolved_feed_attempt ? "pending" : "ready");
+            setFeedingState(paused ? "paused" : awaitingConfirmation ? "pending" : "ready");
             el("feeding-state").title = data.feeder_override_active === true
                 ? "FeederOverride is on."
                 : paused ? "Local feeding controls are paused." : "";

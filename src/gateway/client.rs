@@ -29,6 +29,7 @@ pub struct FeedRequestStatus {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum FeedOutcome {
+    PulseStarted,
     NotDispatched,
     Pending,
     Confirmed,
@@ -61,9 +62,13 @@ impl FeedRequestStatus {
             {
                 Ok(())
             }
-            (FeedOutcome::Pending | FeedOutcome::Confirmed | FeedOutcome::Ambiguous, None) => {
-                Ok(())
-            }
+            (
+                FeedOutcome::PulseStarted
+                | FeedOutcome::Pending
+                | FeedOutcome::Confirmed
+                | FeedOutcome::Ambiguous,
+                None,
+            ) => Ok(()),
             _ => bail!("contradictory gateway outcome"),
         }
     }
@@ -170,16 +175,25 @@ impl GatewayClient {
     }
 
     pub async fn request_feed(&self, request_id: Uuid) -> Result<FeedRequestStatus> {
+        self.submit_feed(request_id, false).await
+    }
+
+    pub(crate) async fn request_feed_with_pulse_notice(
+        &self,
+        request_id: Uuid,
+    ) -> Result<FeedRequestStatus> {
+        self.submit_feed(request_id, true).await
+    }
+
+    async fn submit_feed(&self, request_id: Uuid, pulse_notice: bool) -> Result<FeedRequestStatus> {
         let endpoint = self
             .base_url
             .join(&format!("v1/feeder/request/{request_id}"))?;
-        let response = self
-            .client
-            .post(endpoint)
-            .timeout(Duration::from_secs(150))
-            .header("Content-Length", "0")
-            .send()
-            .await?;
+        let mut request = self.client.post(endpoint).timeout(Duration::from_secs(150));
+        if pulse_notice {
+            request = request.header("X-Goats-Pulse-Notice", "1");
+        }
+        let response = request.header("Content-Length", "0").send().await?;
         Self::read_feed_status(response, request_id).await
     }
 
@@ -207,6 +221,9 @@ impl GatewayClient {
         let result: FeedRequestStatus =
             serde_json::from_slice(&crate::http::bounded_body(response, 4096).await?)?;
         result.validate(request_id)?;
+        if result.status == FeedOutcome::PulseStarted && status.as_u16() != 202 {
+            bail!("gateway pulse HTTP status mismatch");
+        }
         if result.status == FeedOutcome::Confirmed && status.as_u16() != 200 {
             bail!("gateway confirmation HTTP status mismatch");
         }

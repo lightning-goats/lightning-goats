@@ -176,7 +176,7 @@ def start_mint(directory, socket, reserve, credentials, *, watchdog=False, input
            "MINT_MAX_MINT_BOLT11_SAT": "0", "MINT_MAX_MELT_BOLT11_SAT": "1000001",
            "MINT_INPUT_FEE_PPK": str(input_fee_ppk), "MINT_QUOTE_BACKEND_CHECK_RATE_LIMIT": "0", "LOG_LEVEL": "INFO"}
     process = subprocess.Popen([sys.executable, "-m", "lg_mint"], cwd=directory, env=env, stdout=log, stderr=log)
-    client = httpx.Client(transport=httpx.HTTPTransport(uds=str(socket)), base_url="http://mint", timeout=6)
+    client = httpx.Client(transport=httpx.HTTPTransport(uds=str(socket)), base_url="http://mint", timeout=30)
     deadline = time.monotonic() + 60
     while time.monotonic() < deadline:
         if process.poll() is not None:
@@ -197,7 +197,7 @@ def start_mint(directory, socket, reserve, credentials, *, watchdog=False, input
 def fee_charging_handoff():
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "collector"))
     from claim_store import ClaimStore
-    from collect import collect_acquisition, recover_payout_refund
+    from collect import collect_acquisition, recover_payout_refund, execute_payout
 
     with TemporaryDirectory(prefix="lg-handoff-") as raw:
         directory = Path(raw)
@@ -273,6 +273,51 @@ def fee_charging_handoff():
                 assert store.db.execute("SELECT claim_id,returned_sat FROM payout_claim_refund").fetchall() == [
                     (min(sources), 1)]
                 assert wallet_state(viewer, change) == "SPENT"
+                # A single 32-sat proof funds both the 18-sat operator share
+                # and a 14-sat member share on the fee-charging mint.
+                quote = expect(viewer.post("/v1/mint/quote/bolt11", json={"amount": 32, "unit": "sat"}))
+                reserve.paid.add(bolt11.decode(quote["request"]).payment_hash)
+                outputs, material = new_outputs(keyset, [32])
+                sig, = expect(viewer.post("/v1/mint/bolt11", json={
+                    "quote": quote["quote"], "outputs": encode_outputs(outputs)}))["signatures"]
+                source = str(uuid.uuid4())
+                store.prepare(source, {"attribution": {"credit_pool": "herd"}}, list)
+                payment_hash = bolt11.decode(quote["request"]).payment_hash
+                store.record_invoice(source, quote["request"], payment_hash)
+                original = [proof(sig, material[0], keys)]
+                store.record_proofs(source, payment_hash, original)
+                from claim_store import encode
+                evidence = hashlib.sha256(encode(original).encode()).hexdigest()
+                feed = str(uuid.uuid4())
+                request = {"disposition_id": feed, "feed_id": feed, "invoice": reserve.destination[0],
+                    "payment_hash": bolt11.decode(reserve.destination[0]).payment_hash, "amount_sat": 12,
+                    "maximum_fee_sat": 6, "operator": {"plan_hash": "ab"*32, "member_reserved_sat": 14,
+                    "operator_sat": 18}, "retained_allocations": [{"ledger_id": 1, "consumed_sats": 32,
+                    "anchor": {"source": "project_invoice", "claim_id": source, "evidence_digest": evidence}}]}
+                costs = execute_payout(store, viewer, {"quote_invoice": request["invoice"], "amount_sat": 12,
+                    "feed_id": feed, "gross_sat": 18, "retained_allocations": request["retained_allocations"]}, keyset, {})
+                assert costs["routing_reserve_sat"] == 4 and costs["input_fee_sat"] == 2
+                try:
+                    execute_payout(store, LostReply(), request, keyset, {keyset: keys})
+                except httpx.ReadTimeout:
+                    pass
+                else:
+                    raise AssertionError("expected lost fee-bearing split response")
+                store.db.close()
+                store = ClaimStore(directory)
+                reserve.complete_sends = True
+                result = execute_payout(store, viewer, request, keyset, {keyset: keys})
+                for _ in range(30):
+                    if result["state"] == "PAID":
+                        break
+                    time.sleep(.1)
+                    result = execute_payout(store, viewer, {"reconcile_operator": feed, "invoice": request["invoice"]},
+                                            keyset, {keyset: keys})
+                assert result["state"] == "PAID" and result["amount_sat"] == 12 and result["fee_sat"] == 3, result
+                assert reserve.pay_attempts == 1
+                member = store.reserve_payout(str(uuid.uuid4()), feed, "cd"*32, 14, 0,
+                    {source: {"consumed_sats": 32, "evidence_digest": evidence}})
+                assert sum(p["amount"] for p in member) == 14
                 store.db.close()
             finally:
                 viewer.close()
@@ -280,8 +325,7 @@ def fee_charging_handoff():
                 process.wait(timeout=10)
 
 
-def main():
-    fee_charging_handoff()
+def exercise_payout(operator_transfer):
     with TemporaryDirectory(prefix="lg-mint-") as raw:
         home = Path(raw)
         reserve_path, mint_path = home / "reserve.sock", home / "mint.sock"
@@ -525,11 +569,15 @@ def main():
                 payment_id = str(uuid.uuid4())
                 digest = bolt11.decode(reserve.destination[0]).payment_hash
                 payout_feed = str(uuid.uuid4())
+                if operator_transfer:
+                    payment_id = payout_feed
                 authorization = {"disposition_id": payment_id, "feed_id": payout_feed,
                     "invoice": reserve.destination[0], "payment_hash": digest, "amount_sat": 12,
                     "maximum_fee_sat": 4, "retained_allocations": [{"ledger_id": 1, "consumed_sats": 16,
                     "anchor": {"source": "project_invoice", "claim_id": funded_id,
                                "evidence_digest": funded["proof_digest"]}}]}
+                if operator_transfer:
+                    authorization["operator"] = {"plan_hash": "ab"*32, "member_reserved_sat": 0, "operator_sat": 16}
                 try:
                     execute_payout(claims, None, {**authorization, "amount_sat": 13}, keyset, {keyset: keys})
                 except ValueError:
@@ -558,6 +606,7 @@ def main():
                 assert execute_payout(claims, None, absent, keyset, {keyset: keys}) == {"state": "UNRESERVED"}
                 [payout_proof] = claims.reserve_payout(payment_id, payout_feed, digest, 12, 4,
                     {funded_id: {"consumed_sats": 16, "evidence_digest": funded["proof_digest"]}},
+                    operator=authorization.get("operator"),
                     invoice_digest=hashlib.sha256(reserve.destination[0].encode()).hexdigest())
                 lookup = {"reconcile_disposition": payment_id, "invoice": reserve.destination[0]}
                 assert execute_payout(claims, None, lookup, keyset, {keyset: keys}) == {"state": "UNQUOTED"}
@@ -571,6 +620,10 @@ def main():
                     raise AssertionError("reconciliation accepted a different invoice with the same hash")
                 core_lookup = {"payout_receipt": payment_id, "feed_id": payout_feed, "payment_hash": digest,
                                "invoice_digest": hashlib.sha256(reserve.destination[0].encode()).hexdigest()}
+                other_lookup = {**core_lookup, "operator_receipt": core_lookup["payout_receipt"]}
+                del other_lookup["payout_receipt"]
+                if operator_transfer:
+                    core_lookup, other_lookup = other_lookup, core_lookup
                 assert create(core_lookup, claims, None, None, None) is None
                 class FeeBearingKeyset:
                     def post(self, path, **kwargs):
@@ -663,6 +716,11 @@ def main():
                 claims.db.close()
                 claims = ClaimStore(claim_dir)
                 assert create(core_lookup, claims, None, None, None) == final_melt
+                assert create(other_lookup, claims, None, None, None) is None
+                operator_status = execute_payout(claims, LookupOnly(), {
+                    "reconcile_operator": payment_id, "invoice": reserve.destination[0]
+                }, keyset, {keyset: keys})
+                assert operator_status == (final_melt if operator_transfer else {"state": "UNRESERVED"})
                 try:
                     create({**core_lookup, "feed_id": str(uuid.uuid4())}, claims, None, None, None)
                 except ValueError:
@@ -704,6 +762,8 @@ def main():
                     "disposition_id":str(uuid.uuid4()), "feed_id":str(uuid.uuid4()),
                     "retained_allocations":[{"ledger_id":2,"consumed_sats":16,"anchor":{
                         "source":"project_invoice","claim_id":conversion_id,"evidence_digest":status["proof_digest"]}}]}
+                if operator_transfer:
+                    split_request["disposition_id"] = split_request["feed_id"]
                 probe = execute_payout(claims, viewer, {"quote_invoice":reserve.destination[0],
                     "amount_sat":12,"gross_sat":16,"feed_id":split_request["feed_id"],
                     "retained_allocations":split_request["retained_allocations"]},keyset,{keyset:keys})
@@ -796,7 +856,9 @@ def main():
 
 if __name__ == "__main__":
     try:
-        main()
+        fee_charging_handoff()
+        for operator_transfer in (False, True):
+            exercise_payout(operator_transfer)
     except Exception as exc:
         details = repr(exc) + "\n" + "\n".join(str(frame) for frame in traceback.extract_tb(exc.__traceback__, limit=50))
         os.write(2, details.encode() + b"\n")

@@ -16,7 +16,7 @@ use std::{os::unix::fs::MetadataExt as _, path::Path, time::Duration};
 const GUARD: &str = "/run/lightning-goats-contact-fixture/ALLOW";
 const ATTESTATION: &[u8] = b"LIGHTNING_GOATS_DISPOSABLE_CONTACT_UPGRADE_CI_v1\n";
 const DATABASE: &str = "/var/lib/lightning-goats/lightning-goats.db";
-const CURRENT_CORE_SCHEMA: usize = 36;
+const CURRENT_CORE_SCHEMA: usize = 37;
 
 fn isolated_fixture() -> Result<u32> {
     let uid = std::fs::metadata("/proc/self")?.uid();
@@ -359,12 +359,12 @@ async fn strip_empty_inclusive_fee_schema(uid: u32) -> Result<()> {
     }
     let migrations = sqlx::migrate!("./payout-migrations");
     if migrations.iter().map(|m| m.version).collect::<Vec<_>>()
-        != [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12]
+        != [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13]
     {
         bail!("unqualified fixture payout schema");
     }
     let rows = sqlx::query(
-        "SELECT version,success,checksum FROM _sqlx_migrations ORDER BY version LIMIT 12",
+        "SELECT version,success,checksum FROM _sqlx_migrations ORDER BY version LIMIT 13",
     )
     .fetch_all(&pool)
     .await?;
@@ -394,6 +394,8 @@ async fn strip_empty_inclusive_fee_schema(uid: u32) -> Result<()> {
         bail!("only an empty synthetic payout journal may be transformed");
     }
     for table in [
+        "payout_operator_receipts",
+        "payout_operator_invoices",
         "payout_operator_allocations",
         "payout_fee_probe_duplicates",
         "payout_fee_promotions",
@@ -413,11 +415,11 @@ async fn strip_empty_inclusive_fee_schema(uid: u32) -> Result<()> {
             .execute(&mut *tx)
             .await?;
     }
-    if sqlx::query("DELETE FROM _sqlx_migrations WHERE version IN (9,10,11,12)")
+    if sqlx::query("DELETE FROM _sqlx_migrations WHERE version IN (9,10,11,12,13)")
         .execute(&mut *tx)
         .await?
         .rows_affected()
-        != 4
+        != 5
     {
         bail!("fixture payout migration prefix changed");
     }

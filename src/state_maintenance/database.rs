@@ -25,7 +25,7 @@ static CORE: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 static MEMBERSHIP: sqlx::migrate::Migrator = sqlx::migrate!("./cyberherd-migrations");
 static PAYOUT: sqlx::migrate::Migrator = sqlx::migrate!("./payout-migrations");
 static SIGNER: sqlx::migrate::Migrator = sqlx::migrate!("./signer-migrations");
-pub(super) const CURRENT_CORE_SCHEMA: i64 = 36;
+pub(super) const CURRENT_CORE_SCHEMA: i64 = 37;
 
 #[derive(Clone, Copy)]
 enum ReviewScope {
@@ -298,7 +298,9 @@ async fn report(
         engine: "3.54.1".into(),
         pending_feeds: count(core, "SELECT COUNT(*) FROM feed_attempts WHERE status IN ('intent_committed','unknown')").await?,
         unresolved_provider_payments: count(payout, "SELECT COUNT(*) FROM payout_execute_intents e LEFT JOIN payout_payment_bindings b ON b.intent_id=e.intent_id WHERE b.payment_id IS NULL OR EXISTS(SELECT 1 FROM payout_payment_conflicts c WHERE c.payment_id=b.payment_id) OR NOT EXISTS(SELECT 1 FROM payout_payment_records r WHERE r.payment_id=b.payment_id AND r.state IN ('COMPLETED','FAILED'))").await?,
-        execution_claims: count(core, if core_version >= 31 {
+        execution_claims: count(core, if core_version >= 37 {
+            "SELECT (SELECT COUNT(*) FROM payout_execution_claims)+(SELECT COUNT(*) FROM cashu_payout_execution_claims)+(SELECT COUNT(*) FROM operator_cashu_execution_claims)"
+        } else if core_version >= 31 {
             "SELECT (SELECT COUNT(*) FROM payout_execution_claims)+(SELECT COUNT(*) FROM cashu_payout_execution_claims)"
         } else { "SELECT COUNT(*) FROM payout_execution_claims" }).await?,
         payout_held_sats: count(payout, "SELECT COALESCE((SELECT SUM(g.reserved_sats) FROM payout_grants g WHERE NOT EXISTS(SELECT 1 FROM payout_outcome_acks a WHERE a.grant_id=g.id)),0)+COALESCE((SELECT SUM(held_sats) FROM payout_outcome_acks),0)-COALESCE((SELECT SUM(gross_sats) FROM payout_cost_acks),0)").await?,
@@ -627,7 +629,7 @@ async fn equal_rows(local: &SqlitePool, core: &SqlitePool, rows: &str, lookup: &
 pub(super) async fn require_before_inclusive_fees(pool: &SqlitePool) -> Result<()> {
     let compiled: Vec<_> = PAYOUT.iter().collect();
     if compiled.iter().map(|m| m.version).collect::<Vec<_>>()
-        != [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12]
+        != [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13]
     {
         bail!("inclusive-fee source requires the separately qualified payout migrations");
     }

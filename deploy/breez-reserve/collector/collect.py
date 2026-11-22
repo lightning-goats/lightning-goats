@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import secrets
 from urllib.parse import quote as escape
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from project_quote import prepare_outputs
 from claim_store import SplitRequired, encode
@@ -114,18 +114,21 @@ def recover_swap(client, inputs, material, pinned_keys):
     return [unblind(item, promise, pinned_keys) for item, promise in zip(material, promises, strict=True)]
 
 
-def split_payout_proof(store, client, secret, portion, keyset, pinned_keys):
-    """Make exact change without consuming a payout fee or changing claim ownership."""
+def split_payout_proof(store, client, secret, portion, keyset, pinned_keys, *, disposition_id, binding):
+    """Make change with the swap fee charged only to the triggering disposition."""
     row = store.db.execute("SELECT request_id,proof FROM collected_output WHERE secret=?", (secret,)).fetchone()
     if row is None:
         raise ValueError("missing split input")
     claim_id, proof = row[0], json.loads(row[1])
     known = store.db.execute("SELECT 1 FROM proof_split WHERE secret=?", (secret,)).fetchone()
-    if not known and payout_input_fee(client, [proof["id"], keyset]):
-        raise ValueError("proof split requires zero-fee keysets")
+    fee = 0 if known else payout_input_fee(client, [proof["id"]])
+    terms = json.loads(binding)
     with store.write():
         prior = store.db.execute("SELECT material,complete FROM proof_split WHERE secret=?", (secret,)).fetchone()
         if prior:
+            charged = store.db.execute("SELECT disposition_id,binding FROM payout_split_cost WHERE secret=?", (secret,)).fetchone()
+            if charged and charged != (disposition_id, binding):
+                raise ValueError("split belongs to a different payout")
             if prior[1]:
                 return
             material = json.loads(prior[0])
@@ -134,12 +137,26 @@ def split_payout_proof(store, client, secret, portion, keyset, pinned_keys):
                 raise ValueError("invalid split portion")
             if store.db.execute("SELECT 1 FROM disposition_input WHERE secret=?", (secret,)).fetchone():
                 raise ValueError("split input already reserved")
-            material = prepare_outputs(portion, keyset) + prepare_outputs(proof["amount"] - portion, keyset)
+            spent, = store.db.execute("SELECT COALESCE(SUM(fee_sat),0) FROM payout_split_cost WHERE disposition_id=?", (disposition_id,)).fetchone()
+            if fee > portion or spent + fee > terms["maximum_fee_sat"]:
+                raise ValueError("split fee exceeds the authorized budget")
+            # Recheck under the writer lock after the network fee lookup.
+            try:
+                store.payout_inputs(terms["feed"], terms["amount_sat"] + terms["maximum_fee_sat"], terms["claims"], disposition_id)
+            except SplitRequired as current:
+                if (secret, portion) not in current.splits:
+                    return
+            else:
+                return
+            material = prepare_outputs(portion - fee, keyset) + prepare_outputs(proof["amount"] - portion, keyset)
             split_id = str(uuid4())
             store.db.execute("INSERT INTO proof_disposition VALUES (?,'operator_transfer',?)",
                              (split_id, json.dumps({"purpose": "make_change", "claim": claim_id})))
             store.db.execute("INSERT INTO disposition_input VALUES (?,?)", (secret, split_id))
             store.db.execute("INSERT INTO proof_split(secret,material) VALUES (?,?)", (secret, json.dumps(material)))
+            if fee:
+                store.db.execute("INSERT INTO payout_split_cost VALUES(?,?,?,?,?,?)",
+                                 (secret, disposition_id, terms["feed"], claim_id, fee, binding))
     proofs = recover_swap(client, [proof], material, pinned_keys)
     with store.write():
         store._index_outputs(claim_id, proofs)
@@ -272,25 +289,41 @@ def execute_payout(store, client, request, keyset, pinned_keys):
         result = {"payment_hash": invoice.payment_hash, "amount_sat": amount,
                   "routing_reserve_sat": status["fee_reserve"], "expires_at": status["expiry"]}
         if set(request) == with_inputs:
+            swap_fees = 0
+            output_keys = []
             try:
                 selected, _ = store.payout_inputs(request["feed_id"], request["gross_sat"],
                                                   project_allocations(request["retained_allocations"]))
             except SplitRequired as plan:
-                # Only a lossless swap is supported. Fee discovery never submits inputs.
-                split_keys = [json.loads(store.db.execute("SELECT proof FROM collected_output WHERE secret=?",
-                              (secret,)).fetchone()[0])["id"] for secret, _ in plan.splits]
-                if payout_input_fee(client, split_keys + [keyset]):
-                    raise ValueError("proof split requires zero-fee keysets")
                 selected = plan.selected
+                for secret, portion in plan.splits:
+                    if portion is None:
+                        raise ValueError("payout proof split awaiting recovery")
+                    row = store.db.execute("SELECT proof FROM collected_output WHERE secret=?", (secret,)).fetchone()
+                    fee = payout_input_fee(client, [json.loads(row[0])["id"]])
+                    if fee > portion:
+                        raise ValueError("split portion cannot cover its mint fee")
+                    swap_fees += fee
+                    output_keys.extend([keyset] * (portion - fee).bit_count())
             keysets = [json.loads(store.db.execute("SELECT proof FROM collected_output WHERE secret=?",
                                                    (secret,)).fetchone()[0])["id"] for secret in selected]
-            result["input_fee_sat"] = payout_input_fee(client, keysets)
+            result["input_fee_sat"] = swap_fees + payout_input_fee(client, keysets + output_keys)
         return result
+    if set(request) == {"reconcile_operator", "invoice"}:
+        feed = str(UUID(request["reconcile_operator"]))
+        if not store.db.execute(
+            "SELECT 1 FROM proof_disposition WHERE id=? AND purpose='operator_transfer' "
+            "AND json_extract(binding,'$.feed')=? AND json_type(binding,'$.operator')='object'",
+            (feed, feed),
+        ).fetchone():
+            return {"state": "UNRESERVED"}
+        return submit_payout(store, client, feed, request["invoice"], keyset, pinned_keys, reconcile_only=True)
     if set(request) == {"reconcile_disposition", "invoice"}:
         return submit_payout(store, client, request["reconcile_disposition"], request["invoice"],
                              keyset, pinned_keys, reconcile_only=True)
-    if set(request) != {"disposition_id", "feed_id", "invoice", "payment_hash", "amount_sat",
-                        "maximum_fee_sat", "retained_allocations"}:
+    payment_fields = {"disposition_id", "feed_id", "invoice", "payment_hash", "amount_sat",
+                      "maximum_fee_sat", "retained_allocations"}
+    if set(request) not in (payment_fields, payment_fields | {"operator"}) or ("operator" in request and request["operator"] is None):
         raise ValueError("invalid payout request")
     invoice = bolt11.decode(request["invoice"])
     if (type(request["amount_sat"]) is not int or invoice.currency != "bc"
@@ -303,11 +336,13 @@ def execute_payout(store, client, request, keyset, pinned_keys):
             store.reserve_payout(request["disposition_id"], request["feed_id"], invoice.payment_hash,
                                  request["amount_sat"], request["maximum_fee_sat"], allocations,
                                  invoice_expiry=invoice.expiry_time,
-                                 invoice_digest=hashlib.sha256(request["invoice"].encode()).hexdigest())
+                                 invoice_digest=hashlib.sha256(request["invoice"].encode()).hexdigest(),
+                                 operator=request.get("operator"))
             break
         except SplitRequired as plan:
             for secret, portion in plan.splits:
-                split_payout_proof(store, client, secret, portion, keyset, pinned_keys)
+                split_payout_proof(store, client, secret, portion, keyset, pinned_keys,
+                                   disposition_id=request["disposition_id"], binding=plan.binding)
     result = submit_payout(store, client, request["disposition_id"], request["invoice"], keyset, pinned_keys)
     if result["state"] == "PAID":
         return result
@@ -324,7 +359,9 @@ def submit_payout(store, client, disposition_id, invoice_text, keyset, pinned_ke
 
 def _submit_payout(store, client, disposition_id, invoice_text, keyset, pinned_keys, reconcile_only):
     row = store.db.execute(
-        "SELECT binding FROM proof_disposition WHERE id=? AND purpose='cyberherd_payout'",
+        "SELECT d.binding FROM proof_disposition d JOIN payout_invoice i ON i.disposition_id=d.id "
+        "WHERE d.id=? AND (d.purpose='cyberherd_payout' OR "
+        "(d.purpose='operator_transfer' AND json_type(d.binding,'$.operator')='object'))",
         (disposition_id,),
     ).fetchone()
     if row is None:
@@ -425,12 +462,13 @@ def _submit_payout(store, client, disposition_id, invoice_text, keyset, pinned_k
         SELECT o.proof FROM collected_output o JOIN disposition_input i USING(secret)
         WHERE i.disposition_id=? ORDER BY o.secret
     """, (disposition_id,))]
-    if sum(p["amount"] for p in inputs) != terms["amount_sat"] + terms["maximum_fee_sat"]:
+    split_fees, = store.db.execute("SELECT COALESCE(SUM(fee_sat),0) FROM payout_split_cost WHERE disposition_id=?", (disposition_id,)).fetchone()
+    if sum(p["amount"] for p in inputs) + split_fees != terms["amount_sat"] + terms["maximum_fee_sat"]:
         raise ValueError("payout inputs differ from reserved total")
     # NUT-02 charges per input, including proofs from inactive keysets.
     # The NUT-05 routing reserve is additional to those mint fees.
     input_fee = payout_input_fee(client, [p["id"] for p in inputs])
-    if status["fee_reserve"] + input_fee > terms["maximum_fee_sat"]:
+    if status["fee_reserve"] + input_fee + split_fees > terms["maximum_fee_sat"]:
         raise ValueError("mint input fees and routing reserve exceed payout allowance")
     blanks = store.prepare_melt(disposition_id, invoice.payment_hash, quote_id, generate_change)
     outputs = [{k: item[k] for k in ("amount", "id", "B_")} for item in blanks]

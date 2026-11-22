@@ -77,6 +77,7 @@ impl Role {
                 Request::FailedPayoutCost { .. }
                     | Request::PayoutFunding { .. }
                     | Request::OperatorFunding { .. }
+                    | Request::ClaimOperatorExecution { .. }
                     | Request::ClaimCashuExecution { .. }
                     | Request::ClaimPayoutExecution { .. }
                     | Request::PayoutExecutionState { .. }
@@ -392,6 +393,26 @@ async fn serve_one(
                     Err(_) => Response::Rejected,
                 }
             }
+            Request::ClaimOperatorExecution { request } => {
+                if let Some(policy) = reward_policy {
+                    match ledger
+                        .claim_operator_execution(
+                            &request,
+                            policy,
+                            payout_execution_enabled && mode.feeder_enabled(),
+                        )
+                        .await
+                    {
+                        Ok((terms_hash, observed_at)) => Response::OperatorExecutionClaim {
+                            terms_hash,
+                            observed_at,
+                        },
+                        Err(_) => Response::Rejected,
+                    }
+                } else {
+                    Response::Rejected
+                }
+            }
             Request::ClaimCashuExecution { request } => {
                 if let Some(policy) = reward_policy {
                     match ledger
@@ -500,9 +521,12 @@ async fn serve_one(
                     .operator_funding_page(policy, expected_epoch, request_id, after)
                     .await
                 {
-                    Ok(page) => Response::OperatorFunding {
-                        page: Box::new(page),
-                    },
+                    Ok(mut page) => {
+                        page.invoice_enabled = payout_execution_enabled && mode.feeder_enabled();
+                        Response::OperatorFunding {
+                            page: Box::new(page),
+                        }
+                    }
                     Err(_) => Response::Rejected,
                 },
                 _ => Response::Rejected,
@@ -733,6 +757,34 @@ impl Client {
             _ => bail!("core rejected verified result read"),
         }
     }
+    pub(crate) async fn submit_operator(
+        &self,
+        terms: &crate::payout::operator::Execution,
+        collector: &std::path::Path,
+    ) -> Result<crate::payout::cashu::CollectorResult> {
+        let expected = terms.digest()?;
+        let payload = terms.payload();
+        let Response::OperatorExecutionClaim {
+            terms_hash,
+            observed_at,
+        } = self
+            .request(&Request::ClaimOperatorExecution {
+                request: Box::new(terms.clone()),
+            })
+            .await?
+        else {
+            bail!("core rejected operator execution");
+        };
+        let now = crate::cyberherd::calendar::now()?;
+        if terms_hash != expected || observed_at < 0 || observed_at > now || now - observed_at > 5 {
+            bail!("operator execution lease expired or differs from original terms");
+        }
+        let result: crate::payout::cashu::CollectorResult =
+            crate::private_ipc::request(collector, 0, &payload, 65536, 30).await?;
+        result.verified_fee(&terms.payment_hash, terms.amount_sat, terms.maximum_fee_sat)?;
+        Ok(result)
+    }
+
     pub async fn claim_cashu_execution(
         &self,
         original: &crate::payout::cashu::ExecutionRequest,

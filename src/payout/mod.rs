@@ -6,6 +6,7 @@ pub mod execution;
 pub mod funding;
 pub mod inclusive_fees;
 pub mod invoice;
+pub mod operator;
 pub mod outcome;
 pub mod provider;
 pub mod recipient;

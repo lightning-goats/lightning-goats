@@ -118,5 +118,47 @@ async fn admitted_plan_recovers_lost_intake_checkpoint_without_core_or_new_provi
             .unwrap(),
         0
     );
+    assert_eq!(reopened.next_operator_allocation().await.unwrap(), Some(2));
+    // A held transfer must yield to a later confirmed feeding, including after restart.
+    sqlx::query("INSERT INTO payout_intake_receipts(sequence,plan_hash,request_id) SELECT 3,plan_hash,? FROM payout_intake_receipts WHERE sequence=2")
+        .bind(uuid::Uuid::new_v4().to_string()).execute(&db).await.unwrap();
+    sqlx::query("INSERT INTO payout_operator_allocations SELECT 3,funding_hash,collected_sats,member_reserved_sats,operator_sats FROM payout_operator_allocations WHERE sequence=2")
+        .execute(&db).await.unwrap();
+    let restarted = Store::connect(&url, store.policy().clone()).await.unwrap();
+    assert_eq!(restarted.next_operator_allocation().await.unwrap(), Some(3));
+    assert_eq!(restarted.next_operator_allocation().await.unwrap(), Some(2));
+    // Model an invoice already bound before a crash. Settlement must verify
+    // the preimage and preserve the actual fee across replay.
+    let preimage = [37_u8; 32];
+    let hash = hex::encode(<sha2::Sha256 as sha2::Digest>::digest(preimage));
+    sqlx::query(
+        "INSERT INTO payout_operator_invoices VALUES(2,'sat@lightning-goats.com','fixture',?,1,0)",
+    )
+    .bind(&hash)
+    .execute(&db)
+    .await
+    .unwrap();
+    let receipt = |payment_preimage| crate::payout::cashu::CollectorResult::Paid {
+        quote: "fixture".into(),
+        amount_sat: 1,
+        fee_sat: 0,
+        payment_hash: hash.clone(),
+        payment_preimage,
+    };
+    assert!(
+        restarted
+            .settle_operator_invoice(2, &receipt("00".repeat(32)))
+            .await
+            .is_err()
+    );
+    for _ in 0..2 {
+        restarted
+            .settle_operator_invoice(2, &receipt(hex::encode(preimage)))
+            .await
+            .unwrap();
+    }
+    for _ in 0..2 {
+        assert_eq!(restarted.next_operator_allocation().await.unwrap(), Some(3));
+    }
     task.abort();
 }

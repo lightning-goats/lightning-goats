@@ -26,6 +26,7 @@ pub struct Config {
     #[serde(default)]
     pub funding_source: crate::reward_funding::RewardFundingSource,
     pub cashu_payout_socket: Option<PathBuf>,
+    pub operator_address: Option<String>,
     pub state_dir: PathBuf,
     pub core_socket: PathBuf,
     pub intake_socket: PathBuf,
@@ -120,6 +121,19 @@ impl Config {
             && self.policy.scope.provider.environment != "strike-production"
         {
             bail!("Strike execution requires the original Strike journal scope");
+        }
+        if let Some(address) = &self.operator_address {
+            let identity = super::recipient::address_identity(address)?;
+            if address != "sat@lightning-goats.com"
+                || self.cashu_payout_socket.is_none()
+                || !self
+                    .policy
+                    .operation_addresses
+                    .iter()
+                    .any(|a| a.eq_ignore_ascii_case(&identity))
+            {
+                bail!("operator destination requires a Cashu payout socket and member exclusion");
+            }
         }
         if let Some(socket) = &self.cashu_payout_socket {
             ipc::socket_path(socket)?;
@@ -283,6 +297,9 @@ impl Intake {
         let mut lots = Vec::new();
         for _ in 0..limit.div_ceil(crate::reward_funding::MAX_FUNDING_PARTS) {
             let page = self.core.operator_funding(&allocation, cursor).await?;
+            if !page.invoice_enabled {
+                bail!("operator invoice preparation disabled by core");
+            }
             for lot in page.allocations {
                 if !claims.insert(lot.anchor.claim_id) || lots.len() >= limit {
                     bail!("duplicate or excessive operator custody claims");
@@ -301,6 +318,65 @@ impl Intake {
             cursor = page.through;
         }
         bail!("operator funding exceeds configured source bound")
+    }
+
+    async fn operator_tick(&self, socket: &Path, address: Option<&str>) -> Result<()> {
+        let Some(sequence) = self.store.next_operator_allocation().await? else {
+            return Ok(());
+        };
+        if self.store.reconcile_operator(sequence, socket).await?
+            || !self.store.policy().execution_enabled
+        {
+            return Ok(());
+        }
+        let Some(address) = address else {
+            return Ok(());
+        };
+        let (allocation, lots) = self.qualified_operator_funding(sequence).await?;
+        if let Some(terms) = self
+            .store
+            .saved_operator_execution(sequence, allocation.clone(), lots.clone())
+            .await?
+        {
+            if terms.address != address {
+                bail!("operator destination changed after invoice binding");
+            }
+            let result = self.core.submit_operator(&terms, socket).await?;
+            if matches!(result, super::cashu::CollectorResult::Paid { .. }) {
+                self.store
+                    .settle_operator_invoice(sequence, &result)
+                    .await?;
+            }
+            return Ok(());
+        }
+        let recipient = super::recipient::Recipient::fetch(address).await?;
+        let gross = allocation.operator_sats;
+        let minimum = recipient.min_msat.div_ceil(1000);
+        let mut net = gross;
+        if net > recipient.max_msat / 1000 {
+            bail!("operator allocation exceeds recipient invoice limit");
+        }
+        while net >= minimum && net > 0 {
+            let invoice = super::invoice::fetch_operator_invoice(
+                allocation.request_id,
+                address,
+                &recipient,
+                net,
+            )
+            .await?;
+            let fee =
+                super::cashu::payout_fee(socket, 0, &invoice, allocation.request_id, gross, &lots)
+                    .await?;
+            let available = gross.saturating_sub(fee);
+            if net <= available {
+                self.store
+                    .bind_operator_invoice(sequence, address, &invoice, gross - net)
+                    .await?;
+                return Ok(());
+            }
+            net = available;
+        }
+        bail!("operator payment does not cover the current fees and recipient minimum")
     }
 
     pub async fn tick(&self) -> Result<bool> {
@@ -388,8 +464,26 @@ impl Runtime {
     pub async fn run(self) -> Result<()> {
         let _singleton = self._singleton;
         let mut tasks = tokio::task::JoinSet::new();
-        let intake = self.intake;
+        let intake = std::sync::Arc::new(self.intake);
         let intake_seconds = self.config.intake_poll_seconds;
+        if let Some(socket) = self.config.cashu_payout_socket.clone() {
+            let operator = intake.clone();
+            let address = self.config.operator_address.clone();
+            tasks.spawn(async move {
+                let mut ticks = tokio::time::interval(Duration::from_secs(intake_seconds));
+                ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                loop {
+                    ticks.tick().await;
+                    if operator
+                        .operator_tick(&socket, address.as_deref())
+                        .await
+                        .is_err()
+                    {
+                        tracing::warn!("operator transfer work held; retaining journal state");
+                    }
+                }
+            });
+        }
         tasks.spawn(async move {
             let mut ticks = tokio::time::interval(Duration::from_secs(intake_seconds));
             ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);

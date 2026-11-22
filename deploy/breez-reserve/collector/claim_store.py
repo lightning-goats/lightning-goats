@@ -149,6 +149,14 @@ class ClaimStore:
                 )
             """)
             self.db.execute("""
+                CREATE TABLE IF NOT EXISTS payout_split_cost (
+                    secret TEXT PRIMARY KEY REFERENCES proof_split(secret),
+                    disposition_id TEXT NOT NULL, feed_id TEXT NOT NULL,
+                    claim_id TEXT NOT NULL REFERENCES project_claim(id),
+                    fee_sat INTEGER NOT NULL CHECK(fee_sat>0), binding TEXT NOT NULL
+                )
+            """)
+            self.db.execute("""
                 CREATE TABLE IF NOT EXISTS acquired_custody (
                     claim_id TEXT PRIMARY KEY REFERENCES project_claim(id),
                     evidence_digest TEXT UNIQUE NOT NULL,
@@ -210,11 +218,22 @@ class ClaimStore:
                 raise ValueError("disposition inputs changed")
             return [json.loads(r[1]) for r in rows]
 
-    def payout_inputs(self, feed_id, gross, allocations):
+    def payout_inputs(self, feed_id, gross, allocations, disposition_id=None):
         """Select exact inputs using the same allocation bounds for quotes and reservations."""
         if type(gross) is not int or gross <= 0:
             raise ValueError("invalid payout input total")
-        left = gross
+        # A lost swap response leaves both its original blinds and its fee bound
+        # to the triggering payment. Restore it before selecting fresh inputs.
+        pending_cost = self.db.execute("""
+            SELECT c.secret FROM payout_split_cost c JOIN proof_split s USING(secret)
+            WHERE c.disposition_id=? AND s.complete=0
+        """, (disposition_id,)).fetchall()
+        if pending_cost:
+            raise SplitRequired([], [(secret, None) for secret, in pending_cost])
+        costs = dict(self.db.execute("SELECT claim_id,SUM(fee_sat) FROM payout_split_cost WHERE disposition_id=? GROUP BY claim_id", (disposition_id,)))
+        left = gross - sum(costs.values())
+        if left <= 0:
+            raise ValueError("split fees consume the payout")
         selected = []
         remaining = {}
         candidates = []
@@ -241,12 +260,14 @@ class ClaimStore:
             """, (feed_id, claim_id)).fetchone()
             if original is not None and original != budget:
                 raise ValueError("confirmed feed allocation changed")
-            remaining[claim_id] = budget - used
+            split_spent, = self.db.execute("SELECT COALESCE(SUM(fee_sat),0) FROM payout_split_cost WHERE feed_id=? AND claim_id=?", (feed_id, claim_id)).fetchone()
+            remaining[claim_id] = budget - used - split_spent
             candidates.extend((sats, claim_id, secret) for secret,sats in self.db.execute("""
                 SELECT secret,amount_sat FROM collected_output o
                 WHERE request_id=? AND (NOT EXISTS
                 (SELECT 1 FROM disposition_input i WHERE i.secret=o.secret)
-                OR EXISTS(SELECT 1 FROM proof_split s WHERE s.secret=o.secret AND s.complete=0))
+                OR EXISTS(SELECT 1 FROM proof_split s WHERE s.secret=o.secret AND s.complete=0
+                           AND NOT EXISTS(SELECT 1 FROM payout_split_cost c WHERE c.secret=o.secret)))
                 ORDER BY amount_sat DESC,secret
             """, (claim_id,)))
         taken = {}
@@ -278,7 +299,7 @@ class ClaimStore:
             raise SplitRequired(selected, splits)
         return selected, taken
 
-    def reserve_payout(self, disposition_id, feed_id, invoice_hash, amount, fee_limit, allocations, *, invoice_expiry=None, invoice_digest=None):
+    def reserve_payout(self, disposition_id, feed_id, invoice_hash, amount, fee_limit, allocations, *, invoice_expiry=None, invoice_digest=None, operator=None):
         """Reserve exact project inputs against an authenticated confirmed-feed allocation."""
         disposition_id = str(UUID(disposition_id))
         feed_id = str(UUID(feed_id))
@@ -290,6 +311,18 @@ class ClaimStore:
             raise ValueError("invalid payout terms")
         terms = {"feed": feed_id, "invoice_hash": invoice_hash, "amount_sat": amount,
                  "maximum_fee_sat": fee_limit, "claims": allocations}
+        purpose = "cyberherd_payout"
+        if operator is not None:
+            if (not isinstance(operator, dict) or set(operator) != {"plan_hash", "member_reserved_sat", "operator_sat"}
+                    or not isinstance(operator["plan_hash"], str) or len(operator["plan_hash"]) != 64
+                    or any(c not in "0123456789abcdef" for c in operator["plan_hash"])
+                    or type(operator["member_reserved_sat"]) is not int or operator["member_reserved_sat"] < 0
+                    or type(operator["operator_sat"]) is not int or amount + fee_limit > operator["operator_sat"]
+                    or operator["operator_sat"] + operator["member_reserved_sat"] != sum(a["consumed_sats"] for a in allocations.values())
+                    or disposition_id != feed_id or not invoice_digest):
+                raise ValueError("operator transfer differs from confirmed feed allocation")
+            purpose = "operator_transfer"
+            terms["operator"] = operator
         legacy_binding = encode(terms)
         if invoice_digest is not None:
             terms["invoice_digest"] = invoice_digest
@@ -297,15 +330,21 @@ class ClaimStore:
         with self.write():
             previous = self.db.execute("SELECT purpose,binding FROM proof_disposition WHERE id=?",
                                        (disposition_id,)).fetchone()
-            if previous and previous not in (("cyberherd_payout", binding), ("cyberherd_payout", legacy_binding)):
+            if previous and previous != (purpose, binding) and (operator is not None or previous != (purpose, legacy_binding)):
                 raise ValueError("payout replay differs")
             if previous is None:
                 if invoice_expiry is not None and invoice_expiry <= time.time():
                     raise ValueError("expired payout invoice")
-                self.db.execute("INSERT INTO proof_disposition VALUES (?,'cyberherd_payout',?)",
-                                (disposition_id, binding))
+                self.db.execute("INSERT INTO proof_disposition VALUES (?,?,?)", (disposition_id, purpose, binding))
                 self.db.execute("INSERT INTO payout_invoice VALUES (?,?)", (invoice_hash, disposition_id))
-                selected, taken = self.payout_inputs(feed_id, amount + fee_limit, allocations)
+                costs = self.db.execute("SELECT DISTINCT binding FROM payout_split_cost WHERE disposition_id=?", (disposition_id,)).fetchall()
+                if any(saved != binding for saved, in costs):
+                    raise ValueError("split fee already bound to different payout")
+                try:
+                    selected, taken = self.payout_inputs(feed_id, amount + fee_limit, allocations, disposition_id)
+                except SplitRequired as plan:
+                    plan.binding = binding
+                    raise
                 self.db.executemany("INSERT INTO disposition_input VALUES (?,?)",
                                     ((secret, disposition_id) for secret in selected))
                 for claim_id, sats in taken.items():

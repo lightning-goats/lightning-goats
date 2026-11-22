@@ -19,13 +19,15 @@ MAX_FRAME = 65536
 
 
 def create(request, store, client, token, keyset):
-    if set(request) == {"payout_receipt", "feed_id", "invoice_digest", "payment_hash"}:
+    for receipt_field, purpose in (("payout_receipt", "cyberherd_payout"), ("operator_receipt", "operator_transfer")):
+        if set(request) != {receipt_field, "feed_id", "invoice_digest", "payment_hash"}:
+            continue
         row = store.db.execute("""
             SELECT d.binding,m.quote_id,r.fee_sat,r.preimage FROM proof_disposition d
             JOIN payout_melt m ON m.disposition_id=d.id
             JOIN payout_melt_result r ON r.disposition_id=d.id
-            WHERE d.id=? AND d.purpose='cyberherd_payout'
-        """, (request["payout_receipt"],)).fetchone()
+            WHERE d.id=? AND d.purpose=?
+        """, (request[receipt_field], purpose)).fetchone()
         if row is None:
             return None
         terms = json.loads(row[0])

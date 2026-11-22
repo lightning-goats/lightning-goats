@@ -256,10 +256,33 @@ async fn local_ecash_funds_confirmed_feeding_and_only_legacy_lots_can_be_swept()
         assert!(page.reservation.is_none());
         assert!(!page.more);
         assert_eq!(page.allocations.iter().map(|a| a.consumed_sats).sum::<u64>(), spendable);
-        let member = reopened.reserve_reward(&reward_policy, policy.core_epoch, request, &"ab".repeat(32), 10).await.unwrap();
-        let reserved = reopened.operator_funding_page(&reward_policy, policy.core_epoch, request, 0).await.unwrap();
-        assert_eq!(reserved.reservation, Some(member));
-        assert_eq!(reserved.allocations, page.allocations);
+        let plan_hash = "ab".repeat(32);
+        let reserved_sats = if spendable == 500 { 10 } else { 0 };
+        let grant = if reserved_sats > 0 {
+            Some(reopened.reserve_reward(&reward_policy, policy.core_epoch, request, &plan_hash, reserved_sats).await.unwrap())
+        } else { None };
+        let remainder = spendable - reserved_sats;
+        let hash = if reserved_sats > 0 { [1;32] } else { [2;32] };
+        let invoice = crate::test_invoices::invoice_with_payment_hash((remainder-1)*1000, &"cd".repeat(32),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap(), hash);
+        let mut terms = crate::payout::operator::Execution {
+            allocation: crate::reward_funding::OperatorAllocation {
+                epoch: policy.core_epoch, owner: reward_policy.owner.clone(), core_uid: 1, request_id:request,
+                plan_hash:plan_hash.clone(), funding_hash:funding.proof_hash.clone(), member_grant:grant.map(|g|g.id),
+                collected_sats:spendable, member_reserved_sats:reserved_sats, operator_sats:remainder,
+            },
+            address:"sat@lightning-goats.com".into(), invoice, payment_hash:hex::encode(hash),
+            amount_sat:remainder-1, maximum_fee_sat:1, lots:page.allocations,
+        };
+        assert!(reopened.claim_operator_execution(&terms,&reward_policy,false).await.is_err());
+        terms.lots[0].consumed_sats -= 1;
+        assert!(reopened.claim_operator_execution(&terms,&reward_policy,true).await.is_err());
+        terms.lots[0].consumed_sats += 1;
+        for _ in 0..2 {
+            assert_eq!(reopened.claim_operator_execution(&terms,&reward_policy,true).await.unwrap().0,terms.digest().unwrap());
+        }
+        assert!(reopened.reserve_reward(&reward_policy,policy.core_epoch,request,&"ef".repeat(32),1).await.is_err());
+
     }
     tx.rollback().await.unwrap();
     assert_eq!(count(&reopened,"cashu_treasury_intents").await,0);

@@ -2,6 +2,28 @@
 use anyhow::{Context, Result, ensure};
 
 pub async fn strip_empty(transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>) -> Result<()> {
+    let has_operator: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='operator_cashu_execution_claims')",
+    )
+    .fetch_one(&mut **transaction)
+    .await?;
+    if has_operator {
+        let empty: bool =
+            sqlx::query_scalar("SELECT NOT EXISTS(SELECT 1 FROM operator_cashu_execution_claims)")
+                .fetch_one(&mut **transaction)
+                .await?;
+        ensure!(empty, "fixture contains operator execution claims");
+        sqlx::raw_sql("DROP TRIGGER reserve_before_operator_execution;
+            DROP TRIGGER member_strike_operator_conflict; DROP TRIGGER member_cashu_operator_conflict;
+            DROP TABLE operator_cashu_execution_claims;").execute(&mut **transaction).await?;
+        let removed = sqlx::query("DELETE FROM _sqlx_migrations WHERE version=37")
+            .execute(&mut **transaction)
+            .await?;
+        ensure!(
+            removed.rows_affected() == 1,
+            "missing operator execution migration"
+        );
+    }
     let has_handoffs: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='collector_handoff_amounts')",
     )

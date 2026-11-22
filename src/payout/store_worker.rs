@@ -180,6 +180,183 @@ impl Store {
         .transpose()
     }
 
+    async fn record_attempt(
+        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        work_key: &str,
+    ) -> Result<()> {
+        let old: i64 =
+            sqlx::query_scalar("SELECT sequence FROM payout_worker_clock WHERE singleton=1")
+                .fetch_one(&mut **tx)
+                .await?;
+        let next = old.checked_add(1).context("worker sequence exhausted")?;
+        sqlx::query("UPDATE payout_worker_clock SET sequence=? WHERE singleton=1")
+            .bind(next)
+            .execute(&mut **tx)
+            .await?;
+        sqlx::query("INSERT INTO payout_worker_attempts(work_key,sequence) VALUES(?,?) ON CONFLICT(work_key) DO UPDATE SET sequence=excluded.sequence")
+            .bind(work_key).bind(next).execute(&mut **tx).await?;
+        Ok(())
+    }
+
+    /// The first validated recipient invoice is final for this feeding, even
+    /// across expiry or a lost collector response.
+    pub async fn bind_operator_invoice(
+        &self,
+        sequence: i64,
+        address: &str,
+        invoice: &super::super::invoice::ValidatedInvoice,
+        maximum_fee_sat: u64,
+    ) -> Result<()> {
+        super::super::recipient::address_url(address)?;
+        let amount = i64::try_from(invoice.amount_sats())?;
+        let fee = i64::try_from(maximum_fee_sat)?;
+        let mut tx = self.pool.begin().await?;
+        write_lock(&mut tx).await?;
+        let feed: String =
+            sqlx::query_scalar("SELECT request_id FROM payout_intake_receipts WHERE sequence=?")
+                .bind(sequence)
+                .fetch_one(&mut *tx)
+                .await?;
+        if feed != invoice.intent_id().to_string() || invoice.nip57() {
+            bail!("operator invoice is not bound to this feeding");
+        }
+        let saved: Option<(String,String,String,i64,i64)> = sqlx::query_as(
+            "SELECT address,invoice,payment_hash,amount_sat,maximum_fee_sat FROM payout_operator_invoices WHERE sequence=?"
+        ).bind(sequence).fetch_optional(&mut *tx).await?;
+        if let Some(saved) = saved {
+            if saved
+                != (
+                    address.to_owned(),
+                    invoice.encoded().to_owned(),
+                    invoice.payment_hash().to_owned(),
+                    amount,
+                    fee,
+                )
+            {
+                bail!("operator invoice differs from frozen terms");
+            }
+        } else {
+            sqlx::query("INSERT INTO payout_operator_invoices(sequence,address,invoice,payment_hash,amount_sat,maximum_fee_sat) VALUES(?,?,?,?,?,?)")
+                .bind(sequence).bind(address).bind(invoice.encoded()).bind(invoice.payment_hash())
+                .bind(amount).bind(fee).execute(&mut *tx).await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn settle_operator_invoice(
+        &self,
+        sequence: i64,
+        result: &super::super::cashu::CollectorResult,
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        write_lock(&mut tx).await?;
+        let (hash, amount, limit): (String, i64, i64) = sqlx::query_as(
+            "SELECT payment_hash,amount_sat,maximum_fee_sat FROM payout_operator_invoices WHERE sequence=?"
+        ).bind(sequence).fetch_one(&mut *tx).await?;
+        let fee = result
+            .verified_fee(&hash, amount.try_into()?, limit.try_into()?)?
+            .context("operator payment is unsettled")?;
+        let super::super::cashu::CollectorResult::Paid {
+            payment_preimage, ..
+        } = result
+        else {
+            bail!("missing operator settlement preimage");
+        };
+        let fee = i64::try_from(fee)?;
+        let old: Option<(String, i64)> = sqlx::query_as(
+            "SELECT payment_preimage,fee_sat FROM payout_operator_receipts WHERE sequence=?",
+        )
+        .bind(sequence)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some((preimage, old_fee)) = old {
+            if preimage != *payment_preimage || old_fee != fee {
+                bail!("operator receipt differs from prior settlement");
+            }
+        } else {
+            sqlx::query("INSERT INTO payout_operator_receipts(sequence,payment_preimage,fee_sat) VALUES(?,?,?)")
+                .bind(sequence).bind(payment_preimage).bind(fee).execute(&mut *tx).await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn next_operator_allocation(&self) -> Result<Option<i64>> {
+        let mut tx = self.pool.begin().await?;
+        write_lock(&mut tx).await?;
+        let sequence: Option<i64> = sqlx::query_scalar(
+            "SELECT a.sequence FROM payout_operator_allocations a
+             LEFT JOIN payout_worker_attempts w ON w.work_key='operator:'||a.sequence
+             LEFT JOIN payout_operator_receipts r ON r.sequence=a.sequence
+             WHERE r.sequence IS NULL ORDER BY COALESCE(w.sequence,0),a.sequence LIMIT 1",
+        )
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some(id) = sequence {
+            Self::record_attempt(&mut tx, &format!("operator:{id}")).await?;
+        }
+        tx.commit().await?;
+        Ok(sequence)
+    }
+
+    pub(crate) async fn saved_operator_execution(
+        &self,
+        sequence: i64,
+        allocation: crate::reward_funding::OperatorAllocation,
+        lots: Vec<super::super::funding::RetainedAllocation>,
+    ) -> Result<Option<super::super::operator::Execution>> {
+        let row = sqlx::query("SELECT address,invoice,payment_hash,amount_sat,maximum_fee_sat FROM payout_operator_invoices WHERE sequence=?")
+            .bind(sequence).fetch_optional(&self.pool).await?;
+        row.map(|r| {
+            Ok(super::super::operator::Execution {
+                allocation,
+                lots,
+                address: r.try_get("address")?,
+                invoice: r.try_get("invoice")?,
+                payment_hash: r.try_get("payment_hash")?,
+                amount_sat: r.try_get::<i64, _>("amount_sat")?.try_into()?,
+                maximum_fee_sat: r.try_get::<i64, _>("maximum_fee_sat")?.try_into()?,
+            })
+        })
+        .transpose()
+    }
+
+    /// A lost response can be recovered with the feed UUID and exact frozen invoice.
+    /// The collector lookup accepts neither a spending allowance nor proof inputs.
+    pub(crate) async fn reconcile_operator(
+        &self,
+        sequence: i64,
+        socket: &std::path::Path,
+    ) -> Result<bool> {
+        let saved: Option<(String, String)> = sqlx::query_as(
+            "SELECT r.request_id,i.invoice FROM payout_operator_invoices i
+             JOIN payout_intake_receipts r USING(sequence) WHERE i.sequence=?",
+        )
+        .bind(sequence)
+        .fetch_optional(&self.pool)
+        .await?;
+        if let Some((feed, invoice)) = saved {
+            let result: super::super::cashu::CollectorResult = crate::private_ipc::request(
+                socket,
+                0,
+                &serde_json::json!({"reconcile_operator":feed,"invoice":invoice}),
+                65536,
+                30,
+            )
+            .await?;
+            if matches!(result, super::super::cashu::CollectorResult::Paid { .. }) {
+                self.settle_operator_invoice(sequence, &result).await?;
+            }
+            return Ok(matches!(
+                result,
+                super::super::cashu::CollectorResult::Pending { .. }
+                    | super::super::cashu::CollectorResult::Paid { .. }
+            ));
+        }
+        Ok(false)
+    }
+
     pub(crate) async fn take_work(&self, now: i64) -> Result<Option<Work>> {
         self.take_provider_work(now, "strike").await
     }
@@ -215,17 +392,7 @@ WITH grants AS (
 SELECT j.* FROM jobs j LEFT JOIN payout_worker_attempts a ON a.work_key=j.work_key ORDER BY COALESCE(a.sequence,0),j.admitted_at,j.work_key LIMIT 1
 "#).bind(provider).fetch_optional(&mut *tx).await?;
         let Some(row) = row else { return Ok(None) };
-        let old: i64 =
-            sqlx::query_scalar("SELECT sequence FROM payout_worker_clock WHERE singleton=1")
-                .fetch_one(&mut *tx)
-                .await?;
-        let next = old.checked_add(1).context("worker sequence exhausted")?;
-        sqlx::query("UPDATE payout_worker_clock SET sequence=? WHERE singleton=1")
-            .bind(next)
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("INSERT INTO payout_worker_attempts(work_key,sequence) VALUES(?,?) ON CONFLICT(work_key) DO UPDATE SET sequence=excluded.sequence")
-            .bind(row.try_get::<String,_>("work_key")?).bind(next).execute(&mut *tx).await?;
+        Self::record_attempt(&mut tx, &row.try_get::<String, _>("work_key")?).await?;
         let work = Work {
             grant: row.try_get::<String, _>("grant_id")?.parse()?,
             member: row.try_get("member")?,

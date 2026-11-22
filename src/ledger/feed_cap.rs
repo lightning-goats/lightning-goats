@@ -226,6 +226,7 @@ impl LedgerStore {
         let store = Self {
             pool,
             publication: Default::default(),
+            retained_wallet_epoch: None,
         };
         let result = async {
             crate::sqlite::require_current_schema(&store.pool, &super::MIGRATOR).await?;

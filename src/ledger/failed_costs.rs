@@ -19,6 +19,7 @@ impl LedgerStore {
         Ok(Self {
             pool,
             publication: Default::default(),
+            retained_wallet_epoch: None,
         })
     }
     /// Produce correlation fields only. Null cost/evidence and false review

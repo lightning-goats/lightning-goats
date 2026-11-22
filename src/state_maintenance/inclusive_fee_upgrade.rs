@@ -1,4 +1,4 @@
-//! Strict payout-schema-8 -> 11 additive comparison of separate four-journal images.
+//! Strict payout-schema-8 -> 12 additive comparison of separate four-journal images.
 //! It does not migrate a journal, restore state or authorize service resumption.
 use std::{collections::BTreeMap, path::Path};
 
@@ -8,13 +8,14 @@ use sqlx::sqlite::SqliteConnectOptions;
 use super::{Manifest, Operator, Policy, Role, database, files, legacy::rows};
 
 use super::contact_upgrade::{Definition, catalog};
-const FEE_TABLES: [&str; 7] = [
+const FEE_TABLES: [&str; 8] = [
     "payout_fee_observations",
     "payout_fee_probe_intents",
     "payout_fee_probe_callbacks",
     "payout_fee_probe_invoices",
     "payout_fee_probe_quotes",
     "payout_fee_promotions",
+    "payout_operator_allocations",
     "payout_fee_probe_duplicates",
 ];
 pub(super) async fn private_catalog() -> Result<BTreeMap<String, Definition>> {
@@ -219,6 +220,7 @@ mod tests {
         // Fixture-only demotion of empty additive tables; no runtime command
         // can remove schema or migration records from an actual paid journal.
         for table in [
+            "payout_operator_allocations",
             "payout_fee_probe_duplicates",
             "payout_fee_promotions",
             "payout_fee_probe_quotes",

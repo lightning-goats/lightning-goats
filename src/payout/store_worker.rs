@@ -132,6 +132,21 @@ impl Store {
         };
         sqlx::query("INSERT INTO payout_intake_receipts(sequence,plan_hash,request_id,grant_id) VALUES(?,?,?,?)")
             .bind(export.sequence).bind(&export.hash).bind(export.plan.request_id.to_string()).bind(grant).execute(&mut *tx).await?;
+        let plan = &export.plan;
+        if plan.version == 2 && !plan.funding_source.is_strike() && plan.operations_sats > 0 {
+            let funding_hash = plan
+                .funding_hash
+                .as_deref()
+                .context("missing operator funding proof")?;
+            crate::nostr_event::validate_hex(funding_hash, 32)?;
+            sqlx::query("INSERT INTO payout_operator_allocations(sequence,funding_hash,collected_sats,member_reserved_sats,operator_sats) VALUES(?,?,?,?,?)")
+                .bind(export.sequence)
+                .bind(funding_hash)
+                .bind(i64::try_from(plan.real_sats)?)
+                .bind(i64::try_from(plan.reserved_sats)?)
+                .bind(i64::try_from(plan.operations_sats)?)
+                .execute(&mut *tx).await?;
+        }
         sqlx::query("UPDATE payout_intake_binding SET through=? WHERE singleton=1")
             .bind(export.sequence)
             .execute(&mut *tx)

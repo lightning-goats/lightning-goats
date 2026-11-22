@@ -1018,8 +1018,8 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
                 'breez_collected_claims', 'retained_cashu_lots', 'cashu_payout_execution_claims',
                 'breez_treasury_wallet_results', 'breez_treasury_inspections',
                 'cashu_funding_ranges', 'feed_conversion_proceeds', 'collector_handoff_amounts',
-                'feed_acquisition_proceeds'} <= additions
-        assert len(additions) == 34 and all(cashu_migrated['core'][table] == 0 for table in additions)
+                'feed_acquisition_proceeds', 'operator_cashu_execution_claims'} <= additions
+        assert len(additions) == 35 and all(cashu_migrated['core'][table] == 0 for table in additions)
         assert all(cashu_reference[role] == cashu_migrated[role] for role in ('membership', 'payout', 'signer'))
         assert counts['post'] == 0
         finished = True

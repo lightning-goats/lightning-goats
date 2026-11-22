@@ -1,4 +1,4 @@
-//! Strict payout-schema-8 -> 13 additive comparison of separate four-journal images.
+//! Strict payout-schema-8 -> 14 additive comparison of separate four-journal images.
 //! It does not migrate a journal, restore state or authorize service resumption.
 use std::{collections::BTreeMap, path::Path};
 
@@ -8,13 +8,15 @@ use sqlx::sqlite::SqliteConnectOptions;
 use super::{Manifest, Operator, Policy, Role, database, files, legacy::rows};
 
 use super::contact_upgrade::{Definition, catalog};
-const FEE_TABLES: [&str; 10] = [
+const FEE_TABLES: [&str; 12] = [
     "payout_fee_observations",
     "payout_fee_probe_intents",
     "payout_fee_probe_callbacks",
     "payout_fee_probe_invoices",
     "payout_fee_probe_quotes",
     "payout_fee_promotions",
+    "payout_operator_ecash_status",
+    "payout_operator_methods",
     "payout_operator_receipts",
     "payout_operator_invoices",
     "payout_operator_allocations",
@@ -221,7 +223,15 @@ mod tests {
             .unwrap();
         // Fixture-only demotion of empty additive tables; no runtime command
         // can remove schema or migration records from an actual paid journal.
+        sqlx::raw_sql(
+            "DROP TRIGGER check_operator_invoice_method; DROP TRIGGER bind_legacy_operator_method;",
+        )
+        .execute(&payout)
+        .await
+        .unwrap();
         for table in [
+            "payout_operator_ecash_status",
+            "payout_operator_methods",
             "payout_operator_receipts",
             "payout_operator_invoices",
             "payout_operator_allocations",

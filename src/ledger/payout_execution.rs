@@ -17,12 +17,46 @@ impl LedgerStore {
         policy: &crate::reward_funding::RewardPolicy,
         enabled: bool,
     ) -> Result<(String, i64)> {
-        let a = &terms.allocation;
+        let expiry = terms.validate()?;
+        self.bind_operator_claim(
+            (&terms.allocation, &terms.lots),
+            terms.digest()?,
+            Some((&terms.payment_hash, expiry)),
+            policy,
+            enabled,
+        )
+        .await
+    }
+    pub(crate) async fn claim_direct_operator(
+        &self,
+        terms: &crate::payout::operator::DirectExecution,
+        policy: &crate::reward_funding::RewardPolicy,
+        enabled: bool,
+    ) -> Result<(String, i64)> {
+        self.bind_operator_claim(
+            (&terms.allocation, &terms.lots),
+            terms.digest()?,
+            None,
+            policy,
+            enabled,
+        )
+        .await
+    }
+    async fn bind_operator_claim(
+        &self,
+        funding: (
+            &crate::reward_funding::OperatorAllocation,
+            &[crate::payout::funding::RetainedAllocation],
+        ),
+        digest: String,
+        lightning: Option<(&str, u64)>,
+        policy: &crate::reward_funding::RewardPolicy,
+        enabled: bool,
+    ) -> Result<(String, i64)> {
+        let (a, lots) = funding;
         if !enabled || policy.funding_source.is_strike() || policy.owner != a.owner {
             bail!("operator execution is disabled or scope changed");
         }
-        let expiry = terms.validate()?;
-        let digest = terms.digest()?;
         let mut cursor = 0;
         let mut offset = 0;
         loop {
@@ -39,7 +73,7 @@ impl LedgerStore {
                     .reservation
                     .as_ref()
                     .is_some_and(|r| r.plan_hash != a.plan_hash)
-                || terms.lots.get(offset..end) != Some(page.allocations.as_slice())
+                || lots.get(offset..end) != Some(page.allocations.as_slice())
             {
                 bail!("operator claim differs from core funding");
             }
@@ -52,7 +86,7 @@ impl LedgerStore {
             }
             cursor = page.through;
         }
-        if offset != terms.lots.len() {
+        if offset != lots.len() {
             bail!("extra operator funding lots");
         }
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
@@ -71,13 +105,15 @@ impl LedgerStore {
         let now = budget_time(&mut tx, true).await?;
         if epoch != a.epoch.to_string()
             || grant != a.member_grant.map(|g| g.to_string())
-            || u64::try_from(now)? >= expiry
+            || lightning.is_some_and(|(_, expiry)| now as u64 >= expiry)
         {
             bail!("operator grant, epoch or invoice validity changed");
         }
-        let old: Option<String> = sqlx::query_scalar(
-            "SELECT terms_hash FROM operator_cashu_execution_claims WHERE request_id=?",
-        )
+        let old: Option<String> = sqlx::query_scalar(if lightning.is_some() {
+            "SELECT terms_hash FROM operator_cashu_execution_claims WHERE request_id=?"
+        } else {
+            "SELECT terms_hash FROM operator_p2pk_claims WHERE request_id=?"
+        })
         .bind(&id)
         .fetch_optional(&mut *tx)
         .await?;
@@ -85,8 +121,16 @@ impl LedgerStore {
             Some(old) if old != digest => bail!("operator execution terms changed"),
             Some(_) => {}
             None => {
-                sqlx::query("INSERT INTO operator_cashu_execution_claims(request_id,invoice_hash,terms_hash) VALUES(?,?,?)")
-                .bind(id).bind(&terms.payment_hash).bind(&digest).execute(&mut *tx).await?;
+                if let Some((hash, _)) = lightning {
+                    sqlx::query("INSERT INTO operator_cashu_execution_claims(request_id,invoice_hash,terms_hash) VALUES(?,?,?)")
+                .bind(id).bind(hash).bind(&digest).execute(&mut *tx).await?;
+                } else {
+                    sqlx::query("INSERT INTO operator_p2pk_claims VALUES(?,?)")
+                        .bind(id)
+                        .bind(&digest)
+                        .execute(&mut *tx)
+                        .await?;
+                }
             }
         }
         tx.commit().await?;

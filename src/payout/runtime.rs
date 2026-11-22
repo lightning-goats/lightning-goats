@@ -27,6 +27,7 @@ pub struct Config {
     pub funding_source: crate::reward_funding::RewardFundingSource,
     pub cashu_payout_socket: Option<PathBuf>,
     pub operator_address: Option<String>,
+    pub operator_p2pk: Option<super::operator::DirectWallet>,
     pub state_dir: PathBuf,
     pub core_socket: PathBuf,
     pub intake_socket: PathBuf,
@@ -121,6 +122,12 @@ impl Config {
             && self.policy.scope.provider.environment != "strike-production"
         {
             bail!("Strike execution requires the original Strike journal scope");
+        }
+        if let Some(wallet) = &self.operator_p2pk {
+            wallet.validate()?;
+            if self.cashu_payout_socket.is_none() {
+                bail!("direct operator payouts require collector socket");
+            }
         }
         if let Some(address) = &self.operator_address {
             let identity = super::recipient::address_identity(address)?;
@@ -320,19 +327,75 @@ impl Intake {
         bail!("operator funding exceeds configured source bound")
     }
 
-    async fn operator_tick(&self, socket: &Path, address: Option<&str>) -> Result<()> {
+    pub(crate) async fn operator_tick(
+        &self,
+        socket: &Path,
+        address: Option<&str>,
+        direct: Option<&super::operator::DirectWallet>,
+        collector_uid: u32,
+    ) -> Result<()> {
         let Some(sequence) = self.store.next_operator_allocation().await? else {
             return Ok(());
         };
-        if self.store.reconcile_operator(sequence, socket).await?
-            || !self.store.policy().execution_enabled
+        let enabled = self.store.policy().execution_enabled;
+        let choice = if !enabled {
+            None
+        } else if let Some(wallet) = direct {
+            Some((
+                "p2pk",
+                serde_json::to_string(&(
+                    wallet,
+                    self.store.policy().fee_mode,
+                    self.store.policy().max_fee_sats,
+                ))?,
+            ))
+        } else {
+            address.map(|a| ("lightning", a.to_owned()))
+        };
+        let Some((method, destination)) = self.store.operator_method(sequence, choice).await?
+        else {
+            return Ok(());
+        };
+        if method == "lightning"
+            && self
+                .store
+                .reconcile_operator(sequence, socket, collector_uid)
+                .await?
         {
             return Ok(());
         }
-        let Some(address) = address else {
+        if !enabled {
             return Ok(());
-        };
+        }
         let (allocation, lots) = self.qualified_operator_funding(sequence).await?;
+        if method == "p2pk" {
+            let (wallet, mode, limit): (
+                super::operator::DirectWallet,
+                super::inclusive_fees::Mode,
+                u64,
+            ) = serde_json::from_str(&destination)?;
+            let fee_limit = if mode.is_fixed() {
+                limit.min(allocation.operator_sats)
+            } else {
+                allocation.operator_sats
+            };
+            let terms = super::operator::DirectExecution {
+                allocation,
+                lots,
+                wallet,
+                fee_limit,
+            };
+            self.store.begin_direct_attempt(sequence).await?;
+            let status = self
+                .core
+                .submit_direct_operator(&terms, socket, collector_uid)
+                .await?;
+            return self
+                .store
+                .record_direct_status(sequence, &terms, status)
+                .await;
+        }
+        let address = destination.as_str();
         if let Some(terms) = self
             .store
             .saved_operator_execution(sequence, allocation.clone(), lots.clone())
@@ -469,13 +532,14 @@ impl Runtime {
         if let Some(socket) = self.config.cashu_payout_socket.clone() {
             let operator = intake.clone();
             let address = self.config.operator_address.clone();
+            let direct = self.config.operator_p2pk.clone();
             tasks.spawn(async move {
                 let mut ticks = tokio::time::interval(Duration::from_secs(intake_seconds));
                 ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
                 loop {
                     ticks.tick().await;
                     if operator
-                        .operator_tick(&socket, address.as_deref())
+                        .operator_tick(&socket, address.as_deref(), direct.as_ref(), 0)
                         .await
                         .is_err()
                     {

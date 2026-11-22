@@ -78,6 +78,7 @@ impl Role {
                     | Request::PayoutFunding { .. }
                     | Request::OperatorFunding { .. }
                     | Request::ClaimOperatorExecution { .. }
+                    | Request::ClaimDirectOperator { .. }
                     | Request::ClaimCashuExecution { .. }
                     | Request::ClaimPayoutExecution { .. }
                     | Request::PayoutExecutionState { .. }
@@ -391,6 +392,26 @@ async fn serve_one(
                         page: page.map(Box::new),
                     },
                     Err(_) => Response::Rejected,
+                }
+            }
+            Request::ClaimDirectOperator { request } => {
+                if let Some(policy) = reward_policy {
+                    match ledger
+                        .claim_direct_operator(
+                            &request,
+                            policy,
+                            payout_execution_enabled && mode.feeder_enabled(),
+                        )
+                        .await
+                    {
+                        Ok((terms_hash, observed_at)) => Response::OperatorExecutionClaim {
+                            terms_hash,
+                            observed_at,
+                        },
+                        Err(_) => Response::Rejected,
+                    }
+                } else {
+                    Response::Rejected
                 }
             }
             Request::ClaimOperatorExecution { request } => {
@@ -764,14 +785,24 @@ impl Client {
     ) -> Result<crate::payout::cashu::CollectorResult> {
         let expected = terms.digest()?;
         let payload = terms.payload();
+        self.authorize_operator(
+            Request::ClaimOperatorExecution {
+                request: Box::new(terms.clone()),
+            },
+            expected,
+        )
+        .await?;
+        let result: crate::payout::cashu::CollectorResult =
+            crate::private_ipc::request(collector, 0, &payload, 65536, 30).await?;
+        result.verified_fee(&terms.payment_hash, terms.amount_sat, terms.maximum_fee_sat)?;
+        Ok(result)
+    }
+
+    async fn authorize_operator(&self, request: Request, expected: String) -> Result<()> {
         let Response::OperatorExecutionClaim {
             terms_hash,
             observed_at,
-        } = self
-            .request(&Request::ClaimOperatorExecution {
-                request: Box::new(terms.clone()),
-            })
-            .await?
+        } = self.request(&request).await?
         else {
             bail!("core rejected operator execution");
         };
@@ -779,12 +810,27 @@ impl Client {
         if terms_hash != expected || observed_at < 0 || observed_at > now || now - observed_at > 5 {
             bail!("operator execution lease expired or differs from original terms");
         }
-        let result: crate::payout::cashu::CollectorResult =
-            crate::private_ipc::request(collector, 0, &payload, 65536, 30).await?;
-        result.verified_fee(&terms.payment_hash, terms.amount_sat, terms.maximum_fee_sat)?;
-        Ok(result)
+        Ok(())
     }
-
+    pub(crate) async fn submit_direct_operator(
+        &self,
+        terms: &crate::payout::operator::DirectExecution,
+        collector: &std::path::Path,
+        collector_uid: u32,
+    ) -> Result<crate::payout::operator::DirectStatus> {
+        let a = &terms.allocation;
+        let payload = serde_json::json!({"operator_ecash":{"feed":a.request_id,"mint":terms.wallet.mint,
+            "recipient":terms.wallet.recipient,"plan_hash":a.plan_hash,"gross":a.operator_sats,
+            "member":a.member_reserved_sats,"lots":terms.lots,"fee_limit":terms.fee_limit}});
+        self.authorize_operator(
+            Request::ClaimDirectOperator {
+                request: Box::new(terms.clone()),
+            },
+            terms.digest()?,
+        )
+        .await?;
+        crate::private_ipc::request(collector, collector_uid, &payload, 65536, 30).await
+    }
     pub async fn claim_cashu_execution(
         &self,
         original: &crate::payout::cashu::ExecutionRequest,

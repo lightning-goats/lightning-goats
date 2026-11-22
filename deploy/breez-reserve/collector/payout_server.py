@@ -12,6 +12,13 @@ import httpx
 from claim_store import ClaimStore
 from collect import collect_acquisition, execute_payout
 from invoice_server import handle_request
+from operator_ecash import transfer
+
+
+def dispatch_payout(store, client, request, keyset, keys):
+    if set(request) == {"operator_ecash"}:
+        return transfer(store, client, request["operator_ecash"], keyset, keys)
+    return execute_payout(store, client, request, keyset, keys)
 
 
 def main():
@@ -33,7 +40,7 @@ def main():
             timeout=15, follow_redirects=False, trust_env=False) as client:
         def dispatch(request):
             if args.role == "payout":
-                return execute_payout(store, client, request, args.keyset, keys)
+                return dispatch_payout(store, client, request, args.keyset, keys)
             fields = {"acquisition_id", "evidence_digest", "proofs"}
             report_amount = set(request) == fields | {"report_collected_sats"} and request["report_collected_sats"] is True
             if set(request) != fields and not report_amount:

@@ -96,7 +96,7 @@ def payout_input_fee(client, input_keysets):
     return (sum(rates[keyset] for keyset in input_keysets) + 999) // 1000
 
 
-def recover_swap(client, inputs, material, pinned_keys):
+def recover_swap(client, inputs, material, pinned_keys, *, require_unspent=False):
     outputs = [{k: item[k] for k in ("amount", "id", "B_")} for item in material]
     restored = client.post("/v1/restore", json={"outputs": outputs}).raise_for_status().json()
     if restored["outputs"] or restored["signatures"]:
@@ -104,6 +104,11 @@ def recover_swap(client, inputs, material, pinned_keys):
             raise ValueError("swap restoration differs from original outputs")
         promises = restored["signatures"]
     else:
+        if require_unspent:
+            ys = [b_dhke.hash_to_curve(p["secret"].encode()).format().hex() for p in inputs]
+            states = client.post("/v1/checkstate", json={"Ys": ys}).raise_for_status().json()["states"]
+            if sorted(s["Y"] for s in states) != sorted(ys) or any(s["state"] != "UNSPENT" for s in states):
+                raise ValueError("reserved swap has unresolved input state")
         input_total = sum(p["amount"] for p in inputs)
         output_total = sum(o["amount"] for o in outputs)
         if not outputs or input_total - output_total != payout_input_fee(client, [p["id"] for p in inputs]):

@@ -43,6 +43,8 @@ install -m 0644 "$here/mint/lg_mint.py" "$build/nutshell/lg_mint.py"
     poetry env use "$python"
     poetry install --only main --no-root --no-interaction
     PYTHONPATH="$build/nutshell" .venv/bin/python "$here/tests/mint_acceptance.py"
+    PYTHONPATH="$build/nutshell" .venv/bin/python "$here/tests/direct_operator_acceptance.py"
+    PYTHONPATH="$build/nutshell" bash "$here/tests/direct_worker_acceptance.sh" .venv/bin/python
     PYTHONPATH="$build/nutshell" .venv/bin/python "$here/tests/watchdog_acceptance.py"
 )
 

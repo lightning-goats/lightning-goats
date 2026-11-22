@@ -142,6 +142,29 @@ class ClaimStore:
                 )
             """)
             self.db.execute("""
+                CREATE TABLE IF NOT EXISTS operator_ecash (
+                    feed TEXT PRIMARY KEY REFERENCES proof_disposition(id),
+                    material TEXT NOT NULL, amount_sat INTEGER NOT NULL CHECK(amount_sat>0),
+                    fee_sat INTEGER NOT NULL CHECK(fee_sat>=0), token TEXT
+                )
+            """)
+            self.db.execute("""
+                CREATE TRIGGER IF NOT EXISTS immutable_operator_swap BEFORE UPDATE ON operator_ecash
+                WHEN OLD.feed != NEW.feed OR OLD.material != NEW.material
+                  OR OLD.amount_sat != NEW.amount_sat OR OLD.fee_sat != NEW.fee_sat
+                  OR OLD.token IS NOT NULL OR NEW.token IS NULL
+                BEGIN SELECT RAISE(ABORT, 'operator swap terms are immutable'); END
+            """)
+            self.db.execute("""
+                CREATE TRIGGER IF NOT EXISTS original_operator_swap BEFORE INSERT ON operator_ecash
+                WHEN EXISTS(SELECT 1 FROM operator_ecash WHERE feed=NEW.feed)
+                BEGIN SELECT RAISE(ABORT, 'operator swap already reserved'); END
+            """)
+            self.db.execute("""
+                CREATE TRIGGER IF NOT EXISTS retain_operator_swap BEFORE DELETE ON operator_ecash
+                BEGIN SELECT RAISE(ABORT, 'operator swap is retained'); END
+            """)
+            self.db.execute("""
                 CREATE TABLE IF NOT EXISTS proof_split (
                     secret TEXT PRIMARY KEY REFERENCES disposition_input(secret),
                     material TEXT NOT NULL,

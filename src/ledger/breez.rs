@@ -511,3 +511,7 @@ mod tests {
         assert_eq!(restarted.feed_credit_sats().await.unwrap(), 0);
     }
 }
+
+#[cfg(test)]
+#[path = "direct_operator_fixture.rs"]
+mod direct_operator_fixture;

@@ -2,6 +2,19 @@
 use anyhow::{Context, Result, ensure};
 
 pub async fn strip_empty(transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>) -> Result<()> {
+    let direct: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='operator_p2pk_claims')",
+    )
+    .fetch_one(&mut **transaction)
+    .await?;
+    if direct {
+        let empty: bool =
+            sqlx::query_scalar("SELECT NOT EXISTS(SELECT 1 FROM operator_p2pk_claims)")
+                .fetch_one(&mut **transaction)
+                .await?;
+        ensure!(empty, "fixture contains direct operator claims");
+        sqlx::raw_sql("DROP TRIGGER exclude_p2pk_operator_invoice; DROP TRIGGER exclude_p2pk_member_execution; DROP TRIGGER exclude_p2pk_strike_execution; DROP TRIGGER reserve_before_operator_p2pk; DROP TABLE operator_p2pk_claims; DELETE FROM _sqlx_migrations WHERE version=38;").execute(&mut **transaction).await?;
+    }
     let has_operator: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='operator_cashu_execution_claims')",
     )

@@ -233,3 +233,18 @@ index 15e96e6..973947b 100644
              # check if the melt quote is partial and error if it is.
              # it's just not possible to handle this case
              if melt_quote.is_mpp:
+diff --git a/cashu/mint/watchdog.py b/cashu/mint/watchdog.py
+--- a/cashu/mint/watchdog.py
++++ b/cashu/mint/watchdog.py
+@@ -66,6 +66,11 @@
+     async def dispatch_backend_checker(
+         self, unit: Unit, backend: LightningBackend
+     ) -> None:
++        from ..lightning.goats_reserve import GoatsReserve
++        if isinstance(backend, GoatsReserve):
++            from ..lightning.goats_watchdog import monitor
++            return await monitor(self, backend, unit)
++
+         logger.info(
+             f"Dispatching backend checker for unit: {unit.name} and backend: {backend.__class__.__name__}"
+         )

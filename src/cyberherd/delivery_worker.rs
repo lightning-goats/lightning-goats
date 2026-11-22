@@ -46,6 +46,9 @@ impl RelayAck {
     }
 }
 pub(crate) trait Transport {
+    fn after_ack(&self, _relay: &str) -> impl std::future::Future<Output = ()> + Send {
+        std::future::ready(())
+    }
     fn sign(
         &self,
         unsigned: &Unsigned,
@@ -57,6 +60,9 @@ pub(crate) trait Transport {
     ) -> impl std::future::Future<Output = Result<RelayAck>> + Send;
 }
 impl Transport for NakClient {
+    async fn after_ack(&self, relay: &str) {
+        self.advertise_on(relay).await;
+    }
     async fn sign(&self, unsigned: &Unsigned) -> Result<VerifiedEvent> {
         self.sign_protocol_event(
             unsigned.kind,
@@ -68,7 +74,6 @@ impl Transport for NakClient {
     }
     async fn publish(&self, event: &VerifiedEvent, relay: &str) -> Result<RelayAck> {
         crate::zap_receipts::publish_protocol_event(event, relay).await?;
-        self.advertise_on(relay).await;
         Ok(RelayAck {
             event_id: event.event().id.clone(),
             relay: relay.into(),
@@ -103,6 +108,15 @@ impl<T: Transport> Worker<T> {
                 self.store
                     .finish_delivery(&job, Some(&ack), calendar::now()?)
                     .await?;
+                // Metadata lookup and publication can time out independently.
+                // Commit the matching relay OK before attempting either.
+                // An unavailable metadata relay must also release this worker
+                // to process the next announcement.
+                let _ = tokio::time::timeout(
+                    std::time::Duration::from_secs(5),
+                    self.transport.after_ack(&job.relay),
+                )
+                .await;
                 Ok(Step::Published)
             }
             Ok(None) => {
@@ -128,7 +142,13 @@ impl<T: Transport> Worker<T> {
         let raw = match &job.signed {
             Some(raw) => raw.clone(),
             None => {
-                let event = self.transport.sign(&job.unsigned).await?;
+                let event = self.transport.sign(&job.unsigned).await.inspect_err(|_| {
+                    tracing::warn!(
+                        kind = job.unsigned.kind,
+                        confirmed_feeding = job.feeding,
+                        "Nostr signer could not sign frozen announcement"
+                    );
+                })?;
                 self.store.save_delivery_signature(job, &event).await?
             }
         };
@@ -154,6 +174,11 @@ impl<T: Transport> Worker<T> {
                     return Ok(Some(ack));
                 }
             }
+            tracing::warn!(
+                event_id = %event.event().id,
+                remaining_relays = job.remaining_relays.len(),
+                "No remaining relay acknowledged signed announcement"
+            );
             bail!("no eligible relay acknowledged the frozen event")
         })
         .await?

@@ -233,8 +233,28 @@ impl Store {
         }
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         // A waiting branch is rotated; it cannot starve unrelated destinations.
-        let rows=sqlx::query("SELECT w.*,m.document_json,m.relays_json,m.created_at,d.branch,d.target_json FROM delivery_work w JOIN delivery_messages m ON m.owner=w.owner AND m.identity=w.identity JOIN delivery_destinations d ON d.owner=w.owner AND d.identity=w.identity AND d.destination=w.destination WHERE w.owner=? AND (? OR d.destination NOT LIKE 'stream:%') AND w.lease_until<=? AND (SELECT COUNT(*) FROM delivery_receipts r WHERE r.owner=w.owner AND r.identity=w.identity AND r.destination=w.destination)<json_array_length(m.relays_json) ORDER BY w.attempted_at,m.source_seq,w.destination LIMIT 32")
-            .bind(owner).bind(self.stream_chat).bind(now).fetch_all(&mut *tx).await?;
+        // Give an unacknowledged feed a five-minute scheduling advantage over
+        // relay fan-out retries. Aging still gives other eligible work a turn.
+        let rows = sqlx::query(
+            "WITH candidates AS (
+                SELECT w.*,m.document_json,m.relays_json,m.created_at,m.source_seq,
+                       d.branch,d.target_json,
+                       (SELECT COUNT(*) FROM delivery_receipts r WHERE r.owner=w.owner
+                        AND r.identity=w.identity AND r.destination=w.destination) AS receipts
+                FROM delivery_work w
+                JOIN delivery_messages m USING(owner,identity)
+                JOIN delivery_destinations d USING(owner,identity,destination)
+                WHERE w.owner=? AND (? OR d.destination NOT LIKE 'stream:%') AND w.lease_until<=?
+             )
+             SELECT * FROM candidates WHERE receipts<json_array_length(relays_json)
+             ORDER BY attempted_at - CASE WHEN receipts=0 AND destination='broadcast:note'
+                                          THEN 300 ELSE 0 END,source_seq,destination LIMIT 32",
+        )
+        .bind(owner)
+        .bind(self.stream_chat)
+        .bind(now)
+        .fetch_all(&mut *tx)
+        .await?;
         for row in rows {
             let identity: String = row.try_get("identity")?;
             let destination: String = row.try_get("destination")?;

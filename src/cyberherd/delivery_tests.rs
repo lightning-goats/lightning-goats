@@ -33,6 +33,7 @@ fn key(n: u8) -> String {
 #[derive(Clone, Default)]
 struct Fake {
     signs: Arc<AtomicUsize>,
+    fail_sign: Arc<AtomicBool>,
     events: Arc<Mutex<Vec<crate::nostr::SignedNostrEvent>>>,
     lose: Arc<AtomicBool>,
     failed_relay: Option<String>,
@@ -40,6 +41,9 @@ struct Fake {
 impl Transport for Fake {
     async fn sign(&self, u: &Unsigned) -> Result<VerifiedEvent> {
         self.signs.fetch_add(1, Ordering::SeqCst);
+        if self.fail_sign.swap(false, Ordering::SeqCst) {
+            bail!("synthetic signer timeout");
+        }
         VerifiedEvent::verify(test_event(
             1,
             u.kind,
@@ -1001,6 +1005,21 @@ async fn confirmed_feeding_uses_frozen_roster_trigger_amount_and_one_standalone_
     assert_eq!(destinations.len(), 2);
     assert!(destinations.contains(&"broadcast:note".to_owned()));
     assert!(destinations.iter().any(|s| s.ends_with(":original-stream")));
+    // A failed first attempt puts the note behind older fan-out work under
+    // plain least-recently-attempted ordering. Both destinations are due now.
+    sqlx::query("UPDATE delivery_work SET attempted_at=?")
+        .bind(calendar::now().unwrap() - 20)
+        .execute(&db)
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE delivery_work SET attempted_at=? WHERE identity=? AND destination='broadcast:note'",
+    )
+    .bind(calendar::now().unwrap())
+    .bind(&message.identity)
+    .execute(&db)
+    .await
+    .unwrap();
     let mut jobs = vec![];
     while let Some(job) = f
         .store
@@ -1008,6 +1027,10 @@ async fn confirmed_feeding_uses_frozen_roster_trigger_amount_and_one_standalone_
         .await
         .unwrap()
     {
+        if jobs.is_empty() {
+            assert_eq!(job.destination, "broadcast:note");
+            assert_eq!(job.identity, message.identity);
+        }
         if job.feeding {
             jobs.push(job);
         }
@@ -1257,7 +1280,7 @@ async fn feeding_notes_hold_in_nonpublic_mode_but_retry_same_bytes_during_pause_
     // Reopen the same durable store with a public-mode core, not a fresh message.
     let reopened = Store::connect(&f.url).await.unwrap();
     let db = SqlitePool::connect(&f.url).await.unwrap();
-    sqlx::query("UPDATE delivery_work SET lease_until=0")
+    sqlx::query("UPDATE delivery_work SET lease_until=0,attempted_at=0")
         .execute(&db)
         .await
         .unwrap();
@@ -1269,6 +1292,21 @@ async fn feeding_notes_hold_in_nonpublic_mode_but_retry_same_bytes_during_pause_
         owner: f.owner.clone(),
     };
     f.ready(Some(true)).await;
+    fake.fail_sign.store(true, Ordering::SeqCst);
+    tokio::time::sleep(std::time::Duration::from_millis(1050)).await;
+    assert!(worker.tick().await.is_err());
+    let frozen: String = sqlx::query_scalar(
+        "SELECT document_json FROM delivery_unsigned WHERE destination='broadcast:note'",
+    )
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE delivery_work SET lease_until=0,attempted_at=0 WHERE destination='broadcast:note'",
+    )
+    .execute(&db)
+    .await
+    .unwrap();
     fake.lose.store(true, Ordering::SeqCst);
     tokio::time::sleep(std::time::Duration::from_millis(1050)).await;
     assert!(worker.tick().await.is_err());
@@ -1300,7 +1338,11 @@ async fn feeding_notes_hold_in_nonpublic_mode_but_retry_same_bytes_during_pause_
     assert_eq!(worker.tick().await.unwrap(), Step::Published);
     let events = fake.events.lock().unwrap().clone();
     assert_eq!(events[0], events[1]);
-    assert_eq!(fake.signs.load(Ordering::SeqCst), 1);
+    assert_eq!(fake.signs.load(Ordering::SeqCst), 2);
+    let intent: Unsigned = serde_json::from_str(&frozen).unwrap();
+    intent
+        .validate_signed(&VerifiedEvent::verify(original.clone()).unwrap())
+        .unwrap();
     task.abort();
 }
 

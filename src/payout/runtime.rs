@@ -124,7 +124,8 @@ impl Config {
         }
         if let Some(address) = &self.operator_address {
             let identity = super::recipient::address_identity(address)?;
-            if self.cashu_payout_socket.is_none()
+            if address != "sat@lightning-goats.com"
+                || self.cashu_payout_socket.is_none()
                 || !self
                     .policy
                     .operation_addresses
@@ -332,6 +333,22 @@ impl Intake {
             return Ok(());
         };
         let (allocation, lots) = self.qualified_operator_funding(sequence).await?;
+        if let Some(terms) = self
+            .store
+            .saved_operator_execution(sequence, allocation.clone(), lots.clone())
+            .await?
+        {
+            if terms.address != address {
+                bail!("operator destination changed after invoice binding");
+            }
+            let result = self.core.submit_operator(&terms, socket).await?;
+            if matches!(result, super::cashu::CollectorResult::Paid { .. }) {
+                self.store
+                    .settle_operator_invoice(sequence, &result)
+                    .await?;
+            }
+            return Ok(());
+        }
         let recipient = super::recipient::Recipient::fetch(address).await?;
         let gross = allocation.operator_sats;
         let minimum = recipient.min_msat.div_ceil(1000);

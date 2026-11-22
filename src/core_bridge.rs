@@ -86,6 +86,9 @@ pub enum Request {
         reservation: Box<crate::reward_funding::Reservation>,
         after: u16,
     },
+    ClaimOperatorExecution {
+        request: Box<crate::payout::operator::Execution>,
+    },
     ClaimCashuExecution {
         request: Box<crate::payout::cashu::ExecutionRequest>,
     },
@@ -157,6 +160,10 @@ pub enum Response {
     },
     RewardResults {
         page: Option<Box<crate::payout::results::Page>>,
+    },
+    OperatorExecutionClaim {
+        terms_hash: String,
+        observed_at: i64,
     },
     CashuExecutionClaim {
         request: Box<crate::payout::cashu::ExecutionRequest>,

@@ -132,7 +132,8 @@ pub struct FundingPage {
 }
 
 /// Payout-journal checkpoint bound to its original intake receipt and core scope.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct OperatorAllocation {
     pub epoch: Uuid,
     pub owner: String,

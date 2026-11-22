@@ -300,6 +300,28 @@ impl Store {
         Ok(sequence)
     }
 
+    pub(crate) async fn saved_operator_execution(
+        &self,
+        sequence: i64,
+        allocation: crate::reward_funding::OperatorAllocation,
+        lots: Vec<super::super::funding::RetainedAllocation>,
+    ) -> Result<Option<super::super::operator::Execution>> {
+        let row = sqlx::query("SELECT address,invoice,payment_hash,amount_sat,maximum_fee_sat FROM payout_operator_invoices WHERE sequence=?")
+            .bind(sequence).fetch_optional(&self.pool).await?;
+        row.map(|r| {
+            Ok(super::super::operator::Execution {
+                allocation,
+                lots,
+                address: r.try_get("address")?,
+                invoice: r.try_get("invoice")?,
+                payment_hash: r.try_get("payment_hash")?,
+                amount_sat: r.try_get::<i64, _>("amount_sat")?.try_into()?,
+                maximum_fee_sat: r.try_get::<i64, _>("maximum_fee_sat")?.try_into()?,
+            })
+        })
+        .transpose()
+    }
+
     /// A lost response can be recovered with the feed UUID and exact frozen invoice.
     /// The collector lookup accepts neither a spending allowance nor proof inputs.
     pub(crate) async fn reconcile_operator(
@@ -326,7 +348,11 @@ impl Store {
             if matches!(result, super::super::cashu::CollectorResult::Paid { .. }) {
                 self.settle_operator_invoice(sequence, &result).await?;
             }
-            return Ok(true);
+            return Ok(matches!(
+                result,
+                super::super::cashu::CollectorResult::Pending { .. }
+                    | super::super::cashu::CollectorResult::Paid { .. }
+            ));
         }
         Ok(false)
     }

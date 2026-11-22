@@ -11,6 +11,88 @@ use sqlx::{Sqlite, Transaction};
 use uuid::Uuid;
 
 impl LedgerStore {
+    pub(crate) async fn claim_operator_execution(
+        &self,
+        terms: &crate::payout::operator::Execution,
+        policy: &crate::reward_funding::RewardPolicy,
+        enabled: bool,
+    ) -> Result<(String, i64)> {
+        let a = &terms.allocation;
+        if !enabled || policy.funding_source.is_strike() || policy.owner != a.owner {
+            bail!("operator execution is disabled or scope changed");
+        }
+        let expiry = terms.validate()?;
+        let digest = terms.digest()?;
+        let mut cursor = 0;
+        let mut offset = 0;
+        loop {
+            let page = self
+                .operator_funding_page(policy, a.epoch, a.request_id, cursor)
+                .await?;
+            let end = offset + page.allocations.len();
+            if page.funding.proof_hash != a.funding_hash
+                || page.funding.retained_cashu_sats != a.collected_sats
+                || page.reservation.as_ref().map(|r| r.id) != a.member_grant
+                || page.reservation.as_ref().map_or(0, |r| r.reserved_sats)
+                    != a.member_reserved_sats
+                || page
+                    .reservation
+                    .as_ref()
+                    .is_some_and(|r| r.plan_hash != a.plan_hash)
+                || terms.lots.get(offset..end) != Some(page.allocations.as_slice())
+            {
+                bail!("operator claim differs from core funding");
+            }
+            offset = end;
+            if !page.more {
+                break;
+            }
+            if page.through <= cursor {
+                bail!("operator funding cursor did not advance");
+            }
+            cursor = page.through;
+        }
+        if offset != terms.lots.len() {
+            bail!("extra operator funding lots");
+        }
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let id = a.request_id.to_string();
+        // A member reservation may have appeared during pagination. Serialize
+        // this final check with reservation insertion and the immutable claim.
+        let grant: Option<String> =
+            sqlx::query_scalar("SELECT id FROM reward_reservations WHERE request_id=?")
+                .bind(&id)
+                .fetch_optional(&mut *tx)
+                .await?;
+        let epoch: String =
+            sqlx::query_scalar("SELECT stream_id FROM overlay_identity WHERE singleton=1")
+                .fetch_one(&mut *tx)
+                .await?;
+        let now = budget_time(&mut tx, true).await?;
+        if epoch != a.epoch.to_string()
+            || grant != a.member_grant.map(|g| g.to_string())
+            || u64::try_from(now)? >= expiry
+        {
+            bail!("operator grant, epoch or invoice validity changed");
+        }
+        let old: Option<String> = sqlx::query_scalar(
+            "SELECT terms_hash FROM operator_cashu_execution_claims WHERE request_id=?",
+        )
+        .bind(&id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        match old {
+            Some(old) if old != digest => bail!("operator execution terms changed"),
+            Some(_) => {}
+            None => {
+                sqlx::query("INSERT INTO operator_cashu_execution_claims(request_id,invoice_hash,terms_hash) VALUES(?,?,?)")
+                .bind(id).bind(&terms.payment_hash).bind(&digest).execute(&mut *tx).await?;
+            }
+        }
+        tx.commit().await?;
+        Ok((digest, now))
+    }
+
     /// Persist the original Cashu invoice before a collector may submit proofs.
     /// Historical matches still require fresh authority before another submission.
     pub async fn claim_cashu_execution(

@@ -348,6 +348,20 @@ impl LedgerStore {
     }
 }
 
+/// Read the source frozen at reservation time, or reconstruct pre-reservation history.
+pub(super) async fn confirmed_triggering_credit(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    id: Uuid,
+    debit: i64,
+    balance: u64,
+) -> Result<Option<(i64, u64)>> {
+    if super::core_schema_version(tx).await? >= 26 && super::feed_sources::frozen(tx, id).await? {
+        super::feed_sources::triggering_credit(tx, id).await
+    } else {
+        triggering_credit(tx, debit, balance).await
+    }
+}
+
 pub(super) async fn triggering_credit(
     transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     debit_id: i64,

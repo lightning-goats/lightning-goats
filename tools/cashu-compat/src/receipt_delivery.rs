@@ -108,7 +108,7 @@ impl Journal {
         let receipt = self.export_receipt(id)?;
         let wire = crate::receipt_wire::from_private(instance, &receipt)?;
         let ack = Acknowledgment::decode_for(bytes, &wire, core_epoch)?;
-        self.acknowledge_credit(id, &ack.encode()?)
+        self.acknowledge_credit(id, &ack.encode()?, ack.result.retained_cashu)
     }
 }
 

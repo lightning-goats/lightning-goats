@@ -33,7 +33,7 @@ impl LedgerStore {
                 if value.get("triggering_payment_amount_sats").is_none() {
                     return Ok(None);
                 }
-                let debit:i64=sqlx::query_scalar("SELECT l.id FROM feed_event_sources s JOIN ledger_entries l ON l.feed_attempt_id=s.feed_attempt_id AND l.entry_type='FEED_DEBIT' WHERE s.event_seq=?")
+                let (debit, attempt): (i64, String) = sqlx::query_as("SELECT l.id,l.feed_attempt_id FROM feed_event_sources s JOIN ledger_entries l ON l.feed_attempt_id=s.feed_attempt_id AND l.entry_type='FEED_DEBIT' WHERE s.event_seq=?")
                     .bind(i64::try_from(event.seq)?).fetch_one(&mut *tx).await?;
                 let balance: i64 = sqlx::query_scalar(
                     "SELECT COALESCE(SUM(delta_sats),0) FROM ledger_entries WHERE id<=?",
@@ -45,8 +45,13 @@ impl LedgerStore {
                 if value["feed_credit_sats"].as_u64() != Some(balance) {
                     bail!("zap feeding balance contradicts its debit");
                 }
-                let Some((credit, amount)) =
-                    super::feed::triggering_credit(&mut tx, debit, balance).await?
+                let Some((credit, amount)) = super::feed::confirmed_triggering_credit(
+                    &mut tx,
+                    attempt.parse()?,
+                    debit,
+                    balance,
+                )
+                .await?
                 else {
                     return Ok(None);
                 };

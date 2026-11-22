@@ -136,7 +136,7 @@
                 status("Confirm the 100-sat contact fee in your wallet…");
                 try {
                     await wallet.sendPayment(pending.invoice);
-                    status("Wallet reports payment sent. Waiting for Strike confirmation before delivering your message…");
+                    status("Wallet reports payment sent. Waiting for payment confirmation before delivering your message…");
                 } catch (_) {
                     status("Payment was cancelled or could not be confirmed. Check your wallet before explicitly retrying this same invoice.");
                 }

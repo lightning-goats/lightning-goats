@@ -204,6 +204,7 @@ impl Fixture {
         let funding = barrier.feeding.funding.as_ref().unwrap();
         let no_payout = stage == Stage::NoPayout;
         let root_policy = RewardPolicy {
+            funding_source: Default::default(),
             owner: self.policy.owner.clone(),
             member_percent_ceiling: if no_payout { 0 } else { 10 },
             max_sats_per_feed: 100,
@@ -216,6 +217,7 @@ impl Fixture {
             .unwrap();
         let recipient = crate::payout::recipient::Recipient::parse("member@example.com", br#"{"tag":"payRequest","callback":"https://pay.example.com/member","minSendable":1000,"maxSendable":1000000,"metadata":"[[\"text/plain\",\"Synthetic treats\"]]"}"#).unwrap();
         let plan = Plan {
+            funding_source: root_policy.funding_source,
             version: 1,
             owner: self.policy.owner.clone(),
             epoch: self.policy.epoch,

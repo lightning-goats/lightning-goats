@@ -359,6 +359,10 @@ async fn classify(
     let plan_hash: Option<String> = row.try_get("plan_hash")?;
     let (stage, reserved_sats) = if let Some(plan_hash) = &plan_hash {
         let plan: Plan = decode(&bounded(row, "plan_json")?)?;
+        let funded_sats = feeding
+            .funding
+            .as_ref()
+            .map_or(0, |f| plan.funding_source.available(f));
         ensure!(
             plan.hash()? == *plan_hash
                 && plan.owner == policy.owner
@@ -369,12 +373,12 @@ async fn classify(
                 && plan.cycle == snapshot.cycle
                 && plan.roster_revision == snapshot.revision
                 && plan.threshold_sats == feeding.threshold_sats
-                && plan.real_sats == strike_sats
+                && plan.real_sats == funded_sats
                 && plan.funding_hash == feeding.funding.as_ref().map(|f| f.proof_hash.clone())
                 && plan.member_percent <= snapshot.settings.member_percent
                 && plan.created_at >= feeding.confirmed_at
                 && u128::from(plan.budget_sats)
-                    <= u128::from(strike_sats) * u128::from(plan.member_percent) / 100
+                    <= u128::from(funded_sats) * u128::from(plan.member_percent) / 100
                 && plan.reserved_sats <= plan.budget_sats
                 && plan.operations_sats.checked_add(plan.reserved_sats)
                     == Some(plan.threshold_sats),
@@ -436,6 +440,7 @@ async fn classify(
             ensure!(
                 r.owner == policy.owner
                     && r.epoch == policy.epoch
+                    && Some(&r.policy_hash) == plan.root_policy_hash.as_ref()
                     && r.plan_hash == *plan_hash
                     && r.reserved_sats == plan.reserved_sats
                     && Some(&r.funding_hash) == plan.funding_hash.as_ref(),

@@ -44,7 +44,7 @@ fn sample_plan(
     };
     let key = crate::nostr_event::test_event(2, 0, 100, "{}", vec![]).pubkey;
     let address = "member@example.com";
-    Plan{version:1,owner:owner(),epoch,core_uid:self_credentials().unwrap().0,request_id:feed,
+    Plan{funding_source:a.funding_source,version:1,owner:owner(),epoch,core_uid:self_credentials().unwrap().0,request_id:feed,
         barrier_hash:"11".repeat(32),cycle:1,roster_revision:1,funding_hash:Some(a.funding.proof_hash.clone()),
         real_sats:20,threshold_sats:23,member_percent:10,budget_sats:2,reserved_sats:2,operations_sats:21,
         root_policy_hash:Some(a.policy_hash.clone()),created_at:crate::cyberherd::calendar::now().unwrap(),
@@ -104,10 +104,12 @@ fn copy_evidence(q: &QualifiedFunding, plan: &crate::cyberherd::rewards::Plan) -
     QualifiedFunding {
         core_uid: q.core_uid(),
         funding: q.funding().clone(),
+        funding_source: q.funding_source(),
         threshold_sats: q.threshold_sats(),
         reservation,
         provider: q.provider().clone(),
         sources: q.sources().to_vec(),
+        retained_allocations: q.retained_allocations().to_vec(),
     }
 }
 
@@ -796,6 +798,7 @@ impl Fixture {
         let feed = ledger.begin_feed_attempt(23).await.unwrap().unwrap();
         ledger.confirm_feed_attempt(feed).await.unwrap();
         let policy = RewardPolicy {
+            funding_source: Default::default(),
             owner: owner(),
             member_percent_ceiling: 10,
             max_sats_per_feed: 100,
@@ -1007,6 +1010,276 @@ async fn complete_bounded_pages_qualify_actual_p2p_amounts_and_exclude_virtual_f
         20
     );
     assert_eq!(f.ledger.feed_credit_sats().await.unwrap(), 0);
+    task.abort();
+}
+
+#[tokio::test]
+async fn mixed_funding_keeps_the_consumed_claim_for_custody_verification() {
+    use crate::reward_funding::{CashuFundingAnchor, CashuFundingSource};
+    let mut f = Fixture::new().await;
+    let legacy_qualified = qualified(&f).await;
+    let legacy_plan = f.plan.clone();
+    let journal_scope = legacy_qualified.provider();
+    let mut first = f.page(0, true).await;
+    // Model equal Strike and retained funding on this authenticated test feed.
+    f.plan.funding_source = crate::reward_funding::RewardFundingSource::RetainedCashu;
+    f.plan.threshold_sats = 40;
+    f.plan.operations_sats = 38;
+    let plan_hash = f.plan.hash().unwrap();
+    let select_cashu = |page: &mut FundingPage| {
+        page.funding_source = crate::reward_funding::RewardFundingSource::RetainedCashu;
+        page.execution_enabled = false;
+        page.cashu_invoice_enabled = true;
+        page.threshold_sats = 40;
+        page.reservation.plan_hash = plan_hash.clone();
+    };
+    select_cashu(&mut first);
+    assert!(first.cashu_invoice_permitted(first.observed_at));
+    assert!(!first.execution_permitted(first.observed_at));
+    assert!(!first.cashu_invoice_permitted(first.observed_at + 6));
+    let anchor = CashuFundingAnchor {
+        source: CashuFundingSource::ProjectInvoice,
+        claim_id: Uuid::new_v4(),
+        evidence_digest: "ab".repeat(32),
+    };
+    let part = &mut first.parts[0];
+    assert!(part.anchor.is_none());
+    part.consumed_sats = 20;
+    part.cashu_anchor = Some(anchor.clone());
+    let allocation = RetainedAllocation {
+        ledger_id: part.ledger_id,
+        consumed_sats: part.consumed_sats,
+        anchor,
+    };
+    first.funding.retained_cashu_sats = allocation.consumed_sats;
+    let mut page = authenticate(first).await;
+    let mut expected = f.expected();
+    expected.plan_hash = plan_hash.clone();
+    let mut session = Session::new(expected, &page).unwrap();
+    loop {
+        session.accept_cashu(&page, journal_scope).await.unwrap();
+        if session.is_complete() {
+            break;
+        }
+        let mut next = f.page(session.after(), true).await;
+        next.funding.retained_cashu_sats = allocation.consumed_sats;
+        select_cashu(&mut next);
+        let mut wrong = next.clone();
+        wrong.funding_source = Default::default();
+        wrong.cashu_invoice_enabled = false;
+        assert!(
+            session
+                .accept_cashu(&authenticate(wrong).await, journal_scope)
+                .await
+                .is_err()
+        );
+        page = authenticate(next).await;
+    }
+    let mut qualified = session.finish().unwrap();
+    assert!(qualified.sources().is_empty());
+    assert_eq!(
+        qualified.retained_allocations(),
+        std::slice::from_ref(&allocation)
+    );
+    let url = format!("sqlite://{}", f.root.path().join("payout.db").display());
+    let policy = journal_policy(&qualified);
+    let store = crate::payout::store::Store::connect(&url, policy.clone())
+        .await
+        .unwrap();
+    let now = f.reservation.created_at + 10;
+    let mut inclusive = f.plan.clone();
+    inclusive.planning_policy.fee_mode = crate::payout::inclusive_fees::Mode::DeductFromShare;
+    inclusive.planning_policy.minimum_fee_sats = 0;
+    inclusive.rows[0].net_sats = 2;
+    inclusive.rows[0].fee_limit_sats = 0;
+    let mut inclusive_policy = policy.clone();
+    inclusive_policy.fee_mode = inclusive.planning_policy.fee_mode;
+    inclusive_policy.max_fee_sats = 0;
+    inclusive_policy.scope.provider.environment = "retained-cashu".into();
+    inclusive_policy.scope.provider.account_id = inclusive_policy.scope.epoch;
+    let mut inclusive_evidence = copy_evidence(&qualified, &inclusive);
+    inclusive_evidence.provider = inclusive_policy.scope.provider.clone();
+    inclusive_evidence.retained_allocations[0].anchor.source = CashuFundingSource::Acquisition;
+    let inclusive_url = format!(
+        "sqlite://{}",
+        f.root.path().join("inclusive-cashu.db").display()
+    );
+    let journal = crate::payout::store::Store::connect(&inclusive_url, inclusive_policy.clone())
+        .await
+        .unwrap();
+    let grant = journal
+        .admit_cashu(&inclusive, &inclusive_evidence, now)
+        .await
+        .unwrap();
+    let member = &inclusive.rows[0].pubkey;
+    let probe = journal
+        .prepare_fee_probe(grant.id, member, 0, now, None)
+        .await
+        .unwrap();
+    assert_eq!(probe.0.net_sats, 2);
+    assert!(
+        journal
+            .prepare_fee_probe_quote(probe.id(), now)
+            .await
+            .is_err()
+    );
+    let adjusted = journal
+        .prepare_member_invoice(grant.id, member, now, None, Some(1))
+        .await
+        .unwrap();
+    assert_eq!(adjusted.0.net_sats, 1);
+    drop(journal);
+    let journal = crate::payout::store::Store::connect(&inclusive_url, inclusive_policy)
+        .await
+        .unwrap();
+    assert_eq!(
+        journal
+            .saved_invoice_intent(grant.id, member)
+            .await
+            .unwrap()
+            .unwrap()
+            .id(),
+        adjusted.id()
+    );
+    let callback = journal
+        .freeze_request(adjusted.id(), None, now + 1)
+        .await
+        .unwrap();
+    let signed = crate::test_invoices::invoice_at(
+        1000,
+        callback.description_hash(),
+        std::time::Duration::from_secs((now + 2).try_into().unwrap()),
+    );
+    let final_invoice = callback
+        .validate_response(&serde_json::to_vec(&json!({"pr":signed})).unwrap(), now + 2)
+        .unwrap();
+    journal
+        .freeze_invoice(&final_invoice, now + 3)
+        .await
+        .unwrap();
+    let (claim, payload) = journal.cashu_payout_request(adjusted.id()).await.unwrap();
+    assert_eq!(
+        (claim.gross_sats, claim.amount_sat, claim.maximum_fee_sat),
+        (2, 1, 1)
+    );
+    assert_eq!(payload["maximum_fee_sat"], 1);
+    assert_eq!(
+        payload["retained_allocations"][0]["anchor"]["source"],
+        "acquisition"
+    );
+    qualified.retained_allocations[0].consumed_sats = f.plan.reserved_sats - 1;
+    assert!(store.admit_cashu(&f.plan, &qualified, now).await.is_err());
+    qualified.retained_allocations[0] = allocation.clone();
+    let grant = store.admit_cashu(&f.plan, &qualified, now).await.unwrap();
+    drop(store);
+    let reopened = crate::payout::store::Store::connect(&url, policy)
+        .await
+        .unwrap();
+    assert_eq!(
+        reopened
+            .admit_cashu(&f.plan, &qualified, now)
+            .await
+            .unwrap(),
+        grant
+    );
+    assert!(reopened.take_work(now).await.unwrap().is_none());
+    let work = reopened
+        .take_provider_work(now, "cashu")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(work.grant, grant.id);
+    assert_eq!(work.member.as_ref(), Some(&f.plan.rows[0].pubkey));
+    let intent = reopened
+        .prepare_invoice(grant.id, &f.plan.rows[0].pubkey, now)
+        .await
+        .unwrap();
+    assert!(reopened.cashu_payout_request(intent.id()).await.is_err());
+    let request = reopened
+        .freeze_request(intent.id(), None, now + 1)
+        .await
+        .unwrap();
+    let encoded = crate::test_invoices::invoice_at(
+        1000,
+        request.description_hash(),
+        std::time::Duration::from_secs((now + 2).try_into().unwrap()),
+    );
+    let invoice = request
+        .validate_response(
+            &serde_json::to_vec(&json!({"pr":encoded})).unwrap(),
+            now + 2,
+        )
+        .unwrap();
+    reopened.freeze_invoice(&invoice, now + 3).await.unwrap();
+    let (claim, payload) = reopened.cashu_payout_request(intent.id()).await.unwrap();
+    assert_eq!(claim.validate().unwrap(), invoice.expires_at());
+    let mut changed = claim.clone();
+    changed.payment_hash = "ab".repeat(32);
+    assert!(changed.validate().is_err());
+    let mut changed = claim;
+    changed.maximum_fee_sat = changed.reservation.reserved_sats;
+    assert!(changed.validate().is_err());
+    assert_eq!(
+        payload,
+        json!({"disposition_id":intent.id(), "feed_id":f.plan.request_id,
+        "invoice":encoded, "payment_hash":invoice.payment_hash(), "amount_sat":1,
+        "maximum_fee_sat":1, "retained_allocations":[allocation]})
+    );
+    assert!(reopened.prepare_quote(intent.id(), now + 4).await.is_err());
+    assert!(reopened.admit(&f.plan, &qualified, now).await.is_err());
+    assert!(
+        reopened
+            .prepare_fee_probe(grant.id, &f.plan.rows[0].pubkey, 0, now, None)
+            .await
+            .is_err()
+    );
+    assert!(
+        reopened
+            .close_unsubmitted(
+                grant.id,
+                &f.plan.rows[0].pubkey,
+                crate::payout::outcome::UnsubmittedReason::Expired,
+                now + 4
+            )
+            .await
+            .is_err()
+    );
+    let legacy_url = format!("sqlite://{}", f.root.path().join("legacy.db").display());
+    let legacy = crate::payout::store::Store::connect(&legacy_url, journal_policy(&qualified))
+        .await
+        .unwrap();
+    legacy
+        .admit(&legacy_plan, &legacy_qualified, now)
+        .await
+        .unwrap();
+    assert!(legacy.admit_cashu(&f.plan, &qualified, now).await.is_err());
+    qualified.retained_allocations[0].anchor.evidence_digest = "ef".repeat(32);
+    assert!(
+        reopened
+            .admit_cashu(&f.plan, &qualified, now)
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn missing_retained_cashu_evidence_rejects_the_last_page() {
+    let f = Fixture::new().await;
+    let (verifier, task) = verifier(&f, None, "0.00000001").await;
+    let mut first = f.page(0, true).await;
+    first.funding.retained_cashu_sats = 1;
+    let mut page = authenticate(first).await;
+    let mut session = Session::new(f.expected(), &page).unwrap();
+    while page.page().more {
+        session.accept(&page, &verifier).await.unwrap();
+        let mut next = f.page(session.after(), true).await;
+        next.funding.retained_cashu_sats = 1;
+        page = authenticate(next).await;
+    }
+    let cursor = session.after();
+    assert!(session.accept(&page, &verifier).await.is_err());
+    assert_eq!(session.after(), cursor);
+    assert!(!session.is_complete());
     task.abort();
 }
 

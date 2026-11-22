@@ -255,6 +255,7 @@ impl Fixture {
             peer_uid: if payout { uid + 1 } else { uid },
             group_gid: gid,
             reward_policy: Some(crate::reward_funding::RewardPolicy {
+                funding_source: Default::default(),
                 owner: self.owner.clone(),
                 member_percent_ceiling: 0,
                 max_sats_per_feed: 0,
@@ -784,6 +785,7 @@ async fn overlay_import_enforces_pause_owner_epoch_role_and_exact_receipts_witho
         peer_uid: uid + 1,
         group_gid: gid,
         reward_policy: Some(crate::reward_funding::RewardPolicy {
+            funding_source: Default::default(),
             owner: f.owner.clone(),
             member_percent_ceiling: 0,
             max_sats_per_feed: 0,
@@ -1207,6 +1209,7 @@ async fn feeding_overlay_requires_actual_owner_epoch_uuid_and_preserves_exact_re
         peer_uid: uid + 1,
         group_gid: gid,
         reward_policy: Some(crate::reward_funding::RewardPolicy {
+            funding_source: Default::default(),
             owner: f.owner.clone(),
             member_percent_ceiling: 0,
             max_sats_per_feed: 0,

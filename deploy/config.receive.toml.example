@@ -50,6 +50,10 @@ api_url = "https://api.strike.me/"
 [lnurl]
 public_base_url = "https://lightning-goats.com/"
 invoice_expiry_seconds = 300
+# For the HOME mint, select wallet_backend = "breez" and invoice_expiry_seconds = 900.
+# [lnurl.breez_collector]
+# socket = "/run/lightning-goats-project-invoices.sock"
+# peer_uid = 0 # systemd owns the listener passed to the collector service.
 
 # Native NIP-57 is an explicit opt-in after installing its verified binary/schema
 # and qualifying the receipt worker. Public keys only; signing stays in the bunker.

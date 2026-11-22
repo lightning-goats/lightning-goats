@@ -32,6 +32,16 @@ impl LedgerStore {
         policy: &ReceiptPolicy,
         authenticated: &PeerReceipt,
     ) -> Result<CashuImportResult> {
+        self.import_cashu_with_custody(policy, authenticated, None)
+            .await
+    }
+
+    pub(crate) async fn import_cashu_with_custody(
+        &self,
+        policy: &ReceiptPolicy,
+        authenticated: &PeerReceipt,
+        retained_mint: Option<&str>,
+    ) -> Result<CashuImportResult> {
         let receipt = authenticated.receipt();
         let data = receipt.data();
         let digest = hex::encode(receipt.digest()?);
@@ -60,7 +70,13 @@ impl LedgerStore {
                 row.try_get::<String, _>("receipt_digest")? == digest,
                 "Cashu acquisition conflicts with original receipt"
             );
-            let result = verify_row(&mut tx, &row, receipt).await?;
+            let mut result = verify_row(&mut tx, &row, receipt).await?;
+            result.retained_cashu = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM retained_cashu_lots WHERE ledger_id=?)",
+            )
+            .bind(row.try_get::<i64, _>("ledger_entry_id")?)
+            .fetch_one(&mut *tx)
+            .await?;
             tx.commit().await?;
             return Ok(result);
         }
@@ -88,7 +104,7 @@ impl LedgerStore {
         // Until a verified treasury allocation consumes custody, every acquired
         // sat remains exposure, including credit retired by the payment cap.
         let custody: i64 =
-            sqlx::query_scalar("SELECT (SELECT COALESCE(SUM(net_sats),0) FROM cashu_receipt_inbox)-(SELECT COALESCE(SUM(input_sats-change_sats),0) FROM cashu_treasury_source_results)")
+            sqlx::query_scalar(concat!(include_str!("cashu/treasury_balances.sql"), "SELECT (SELECT COALESCE(SUM(net_sats),0) FROM cashu_receipt_inbox)-(SELECT COALESCE(SUM(input_sats-change_sats),0) FROM settled_sources)"))
                 .fetch_one(&mut *tx)
                 .await?;
         let limits = &policy.limits;
@@ -137,11 +153,18 @@ impl LedgerStore {
             .bind(&epoch).bind(&data.mint_id).bind(&data.acquisition_evidence_digest).bind(&digest)
             .bind(String::from_utf8(receipt.encode()?)?).bind(amount).bind(ledger_id).bind(to_i64(event,"Cashu event")?)
             .bind(to_i64(after,"Cashu credit after cap")?).bind(now).execute(&mut *tx).await?;
+        if retained_mint == Some(data.mint_id.as_str()) {
+            sqlx::query("INSERT INTO retained_cashu_lots(ledger_id) VALUES (?)")
+                .bind(ledger_id)
+                .execute(&mut *tx)
+                .await?;
+        }
         sqlx::query("INSERT INTO cashu_import_clock VALUES(1,?) ON CONFLICT(singleton) DO UPDATE SET last_seen=excluded.last_seen")
             .bind(now).execute(&mut *tx).await?;
         // The immutable private receipt exists before source proof capture.
         super::reward_funding::prepare(&mut tx).await?;
         let result = CashuImportResult {
+            retained_cashu: retained_mint == Some(data.mint_id.as_str()),
             acquisition_id: data.acquisition_id,
             receipt_digest: digest,
             event_seq: event,
@@ -240,6 +263,7 @@ async fn verify_row(
         "Cashu receipt lost original public event"
     );
     Ok(CashuImportResult {
+        retained_cashu: false,
         acquisition_id: data.acquisition_id,
         receipt_digest: hex::encode(receipt.digest()?),
         event_seq: to_u64(row.try_get("event_seq")?, "Cashu event")?,

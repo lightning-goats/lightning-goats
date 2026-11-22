@@ -616,7 +616,7 @@
                         <form id="feedLightningForm" class="feed-lightning-form">
                             <label for="feedLightningAmount">Amount (sats)</label>
                             <input id="feedLightningAmount" class="form-control" type="number"
-                                min="1" step="1" value="1000" inputmode="numeric" required>
+                                min="1" max="1000000" step="1" value="1000" inputmode="numeric" required>
                             <button id="feedLightningButton" class="btn btn-warning" type="submit">Pay with Lightning</button>
                         </form>
                         <button id="feedCashuButton" class="btn btn-outline-light" type="button"
@@ -735,7 +735,7 @@
                 </div>
                 <div class="modal-body">
                     <label class="form-label" for="zapAmount">Amount in sats</label>
-                    <input id="zapAmount" class="form-control" type="number" min="1" step="1" value="1000" inputmode="numeric">
+                    <input id="zapAmount" class="form-control" type="number" min="1" max="1000000" step="1" value="1000" inputmode="numeric">
                     <div id="zapStatus" class="small text-muted mt-2">Choose an amount, then confirm in your wallet.</div>
 
                     <div id="zapInvoiceWrap" class="zap-invoice-wrap" hidden>
@@ -760,7 +760,7 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
-                    <p>Pay from your Lightning Goats or Minibits mint balance. To add the Lightning Goats mint to your wallet, use <code>https://mint.lightning-goats.com</code>. Enter the amount in your wallet.</p>
+                    <p>Pay from your Lightning Goats mint balance. To add the Lightning Goats mint to your wallet, use <code>https://mint.lightning-goats.com</code>. Enter the amount in your wallet.</p>
                     <div id="cashuRequestWrap" hidden>
                         <img id="cashuQr" width="252" height="252" alt="Scan for the Lightning Goats Cashu payment request">
                         <textarea id="cashuRequest" class="zap-invoice" readonly aria-label="Cashu payment request"></textarea>
@@ -1762,6 +1762,10 @@
             const sats = Number(raw);
             if (!/^[1-9][0-9]*$/.test(raw) || !Number.isSafeInteger(sats * 1000)) {
                 status.textContent = "Enter a positive whole number of sats.";
+                return;
+            }
+            if (sats > 1_000_000) {
+                status.textContent = "Enter up to 1,000,000 sats per payment.";
                 return;
             }
             const goal = target === "goal" ? activeGoalEvent : null;

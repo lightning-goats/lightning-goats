@@ -26,6 +26,12 @@ impl LedgerStore {
         reader: &Reader,
     ) -> Result<Progress> {
         packet.validate()?;
+        if matches!(
+            packet.row.disposition,
+            crate::payout::outcome::Disposition::CashuPaid { .. }
+        ) {
+            bail!("Cashu settlement requires collector verification");
+        }
         // No network under a database transaction. Reject changed/foreign
         // reports and return exact retries before consuming provider capacity.
         let mut tx = self.pool.begin().await?;
@@ -38,6 +44,34 @@ impl LedgerStore {
         super::payout_execution::validate_outcome(&mut tx, packet).await?;
         tx.commit().await?;
         let verified = reader.verify(packet).await?;
+        self.commit_verified_outcome(&verified).await
+    }
+
+    pub async fn reconcile_cashu_outcome(
+        &self,
+        packet: &Packet,
+        collector: &crate::config::BreezCollectorConfig,
+    ) -> Result<Progress> {
+        packet.validate()?;
+        let mut tx = self.pool.begin().await?;
+        validate_scope(&mut tx, &packet.header).await?;
+        if let Some(done) = existing_packet(&mut tx, packet).await? {
+            return Ok(done);
+        }
+        validate_cursor(&mut tx, packet).await?;
+        let raw: String = sqlx::query_scalar("SELECT document_json FROM cashu_payout_execution_claims WHERE reservation_id=? AND member=?")
+            .bind(packet.header.reservation.id.to_string()).bind(&packet.row.member).fetch_one(&mut *tx).await?;
+        tx.commit().await?;
+        let claim = serde_json::from_str(&raw)?;
+        let verified =
+            crate::payout::outcome::VerifiedRow::from_cashu(packet, &claim, collector).await?;
+        self.commit_verified_outcome(&verified).await
+    }
+
+    async fn commit_verified_outcome(
+        &self,
+        verified: &crate::payout::outcome::VerifiedRow,
+    ) -> Result<Progress> {
         let packet = verified.packet();
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         validate_scope(&mut tx, &packet.header).await?;
@@ -72,7 +106,15 @@ impl LedgerStore {
         if result.through == packet.header.rows {
             let missing:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM payout_execution_claims c WHERE c.reservation_id=? AND NOT EXISTS(SELECT 1 FROM reward_outcome_rows r WHERE r.reservation_id=c.reservation_id AND r.member=c.member))")
                 .bind(packet.header.reservation.id.to_string()).fetch_one(&mut *tx).await?;
-            if missing {
+            let missing_cashu: bool = if matches!(
+                packet.row.disposition,
+                crate::payout::outcome::Disposition::CashuPaid { .. }
+            ) {
+                sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM cashu_payout_execution_claims c WHERE c.reservation_id=? AND NOT EXISTS(SELECT 1 FROM reward_outcome_rows r WHERE r.reservation_id=c.reservation_id AND r.member=c.member))").bind(packet.header.reservation.id.to_string()).fetch_one(&mut *tx).await?
+            } else {
+                false
+            };
+            if missing || missing_cashu {
                 bail!("manifest omits a core-retained possible execution");
             }
             if result.chain_hash != packet.header.final_hash
@@ -116,11 +158,18 @@ pub(super) async fn validate_scope(
     {
         bail!("outcome does not match current core reservation");
     }
+
+    let policy: crate::reward_funding::RewardPolicy =
+        serde_json::from_str(&row.try_get::<String, _>("policy_json")?)?;
+
+    if policy.funding_source.is_strike() != (header.scope.environment == "strike-production") {
+        bail!("outcome provider differs from the frozen reservation policy");
+    }
     let funding = super::reward_funding::confirmed_funding(tx, header.reservation.request_id)
         .await?
         .context("outcome reservation lost confirmed funding")?;
     if funding.proof_hash != header.reservation.funding_hash
-        || header.reservation.reserved_sats > funding.strike_sats
+        || header.reservation.reserved_sats > policy.funding_source.available(&funding)
     {
         bail!("outcome reservation funding changed");
     }

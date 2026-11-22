@@ -1,6 +1,20 @@
 # Delivery roadmap — Lightning and Cashu
 
-**Operator decision, 2026-11-19.** Strike-backed Lightning and Cashu remain
+**Operator decision, 2026-11-21.** Retire Strike completely. HOME Breez and the
+Lightning Goats mint own new Lightning invoices, including Lightning Address,
+WebLN, zaps and paid contact. The feeder collects Cashu proofs, credits each
+verified receipt once, and pays CyberHerd Lightning invoices from custody through
+the mint. Preserve the 1,000-sat feed threshold and apply payout percentages to
+available funding after fees. Migrate foreign-mint settlement off Strike as well.
+
+Before disconnecting Strike, stop new issuance and payouts there, reconcile
+outstanding invoices, treasury transfers and ambiguous payouts against their
+original IDs, and preserve the paid journals. Verify receive, restart recovery,
+feed credit and payouts with Strike credentials absent. Then disable the webhook,
+pollers and service credential mounts, and retire the keys. Historical payment
+records remain readable offline.
+
+**Earlier pilot decision, 2026-11-19.** Strike-backed Lightning and Cashu remain
 live. Preserve paid history, the shared feeder controls and the
 [architecture for future payment sources](../architecture/phase1-strike-architecture.md#future-payment-sources).
 Any future source needs its own verified receipt and credit policy.
@@ -14,7 +28,7 @@ the two-QR overlay. Preserve existing CyberHerd behavior and opt-outs. Productio
 keys, mints, limits, schema upgrades, public announcements, financial activation
 and physical feeding remain operator-controlled.
 
-## Lightning deliverable and acceptance
+## Historical Strike pilot deliverable and acceptance
 
 Use the existing Strike backend and current daemon/gateway architecture, not a
 replacement wallet or a new framework. Start with the

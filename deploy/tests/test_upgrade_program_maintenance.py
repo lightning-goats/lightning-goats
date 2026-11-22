@@ -107,7 +107,7 @@ class ProgramBoundaries(unittest.TestCase):
         record = {'inclusive_fee_upgrade': True, 'program_upgrade_only': False,
                   'cashu_core_source': True}
         receipt = {'id': str(uuid.uuid4()), 'accepted': True, 'resume_authorized': False}
-        manifest = {'report': {'rows': {'core': {'_sqlx_migrations': 29}}}}
+        manifest = {'report': {'rows': {'core': {'_sqlx_migrations': 30}}}}
         with patch.object(P.U, 'stopped'), patch.object(P.U, 'state_files', return_value={'frozen': True}), \
                 patch.object(P.U, 'sources_match') as sources, patch.object(P.U, 'digest', return_value='digest'), \
                 patch.object(P.C, 'read_json', return_value=manifest), \
@@ -128,7 +128,7 @@ class ProgramBoundaries(unittest.TestCase):
     def test_cashu_prefix_failure_or_wrong_schema_never_falls_back_or_accepts(self):
         record = {'inclusive_fee_upgrade': True, 'program_upgrade_only': False,
                   'cashu_core_source': True}
-        for count in (25, 30, True, '26', None):
+        for count in (25, 36, True, '26', None):
             with self.subTest(count=count), patch.object(P.U, 'stopped'), \
                     patch.object(P.U, 'state_files'), patch.object(P.U, 'sources_match') as sources, \
                     patch.object(P.C, 'read_json', return_value={'report': {'rows': {'core': {'_sqlx_migrations': count}}}}), \

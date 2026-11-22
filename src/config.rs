@@ -12,6 +12,8 @@ use serde::Deserialize;
 
 use crate::domain::invoice::validate_user;
 
+pub(crate) const HOME_INVOICE_EXPIRY_SECONDS: u64 = 900;
+
 pub const REQUIRED_PHASE1_LIGHTNING_USERS: [&str; 6] =
     ["herd", "dexter", "rowan", "cosmo", "newton", "nova"];
 
@@ -19,7 +21,7 @@ pub const REQUIRED_PHASE1_LIGHTNING_USERS: [&str; 6] =
 pub struct AppConfig {
     pub service: ServiceConfig,
     pub database: DatabaseConfig,
-    pub strike: StrikeConfig,
+    pub strike: Option<StrikeConfig>,
     pub lnurl: LnurlConfig,
     #[serde(default)]
     pub lightning_address: Vec<LightningAddressConfig>,
@@ -55,18 +57,36 @@ impl AppConfig {
         }
         crate::sqlite::durable_options(&self.database.url).context("invalid database.url")?;
 
-        let strike_url = Url::parse(&self.strike.api_url).context("invalid strike.api_url")?;
-        if strike_url.scheme() != "https" || strike_url.host_str().is_none() {
-            bail!("strike.api_url must use https:// with a host");
-        }
-        if !strike_url.username().is_empty()
-            || strike_url.password().is_some()
-            || strike_url.query().is_some()
-            || strike_url.fragment().is_some()
+        if let Some(strike) = &self.strike {
+            let strike_url = Url::parse(&strike.api_url).context("invalid strike.api_url")?;
+            if strike_url.scheme() != "https" || strike_url.host_str().is_none() {
+                bail!("strike.api_url must use https:// with a host");
+            }
+            if !strike_url.username().is_empty()
+                || strike_url.password().is_some()
+                || strike_url.query().is_some()
+                || strike_url.fragment().is_some()
+            {
+                bail!("strike.api_url must not contain credentials, query, or fragment");
+            }
+        } else if self.lnurl.wallet_backend != WalletBackend::Breez
+            || self.lnurl.breez_collector.is_none()
+            || self.cashu_treasury.as_ref().is_some_and(|t| {
+                t.policy.destination.origin != crate::cashu::treasury::PROJECT_MINT_ORIGIN
+            })
+            || self
+                .core_bridge
+                .as_ref()
+                .is_some_and(|b| b.payout_account_id.is_some())
         {
-            bail!("strike.api_url must not contain credentials, query, or fragment");
+            bail!("configuration requests a Strike-dependent service without a Strike backend");
         }
 
+        if self.lnurl.wallet_backend == WalletBackend::Breez {
+            self.lnurl.project_collector()?;
+        } else if let Some(collector) = &self.lnurl.breez_collector {
+            collector.validate()?;
+        }
         self.validate_lnurl()?;
         if self.feeder.threshold_sats == 0 {
             bail!("feeder.threshold_sats must be greater than zero");
@@ -297,10 +317,63 @@ pub struct StrikeConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct LnurlConfig {
+    #[serde(default)]
+    pub wallet_backend: WalletBackend,
+    pub breez_collector: Option<BreezCollectorConfig>,
     pub public_base_url: String,
     pub invoice_expiry_seconds: u64,
     #[serde(default)]
     pub zap: Option<ZapConfig>,
+}
+
+impl LnurlConfig {
+    pub(crate) fn project_collector(&self) -> Result<&BreezCollectorConfig> {
+        let collector = self
+            .breez_collector
+            .as_ref()
+            .context("Breez requires a private collector")?;
+        collector.validate()?;
+        if self.invoice_expiry_seconds != HOME_INVOICE_EXPIRY_SECONDS {
+            bail!("Breez requires the HOME invoice expiry of 900 seconds");
+        }
+        Ok(collector)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum WalletBackend {
+    #[default]
+    Strike,
+    Breez,
+}
+
+impl WalletBackend {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Strike => "strike",
+            Self::Breez => "breez",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct BreezCollectorConfig {
+    pub socket: PathBuf,
+    pub peer_uid: u32,
+}
+
+impl BreezCollectorConfig {
+    pub(crate) fn validate(&self) -> Result<()> {
+        const INVOICE_SOCKET: &str = "/run/lightning-goats-project-invoices.sock";
+        crate::private_ipc::socket_path(&self.socket)?;
+        // SO_PEERCRED identifies the process that created the listening socket.
+        // The shipped invoice unit inherits its listener from the system manager.
+        if self.peer_uid == 0 && self.socket != Path::new(INVOICE_SOCKET) {
+            bail!("root peer UID is scoped to the systemd project invoice socket");
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -430,12 +503,14 @@ mod tests {
             database: DatabaseConfig {
                 url: "sqlite:///var/lib/lightning-goats/lightning-goats.db".to_owned(),
             },
-            strike: StrikeConfig {
+            strike: Some(StrikeConfig {
                 api_url: "https://api.strike.me/".to_owned(),
-            },
+            }),
             lnurl: LnurlConfig {
                 public_base_url: "https://lightning-goats.com/".to_owned(),
                 invoice_expiry_seconds: 300,
+                wallet_backend: Default::default(),
+                breez_collector: None,
                 zap: None,
             },
             lightning_address: phase1_addresses(),
@@ -463,6 +538,28 @@ mod tests {
             core_bridge: None,
             contact: None,
         }
+    }
+
+    #[test]
+    fn breez_can_run_without_strike_configuration() {
+        let mut config = valid_config();
+        config.strike = None;
+        assert!(config.validate().is_err());
+        config.lnurl.wallet_backend = WalletBackend::Breez;
+        config.lnurl.invoice_expiry_seconds = 900;
+        config.lnurl.breez_collector = Some(BreezCollectorConfig {
+            socket: "/run/lightning-goats/project.sock".into(),
+            peer_uid: 1001,
+        });
+        config.validate().unwrap();
+        config.lnurl.invoice_expiry_seconds = 600;
+        assert!(config.validate().is_err());
+        config.lnurl.invoice_expiry_seconds = 900;
+        config.lnurl.breez_collector.as_mut().unwrap().peer_uid = 0;
+        assert!(config.validate().is_err());
+        config.lnurl.breez_collector.as_mut().unwrap().socket =
+            "/run/lightning-goats-project-invoices.sock".into();
+        config.validate().unwrap();
     }
 
     #[test]
@@ -509,7 +606,7 @@ mod tests {
     #[test]
     fn rejects_insecure_strike_api_url() {
         let mut config = valid_config();
-        config.strike.api_url = "http://api.strike.me/".to_owned();
+        config.strike.as_mut().unwrap().api_url = "http://api.strike.me/".to_owned();
         assert!(config.validate().is_err());
     }
 

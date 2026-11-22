@@ -198,6 +198,24 @@ impl LedgerStore {
         let mut epoch_tx = self.pool.begin().await?;
         require_epoch(&mut epoch_tx, intent.core_epoch).await?;
         epoch_tx.commit().await?;
+        if intent.destination.origin == crate::cashu::treasury::PROJECT_MINT_ORIGIN {
+            let digest = hex_digest(intent.digest()?);
+            let row = sqlx::query("SELECT invoice,payment_hash FROM breez_project_invoices
+                WHERE id=? AND invoice IS NOT NULL AND json_extract(intent,'$.purpose')='treasury_conversion'
+                  AND json_extract(intent,'$.description_hash')=? AND json_extract(intent,'$.amount_sat')=?")
+                .bind(id.to_string()).bind(&digest).bind(to_i64(intent.deposit_sats, "conversion amount")?)
+                .fetch_optional(&self.pool).await?;
+            let Some(row) = row else { return Ok(None) };
+            let invoice: String = row.try_get("invoice")?;
+            let payment_hash: String = row.try_get("payment_hash")?;
+            crate::bolt11::verify(&invoice, intent.deposit_sats * 1000, &payment_hash, &digest)?;
+            return Ok(Some(Issued {
+                intent,
+                receive_request_id: id,
+                payment_hash,
+                invoice,
+            }));
+        }
         let request: Option<String> = sqlx::query_scalar(
             "SELECT receive_request_id FROM cashu_treasury_issuances WHERE intent_id=?",
         )
@@ -319,6 +337,37 @@ impl LedgerStore {
             .context("unknown treasury intent")?;
         let data = report.validate(registration, &intent)?;
         let digest = hex_digest(data.digest()?);
+        if intent.destination.origin == crate::cashu::treasury::PROJECT_MINT_ORIGIN {
+            let id = intent.id.to_string();
+            let changed = sqlx::query(
+                "INSERT INTO breez_treasury_wallet_results(intent_id,result_digest,result_json,observed_at)
+                 SELECT i.id,?,?,MAX(unixepoch(),?,COALESCE((SELECT MAX(observed_at) FROM breez_treasury_wallet_results),0))
+                 FROM breez_project_invoices i WHERE i.id=? AND i.invoice IS NOT NULL
+                   AND json_extract(i.intent,'$.purpose')='treasury_conversion'
+                   AND json_extract(i.intent,'$.description_hash')=? AND json_extract(i.intent,'$.amount_sat')=?
+                 ON CONFLICT(intent_id) DO NOTHING")
+                .bind(&digest).bind(serde_json::to_string(data)?).bind(report.fee_recorded_at().unwrap_or(0))
+                .bind(&id).bind(&data.intent_digest).bind(to_i64(intent.deposit_sats,"conversion amount")?)
+                .execute(&mut *tx).await?;
+            if changed.rows_affected() == 0 {
+                let row = sqlx::query("SELECT result_digest,observed_at FROM breez_treasury_wallet_results WHERE intent_id=?")
+                    .bind(&id).fetch_one(&mut *tx).await?;
+                ensure!(
+                    row.try_get::<String, _>("result_digest")? == digest
+                        && report.fee_recorded_at().unwrap_or(0)
+                            <= row.try_get::<i64, _>("observed_at")?,
+                    "conflicting conversion wallet result"
+                );
+            }
+            let ready: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM breez_treasury_source_results WHERE intent_id=?)",
+            )
+            .bind(&id)
+            .fetch_one(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            return Ok(ready);
+        }
         if let Some(previous) = sqlx::query_scalar::<_, String>(
             "SELECT result_digest FROM cashu_treasury_wallet_results WHERE intent_id=?",
         )
@@ -471,9 +520,9 @@ pub(super) async fn reserve_in_transaction(
     );
     let usage=sqlx::query("SELECT COUNT(*) AS count,COALESCE(SUM(input_sats),0) AS sats FROM cashu_treasury_intents WHERE created_at>=?")
             .bind(now.saturating_sub(86_400)).fetch_one(&mut **tx).await?;
-    let pending:i64=sqlx::query_scalar("SELECT COALESCE(SUM(i.input_sats),0) FROM cashu_treasury_intents i WHERE NOT EXISTS(SELECT 1 FROM cashu_treasury_completions c WHERE c.intent_id=i.id)")
+    let pending:i64=sqlx::query_scalar(concat!(include_str!("treasury_balances.sql"), "SELECT COALESCE(SUM(i.input_sats),0) FROM cashu_treasury_intents i WHERE NOT EXISTS(SELECT 1 FROM settled_intents c WHERE c.intent_id=i.id)"))
             .fetch_one(&mut **tx).await?;
-    let mint_pending:i64=sqlx::query_scalar("SELECT COALESCE(SUM(i.input_sats),0) FROM cashu_treasury_intents i WHERE i.mint_id=? AND NOT EXISTS(SELECT 1 FROM cashu_treasury_completions c WHERE c.intent_id=i.id)")
+    let mint_pending:i64=sqlx::query_scalar(concat!(include_str!("treasury_balances.sql"), "SELECT COALESCE(SUM(i.input_sats),0) FROM cashu_treasury_intents i WHERE i.mint_id=? AND NOT EXISTS(SELECT 1 FROM settled_intents c WHERE c.intent_id=i.id)"))
             .bind(&intent.mint_id).fetch_one(&mut **tx).await?;
     let mint = policy
         .approved_mints
@@ -539,7 +588,7 @@ pub(super) async fn reserve_in_transaction(
 }
 
 /// Pending intents can still charge their maximum, even across the boundary.
-/// A completed fee ages from the later of wallet result acceptance and Strike
+/// A completed fee ages from the later of wallet result acceptance and destination
 /// verification. A missing observation cannot release an existing reservation.
 pub(super) async fn daily_fee_remaining(
     tx: &mut Transaction<'_, Sqlite>,
@@ -547,18 +596,22 @@ pub(super) async fn daily_fee_remaining(
     limit: u64,
 ) -> Result<u64> {
     let used: i64 = sqlx::query_scalar(
-        "SELECT COALESCE(SUM(CASE WHEN c.intent_id IS NULL OR d.intent_id IS NULL OR o.intent_id IS NULL THEN
+        "WITH fees AS (
+             SELECT c.intent_id,c.fee_sats,MAX(d.verified_at,o.observed_at) AS verified_at
+             FROM cashu_treasury_completions c JOIN cashu_treasury_deposits d USING(intent_id)
+             JOIN cashu_treasury_fee_observations o USING(intent_id)
+             UNION ALL
+             SELECT s.intent_id,SUM(s.fee_sats),MAX(w.observed_at,b.verified_at)
+             FROM breez_treasury_source_results s JOIN breez_treasury_wallet_results w USING(intent_id)
+             JOIN breez_collected_claims b ON b.request_id=s.intent_id GROUP BY s.intent_id
+         ) SELECT COALESCE(SUM(CASE WHEN f.intent_id IS NULL THEN
              CASE WHEN json_type(i.intent_json,'$.maximum_fee_sats')='integer'
                    AND json_extract(i.intent_json,'$.maximum_fee_sats') BETWEEN 0 AND i.input_sats-i.deposit_sats
                   THEN json_extract(i.intent_json,'$.maximum_fee_sats')
                   ELSE i.input_sats-i.deposit_sats END
-             ELSE c.fee_sats END),0)
-         FROM cashu_treasury_intents i
-         LEFT JOIN cashu_treasury_completions c ON c.intent_id=i.id
-         LEFT JOIN cashu_treasury_deposits d ON d.intent_id=i.id
-         LEFT JOIN cashu_treasury_fee_observations o ON o.intent_id=i.id
-         WHERE c.intent_id IS NULL OR d.intent_id IS NULL OR o.intent_id IS NULL
-            OR MAX(i.created_at,d.verified_at,o.observed_at)>=?",
+             ELSE f.fee_sats END),0)
+         FROM cashu_treasury_intents i LEFT JOIN fees f ON f.intent_id=i.id
+         WHERE f.intent_id IS NULL OR MAX(i.created_at,f.verified_at)>=?",
     )
     .bind(now.saturating_sub(86_400))
     .fetch_one(&mut **tx)
@@ -571,12 +624,15 @@ pub(super) async fn available_custody(
     ledger: i64,
 ) -> Result<u64> {
     let acquired: i64 =
-        sqlx::query_scalar("SELECT net_sats FROM cashu_receipt_inbox WHERE ledger_entry_id=?")
+        sqlx::query_scalar(
+            "SELECT c.net_sats FROM cashu_receipt_inbox c WHERE c.ledger_entry_id=?
+             AND NOT EXISTS(SELECT 1 FROM retained_cashu_lots r WHERE r.ledger_id=c.ledger_entry_id)",
+        )
             .bind(ledger)
             .fetch_one(&mut **tx)
             .await?;
     // Missing completion details hold the whole reservation, never release it.
-    let used:i64=sqlx::query_scalar("SELECT COALESCE(SUM(CASE WHEN c.intent_id IS NULL OR r.ledger_id IS NULL THEN s.input_sats ELSE r.input_sats-r.change_sats END),0) FROM cashu_treasury_sources s LEFT JOIN cashu_treasury_completions c ON c.intent_id=s.intent_id LEFT JOIN cashu_treasury_source_results r ON r.intent_id=s.intent_id AND r.ledger_id=s.ledger_id WHERE s.ledger_id=?")
+    let used:i64=sqlx::query_scalar(concat!(include_str!("treasury_balances.sql"), "SELECT COALESCE(SUM(CASE WHEN r.ledger_id IS NULL THEN s.input_sats ELSE r.input_sats-r.change_sats END),0) FROM cashu_treasury_sources s LEFT JOIN settled_sources r ON r.intent_id=s.intent_id AND r.ledger_id=s.ledger_id WHERE s.ledger_id=?"))
         .bind(ledger).fetch_one(&mut **tx).await?;
     to_u64(acquired, "acquired custody")?
         .checked_sub(to_u64(used, "reserved/consumed custody")?)

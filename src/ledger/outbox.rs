@@ -22,7 +22,7 @@ impl LedgerStore {
 
     pub async fn advance_message_cursor(&self, event_seq: u64) -> Result<()> {
         let event_seq = i64::try_from(event_seq).context("event sequence exceeds SQLite range")?;
-        let mut transaction = self.pool.begin().await?;
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let current = message_cursor_in_transaction(&mut transaction).await?;
         if event_seq < current {
             bail!("refusing to move message cursor backward from {current} to {event_seq}");
@@ -47,7 +47,7 @@ impl LedgerStore {
     ) -> Result<()> {
         let source_event_seq_i64 =
             i64::try_from(source_event_seq).context("event sequence exceeds SQLite range")?;
-        let mut transaction = self.pool.begin().await?;
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let current = message_cursor_in_transaction(&mut transaction).await?;
         if source_event_seq_i64 <= current {
             bail!("source event {source_event_seq} is not ahead of message cursor {current}");

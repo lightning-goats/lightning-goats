@@ -212,10 +212,19 @@ pub(crate) async fn export_body(
         let mut paid_at = row
             .try_get::<Option<i64>, _>("settled_at")?
             .unwrap_or(row.try_get("received_at")?);
-        let zap=sqlx::query("SELECT j.paid_at,z.request_json,z.payee_pubkey,z.receipt_pubkey,r.invoice,r.description_hash,r.amount_msat,r.address_user,r.credit_pool FROM zap_receipt_jobs j JOIN zap_receive_context z USING(receive_request_id) JOIN strike_receive_requests r USING(receive_request_id) WHERE j.settlement_id=? AND j.source_event_seq=?")
-            .bind(id).bind(seq).fetch_optional(&mut **tx).await?;
+        // Older snapshots have only the Strike tables. Their exports must remain replayable.
+        let query = if source == "breez" {
+            "SELECT j.paid_at,z.request_json,z.payee_pubkey,z.receipt_pubkey,z.invoice,z.description_hash,z.amount_msat,z.address_user,z.credit_pool FROM zap_receipt_jobs j JOIN zap_invoice_terms z USING(receive_request_id) WHERE z.provider='breez' AND j.settlement_id=? AND j.source_event_seq=?"
+        } else {
+            "SELECT j.paid_at,z.request_json,z.payee_pubkey,z.receipt_pubkey,r.invoice,r.description_hash,r.amount_msat,r.address_user,r.credit_pool FROM zap_receipt_jobs j JOIN zap_receive_context z USING(receive_request_id) JOIN strike_receive_requests r USING(receive_request_id) WHERE j.settlement_id=? AND j.source_event_seq=?"
+        };
+        let zap = sqlx::query(query)
+            .bind(id)
+            .bind(seq)
+            .fetch_optional(&mut **tx)
+            .await?;
         let zap = if let Some(zap) = zap {
-            if source != "strike"
+            if !matches!(source.as_str(), "strike" | "breez")
                 || zap.try_get::<i64, _>("amount_msat")? != to_i64(amount_msat, "msat")?
                 || zap.try_get::<String, _>("address_user")? != address_user
                 || zap.try_get::<String, _>("credit_pool")? != credit_pool

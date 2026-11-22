@@ -1,0 +1,7 @@
+-- Read-only reconciliation must not share the finite invoice delivery budget.
+CREATE TABLE breez_treasury_inspections (
+    intent_id TEXT PRIMARY KEY REFERENCES breez_project_invoices(id) REFERENCES cashu_treasury_intents(id),
+    attempts INTEGER NOT NULL DEFAULT 0 CHECK(typeof(attempts)='integer' AND attempts BETWEEN 0 AND 6),
+    next_attempt INTEGER NOT NULL CHECK(typeof(next_attempt)='integer' AND next_attempt>=0),
+    delivery_closed INTEGER NOT NULL DEFAULT 0 CHECK(delivery_closed IN (0,1))
+);

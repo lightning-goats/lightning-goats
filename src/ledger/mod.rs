@@ -1,4 +1,5 @@
 mod admission;
+mod breez;
 #[cfg(unix)]
 mod cashu;
 #[cfg(unix)]
@@ -109,6 +110,18 @@ impl LedgerStore {
     /// `(source, source_id)` tuple, with `payment_hash` acting as an additional
     /// collision boundary when the provider exposes one.
     pub async fn record_payment(&self, payment: &SettledPayment) -> Result<SettlementOutcome> {
+        self.record_verified_payment(payment, None).await
+    }
+
+    async fn record_verified_payment(
+        &self,
+        payment: &SettledPayment,
+        claim_digest: Option<&str>,
+    ) -> Result<SettlementOutcome> {
+        anyhow::ensure!(
+            (payment.source == "breez") == claim_digest.is_some(),
+            "Breez credit requires authenticated proof ownership"
+        );
         validate_source(&payment.source)?;
         validate_external_id(&payment.source_id, "payment source_id", 256)?;
         validate_user(&payment.address_user, "address_user")?;
@@ -141,17 +154,29 @@ impl LedgerStore {
         let credited_sats_i64 = to_i64(credited_sats, "credited_sats")?;
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
 
+        if let Some(digest) = claim_digest {
+            let terms_match: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM breez_project_invoices
+                WHERE id=? AND payment_hash=? AND json_extract(intent,'$.amount_sat')=? AND json_extract(intent,'$.user')=?
+                AND json_extract(intent,'$.credit_pool')=? AND json_type(intent,'$.purpose') IS NULL)")
+                .bind(&payment.source_id).bind(&payment.payment_hash).bind(credited_sats_i64)
+                .bind(&payment.address_user).bind(&payment.credit_pool).fetch_one(&mut *transaction).await?;
+            anyhow::ensure!(
+                terms_match,
+                "claimed project invoice conflicts with core terms"
+            );
+            breez::retain_claim(&mut transaction, &payment.source_id, digest).await?;
+        }
         let contact_collision: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM private_contact_intents i JOIN strike_receive_requests r ON r.receive_request_id=i.receive_request_id WHERE r.payment_hash=lower(?)) OR EXISTS(SELECT 1 FROM private_contact_fees WHERE ?='strike' AND receive_id=?)",
-        ).bind(payment.payment_hash.as_deref()).bind(&payment.source).bind(&payment.source_id).fetch_one(&mut *transaction).await?;
+            "SELECT EXISTS(SELECT 1 FROM private_contact_intents i JOIN strike_receive_requests r ON r.receive_request_id=i.receive_request_id WHERE r.payment_hash=lower(?)) OR EXISTS(SELECT 1 FROM breez_project_invoices WHERE payment_hash=lower(?) AND json_extract(intent,'$.purpose')='contact_fee') OR EXISTS(SELECT 1 FROM private_contact_fees WHERE ?='strike' AND receive_id=?)",
+        ).bind(payment.payment_hash.as_deref()).bind(payment.payment_hash.as_deref()).bind(&payment.source).bind(&payment.source_id).fetch_one(&mut *transaction).await?;
         if contact_collision
             || payment.address_user == "contact"
             || payment.credit_pool == "contact"
         {
             bail!("private contact fees cannot enter feed-credit settlement");
         }
-        let treasury_collision:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM cashu_treasury_issuances WHERE payment_hash=lower(?)) OR EXISTS(SELECT 1 FROM cashu_treasury_deposits WHERE ?='strike' AND receive_id=?)")
-            .bind(payment.payment_hash.as_deref()).bind(&payment.source).bind(&payment.source_id).fetch_one(&mut *transaction).await?;
+        let treasury_collision:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM breez_project_invoices WHERE payment_hash=lower(?) AND json_extract(intent,'$.purpose')='treasury_conversion') OR EXISTS(SELECT 1 FROM cashu_treasury_issuances WHERE payment_hash=lower(?)) OR EXISTS(SELECT 1 FROM cashu_treasury_deposits WHERE ?='strike' AND receive_id=?)")
+            .bind(payment.payment_hash.as_deref()).bind(payment.payment_hash.as_deref()).bind(&payment.source).bind(&payment.source_id).fetch_one(&mut *transaction).await?;
         if treasury_collision
             || payment.address_user == "cashu_treasury"
             || payment.credit_pool == "cashu_treasury"

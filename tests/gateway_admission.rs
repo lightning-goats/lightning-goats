@@ -504,16 +504,24 @@ async fn daemon(directory: &impl AsRef<std::path::Path>, gateway_url: &str) -> P
     config["gateway"]["url"] = gateway_url.into();
     config["informational"]["interface_info_enabled"] = false.into();
     config["informational"]["weather_enabled"] = false.into();
-    let path = directory.as_ref().join("daemon.toml");
-    std::fs::write(&path, toml::to_string(&config).unwrap()).unwrap();
     for name in ["strike-api-key", "strike-webhook-secret"] {
         std::fs::write(directory.as_ref().join(name), "synthetic-mock-only").unwrap();
     }
+    launch_daemon(directory.as_ref(), address, &config).await
+}
+
+async fn launch_daemon(
+    directory: &std::path::Path,
+    address: std::net::SocketAddr,
+    config: &toml::Value,
+) -> Process {
+    let path = directory.join("daemon.toml");
+    std::fs::write(&path, toml::to_string(config).unwrap()).unwrap();
     let mut process = Process(
         Command::new(env!("CARGO_BIN_EXE_lightning-goatsd"))
             .arg("--config")
             .arg(path)
-            .env("CREDENTIALS_DIRECTORY", directory.as_ref())
+            .env("CREDENTIALS_DIRECTORY", directory)
             .env("TOKIO_WORKER_THREADS", "2")
             .stdout(Stdio::null())
             .stderr(Stdio::inherit())
@@ -534,6 +542,55 @@ async fn daemon(directory: &impl AsRef<std::path::Path>, gateway_url: &str) -> P
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     panic!("daemon startup timed out");
+}
+
+#[tokio::test]
+async fn breez_daemon_serves_discovery_without_strike_credentials() {
+    let directory = TempDir::new().unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    drop(listener);
+    let mut config: toml::Value =
+        toml::from_str(include_str!("../deploy/config.canary.toml.example")).unwrap();
+    config.as_table_mut().unwrap().remove("strike");
+    config["service"]["listen"] = address.to_string().into();
+    config["service"]["mode"] = "shadow".into();
+    config["gateway"]["url"] = "http://127.0.0.1:9/".into();
+    config["database"]["url"] =
+        format!("sqlite://{}", directory.path().join("daemon.db").display()).into();
+    let lnurl = config["lnurl"].as_table_mut().unwrap();
+    lnurl.insert("wallet_backend".into(), "breez".into());
+    lnurl.insert("invoice_expiry_seconds".into(), 900.into());
+    lnurl.insert(
+        "breez_collector".into(),
+        toml::toml! {
+            socket = "/run/lightning-goats/project.sock"
+            peer_uid = 1001
+        }
+        .into(),
+    );
+    let _daemon = launch_daemon(directory.path(), address, &config).await;
+    let client = Client::new();
+    let discovery: serde_json::Value = client
+        .get(format!("http://{address}/.well-known/lnurlp/herd"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(discovery["maxSendable"], 1_000_000_000);
+    assert_eq!(
+        client
+            .post(format!("http://{address}/api/v1/strike/webhook"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        404
+    );
 }
 
 async fn wait_credit(ledger: &lightning_goats::ledger::LedgerStore, sats: u64) {

@@ -244,7 +244,12 @@ pub async fn run(config_path: &Path, approval_path: &Path, apply: bool) -> Resul
             &ledger,
             &registration,
             &treasury.policy.destination,
-            StrikeClient::from_config(&config.strike),
+            StrikeClient::from_config(
+                config
+                    .strike
+                    .as_ref()
+                    .context("Strike reconciliation backend missing")?,
+            ),
             &client,
         )
         .await?;

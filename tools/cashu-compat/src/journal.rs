@@ -291,6 +291,17 @@ CREATE TABLE IF NOT EXISTS treasury_source_holds (
     PRIMARY KEY(intent_id,acquisition_id)
 );
 CREATE INDEX IF NOT EXISTS treasury_source_holds_acquisition ON treasury_source_holds(acquisition_id);
+CREATE TABLE IF NOT EXISTS collector_handoffs (
+    acquisition_id TEXT PRIMARY KEY NOT NULL REFERENCES acquisitions(id),
+    delivered INTEGER NOT NULL DEFAULT 0 CHECK(delivered IN (0,1)),
+    next_attempt INTEGER NOT NULL DEFAULT 0 CHECK(next_attempt>=0)
+);
+CREATE TRIGGER IF NOT EXISTS handoff_requires_unreserved_source BEFORE INSERT ON collector_handoffs
+WHEN EXISTS(SELECT 1 FROM treasury_source_holds WHERE acquisition_id=NEW.acquisition_id)
+BEGIN SELECT RAISE(ABORT,'acquisition already assigned to treasury'); END;
+CREATE TRIGGER IF NOT EXISTS treasury_requires_unassigned_source BEFORE INSERT ON treasury_source_holds
+WHEN EXISTS(SELECT 1 FROM collector_handoffs WHERE acquisition_id=NEW.acquisition_id)
+BEGIN SELECT RAISE(ABORT,'acquisition already assigned to collector'); END;
 CREATE TABLE IF NOT EXISTS proof_index (
     mint_id TEXT NOT NULL, unit TEXT NOT NULL CHECK(unit='sat'), y BLOB NOT NULL,
     evidence BLOB NOT NULL, acquisition_id TEXT NOT NULL REFERENCES acquisitions(id),
@@ -1173,8 +1184,39 @@ impl Journal {
         Ok(receipt)
     }
 
+    pub(crate) fn claim_collector_handoff(&self) -> Result<Option<Uuid>> {
+        let id: Option<String> = self
+            .connection
+            .query_row(
+                "UPDATE collector_handoffs SET next_attempt=unixepoch()+60
+             WHERE acquisition_id=(SELECT acquisition_id FROM collector_handoffs
+               WHERE delivered=0 AND next_attempt<=unixepoch() ORDER BY next_attempt,rowid LIMIT 1)
+             RETURNING acquisition_id",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        id.map(|s| Ok(Uuid::parse_str(&s)?)).transpose()
+    }
+
+    pub(crate) fn finish_collector_handoff(&self, id: Uuid) -> Result<()> {
+        ensure!(
+            self.connection.execute(
+                "UPDATE collector_handoffs SET delivered=1 WHERE acquisition_id=?",
+                [id.to_string()]
+            )? == 1,
+            "missing collector handoff"
+        );
+        Ok(())
+    }
+
     /// An acknowledgment lost after the core consumed the credit must still be safe.
-    pub(crate) fn acknowledge_credit(&mut self, id: Uuid, acknowledgment: &[u8]) -> Result<()> {
+    pub(crate) fn acknowledge_credit(
+        &mut self,
+        id: Uuid,
+        acknowledgment: &[u8],
+        retained_cashu: bool,
+    ) -> Result<()> {
         ensure!(
             !acknowledgment.is_empty() && acknowledgment.len() <= 4096,
             "invalid credit acknowledgment"
@@ -1198,6 +1240,11 @@ impl Journal {
                 "UPDATE acquisitions SET state='credited',core_ack=? WHERE id=?",
                 params![acknowledgment, id.to_string()],
             )?;
+        }
+        // The validated core acknowledgment binds the custody decision to this receipt.
+        if retained_cashu {
+            tx.execute("INSERT INTO collector_handoffs(acquisition_id) VALUES(?) ON CONFLICT(acquisition_id) DO NOTHING",
+                [id.to_string()])?;
         }
         tx.commit()?;
         Ok(())
@@ -1484,7 +1531,7 @@ mod tests {
         journal.start_acquisition(completed)?;
         journal.record_acquired(completed, 8, 0, b"fixture owned outputs")?;
         journal.export_receipt(completed)?;
-        journal.acknowledge_credit(completed, b"fixture core acknowledgment")?;
+        journal.acknowledge_credit(completed, b"fixture core acknowledgment", false)?;
         assert!(matches!(
             journal.admit(&intake(&refused, "overflow", Transport::Nutzap))?,
             Admission::New(_)
@@ -1752,7 +1799,7 @@ mod tests {
             journal.record_acquired(id, 15, 1, b"owned outputs")?;
             let receipt = journal.export_receipt(id)?;
             assert!(receipt == journal.export_receipt(id)?);
-            journal.acknowledge_credit(id, b"original core grant")?;
+            journal.acknowledge_credit(id, b"original core grant", true)?;
             (id, receipt)
         };
         let mut journal = Journal::open(&path, epoch, 8)?;
@@ -1763,8 +1810,25 @@ mod tests {
         );
         assert!(receipt == journal.export_receipt(id)?);
         assert_eq!(journal.state(id)?, "credited");
-        journal.acknowledge_credit(id, b"original core grant")?;
-        assert!(journal.acknowledge_credit(id, b"different grant").is_err());
+        journal.acknowledge_credit(id, b"original core grant", true)?;
+        assert_eq!(journal.claim_collector_handoff()?, Some(id));
+        assert_eq!(journal.claim_collector_handoff()?, None);
+        assert_eq!(
+            custody::Custody::read(&journal.connection, None)?.retained_sats,
+            15
+        );
+        journal.finish_collector_handoff(id)?;
+        journal.acknowledge_credit(id, b"original core grant", true)?;
+        assert_eq!(journal.claim_collector_handoff()?, None);
+        assert_eq!(
+            custody::Custody::read(&journal.connection, None)?.retained_sats,
+            0
+        );
+        assert!(
+            journal
+                .acknowledge_credit(id, b"different grant", false)
+                .is_err()
+        );
         assert!(
             journal
                 .record_acquired(id, 15, 1, b"conflicting outputs")
@@ -1800,6 +1864,7 @@ mod tests {
             wallet_epoch: epoch,
             core_epoch,
             result: ImportResult {
+                retained_cashu: false,
                 acquisition_id: id,
                 receipt_digest: hex::encode(wire.digest()?),
                 event_seq: 42,

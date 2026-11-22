@@ -112,6 +112,8 @@ impl Fixture {
         let config = LnurlConfig {
             public_base_url: "https://lightning-goats.com/".into(),
             invoice_expiry_seconds: 300,
+            wallet_backend: Default::default(),
+            breez_collector: None,
             zap: zaps.then(|| ZapConfig {
                 receipt_pubkey: signer.clone(),
                 payee_pubkeys: users
@@ -588,4 +590,93 @@ async fn immutable_invoice_context_and_atomic_receipt_intent_survive_storage_fai
         .unwrap();
     assert_eq!(f.ledger.feed_credit_sats().await.unwrap(), 10);
     assert!(f.ledger.reserve_zap_receipt().await.unwrap().is_some());
+}
+
+#[tokio::test]
+async fn breez_callback_preserves_raw_zap_and_claim_recovery_queues_one_receipt() {
+    use lightning_goats::config::{BreezCollectorConfig, WalletBackend};
+    use std::time::Duration;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::{UnixListener, UnixStream};
+
+    let f = Fixture::new(true).await;
+    let socket = f.directory.path().join("breez.sock");
+    let listener = UnixListener::bind(&socket).unwrap();
+    let collector = BreezCollectorConfig {
+        socket,
+        peer_uid: UnixStream::pair().unwrap().0.peer_cred().unwrap().uid(),
+    };
+    let config = LnurlConfig {
+        public_base_url: "https://lightning-goats.com/".into(),
+        invoice_expiry_seconds: 900,
+        wallet_backend: WalletBackend::Breez,
+        breez_collector: Some(collector.clone()),
+        zap: Some(ZapConfig {
+            receipt_pubkey: f.signer.clone(),
+            payee_pubkeys: BTreeMap::from([("herd".into(), f.payee.clone())]),
+            alias_origins: Vec::new(),
+        }),
+    };
+    let address = LightningAddressConfig {
+        user: "herd".into(),
+        display_name: "Herd".into(),
+        description: "Feed the goats".into(),
+        credit_pool: "herd".into(),
+        min_sendable_msat: 1000,
+        max_sendable_msat: 1_000_000_000,
+    };
+    let service =
+        LnurlService::new(&config, &[address], f.runtime.clone(), f.ledger.clone()).unwrap();
+    let raw = f.raw_zap();
+    let frozen = raw.clone();
+    let collector_task = tokio::spawn(async move {
+        let mut id = Value::Null;
+        for claim_status in [false, true] {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let len = stream.read_u32().await.unwrap();
+            assert!(len <= 65536);
+            let mut bytes = vec![0; len as usize];
+            stream.read_exact(&mut bytes).await.unwrap();
+            let req: Value = serde_json::from_slice(&bytes).unwrap();
+            let response = if claim_status {
+                assert_eq!(req, json!({"claim_status":id}));
+                json!({"request_id":id,"amount_sat":10,"payment_hash":"22".repeat(32),"proof_digest":"ab".repeat(32)})
+            } else {
+                assert_eq!(req["description"], frozen);
+                assert_eq!(req["zap"], true);
+                id = req["request_id"].clone();
+                json!({"invoice":invoices::invoice_with_expiry(10000,&hex::encode(Sha256::digest(frozen.as_bytes())),SystemTime::now().duration_since(UNIX_EPOCH).unwrap(),[0x22;32],Duration::from_secs(900))})
+            };
+            let encoded = serde_json::to_vec(&response).unwrap();
+            stream
+                .write_u32(encoded.len().try_into().unwrap())
+                .await
+                .unwrap();
+            stream.write_all(&encoded).await.unwrap();
+        }
+    });
+    let issued = service
+        .callback_with_zap("herd", 10000, Some(&raw), None)
+        .await
+        .unwrap();
+    assert_eq!(f.provider.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(f.ledger.feed_credit_sats().await.unwrap(), 0);
+    let ledger = f.ledger.clone();
+    let recovery = tokio::spawn(async move { ledger.run_breez_claim_recovery(collector).await });
+    let receipt = tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            if let Some(job) = f.ledger.reserve_zap_receipt().await.unwrap() {
+                break job;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+    recovery.abort();
+    collector_task.await.unwrap();
+    assert_eq!(receipt.invoice, issued.pr);
+    assert_eq!(receipt.request.raw_json(), raw);
+    assert_eq!(f.ledger.feed_credit_sats().await.unwrap(), 10);
+    assert!(f.ledger.reserve_zap_receipt().await.unwrap().is_none());
 }

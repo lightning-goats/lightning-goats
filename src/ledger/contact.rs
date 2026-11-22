@@ -60,7 +60,7 @@ impl LedgerStore {
 
     pub async fn contact_status(&self, id: Uuid, capability: &str) -> Result<Option<Status>> {
         let hash = capability_hash(capability)?;
-        let row=sqlx::query("SELECT i.state,r.invoice,f.contact_id AS paid,d.accepted_at FROM private_contact_intents i LEFT JOIN strike_receive_requests r ON r.receive_request_id=i.receive_request_id LEFT JOIN private_contact_fees f ON f.contact_id=i.id LEFT JOIN private_contact_delivery d ON d.contact_id=i.id WHERE i.id=? AND i.capability_hash=?")
+        let row=sqlx::query("SELECT CASE WHEN b.invoice IS NOT NULL THEN 'issued' ELSE i.state END AS state,COALESCE(r.invoice,b.invoice) AS invoice,f.contact_id AS paid,d.accepted_at FROM private_contact_intents i LEFT JOIN breez_project_invoices b ON b.id=i.id AND json_extract(b.intent,'$.purpose')='contact_fee' LEFT JOIN strike_receive_requests r ON r.receive_request_id=i.receive_request_id LEFT JOIN private_contact_fees f ON f.contact_id=i.id LEFT JOIN private_contact_delivery d ON d.contact_id=i.id WHERE i.id=? AND i.capability_hash=?")
             .bind(id.to_string()).bind(hash).fetch_optional(&self.pool).await?;
         row.map(|row| {
             let state = if row.try_get::<Option<i64>, _>("accepted_at")?.is_some() {
@@ -184,6 +184,116 @@ impl LedgerStore {
             .await?;
         tx.commit().await?;
         Ok(true)
+    }
+
+    pub async fn create_breez_contact_invoice(
+        &self,
+        collector: &crate::config::BreezCollectorConfig,
+        intent: &Intent,
+        capability: &str,
+    ) -> Result<Status> {
+        self.create_contact_intent(intent).await?;
+        let current = self
+            .contact_status(intent.id, capability)
+            .await?
+            .context("contact capability refused")?;
+        if !matches!(current.state.as_str(), "new" | "issuing") {
+            return Ok(current);
+        }
+        let terms =
+            serde_json::json!({"purpose":"contact_fee", "description_hash":intent.description_hash,
+                                       "amount_sat":FEE_MSAT / 1000})
+            .to_string();
+        let id = intent.id.to_string();
+        // Claim backend ownership and the immutable request together. A previously
+        // interrupted Strike issuance has no project quote and stays with Strike.
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let inserted = sqlx::query("UPDATE private_contact_intents SET state='issuing',issuance_claim=? WHERE id=? AND state='new' AND capability_hash=?")
+            .bind(&id).bind(&id).bind(capability_hash(capability)?).execute(&mut *tx).await?.rows_affected();
+        if inserted == 1 {
+            sqlx::query("INSERT INTO breez_project_invoices(id,intent,next_poll) VALUES (?,?,unixepoch()+30)")
+                .bind(&id)
+                .bind(&terms)
+                .execute(&mut *tx)
+                .await?;
+        }
+        let owned: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM breez_project_invoices b JOIN private_contact_intents i ON b.id=i.id WHERE b.id=? AND b.intent=? AND i.issuance_claim=i.id AND i.state='issuing')")
+            .bind(&id).bind(&terms).fetch_one(&mut *tx).await?;
+        tx.commit().await?;
+        if owned {
+            self.issue_reserved_contact(collector, intent.id, &intent.description_hash)
+                .await?;
+        }
+        self.contact_status(intent.id, capability)
+            .await?
+            .context("contact capability refused")
+    }
+
+    pub(super) async fn issue_reserved_contact(
+        &self,
+        collector: &crate::config::BreezCollectorConfig,
+        id: Uuid,
+        description_hash: &str,
+    ) -> Result<()> {
+        #[derive(serde::Deserialize)]
+        struct Reply {
+            invoice: String,
+        }
+        let reservation = self
+            .reserve_invoice()
+            .await?
+            .context("invoice capacity exhausted")?;
+        let result: Result<()> = async {
+            let reply: Reply = crate::private_ipc::request(
+                &collector.socket,
+                collector.peer_uid,
+                &serde_json::json!({"contact_id":id, "description_hash":description_hash}),
+                65536,
+                20,
+            )
+            .await?;
+            let invoice: lightning_invoice::Bolt11Invoice = reply.invoice.parse()?;
+            let hash = invoice.payment_hash().to_string();
+            let signed = crate::bolt11::verify(&reply.invoice, FEE_MSAT, &hash, description_hash)?;
+            crate::bolt11::verify_issuance_expiry(&signed, 900)?;
+            self.bind_breez_invoice(id, &reply.invoice, &hash).await
+        }
+        .await;
+        self.finish_invoice_admission(reservation).await?;
+        result
+    }
+
+    pub(crate) async fn accept_breez_contact_claim(
+        &self,
+        id: &str,
+        hash: &str,
+        digest: &str,
+    ) -> Result<()> {
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let valid: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM breez_project_invoices q JOIN private_contact_intents i ON i.id=q.id
+             WHERE q.id=? AND q.payment_hash=? AND q.invoice IS NOT NULL AND i.receive_request_id IS NULL
+               AND i.state='issuing' AND json_extract(q.intent,'$.purpose')='contact_fee'
+               AND json_extract(q.intent,'$.description_hash')=i.description_hash
+               AND json_extract(q.intent,'$.amount_sat')=?
+               AND NOT EXISTS(SELECT 1 FROM settled_payments WHERE payment_hash=q.payment_hash COLLATE NOCASE))")
+            .bind(id).bind(hash).bind(i64::try_from(FEE_MSAT / 1000)?).fetch_one(&mut *tx).await?;
+        if !valid {
+            bail!("private claim differs from bound contact invoice");
+        }
+        super::breez::retain_claim(&mut tx, id, digest).await?;
+        sqlx::query("INSERT INTO private_contact_fees(contact_id,receive_id,invoice_payment_hash,amount_msat)
+                     VALUES(?,?,?,?) ON CONFLICT(contact_id) DO NOTHING")
+            .bind(id).bind(id).bind(hash).bind(i64::try_from(FEE_MSAT)?).execute(&mut *tx).await?;
+        let matched: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM private_contact_fees WHERE contact_id=? AND receive_id=? AND invoice_payment_hash=?)")
+            .bind(id).bind(id).bind(hash).fetch_one(&mut *tx).await?;
+        if !matched {
+            bail!("conflicting contact settlement");
+        }
+        sqlx::query("INSERT INTO private_contact_delivery(contact_id) VALUES(?) ON CONFLICT(contact_id) DO NOTHING")
+            .bind(id).execute(&mut *tx).await?;
+        tx.commit().await?;
+        Ok(())
     }
 
     pub async fn reserve_contact_delivery(&self) -> Result<Option<ContactDelivery>> {

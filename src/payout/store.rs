@@ -45,7 +45,9 @@ impl Scope {
         crate::nostr_event::validate_hex(&self.provider.credential_fingerprint, 32)?;
         if self.core_uid == 0
             || self.epoch.is_nil()
-            || self.provider.environment != "strike-production"
+            || !(self.provider.environment == "strike-production"
+                || (self.provider.environment == "retained-cashu"
+                    && self.provider.account_id == self.epoch))
             || self.provider.account_id.is_nil()
         {
             bail!("invalid root payout scope");
@@ -245,13 +247,55 @@ impl Store {
         qualified: &QualifiedFunding,
         now: i64,
     ) -> Result<Grant> {
+        self.admit_for_provider(plan, qualified, now, false).await
+    }
+
+    pub async fn admit_cashu(
+        &self,
+        plan: &Plan,
+        qualified: &QualifiedFunding,
+        now: i64,
+    ) -> Result<Grant> {
+        let available = qualified
+            .retained_allocations()
+            .iter()
+            .try_fold(0u64, |total, part| {
+                total
+                    .checked_add(part.consumed_sats)
+                    .context("Cashu grant funding overflow")
+            })?;
+        if available == 0 || plan.reserved_sats > available {
+            bail!("Cashu grant exceeds available project custody");
+        }
+        self.admit_for_provider(plan, qualified, now, true).await
+    }
+
+    async fn admit_for_provider(
+        &self,
+        plan: &Plan,
+        qualified: &QualifiedFunding,
+        now: i64,
+        cashu: bool,
+    ) -> Result<Grant> {
+        if cashu == qualified.funding_source().is_strike() {
+            bail!("grant execution provider differs from the core reservation");
+        }
         validate_admission(plan, qualified, &self.policy, now)?;
         let plan_json = serde_json::to_string(plan)?;
-        let qualification_json = serde_json::to_string(&serde_json::json!({
+        let mut evidence = serde_json::json!({
             "reservation":qualified.reservation(),"funding":qualified.funding(),
             "threshold_sats":qualified.threshold_sats(),"core_uid":qualified.core_uid(),
             "provider":qualified.provider(),"sources":qualified.sources(),
-        }))?;
+        });
+        if cashu {
+            evidence["execution_provider"] = serde_json::json!("cashu");
+        }
+        // Keep legacy grant evidence byte-identical when it has no Cashu allocation.
+        if !qualified.retained_allocations().is_empty() {
+            evidence["retained_allocations"] =
+                serde_json::to_value(qualified.retained_allocations())?;
+        }
+        let qualification_json = serde_json::to_string(&evidence)?;
         if plan_json.len() > 4 * 1024 * 1024 || qualification_json.len() > 4 * 1024 * 1024 {
             bail!("payout grant exceeds private storage bound");
         }
@@ -383,7 +427,8 @@ fn validate_admission(plan: &Plan, q: &QualifiedFunding, policy: &Policy, now: i
         || plan.hash()? != r.plan_hash
         || plan.funding_hash.as_deref() != Some(&r.funding_hash)
         || q.funding().proof_hash != r.funding_hash
-        || plan.real_sats != q.funding().strike_sats
+        || plan.funding_source != q.funding_source()
+        || plan.real_sats != q.funding_source().available(q.funding())
         || plan.threshold_sats != q.threshold_sats()
         || plan.reserved_sats != r.reserved_sats
         || plan.root_policy_hash.as_deref() != Some(&r.policy_hash)
@@ -395,7 +440,7 @@ fn validate_admission(plan: &Plan, q: &QualifiedFunding, policy: &Policy, now: i
         || now < plan.created_at
         || now < r.created_at
         || plan.rows.len() > 1000
-        || q.sources().len() > usize::from(policy.max_source_parts)
+        || q.sources().len() + q.retained_allocations().len() > usize::from(policy.max_source_parts)
     {
         bail!("plan differs from authenticated funding/root scope");
     }
@@ -487,7 +532,12 @@ fn validate_admission(plan: &Plan, q: &QualifiedFunding, policy: &Policy, now: i
             .checked_add(source.consumed_sats)
             .context("payout funding overflow")?;
     }
-    if total != plan.reserved_sats || real != plan.real_sats {
+    let expected_strike = if q.funding_source().is_strike() {
+        q.funding().strike_sats
+    } else {
+        0
+    };
+    if total != plan.reserved_sats || real != expected_strike {
         bail!("payout allocation/funding total mismatch");
     }
     Ok(())

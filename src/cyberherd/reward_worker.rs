@@ -69,7 +69,7 @@ impl<R: Query> Worker<R> {
             .feeding
             .funding
             .as_ref()
-            .is_some_and(|f| f.strike_sats > 0);
+            .is_some_and(|f| f.strike_sats > 0 || f.retained_cashu_sats > 0);
         let allowance = if funded && barrier.snapshot.settings.member_percent > 0 {
             Some(
                 self.client
@@ -80,7 +80,12 @@ impl<R: Query> Worker<R> {
             None
         };
         let zero_budget = allowance.as_ref().is_none_or(|a| {
-            a.allowance().member_percent_ceiling == 0 || a.allowance().max_sats_per_feed == 0
+            a.allowance()
+                .funding_source
+                .available(&a.allowance().funding)
+                == 0
+                || a.allowance().member_percent_ceiling == 0
+                || a.allowance().max_sats_per_feed == 0
         });
         if zero_budget {
             self.store

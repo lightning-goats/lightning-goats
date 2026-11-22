@@ -46,7 +46,7 @@ impl Runtime {
         tokio::pin!(shutdown);
         tokio::select! {
             _ = &mut shutdown => Ok(()),
-            result = async { tokio::try_join!(self.serve_intake(std::future::pending()), self.serve_treasury(std::future::pending()), worker.run(), delivery.run(), relays.run(), signing.run(), publishing.run(), treasury.run()) } => result.map(|_| ()),
+            result = async { tokio::try_join!(self.serve_intake(std::future::pending()), self.serve_treasury(std::future::pending()), worker.run(), delivery.run(), relays.run(), signing.run(), publishing.run(), treasury.run(), crate::collector_handoff::run(self)) } => result.map(|_| ()),
         }
     }
     /// Explicit provisioning action for a directory with keys but no databases.
@@ -630,6 +630,7 @@ mod tests {
         let mut config = configuration(directory.path(), Uuid::new_v4(), Uuid::new_v4())?;
         let expected_core = Uuid::new_v4();
         config.receipt_delivery = Some(crate::receipt_outbox::Config {
+            collector_handoff: false,
             enabled: false,
             socket: "/run/core/receipts.sock".into(),
             core_epoch: expected_core,
@@ -666,6 +667,7 @@ mod tests {
                 wallet_epoch: runtime.config.wallet_epoch,
                 core_epoch: previous_core,
                 result: ImportResult {
+                    retained_cashu: false,
                     acquisition_id: id,
                     receipt_digest: hex::encode(wire.digest()?),
                     event_seq: 1,

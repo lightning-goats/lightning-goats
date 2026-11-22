@@ -14,6 +14,9 @@ pub struct ImportResult {
     pub receipt_digest: String,
     pub event_seq: u64,
     pub net_sats: u64,
+    /// The core reserved this receipt for project Cashu custody when it granted credit.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub retained_cashu: bool,
     /// Original total pool credit after import, not this receipt's contribution.
     pub original_feed_credit_sats: u64,
 }
@@ -98,6 +101,7 @@ mod tests {
             wallet_epoch: receipt.data().wallet_epoch,
             core_epoch: epoch,
             result: ImportResult {
+                retained_cashu: false,
                 acquisition_id: receipt.data().acquisition_id,
                 receipt_digest: receipt
                     .digest()?

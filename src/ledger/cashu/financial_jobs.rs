@@ -29,7 +29,7 @@ impl LedgerStore {
         let Some(plan) = plan else {
             return Ok(None);
         };
-        let rows = sqlx::query("SELECT p.ledger_id,p.sats,c.mint_id,c.wallet_instance,c.wallet_epoch,c.core_epoch,l.remaining_sats FROM feed_financial_parts p JOIN cashu_receipt_inbox c ON c.ledger_entry_id=p.ledger_id JOIN reward_funding_lots l ON l.ledger_id=p.ledger_id WHERE p.plan_id=? ORDER BY p.ledger_id LIMIT 4097")
+        let rows = sqlx::query("SELECT p.ledger_id,p.sats,c.mint_id,c.wallet_instance,c.wallet_epoch,c.core_epoch,l.remaining_sats FROM feed_financial_parts p JOIN cashu_receipt_inbox c ON c.ledger_entry_id=p.ledger_id JOIN reward_funding_lots l ON l.ledger_id=p.ledger_id WHERE p.plan_id=? AND NOT EXISTS(SELECT 1 FROM retained_cashu_lots g WHERE g.ledger_id=p.ledger_id) ORDER BY p.ledger_id LIMIT 4097")
             .bind(&plan).fetch_all(&mut *tx).await?;
         ensure!(rows.len() <= 4096, "financial source bound exceeded");
         let mut by_mint: BTreeMap<String, Vec<(i64, u64)>> = BTreeMap::new();
@@ -51,9 +51,9 @@ impl LedgerStore {
             );
             let (processed, spent, consumed): (i64,i64,i64) = sqlx::query_as(
                 "SELECT COALESCE(MAX(g.start_sats+g.input_sats),0),
-                        COALESCE(SUM(r.input_sats-r.change_sats),0),
+                        COALESCE(SUM(g.input_sats-g.change_sats),0),
                         (SELECT COALESCE(SUM(sats),0) FROM feed_reward_funding_parts WHERE ledger_id=?1)
-                 FROM cashu_settled_ranges g JOIN cashu_treasury_source_results r USING(intent_id,ledger_id)
+                 FROM cashu_funding_ranges g
                  WHERE g.ledger_id=?1",
             )
             .bind(ledger)
@@ -66,7 +66,7 @@ impl LedgerStore {
             if processed >= target {
                 continue;
             }
-            let pending: i64 = sqlx::query_scalar("SELECT COALESCE(SUM(s.input_sats),0) FROM cashu_treasury_sources s WHERE s.ledger_id=? AND NOT EXISTS(SELECT 1 FROM cashu_treasury_completions c WHERE c.intent_id=s.intent_id)")
+            let pending: i64 = sqlx::query_scalar(concat!(include_str!("treasury_balances.sql"), "SELECT COALESCE(SUM(s.input_sats),0) FROM cashu_treasury_sources s WHERE s.ledger_id=? AND NOT EXISTS(SELECT 1 FROM settled_intents c WHERE c.intent_id=s.intent_id)"))
                 .bind(ledger).fetch_one(&mut *tx).await?;
             let committed = to_u64(spent, "spent custody")?
                 .checked_add(to_u64(pending, "pending custody")?)

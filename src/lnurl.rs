@@ -20,9 +20,15 @@ pub struct LnurlService {
     public_base_url: Url,
     invoice_expiry_seconds: u64,
     addresses: Arc<HashMap<String, RegisteredAddress>>,
-    strike: StrikeRuntime,
+    backend: InvoiceBackend,
     ledger: LedgerStore,
     zap: Option<Arc<ZapConfig>>,
+}
+
+#[derive(Clone)]
+enum InvoiceBackend {
+    Strike(StrikeRuntime),
+    Breez(crate::config::BreezCollectorConfig),
 }
 
 #[derive(Debug, Clone)]
@@ -112,9 +118,19 @@ impl LnurlService {
     pub fn new(
         config: &LnurlConfig,
         configured_addresses: &[LightningAddressConfig],
-        strike: StrikeRuntime,
+        strike: impl Into<Option<StrikeRuntime>>,
         ledger: LedgerStore,
     ) -> Result<Self> {
+        let backend = match config.wallet_backend {
+            crate::config::WalletBackend::Strike => InvoiceBackend::Strike(
+                strike
+                    .into()
+                    .context("Strike invoice backend requires a receive client")?,
+            ),
+            crate::config::WalletBackend::Breez => {
+                InvoiceBackend::Breez(config.project_collector()?.clone())
+            }
+        };
         let public_base_url =
             Url::parse(&config.public_base_url).context("invalid LNURL public base URL")?;
         let host = public_base_url
@@ -159,7 +175,11 @@ impl LnurlService {
                 display_name: configured.display_name.clone(),
                 credit_pool: configured.credit_pool.clone(),
                 min_sendable_msat: configured.min_sendable_msat,
-                max_sendable_msat: configured.max_sendable_msat,
+                max_sendable_msat: if matches!(backend, InvoiceBackend::Breez(_)) {
+                    configured.max_sendable_msat.min(1_000_000_000)
+                } else {
+                    configured.max_sendable_msat
+                },
                 metadata,
                 description_hash,
                 nostr_payee: config
@@ -180,7 +200,7 @@ impl LnurlService {
             public_base_url,
             invoice_expiry_seconds: config.invoice_expiry_seconds,
             addresses: Arc::new(addresses),
-            strike,
+            backend,
             ledger,
             zap: config.zap.clone().map(Arc::new),
         })
@@ -278,8 +298,69 @@ impl LnurlService {
             None
         };
 
+        let strike = match &self.backend {
+            InvoiceBackend::Strike(strike) => strike,
+            InvoiceBackend::Breez(collector) => {
+                let description = zap
+                    .as_ref()
+                    .map_or(address.metadata.as_str(), |request| request.raw_json());
+                let id = self
+                    .ledger
+                    .reserve_invoice()
+                    .await
+                    .map_err(LnurlServiceError::Provider)?
+                    .ok_or(LnurlServiceError::Busy)?;
+                let result: Result<LnurlPayCallbackResponse> = async {
+                    #[derive(serde::Deserialize)]
+                    struct Reply {
+                        invoice: String,
+                    }
+                    let payload = json!({"request_id": id, "amount_sat": amount_msat / 1000,
+                    "user": address.user, "credit_pool": address.credit_pool,
+                    "description": description, "zap": zap.is_some()});
+                    let mut intent = payload.clone();
+                    if let Some(zap) = zap.as_ref() {
+                        intent["payee_pubkey"] = json!(zap.payee());
+                        intent["receipt_pubkey"] = json!(zap.receipt_signer());
+                        intent["description_hash"] = json!(zap.description_hash());
+                    }
+                    self.ledger.prepare_breez_invoice(id, &intent).await?;
+                    let reply: Reply = crate::private_ipc::request(
+                        &collector.socket,
+                        collector.peer_uid,
+                        &payload,
+                        65536,
+                        20,
+                    )
+                    .await?;
+                    let parsed: lightning_invoice::Bolt11Invoice = reply.invoice.parse()?;
+                    let hash = parsed.payment_hash().to_string();
+                    let signed = crate::bolt11::verify(
+                        &reply.invoice,
+                        amount_msat,
+                        &hash,
+                        &hex::encode(Sha256::digest(description.as_bytes())),
+                    )?;
+                    crate::bolt11::verify_issuance_expiry(&signed, self.invoice_expiry_seconds)?;
+                    self.ledger
+                        .bind_breez_invoice(id, &reply.invoice, &hash)
+                        .await?;
+                    Ok(LnurlPayCallbackResponse {
+                        pr: reply.invoice,
+                        routes: Vec::new(),
+                    })
+                }
+                .await;
+                self.ledger
+                    .finish_invoice_admission(id)
+                    .await
+                    .map_err(LnurlServiceError::Provider)?;
+                return result.map_err(LnurlServiceError::Provider);
+            }
+        };
+
         let created = if let Some(zap) = zap.as_ref() {
-            self.strike
+            strike
                 .create_and_record_zap_receive_request(
                     &self.ledger,
                     &address.user,
@@ -289,7 +370,7 @@ impl LnurlService {
                 )
                 .await
         } else {
-            self.strike
+            strike
                 .create_and_record_receive_request(
                     &self.ledger,
                     &address.user,
@@ -377,6 +458,8 @@ mod tests {
             &LnurlConfig {
                 public_base_url: "https://lightning-goats.com/".to_owned(),
                 invoice_expiry_seconds: 300,
+                wallet_backend: Default::default(),
+                breez_collector: None,
                 zap: None,
             },
             &addresses,
@@ -385,6 +468,32 @@ mod tests {
         )
         .unwrap();
         (directory, service)
+    }
+
+    #[tokio::test]
+    async fn breez_discovery_starts_without_a_strike_client() {
+        let directory = TempDir::new().unwrap();
+        let ledger = LedgerStore::connect(&format!(
+            "sqlite://{}",
+            directory.path().join("breez.db").display()
+        ))
+        .await
+        .unwrap();
+        let config = LnurlConfig {
+            public_base_url: "https://lightning-goats.com/".into(),
+            invoice_expiry_seconds: 900,
+            wallet_backend: crate::config::WalletBackend::Breez,
+            breez_collector: Some(crate::config::BreezCollectorConfig {
+                socket: directory.path().join("collector.sock"),
+                peer_uid: 1001,
+            }),
+            zap: None,
+        };
+        let service = LnurlService::new(&config, &[configured("herd")], None, ledger).unwrap();
+        assert_eq!(
+            service.discovery("herd").unwrap().max_sendable,
+            1_000_000_000
+        );
     }
 
     #[tokio::test]

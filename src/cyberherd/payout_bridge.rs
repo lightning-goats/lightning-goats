@@ -37,7 +37,7 @@ impl Export {
     pub fn validate(&self) -> Result<()> {
         crate::nostr_event::validate_public_key(&self.plan.owner)?;
         if self.sequence <= 0
-            || self.plan.version != 1
+            || !self.plan.valid_operations_remainder()
             || self.plan.hash()? != self.hash
             || self.plan.rows.len() > 1000
             || serde_json::to_vec(self)?.len() > MAX_EXPORT

@@ -380,8 +380,7 @@ async fn classify(
                 && u128::from(plan.budget_sats)
                     <= u128::from(funded_sats) * u128::from(plan.member_percent) / 100
                 && plan.reserved_sats <= plan.budget_sats
-                && plan.operations_sats.checked_add(plan.reserved_sats)
-                    == Some(plan.threshold_sats),
+                && plan.valid_operations_remainder(),
             "retained plan differs from its frozen barrier or budget"
         );
         plan.planning_policy.validate()?;

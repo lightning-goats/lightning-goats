@@ -200,6 +200,8 @@ impl Store {
             "payout_outcome_acks",
             "payout_intake_binding",
             "payout_intake_receipts",
+            "payout_operator_receipts",
+            "payout_operator_invoices",
             "payout_operator_allocations",
             "payout_worker_clock",
             "payout_worker_attempts",

@@ -91,7 +91,7 @@ pub struct CashuFundingAnchor {
 }
 
 impl CashuFundingAnchor {
-    fn validate(&self) -> Result<()> {
+    pub(crate) fn validate(&self) -> Result<()> {
         if self.claim_id.is_nil() {
             bail!("missing Cashu claim identity");
         }

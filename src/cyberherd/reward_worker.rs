@@ -70,7 +70,8 @@ impl<R: Query> Worker<R> {
             .funding
             .as_ref()
             .is_some_and(|f| f.strike_sats > 0 || f.retained_cashu_sats > 0);
-        let allowance = if funded && barrier.snapshot.settings.member_percent > 0 {
+        // The allowance identifies the active custody source even when members receive zero.
+        let allowance = if funded {
             Some(
                 self.client
                     .reward_allowance(binding.epoch, id, &self.owner)
@@ -79,14 +80,15 @@ impl<R: Query> Worker<R> {
         } else {
             None
         };
-        let zero_budget = allowance.as_ref().is_none_or(|a| {
-            a.allowance()
-                .funding_source
-                .available(&a.allowance().funding)
-                == 0
-                || a.allowance().member_percent_ceiling == 0
-                || a.allowance().max_sats_per_feed == 0
-        });
+        let zero_budget = barrier.snapshot.settings.member_percent == 0
+            || allowance.as_ref().is_none_or(|a| {
+                a.allowance()
+                    .funding_source
+                    .available(&a.allowance().funding)
+                    == 0
+                    || a.allowance().member_percent_ceiling == 0
+                    || a.allowance().max_sats_per_feed == 0
+            });
         if zero_budget {
             self.store
                 .freeze_reward_plan(

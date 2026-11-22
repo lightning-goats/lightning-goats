@@ -358,7 +358,8 @@ async fn strip_empty_inclusive_fee_schema(uid: u32) -> Result<()> {
         bail!("wrong native fee fixture engine");
     }
     let migrations = sqlx::migrate!("./payout-migrations");
-    if migrations.iter().map(|m| m.version).collect::<Vec<_>>() != [1, 2, 3, 4, 5, 6, 8, 9, 10, 11]
+    if migrations.iter().map(|m| m.version).collect::<Vec<_>>()
+        != [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12]
     {
         bail!("unqualified fixture payout schema");
     }
@@ -367,7 +368,7 @@ async fn strip_empty_inclusive_fee_schema(uid: u32) -> Result<()> {
     )
     .fetch_all(&pool)
     .await?;
-    if rows.len() != 10 {
+    if rows.len() != migrations.iter().count() {
         bail!("exact current synthetic payout schema required");
     }
     for (row, migration) in rows.iter().zip(migrations.iter()) {
@@ -393,6 +394,7 @@ async fn strip_empty_inclusive_fee_schema(uid: u32) -> Result<()> {
         bail!("only an empty synthetic payout journal may be transformed");
     }
     for table in [
+        "payout_operator_allocations",
         "payout_fee_probe_duplicates",
         "payout_fee_promotions",
         "payout_fee_probe_quotes",
@@ -411,11 +413,11 @@ async fn strip_empty_inclusive_fee_schema(uid: u32) -> Result<()> {
             .execute(&mut *tx)
             .await?;
     }
-    if sqlx::query("DELETE FROM _sqlx_migrations WHERE version IN (9,10,11)")
+    if sqlx::query("DELETE FROM _sqlx_migrations WHERE version IN (9,10,11,12)")
         .execute(&mut *tx)
         .await?
         .rows_affected()
-        != 3
+        != 4
     {
         bail!("fixture payout migration prefix changed");
     }

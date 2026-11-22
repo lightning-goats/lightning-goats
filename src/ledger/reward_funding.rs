@@ -62,78 +62,13 @@ impl LedgerStore {
                 .bind(reservation.request_id.to_string())
                 .fetch_one(&mut *tx)
                 .await?;
-        // A caller cannot manufacture a starting cursor that skips a source.
-        // Clients still have to start at zero and complete the page sequence.
-        if after > 0 {
-            let valid: bool = sqlx::query_scalar(&format!(
-                "{} SELECT EXISTS(SELECT 1 FROM funding_parts WHERE ledger_id=?2)",
-                feed_proceeds::PAGE
-            ))
-            .bind(reservation.request_id.to_string())
-            .bind(after)
-            .fetch_one(&mut *tx)
-            .await?;
-            if !valid {
-                bail!("payout funding cursor is not a consumed part");
-            }
-        }
-        let rows = sqlx::query(&format!(
-            "{} SELECT * FROM funding_parts WHERE ledger_id>?2 ORDER BY ledger_id LIMIT ?3",
-            feed_proceeds::PAGE
-        ))
-        .bind(reservation.request_id.to_string())
-        .bind(after)
-        .bind((MAX_FUNDING_PARTS + 1) as i64)
-        .fetch_all(&mut *tx)
+        let (parts, through, more) = funding_parts(
+            &mut tx,
+            reservation.request_id,
+            funding.retained_cashu_sats,
+            after,
+        )
         .await?;
-        let more = rows.len() > MAX_FUNDING_PARTS;
-        let mut parts = Vec::new();
-        let mut through = after;
-        let has_collector_handoffs = super::core_schema_version(&mut tx).await? >= 36;
-        for row in rows.into_iter().take(MAX_FUNDING_PARTS) {
-            let ledger_id: i64 = row.try_get("ledger_id")?;
-            let kind: String = row.try_get("kind")?;
-            let hash: String = row.try_get("proof_hash")?;
-            let anchor = if kind == "conversion" {
-                None
-            } else if let Some(intent) = row.try_get::<Option<String>, _>("intent_id")? {
-                Some(feed_proceeds::anchor(&mut tx, &intent).await?)
-            } else {
-                let actual = lot_proof(&mut tx, ledger_id).await?;
-                if actual.0 != kind || actual.1 != hash {
-                    bail!("consumed funding provenance changed");
-                }
-                if kind == "strike_btc" {
-                    Some(strike_anchor(&mut tx, ledger_id).await?)
-                } else {
-                    None
-                }
-            };
-            let cashu_anchor = if kind == "conversion" {
-                Some(CashuFundingAnchor {
-                    source: CashuFundingSource::ProjectInvoice,
-                    claim_id: row.try_get::<String, _>("intent_id")?.parse()?,
-                    evidence_digest: hash,
-                })
-            } else if anchor.is_none() && funding.retained_cashu_sats > 0 {
-                retained_anchor(&mut tx, ledger_id).await?
-            } else {
-                None
-            };
-            let collected_sats = if kind != "conversion" && has_collector_handoffs {
-                acquisition_proceeds(&mut tx, reservation.request_id, ledger_id).await?
-            } else {
-                None
-            };
-            parts.push(FundingPart {
-                collected_sats,
-                ledger_id,
-                consumed_sats: to_u64(row.try_get("sats")?, "consumed sats")?,
-                anchor,
-                cashu_anchor,
-            });
-            through = ledger_id;
-        }
         let budget_now = super::reward_outcomes::budget_time(&mut tx, false).await?;
         let used = super::reward_outcomes::budget_usage(&mut tx, budget_now).await?;
         let finalized: bool = sqlx::query_scalar(
@@ -170,6 +105,81 @@ impl LedgerStore {
             parts,
         };
         page.validate()?;
+        tx.commit().await?;
+        Ok(page)
+    }
+
+    /// Read confirmed custody without requiring a nonzero member reward reservation.
+    /// This read does not claim a transfer or grant execution permission.
+    pub(crate) async fn operator_funding_page(
+        &self,
+        policy: &RewardPolicy,
+        epoch: Uuid,
+        request_id: Uuid,
+        after: i64,
+    ) -> Result<crate::reward_funding::OperatorFundingPage> {
+        policy.validate()?;
+        if policy.funding_source.is_strike() || epoch.is_nil() || request_id.is_nil() || after < 0 {
+            bail!("invalid operator funding scope");
+        }
+        let mut tx = self.pool.begin().await?;
+        let current: String =
+            sqlx::query_scalar("SELECT stream_id FROM overlay_identity WHERE singleton=1")
+                .fetch_one(&mut *tx)
+                .await?;
+        if current != epoch.to_string() {
+            bail!("operator funding epoch changed");
+        }
+        let funding = confirmed_funding(&mut tx, request_id)
+            .await?
+            .context("confirmed operator funding missing")?;
+        let reservation = sqlx::query("SELECT * FROM reward_reservations WHERE request_id=?")
+            .bind(request_id.to_string())
+            .fetch_optional(&mut *tx)
+            .await?
+            .as_ref()
+            .map(|row| -> Result<Reservation> {
+                let original: RewardPolicy =
+                    serde_json::from_str(&row.try_get::<String, _>("policy_json")?)?;
+                if original.funding_source != policy.funding_source {
+                    bail!("member reservation uses a different funding source");
+                }
+                decode_reservation(row)
+            })
+            .transpose()?;
+        if reservation.as_ref().is_some_and(|r| {
+            r.owner != policy.owner
+                || r.epoch != epoch
+                || r.funding_hash != funding.proof_hash
+                || r.reserved_sats > funding.retained_cashu_sats
+        }) {
+            bail!("member reservation contradicts confirmed operator funding");
+        }
+        let (parts, through, more) =
+            funding_parts(&mut tx, request_id, funding.retained_cashu_sats, after).await?;
+        let page = crate::reward_funding::OperatorFundingPage {
+            epoch,
+            request_id,
+            owner: policy.owner.clone(),
+            funding,
+            reservation,
+            after,
+            through,
+            more,
+            allocations: parts
+                .into_iter()
+                .filter_map(|part| {
+                    let consumed_sats = part.collected_sats.unwrap_or(part.consumed_sats);
+                    part.cashu_anchor
+                        .filter(|_| consumed_sats > 0)
+                        .map(|anchor| crate::payout::funding::RetainedAllocation {
+                            ledger_id: part.ledger_id,
+                            consumed_sats,
+                            anchor,
+                        })
+                })
+                .collect(),
+        };
         tx.commit().await?;
         Ok(page)
     }
@@ -366,6 +376,87 @@ async fn strike_anchor(
     };
     anchor.validate()?;
     Ok(anchor)
+}
+
+async fn funding_parts(
+    tx: &mut Transaction<'_, Sqlite>,
+    request_id: Uuid,
+    retained_cashu_sats: u64,
+    after: i64,
+) -> Result<(Vec<FundingPart>, i64, bool)> {
+    // A caller cannot manufacture a starting cursor that skips a source.
+    // Clients still have to start at zero and complete the page sequence.
+    if after > 0 {
+        let valid: bool = sqlx::query_scalar(&format!(
+            "{} SELECT EXISTS(SELECT 1 FROM funding_parts WHERE ledger_id=?2)",
+            feed_proceeds::PAGE
+        ))
+        .bind(request_id.to_string())
+        .bind(after)
+        .fetch_one(&mut **tx)
+        .await?;
+        if !valid {
+            bail!("payout funding cursor is not a consumed part");
+        }
+    }
+    let rows = sqlx::query(&format!(
+        "{} SELECT * FROM funding_parts WHERE ledger_id>?2 ORDER BY ledger_id LIMIT ?3",
+        feed_proceeds::PAGE
+    ))
+    .bind(request_id.to_string())
+    .bind(after)
+    .bind((MAX_FUNDING_PARTS + 1) as i64)
+    .fetch_all(&mut **tx)
+    .await?;
+    let more = rows.len() > MAX_FUNDING_PARTS;
+    let mut parts = Vec::new();
+    let mut through = after;
+    let has_collector_handoffs = super::core_schema_version(tx).await? >= 36;
+    for row in rows.into_iter().take(MAX_FUNDING_PARTS) {
+        let ledger_id: i64 = row.try_get("ledger_id")?;
+        let kind: String = row.try_get("kind")?;
+        let hash: String = row.try_get("proof_hash")?;
+        let anchor = if kind == "conversion" {
+            None
+        } else if let Some(intent) = row.try_get::<Option<String>, _>("intent_id")? {
+            Some(feed_proceeds::anchor(tx, &intent).await?)
+        } else {
+            let actual = lot_proof(tx, ledger_id).await?;
+            if actual.0 != kind || actual.1 != hash {
+                bail!("consumed funding provenance changed");
+            }
+            if kind == "strike_btc" {
+                Some(strike_anchor(tx, ledger_id).await?)
+            } else {
+                None
+            }
+        };
+        let cashu_anchor = if kind == "conversion" {
+            Some(CashuFundingAnchor {
+                source: CashuFundingSource::ProjectInvoice,
+                claim_id: row.try_get::<String, _>("intent_id")?.parse()?,
+                evidence_digest: hash,
+            })
+        } else if anchor.is_none() && retained_cashu_sats > 0 {
+            retained_anchor(tx, ledger_id).await?
+        } else {
+            None
+        };
+        let collected_sats = if kind != "conversion" && has_collector_handoffs {
+            acquisition_proceeds(tx, request_id, ledger_id).await?
+        } else {
+            None
+        };
+        parts.push(FundingPart {
+            collected_sats,
+            ledger_id,
+            consumed_sats: to_u64(row.try_get("sats")?, "consumed sats")?,
+            anchor,
+            cashu_anchor,
+        });
+        through = ledger_id;
+    }
+    Ok((parts, through, more))
 }
 
 /// Sync only positive grants after activation. Every later debit must have

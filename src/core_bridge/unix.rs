@@ -76,6 +76,7 @@ impl Role {
                 request,
                 Request::FailedPayoutCost { .. }
                     | Request::PayoutFunding { .. }
+                    | Request::OperatorFunding { .. }
                     | Request::ClaimCashuExecution { .. }
                     | Request::ClaimPayoutExecution { .. }
                     | Request::PayoutExecutionState { .. }
@@ -488,6 +489,23 @@ async fn serve_one(
             Request::Safety => match ledger.core_safety(mode).await {
                 Ok(state) => Response::Safety { state },
                 Err(_) => Response::Rejected,
+            },
+            Request::OperatorFunding {
+                expected_epoch,
+                request_id,
+                owner,
+                after,
+            } => match reward_policy {
+                Some(policy) if policy.owner == owner => match ledger
+                    .operator_funding_page(policy, expected_epoch, request_id, after)
+                    .await
+                {
+                    Ok(page) => Response::OperatorFunding {
+                        page: Box::new(page),
+                    },
+                    Err(_) => Response::Rejected,
+                },
+                _ => Response::Rejected,
             },
             Request::PayoutFunding {
                 expected_epoch,
@@ -998,6 +1016,70 @@ impl Client {
             }
             _ => bail!("core did not authorize this reward reservation"),
         }
+    }
+
+    /// Read the exact confirmed Cashu lots backing a frozen operator allocation.
+    pub async fn operator_funding(
+        &self,
+        plan: &crate::reward_funding::OperatorAllocation,
+        after: i64,
+    ) -> Result<crate::reward_funding::OperatorFundingPage> {
+        if plan.collected_sats.checked_sub(plan.member_reserved_sats) != Some(plan.operator_sats)
+            || plan.operator_sats == 0
+            || plan.core_uid != self.expected_uid
+            || after < 0
+        {
+            bail!("invalid operator allocation scope");
+        }
+        let Response::OperatorFunding { page } = self
+            .request(&Request::OperatorFunding {
+                expected_epoch: plan.epoch,
+                request_id: plan.request_id,
+                owner: plan.owner.clone(),
+                after,
+            })
+            .await?
+        else {
+            bail!("core rejected operator funding read");
+        };
+        if page.epoch != plan.epoch
+            || page.request_id != plan.request_id
+            || page.owner != plan.owner
+            || plan.funding_hash != page.funding.proof_hash
+            || page.funding.retained_cashu_sats != plan.collected_sats
+            || page.reservation.as_ref().map_or(0, |r| r.reserved_sats) != plan.member_reserved_sats
+            || page.reservation.as_ref().map(|r| r.id) != plan.member_grant
+            || page.after != after
+            || page.through < after
+            || (page.more && page.through == after)
+            || page.allocations.len() > crate::reward_funding::MAX_FUNDING_PARTS
+        {
+            bail!("core funding differs from the frozen operator allocation");
+        }
+        if let Some(reservation) = &page.reservation {
+            reservation.validate()?;
+            if reservation.owner != plan.owner
+                || reservation.epoch != plan.epoch
+                || reservation.request_id != plan.request_id
+                || reservation.plan_hash != plan.plan_hash
+                || reservation.funding_hash != page.funding.proof_hash
+            {
+                bail!("member reservation differs from operator plan");
+            }
+        }
+        let mut cursor = after;
+        for allocation in &page.allocations {
+            allocation.anchor.validate()?;
+            if allocation.ledger_id <= cursor
+                || allocation.ledger_id > page.through
+                || allocation.consumed_sats == 0
+                || allocation.consumed_sats > plan.collected_sats
+            {
+                bail!("invalid operator funding allocation");
+            }
+            cursor = allocation.ledger_id;
+        }
+        Ok(*page)
     }
 
     pub async fn payout_funding(

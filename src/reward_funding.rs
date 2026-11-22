@@ -91,7 +91,7 @@ pub struct CashuFundingAnchor {
 }
 
 impl CashuFundingAnchor {
-    fn validate(&self) -> Result<()> {
+    pub(crate) fn validate(&self) -> Result<()> {
         if self.claim_id.is_nil() {
             bail!("missing Cashu claim identity");
         }
@@ -129,6 +129,36 @@ pub struct FundingPage {
     pub through: i64,
     pub more: bool,
     pub parts: Vec<FundingPart>,
+}
+
+/// Payout-journal checkpoint bound to its original intake receipt and core scope.
+#[derive(Debug, Clone)]
+pub struct OperatorAllocation {
+    pub epoch: Uuid,
+    pub owner: String,
+    pub core_uid: u32,
+    pub request_id: Uuid,
+    pub plan_hash: String,
+    pub funding_hash: String,
+    pub member_grant: Option<Uuid>,
+    pub collected_sats: u64,
+    pub member_reserved_sats: u64,
+    pub operator_sats: u64,
+}
+
+/// Authenticated readback of a confirmed feed, including feeds with no member grant.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct OperatorFundingPage {
+    pub epoch: Uuid,
+    pub request_id: Uuid,
+    pub owner: String,
+    pub funding: Funding,
+    pub reservation: Option<Reservation>,
+    pub after: i64,
+    pub through: i64,
+    pub more: bool,
+    pub allocations: Vec<crate::payout::funding::RetainedAllocation>,
 }
 
 impl FundingPage {

@@ -132,6 +132,21 @@ impl Store {
         };
         sqlx::query("INSERT INTO payout_intake_receipts(sequence,plan_hash,request_id,grant_id) VALUES(?,?,?,?)")
             .bind(export.sequence).bind(&export.hash).bind(export.plan.request_id.to_string()).bind(grant).execute(&mut *tx).await?;
+        let plan = &export.plan;
+        if plan.version == 2 && !plan.funding_source.is_strike() && plan.operations_sats > 0 {
+            let funding_hash = plan
+                .funding_hash
+                .as_deref()
+                .context("missing operator funding proof")?;
+            crate::nostr_event::validate_hex(funding_hash, 32)?;
+            sqlx::query("INSERT INTO payout_operator_allocations(sequence,funding_hash,collected_sats,member_reserved_sats,operator_sats) VALUES(?,?,?,?,?)")
+                .bind(export.sequence)
+                .bind(funding_hash)
+                .bind(i64::try_from(plan.real_sats)?)
+                .bind(i64::try_from(plan.reserved_sats)?)
+                .bind(i64::try_from(plan.operations_sats)?)
+                .execute(&mut *tx).await?;
+        }
         sqlx::query("UPDATE payout_intake_binding SET through=? WHERE singleton=1")
             .bind(export.sequence)
             .execute(&mut *tx)
@@ -139,6 +154,32 @@ impl Store {
         tx.commit().await?;
         Ok(())
     }
+    pub async fn operator_allocation(
+        &self,
+        sequence: i64,
+    ) -> Result<Option<crate::reward_funding::OperatorAllocation>> {
+        let row = sqlx::query("SELECT r.request_id,r.plan_hash,r.grant_id,a.funding_hash,a.collected_sats,a.member_reserved_sats,a.operator_sats FROM payout_operator_allocations a JOIN payout_intake_receipts r USING(sequence) WHERE sequence=?")
+            .bind(sequence).fetch_optional(&self.pool).await?;
+        row.map(|r| -> Result<_> {
+            Ok(crate::reward_funding::OperatorAllocation {
+                epoch: self.policy.scope.epoch,
+                owner: self.policy.scope.owner.clone(),
+                core_uid: self.policy.scope.core_uid,
+                request_id: r.try_get::<String, _>("request_id")?.parse()?,
+                plan_hash: r.try_get("plan_hash")?,
+                funding_hash: r.try_get("funding_hash")?,
+                member_grant: r
+                    .try_get::<Option<String>, _>("grant_id")?
+                    .map(|id| id.parse())
+                    .transpose()?,
+                collected_sats: u64::try_from(r.try_get::<i64, _>("collected_sats")?)?,
+                member_reserved_sats: u64::try_from(r.try_get::<i64, _>("member_reserved_sats")?)?,
+                operator_sats: u64::try_from(r.try_get::<i64, _>("operator_sats")?)?,
+            })
+        })
+        .transpose()
+    }
+
     pub(crate) async fn take_work(&self, now: i64) -> Result<Option<Work>> {
         self.take_provider_work(now, "strike").await
     }

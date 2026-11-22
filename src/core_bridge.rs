@@ -111,6 +111,12 @@ pub enum Request {
     },
     Safety,
     LifecycleContext,
+    OperatorFunding {
+        expected_epoch: Uuid,
+        request_id: Uuid,
+        owner: String,
+        after: i64,
+    },
     PayoutFunding {
         expected_epoch: Uuid,
         reservation_id: Uuid,
@@ -181,6 +187,9 @@ pub enum Response {
         allowance: Box<crate::reward_funding::Allowance>,
     },
     Rejected,
+    OperatorFunding {
+        page: Box<crate::reward_funding::OperatorFundingPage>,
+    },
     PayoutFunding {
         page: Box<crate::reward_funding::FundingPage>,
     },

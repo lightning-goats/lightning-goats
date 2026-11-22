@@ -71,6 +71,8 @@ def core_upgrade(launcher, root, source, runtime, archive, commit):
     with config.open('xb') as output:
         output.write(config_bytes)
     config.chmod(0o644)
+    wal = source / 'core.db-wal'
+    assert not wal.exists() or wal.stat().st_size == 0, 'synthetic main file has uncheckpointed pages'
     with (source / 'core.db').open('rb') as incoming, (state / 'lightning-goats.db').open('xb') as output:
         shutil.copyfileobj(incoming, output)
         output.flush()

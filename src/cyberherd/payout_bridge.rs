@@ -80,6 +80,11 @@ enum Call {
         owner: String,
         after: i64,
     },
+    PrimalInvoiceMismatch {
+        owner: String,
+        request_id: uuid::Uuid,
+        member: String,
+    },
     Joining {
         owner: String,
         request_id: uuid::Uuid,
@@ -94,6 +99,7 @@ enum Reply {
     },
     Waiting,
     Rejected,
+    Recorded,
     Joining {
         owner: String,
         request_id: uuid::Uuid,
@@ -144,6 +150,19 @@ impl Server {
                                         export: Box::new(export),
                                     },
                                     Ok(None) => Reply::Waiting,
+                                    Err(_) => Reply::Rejected,
+                                }
+                            }
+                            Ok(Ok(Call::PrimalInvoiceMismatch {
+                                owner: claimed,
+                                request_id,
+                                member,
+                            })) if claimed == owner => {
+                                match store
+                                    .record_primal_invoice_mismatch(&owner, request_id, &member)
+                                    .await
+                                {
+                                    Ok(()) => Reply::Recorded,
                                     Err(_) => Reply::Rejected,
                                 }
                             }
@@ -201,6 +220,28 @@ pub struct Client {
     owner: String,
 }
 impl Client {
+    pub(crate) async fn primal_invoice_mismatch(
+        &self,
+        request_id: uuid::Uuid,
+        member: &str,
+    ) -> Result<()> {
+        let reply: Reply = ipc::request(
+            &self.socket,
+            self.peer_uid,
+            &Call::PrimalInvoiceMismatch {
+                owner: self.owner.clone(),
+                request_id,
+                member: member.into(),
+            },
+            MAX_FRAME,
+            3,
+        )
+        .await?;
+        if !matches!(reply, Reply::Recorded) {
+            bail!("invoice mismatch notice was not accepted");
+        }
+        Ok(())
+    }
     pub async fn joining(
         &self,
         request_id: uuid::Uuid,

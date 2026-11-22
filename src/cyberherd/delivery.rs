@@ -56,6 +56,29 @@ pub(crate) fn render(event: &StoredEvent, catalog: &Catalog) -> Result<Option<Re
             message.validate_broadcast(&event.owner)?;
             Ok(Some(message))
         }
+        "primal_invoice_mismatch" => {
+            let (member, conversation): (String, Option<MemberConversation>) =
+                serde_json::from_str(&event.snapshot_json)?;
+            if let Some(branch) = &conversation {
+                branch.validate(&event.owner)?;
+            }
+            let identity = conversation::identity(&event.owner, &member, &event.source_id)?;
+            Ok(Some(Rendered {
+                identity,
+                cycle: event.cycle,
+                member,
+                context: conversation.as_ref().map(|branch| branch.context.clone()).unwrap_or_default(),
+                conversation,
+                category:event.event_type.clone(),
+                nostr:"Your CyberHerd payout is on hold. Primal returned a Lightning invoice whose description hash didn’t match the payment request, so we couldn’t verify it. Your share is still reserved. For future payouts, please use a Lightning address from another provider on your Nostr profile. Updating your profile won’t redirect this pending payout. https://github.com/PrimalHQ/primal-web-app/issues/198".into(),
+                overlay: String::new(),
+                accepted: false,
+                requires_joining: true,
+                additional_members: vec![],
+                interaction_cards: None,
+                broadcast: None,
+            }))
+        }
         "operator_member" => operator_member(event, catalog),
         "interaction" => interaction(event, catalog),
         "payout_result" | "payout_skipped" => payout(event, catalog),

@@ -8,6 +8,15 @@ use uuid::Uuid;
 use super::recipient::Recipient;
 use crate::{nostr_event::VerifiedEvent, public_network};
 
+#[derive(Debug)]
+pub(crate) struct DescriptionHashMismatch;
+impl std::fmt::Display for DescriptionHashMismatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("invoice description hash matches neither zap nor recipient metadata")
+    }
+}
+impl std::error::Error for DescriptionHashMismatch {}
+
 pub const MAX_INVOICE_RESPONSE: usize = 16_384;
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -135,6 +144,12 @@ pub struct Request {
 }
 
 impl Request {
+    pub(crate) fn uses_primal_callback(&self) -> bool {
+        let r = &self.intent.0.recipient;
+        r.lnurl_url.starts_with("https://primal.net/")
+            && r.callback.starts_with("https://primal.net/")
+    }
+
     pub(crate) fn restore(intent: Intent, raw_zap: Option<String>) -> Result<Self> {
         let description_hash = match (intent.unsigned_zap()?, &raw_zap) {
             (_, None) => intent.0.recipient.metadata_hash.clone(),
@@ -325,7 +340,7 @@ fn validate_signed_invoice(
             hex::encode(Sha256::digest(text.to_string().as_bytes())),
             false,
         ),
-        _ => bail!("invoice description hash matches neither zap nor recipient metadata"),
+        _ => return Err(DescriptionHashMismatch.into()),
     };
     let parsed = if nip57 {
         crate::bolt11::verify(

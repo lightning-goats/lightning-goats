@@ -169,7 +169,7 @@ impl Store {
             .fetch_one(&mut *tx)
             .await?;
             if !exists {
-                let pending:i64=sqlx::query_scalar("SELECT COUNT(*) FROM delivery_messages m JOIN delivery_overlay o ON o.owner=m.owner AND o.identity=m.identity WHERE m.owner=? AND (o.event_seq IS NULL OR EXISTS(SELECT 1 FROM delivery_destinations d WHERE d.owner=m.owner AND d.identity=m.identity AND (SELECT COUNT(*) FROM delivery_receipts r WHERE r.owner=d.owner AND r.identity=d.identity AND r.destination=d.destination)<json_array_length(m.relays_json)))")
+                let pending:i64=sqlx::query_scalar("SELECT COUNT(*) FROM delivery_messages m LEFT JOIN delivery_overlay o ON o.owner=m.owner AND o.identity=m.identity WHERE m.owner=? AND ((o.identity IS NOT NULL AND o.event_seq IS NULL) OR EXISTS(SELECT 1 FROM delivery_destinations d WHERE d.owner=m.owner AND d.identity=m.identity AND (SELECT COUNT(*) FROM delivery_receipts r WHERE r.owner=d.owner AND r.identity=d.identity AND r.destination=d.destination)<json_array_length(m.relays_json)))")
                     .bind(owner).fetch_one(&mut *tx).await?;
                 if pending >= 2048 {
                     bail!("member presentation backlog is full");
@@ -212,11 +212,13 @@ impl Store {
                 sqlx::query("INSERT INTO delivery_messages(owner,identity,source_seq,document_json,relays_json,created_at) VALUES(?,?,?,?,?,?)")
                     .bind(owner).bind(&message.identity).bind(event.seq).bind(serde_json::to_string(&message)?).bind(serde_json::to_string(&relays)?).bind(now).execute(&mut *tx).await?;
                 insert_destinations(&mut tx, owner, &message, None, self.stream_chat).await?;
-                sqlx::query("INSERT INTO delivery_overlay(owner,identity) VALUES(?,?)")
-                    .bind(owner)
-                    .bind(&message.identity)
-                    .execute(&mut *tx)
-                    .await?;
+                if event.event_type != "primal_invoice_mismatch" {
+                    sqlx::query("INSERT INTO delivery_overlay(owner,identity) VALUES(?,?)")
+                        .bind(owner)
+                        .bind(&message.identity)
+                        .execute(&mut *tx)
+                        .await?;
+                }
             }
         }
         sqlx::query("UPDATE delivery_cursors SET through=? WHERE owner=?")

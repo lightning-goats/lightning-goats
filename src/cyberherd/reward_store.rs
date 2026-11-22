@@ -16,6 +16,40 @@ use crate::{
 };
 
 impl Store {
+    pub(crate) async fn record_primal_invoice_mismatch(
+        &self,
+        owner: &str,
+        feed: Uuid,
+        member: &str,
+    ) -> Result<()> {
+        let stored = self
+            .reward_plan(owner, feed)
+            .await?
+            .context("missing reward plan")?;
+        let row = stored
+            .plan
+            .rows
+            .iter()
+            .find(|r| r.pubkey == member && r.skip.is_none() && r.gross_sats > 0)
+            .context("missing payable member")?;
+        let recipient = row.recipient.as_ref().context("missing recipient")?;
+        for url in [&recipient.lnurl_url, &recipient.callback] {
+            if crate::public_network::validate_destination(url, "https")?.host_str()
+                != Some("primal.net")
+            {
+                anyhow::bail!("invoice mismatch notice requires a Primal recipient");
+            }
+        }
+        if let Some(conversation) = &row.conversation {
+            conversation.validate(owner)?;
+        }
+        let source = format!("primal-invoice-mismatch:{feed}:{member}");
+        sqlx::query("INSERT INTO domain_events(owner,cycle,source_id,event_type,snapshot_json) VALUES(?,?,?,'primal_invoice_mismatch',?) ON CONFLICT(owner,source_id) DO NOTHING")
+            .bind(owner).bind(stored.plan.cycle).bind(source).bind(serde_json::to_string(&(member,&row.conversation))?)
+            .execute(&self.pool).await?;
+        Ok(())
+    }
+
     #[cfg(unix)]
     pub(crate) async fn next_reward_export(
         &self,

@@ -606,3 +606,45 @@ async fn receipt_credit_and_replay_accept_the_original_advisory_feeding_snapshot
 include!("financial_jobs_tests.rs");
 
 include!("sweep_tests.rs");
+
+#[tokio::test]
+async fn retired_wallet_credit_dispatches_the_pending_plan_without_creating_payout_proceeds() {
+    let (_dir, url, store, policy) = fixture().await;
+    let receipt = wire(&policy, 100);
+    store
+        .import_cashu_receipt(&policy, &authenticated(&policy, &receipt))
+        .await
+        .unwrap();
+    lightning(&store, 900).await;
+    let current = store
+        .clone()
+        .with_retained_wallet_epoch(policy.wallet_epoch);
+    assert!(current.begin_feed_attempt(1000).await.unwrap().is_none());
+    let plan: String =
+        sqlx::query_scalar("SELECT id FROM feed_financial_plans WHERE state='pending'")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+    let rotated = LedgerStore::connect(&url)
+        .await
+        .unwrap()
+        .with_retained_wallet_epoch(Uuid::new_v4());
+    let feed = rotated.begin_feed_attempt(1000).await.unwrap().unwrap();
+    rotated.confirm_feed_attempt(feed).await.unwrap();
+    assert_eq!(rotated.feed_credit_sats().await.unwrap(), 0);
+    assert!(rotated.begin_feed_attempt(1000).await.unwrap().is_none());
+    let dispatched: String = sqlx::query_scalar(
+        "SELECT request_id FROM feed_financial_plans WHERE id=? AND state='dispatched'",
+    )
+    .bind(plan)
+    .fetch_one(&store.pool)
+    .await
+    .unwrap();
+    assert_eq!(dispatched, feed.to_string());
+    let mut tx = store.pool.begin().await.unwrap();
+    let funding = crate::ledger::inspect_confirmed_reward_funding(&mut tx, feed)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!((funding.strike_sats, funding.retained_cashu_sats), (900, 0));
+}

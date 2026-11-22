@@ -85,9 +85,14 @@ impl LedgerStore {
             let threshold_sats = to_u64(row.try_get("threshold_sats")?, "financial threshold")?;
             let pending_sources_covered = if state == "pending" {
                 Some(
-                    pending_allocation(&mut tx, plan_id, threshold_sats)
-                        .await?
-                        .1,
+                    pending_allocation(
+                        &mut tx,
+                        plan_id,
+                        threshold_sats,
+                        self.retained_wallet_epoch,
+                    )
+                    .await?
+                    .1,
                 )
             } else {
                 None

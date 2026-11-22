@@ -2174,3 +2174,30 @@ async fn nip65_recipient_read_relays_are_frozen_with_the_message_before_signing(
     assert_eq!(f.core.feed_credit_sats().await.unwrap(), 0);
     db.close().await;
 }
+
+#[tokio::test]
+async fn primal_invoice_notice_is_threaded_and_never_enters_the_overlay() {
+    let f = Fixture::new().await;
+    let branch = f.apply("join", 34).await;
+    let db = SqlitePool::connect(&f.url).await.unwrap();
+    for _ in 0..2 {
+        sqlx::query("INSERT INTO domain_events(owner,cycle,source_id,event_type,snapshot_json) VALUES(?,1,'one-held-member','primal_invoice_mismatch',?) ON CONFLICT(owner,source_id) DO NOTHING")
+            .bind(&f.owner).bind(serde_json::to_string(&(key(2), &branch)).unwrap())
+            .execute(&db).await.unwrap();
+        f.queue().await;
+    }
+    let rows: Vec<(String, i64, i64)> = sqlx::query_as("SELECT m.document_json,(SELECT count(*) FROM delivery_overlay o WHERE o.owner=m.owner AND o.identity=m.identity),(SELECT count(*) FROM delivery_destinations d WHERE d.owner=m.owner AND d.identity=m.identity AND d.branch IS NOT NULL) FROM delivery_messages m WHERE m.owner=? AND json_extract(m.document_json,'$.category')='primal_invoice_mismatch'")
+        .bind(&f.owner).fetch_all(&db).await.unwrap();
+    assert_eq!(rows.len(), 1);
+    let (json, overlays, branches) = &rows[0];
+    let notice: crate::cyberherd::delivery::Rendered = serde_json::from_str(json).unwrap();
+    assert_eq!(notice.conversation, Some(branch));
+    assert!(notice.requires_joining && !notice.accepted && notice.broadcast.is_none());
+    assert!(
+        notice
+            .nostr
+            .contains("github.com/PrimalHQ/primal-web-app/issues/198")
+    );
+    assert_eq!(*overlays, 0);
+    assert!(*branches > 0);
+}

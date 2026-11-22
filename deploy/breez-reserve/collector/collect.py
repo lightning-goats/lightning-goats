@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import secrets
 from urllib.parse import quote as escape
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from project_quote import prepare_outputs
 from claim_store import SplitRequired, encode
@@ -277,6 +277,15 @@ def execute_payout(store, client, request, keyset, pinned_keys):
                                                    (secret,)).fetchone()[0])["id"] for secret in selected]
             result["input_fee_sat"] = payout_input_fee(client, keysets)
         return result
+    if set(request) == {"reconcile_operator", "invoice"}:
+        feed = str(UUID(request["reconcile_operator"]))
+        if not store.db.execute(
+            "SELECT 1 FROM proof_disposition WHERE id=? AND purpose='operator_transfer' "
+            "AND json_extract(binding,'$.feed')=? AND json_type(binding,'$.operator')='object'",
+            (feed, feed),
+        ).fetchone():
+            return {"state": "UNRESERVED"}
+        return submit_payout(store, client, feed, request["invoice"], keyset, pinned_keys, reconcile_only=True)
     if set(request) == {"reconcile_disposition", "invoice"}:
         return submit_payout(store, client, request["reconcile_disposition"], request["invoice"],
                              keyset, pinned_keys, reconcile_only=True)

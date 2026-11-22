@@ -215,83 +215,136 @@ impl Request {
         self.validate_response(&raw, crate::cyberherd::calendar::now()?)
     }
     pub(crate) fn validate_response(&self, raw: &[u8], now: i64) -> Result<ValidatedInvoice> {
-        #[derive(Deserialize)]
-        struct Wire {
-            status: Option<String>,
-            pr: String,
-        }
-        if raw.len() > MAX_INVOICE_RESPONSE {
-            bail!("recipient invoice response exceeds bound");
-        }
-        let wire: Wire = serde_json::from_slice(raw)
-            .map_err(|_| anyhow::anyhow!("invalid recipient invoice response"))?;
-        if wire.status.as_deref().is_some_and(|status| status != "OK") {
-            bail!("recipient rejected invoice request");
-        }
-        // Wrapper success is never payment authority: the signed invoice must
-        // still match the frozen amount, description hash, network and expiry.
-        self.validate_invoice(&wire.pr, now)
+        let invoice = response_invoice(raw)?;
+        self.validate_invoice(&invoice, now)
     }
     pub(crate) fn validate_invoice(&self, encoded: &str, now: i64) -> Result<ValidatedInvoice> {
-        if encoded.is_empty() || encoded.len() > 8192 || now < 0 {
-            bail!("invalid outgoing invoice size/time");
-        }
-        let parsed: lightning_invoice::Bolt11Invoice = encoded
-            .parse()
-            .map_err(|_| anyhow::anyhow!("invalid outgoing BOLT11 invoice"))?;
-        let payment_hash = parsed.payment_hash().to_string();
-        use lightning_invoice::Bolt11InvoiceDescriptionRef;
-        let (description_hash, nip57) = match parsed.description() {
-            Bolt11InvoiceDescriptionRef::Hash(h) if h.0.to_string() == self.description_hash => {
-                (self.description_hash.clone(), self.raw_zap.is_some())
-            }
-            Bolt11InvoiceDescriptionRef::Hash(h)
-                if h.0.to_string() == self.intent.0.recipient.metadata_hash =>
-            {
-                (self.intent.0.recipient.metadata_hash.clone(), false)
-            }
-            Bolt11InvoiceDescriptionRef::Direct(text) => (
-                hex::encode(Sha256::digest(text.to_string().as_bytes())),
-                false,
-            ),
-            _ => bail!("invoice description hash matches neither zap nor recipient metadata"),
-        };
-        let parsed = if nip57 {
-            crate::bolt11::verify(
-                encoded,
-                self.intent.0.net_sats * 1000,
-                &payment_hash,
-                &description_hash,
-            )
-        } else {
-            crate::bolt11::verify_payout(
-                encoded,
-                self.intent.0.net_sats * 1000,
-                &payment_hash,
-                &description_hash,
-            )
-        }
-        .map_err(|_| anyhow::anyhow!("outgoing invoice contradicts frozen request"))?;
-        let created = parsed.duration_since_epoch().as_secs();
-        let expires_at = parsed
-            .expires_at()
-            .context("outgoing invoice has invalid expiry")?
-            .as_secs();
-        let now = u64::try_from(now)?;
-        if created > now.saturating_add(30) || expires_at < now.saturating_add(30) {
-            bail!("outgoing invoice is future-dated or lacks remaining validity");
-        }
-        Ok(ValidatedInvoice {
-            intent_id: self.intent.id(),
-            encoded: encoded.into(),
-            payment_hash,
-            description_hash,
-            nip57,
-            amount_sats: self.intent.0.net_sats,
-            expires_at,
-            node_pubkey: parsed.recover_payee_pub_key().to_string(),
-        })
+        validate_signed_invoice(
+            self.intent.id(),
+            self.intent.0.net_sats,
+            &self.description_hash,
+            &self.intent.0.recipient.metadata_hash,
+            self.raw_zap.is_some(),
+            encoded,
+            now,
+        )
     }
+}
+
+fn response_invoice(raw: &[u8]) -> Result<String> {
+    #[derive(Deserialize)]
+    struct Wire {
+        status: Option<String>,
+        pr: String,
+    }
+    if raw.len() > MAX_INVOICE_RESPONSE {
+        bail!("recipient invoice response exceeds bound");
+    }
+    let wire: Wire = serde_json::from_slice(raw)
+        .map_err(|_| anyhow::anyhow!("invalid recipient invoice response"))?;
+    if wire.status.as_deref().is_some_and(|status| status != "OK") {
+        bail!("recipient rejected invoice request");
+    }
+    Ok(wire.pr)
+}
+
+/// Ordinary LNURL-pay to the configured operator wallet, bound to one feeding.
+pub async fn fetch_operator_invoice(
+    feed: Uuid,
+    address: &str,
+    recipient: &Recipient,
+    amount_sats: u64,
+) -> Result<ValidatedInvoice> {
+    recipient.validate(address)?;
+    let amount_msat = amount_sats
+        .checked_mul(1000)
+        .context("operator invoice amount overflow")?;
+    if feed.is_nil() || !(recipient.min_msat..=recipient.max_msat).contains(&amount_msat) {
+        bail!("operator invoice outside recipient limits");
+    }
+    let raw = public_network::get_json_query(
+        &recipient.callback,
+        &[("amount".into(), amount_msat.to_string())],
+        MAX_INVOICE_RESPONSE,
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("operator invoice request failed"))?;
+    validate_signed_invoice(
+        feed,
+        amount_sats,
+        &recipient.metadata_hash,
+        &recipient.metadata_hash,
+        false,
+        &response_invoice(&raw)?,
+        crate::cyberherd::calendar::now()?,
+    )
+}
+
+fn validate_signed_invoice(
+    intent_id: Uuid,
+    amount_sats: u64,
+    expected_hash: &str,
+    metadata_hash: &str,
+    requested_zap: bool,
+    encoded: &str,
+    now: i64,
+) -> Result<ValidatedInvoice> {
+    if encoded.is_empty() || encoded.len() > 8192 || now < 0 {
+        bail!("invalid outgoing invoice size/time");
+    }
+    let parsed: lightning_invoice::Bolt11Invoice = encoded
+        .parse()
+        .map_err(|_| anyhow::anyhow!("invalid outgoing BOLT11 invoice"))?;
+    let payment_hash = parsed.payment_hash().to_string();
+    use lightning_invoice::Bolt11InvoiceDescriptionRef;
+    let (description_hash, nip57) = match parsed.description() {
+        Bolt11InvoiceDescriptionRef::Hash(h) if h.0.to_string() == expected_hash => {
+            (expected_hash.to_owned(), requested_zap)
+        }
+        Bolt11InvoiceDescriptionRef::Hash(h) if h.0.to_string() == metadata_hash => {
+            (metadata_hash.to_owned(), false)
+        }
+        Bolt11InvoiceDescriptionRef::Direct(text) => (
+            hex::encode(Sha256::digest(text.to_string().as_bytes())),
+            false,
+        ),
+        _ => bail!("invoice description hash matches neither zap nor recipient metadata"),
+    };
+    let parsed = if nip57 {
+        crate::bolt11::verify(
+            encoded,
+            amount_sats * 1000,
+            &payment_hash,
+            &description_hash,
+        )
+    } else {
+        crate::bolt11::verify_payout(
+            encoded,
+            amount_sats * 1000,
+            &payment_hash,
+            &description_hash,
+        )
+    }
+    .map_err(|_| anyhow::anyhow!("outgoing invoice contradicts frozen request"))?;
+    let created = parsed.duration_since_epoch().as_secs();
+    let expires_at = parsed
+        .expires_at()
+        .context("outgoing invoice has invalid expiry")?
+        .as_secs();
+    let now = u64::try_from(now)?;
+    if created > now.saturating_add(30) || expires_at < now.saturating_add(30) {
+        bail!("outgoing invoice is future-dated or lacks remaining validity");
+    }
+    Ok(ValidatedInvoice {
+        intent_id,
+        encoded: encoded.into(),
+        payment_hash,
+        description_hash,
+        nip57,
+        amount_sats,
+        expires_at,
+        node_pubkey: parsed.recover_payee_pub_key().to_string(),
+    })
 }
 
 /// Created by signed invoice validation, not by deserializing provider wrappers.

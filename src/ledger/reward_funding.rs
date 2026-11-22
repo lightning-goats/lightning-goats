@@ -158,6 +158,7 @@ impl LedgerStore {
         let (parts, through, more) =
             funding_parts(&mut tx, request_id, funding.retained_cashu_sats, after).await?;
         let page = crate::reward_funding::OperatorFundingPage {
+            invoice_enabled: false,
             epoch,
             request_id,
             owner: policy.owner.clone(),

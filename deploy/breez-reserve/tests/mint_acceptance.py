@@ -176,7 +176,7 @@ def start_mint(directory, socket, reserve, credentials, *, watchdog=False, input
            "MINT_MAX_MINT_BOLT11_SAT": "0", "MINT_MAX_MELT_BOLT11_SAT": "1000001",
            "MINT_INPUT_FEE_PPK": str(input_fee_ppk), "MINT_QUOTE_BACKEND_CHECK_RATE_LIMIT": "0", "LOG_LEVEL": "INFO"}
     process = subprocess.Popen([sys.executable, "-m", "lg_mint"], cwd=directory, env=env, stdout=log, stderr=log)
-    client = httpx.Client(transport=httpx.HTTPTransport(uds=str(socket)), base_url="http://mint", timeout=6)
+    client = httpx.Client(transport=httpx.HTTPTransport(uds=str(socket)), base_url="http://mint", timeout=30)
     deadline = time.monotonic() + 60
     while time.monotonic() < deadline:
         if process.poll() is not None:
@@ -640,6 +640,10 @@ def exercise_payout(operator_transfer):
                 claims = ClaimStore(claim_dir)
                 assert create(core_lookup, claims, None, None, None) == final_melt
                 assert create(other_lookup, claims, None, None, None) is None
+                operator_status = execute_payout(claims, LookupOnly(), {
+                    "reconcile_operator": payment_id, "invoice": reserve.destination[0]
+                }, keyset, {keyset: keys})
+                assert operator_status == (final_melt if operator_transfer else {"state": "UNRESERVED"})
                 try:
                     create({**core_lookup, "feed_id": str(uuid.uuid4())}, claims, None, None, None)
                 except ValueError:

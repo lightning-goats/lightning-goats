@@ -212,6 +212,14 @@ impl Store {
         let fee = i64::try_from(maximum_fee_sat)?;
         let mut tx = self.pool.begin().await?;
         write_lock(&mut tx).await?;
+        let feed: String =
+            sqlx::query_scalar("SELECT request_id FROM payout_intake_receipts WHERE sequence=?")
+                .bind(sequence)
+                .fetch_one(&mut *tx)
+                .await?;
+        if feed != invoice.intent_id().to_string() || invoice.nip57() {
+            bail!("operator invoice is not bound to this feeding");
+        }
         let saved: Option<(String,String,String,i64,i64)> = sqlx::query_as(
             "SELECT address,invoice,payment_hash,amount_sat,maximum_fee_sat FROM payout_operator_invoices WHERE sequence=?"
         ).bind(sequence).fetch_optional(&mut *tx).await?;
@@ -290,6 +298,37 @@ impl Store {
         }
         tx.commit().await?;
         Ok(sequence)
+    }
+
+    /// A lost response can be recovered with the feed UUID and exact frozen invoice.
+    /// The collector lookup accepts neither a spending allowance nor proof inputs.
+    pub(crate) async fn reconcile_operator(
+        &self,
+        sequence: i64,
+        socket: &std::path::Path,
+    ) -> Result<bool> {
+        let saved: Option<(String, String)> = sqlx::query_as(
+            "SELECT r.request_id,i.invoice FROM payout_operator_invoices i
+             JOIN payout_intake_receipts r USING(sequence) WHERE i.sequence=?",
+        )
+        .bind(sequence)
+        .fetch_optional(&self.pool)
+        .await?;
+        if let Some((feed, invoice)) = saved {
+            let result: super::super::cashu::CollectorResult = crate::private_ipc::request(
+                socket,
+                0,
+                &serde_json::json!({"reconcile_operator":feed,"invoice":invoice}),
+                65536,
+                30,
+            )
+            .await?;
+            if matches!(result, super::super::cashu::CollectorResult::Paid { .. }) {
+                self.settle_operator_invoice(sequence, &result).await?;
+            }
+            return Ok(true);
+        }
+        Ok(false)
     }
 
     pub(crate) async fn take_work(&self, now: i64) -> Result<Option<Work>> {

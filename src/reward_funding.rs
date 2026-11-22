@@ -150,6 +150,8 @@ pub struct OperatorAllocation {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct OperatorFundingPage {
+    #[serde(default)]
+    pub invoice_enabled: bool,
     pub epoch: Uuid,
     pub request_id: Uuid,
     pub owner: String,

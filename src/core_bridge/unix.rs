@@ -500,9 +500,12 @@ async fn serve_one(
                     .operator_funding_page(policy, expected_epoch, request_id, after)
                     .await
                 {
-                    Ok(page) => Response::OperatorFunding {
-                        page: Box::new(page),
-                    },
+                    Ok(mut page) => {
+                        page.invoice_enabled = payout_execution_enabled && mode.feeder_enabled();
+                        Response::OperatorFunding {
+                            page: Box::new(page),
+                        }
+                    }
                     Err(_) => Response::Rejected,
                 },
                 _ => Response::Rejected,

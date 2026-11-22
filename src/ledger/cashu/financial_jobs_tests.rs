@@ -234,12 +234,19 @@ async fn local_ecash_funds_confirmed_feeding_and_only_legacy_lots_can_be_swept()
     reopened.record_collector_handoff(&handoff).await.unwrap();
     handoff.collected_sats = 1000;
     assert!(reopened.record_collector_handoff(&handoff).await.is_err());
-    let request = reopened.begin_feed_attempt(1000).await.unwrap().unwrap();
-    reopened.confirm_feed_attempt(request).await.unwrap();
-    assert_eq!(reopened.feed_credit_sats().await.unwrap(),400);
+    let mut feeds = Vec::new();
+    for spendable in [500, 499] {
+        let request = reopened.begin_feed_attempt(500).await.unwrap().unwrap();
+        reopened.confirm_feed_attempt(request).await.unwrap();
+        feeds.push((request, spendable));
+    }
+    assert_eq!(reopened.feed_credit_sats().await.unwrap(), 400);
     let mut tx = reopened.pool.begin().await.unwrap();
-    let funding = crate::ledger::inspect_confirmed_reward_funding(&mut tx,request).await.unwrap().unwrap();
-    assert_eq!((funding.strike_sats,funding.retained_cashu_sats),(0,999));
+    for (request, spendable) in feeds {
+        let funding = crate::ledger::inspect_confirmed_reward_funding(&mut tx, request)
+            .await.unwrap().unwrap();
+        assert_eq!((funding.strike_sats, funding.retained_cashu_sats), (0, spendable));
+    }
     tx.rollback().await.unwrap();
     assert_eq!(count(&reopened,"cashu_treasury_intents").await,0);
     let retained_id: i64 = sqlx::query_scalar("SELECT ledger_id FROM retained_cashu_lots")

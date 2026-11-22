@@ -242,10 +242,24 @@ async fn local_ecash_funds_confirmed_feeding_and_only_legacy_lots_can_be_swept()
     }
     assert_eq!(reopened.feed_credit_sats().await.unwrap(), 400);
     let mut tx = reopened.pool.begin().await.unwrap();
+    let reward_policy = crate::reward_funding::RewardPolicy {
+        funding_source: crate::reward_funding::RewardFundingSource::RetainedCashu,
+        owner: crate::nostr_event::test_event(1, 1, 100, "operator funding", vec![]).pubkey,
+        member_percent_ceiling: 10, max_sats_per_feed: 100, max_sats_per_24h: 1000,
+    };
     for (request, spendable) in feeds {
         let funding = crate::ledger::inspect_confirmed_reward_funding(&mut tx, request)
             .await.unwrap().unwrap();
         assert_eq!((funding.strike_sats, funding.retained_cashu_sats), (0, spendable));
+        let page = reopened.operator_funding_page(&reward_policy, policy.core_epoch, request, 0).await.unwrap();
+        assert_eq!(page.funding, funding);
+        assert!(page.reservation.is_none());
+        assert!(!page.more);
+        assert_eq!(page.allocations.iter().map(|a| a.consumed_sats).sum::<u64>(), spendable);
+        let member = reopened.reserve_reward(&reward_policy, policy.core_epoch, request, &"ab".repeat(32), 10).await.unwrap();
+        let reserved = reopened.operator_funding_page(&reward_policy, policy.core_epoch, request, 0).await.unwrap();
+        assert_eq!(reserved.reservation, Some(member));
+        assert_eq!(reserved.allocations, page.allocations);
     }
     tx.rollback().await.unwrap();
     assert_eq!(count(&reopened,"cashu_treasury_intents").await,0);

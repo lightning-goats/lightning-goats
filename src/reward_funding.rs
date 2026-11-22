@@ -131,6 +131,21 @@ pub struct FundingPage {
     pub parts: Vec<FundingPart>,
 }
 
+/// Authenticated readback of a confirmed feed, including feeds with no member grant.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct OperatorFundingPage {
+    pub epoch: Uuid,
+    pub request_id: Uuid,
+    pub owner: String,
+    pub funding: Funding,
+    pub reservation: Option<Reservation>,
+    pub after: i64,
+    pub through: i64,
+    pub more: bool,
+    pub allocations: Vec<crate::payout::funding::RetainedAllocation>,
+}
+
 impl FundingPage {
     pub fn execution_permitted(&self, now: i64) -> bool {
         self.funding_source.is_strike() && self.execution_enabled && self.is_fresh(now)

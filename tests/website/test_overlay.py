@@ -287,6 +287,22 @@ class OverlayBrowserTests(unittest.TestCase):
         self.assertEqual(self.page.locator("#credit").inner_text(), "305 sats credit")
         self.assertEqual(self.errors, [])
 
+    def test_owner_pulse_preempts_payment_and_completion_does_not_repeat_effect(self):
+        self.page.clock.pause_at(self.page.evaluate("Date.now() + 60000"))
+        self.snapshot(credit=999)
+        self.send({"type":"sats_received","source_type":"payment_received","seq":1,
+                   "amount_sats":10,"feed_credit_sats":1009,"message":"Payment received"})
+        attempt = "90dcd1d4-e576-46e8-84e2-7e08aad8d712"
+        self.send({"type":"feeder_pulse_started","seq":2,"feed_attempt_id":attempt})
+        self.assertTrue(self.page.locator("#feeder-triggered").is_visible())
+        self.assertFalse(self.page.locator("#sats-received-overlay").is_visible())
+        self.assertEqual(self.page.locator("#credit").inner_text(), "1,009 sats credit")
+        self.page.clock.run_for(3100)
+        self.send({"type":"feeder_trigger","source_type":"feeder_confirmed","seq":3,
+                   "feed_attempt_id":attempt,"feed_credit_sats":9})
+        self.assertFalse(self.page.locator("#feeder-triggered").is_visible())
+        self.assertEqual(self.page.locator("#credit").inner_text(), "9 sats credit")
+
     def test_payment_reaching_threshold_never_fakes_a_feed(self):
         # Hold the short spark animation while assertions run, even when the
         # host is busy compiling Rust. Advance it explicitly below.

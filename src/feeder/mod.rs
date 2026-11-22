@@ -89,7 +89,7 @@ pub async fn run_feed_step(
         return Ok(FeedWorkerStep::Idle);
     };
 
-    let status = match gateway.request_feed(attempt_id).await {
+    let status = match gateway.request_feed_with_pulse_notice(attempt_id).await {
         Ok(status) => status,
         Err(error) => {
             ledger
@@ -97,6 +97,27 @@ pub async fn run_feed_step(
                 .await?;
             return Err(error).context("gateway feed outcome remains unresolved");
         }
+    };
+    let status = if status.status == FeedOutcome::PulseStarted {
+        // Only the first POST can announce a pulse. Keep the same durable
+        // attempt and use read-only status checks until evidence of completion.
+        ledger
+            .append_event(
+                "feeder_pulse_started",
+                &serde_json::json!({"feed_attempt_id":attempt_id}),
+            )
+            .await?;
+        let mut observed = gateway.feed_request_status(attempt_id).await?;
+        for _ in 0..12 {
+            if observed.status != FeedOutcome::Pending {
+                break;
+            }
+            sleep(Duration::from_millis(250)).await;
+            observed = gateway.feed_request_status(attempt_id).await?;
+        }
+        observed
+    } else {
+        status
     };
     apply_outcome(
         ledger,
@@ -141,7 +162,7 @@ async fn apply_outcome(
                 .await?;
             Ok(FeedWorkerStep::NotDispatched { attempt_id })
         }
-        FeedOutcome::Pending | FeedOutcome::Ambiguous => {
+        FeedOutcome::PulseStarted | FeedOutcome::Pending | FeedOutcome::Ambiguous => {
             if stored == StoredFeedAttemptStatus::IntentCommitted {
                 ledger
                     .mark_feed_unknown(

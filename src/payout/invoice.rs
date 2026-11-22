@@ -211,8 +211,25 @@ impl Request {
             MAX_INVOICE_RESPONSE,
         )
         .await
-        .map_err(|_| anyhow::anyhow!("recipient invoice request failed"))?;
+        .map_err(|_| {
+            tracing::warn!("recipient invoice HTTP request failed");
+            anyhow::anyhow!("recipient invoice request failed")
+        })?;
         self.validate_response(&raw, crate::cyberherd::calendar::now()?)
+            .inspect_err(|error| {
+                let reason = match error.to_string().as_str() {
+                    "invoice description hash matches neither zap nor recipient metadata" => {
+                        "description_hash"
+                    }
+                    "outgoing invoice is future-dated or lacks remaining validity" => "timestamp",
+                    "invalid outgoing BOLT11 invoice" => "invalid_bolt11",
+                    "outgoing invoice contradicts frozen request" => "invoice_terms",
+                    "invalid recipient invoice response" => "response_format",
+                    "recipient rejected invoice request" => "recipient_rejection",
+                    _ => "other",
+                };
+                tracing::warn!(reason, "recipient response failed invoice validation");
+            })
     }
     pub(crate) fn validate_response(&self, raw: &[u8], now: i64) -> Result<ValidatedInvoice> {
         let invoice = response_invoice(raw)?;
@@ -235,7 +252,7 @@ fn response_invoice(raw: &[u8]) -> Result<String> {
     #[derive(Deserialize)]
     struct Wire {
         status: Option<String>,
-        pr: String,
+        pr: Option<String>,
     }
     if raw.len() > MAX_INVOICE_RESPONSE {
         bail!("recipient invoice response exceeds bound");
@@ -245,7 +262,7 @@ fn response_invoice(raw: &[u8]) -> Result<String> {
     if wire.status.as_deref().is_some_and(|status| status != "OK") {
         bail!("recipient rejected invoice request");
     }
-    Ok(wire.pr)
+    wire.pr.context("invalid recipient invoice response")
 }
 
 /// Ordinary LNURL-pay to the configured operator wallet, bound to one feeding.
@@ -756,6 +773,13 @@ mod tests {
             let error = request.validate_response(&raw, 1000).unwrap_err();
             assert!(!format!("{error:#}").contains("synthetic-private"));
         }
+        assert_eq!(
+            response_invoice(br#"{"status":"ERROR","reason":"synthetic-private"}"#)
+                .unwrap_err()
+                .to_string(),
+            "recipient rejected invoice request"
+        );
+        assert!(response_invoice(br#"{"status":"OK"}"#).is_err());
         let mut doc = i.0;
         doc.recipient.callback = "https://10.8.0.6/callback".into();
         assert!(Intent::restore(doc).is_err());

@@ -89,6 +89,7 @@ impl LedgerStore {
         let more = rows.len() > MAX_FUNDING_PARTS;
         let mut parts = Vec::new();
         let mut through = after;
+        let has_collector_handoffs = super::core_schema_version(&mut tx).await? >= 36;
         for row in rows.into_iter().take(MAX_FUNDING_PARTS) {
             let ledger_id: i64 = row.try_get("ledger_id")?;
             let kind: String = row.try_get("kind")?;
@@ -119,7 +120,13 @@ impl LedgerStore {
             } else {
                 None
             };
+            let collected_sats = if kind != "conversion" && has_collector_handoffs {
+                acquisition_proceeds(&mut tx, reservation.request_id, ledger_id).await?
+            } else {
+                None
+            };
             parts.push(FundingPart {
+                collected_sats,
                 ledger_id,
                 consumed_sats: to_u64(row.try_get("sats")?, "consumed sats")?,
                 anchor,
@@ -603,7 +610,12 @@ async fn consume(
             if kind == "strike_btc" {
                 strike = strike.checked_add(take).context("real funding overflow")?;
             } else if let Some((id, _)) = feed {
-                hash_retained_claim(tx, ledger, take, &mut hash).await?;
+                sqlx::query("INSERT INTO feed_acquisition_proceeds(request_id,ledger_id,sats)
+                    SELECT ?1,h.ledger_id, MIN(?2,MAX(0,h.collected_sats-COALESCE((
+                      SELECT SUM(prior.sats) FROM feed_reward_funding_parts prior WHERE prior.ledger_id=h.ledger_id AND prior.request_id!=?1),0)))
+                    FROM collector_handoff_amounts h WHERE h.ledger_id=?3")
+                    .bind(id.to_string()).bind(to_i64(take,"consumed credit")?).bind(ledger).execute(&mut **tx).await?;
+                hash_retained_claim(tx, id, ledger, take, &mut hash, true).await?;
                 feed_proceeds::freeze(tx, id, ledger).await?;
                 hash_conversion_proceeds(tx, id, ledger, &mut hash).await?;
                 add_proceeds(tx, id, ledger, &mut hash, &mut strike).await?;
@@ -621,11 +633,20 @@ async fn consume(
 /// invoice alone nor an ordinary viewer mint quote can contribute here.
 async fn hash_retained_claim(
     tx: &mut Transaction<'_, Sqlite>,
+    feed: Uuid,
     ledger: i64,
     sats: u64,
     hash: &mut Sha256,
+    has_handoff_schema: bool,
 ) -> Result<u64> {
     if let Some(anchor) = retained_anchor(tx, ledger).await? {
+        let sats = if has_handoff_schema {
+            acquisition_proceeds(tx, feed, ledger)
+                .await?
+                .unwrap_or(sats)
+        } else {
+            sats
+        };
         hash_part(
             hash,
             &json!([
@@ -640,6 +661,21 @@ async fn hash_retained_claim(
         return Ok(sats);
     }
     Ok(0)
+}
+
+async fn acquisition_proceeds(
+    tx: &mut Transaction<'_, Sqlite>,
+    feed: Uuid,
+    ledger: i64,
+) -> Result<Option<u64>> {
+    let amount: Option<i64> = sqlx::query_scalar(
+        "SELECT sats FROM feed_acquisition_proceeds WHERE request_id=? AND ledger_id=?",
+    )
+    .bind(feed.to_string())
+    .bind(ledger)
+    .fetch_optional(&mut **tx)
+    .await?;
+    amount.map(|s| to_u64(s, "collector proceeds")).transpose()
 }
 
 async fn retained_anchor(
@@ -787,7 +823,9 @@ pub(crate) async fn confirmed_funding(
             }
             if schema >= 30 && kind != "strike_btc" {
                 retained_cashu_sats = retained_cashu_sats
-                    .checked_add(hash_retained_claim(tx, ledger, sats, &mut hash).await?)
+                    .checked_add(
+                        hash_retained_claim(tx, id, ledger, sats, &mut hash, schema >= 36).await?,
+                    )
                     .context("retained Cashu funding overflow")?;
             }
             if schema >= 35 && kind != "strike_btc" {

@@ -1,5 +1,5 @@
 use super::{Report, Table};
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use futures_util::TryStreamExt as _;
 use sha2::{Digest as _, Sha256};
 use sqlx::{
@@ -37,7 +37,8 @@ pub(in crate::state_maintenance) async fn open_named(
                 .pragma("hard_heap_limit", "268435456")
                 .busy_timeout(Duration::from_secs(5)),
         )
-        .await?;
+        .await
+        .context("opening copied journal for read-only verification")?;
     let result: Result<()> = async {
         let engine: String = sqlx::query_scalar("SELECT sqlite_version()")
             .fetch_one(&pool)
@@ -47,7 +48,8 @@ pub(in crate::state_maintenance) async fn open_named(
         }
         let integrity: Vec<String> = sqlx::query_scalar("PRAGMA integrity_check")
             .fetch_all(&pool)
-            .await?;
+            .await
+            .context("checking copied journal integrity")?;
         if integrity != ["ok"]
             || sqlx::query("PRAGMA foreign_key_check")
                 .fetch_optional(&pool)
@@ -263,7 +265,9 @@ async fn epoch(pool: &SqlitePool) -> Result<uuid::Uuid> {
 pub(super) async fn inspect(directory: &Path) -> Result<Report> {
     let pool = open(directory).await?;
     let result: Result<Report> = async {
-        let migrations = schema(&pool, false).await?;
+        let migrations = schema(&pool, false)
+            .await
+            .context("checking legacy migration history")?;
         let names = names(&pool).await?;
         if names.iter().any(|name| {
             name.starts_with("reward_")
@@ -277,7 +281,9 @@ pub(super) async fn inspect(directory: &Path) -> Result<Report> {
         for name in names {
             tables.insert(
                 name.clone(),
-                digest(&pool, &name, &columns(&pool, &name).await?).await?,
+                digest(&pool, &name, &columns(&pool, &name).await?)
+                    .await
+                    .context("digesting legacy journal rows")?,
             );
         }
         Ok(Report {
@@ -309,6 +315,8 @@ pub(super) async fn compare(directory: &Path, original: &Report) -> Result<()> {
                 "retained_cashu_lots",
                 "breez_collected_claims",
                 "breez_project_invoices",
+                "feed_acquisition_proceeds",
+                "collector_handoff_amounts",
                 "feed_conversion_proceeds",
                 "cashu_funding_ranges",
                 "breez_treasury_inspections",

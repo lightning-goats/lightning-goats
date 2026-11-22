@@ -296,6 +296,10 @@ CREATE TABLE IF NOT EXISTS collector_handoffs (
     delivered INTEGER NOT NULL DEFAULT 0 CHECK(delivered IN (0,1)),
     next_attempt INTEGER NOT NULL DEFAULT 0 CHECK(next_attempt>=0)
 );
+CREATE TABLE IF NOT EXISTS collector_handoff_amounts (
+    acquisition_id TEXT PRIMARY KEY NOT NULL REFERENCES collector_handoffs(acquisition_id),
+    collected_sats INTEGER NOT NULL CHECK(collected_sats>0)
+);
 CREATE TRIGGER IF NOT EXISTS handoff_requires_unreserved_source BEFORE INSERT ON collector_handoffs
 WHEN EXISTS(SELECT 1 FROM treasury_source_holds WHERE acquisition_id=NEW.acquisition_id)
 BEGIN SELECT RAISE(ABORT,'acquisition already assigned to treasury'); END;
@@ -1199,14 +1203,34 @@ impl Journal {
         id.map(|s| Ok(Uuid::parse_str(&s)?)).transpose()
     }
 
-    pub(crate) fn finish_collector_handoff(&self, id: Uuid) -> Result<()> {
+    pub(crate) fn finish_collector_handoff(&mut self, id: Uuid, collected_sats: u64) -> Result<()> {
+        let tx = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let id = id.to_string();
+        let net: u64 = tx.query_row(
+            "SELECT net FROM acquisitions JOIN collector_handoffs ON acquisitions.id=acquisition_id
+             WHERE acquisition_id=?",
+            [&id],
+            |row| row.get(0),
+        )?;
         ensure!(
-            self.connection.execute(
-                "UPDATE collector_handoffs SET delivered=1 WHERE acquisition_id=?",
-                [id.to_string()]
-            )? == 1,
-            "missing collector handoff"
+            collected_sats > 0 && collected_sats <= net,
+            "invalid collected amount"
         );
+        tx.execute(
+            "INSERT INTO collector_handoff_amounts VALUES(?,?) ON CONFLICT(acquisition_id) DO NOTHING",
+            rusqlite::params![id, collected_sats],
+        )?;
+        ensure!(
+            tx.execute(
+                "UPDATE collector_handoffs SET delivered=1 WHERE acquisition_id=?
+                 AND EXISTS (SELECT 1 FROM collector_handoff_amounts WHERE acquisition_id=? AND collected_sats=?)",
+                rusqlite::params![id, id, collected_sats],
+            )? == 1,
+            "collector handoff amount changed"
+        );
+        tx.commit()?;
         Ok(())
     }
 
@@ -1817,7 +1841,10 @@ mod tests {
             custody::Custody::read(&journal.connection, None)?.retained_sats,
             15
         );
-        journal.finish_collector_handoff(id)?;
+        assert!(journal.finish_collector_handoff(id, 16).is_err());
+        journal.finish_collector_handoff(id, 14)?;
+        journal.finish_collector_handoff(id, 14)?;
+        assert!(journal.finish_collector_handoff(id, 15).is_err());
         journal.acknowledge_credit(id, b"original core grant", true)?;
         assert_eq!(journal.claim_collector_handoff()?, None);
         assert_eq!(

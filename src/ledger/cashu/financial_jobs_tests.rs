@@ -222,12 +222,31 @@ async fn local_ecash_funds_confirmed_feeding_and_only_legacy_lots_can_be_swept()
     let reopened = LedgerStore::connect(&url).await.unwrap();
     assert!(reopened.import_cashu_receipt(&policy,&peer).await.unwrap().retained_cashu);
     assert_eq!(count(&reopened,"retained_cashu_lots").await,1);
-    let request = reopened.begin_feed_attempt(1000).await.unwrap().unwrap();
-    reopened.confirm_feed_attempt(request).await.unwrap();
-    assert_eq!(reopened.feed_credit_sats().await.unwrap(),400);
+    let mut handoff = lightning_goats_cashu_receipt::CollectorHandoff {
+        wallet_instance: policy.wallet_instance,
+        wallet_epoch: policy.wallet_epoch,
+        core_epoch: policy.core_epoch,
+        acquisition_id: local.data().acquisition_id,
+        evidence_digest: local.data().acquisition_evidence_digest.clone(),
+        collected_sats: 999,
+    };
+    reopened.record_collector_handoff(&handoff).await.unwrap();
+    reopened.record_collector_handoff(&handoff).await.unwrap();
+    handoff.collected_sats = 1000;
+    assert!(reopened.record_collector_handoff(&handoff).await.is_err());
+    let mut feeds = Vec::new();
+    for spendable in [500, 499] {
+        let request = reopened.begin_feed_attempt(500).await.unwrap().unwrap();
+        reopened.confirm_feed_attempt(request).await.unwrap();
+        feeds.push((request, spendable));
+    }
+    assert_eq!(reopened.feed_credit_sats().await.unwrap(), 400);
     let mut tx = reopened.pool.begin().await.unwrap();
-    let funding = crate::ledger::inspect_confirmed_reward_funding(&mut tx,request).await.unwrap().unwrap();
-    assert_eq!((funding.strike_sats,funding.retained_cashu_sats),(0,1000));
+    for (request, spendable) in feeds {
+        let funding = crate::ledger::inspect_confirmed_reward_funding(&mut tx, request)
+            .await.unwrap().unwrap();
+        assert_eq!((funding.strike_sats, funding.retained_cashu_sats), (0, spendable));
+    }
     tx.rollback().await.unwrap();
     assert_eq!(count(&reopened,"cashu_treasury_intents").await,0);
     let retained_id: i64 = sqlx::query_scalar("SELECT ledger_id FROM retained_cashu_lots")

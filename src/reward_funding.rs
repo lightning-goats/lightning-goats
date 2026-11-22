@@ -102,6 +102,8 @@ impl CashuFundingAnchor {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct FundingPart {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collected_sats: Option<u64>,
     pub ledger_id: i64,
     pub consumed_sats: u64,
     pub anchor: Option<StrikeFundingAnchor>,
@@ -162,8 +164,17 @@ impl FundingPage {
             if part.ledger_id <= cursor || part.consumed_sats == 0 {
                 bail!("funding page is not strictly ordered");
             }
+            if part
+                .collected_sats
+                .is_some_and(|s| s > part.consumed_sats || (s > 0 && part.cashu_anchor.is_none()))
+            {
+                bail!("invalid collected Cashu proceeds");
+            }
             if let Some(anchor) = &part.cashu_anchor {
-                if part.anchor.is_some() || part.consumed_sats > self.funding.retained_cashu_sats {
+                if part.anchor.is_some()
+                    || part.collected_sats.unwrap_or(part.consumed_sats)
+                        > self.funding.retained_cashu_sats
+                {
                     bail!("invalid retained Cashu funding part");
                 }
                 anchor.validate()?;

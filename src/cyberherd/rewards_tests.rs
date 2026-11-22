@@ -361,7 +361,7 @@ async fn mixed_funding_freezes_whole_sat_shares_and_exact_reservation_across_res
             plan.plan.reserved_sats,
             plan.plan.operations_sats
         ),
-        (700, 70, 68, 932)
+        (700, 70, 68, 632)
     );
     // Six-decimal percentages are frozen before sat rounding: 70 * 2.142857
     // / 10 is 14.999999, so the repost share is 14 sats, not the full-rational
@@ -646,7 +646,7 @@ async fn virtual_and_zero_allocations_close_without_lookups_or_backpay() {
                 plan.plan.operations_sats,
                 plan.state
             ),
-            (0, 1000, State::NoPayout)
+            (0, 1000 - virtual_sats, State::NoPayout)
         );
         assert!(plan.plan.rows.is_empty());
         let later = f.freeze(&policy()).await.unwrap();
@@ -912,7 +912,7 @@ async fn payment_limit_skips_oversized_shares_without_reallocation_and_zero_clos
         assert_eq!(frozen.plan.reserved_sats, if maximum == 0 { 0 } else { 5 });
         assert_eq!(
             frozen.plan.operations_sats,
-            if maximum == 0 { 1000 } else { 995 }
+            if maximum == 0 { 700 } else { 695 }
         );
         for row in &frozen.plan.rows {
             if maximum == 0 || row.pubkey != key(4) {

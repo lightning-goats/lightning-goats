@@ -197,6 +197,15 @@ pub struct Plan {
 }
 
 impl Plan {
+    pub(crate) fn valid_operations_remainder(&self) -> bool {
+        let base = match self.version {
+            1 => self.threshold_sats,
+            2 => self.real_sats,
+            _ => return false,
+        };
+        base.checked_sub(self.reserved_sats) == Some(self.operations_sats)
+    }
+
     pub fn hash(&self) -> Result<String> {
         hash(self)
     }
@@ -258,7 +267,7 @@ pub(super) fn build(
     let budget = u64::try_from(u128::from(real_sats) * u128::from(percent) / 100)?.min(cap);
     let mut plan = Plan {
         funding_source,
-        version: 1,
+        version: 2,
         owner: snapshot.owner.clone(),
         epoch: binding.epoch,
         core_uid: binding.core_uid,
@@ -272,7 +281,7 @@ pub(super) fn build(
         member_percent: percent,
         budget_sats: budget,
         reserved_sats: 0,
-        operations_sats: barrier.feeding.threshold_sats,
+        operations_sats: real_sats,
         root_policy_hash: allowance.map(|a| a.policy_hash.clone()),
         planning_policy: policy.clone(),
         created_at: now,
@@ -429,7 +438,7 @@ pub(super) fn build(
         bail!("reward plan exceeds currently available root budget");
     }
     plan.operations_sats = plan
-        .threshold_sats
+        .real_sats
         .checked_sub(plan.reserved_sats)
         .context("reward exceeds feeding")?;
     Ok(plan)
@@ -474,7 +483,7 @@ mod tests {
             let budget=(real*u64::from(percent.min(ceiling))/100).min(cap);
             prop_assert_eq!(plan.budget_sats,budget);
             prop_assert!(plan.reserved_sats<=budget);
-            prop_assert_eq!(plan.operations_sats+plan.reserved_sats,1_000_000);
+            prop_assert_eq!(plan.operations_sats+plan.reserved_sats,real);
             if budget==0 {prop_assert!(plan.rows.is_empty());}
             else {
                 let row=&plan.rows[0];

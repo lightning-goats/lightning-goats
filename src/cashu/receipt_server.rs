@@ -191,8 +191,21 @@ impl Server {
             );
             let mut bytes = vec![0; length];
             stream.read_exact(&mut bytes).await?;
-            let receipt = self.policy.authenticate(&peer, &bytes)?;
-            let ack = self.commit(&receipt).await?.encode()?;
+            let ack = if let Ok(handoff) =
+                serde_json::from_slice::<lightning_goats_cashu_receipt::CollectorHandoff>(&bytes)
+            {
+                ensure!(
+                    handoff.wallet_instance == self.policy.wallet_instance
+                        && handoff.wallet_epoch == self.policy.wallet_epoch
+                        && handoff.core_epoch == self.policy.core_epoch,
+                    "handoff registration mismatch"
+                );
+                self.ledger.record_collector_handoff(&handoff).await?;
+                serde_json::to_vec(&handoff)?
+            } else {
+                let receipt = self.policy.authenticate(&peer, &bytes)?;
+                self.commit(&receipt).await?.encode()?
+            };
             ensure!(ack.len() <= MAX_ACK_BYTES, "acknowledgment exceeds bound");
             stream.write_u32(u32::try_from(ack.len())?).await?;
             stream.write_all(&ack).await?;

@@ -13,6 +13,19 @@ pub mod receive_status;
 pub mod treasury;
 pub mod treasury_rpc;
 
+/// Private post-credit custody confirmation. The epoch and immutable receipt
+/// evidence bind an exact collector result to a single core journal entry.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct CollectorHandoff {
+    pub wallet_instance: uuid::Uuid,
+    pub wallet_epoch: uuid::Uuid,
+    pub core_epoch: uuid::Uuid,
+    pub acquisition_id: uuid::Uuid,
+    pub evidence_digest: String,
+    pub collected_sats: u64,
+}
+
 pub const MAX_RECEIPT_BYTES: usize = 8192;
 
 #[derive(Clone, Serialize, Deserialize)]

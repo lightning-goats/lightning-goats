@@ -54,20 +54,50 @@ async fn deliver(runtime: &Runtime, id: Uuid) -> Result<()> {
     let reply: Value = crate::private_ipc::request(
         Path::new("/run/lightning-goats-project-acquisitions.sock"),
         0,
-        &json!({"acquisition_id":id,"evidence_digest":evidence,"proofs":proofs}),
+        &json!({"acquisition_id":id,"evidence_digest":evidence,"proofs":proofs,"report_collected_sats":true}),
         1048576,
         45,
     )
     .await?;
+    let collected_sats = reply["collected_sats"]
+        .as_u64()
+        .context("missing collected amount")?;
     ensure!(
-        reply == json!({"acquisition_id":id,"evidence_digest":evidence}),
+        reply
+            == json!({"acquisition_id":id,"evidence_digest":evidence,"collected_sats":collected_sats}),
         "handoff acknowledgment differs"
     );
+    ensure!(
+        collected_sats > 0 && collected_sats <= sats,
+        "invalid collector proceeds"
+    );
+    let delivery = runtime
+        .config
+        .receipt_delivery
+        .as_ref()
+        .context("missing core delivery configuration")?;
+    let confirmation = lightning_goats_cashu_receipt::CollectorHandoff {
+        wallet_instance: runtime.config.wallet_instance,
+        wallet_epoch: runtime.config.wallet_epoch,
+        core_epoch: delivery.core_epoch,
+        acquisition_id: id,
+        evidence_digest: evidence,
+        collected_sats,
+    };
+    let ack: lightning_goats_cashu_receipt::CollectorHandoff = crate::private_ipc::request(
+        &delivery.socket,
+        runtime.config.core_uid,
+        &confirmation,
+        4096,
+        delivery.deadline_seconds,
+    )
+    .await?;
+    ensure!(ack == confirmation, "core handoff acknowledgment differs");
     runtime
         .journal
         .lock()
         .map_err(|_| anyhow::anyhow!("wallet journal unavailable"))?
-        .finish_collector_handoff(id)
+        .finish_collector_handoff(id, collected_sats)
 }
 
 pub(crate) async fn run(runtime: &Runtime) -> Result<()> {

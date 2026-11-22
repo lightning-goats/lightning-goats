@@ -194,7 +194,62 @@ def start_mint(directory, socket, reserve, credentials, *, watchdog=False, input
     raise RuntimeError((directory / "process.log").read_text()[-12000:])
 
 
+def fee_charging_handoff():
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "collector"))
+    from claim_store import ClaimStore
+    from collect import collect_acquisition
+
+    with TemporaryDirectory(prefix="lg-handoff-") as raw:
+        directory = Path(raw)
+        (directory / "mint-seed").write_text(Mnemonic("english").generate(strength=128))
+        (directory / "project-quote-token").write_text(PROJECT_TOKEN)
+        with Fixture(directory / "reserve.sock") as reserve:
+            threading.Thread(target=reserve.serve_forever, daemon=True).start()
+            process, viewer = start_mint(directory, directory / "mint.sock", directory / "reserve.sock",
+                                         directory, input_fee_ppk=100)
+            try:
+                current = expect(viewer.get("/v1/keys"))["keysets"][0]
+                keyset, keys = current["id"], current["keys"]
+                quote = expect(viewer.post("/v1/mint/quote/bolt11", json={"amount": 4, "unit": "sat"}))
+                reserve.paid.add(bolt11.decode(quote["request"]).payment_hash)
+                outputs, material = new_outputs(keyset, [1, 1, 1, 1])
+                signatures = expect(viewer.post("/v1/mint/bolt11", json={
+                    "quote": quote["quote"], "outputs": encode_outputs(outputs)}))["signatures"]
+                inputs = [proof(s, m, keys) for s, m in zip(signatures, material, strict=True)]
+
+                class LostReply:
+                    get = viewer.get
+
+                    def post(self, path, **kwargs):
+                        response = viewer.post(path, **kwargs)
+                        if path == "/v1/swap":
+                            response.raise_for_status()
+                            raise httpx.ReadTimeout("discarded handoff response")
+                        return response
+
+                store = ClaimStore(directory)
+                args = (str(uuid.uuid4()), "ba" * 32, inputs, keyset, {keyset: keys})
+                try:
+                    collect_acquisition(store, LostReply(), *args)
+                except httpx.ReadTimeout:
+                    pass
+                else:
+                    raise AssertionError("expected a lost response")
+                store.db.close()
+                store = ClaimStore(directory)
+                assert collect_acquisition(store, viewer, *args) == 3
+                assert collect_acquisition(store, None, *args) == 3
+                assert store.db.execute("SELECT SUM(amount_sat) FROM collected_output").fetchone() == (3,)
+                assert all(wallet_state(viewer, p) == "SPENT" for p in inputs)
+                store.db.close()
+            finally:
+                viewer.close()
+                process.terminate()
+                process.wait(timeout=10)
+
+
 def main():
+    fee_charging_handoff()
     with TemporaryDirectory(prefix="lg-mint-") as raw:
         home = Path(raw)
         reserve_path, mint_path = home / "reserve.sock", home / "mint.sock"

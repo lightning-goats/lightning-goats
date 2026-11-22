@@ -415,7 +415,7 @@ fn decode_grant(row: &sqlx::sqlite::SqliteRow) -> Result<Grant> {
 fn validate_admission(plan: &Plan, q: &QualifiedFunding, policy: &Policy, now: i64) -> Result<()> {
     let r = q.reservation();
     r.validate()?;
-    if plan.version != 1
+    if !plan.valid_operations_remainder()
         || plan.owner != policy.scope.owner
         || plan.owner != r.owner
         || plan.core_uid != policy.scope.core_uid
@@ -453,10 +453,7 @@ fn validate_admission(plan: &Plan, q: &QualifiedFunding, policy: &Policy, now: i
     let ceiling =
         u64::try_from(u128::from(plan.real_sats) * u128::from(plan.member_percent) / 100)?
             .min(policy.max_sats_per_feed);
-    if plan.budget_sats > ceiling
-        || plan.reserved_sats > plan.budget_sats
-        || plan.threshold_sats.checked_sub(plan.reserved_sats) != Some(plan.operations_sats)
-    {
+    if plan.budget_sats > ceiling || plan.reserved_sats > plan.budget_sats {
         bail!("plan exceeds independent allocation limit");
     }
     let operations = policy

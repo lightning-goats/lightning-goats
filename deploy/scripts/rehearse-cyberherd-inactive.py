@@ -71,6 +71,8 @@ def core_upgrade(launcher, root, source, runtime, archive, commit):
     with config.open('xb') as output:
         output.write(config_bytes)
     config.chmod(0o644)
+    wal = source / 'core.db-wal'
+    assert not wal.exists() or wal.stat().st_size == 0, 'synthetic main file has uncheckpointed pages'
     with (source / 'core.db').open('rb') as incoming, (state / 'lightning-goats.db').open('xb') as output:
         shutil.copyfileobj(incoming, output)
         output.flush()
@@ -94,7 +96,17 @@ def core_upgrade(launcher, root, source, runtime, archive, commit):
     transaction = base / 'ci-core-upgrade'
     plan = json.loads(run(*launcher, '--cyberherd-core', 'prepare', str(archive), commit, digest, str(transaction)))
     assert plan['service_changed'] is False and plan['state_opened'] is False
-    upgraded = json.loads(run(*launcher, '--cyberherd-core', 'apply', str(transaction), '--writers-stopped'))
+    try:
+        upgraded = json.loads(run(*launcher, '--cyberherd-core', 'apply', str(transaction), '--writers-stopped'))
+    except RuntimeError:
+        # The production coordinator suppresses private native stderr. Diagnose
+        # its snapshot against this VM's synthetic journal in a separate bundle.
+        if (unit.is_symlink() and os.readlink(unit) == '/dev/null'
+                and not (transaction / 'legacy/MANIFEST.json').exists()):
+            run(str(transaction / 'payload/lightning-goatsctl'), 'backup-legacy-core',
+                '--policy', str(transaction / 'policy.toml'), '--destination',
+                str(transaction / 'diagnostic-snapshot'), '--writers-stopped')
+        raise
     assert upgraded['upgraded'] is True and upgraded['core_masked'] is True and upgraded['core_started'] is False
     assert os.readlink(unit) == '/dev/null'
     for binary in ('lightning-goatsd', 'lightning-goatsctl'):
@@ -735,8 +747,8 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
         fee_acceptance = json.loads((fee_review / 'BACKUP-ACCEPTED.json').read_text())
         assert fee_acceptance['cashu_core_source'] is True
         assert fee_acceptance['original_verifier_used'] is False and fee_acceptance['native'] is None
-        assert fee_before['report']['rows']['core']['_sqlx_migrations'] == 35
-        assert fee_after['report']['rows']['core']['_sqlx_migrations'] == 35
+        assert fee_before['report']['rows']['core']['_sqlx_migrations'] == 36
+        assert fee_after['report']['rows']['core']['_sqlx_migrations'] == 36
         assert fee_before['report']['rows']['payout']['_sqlx_migrations'] == 7
         assert fee_after['report']['rows']['payout']['_sqlx_migrations'] == 10
         fee_resumed = json.loads(run(*launcher, '--cyberherd-program-maintenance', 'resume-inclusive-fees',
@@ -1005,8 +1017,9 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
         assert {'cashu_settled_ranges', 'feed_cashu_proceeds', 'breez_project_invoices',
                 'breez_collected_claims', 'retained_cashu_lots', 'cashu_payout_execution_claims',
                 'breez_treasury_wallet_results', 'breez_treasury_inspections',
-                'cashu_funding_ranges', 'feed_conversion_proceeds'} <= additions
-        assert len(additions) == 32 and all(cashu_migrated['core'][table] == 0 for table in additions)
+                'cashu_funding_ranges', 'feed_conversion_proceeds', 'collector_handoff_amounts',
+                'feed_acquisition_proceeds'} <= additions
+        assert len(additions) == 34 and all(cashu_migrated['core'][table] == 0 for table in additions)
         assert all(cashu_reference[role] == cashu_migrated[role] for role in ('membership', 'payout', 'signer'))
         assert counts['post'] == 0
         finished = True

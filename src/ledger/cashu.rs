@@ -24,6 +24,39 @@ pub use treasury_status::{CashuSettlementStatus, FinancialPlanStatus};
 pub use lightning_goats_cashu_receipt::acknowledgment::ImportResult as CashuImportResult;
 
 impl LedgerStore {
+    pub(crate) async fn record_collector_handoff(
+        &self,
+        h: &lightning_goats_cashu_receipt::CollectorHandoff,
+    ) -> Result<()> {
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let ledger: i64 = sqlx::query_scalar("SELECT i.ledger_entry_id FROM cashu_receipt_inbox i
+            JOIN retained_cashu_lots g ON g.ledger_id=i.ledger_entry_id
+            WHERE i.wallet_instance=? AND i.wallet_epoch=? AND i.core_epoch=? AND i.acquisition_id=?
+              AND i.evidence_digest=? AND i.net_sats>=? AND i.core_epoch=(SELECT stream_id FROM overlay_identity WHERE singleton=1)")
+            .bind(h.wallet_instance.to_string()).bind(h.wallet_epoch.to_string()).bind(h.core_epoch.to_string())
+            .bind(h.acquisition_id.to_string()).bind(&h.evidence_digest).bind(to_i64(h.collected_sats,"collected amount")?)
+            .fetch_one(&mut *tx).await?;
+        sqlx::query(
+            "INSERT INTO collector_handoff_amounts VALUES(?,?) ON CONFLICT(ledger_id) DO NOTHING",
+        )
+        .bind(ledger)
+        .bind(to_i64(h.collected_sats, "collected amount")?)
+        .execute(&mut *tx)
+        .await?;
+        let recorded: i64 = sqlx::query_scalar(
+            "SELECT collected_sats FROM collector_handoff_amounts WHERE ledger_id=?",
+        )
+        .bind(ledger)
+        .fetch_one(&mut *tx)
+        .await?;
+        ensure!(
+            to_u64(recorded, "collected amount")? == h.collected_sats,
+            "conflicting collector acknowledgment"
+        );
+        tx.commit().await?;
+        Ok(())
+    }
+
     /// Only reachable with a kernel-authenticated private receipt. The separate
     /// socket server must load policy from protected core configuration. New
     /// import and duplicate acknowledgment deliberately have different gates.

@@ -290,14 +290,18 @@ impl Session {
             total = total
                 .checked_add(part.consumed_sats)
                 .context("funding sum overflow")?;
-            if let Some(anchor) = &part.cashu_anchor {
+            if let Some(anchor) = part
+                .cashu_anchor
+                .as_ref()
+                .filter(|_| part.collected_sats != Some(0))
+            {
                 allocations.push(RetainedAllocation {
                     ledger_id: part.ledger_id,
-                    consumed_sats: part.consumed_sats,
+                    consumed_sats: part.collected_sats.unwrap_or(part.consumed_sats),
                     anchor: anchor.clone(),
                 });
                 retained = retained
-                    .checked_add(part.consumed_sats)
+                    .checked_add(part.collected_sats.unwrap_or(part.consumed_sats))
                     .context("retained Cashu funding sum overflow")?;
             }
             if let Some(anchor) = &part.anchor {

@@ -98,6 +98,20 @@ async fn main() -> Result<()> {
     if engine != "3.54.1" {
         bail!("fixture used a different native engine");
     }
+    // The rehearsal installs the main file by itself. Publish it only once
+    // every committed fixture page is in that file.
+    let checkpoint: (i64, i64, i64) = sqlx::query_as("PRAGMA wal_checkpoint(TRUNCATE)")
+        .fetch_one(&pool)
+        .await?;
+    if checkpoint != (0, 0, 0) {
+        bail!("synthetic fixture checkpoint did not complete");
+    }
+    let integrity: Vec<String> = sqlx::query_scalar("PRAGMA integrity_check")
+        .fetch_all(&pool)
+        .await?;
+    if integrity != ["ok"] {
+        bail!("synthetic source journal failed integrity verification");
+    }
     pool.close().await;
     println!(
         "{}",

@@ -733,6 +733,7 @@ mod tests {
             let id = Uuid::parse_str(case["result"]["requestId"].as_str().unwrap()).unwrap();
             let expected = match case["expected"].as_str().unwrap() {
                 "pending" => OwnerOutcome::Pending,
+                "pulse_started" => OwnerOutcome::PulseStarted,
                 "complete" => OwnerOutcome::Complete,
                 "rejected" => OwnerOutcome::Rejected,
                 "ambiguous" => OwnerOutcome::Ambiguous,

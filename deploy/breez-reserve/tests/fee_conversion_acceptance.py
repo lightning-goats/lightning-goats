@@ -58,6 +58,15 @@ async def scenario(directory):
     else:
         raise AssertionError("stale reserve accepted")
     reserve.synced = int(time.time())
+    from cashu.core.settings import settings
+    settings.mint_max_balance = 6
+    try:
+        await issue()
+    except ValueError as exc:
+        assert "liability cap" in str(exc)
+    else:
+        raise AssertionError("mint liability cap exceeded")
+    settings.mint_max_balance = 7
     first, retry = await asyncio.gather(issue(), issue())
     assert [p.C_ for p in first] == [p.C_ for p in retry]
     assert sum(p.amount for p in retry) == 7
@@ -83,6 +92,7 @@ async def scenario(directory):
     if await child.wait() != 0:
         raise AssertionError("persisted token recovery failed")
     reserve.synced = int(time.time())
+    settings.mint_max_balance = 0
     # Seven of nine fee sats were converted. The remaining two cannot fund three.
     try:
         await issue_conversion(ledger, reserve, str(uuid4()), prepare_outputs(3, keyset.id, recipient=key),

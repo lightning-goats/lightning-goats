@@ -163,6 +163,11 @@ def recover_payout_refund(store, client, disposition_id, keyset, pinned_keys):
         if prior:
             plan = json.loads(prior[0])
         else:
+            # This change cannot be assigned as whole proofs to its source claims.
+            # Only the net outputs of the required swap become spendable again.
+            remaining -= payout_input_fee(client, [proof["id"] for proof in inputs])
+            if remaining <= 0:
+                raise ValueError("refund swap fee consumes the remaining change")
             plan = []
             for claim, reserved in store.db.execute("""
                 SELECT claim_id,reserved_sat FROM payout_claim_allocation
@@ -181,6 +186,10 @@ def recover_payout_refund(store, client, disposition_id, keyset, pinned_keys):
     for (claim, _), proof in zip(plan, outputs, strict=True):
         by_claim.setdefault(claim, []).append(proof)
     with store.write():
+        # A concurrent recovery may already have committed this exact frozen plan.
+        if store.db.execute("SELECT 1 FROM payout_claim_refund WHERE disposition_id=?",
+                            (disposition_id,)).fetchone():
+            return
         for claim, proofs in by_claim.items():
             store._index_outputs(claim, proofs)
             store.db.execute("INSERT INTO payout_claim_refund VALUES (?,?,?)",

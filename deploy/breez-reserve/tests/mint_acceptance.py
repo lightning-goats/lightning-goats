@@ -197,7 +197,7 @@ def start_mint(directory, socket, reserve, credentials, *, watchdog=False, input
 def fee_charging_handoff():
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "collector"))
     from claim_store import ClaimStore
-    from collect import collect_acquisition
+    from collect import collect_acquisition, recover_payout_refund
 
     with TemporaryDirectory(prefix="lg-handoff-") as raw:
         directory = Path(raw)
@@ -241,6 +241,38 @@ def fee_charging_handoff():
                 assert collect_acquisition(store, None, *args) == 3
                 assert store.db.execute("SELECT SUM(amount_sat) FROM collected_output").fetchone() == (3,)
                 assert all(wallet_state(viewer, p) == "SPENT" for p in inputs)
+                # One two-sat melt-change proof spans three one-sat reservations.
+                quote = expect(viewer.post("/v1/mint/quote/bolt11", json={"amount": 2, "unit": "sat"}))
+                reserve.paid.add(bolt11.decode(quote["request"]).payment_hash)
+                outputs, material = new_outputs(keyset, [2])
+                signature, = expect(viewer.post("/v1/mint/bolt11", json={
+                    "quote": quote["quote"], "outputs": encode_outputs(outputs)}))["signatures"]
+                change = proof(signature, material[0], keys)
+                refund_id, feed_id = str(uuid.uuid4()), str(uuid.uuid4())
+                sources = [str(uuid.uuid4()) for _ in range(3)]
+                for source in sources:
+                    store.prepare(source, {"amount": 1}, list)
+                with store.write():
+                    store.db.execute("INSERT INTO proof_disposition VALUES (?,'cyberherd_payout','{}')", (refund_id,))
+                    store.db.execute("INSERT INTO payout_invoice VALUES (?,?)", ("ae"*32, refund_id))
+                    store.db.execute("INSERT INTO payout_melt VALUES (?,?,'[]')", (refund_id, refund_id))
+                    store.db.execute("INSERT INTO payout_melt_submission VALUES (?)", (refund_id,))
+                    store.db.executemany("INSERT INTO payout_claim_allocation VALUES (?,?,?,1,1)",
+                                         [(refund_id, feed_id, source) for source in sources])
+                store.record_melt_result(refund_id, 0, "fixture", [change])
+                try:
+                    recover_payout_refund(store, LostReply(), refund_id, keyset, {keyset: keys})
+                except httpx.ReadTimeout:
+                    pass
+                else:
+                    raise AssertionError("expected a lost refund response")
+                store.db.close()
+                store = ClaimStore(directory)
+                recover_payout_refund(store, viewer, refund_id, keyset, {keyset: keys})
+                recover_payout_refund(store, None, refund_id, keyset, {keyset: keys})
+                assert store.db.execute("SELECT claim_id,returned_sat FROM payout_claim_refund").fetchall() == [
+                    (min(sources), 1)]
+                assert wallet_state(viewer, change) == "SPENT"
                 store.db.close()
             finally:
                 viewer.close()

@@ -14,5 +14,6 @@ cp -a "$python" "$out/python"
 cp -a "$mint/.venv/lib/python3.11/site-packages/." "$out/modules/"
 cp -a "$mint/cashu" "$out/modules/"
 install -m 0644 "$here"/{invoice_server,payout_server,claim_store,collect,worker,project_quote,operator_ecash,export_operator_token}.py "$out/collector/"
+install -m 0644 "$here"/{operator_delivery.py,operator_wrap.cjs} "$here/../../../web/vendor/nostr.bundle.js" "$out/collector/"
 PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$out/modules:$out/collector" \
     "$out/python/bin/python3.11" -c 'import invoice_server, payout_server, worker'

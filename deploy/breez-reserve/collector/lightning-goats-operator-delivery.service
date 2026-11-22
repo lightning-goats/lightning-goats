@@ -1,0 +1,27 @@
+[Unit]
+Description=Deliver recipient-locked operator ecash to Cashu Wallet
+After=network-online.target lightning-goats-project-payouts.socket
+Wants=network-online.target
+
+[Service]
+User=goats-project-collector
+Group=goats-project-collector
+Environment=PYTHONPATH=/opt/lightning-goats-project-collector/modules
+Environment=PYTHONNOUSERSITE=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/lightning-goats-project-collector/python/bin/python3.11 /opt/lightning-goats-project-collector/collector/operator_delivery.py --request /etc/lightning-goats-project-collector/operator-payment-request
+Restart=on-failure
+RestartSec=5
+StateDirectory=lightning-goats-operator-delivery
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

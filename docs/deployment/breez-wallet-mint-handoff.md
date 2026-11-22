@@ -176,3 +176,25 @@ client decoder, set `LG_CASHU_TS_INSTALLATION` to the local npm installation
 containing the Minibits-compatible `@cashu/cashu-ts` package. On a phone,
 verify the receiving key, paste the privately exported token, and check the
 resulting balance at the Goats mint.
+
+#### Automatic delivery to Cashu Wallet
+
+Use `funding_source = "retained_cashu"` in both the core's
+`[core_bridge.reward_policy]` and the payout service configuration. An omitted
+core selection defaults to Strike and can freeze a zero-value plan even when
+the collector owns the feed's ecash. Only an actual CyberHerd reservation
+reduces the gross operator allocation. With no payable members the operator
+receives all verified proceeds, less the mint's operator swap fee.
+
+To enable automatic delivery, install a reusable, amountless NUT-18 payment
+request from Cashu Wallet at
+`/etc/lightning-goats-project-collector/operator-payment-request` (root-owned,
+group-readable by goats-project-collector). Use the Goats mint and the same
+P2PK key as the payout configuration. Install the collector bundle and
+`lightning-goats-operator-delivery.service`, with Node installed at
+`/usr/bin/node`, and enable the service. After a payout it sends the existing
+proofs in a NIP-17 encrypted message to the relays in the request.
+A relay acknowledgment is recorded in the private delivery journal.
+The wallet must receive and process the message before it can show spendable
+funds. A retry sends the original encrypted event. Manual retrieval still
+returns the same token and cannot create another payout.

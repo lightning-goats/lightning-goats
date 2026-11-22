@@ -33,15 +33,27 @@ class SafeParser(argparse.ArgumentParser):
         self.exit(2, 'Invalid options. Use --help; enter words only at the private prompt.\n')
 
 
+def english_words():
+    data = zlib.decompress(base64.b85decode(WORDLIST_B85))
+    if hashlib.sha256(data).hexdigest() != WORDLIST_SHA256:
+        raise ValueError('Bundled wordlist integrity check failed.')
+    return data.decode('ascii').splitlines()
+
+
+def generate_phrase():
+    entropy = secrets.token_bytes(16)
+    checksum = hashlib.sha256(entropy).digest()[0] >> 4
+    bits = (int.from_bytes(entropy, 'big') << 4) | checksum
+    words = english_words()
+    return ' '.join(words[(bits >> shift) & 2047] for shift in range(121, -1, -11))
+
+
 def normalize_phrase(value):
     normalized = ' '.join(unicodedata.normalize('NFKD', value).split())
     words = normalized.split(' ')
     if len(words) != 12:
         raise ValueError('Enter exactly 12 English BIP39 words.')
-    data = zlib.decompress(base64.b85decode(WORDLIST_B85))
-    if hashlib.sha256(data).hexdigest() != WORDLIST_SHA256:
-        raise ValueError('Bundled wordlist integrity check failed.')
-    indexes = {word: i for i, word in enumerate(data.decode('ascii').splitlines())}
+    indexes = {word: i for i, word in enumerate(english_words())}
     if len(indexes) != 2048 or any(word not in indexes for word in words):
         raise ValueError('Phrase contains a word outside the English BIP39 list.')
     bits = 0
@@ -117,11 +129,16 @@ def write_seed(output, seed):
 
 def main():
     parser = SafeParser(description=__doc__)
-    parser.add_argument('--output', type=Path, default=Path.home() / '.local/share/lightning-goats-cashu/seed-staging/wallet-seed.bin',
+    parser.add_argument('--output', type=Path, default=None,
                         help='private 64-byte output; existing files are never replaced')
     parser.add_argument('--passphrase', action='store_true',
                         help='also prompt for an existing additional BIP39 passphrase (not a wallet PIN)')
+    parser.add_argument('--generate', action='store_true',
+                        help='generate a fresh 12-word receiver phrase and verify your backup')
     args = parser.parse_args()
+    if args.output is None:
+        folder = 'receiver-v2' if args.generate else 'seed-staging'
+        args.output = Path.home() / '.local/share/lightning-goats-cashu' / folder / 'wallet-seed.bin'
     if not sys.stdin.isatty() or not sys.stderr.isatty():
         parser.exit(2, 'Run interactively in a terminal; redirected secret input is refused.\n')
     if os.geteuid() == 0:
@@ -141,7 +158,12 @@ def main():
         finally:
             os.close(parent)
         print('Dedicated Cashu wallet seed preparation. Input is hidden; nothing is sent over the network.')
-        phrase = normalize_phrase(getpass.getpass('12 seed words: '))
+        if args.generate:
+            phrase = generate_phrase()
+            print('Write these 12 words down in order for the feeder backup:', file=sys.stderr)
+            print(phrase, file=sys.stderr, flush=True)
+        else:
+            phrase = normalize_phrase(getpass.getpass('12 seed words: '))
         repeated = normalize_phrase(getpass.getpass('Enter the same 12 words again: '))
         if not hmac.compare_digest(phrase, repeated):
             raise ValueError('The two entries do not match.')

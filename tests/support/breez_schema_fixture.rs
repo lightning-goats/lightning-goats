@@ -2,6 +2,31 @@
 use anyhow::{Context, Result, ensure};
 
 pub async fn strip_empty(transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>) -> Result<()> {
+    let has_handoffs: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='collector_handoff_amounts')",
+    )
+    .fetch_one(&mut **transaction)
+    .await?;
+    if has_handoffs {
+        let empty: bool =
+            sqlx::query_scalar("SELECT NOT EXISTS(SELECT 1 FROM collector_handoff_amounts)")
+                .fetch_one(&mut **transaction)
+                .await?;
+        ensure!(empty, "fixture contains verified collector handoffs");
+        sqlx::query("DROP TABLE feed_acquisition_proceeds")
+            .execute(&mut **transaction)
+            .await?;
+        sqlx::query("DROP TABLE collector_handoff_amounts")
+            .execute(&mut **transaction)
+            .await?;
+        let removed = sqlx::query("DELETE FROM _sqlx_migrations WHERE version=36")
+            .execute(&mut **transaction)
+            .await?;
+        ensure!(
+            removed.rows_affected() == 1,
+            "missing collector handoff migration"
+        );
+    }
     let conversions: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='feed_conversion_proceeds')",
     )

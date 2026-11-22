@@ -34,11 +34,16 @@ def main():
         def dispatch(request):
             if args.role == "payout":
                 return execute_payout(store, client, request, args.keyset, keys)
-            if set(request) != {"acquisition_id", "evidence_digest", "proofs"}:
+            fields = {"acquisition_id", "evidence_digest", "proofs"}
+            report_amount = set(request) == fields | {"report_collected_sats"} and request["report_collected_sats"] is True
+            if set(request) != fields and not report_amount:
                 raise ValueError("invalid acquisition handoff")
-            collect_acquisition(store, client, request["acquisition_id"], request["evidence_digest"],
-                                request["proofs"], args.keyset, keys)
-            return {"acquisition_id":request["acquisition_id"], "evidence_digest":request["evidence_digest"]}
+            collected = collect_acquisition(store, client, request["acquisition_id"], request["evidence_digest"],
+                                            request["proofs"], args.keyset, keys)
+            result = {"acquisition_id": request["acquisition_id"], "evidence_digest": request["evidence_digest"]}
+            if report_amount:
+                result["collected_sats"] = collected
+            return result
 
         while True:
             connection, _ = listener.accept()

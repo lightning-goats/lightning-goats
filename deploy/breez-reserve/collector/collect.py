@@ -104,8 +104,10 @@ def recover_swap(client, inputs, material, pinned_keys):
             raise ValueError("swap restoration differs from original outputs")
         promises = restored["signatures"]
     else:
-        if payout_input_fee(client, [p["id"] for p in inputs]):
-            raise ValueError("custody transfer requires a zero-fee swap")
+        input_total = sum(p["amount"] for p in inputs)
+        output_total = sum(o["amount"] for o in outputs)
+        if not outputs or input_total - output_total != payout_input_fee(client, [p["id"] for p in inputs]):
+            raise ValueError("frozen swap outputs differ from the current mint fee")
         promises = client.post("/v1/swap", json={"inputs": inputs, "outputs": outputs}).raise_for_status().json()["signatures"]
     if [p["amount"] for p in promises] != [o["amount"] for o in outputs]:
         raise ValueError("swap promise amounts changed")
@@ -200,9 +202,16 @@ def collect_acquisition(store, client, claim_id, evidence_digest, inputs, keyset
     inputs = sorted(inputs, key=lambda p: p["secret"])
     terms = {"amount":amount, "attribution":{"purpose":"acquisition","credit_pool":"herd"},
              "input_digest":hashlib.sha256(encode(inputs).encode()).hexdigest(), "evidence_digest":evidence_digest}
-    material = store.prepare(claim_id, terms, lambda: prepare_outputs(amount, keyset))
-    if store.db.execute("SELECT 1 FROM acquired_custody WHERE claim_id=?", (claim_id,)).fetchone():
-        return
+    def prepare_handoff():
+        fee = payout_input_fee(client, [p["id"] for p in inputs])
+        if fee >= amount:
+            raise ValueError("handoff fee would consume the receipt")
+        return prepare_outputs(amount - fee, keyset)
+
+    material = store.prepare(claim_id, terms, prepare_handoff)
+    prior = store.db.execute("SELECT proofs FROM acquired_custody WHERE claim_id=?", (claim_id,)).fetchone()
+    if prior:
+        return sum(proof["amount"] for proof in json.loads(prior[0]))
     proofs = recover_swap(client, inputs, material, pinned_keys)
     with store.write():
         store.db.execute("INSERT INTO acquired_custody VALUES (?,?,?) ON CONFLICT(claim_id) DO NOTHING",
@@ -210,6 +219,7 @@ def collect_acquisition(store, client, claim_id, evidence_digest, inputs, keyset
         if store.db.execute("SELECT proofs FROM acquired_custody WHERE claim_id=?", (claim_id,)).fetchone() != (encode(proofs),):
             raise ValueError("acquisition handoff evidence changed")
         store._index_outputs(claim_id, proofs)
+    return sum(proof["amount"] for proof in proofs)
 
 
 def project_allocations(parts):

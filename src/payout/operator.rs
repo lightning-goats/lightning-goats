@@ -64,3 +64,60 @@ impl Execution {
             "member_reserved_sat":a.member_reserved_sats}})
     }
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct DirectWallet {
+    pub mint: String,
+    pub recipient: String,
+}
+
+impl DirectWallet {
+    pub fn validate(&self) -> Result<()> {
+        ensure!(
+            self.mint == "https://mint.lightning-goats.com",
+            "unsupported operator mint"
+        );
+        let key: bitcoin::secp256k1::PublicKey = self
+            .recipient
+            .parse()
+            .context("invalid operator receiving key")?;
+        ensure!(
+            hex::encode(key.serialize()) == self.recipient,
+            "expected compressed operator receiving key"
+        );
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct DirectExecution {
+    pub allocation: crate::reward_funding::OperatorAllocation,
+    pub wallet: DirectWallet,
+    pub lots: Vec<super::funding::RetainedAllocation>,
+    pub fee_limit: u64,
+}
+
+impl DirectExecution {
+    pub fn digest(&self) -> Result<String> {
+        self.wallet.validate()?;
+        let a = &self.allocation;
+        ensure!(
+            !a.request_id.is_nil()
+                && !self.lots.is_empty()
+                && a.operator_sats > 0
+                && a.collected_sats.checked_sub(a.member_reserved_sats) == Some(a.operator_sats)
+                && self.fee_limit <= a.operator_sats,
+            "invalid direct allocation"
+        );
+        crate::nostr_event::validate_hex(&a.plan_hash, 32)?;
+        Ok(hex::encode(Sha256::digest(serde_json::to_vec(self)?)))
+    }
+}
+#[derive(Debug, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
+pub enum DirectStatus {
+    Ready { amount_sat: u64, fee_sat: u64 },
+    Held { reason: String },
+}

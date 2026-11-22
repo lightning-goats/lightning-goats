@@ -121,3 +121,116 @@ The operator authorized port 8793. HOME enabled the dedicated `lightning-goats-p
 ### Public transaction amounts
 
 The HOME operator removed the project-defined principal ceilings for ordinary Lightning top-ups and Cashu-to-Lightning melts. Configure `MINT_MAX_MINT_BOLT11_SAT=0`, `MINT_MAX_MELT_BOLT11_SAT=0` and `MINT_MAX_BALANCE=0`. Public NUT-04 and NUT-05 discovery omit the optional maximum. The reserve accepts positive whole-sat amounts representable in its Lightning invoice format. A melt still requires sufficient proofs to cover principal and fees, an acceptable provider route, and a routing fee within the reserve's 100-sat fee ceiling. The authenticated project-quote interface retains its own request validation.
+
+### Direct operator payouts to Cashu Wallet
+
+In Cashu Wallet on the receiving phone, select the Goats mint and obtain the
+wallet’s compressed P2PK receiving public key. The wallet’s Lightning address
+and Nostr npub serve different purposes. The 66 hex digits start with 02 or 03.
+Use the key for which this wallet can sign Cashu spends. Keep the spending key
+and wallet backup on the phone or in its existing private backup.
+
+Set `operator_p2pk` in the root-managed payout configuration (see
+`deploy/cyberherd/payout.toml.example`). A configured direct wallet takes
+precedence for new feedings. Existing service and core execution controls apply.
+Install the updated payout and core binaries and the collector modules together
+using the ordinary stopped-writer backup and migration procedure. The core
+requires schema 38 and the payout journal requires schema 14. Existing invoices
+are bound to Lightning by migration. Keep all journals and keys on rollback.
+An older binary may refuse the migrated schema. Use a compatible release to
+reconcile outstanding transfers; restoring stale journals can duplicate spends.
+
+The collector reserves the original inputs and private swap outputs before it
+contacts the mint to swap. A retry restores the same blinded outputs. P2PK
+proofs use the original receiving key even after configuration rotation. Mint
+input fees come out of the operator share. Change remains in the original
+collection claims. A nonpositive payable amount or fee above the pinned limit
+holds the allocation. Check the private payout journal for the feed and status:
+
+```sql
+SELECT t.request_id, s.state, s.reason, s.amount_sat, s.fee_sat
+FROM payout_operator_ecash_status AS s
+JOIN payout_intake_receipts AS t USING (sequence);
+```
+
+For a ready transfer, run the installed helper on the VPS as the operator.
+Supply the confirmed feed UUID and a new file in a private directory.
+
+```sh
+sudo python3 -I -S -B /opt/lightning-goats-project-collector/collector/export_operator_token.py FEED_UUID /root/operator-token.cashu
+```
+
+Privately copy the token text into Cashu Wallet to receive it. The phone may be offline when the feeding confirms. Subsequent exports
+produce the same token. Ready means issued and available to collect; verify
+redemption in Cashu Wallet. Keep tokens out of logs, chat, support tickets and
+public overlays. Preserve pending dispositions during an outage and resume
+against the original mint. A missing swap response can represent an accepted
+swap. Never replace it with a new set of outputs or a Lightning payout.
+
+For a local rehearsal, use the patched Nutshell checkout and its Python
+environment from the pinned mint build. Set `PYTHONPATH` to that checkout
+and run `bash deploy/breez-reserve/tests/direct_worker_acceptance.sh /absolute/path/to/.venv/bin/python`
+as an unprivileged user. The fixture creates disposable credentials, two
+local mints, and fresh core, payout and collector databases. To include the
+client decoder, set `LG_CASHU_TS_INSTALLATION` to the local npm installation
+containing the Minibits-compatible `@cashu/cashu-ts` package. On a phone,
+verify the receiving key, paste the privately exported token, and check the
+resulting balance at the Goats mint.
+
+#### Automatic delivery to Cashu Wallet
+
+Use `funding_source = "retained_cashu"` in both the core's
+`[core_bridge.reward_policy]` and the payout service configuration. An omitted
+core selection defaults to Strike and can freeze a zero-value plan even when
+the collector owns the feed's ecash. Only an actual CyberHerd reservation
+reduces the gross operator allocation. With no payable members the operator
+receives all verified proceeds, less the mint's operator swap fee.
+
+To enable automatic delivery, install a reusable, amountless NUT-18 payment
+request from Cashu Wallet at
+`/etc/lightning-goats-project-collector/operator-payment-request` (root-owned,
+group-readable by goats-project-collector). Use the Goats mint and the same
+P2PK key as the payout configuration. Install the collector bundle and
+`lightning-goats-operator-delivery.service`, with Node installed at
+`/usr/bin/node`, and enable the service. After a payout it sends the existing
+proofs in a NIP-17 encrypted message to the relays in the request.
+A relay acknowledgment is recorded in the private delivery journal.
+The wallet must receive and process the message before it can show spendable
+funds. A retry sends the original encrypted event. Manual retrieval still
+returns the same token and cannot create another payout.
+
+### Converting mint fees to operator ecash
+
+On HOME, the solvency report accepts `--operating-buffer-sat` to estimate the
+maximum input fees that could become operator ecash after protecting outstanding
+proofs, paid unissued quotes and the specified operating buffer. A stale reserve
+sample or pending settlement holds the estimate at zero. The estimate uses
+independent reserve and issuer samples and is for planning only.
+
+The HOME issuer reconciles cumulative fees against prior conversions, recorded
+issuer expenses, paid unissued quotes and the operating buffer inside its write
+transaction. A conversion adds an equal amount of operator proof liability and
+leaves the reserve in Breez. The watchdog checks the conversion journal against
+the signed sat outputs before subtracting distributed fees from its fee total.
+Its reserve checkpoint should show the same backing immediately before and
+after issuance when no other transactions intervene. Existing feeder credit
+and confirmed-feed allocations are outside this transaction.
+
+The private HOME endpoint and VPS fee worker use a separate shared
+`operator-fee-token`. Install it as an encrypted systemd credential on each
+host. Add the credential to the HOME mint instance using a drop-in with
+`LoadCredentialEncrypted=operator-fee-token:/etc/credstore.encrypted/lightning-goats-reserve/mainnet-operator-fee-token.cred`.
+Set `LG_OPERATOR_FEE_RECIPIENT` to the operator wallet's compressed P2PK public
+key, `LG_OPERATOR_FEE_BUFFER_SAT` to the approved operating reserve and
+`LG_OPERATOR_FEE_MAX_SAT` to the approved per-request ceiling in the HOME mint
+environment. Install the private origin configuration with the conversion routes.
+
+On the VPS, set `LG_FEE_BATCH_SAT` in
+`/etc/lightning-goats-project-collector/operator-fees.env`. The oneshot unit
+uses the existing mint keyset and operator payment request. Run the service
+once for the bounded live test. Verify wallet receipt and the HOME backing
+checkpoint before enabling `lightning-goats-operator-fees.timer`.
+The timer checks every ten minutes. A pending batch keeps its original ID,
+blinded outputs, wallet request and delivery envelope across retries. The UTC
+date limits creation to one batch per day. Retain the private journal in
+`/var/lib/lightning-goats-operator-fees` through upgrade or rollback.

@@ -449,6 +449,26 @@ pub(crate) struct CashuWorker {
     pub signer: Signer,
     pub plans: crate::cyberherd::payout_bridge::Client,
 }
+struct MemberInvoiceFetcher<'a> {
+    plans: &'a crate::cyberherd::payout_bridge::Client,
+    feed: uuid::Uuid,
+    member: &'a str,
+}
+impl InvoiceFetcher for MemberInvoiceFetcher<'_> {
+    async fn fetch(&self, request: &Request) -> Result<ValidatedInvoice> {
+        let result = request.fetch().await;
+        if request.uses_primal_callback()
+            && result
+                .as_ref()
+                .is_err_and(|err| err.is::<super::invoice::DescriptionHashMismatch>())
+        {
+            self.plans
+                .primal_invoice_mismatch(self.feed, self.member)
+                .await?;
+        }
+        result
+    }
+}
 impl CashuWorker {
     pub async fn tick(&self) -> Result<Step> {
         let policy = self.store.policy();
@@ -531,9 +551,13 @@ impl CashuWorker {
         {
             return Ok(Step::Waiting);
         }
+        let fetcher = MemberInvoiceFetcher {
+            plans: &self.plans,
+            feed: grant.request_id,
+            member: &member,
+        };
         if let Some(intent) = intent {
-            return prepare_callback(&self.store, &self.signer, &intent, &fresh, &HttpFetcher)
-                .await;
+            return prepare_callback(&self.store, &self.signer, &intent, &fresh, &fetcher).await;
         }
         if !policy.fee_mode.is_fixed() {
             let Some(socket) = &self.collector_socket else {
@@ -566,7 +590,7 @@ impl CashuWorker {
                 return Ok(Step::InvoiceIntent);
             }
             if let Some(request) = self.store.fee_probe_callback(probe.id()).await? {
-                let invoice = request.fetch().await?;
+                let invoice = fetcher.fetch(&request).await?;
                 self.store
                     .freeze_fee_probe_invoice(&invoice, calendar::now()?)
                     .await?;

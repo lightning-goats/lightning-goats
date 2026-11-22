@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "lock_sha256": {
-    "Cargo.lock": "880e667ecbd768a02487ae281e61114b01dd1278a20d4912e4ce19d7870e4b00",
-    "tools/cashu-compat/Cargo.lock": "89a2df145d7f8807862645946b84e673ce42d8b11f7d3071ea26eac1ae55fb3a"
+    "Cargo.lock": "e42a331088ba14028d6c5d63d3fa00afc991a9026bf9e530777da21f89eede6b",
+    "tools/cashu-compat/Cargo.lock": "efdafa2f651901d846e86d3129a55bc6bbf69a8a619316ec367a2d84174dd05d"
   },
   "scope": "full lockfile graphs, not a linked-binary inventory",
   "complete": true,
@@ -2380,14 +2380,14 @@
     },
     {
       "name": "form_urlencoded",
-      "version": "1.2.2",
+      "version": "1.2.3",
       "source": "registry+https://github.com/rust-lang/crates.io-index",
       "graphs": [
         "Cargo.lock",
         "tools/cashu-compat/Cargo.lock"
       ],
       "status": "verified_archive",
-      "checksum": "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf",
+      "checksum": "afa489199eaffb1211795df1c6236ce1ad0d41a6fa45250add73e3b02420f06e",
       "declared_license": "MIT OR Apache-2.0",
       "license_file": null,
       "license_notice_files_sha256": {
@@ -2397,8 +2397,7 @@
       "archive_repository": "https://github.com/servo/rust-url",
       "archive_vcs_info": {
         "git": {
-          "sha1": "91377f48bf35011d042aa5abef9e7f2a0a625aaa",
-          "dirty": true
+          "sha1": "ad1c66cbff6e318393d872641e30589ff9687b9c"
         },
         "path_in_vcs": "form_urlencoded"
       }
@@ -4207,7 +4206,7 @@
       ],
       "status": "local_manifest",
       "manifest": "tools/cashu-compat/Cargo.toml",
-      "manifest_sha256": "18e2787fddde10e89e1b5aab950b5c7d77c51dd9abbed3bd4caf4c10de813647",
+      "manifest_sha256": "961944287674db5a970748081c96d1f0086f180eb4f772e8ce2f4255ba16b14f",
       "declared_license": "MIT",
       "license_file": null,
       "license_notice_files_sha256": {
@@ -8778,14 +8777,14 @@
     },
     {
       "name": "url",
-      "version": "2.5.8",
+      "version": "2.5.9",
       "source": "registry+https://github.com/rust-lang/crates.io-index",
       "graphs": [
         "Cargo.lock",
         "tools/cashu-compat/Cargo.lock"
       ],
       "status": "verified_archive",
-      "checksum": "ff67a8a4397373c3ef660812acab3268222035010ab8680ec4215f38ba3d0eed",
+      "checksum": "f00cd2407bb42c0ef17be88d4cf020f5cceffd121665bac9b8b9493a369b3b1a",
       "declared_license": "MIT OR Apache-2.0",
       "license_file": null,
       "license_notice_files_sha256": {
@@ -8795,7 +8794,7 @@
       "archive_repository": "https://github.com/servo/rust-url",
       "archive_vcs_info": {
         "git": {
-          "sha1": "d6ea13c5f8e7e6e627f6390161b3e185bda5e5ce"
+          "sha1": "ad1c66cbff6e318393d872641e30589ff9687b9c"
         },
         "path_in_vcs": "url"
       }

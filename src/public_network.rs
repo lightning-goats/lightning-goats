@@ -170,6 +170,11 @@ async fn get_json_url(url: Url, max_bytes: usize) -> Result<Vec<u8>> {
         let addresses = resolve(&url).await?;
         let host = url.host_str().context("destination is missing a host")?;
         let client = Client::builder()
+            .user_agent(concat!(
+                "Lightning-Goats/",
+                env!("CARGO_PKG_VERSION"),
+                " (+https://lightning-goats.com)"
+            ))
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
             .connect_timeout(CONNECT_TIMEOUT)
@@ -182,6 +187,10 @@ async fn get_json_url(url: Url, max_bytes: usize) -> Result<Vec<u8>> {
             .send()
             .await?;
         if !response.status().is_success() {
+            tracing::debug!(
+                status = response.status().as_u16(),
+                "public JSON endpoint rejected request"
+            );
             bail!("public JSON endpoint did not succeed");
         }
         let content_type = response

@@ -165,7 +165,7 @@ def wallet_state(client, item):
     return expect(client.post("/v1/checkstate", json={"Ys": [y]}))["states"][0]["state"]
 
 
-def start_mint(directory, socket, reserve, credentials, *, watchdog=False, input_fee_ppk=0):
+def start_mint(directory, socket, reserve, credentials, *, watchdog=False, input_fee_ppk=0, startup_timeout=60):
     log = (directory / "process.log").open("ab")
     env = {**os.environ, "STATE_DIRECTORY": str(directory), "CREDENTIALS_DIRECTORY": str(credentials),
            "LG_RESERVE_FUND_SOCKET": str(reserve), "LG_MINT_SOCKET": str(socket),
@@ -177,7 +177,7 @@ def start_mint(directory, socket, reserve, credentials, *, watchdog=False, input
            "MINT_INPUT_FEE_PPK": str(input_fee_ppk), "MINT_QUOTE_BACKEND_CHECK_RATE_LIMIT": "0", "LOG_LEVEL": "INFO"}
     process = subprocess.Popen([sys.executable, "-m", "lg_mint"], cwd=directory, env=env, stdout=log, stderr=log)
     client = httpx.Client(transport=httpx.HTTPTransport(uds=str(socket)), base_url="http://mint", timeout=30)
-    deadline = time.monotonic() + 60
+    deadline = time.monotonic() + startup_timeout
     while time.monotonic() < deadline:
         if process.poll() is not None:
             break

@@ -16,26 +16,8 @@ import bolt11
 
 from cashu.core.base import BlindedMessage
 from cashu.core.crypto import b_dhke
-from cashu.core.crypto.secp import PrivateKey, PublicKey
+from operator_proofs import unblind
 from cashu.core.nuts import nut20
-
-
-def unblind(item, promise, pinned_keys):
-    amount, keyset = promise["amount"], promise["id"]
-    if type(amount) is not int or amount <= 0 or keyset != item["id"]:
-        raise ValueError("invalid mint promise denomination or keyset")
-    mint_key = PublicKey(bytes.fromhex(pinned_keys[keyset][str(amount)]))
-    blind_signature = PublicKey(bytes.fromhex(promise["C_"]))
-    dleq = promise["dleq"]
-    if not b_dhke.alice_verify_dleq(
-        PublicKey(bytes.fromhex(item["B_"])), blind_signature,
-        PrivateKey(bytes.fromhex(dleq["e"])), PrivateKey(bytes.fromhex(dleq["s"])), mint_key,
-    ):
-        raise ValueError("invalid project mint signature")
-    signature = b_dhke.step3_alice(blind_signature, PrivateKey(bytes.fromhex(item["blind"])), mint_key)
-    return {"id": keyset, "amount": amount, "secret": item["secret"],
-                   "C": signature.format().hex(),
-                   "dleq": {"e": dleq["e"], "s": dleq["s"], "r": item["blind"]}}
 
 
 def collect(store, client, request_id, pinned_keys):
@@ -96,7 +78,7 @@ def payout_input_fee(client, input_keysets):
     return (sum(rates[keyset] for keyset in input_keysets) + 999) // 1000
 
 
-def recover_swap(client, inputs, material, pinned_keys):
+def recover_swap(client, inputs, material, pinned_keys, *, require_unspent=False):
     outputs = [{k: item[k] for k in ("amount", "id", "B_")} for item in material]
     restored = client.post("/v1/restore", json={"outputs": outputs}).raise_for_status().json()
     if restored["outputs"] or restored["signatures"]:
@@ -104,6 +86,11 @@ def recover_swap(client, inputs, material, pinned_keys):
             raise ValueError("swap restoration differs from original outputs")
         promises = restored["signatures"]
     else:
+        if require_unspent:
+            ys = [b_dhke.hash_to_curve(p["secret"].encode()).format().hex() for p in inputs]
+            states = client.post("/v1/checkstate", json={"Ys": ys}).raise_for_status().json()["states"]
+            if sorted(s["Y"] for s in states) != sorted(ys) or any(s["state"] != "UNSPENT" for s in states):
+                raise ValueError("reserved swap has unresolved input state")
         input_total = sum(p["amount"] for p in inputs)
         output_total = sum(o["amount"] for o in outputs)
         if not outputs or input_total - output_total != payout_input_fee(client, [p["id"] for p in inputs]):

@@ -12,6 +12,8 @@ funding_source = "strike"
 # cashu_payout_socket = "/run/lightning-goats-project-payouts.sock"
 # Set this destination to pay the operator share from confirmed Cashu feedings.
 # operator_address = "sat@lightning-goats.com"
+# Direct Cashu for new operator transfers (compressed public key from Cashu Wallet):
+# operator_p2pk = { mint = "https://mint.lightning-goats.com", recipient = "<66 lowercase hex digits>" }
 state_dir = "/var/lib/cyberherd-payout"
 core_socket = "/run/lightning-goats-bridge/core.sock"
 intake_socket = "/run/cyberherd-plans/plans.sock"

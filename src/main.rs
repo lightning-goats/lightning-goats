@@ -101,7 +101,14 @@ async fn main() -> Result<()> {
     if args.recovery_paused {
         return paused_recovery::serve(&config).await;
     }
-    let ledger = LedgerStore::connect(&config.database.url).await?;
+    let mut ledger = LedgerStore::connect(&config.database.url).await?;
+    if matches!(
+        config.lnurl.wallet_backend,
+        lightning_goats::config::WalletBackend::Breez
+    ) && let Some(receipts) = &config.cashu_receipts
+    {
+        ledger = ledger.with_retained_wallet_epoch(receipts.wallet_epoch);
+    }
     ledger
         .configure_feeder_credit_cap(config.feeder.threshold_sats)
         .await?;

@@ -33,6 +33,7 @@ fn key(n: u8) -> String {
 #[derive(Clone, Default)]
 struct Fake {
     signs: Arc<AtomicUsize>,
+    fail_sign: Arc<AtomicBool>,
     events: Arc<Mutex<Vec<crate::nostr::SignedNostrEvent>>>,
     lose: Arc<AtomicBool>,
     failed_relay: Option<String>,
@@ -40,6 +41,9 @@ struct Fake {
 impl Transport for Fake {
     async fn sign(&self, u: &Unsigned) -> Result<VerifiedEvent> {
         self.signs.fetch_add(1, Ordering::SeqCst);
+        if self.fail_sign.swap(false, Ordering::SeqCst) {
+            bail!("synthetic signer timeout");
+        }
         VerifiedEvent::verify(test_event(
             1,
             u.kind,
@@ -1001,6 +1005,21 @@ async fn confirmed_feeding_uses_frozen_roster_trigger_amount_and_one_standalone_
     assert_eq!(destinations.len(), 2);
     assert!(destinations.contains(&"broadcast:note".to_owned()));
     assert!(destinations.iter().any(|s| s.ends_with(":original-stream")));
+    // A failed first attempt puts the note behind older fan-out work under
+    // plain least-recently-attempted ordering. Both destinations are due now.
+    sqlx::query("UPDATE delivery_work SET attempted_at=?")
+        .bind(calendar::now().unwrap() - 20)
+        .execute(&db)
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE delivery_work SET attempted_at=? WHERE identity=? AND destination='broadcast:note'",
+    )
+    .bind(calendar::now().unwrap())
+    .bind(&message.identity)
+    .execute(&db)
+    .await
+    .unwrap();
     let mut jobs = vec![];
     while let Some(job) = f
         .store
@@ -1008,6 +1027,10 @@ async fn confirmed_feeding_uses_frozen_roster_trigger_amount_and_one_standalone_
         .await
         .unwrap()
     {
+        if jobs.is_empty() {
+            assert_eq!(job.destination, "broadcast:note");
+            assert_eq!(job.identity, message.identity);
+        }
         if job.feeding {
             jobs.push(job);
         }
@@ -1257,7 +1280,7 @@ async fn feeding_notes_hold_in_nonpublic_mode_but_retry_same_bytes_during_pause_
     // Reopen the same durable store with a public-mode core, not a fresh message.
     let reopened = Store::connect(&f.url).await.unwrap();
     let db = SqlitePool::connect(&f.url).await.unwrap();
-    sqlx::query("UPDATE delivery_work SET lease_until=0")
+    sqlx::query("UPDATE delivery_work SET lease_until=0,attempted_at=0")
         .execute(&db)
         .await
         .unwrap();
@@ -1269,6 +1292,21 @@ async fn feeding_notes_hold_in_nonpublic_mode_but_retry_same_bytes_during_pause_
         owner: f.owner.clone(),
     };
     f.ready(Some(true)).await;
+    fake.fail_sign.store(true, Ordering::SeqCst);
+    tokio::time::sleep(std::time::Duration::from_millis(1050)).await;
+    assert!(worker.tick().await.is_err());
+    let frozen: String = sqlx::query_scalar(
+        "SELECT document_json FROM delivery_unsigned WHERE destination='broadcast:note'",
+    )
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE delivery_work SET lease_until=0,attempted_at=0 WHERE destination='broadcast:note'",
+    )
+    .execute(&db)
+    .await
+    .unwrap();
     fake.lose.store(true, Ordering::SeqCst);
     tokio::time::sleep(std::time::Duration::from_millis(1050)).await;
     assert!(worker.tick().await.is_err());
@@ -1300,7 +1338,11 @@ async fn feeding_notes_hold_in_nonpublic_mode_but_retry_same_bytes_during_pause_
     assert_eq!(worker.tick().await.unwrap(), Step::Published);
     let events = fake.events.lock().unwrap().clone();
     assert_eq!(events[0], events[1]);
-    assert_eq!(fake.signs.load(Ordering::SeqCst), 1);
+    assert_eq!(fake.signs.load(Ordering::SeqCst), 2);
+    let intent: Unsigned = serde_json::from_str(&frozen).unwrap();
+    intent
+        .validate_signed(&VerifiedEvent::verify(original.clone()).unwrap())
+        .unwrap();
     task.abort();
 }
 
@@ -2131,4 +2173,31 @@ async fn nip65_recipient_read_relays_are_frozen_with_the_message_before_signing(
     }
     assert_eq!(f.core.feed_credit_sats().await.unwrap(), 0);
     db.close().await;
+}
+
+#[tokio::test]
+async fn primal_invoice_notice_is_threaded_and_never_enters_the_overlay() {
+    let f = Fixture::new().await;
+    let branch = f.apply("join", 34).await;
+    let db = SqlitePool::connect(&f.url).await.unwrap();
+    for _ in 0..2 {
+        sqlx::query("INSERT INTO domain_events(owner,cycle,source_id,event_type,snapshot_json) VALUES(?,1,'one-held-member','primal_invoice_mismatch',?) ON CONFLICT(owner,source_id) DO NOTHING")
+            .bind(&f.owner).bind(serde_json::to_string(&(key(2), &branch)).unwrap())
+            .execute(&db).await.unwrap();
+        f.queue().await;
+    }
+    let rows: Vec<(String, i64, i64)> = sqlx::query_as("SELECT m.document_json,(SELECT count(*) FROM delivery_overlay o WHERE o.owner=m.owner AND o.identity=m.identity),(SELECT count(*) FROM delivery_destinations d WHERE d.owner=m.owner AND d.identity=m.identity AND d.branch IS NOT NULL) FROM delivery_messages m WHERE m.owner=? AND json_extract(m.document_json,'$.category')='primal_invoice_mismatch'")
+        .bind(&f.owner).fetch_all(&db).await.unwrap();
+    assert_eq!(rows.len(), 1);
+    let (json, overlays, branches) = &rows[0];
+    let notice: crate::cyberherd::delivery::Rendered = serde_json::from_str(json).unwrap();
+    assert_eq!(notice.conversation, Some(branch));
+    assert!(notice.requires_joining && !notice.accepted && notice.broadcast.is_none());
+    assert!(
+        notice
+            .nostr
+            .contains("github.com/PrimalHQ/primal-web-app/issues/198")
+    );
+    assert_eq!(*overlays, 0);
+    assert!(*branches > 0);
 }

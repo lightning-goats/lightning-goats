@@ -1,0 +1,29 @@
+[Unit]
+Description=Convert reconciled Goats mint fees into operator wallet ecash
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=goats-project-collector
+Group=goats-project-collector
+StateDirectory=lightning-goats-operator-fees
+StateDirectoryMode=0700
+UMask=0077
+EnvironmentFile=/etc/lightning-goats-project-collector/config.env
+EnvironmentFile=/etc/lightning-goats-project-collector/operator-fees.env
+LoadCredentialEncrypted=operator-fee-token:/etc/credstore.encrypted/lightning-goats-reserve/mainnet-operator-fee-token.cred
+LoadCredential=home-ca.pem:/etc/nginx/goats-mint/home-ca.pem
+LoadCredential=client.pem:/etc/nginx/goats-mint/project-receive-client.pem
+LoadCredential=client.key:/etc/nginx/goats-mint/project-receive-client.key
+Environment=PYTHONPATH=/opt/lightning-goats-project-collector/modules
+Environment=PYTHONNOUSERSITE=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/lightning-goats-project-collector/python/bin/python3.11 /opt/lightning-goats-project-collector/collector/fee_worker.py --batch-sat ${LG_FEE_BATCH_SAT} --keyset ${MINT_KEYSET} --request /etc/lightning-goats-project-collector/operator-payment-request
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6

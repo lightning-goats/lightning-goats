@@ -59,6 +59,7 @@ static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
 #[derive(Debug, Clone)]
 pub struct LedgerStore {
+    retained_wallet_epoch: Option<uuid::Uuid>,
     pool: SqlitePool,
     publication: std::sync::Arc<tokio::sync::Mutex<publication::Progress>>,
 }
@@ -76,6 +77,12 @@ pub enum SettlementOutcome {
 }
 
 impl LedgerStore {
+    /// Retired wallet receipts retain physical credit. This setting grants no payout custody.
+    pub fn with_retained_wallet_epoch(mut self, epoch: uuid::Uuid) -> Self {
+        self.retained_wallet_epoch = Some(epoch);
+        self
+    }
+
     /// Open only an existing current ledger for paused recovery status.
     /// The pool opens every connection read-only and never runs migrations.
     pub async fn connect_recovery_read_only(database_url: &str) -> Result<Self> {
@@ -84,6 +91,7 @@ impl LedgerStore {
         Ok(Self {
             pool,
             publication: Default::default(),
+            retained_wallet_epoch: None,
         })
     }
 
@@ -100,6 +108,7 @@ impl LedgerStore {
         Ok(Self {
             pool,
             publication: Default::default(),
+            retained_wallet_epoch: None,
         })
     }
 

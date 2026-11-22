@@ -138,6 +138,37 @@ async fn admitted_plan_recovers_lost_intake_checkpoint_without_core_or_new_provi
     .execute(&db)
     .await
     .unwrap();
+    let legacy = restarted
+        .operator_method(2, Some(("p2pk", "new key".into())))
+        .await
+        .unwrap();
+    assert_eq!(
+        legacy,
+        Some(("lightning".into(), "sat@lightning-goats.com".into()))
+    );
+    let original = restarted
+        .operator_method(3, Some(("p2pk", "first key".into())))
+        .await
+        .unwrap();
+    for changed in [
+        Some(("p2pk", "rotated key".into())),
+        Some(("lightning", "sat@lightning-goats.com".into())),
+        None,
+    ] {
+        assert_eq!(
+            restarted.operator_method(3, changed).await.unwrap(),
+            original
+        );
+    }
+    assert!(
+        sqlx::query(
+            "INSERT INTO payout_operator_invoices VALUES(3,'sat@lightning-goats.com','other',?,1,0)"
+        )
+        .bind("ee".repeat(32))
+        .execute(&db)
+        .await
+        .is_err()
+    );
     let receipt = |payment_preimage| crate::payout::cashu::CollectorResult::Paid {
         quote: "fixture".into(),
         amount_sat: 1,
@@ -151,12 +182,29 @@ async fn admitted_plan_recovers_lost_intake_checkpoint_without_core_or_new_provi
             .await
             .is_err()
     );
+    let socket = f.root.path().join("legacy-reconcile.sock");
+    let listener = UnixListener::bind(&socket).unwrap();
+    let original_feed = allocation.request_id;
+    let settled_hash = hash.clone();
+    let collector = tokio::spawn(async move {
+        for _ in 0..2 {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let request: serde_json::Value =
+                crate::private_ipc::read(&mut stream, 65536).await.unwrap();
+            assert_eq!(
+                request,
+                json!({"reconcile_operator":original_feed,"invoice":"fixture"})
+            );
+            let result = json!({"state":"PAID","quote":"fixture","amount_sat":1,"fee_sat":0,"payment_hash":settled_hash,"payment_preimage":hex::encode(preimage)});
+            crate::private_ipc::write(&mut stream, &result, 65536)
+                .await
+                .unwrap();
+        }
+    });
     for _ in 0..2 {
-        restarted
-            .settle_operator_invoice(2, &receipt(hex::encode(preimage)))
-            .await
-            .unwrap();
+        assert!(restarted.reconcile_operator(2, &socket, uid).await.unwrap());
     }
+    collector.await.unwrap();
     for _ in 0..2 {
         assert_eq!(restarted.next_operator_allocation().await.unwrap(), Some(3));
     }

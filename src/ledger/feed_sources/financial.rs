@@ -47,12 +47,14 @@ pub(in crate::ledger) async fn pending_allocation(
     tx: &mut Transaction<'_, Sqlite>,
     id: Uuid,
     threshold: u64,
+    epoch: Option<Uuid>,
 ) -> Result<(Vec<(i64, u64)>, bool)> {
     let rows = sqlx::query(&format!(
         "SELECT f.ledger_id,f.sats,c.remaining_sats,c.eligible_sats
          FROM feed_financial_parts f LEFT JOIN ({SOURCE_COVERAGE}) c ON c.ledger_id=f.ledger_id
-         WHERE f.plan_id=? ORDER BY f.ledger_id LIMIT 4097"
+         WHERE f.plan_id=?2 ORDER BY f.ledger_id LIMIT 4097"
     ))
+    .bind(epoch.map(|e| e.to_string()))
     .bind(id.to_string())
     .fetch_all(&mut **tx)
     .await?;
@@ -90,6 +92,7 @@ pub(super) async fn select(
     tx: &mut Transaction<'_, Sqlite>,
     threshold: u64,
     lots: &[Lot],
+    epoch: Option<Uuid>,
 ) -> Result<Selection> {
     let pending =
         sqlx::query("SELECT id,threshold_sats FROM feed_financial_plans WHERE state='pending'")
@@ -101,7 +104,7 @@ pub(super) async fn select(
         if to_u64(row.try_get("threshold_sats")?, "financial threshold")? != threshold {
             release(tx, id, "threshold_changed").await?;
         } else {
-            let (frozen, ready) = pending_allocation(tx, id, threshold).await?;
+            let (frozen, ready) = pending_allocation(tx, id, threshold, epoch).await?;
             if ready {
                 return Ok(Selection::Ready(id, frozen));
             }
@@ -214,7 +217,8 @@ mod tests {
             remaining: 1000,
             eligible: 1000,
         };
-        let Selection::Ready(id, allocation) = select(&mut tx, 1000, &[earlier]).await? else {
+        let Selection::Ready(id, allocation) = select(&mut tx, 1000, &[earlier], None).await?
+        else {
             anyhow::bail!("the frozen sources cover the original plan");
         };
         assert_eq!(id, plan);

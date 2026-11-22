@@ -1,5 +1,6 @@
 """VPS project invoice issuance with the pinned Nutshell wallet primitives."""
 
+import json
 import re
 import secrets
 import time
@@ -10,12 +11,14 @@ from cashu.core.crypto import b_dhke
 from coincurve import PrivateKey
 
 
-def prepare_outputs(amount, keyset):
+def prepare_outputs(amount, keyset, *, recipient=None):
     outputs = []
     for bit in range(amount.bit_length()):
         denomination = 1 << bit
         if amount & denomination:
             secret = secrets.token_hex(32)
+            if recipient is not None:
+                secret = json.dumps(["P2PK", {"nonce": secret, "data": recipient}], separators=(",", ":"))
             blinded, factor = b_dhke.step1_alice(secret)
             outputs.append({
                 "amount": denomination, "id": keyset, "B_": blinded.format().hex(),

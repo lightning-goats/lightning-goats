@@ -82,7 +82,12 @@ impl LedgerStore {
             return Ok(None);
         }
 
-        let sources = super::feed_sources::select(&mut transaction, threshold_sats).await?;
+        let sources = super::feed_sources::select(
+            &mut transaction,
+            threshold_sats,
+            self.retained_wallet_epoch,
+        )
+        .await?;
         if matches!(sources, super::feed_sources::Selection::Waiting) {
             transaction.commit().await?;
             return Ok(None);

@@ -7,6 +7,7 @@ from loguru import logger
 from cashu.core.base import Amount
 from cashu.core.db import LockOptions
 from cashu.core.settings import settings
+from cashu.lightning.goats_fee_conversion import converted_sat, ensure_journal
 
 
 async def check_sample(ledger, backend, unit):
@@ -19,6 +20,12 @@ async def check_sample(ledger, backend, unit):
         backend._verify_wallet(funding)
         reserve = Amount(unit, funding["balance_sat"])
         issued, fees = await ledger.get_unit_balance_and_fees(unit, db, conn)
+        if unit.name == "sat":
+            await ensure_journal(conn)
+            converted = await converted_sat(conn)
+            if converted > fees.amount:
+                raise RuntimeError("fee conversions exceed earned mint fees")
+            fees = Amount(unit, fees.amount - converted)
         gap = reserve.amount - issued.amount - fees.amount
         # Pending inputs have already been removed from keyset balance. Even
         # at the maximum permitted Lightning fee, their residual value is owed.

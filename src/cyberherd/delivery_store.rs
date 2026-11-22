@@ -169,7 +169,7 @@ impl Store {
             .fetch_one(&mut *tx)
             .await?;
             if !exists {
-                let pending:i64=sqlx::query_scalar("SELECT COUNT(*) FROM delivery_messages m JOIN delivery_overlay o ON o.owner=m.owner AND o.identity=m.identity WHERE m.owner=? AND (o.event_seq IS NULL OR EXISTS(SELECT 1 FROM delivery_destinations d WHERE d.owner=m.owner AND d.identity=m.identity AND (SELECT COUNT(*) FROM delivery_receipts r WHERE r.owner=d.owner AND r.identity=d.identity AND r.destination=d.destination)<json_array_length(m.relays_json)))")
+                let pending:i64=sqlx::query_scalar("SELECT COUNT(*) FROM delivery_messages m LEFT JOIN delivery_overlay o ON o.owner=m.owner AND o.identity=m.identity WHERE m.owner=? AND ((o.identity IS NOT NULL AND o.event_seq IS NULL) OR EXISTS(SELECT 1 FROM delivery_destinations d WHERE d.owner=m.owner AND d.identity=m.identity AND (SELECT COUNT(*) FROM delivery_receipts r WHERE r.owner=d.owner AND r.identity=d.identity AND r.destination=d.destination)<json_array_length(m.relays_json)))")
                     .bind(owner).fetch_one(&mut *tx).await?;
                 if pending >= 2048 {
                     bail!("member presentation backlog is full");
@@ -212,11 +212,13 @@ impl Store {
                 sqlx::query("INSERT INTO delivery_messages(owner,identity,source_seq,document_json,relays_json,created_at) VALUES(?,?,?,?,?,?)")
                     .bind(owner).bind(&message.identity).bind(event.seq).bind(serde_json::to_string(&message)?).bind(serde_json::to_string(&relays)?).bind(now).execute(&mut *tx).await?;
                 insert_destinations(&mut tx, owner, &message, None, self.stream_chat).await?;
-                sqlx::query("INSERT INTO delivery_overlay(owner,identity) VALUES(?,?)")
-                    .bind(owner)
-                    .bind(&message.identity)
-                    .execute(&mut *tx)
-                    .await?;
+                if event.event_type != "primal_invoice_mismatch" {
+                    sqlx::query("INSERT INTO delivery_overlay(owner,identity) VALUES(?,?)")
+                        .bind(owner)
+                        .bind(&message.identity)
+                        .execute(&mut *tx)
+                        .await?;
+                }
             }
         }
         sqlx::query("UPDATE delivery_cursors SET through=? WHERE owner=?")
@@ -233,8 +235,28 @@ impl Store {
         }
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         // A waiting branch is rotated; it cannot starve unrelated destinations.
-        let rows=sqlx::query("SELECT w.*,m.document_json,m.relays_json,m.created_at,d.branch,d.target_json FROM delivery_work w JOIN delivery_messages m ON m.owner=w.owner AND m.identity=w.identity JOIN delivery_destinations d ON d.owner=w.owner AND d.identity=w.identity AND d.destination=w.destination WHERE w.owner=? AND (? OR d.destination NOT LIKE 'stream:%') AND w.lease_until<=? AND (SELECT COUNT(*) FROM delivery_receipts r WHERE r.owner=w.owner AND r.identity=w.identity AND r.destination=w.destination)<json_array_length(m.relays_json) ORDER BY w.attempted_at,m.source_seq,w.destination LIMIT 32")
-            .bind(owner).bind(self.stream_chat).bind(now).fetch_all(&mut *tx).await?;
+        // Give an unacknowledged feed a five-minute scheduling advantage over
+        // relay fan-out retries. Aging still gives other eligible work a turn.
+        let rows = sqlx::query(
+            "WITH candidates AS (
+                SELECT w.*,m.document_json,m.relays_json,m.created_at,m.source_seq,
+                       d.branch,d.target_json,
+                       (SELECT COUNT(*) FROM delivery_receipts r WHERE r.owner=w.owner
+                        AND r.identity=w.identity AND r.destination=w.destination) AS receipts
+                FROM delivery_work w
+                JOIN delivery_messages m USING(owner,identity)
+                JOIN delivery_destinations d USING(owner,identity,destination)
+                WHERE w.owner=? AND (? OR d.destination NOT LIKE 'stream:%') AND w.lease_until<=?
+             )
+             SELECT * FROM candidates WHERE receipts<json_array_length(relays_json)
+             ORDER BY attempted_at - CASE WHEN receipts=0 AND destination='broadcast:note'
+                                          THEN 300 ELSE 0 END,source_seq,destination LIMIT 32",
+        )
+        .bind(owner)
+        .bind(self.stream_chat)
+        .bind(now)
+        .fetch_all(&mut *tx)
+        .await?;
         for row in rows {
             let identity: String = row.try_get("identity")?;
             let destination: String = row.try_get("destination")?;

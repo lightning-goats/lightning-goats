@@ -282,6 +282,82 @@ impl Store {
         Ok(())
     }
 
+    pub(crate) async fn operator_method(
+        &self,
+        sequence: i64,
+        choice: Option<(&str, String)>,
+    ) -> Result<Option<(String, String)>> {
+        let mut tx = self.pool.begin().await?;
+        write_lock(&mut tx).await?;
+        let existing = sqlx::query_as(
+            "SELECT method,destination FROM payout_operator_methods WHERE sequence=?",
+        )
+        .bind(sequence)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if existing.is_some() {
+            return Ok(existing);
+        }
+        let Some((method, destination)) = choice else {
+            return Ok(None);
+        };
+        sqlx::query("INSERT INTO payout_operator_methods VALUES(?,?,?)")
+            .bind(sequence)
+            .bind(method)
+            .bind(&destination)
+            .execute(&mut *tx)
+            .await?;
+        if method == "p2pk" {
+            sqlx::query(
+                "INSERT INTO payout_operator_ecash_status(sequence,state) VALUES(?,'pending')",
+            )
+            .bind(sequence)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(Some((method.to_owned(), destination)))
+    }
+
+    pub(crate) async fn begin_direct_attempt(&self, sequence: i64) -> Result<()> {
+        sqlx::query("UPDATE payout_operator_ecash_status SET state='pending',reason=NULL WHERE sequence=? AND state='held'")
+            .bind(sequence).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    pub(crate) async fn record_direct_status(
+        &self,
+        sequence: i64,
+        terms: &super::super::operator::DirectExecution,
+        status: super::super::operator::DirectStatus,
+    ) -> Result<()> {
+        use super::super::operator::DirectStatus;
+        match status {
+            DirectStatus::Ready {
+                amount_sat,
+                fee_sat,
+            } => {
+                if amount_sat == 0
+                    || amount_sat.checked_add(fee_sat) != Some(terms.allocation.operator_sats)
+                    || fee_sat > terms.fee_limit
+                {
+                    bail!("direct payout amount or fee differs");
+                }
+                sqlx::query("UPDATE payout_operator_ecash_status SET state='ready',reason=NULL,amount_sat=?,fee_sat=? WHERE sequence=? AND state!='ready'")
+                    .bind(i64::try_from(amount_sat)?).bind(i64::try_from(fee_sat)?).bind(sequence).execute(&self.pool).await?;
+            }
+            DirectStatus::Held { reason } => {
+                if !matches!(
+                    reason.as_str(),
+                    "no_payable_amount" | "fee_limit" | "nut11_unsupported"
+                ) {
+                    bail!("unknown direct payout status");
+                }
+                sqlx::query("UPDATE payout_operator_ecash_status SET state='held',reason=? WHERE sequence=? AND state!='ready'").bind(reason).bind(sequence).execute(&self.pool).await?;
+            }
+        }
+        Ok(())
+    }
     pub async fn next_operator_allocation(&self) -> Result<Option<i64>> {
         let mut tx = self.pool.begin().await?;
         write_lock(&mut tx).await?;
@@ -289,7 +365,7 @@ impl Store {
             "SELECT a.sequence FROM payout_operator_allocations a
              LEFT JOIN payout_worker_attempts w ON w.work_key='operator:'||a.sequence
              LEFT JOIN payout_operator_receipts r ON r.sequence=a.sequence
-             WHERE r.sequence IS NULL ORDER BY COALESCE(w.sequence,0),a.sequence LIMIT 1",
+             WHERE r.sequence IS NULL AND NOT EXISTS (SELECT 1 FROM payout_operator_ecash_status s WHERE s.sequence=a.sequence AND s.state='ready') ORDER BY COALESCE(w.sequence,0),a.sequence LIMIT 1",
         )
         .fetch_optional(&mut *tx)
         .await?;
@@ -328,6 +404,7 @@ impl Store {
         &self,
         sequence: i64,
         socket: &std::path::Path,
+        collector_uid: u32,
     ) -> Result<bool> {
         let saved: Option<(String, String)> = sqlx::query_as(
             "SELECT r.request_id,i.invoice FROM payout_operator_invoices i
@@ -339,7 +416,7 @@ impl Store {
         if let Some((feed, invoice)) = saved {
             let result: super::super::cashu::CollectorResult = crate::private_ipc::request(
                 socket,
-                0,
+                collector_uid,
                 &serde_json::json!({"reconcile_operator":feed,"invoice":invoice}),
                 65536,
                 30,

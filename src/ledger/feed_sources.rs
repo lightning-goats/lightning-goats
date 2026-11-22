@@ -15,14 +15,22 @@ pub(super) enum Selection {
 // the authenticated wallet result. The furthest verified input covers gross
 // contribution credit. Spending fee change again cannot duplicate that input.
 const SOURCE_COVERAGE: &str = "SELECT l.ledger_id,l.remaining_sats,
-    CASE WHEN c.ledger_entry_id IS NULL OR EXISTS(SELECT 1 FROM collector_handoff_amounts g WHERE g.ledger_id=l.ledger_id) THEN l.remaining_sats
+    CASE WHEN c.ledger_entry_id IS NULL OR (c.wallet_epoch != ?1
+             AND c.core_epoch=(SELECT stream_id FROM overlay_identity WHERE singleton=1)
+             AND NOT EXISTS(SELECT 1 FROM retained_cashu_lots g WHERE g.ledger_id=l.ledger_id)
+             AND NOT EXISTS(SELECT 1 FROM cashu_treasury_sources t WHERE t.ledger_id=l.ledger_id))
+         OR EXISTS(SELECT 1 FROM collector_handoff_amounts g WHERE g.ledger_id=l.ledger_id) THEN l.remaining_sats
          ELSE MIN(l.remaining_sats,MAX(0,
            (SELECT COALESCE(MAX(start_sats+input_sats),0) FROM cashu_funding_ranges WHERE ledger_id=l.ledger_id)
            -(SELECT COALESCE(SUM(p.sats),0) FROM feed_reward_funding_parts p WHERE p.ledger_id=l.ledger_id)))
     END AS eligible_sats
     FROM reward_funding_lots l LEFT JOIN cashu_receipt_inbox c ON c.ledger_entry_id=l.ledger_id";
 
-pub(super) async fn select(tx: &mut Transaction<'_, Sqlite>, threshold: u64) -> Result<Selection> {
+pub(super) async fn select(
+    tx: &mut Transaction<'_, Sqlite>,
+    threshold: u64,
+    epoch: Option<Uuid>,
+) -> Result<Selection> {
     let cashu: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM cashu_receipt_inbox)")
         .fetch_one(&mut **tx)
         .await?;
@@ -37,6 +45,7 @@ pub(super) async fn select(tx: &mut Transaction<'_, Sqlite>, threshold: u64) -> 
         "{SOURCE_COVERAGE} WHERE l.remaining_sats>0
          ORDER BY CASE WHEN eligible_sats>0 THEN 0 ELSE 1 END,l.ledger_id LIMIT 4096"
     ))
+    .bind(epoch.map(|e| e.to_string()))
     .fetch_all(&mut **tx)
     .await?;
     let mut lots = Vec::new();
@@ -47,7 +56,7 @@ pub(super) async fn select(tx: &mut Transaction<'_, Sqlite>, threshold: u64) -> 
             eligible: to_u64(row.try_get("eligible_sats")?, "available source credit")?,
         });
     }
-    financial::select(tx, threshold, &lots).await
+    financial::select(tx, threshold, &lots, epoch).await
 }
 
 mod financial;

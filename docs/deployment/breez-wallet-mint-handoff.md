@@ -198,3 +198,39 @@ A relay acknowledgment is recorded in the private delivery journal.
 The wallet must receive and process the message before it can show spendable
 funds. A retry sends the original encrypted event. Manual retrieval still
 returns the same token and cannot create another payout.
+
+### Converting mint fees to operator ecash
+
+On HOME, the solvency report accepts `--operating-buffer-sat` to estimate the
+maximum input fees that could become operator ecash after protecting outstanding
+proofs, paid unissued quotes and the specified operating buffer. A stale reserve
+sample or pending settlement holds the estimate at zero. The estimate uses
+independent reserve and issuer samples and is for planning only.
+
+The HOME issuer reconciles cumulative fees against prior conversions, recorded
+issuer expenses, paid unissued quotes and the operating buffer inside its write
+transaction. A conversion adds an equal amount of operator proof liability and
+leaves the reserve in Breez. The watchdog checks the conversion journal against
+the signed sat outputs before subtracting distributed fees from its fee total.
+Its reserve checkpoint should show the same backing immediately before and
+after issuance when no other transactions intervene. Existing feeder credit
+and confirmed-feed allocations are outside this transaction.
+
+The private HOME endpoint and VPS fee worker use a separate shared
+`operator-fee-token`. Install it as an encrypted systemd credential on each
+host. Add the credential to the HOME mint instance using a drop-in with
+`LoadCredentialEncrypted=operator-fee-token:/etc/credstore.encrypted/lightning-goats-reserve/mainnet-operator-fee-token.cred`.
+Set `LG_OPERATOR_FEE_RECIPIENT` to the operator wallet's compressed P2PK public
+key, `LG_OPERATOR_FEE_BUFFER_SAT` to the approved operating reserve and
+`LG_OPERATOR_FEE_MAX_SAT` to the approved per-request ceiling in the HOME mint
+environment. Install the private origin configuration with the conversion routes.
+
+On the VPS, set `LG_FEE_BATCH_SAT` in
+`/etc/lightning-goats-project-collector/operator-fees.env`. The oneshot unit
+uses the existing mint keyset and operator payment request. Run the service
+once for the bounded live test. Verify wallet receipt and the HOME backing
+checkpoint before enabling `lightning-goats-operator-fees.timer`.
+The timer checks every ten minutes. A pending batch keeps its original ID,
+blinded outputs, wallet request and delivery envelope across retries. The UTC
+date limits creation to one batch per day. Retain the private journal in
+`/var/lib/lightning-goats-operator-fees` through upgrade or rollback.

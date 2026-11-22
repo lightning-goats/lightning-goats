@@ -25,7 +25,9 @@ git -C "$build/nutshell" apply "$here/mint/nutshell.patch" "$here/mint/runtime-d
 mkdir "$build/spark/crates/lg-reserve"
 cp -a "$here/wallet/Cargo.toml" "$here/wallet/src" "$build/spark/crates/lg-reserve/"
 install -m 0644 "$here/mint/adapter.py" "$build/nutshell/cashu/lightning/goats_reserve.py"
+install -m 0644 "$here/mint/goats_fee_conversion.py" "$build/nutshell/cashu/lightning/goats_fee_conversion.py"
 install -m 0644 "$here/mint/goats_watchdog.py" "$build/nutshell/cashu/lightning/goats_watchdog.py"
+install -m 0644 "$here/collector/operator_proofs.py" "$build/nutshell/operator_proofs.py"
 install -m 0644 "$here/mint/lg_mint.py" "$build/nutshell/lg_mint.py"
 
 (
@@ -46,12 +48,14 @@ install -m 0644 "$here/mint/lg_mint.py" "$build/nutshell/lg_mint.py"
     PYTHONPATH="$build/nutshell" .venv/bin/python "$here/tests/direct_operator_acceptance.py"
     PYTHONPATH="$build/nutshell" bash "$here/tests/direct_worker_acceptance.sh" .venv/bin/python
     PYTHONPATH="$build/nutshell" .venv/bin/python "$here/tests/watchdog_acceptance.py"
+    PYTHONPATH="$build/nutshell:$build/nutshell/cashu/lightning:$here/collector" .venv/bin/python "$here/tests/fee_conversion_acceptance.py"
+    PYTHONPATH="$build/nutshell:$here/collector" .venv/bin/python "$here/tests/fee_http_acceptance.py"
 )
 
 bundle=$build/bundle
 mkdir -p "$bundle/bin" "$bundle/nutshell" "$bundle/site-packages" "$bundle/python"
 install -m 0755 "$cargo_target/release-lnurl/lightning-goats-reserve" "$bundle/bin/"
-cp -a "$build/nutshell/cashu" "$build/nutshell/lg_mint.py" "$bundle/nutshell/"
+cp -a "$build/nutshell/cashu" "$build/nutshell/lg_mint.py" "$build/nutshell/operator_proofs.py" "$bundle/nutshell/"
 cp -a "$build/nutshell/.venv/lib/python3.11/site-packages/." "$bundle/site-packages/"
 rm -rf -- "$bundle/site-packages/pip" "$bundle/site-packages"/pip-*.dist-info
 # Use a relocatable Python distribution whose bin/ and lib/ are below one prefix.

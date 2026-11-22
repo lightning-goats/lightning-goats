@@ -67,6 +67,66 @@ async def project_quote(payload: ProjectQuote, authorization: str | None = Heade
     return PostMintQuoteResponse.from_mint_quote(quote)
 
 
+class FeeOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    amount: Annotated[int, Field(strict=True, gt=0, le=MAX_INVOICE_SAT)]
+    id: Annotated[str, Field(pattern=r"^[0-9a-f]{16,66}$")]
+    B_: Annotated[str, Field(pattern=r"^(02|03)[0-9a-f]{64}$")]
+    secret: Annotated[str, Field(min_length=1, max_length=512)]
+    blind: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+
+
+class FeeConversion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request_id: UUID
+    outputs: Annotated[list[FeeOutput], Field(min_length=1, max_length=20)]
+
+
+def authorize_fee_conversion(authorization):
+    token_path = credentials / "operator-fee-token"
+    if not token_path.is_file():
+        raise HTTPException(status_code=404, detail="fee conversion disabled")
+    secret = token_path.read_bytes().strip()
+    if len(secret) < 32 or not hmac.compare_digest((authorization or "").encode(), b"Bearer " + secret):
+        raise HTTPException(status_code=401, detail="fee conversion credential required")
+
+
+@app.post("/private/v1/operator-fee-conversions")
+async def operator_fee_conversion(payload: FeeConversion, authorization: str | None = Header(default=None)):
+    from cashu.core.base import Method, Unit
+    from cashu.lightning.goats_fee_conversion import issue_conversion, recover_token
+
+    authorize_fee_conversion(authorization)
+    recipient = os.environ["LG_OPERATOR_FEE_RECIPIENT"]
+    buffer = int(os.environ["LG_OPERATOR_FEE_BUFFER_SAT"])
+    limit = int(os.environ["LG_OPERATOR_FEE_MAX_SAT"])
+    if not 0 < sum(item.amount for item in payload.outputs) <= limit:
+        raise HTTPException(status_code=422, detail="outside configured conversion budget")
+    identity = str(payload.request_id)
+    try:
+        await issue_conversion(ledger, ledger.backends[Method.bolt11][Unit.sat], identity,
+                               [item.model_dump() for item in payload.outputs], recipient, buffer)
+        token = await recover_token(ledger, identity)
+    except ValueError:
+        raise HTTPException(status_code=409, detail="fee conversion held") from None
+    return {"id": identity, "token": token}
+
+
+@app.get("/private/v1/operator-fee-conversions/{conversion_id}")
+async def read_fee_conversion(conversion_id: UUID, authorization: str | None = Header(default=None)):
+    from cashu.lightning.goats_fee_conversion import recover_token
+
+    authorize_fee_conversion(authorization)
+    identity = str(conversion_id)
+    async with ledger.db.connect() as conn:
+        journal = await conn.fetchone("SELECT 1 FROM sqlite_master WHERE type='table' AND name='goats_fee_conversions'")
+        existing = journal and await conn.fetchone("SELECT 1 FROM goats_fee_conversions WHERE conversion_id=:id",
+                                      {"id": identity})
+    if existing is None:
+        raise HTTPException(status_code=404, detail="unknown conversion")
+    return {"id": identity, "token": await recover_token(ledger, identity)}
+
+
 if __name__ == "__main__":
     uvicorn.run(app, uds=os.environ["LG_MINT_SOCKET"], proxy_headers=False, access_log=False,
         limit_concurrency=32, timeout_keep_alive=5)

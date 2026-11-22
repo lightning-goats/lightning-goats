@@ -1,5 +1,4 @@
 """Swap confirmed collector allocations into offline, recipient-only Cashu proofs."""
-import base64
 import fcntl
 import json
 import re
@@ -10,6 +9,7 @@ from coincurve import PublicKey
 from claim_store import SplitRequired, encode
 from collect import payout_input_fee, project_allocations, recover_swap
 from project_quote import prepare_outputs
+from operator_proofs import encode_token
 
 MINT = "https://mint.lightning-goats.com"
 
@@ -111,7 +111,6 @@ def transfer(store, client, request, keyset, keys):
                     store._index_outputs(claim, [proof])
             if sum(p["amount"] for p in operator) != amount:
                 raise ValueError("mint returned inconsistent operator amount")
-            token = {"unit": "sat", "token": [{"mint": MINT, "proofs": operator}]}
-            encoded = "cashuA" + base64.urlsafe_b64encode(encode(token).encode()).decode().rstrip("=")
+            encoded = encode_token(MINT, operator)
             db.execute("UPDATE operator_ecash SET token=? WHERE feed=? AND token IS NULL", (encoded, feed))
         return {"state": "ready", "amount_sat": amount, "fee_sat": fee}

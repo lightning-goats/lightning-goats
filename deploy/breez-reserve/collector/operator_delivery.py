@@ -98,33 +98,42 @@ def publish(url, event):
     return False
 
 
-def deliver(source, journal, request, wrapper=HERE/"operator_wrap.cjs", send=publish):
+def deliver_token(journal, feed, token, amount, recipient, request, wrapper=HERE/"operator_wrap.cjs", send=publish):
     rid, lock, relays = destination(request)
     journal.execute("CREATE TABLE IF NOT EXISTS delivery(feed TEXT PRIMARY KEY,token_hash TEXT NOT NULL,event TEXT NOT NULL,relays TEXT NOT NULL,ack_at INTEGER)")
-    for feed, token, amount in source.execute("SELECT feed,token,amount_sat FROM operator_ecash WHERE token IS NOT NULL"):
-        stamp = hashlib.sha256(token.encode()).hexdigest()
+    stamp = hashlib.sha256(token.encode()).hexdigest()
+    with journal:
+        journal.execute("BEGIN IMMEDIATE")
+        row = journal.execute("SELECT token_hash,event,relays,ack_at FROM delivery WHERE feed=?", (feed,)).fetchone()
+        if row:
+            if row[0] != stamp:
+                raise ValueError("issued token changed")
+            if row[3] is not None:
+                return True
+            message, urls = row[1], json.loads(row[2])
+        else:
+            # Rotation applies to matching tokens only. Existing envelopes keep their route.
+            if recipient != lock:
+                return False
+            message, urls = envelope(token, amount, rid, lock, wrapper), relays
+            journal.execute("INSERT INTO delivery VALUES(?,?,?,?,NULL)", (feed,stamp,message,json.dumps(urls)))
+    event = json.loads(message)
+    with ThreadPoolExecutor(max_workers=len(urls)) as pool:
+        accepted = list(pool.map(lambda url: send(url,event), urls))
+    if any(accepted):
         with journal:
-            journal.execute("BEGIN IMMEDIATE")
-            row = journal.execute("SELECT token_hash,event,relays,ack_at FROM delivery WHERE feed=?", (feed,)).fetchone()
-            if row:
-                if row[0] != stamp:
-                    raise ValueError("issued token changed")
-                if row[3] is not None:
-                    continue
-                message, urls = row[1], json.loads(row[2])
-            else:
-                # Rotation applies to matching tokens only. Existing envelopes keep their route.
-                binding, = source.execute("SELECT binding FROM proof_disposition WHERE id=?", (feed,)).fetchone()
-                if json.loads(binding)["recipient"] != lock:
-                    continue
-                message, urls = envelope(token, amount, rid, lock, wrapper), relays
-                journal.execute("INSERT INTO delivery VALUES(?,?,?,?,NULL)", (feed,stamp,message,json.dumps(urls)))
-        event = json.loads(message)
-        with ThreadPoolExecutor(max_workers=len(urls)) as pool:
-            accepted = list(pool.map(lambda url: send(url,event), urls))
-        if any(accepted):
-            with journal:
-                journal.execute("UPDATE delivery SET ack_at=COALESCE(ack_at,unixepoch()) WHERE feed=?", (feed,))
+            journal.execute("UPDATE delivery SET ack_at=COALESCE(ack_at,unixepoch()) WHERE feed=?", (feed,))
+        return True
+    return False
+
+
+def deliver(source, journal, request, wrapper=HERE/"operator_wrap.cjs", send=publish):
+    rows = source.execute("""
+        SELECT e.feed,e.token,e.amount_sat,p.binding FROM operator_ecash e
+        JOIN proof_disposition p ON p.id=e.feed WHERE e.token IS NOT NULL
+    """)
+    for feed, token, amount, binding in rows:
+        deliver_token(journal, feed, token, amount, json.loads(binding)["recipient"], request, wrapper, send)
 
 
 if __name__ == "__main__":

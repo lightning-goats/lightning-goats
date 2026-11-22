@@ -255,6 +255,7 @@ async fn project_treasury_invoice_reopens_without_issuing_or_crediting_again() {
     ledger.import_cashu_receipt(&registration, &authenticated(&registration, &receipt)).await.unwrap();
     let mut policy = feed_treasury_policy();
     policy.destination.origin = "https://mint.lightning-goats.com/".into();
+    assert!(policy.validate().is_err());
     policy.invoice_expiry_seconds = 900;
     let sweep = crate::cashu::treasury_sweep::Request {
         id: Uuid::new_v4(), mint_id: "mint-a".into(), maximum_input_sats: 1000,

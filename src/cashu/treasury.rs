@@ -54,6 +54,12 @@ pub struct Policy {
 impl Policy {
     pub fn validate(&self) -> Result<()> {
         self.destination.validate()?;
+        if self.destination.origin == PROJECT_MINT_ORIGIN {
+            ensure!(
+                self.invoice_expiry_seconds == crate::config::HOME_INVOICE_EXPIRY_SECONDS,
+                "project treasury requires the HOME invoice expiry of 900 seconds"
+            );
+        }
         let bounded_label =
             |v: &str| !v.is_empty() && v.len() <= 128 && !v.chars().any(char::is_control);
         ensure!(

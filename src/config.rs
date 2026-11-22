@@ -12,6 +12,8 @@ use serde::Deserialize;
 
 use crate::domain::invoice::validate_user;
 
+pub(crate) const HOME_INVOICE_EXPIRY_SECONDS: u64 = 900;
+
 pub const REQUIRED_PHASE1_LIGHTNING_USERS: [&str; 6] =
     ["herd", "dexter", "rowan", "cosmo", "newton", "nova"];
 
@@ -331,7 +333,7 @@ impl LnurlConfig {
             .as_ref()
             .context("Breez requires a private collector")?;
         collector.validate()?;
-        if self.invoice_expiry_seconds != 900 {
+        if self.invoice_expiry_seconds != HOME_INVOICE_EXPIRY_SECONDS {
             bail!("Breez requires the HOME invoice expiry of 900 seconds");
         }
         Ok(collector)

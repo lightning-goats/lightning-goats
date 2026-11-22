@@ -10,6 +10,8 @@ enabled = false
 # Preserve the original scope of any existing journal for recovery.
 funding_source = "strike"
 # cashu_payout_socket = "/run/lightning-goats-project-payouts.sock"
+# Set this destination to pay the operator share from confirmed Cashu feedings.
+# operator_address = "sat@lightning-goats.com"
 state_dir = "/var/lib/cyberherd-payout"
 core_socket = "/run/lightning-goats-bridge/core.sock"
 intake_socket = "/run/cyberherd-plans/plans.sock"

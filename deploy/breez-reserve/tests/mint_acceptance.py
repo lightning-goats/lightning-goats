@@ -197,7 +197,7 @@ def start_mint(directory, socket, reserve, credentials, *, watchdog=False, input
 def fee_charging_handoff():
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "collector"))
     from claim_store import ClaimStore
-    from collect import collect_acquisition, recover_payout_refund
+    from collect import collect_acquisition, recover_payout_refund, execute_payout
 
     with TemporaryDirectory(prefix="lg-handoff-") as raw:
         directory = Path(raw)
@@ -273,6 +273,51 @@ def fee_charging_handoff():
                 assert store.db.execute("SELECT claim_id,returned_sat FROM payout_claim_refund").fetchall() == [
                     (min(sources), 1)]
                 assert wallet_state(viewer, change) == "SPENT"
+                # A single 32-sat proof funds both the 18-sat operator share
+                # and a 14-sat member share on the fee-charging mint.
+                quote = expect(viewer.post("/v1/mint/quote/bolt11", json={"amount": 32, "unit": "sat"}))
+                reserve.paid.add(bolt11.decode(quote["request"]).payment_hash)
+                outputs, material = new_outputs(keyset, [32])
+                sig, = expect(viewer.post("/v1/mint/bolt11", json={
+                    "quote": quote["quote"], "outputs": encode_outputs(outputs)}))["signatures"]
+                source = str(uuid.uuid4())
+                store.prepare(source, {"attribution": {"credit_pool": "herd"}}, list)
+                payment_hash = bolt11.decode(quote["request"]).payment_hash
+                store.record_invoice(source, quote["request"], payment_hash)
+                original = [proof(sig, material[0], keys)]
+                store.record_proofs(source, payment_hash, original)
+                from claim_store import encode
+                evidence = hashlib.sha256(encode(original).encode()).hexdigest()
+                feed = str(uuid.uuid4())
+                request = {"disposition_id": feed, "feed_id": feed, "invoice": reserve.destination[0],
+                    "payment_hash": bolt11.decode(reserve.destination[0]).payment_hash, "amount_sat": 12,
+                    "maximum_fee_sat": 6, "operator": {"plan_hash": "ab"*32, "member_reserved_sat": 14,
+                    "operator_sat": 18}, "retained_allocations": [{"ledger_id": 1, "consumed_sats": 32,
+                    "anchor": {"source": "project_invoice", "claim_id": source, "evidence_digest": evidence}}]}
+                costs = execute_payout(store, viewer, {"quote_invoice": request["invoice"], "amount_sat": 12,
+                    "feed_id": feed, "gross_sat": 18, "retained_allocations": request["retained_allocations"]}, keyset, {})
+                assert costs["routing_reserve_sat"] == 4 and costs["input_fee_sat"] == 2
+                try:
+                    execute_payout(store, LostReply(), request, keyset, {keyset: keys})
+                except httpx.ReadTimeout:
+                    pass
+                else:
+                    raise AssertionError("expected lost fee-bearing split response")
+                store.db.close()
+                store = ClaimStore(directory)
+                reserve.complete_sends = True
+                result = execute_payout(store, viewer, request, keyset, {keyset: keys})
+                for _ in range(30):
+                    if result["state"] == "PAID":
+                        break
+                    time.sleep(.1)
+                    result = execute_payout(store, viewer, {"reconcile_operator": feed, "invoice": request["invoice"]},
+                                            keyset, {keyset: keys})
+                assert result["state"] == "PAID" and result["amount_sat"] == 12 and result["fee_sat"] == 3, result
+                assert reserve.pay_attempts == 1
+                member = store.reserve_payout(str(uuid.uuid4()), feed, "cd"*32, 14, 0,
+                    {source: {"consumed_sats": 32, "evidence_digest": evidence}})
+                assert sum(p["amount"] for p in member) == 14
                 store.db.close()
             finally:
                 viewer.close()

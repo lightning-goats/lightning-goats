@@ -280,8 +280,9 @@ def execute_payout(store, client, request, keyset, pinned_keys):
     if set(request) == {"reconcile_disposition", "invoice"}:
         return submit_payout(store, client, request["reconcile_disposition"], request["invoice"],
                              keyset, pinned_keys, reconcile_only=True)
-    if set(request) != {"disposition_id", "feed_id", "invoice", "payment_hash", "amount_sat",
-                        "maximum_fee_sat", "retained_allocations"}:
+    payment_fields = {"disposition_id", "feed_id", "invoice", "payment_hash", "amount_sat",
+                      "maximum_fee_sat", "retained_allocations"}
+    if set(request) not in (payment_fields, payment_fields | {"operator"}) or ("operator" in request and request["operator"] is None):
         raise ValueError("invalid payout request")
     invoice = bolt11.decode(request["invoice"])
     if (type(request["amount_sat"]) is not int or invoice.currency != "bc"
@@ -294,7 +295,8 @@ def execute_payout(store, client, request, keyset, pinned_keys):
             store.reserve_payout(request["disposition_id"], request["feed_id"], invoice.payment_hash,
                                  request["amount_sat"], request["maximum_fee_sat"], allocations,
                                  invoice_expiry=invoice.expiry_time,
-                                 invoice_digest=hashlib.sha256(request["invoice"].encode()).hexdigest())
+                                 invoice_digest=hashlib.sha256(request["invoice"].encode()).hexdigest(),
+                                 operator=request.get("operator"))
             break
         except SplitRequired as plan:
             for secret, portion in plan.splits:
@@ -315,7 +317,9 @@ def submit_payout(store, client, disposition_id, invoice_text, keyset, pinned_ke
 
 def _submit_payout(store, client, disposition_id, invoice_text, keyset, pinned_keys, reconcile_only):
     row = store.db.execute(
-        "SELECT binding FROM proof_disposition WHERE id=? AND purpose='cyberherd_payout'",
+        "SELECT d.binding FROM proof_disposition d JOIN payout_invoice i ON i.disposition_id=d.id "
+        "WHERE d.id=? AND (d.purpose='cyberherd_payout' OR "
+        "(d.purpose='operator_transfer' AND json_type(d.binding,'$.operator')='object'))",
         (disposition_id,),
     ).fetchone()
     if row is None:

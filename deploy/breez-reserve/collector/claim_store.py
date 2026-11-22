@@ -278,7 +278,7 @@ class ClaimStore:
             raise SplitRequired(selected, splits)
         return selected, taken
 
-    def reserve_payout(self, disposition_id, feed_id, invoice_hash, amount, fee_limit, allocations, *, invoice_expiry=None, invoice_digest=None):
+    def reserve_payout(self, disposition_id, feed_id, invoice_hash, amount, fee_limit, allocations, *, invoice_expiry=None, invoice_digest=None, operator=None):
         """Reserve exact project inputs against an authenticated confirmed-feed allocation."""
         disposition_id = str(UUID(disposition_id))
         feed_id = str(UUID(feed_id))
@@ -290,6 +290,18 @@ class ClaimStore:
             raise ValueError("invalid payout terms")
         terms = {"feed": feed_id, "invoice_hash": invoice_hash, "amount_sat": amount,
                  "maximum_fee_sat": fee_limit, "claims": allocations}
+        purpose = "cyberherd_payout"
+        if operator is not None:
+            if (not isinstance(operator, dict) or set(operator) != {"plan_hash", "member_reserved_sat", "operator_sat"}
+                    or not isinstance(operator["plan_hash"], str) or len(operator["plan_hash"]) != 64
+                    or any(c not in "0123456789abcdef" for c in operator["plan_hash"])
+                    or type(operator["member_reserved_sat"]) is not int or operator["member_reserved_sat"] < 0
+                    or type(operator["operator_sat"]) is not int or amount + fee_limit > operator["operator_sat"]
+                    or operator["operator_sat"] + operator["member_reserved_sat"] != sum(a["consumed_sats"] for a in allocations.values())
+                    or disposition_id != feed_id or not invoice_digest):
+                raise ValueError("operator transfer differs from confirmed feed allocation")
+            purpose = "operator_transfer"
+            terms["operator"] = operator
         legacy_binding = encode(terms)
         if invoice_digest is not None:
             terms["invoice_digest"] = invoice_digest
@@ -297,13 +309,12 @@ class ClaimStore:
         with self.write():
             previous = self.db.execute("SELECT purpose,binding FROM proof_disposition WHERE id=?",
                                        (disposition_id,)).fetchone()
-            if previous and previous not in (("cyberherd_payout", binding), ("cyberherd_payout", legacy_binding)):
+            if previous and previous != (purpose, binding) and (operator is not None or previous != (purpose, legacy_binding)):
                 raise ValueError("payout replay differs")
             if previous is None:
                 if invoice_expiry is not None and invoice_expiry <= time.time():
                     raise ValueError("expired payout invoice")
-                self.db.execute("INSERT INTO proof_disposition VALUES (?,'cyberherd_payout',?)",
-                                (disposition_id, binding))
+                self.db.execute("INSERT INTO proof_disposition VALUES (?,?,?)", (disposition_id, purpose, binding))
                 self.db.execute("INSERT INTO payout_invoice VALUES (?,?)", (invoice_hash, disposition_id))
                 selected, taken = self.payout_inputs(feed_id, amount + fee_limit, allocations)
                 self.db.executemany("INSERT INTO disposition_input VALUES (?,?)",

@@ -32,8 +32,6 @@ use uuid::Uuid;
 use sha2::{Digest, Sha256};
 use store::{Admission, Journal};
 
-const INVOICE_MAX_SAT: u64 = 1_000_000;
-const MELT_MAX_SAT: u64 = INVOICE_MAX_SAT;
 const FEE_MAX_SAT: u64 = 100;
 
 struct Wallet {
@@ -152,7 +150,7 @@ fn check_created(
 ) -> Result<Invoice> {
     let parsed = parse_invoice(&raw, network)?;
     ensure!(
-        parsed.amount_milli_satoshis() == Some(request.amount_sat * 1000),
+        parsed.amount_milli_satoshis() == request.amount_sat.checked_mul(1000),
         "invoice amount"
     );
     ensure!(
@@ -199,7 +197,8 @@ fn check_created(
 
 async fn create(State(wallet): State<Shared>, Json(request): Json<Create>) -> Api {
     if request.operation_id.is_nil()
-        || !(1..=INVOICE_MAX_SAT).contains(&request.amount_sat)
+        || request.amount_sat == 0
+        || request.amount_sat.checked_mul(1000).is_none()
         || !(60..=3600).contains(&request.expiry_secs)
         || match &request.description {
             Description::MintQuote { memo } => memo.is_empty() || memo.len() > 256,
@@ -261,9 +260,6 @@ async fn receive_status(State(wallet): State<Shared>, Path(hash): Path<String>) 
 fn melt_invoice(raw: &str, network: &str) -> Result<(String, u64), ApiError> {
     let invoice = parse_invoice(raw, network).map_err(|_| INVALID)?;
     let amount = invoice.amount_milli_satoshis().ok_or(INVALID)? / 1000;
-    if amount > MELT_MAX_SAT {
-        return Err(INVALID);
-    }
     Ok((invoice.payment_hash().to_string(), amount))
 }
 
@@ -506,7 +502,7 @@ mod tests {
     };
     use lightning_invoice::{InvoiceBuilder, PaymentSecret};
 
-    fn signed_invoice(description: sha256::Hash) -> String {
+    fn signed_invoice(description: sha256::Hash, amount_sat: u64) -> String {
         let key = SecretKey::from_slice(&[7; 32]).unwrap();
         InvoiceBuilder::new(Currency::Bitcoin)
             .description_hash(description)
@@ -514,11 +510,17 @@ mod tests {
             .payment_secret(PaymentSecret([9; 32]))
             .duration_since_epoch(std::time::Duration::from_secs(now()))
             .min_final_cltv_expiry_delta(18)
-            .amount_milli_satoshis(21_000)
+            .amount_milli_satoshis(amount_sat * 1000)
             .expiry_time(std::time::Duration::from_secs(900))
             .build_signed(|message| Secp256k1::new().sign_ecdsa_recoverable(message, &key))
             .unwrap()
             .to_string()
+    }
+
+    #[test]
+    fn melt_accepts_invoice_above_former_amount_limits() {
+        let raw = signed_invoice(sha256::Hash::hash(b"large payment"), 1_000_001);
+        assert!(matches!(melt_invoice(&raw, "mainnet"), Ok((_, 1_000_001))));
     }
 
     #[test]
@@ -532,7 +534,7 @@ mod tests {
                 "description": {"purpose": "project_quote", "description_hash": digest.to_string(),
                 "claim_pubkey": format!("02{}", "a".repeat(64))}});
             let mut request: Create = serde_json::from_value(fields).unwrap();
-            let raw = signed_invoice(digest);
+            let raw = signed_invoice(digest, 21);
             assert!(
                 check_created(&request, raw.clone(), "ssp-reference".into(), "mainnet").is_ok()
             );
@@ -552,7 +554,7 @@ mod tests {
             assert!(
                 check_created(
                     &request,
-                    signed_invoice(sha256::Hash::hash(b"changed")),
+                    signed_invoice(sha256::Hash::hash(b"changed"), 21),
                     "ssp-reference".into(),
                     "mainnet"
                 )

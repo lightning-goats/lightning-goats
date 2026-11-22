@@ -7,6 +7,9 @@ CREATE TABLE payout_operator_allocations (
     member_reserved_sats INTEGER NOT NULL CHECK(member_reserved_sats>=0),
     operator_sats INTEGER NOT NULL CHECK(operator_sats>0 AND operator_sats=collected_sats-member_reserved_sats)
 ) STRICT;
+CREATE TRIGGER reject_operator_allocation_replacement BEFORE INSERT ON payout_operator_allocations
+WHEN EXISTS (SELECT 1 FROM payout_operator_allocations WHERE sequence=NEW.sequence)
+BEGIN SELECT RAISE(ABORT,'operator allocation already recorded'); END;
 CREATE TRIGGER immutable_operator_allocation BEFORE UPDATE ON payout_operator_allocations
 BEGIN SELECT RAISE(ABORT,'operator allocation is immutable'); END;
 CREATE TRIGGER retained_operator_allocation BEFORE DELETE ON payout_operator_allocations

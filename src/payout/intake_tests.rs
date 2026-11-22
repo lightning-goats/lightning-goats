@@ -88,6 +88,8 @@ async fn admitted_plan_recovers_lost_intake_checkpoint_without_core_or_new_provi
     .unwrap();
     let real = i64::try_from(operator_plan.real_sats).unwrap();
     assert_eq!(saved, (real, 0, real));
+    assert!(sqlx::query("INSERT OR REPLACE INTO payout_operator_allocations SELECT sequence,funding_hash,collected_sats,1,collected_sats-1 FROM payout_operator_allocations")
+        .execute(&db).await.is_err());
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM payout_grants")
             .fetch_one(&db)

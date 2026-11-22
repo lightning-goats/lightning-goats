@@ -80,7 +80,9 @@ impl AppConfig {
             bail!("configuration requests a Strike-dependent service without a Strike backend");
         }
 
-        if let Some(collector) = &self.lnurl.breez_collector {
+        if self.lnurl.wallet_backend == WalletBackend::Breez {
+            self.lnurl.project_collector()?;
+        } else if let Some(collector) = &self.lnurl.breez_collector {
             collector.validate()?;
         }
         self.validate_lnurl()?;
@@ -322,6 +324,20 @@ pub struct LnurlConfig {
     pub zap: Option<ZapConfig>,
 }
 
+impl LnurlConfig {
+    pub(crate) fn project_collector(&self) -> Result<&BreezCollectorConfig> {
+        let collector = self
+            .breez_collector
+            .as_ref()
+            .context("Breez requires a private collector")?;
+        collector.validate()?;
+        if self.invoice_expiry_seconds != 900 {
+            bail!("Breez requires the HOME invoice expiry of 900 seconds");
+        }
+        Ok(collector)
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum WalletBackend {
@@ -534,6 +550,9 @@ mod tests {
             peer_uid: 1001,
         });
         config.validate().unwrap();
+        config.lnurl.invoice_expiry_seconds = 600;
+        assert!(config.validate().is_err());
+        config.lnurl.invoice_expiry_seconds = 900;
         config.lnurl.breez_collector.as_mut().unwrap().peer_uid = 0;
         assert!(config.validate().is_err());
         config.lnurl.breez_collector.as_mut().unwrap().socket =

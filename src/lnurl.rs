@@ -128,15 +128,7 @@ impl LnurlService {
                     .context("Strike invoice backend requires a receive client")?,
             ),
             crate::config::WalletBackend::Breez => {
-                let collector = config
-                    .breez_collector
-                    .as_ref()
-                    .context("Breez requires a private collector")?;
-                collector.validate()?;
-                if config.invoice_expiry_seconds != 900 {
-                    bail!("Breez requires the HOME invoice expiry of 900 seconds");
-                }
-                InvoiceBackend::Breez(collector.clone())
+                InvoiceBackend::Breez(config.project_collector()?.clone())
             }
         };
         let public_base_url =

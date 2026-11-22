@@ -96,6 +96,8 @@ def render(original, identities, plans_gid, limits):
             or {row['user'] for row in core['lightning_address']} != USERS):
         raise ValueError('original financial identities, epoch, payees, sockets or receipt relays differ')
     operations = set(payout['policy']['operation_addresses'])
+    operations.update(member.get('rewards', {}).get('operation_addresses', []))
+    operations.add('sat@lightning-goats.com')
     for origin in [core['lnurl']['public_base_url'], *core['lnurl']['zap'].get('alias_origins', [])]:
         url = urlsplit(origin)
         if url.scheme != 'https' or not url.hostname or url.username or url.password or url.port not in (None, 443):

@@ -94,7 +94,9 @@ class FinancialBoundaries(unittest.TestCase):
         F.validate_limits(dict({n:0 for n in F.LIMITS},fee_mode='deduct_from_share'))
 
     def test_four_role_changes_retain_all_other_configuration_and_exclude_every_receive_alias(self):
-        original=fixture();saved=copy.deepcopy(original);new=F.render(original,IDENTITIES,10006,LIMITS)
+        original=fixture()
+        original['membership'].setdefault('rewards', {})['operation_addresses'] = ['prior@wallet.example']
+        saved=copy.deepcopy(original);new=F.render(original,IDENTITIES,10006,LIMITS)
         self.assertEqual(original,saved)
         self.assertEqual(new['core']['lightning_address'],original['core']['lightning_address'])
         for section in ['nostr','lnurl','database','gateway','service']:
@@ -104,7 +106,7 @@ class FinancialBoundaries(unittest.TestCase):
         self.assertEqual(new['signer']['nostr'],original['signer']['nostr'])
         self.assertEqual(new['core']['core_bridge']['payout_peer_uid'],10003)
         self.assertEqual(new['membership']['payout_bridge']['group_gid'],10006)
-        expected={u+'@'+d for u in F.USERS for d in ['lightning-goats.com','lnb.bolverker.com']}|{'operator@wallet.example'}
+        expected={u+'@'+d for u in F.USERS for d in ['lightning-goats.com','lnb.bolverker.com']}|{'operator@wallet.example', 'prior@wallet.example', 'sat@lightning-goats.com'}
         self.assertEqual(set(new['payout']['policy']['operation_addresses']),expected)
         self.assertEqual(new['membership']['rewards']['operation_addresses'],new['payout']['policy']['operation_addresses'])
         self.assertEqual(new['membership']['rewards']['minimum_fee_sats'],2)

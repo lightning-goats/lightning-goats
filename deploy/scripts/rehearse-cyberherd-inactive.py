@@ -94,7 +94,17 @@ def core_upgrade(launcher, root, source, runtime, archive, commit):
     transaction = base / 'ci-core-upgrade'
     plan = json.loads(run(*launcher, '--cyberherd-core', 'prepare', str(archive), commit, digest, str(transaction)))
     assert plan['service_changed'] is False and plan['state_opened'] is False
-    upgraded = json.loads(run(*launcher, '--cyberherd-core', 'apply', str(transaction), '--writers-stopped'))
+    try:
+        upgraded = json.loads(run(*launcher, '--cyberherd-core', 'apply', str(transaction), '--writers-stopped'))
+    except RuntimeError:
+        # The production coordinator suppresses private native stderr. Diagnose
+        # its snapshot against this VM's synthetic journal in a separate bundle.
+        if (unit.is_symlink() and os.readlink(unit) == '/dev/null'
+                and not (transaction / 'legacy/MANIFEST.json').exists()):
+            run(str(payload / 'lightning-goatsctl'), 'backup-legacy-core',
+                '--policy', str(transaction / 'policy.toml'), '--destination',
+                str(transaction / 'diagnostic-snapshot'), '--writers-stopped')
+        raise
     assert upgraded['upgraded'] is True and upgraded['core_masked'] is True and upgraded['core_started'] is False
     assert os.readlink(unit) == '/dev/null'
     for binary in ('lightning-goatsd', 'lightning-goatsctl'):

@@ -376,6 +376,37 @@ async fn a_small_zap_has_a_protocol_receipt_without_a_payment_announcement() {
 }
 
 #[tokio::test]
+async fn copied_provider_label_and_invoice_context_cannot_stage_a_zap_receipt() {
+    let f = Fixture::new(true).await;
+    let raw = f.raw_zap();
+    let issued = f
+        .service
+        .callback_with_zap("herd", 10000, Some(&raw), None)
+        .await
+        .unwrap();
+    let id = f.issued_id(&issued.pr);
+    let generic = lightning_goats::domain::payment::SettledPayment {
+        source: "strike".into(),
+        source_id: "separate-native-receipt".into(),
+        payment_hash: None,
+        address_user: "herd".into(),
+        credit_pool: "herd".into(),
+        amount_msat: 10000,
+        settled_at: None,
+        context_json: Some(json!({"receive_request_id":id}).to_string()),
+    };
+    f.ledger.record_payment(&generic).await.unwrap();
+    assert!(f.ledger.reserve_zap_receipt().await.unwrap().is_none());
+    f.runtime
+        .reconcile_and_credit(&f.ledger, &f.event(id))
+        .await
+        .unwrap();
+    let job = f.ledger.reserve_zap_receipt().await.unwrap().unwrap();
+    assert_eq!(job.invoice, issued.pr);
+    assert_eq!(job.request.raw_json(), raw);
+}
+
+#[tokio::test]
 async fn exact_request_alias_binding_settlement_duplicates_and_distinct_invoices_are_preserved() {
     let f = Fixture::new(true).await;
     let raw = f.raw_zap();

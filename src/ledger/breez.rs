@@ -209,7 +209,10 @@ impl LedgerStore {
                     settled_at: None,
                     context_json: Some(json!({"receive_request_id":id}).to_string()),
                 },
-                Some(&digest),
+                super::SettlementEvidence::MintClaim {
+                    invoice_id: status.request_id.parse()?,
+                    digest: &digest,
+                },
             )
             .await?;
         }

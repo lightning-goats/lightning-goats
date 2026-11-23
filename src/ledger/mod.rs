@@ -57,6 +57,15 @@ pub use zap::ZapReceiptJob;
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
+enum SettlementEvidence<'a> {
+    Native,
+    ReconciledInvoice(uuid::Uuid),
+    MintClaim {
+        invoice_id: uuid::Uuid,
+        digest: &'a str,
+    },
+}
+
 #[derive(Debug, Clone)]
 pub struct LedgerStore {
     retained_wallet_epoch: Option<uuid::Uuid>,
@@ -119,16 +128,27 @@ impl LedgerStore {
     /// `(source, source_id)` tuple, with `payment_hash` acting as an additional
     /// collision boundary when the provider exposes one.
     pub async fn record_payment(&self, payment: &SettledPayment) -> Result<SettlementOutcome> {
-        self.record_verified_payment(payment, None).await
+        self.record_verified_payment(payment, SettlementEvidence::Native)
+            .await
+    }
+
+    /// The receive adapter matched this invoice to an authoritative settlement.
+    pub(crate) async fn record_reconciled_invoice(
+        &self,
+        payment: &SettledPayment,
+        invoice_id: uuid::Uuid,
+    ) -> Result<SettlementOutcome> {
+        self.record_verified_payment(payment, SettlementEvidence::ReconciledInvoice(invoice_id))
+            .await
     }
 
     async fn record_verified_payment(
         &self,
         payment: &SettledPayment,
-        claim_digest: Option<&str>,
+        evidence: SettlementEvidence<'_>,
     ) -> Result<SettlementOutcome> {
         anyhow::ensure!(
-            (payment.source == "breez") == claim_digest.is_some(),
+            (payment.source == "breez") == matches!(evidence, SettlementEvidence::MintClaim { .. }),
             "Breez credit requires authenticated proof ownership"
         );
         validate_source(&payment.source)?;
@@ -163,7 +183,7 @@ impl LedgerStore {
         let credited_sats_i64 = to_i64(credited_sats, "credited_sats")?;
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
 
-        if let Some(digest) = claim_digest {
+        if let SettlementEvidence::MintClaim { digest, .. } = evidence {
             let terms_match: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM breez_project_invoices
                 WHERE id=? AND payment_hash=? AND json_extract(intent,'$.amount_sat')=? AND json_extract(intent,'$.user')=?
                 AND json_extract(intent,'$.credit_pool')=? AND json_type(intent,'$.purpose') IS NULL)")
@@ -307,7 +327,18 @@ impl LedgerStore {
         .await?;
 
         credit::record_native_btc(&mut transaction, settlement_id, ledger_id, event_seq).await?;
-        zap::stage_receipt(&mut transaction, payment, settlement_id, event_seq).await?;
+        if let SettlementEvidence::MintClaim { invoice_id, .. }
+        | SettlementEvidence::ReconciledInvoice(invoice_id) = evidence
+        {
+            zap::stage_receipt(
+                &mut transaction,
+                payment,
+                invoice_id,
+                settlement_id,
+                event_seq,
+            )
+            .await?;
+        }
         reward_funding::prepare(&mut transaction).await?;
         transaction.commit().await?;
 

@@ -855,16 +855,19 @@ impl StrikeRuntime {
         })
         .to_string();
         ledger
-            .record_payment(&SettledPayment {
-                source: STRIKE_SOURCE.to_owned(),
-                source_id: receive.receive_id.to_string(),
-                payment_hash: receive.payment_hash,
-                address_user: stored.address_user,
-                credit_pool: stored.credit_pool,
-                amount_msat: receive.amount_msat,
-                settled_at: None,
-                context_json: Some(context_json),
-            })
+            .record_reconciled_invoice(
+                &SettledPayment {
+                    source: STRIKE_SOURCE.to_owned(),
+                    source_id: receive.receive_id.to_string(),
+                    payment_hash: receive.payment_hash,
+                    address_user: stored.address_user,
+                    credit_pool: stored.credit_pool,
+                    amount_msat: receive.amount_msat,
+                    settled_at: None,
+                    context_json: Some(context_json),
+                },
+                receive.receive_request_id,
+            )
             .await
     }
 }

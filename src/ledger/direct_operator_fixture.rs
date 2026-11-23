@@ -193,6 +193,8 @@ async fn direct_operator_worker_fixture() -> anyhow::Result<()> {
         let mut ready = 0;
         // A second member can be selected while the first member's swap
         // still holds the shared input. It must resume after change is restored.
+        let core = Client::new(config.socket.clone(), uid)?
+            .with_request_spacing(std::time::Duration::from_secs(1));
         for _ in 0..10 {
             if ready == 2 {
                 break;
@@ -201,7 +203,7 @@ async fn direct_operator_worker_fixture() -> anyhow::Result<()> {
                 reclaim_failed: false,
                 collector_socket: Some(socket.clone()),
                 store: Store::connect(&url, policy.clone()).await?,
-                core: Client::new(config.socket.clone(), uid)?,
+                core: core.clone(),
                 signer: Signer::new(root.join("unused"), uid)?,
                 plans: Plans::new(root.join("unused"), uid, owner.clone())?,
             };

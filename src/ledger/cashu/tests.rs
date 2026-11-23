@@ -648,3 +648,51 @@ async fn retired_wallet_credit_dispatches_the_pending_plan_without_creating_payo
         .unwrap();
     assert_eq!((funding.strike_sats, funding.retained_cashu_sats), (900, 0));
 }
+
+#[tokio::test]
+async fn goats_payment_counts_gross_for_feeding_and_net_for_payout_once() {
+    let (_dir, url, store, policy) = fixture().await;
+    let receipt = wire(&policy, 20);
+    let peer = authenticated(&policy, &receipt);
+    let result = store
+        .import_cashu_with_custody(&policy, &peer, Some("mint-a"))
+        .await
+        .unwrap();
+    assert_eq!(
+        (result.net_sats, result.original_feed_credit_sats),
+        (20, 21)
+    );
+    let amount: i64 = sqlx::query_scalar(
+        "SELECT json_extract(payload_json,'$.amount_sats') FROM event_log WHERE seq=?",
+    )
+    .bind(i64::try_from(result.event_seq).unwrap())
+    .fetch_one(&store.pool)
+    .await
+    .unwrap();
+    assert_eq!(amount, 21);
+    let reopened = LedgerStore::connect(&url).await.unwrap();
+    assert_eq!(
+        reopened.import_cashu_receipt(&policy, &peer).await.unwrap(),
+        result
+    );
+    reopened
+        .record_collector_handoff(&lightning_goats_cashu_receipt::CollectorHandoff {
+            wallet_instance: policy.wallet_instance,
+            wallet_epoch: policy.wallet_epoch,
+            core_epoch: policy.core_epoch,
+            acquisition_id: receipt.data().acquisition_id,
+            evidence_digest: receipt.data().acquisition_evidence_digest.clone(),
+            collected_sats: 20,
+        })
+        .await
+        .unwrap();
+    let feed = reopened.begin_feed_attempt(21).await.unwrap().unwrap();
+    reopened.confirm_feed_attempt(feed).await.unwrap();
+    let mut tx = reopened.pool.begin().await.unwrap();
+    let funding = crate::ledger::inspect_confirmed_reward_funding(&mut tx, feed)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(funding.retained_cashu_sats, 20);
+    assert_eq!(reopened.feed_credit_sats().await.unwrap(), 0);
+}

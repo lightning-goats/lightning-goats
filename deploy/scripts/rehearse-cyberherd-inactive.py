@@ -1019,8 +1019,11 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
                 'breez_treasury_wallet_results', 'breez_treasury_inspections',
                 'cashu_funding_ranges', 'feed_conversion_proceeds', 'collector_handoff_amounts',
                 'feed_acquisition_proceeds', 'operator_cashu_execution_claims', 'operator_p2pk_claims',
-                'member_ecash_execution_claims'} <= additions
-        assert len(additions) == 37 and all(cashu_migrated['core'][table] == 0 for table in additions)
+                'member_ecash_execution_claims', 'private_contact_entitlements', 'private_contact_requests',
+                'private_contact_tenders', 'private_contact_cashu_receipts'} <= additions
+        assert len(additions) == 41
+        assert cashu_migrated['core']['private_contact_entitlements'] == cashu_reference['core']['private_contact_fees']
+        assert all(cashu_migrated['core'][table] == 0 for table in additions - {'private_contact_entitlements'})
         assert all(cashu_reference[role] == cashu_migrated[role] for role in ('membership', 'payout', 'signer'))
         assert counts['post'] == 0
         finished = True

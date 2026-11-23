@@ -293,10 +293,19 @@ fn social_parser_counts_standard_likes_and_requires_consistent_signed_reposts() 
     let now = 1_794_225_600;
     let owner = public(1);
     let note = signed(1, 1, now, vec![], "Project note");
-    for content in ["+", ""] {
+    for content in ["+", "", "🎯", "🐐", "👩🏽‍🌾", "❤️", ":goat:"] {
         assert_eq!(
             SocialEvent::parse(
-                signed(2, 7, now, vec![tag(&["e", &note.event().id])], content),
+                signed(
+                    2,
+                    7,
+                    now,
+                    vec![
+                        tag(&["e", &note.event().id]),
+                        tag(&["emoji", "goat", "https://example.com/goat.png"])
+                    ],
+                    content
+                ),
                 &owner,
                 now
             )
@@ -306,7 +315,7 @@ fn social_parser_counts_standard_likes_and_requires_consistent_signed_reposts() 
             Action::Like
         );
     }
-    for content in ["-", "🐐", ":goat:", "great show", " + "] {
+    for content in ["-", ":goat:", "great show", " + "] {
         assert!(
             SocialEvent::parse(
                 signed(2, 7, now, vec![tag(&["e", &note.event().id])], content),

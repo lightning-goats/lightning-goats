@@ -141,7 +141,7 @@ The list is the full port contract, not a completion claim for an initial slice.
    older live events. Live streams can cross local midnight while fresh.
 5. **Nostr ingestion and pause recovery:** bounded reconnect/backfill and separate
    OR queries for `e`/`a` references; valid kinds 6/7 and stream kind-16 reposts;
-   positive reactions only; chat text earns no points. While override is ON,
+   likes include standard likes, Unicode emoji, and tagged custom emoji. Chat text earns no points. While override is ON,
    unknown or unavailable, defer membership changes and membership-thread posts
    without claiming work as applied. On resumption refresh targets first, then
    replay only still-active targets/aliases. Stale deferred work receives a

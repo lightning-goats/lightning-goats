@@ -913,7 +913,7 @@ async fn signed_outbox_profile_resolves_second_member_like_and_repost_exactly_on
     let tags = vec![tag(&["e", &f.note.event().id]), tag(&["p", &f.owner])];
     let events = [
         signed(2, 6, f.now - 3, "", tags.clone()),
-        signed(3, 7, f.now - 2, "+", tags.clone()),
+        signed(3, 7, f.now - 2, "🎯", tags.clone()),
         signed(3, 6, f.now - 1, "", tags),
     ];
     for event in &events {
@@ -1264,7 +1264,7 @@ async fn social_backfill_advances_only_complete_unsaturated_windows_and_reuses_r
             .unwrap()
     );
     let key =
-        crate::cyberherd::ingress::hash(&("engagement-v2", f.now - 100, false, &f.note.event().id))
+        crate::cyberherd::ingress::hash(&("engagement-v3", f.now - 100, false, &f.note.event().id))
             .unwrap();
     assert_eq!(
         f.store
@@ -1311,7 +1311,7 @@ async fn cold_social_start_recovers_earlier_users_and_recent_reactions_without_s
         2,
         7,
         f.now - 3600,
-        "+",
+        "🎯",
         vec![tag(&["e", &f.note.event().id])],
     );
     let recent = signed(3, 7, f.now - 1, "+", vec![tag(&["e", &f.note.event().id])]);
@@ -1326,6 +1326,13 @@ async fn cold_social_start_recovers_earlier_users_and_recent_reactions_without_s
     )
     .unwrap();
     let start = f.now - 36000;
+    let previous =
+        crate::cyberherd::ingress::hash(&("engagement-v2", start, false, &f.note.event().id))
+            .unwrap();
+    f.store
+        .advance_relay_window(&f.owner, &previous, f.now)
+        .await
+        .unwrap();
     assert!(
         discovery
             .backfill(&f.store, &f.owner, &f.targets, start, f.now)
@@ -1347,7 +1354,7 @@ async fn cold_social_start_recovers_earlier_users_and_recent_reactions_without_s
         assert_eq!(queries[0][0].since, Some((f.now - 300) as u64));
         assert_eq!(queries[1][0].since, Some(start as u64));
     }
-    let key = crate::cyberherd::ingress::hash(&("engagement-v2", start, false, &f.note.event().id))
+    let key = crate::cyberherd::ingress::hash(&("engagement-v3", start, false, &f.note.event().id))
         .unwrap();
     assert_eq!(
         f.store.relay_window(&f.owner, &key, start).await.unwrap(),
@@ -1384,7 +1391,7 @@ async fn stream_updates_keep_prior_scope_cursors_and_recover_new_aliases_without
     };
     let start = f.now - 36000;
     let note_key =
-        crate::cyberherd::ingress::hash(&("engagement-v2", start, false, &f.note.event().id))
+        crate::cyberherd::ingress::hash(&("engagement-v3", start, false, &f.note.event().id))
             .unwrap();
     for offset in [20, 10] {
         let stream = signed(
@@ -1395,7 +1402,7 @@ async fn stream_updates_keep_prior_scope_cursors_and_recover_new_aliases_without
             vec![tag(&["d", "live"]), tag(&["status", "live"])],
         );
         let stream_key =
-            crate::cyberherd::ingress::hash(&("engagement-v2", start, false, &stream.event().id))
+            crate::cyberherd::ingress::hash(&("engagement-v3", start, false, &stream.event().id))
                 .unwrap();
         let mut discovery = Discovery::new(
             RelayFixture {

@@ -40,6 +40,10 @@ def select(store, feed, gross, allocations):
 
 
 def transfer(store, client, request, keyset, keys):
+    return _transfer(store, client, request, keyset, keys, request["feed"], None)
+
+
+def _transfer(store, client, request, keyset, keys, disposition, failed_members):
     if set(request) != {"feed", "mint", "recipient", "gross", "member", "plan_hash", "lots", "fee_limit"}:
         raise ValueError("invalid direct payout request")
     feed = str(UUID(request["feed"]))
@@ -57,28 +61,28 @@ def transfer(store, client, request, keyset, keys):
         raise ValueError("invalid direct payout budget")
     db = store.db
     path = Path(db.execute("PRAGMA database_list").fetchone()[2])
-    binding = encode(request)
+    binding = encode(request if failed_members is None else {**request, "failed_members": failed_members})
     with path.with_suffix(".melt.lock").open("ab") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         with store.write():
-            old = db.execute("SELECT binding FROM proof_disposition WHERE id=?", (feed,)).fetchone()
+            old = db.execute("SELECT binding FROM proof_disposition WHERE id=?", (disposition,)).fetchone()
             if old and old != (binding,):
                 raise ValueError("operator method or terms changed")
             if old:
                 material, amount, fee, ready = db.execute(
                     "SELECT material,amount_sat,fee_sat,token IS NOT NULL "
-                    "FROM operator_ecash WHERE feed=?", (feed,)
+                    "FROM operator_ecash WHERE feed=?", (disposition,)
                 ).fetchone()
                 if ready:
                     return {"state": "ready", "amount_sat": amount, "fee_sat": fee}
                 outputs = json.loads(material)
                 rows = db.execute(
                     "SELECT o.proof FROM collected_output o JOIN disposition_input i USING(secret) "
-                    "WHERE i.disposition_id=? ORDER BY secret", (feed,)
+                    "WHERE i.disposition_id=? ORDER BY secret", (disposition,)
                 )
                 inputs = [json.loads(proof) for proof, in rows]
             else:
-                if db.execute("SELECT 1 FROM payout_split_cost WHERE disposition_id=?", (feed,)).fetchone():
+                if db.execute("SELECT 1 FROM payout_split_cost WHERE disposition_id=?", (disposition,)).fetchone():
                     raise ValueError("operator invoice split already reserved")
                 info = client.get("/v1/info").raise_for_status().json()
                 if info.get("nuts", {}).get("11", {}).get("supported") is not True:
@@ -91,13 +95,13 @@ def transfer(store, client, request, keyset, keys):
                 outputs = [(None, o) for o in prepare_outputs(amount, keyset, recipient=recipient)]
                 for claim, sats in change.items():
                     outputs.extend((claim, output) for output in prepare_outputs(sats, keyset))
-                db.execute("INSERT INTO proof_disposition VALUES (?,'operator_transfer',?)", (feed, binding))
-                db.executemany("INSERT INTO disposition_input VALUES (?,?)", [(p["secret"], feed) for p in inputs])
+                db.execute("INSERT INTO proof_disposition VALUES (?,'operator_transfer',?)", (disposition, binding))
+                db.executemany("INSERT INTO disposition_input VALUES (?,?)", [(p["secret"], disposition) for p in inputs])
                 db.executemany("INSERT INTO payout_claim_allocation VALUES (?,?,?,?,?)",
-                               [(feed, feed, claim, allocations[claim]["consumed_sats"], used)
+                               [(disposition, feed, claim, allocations[claim]["consumed_sats"], used)
                                 for claim, used in spent.items()])
                 db.execute("INSERT INTO operator_ecash(feed,material,amount_sat,fee_sat) VALUES(?,?,?,?)",
-                           (feed, encode(outputs), amount, fee))
+                           (disposition, encode(outputs), amount, fee))
         proofs = recover_swap(
             client, sorted(inputs, key=lambda p: p["secret"]),
             [output for _, output in outputs], keys, require_unspent=True,
@@ -112,5 +116,5 @@ def transfer(store, client, request, keyset, keys):
             if sum(p["amount"] for p in operator) != amount:
                 raise ValueError("mint returned inconsistent operator amount")
             encoded = encode_token(MINT, operator)
-            db.execute("UPDATE operator_ecash SET token=? WHERE feed=? AND token IS NULL", (encoded, feed))
+            db.execute("UPDATE operator_ecash SET token=? WHERE feed=? AND token IS NULL", (encoded, disposition))
         return {"state": "ready", "amount_sat": amount, "fee_sat": fee}

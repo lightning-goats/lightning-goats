@@ -19,6 +19,9 @@ MAX_FRAME = 65536
 
 
 def create(request, store, client, token, keyset):
+    if set(request) == {"reclaim_receipt","plan","member"}:
+        from member_reclaim import receipt
+        return receipt(store.db,request["reclaim_receipt"],request["plan"],request["member"])
     for receipt_field, purpose in (("payout_receipt", "cyberherd_payout"), ("operator_receipt", "operator_transfer")):
         if set(request) != {receipt_field, "feed_id", "invoice_digest", "payment_hash"}:
             continue

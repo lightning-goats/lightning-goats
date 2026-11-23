@@ -70,7 +70,7 @@ pub(crate) fn render(event: &StoredEvent, catalog: &Catalog) -> Result<Option<Re
                 context: conversation.as_ref().map(|branch| branch.context.clone()).unwrap_or_default(),
                 conversation,
                 category:event.event_type.clone(),
-                nostr:"Your CyberHerd payout is on hold. Primal returned a Lightning invoice whose description hash didn’t match the payment request, so we couldn’t verify it. Your share is still reserved. For future payouts, please use a Lightning address from another provider on your Nostr profile. Updating your profile won’t redirect this pending payout. https://github.com/PrimalHQ/primal-web-app/issues/198".into(),
+                nostr:"Your CyberHerd payment failed invoice verification. Primal returned a Lightning invoice whose description hash didn’t match the payment request, so we couldn’t verify it. For future payouts, please use a Lightning address from another provider on your Nostr profile. The address on this feeding’s plan is frozen. https://github.com/PrimalHQ/primal-web-app/issues/198".into(),
                 overlay: String::new(),
                 accepted: false,
                 requires_joining: true,

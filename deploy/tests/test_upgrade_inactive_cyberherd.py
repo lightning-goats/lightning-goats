@@ -93,7 +93,7 @@ class InactiveFiles(unittest.TestCase):
         self.owner = '11' * 32
         self.raw = {
             'cyberherd': f'enabled=false\nstate_dir="{self.state}/cyberherd"\nproject_pubkey="{self.owner}"\n[core]\ncore_uid=50010\nepoch="{self.epoch}"\n',
-            'cyberherd-payout': f'enabled=false\nstate_dir="{self.state}/cyberherd-payout"\nintake_uid=50011\nsigner_uid=50013\n[policy]\nexecution_enabled=false\nmember_percent_ceiling=0\nmax_sats_per_feed=0\nmax_sats_per_24h=0\nmax_fee_sats=0\n[policy.scope]\ncore_uid=50010\nepoch="{self.epoch}"\nowner="{self.owner}"\n[policy.scope.provider]\nenvironment="strike-production"\ncredential_fingerprint="' + '22' * 32 + '"\n',
+            'cyberherd-payout': f'enabled=false\nstate_dir="{self.state}/cyberherd-payout"\nfunding_source="retained_cashu"\ncashu_payout_socket="/run/fixture-collector.sock"\nintake_uid=50011\nsigner_uid=50013\n[policy]\nexecution_enabled=false\nmember_percent_ceiling=0\nmax_sats_per_feed=0\nmax_sats_per_24h=0\nmax_fee_sats=0\n[policy.scope]\ncore_uid=50010\nepoch="{self.epoch}"\nowner="{self.owner}"\n[policy.scope.provider]\nenvironment="retained-cashu"\naccount_id="{self.epoch}"\ncredential_fingerprint="' + '22' * 32 + '"\n',
             'cyberherd-signer': f'enabled=false\nstate_dir="{self.state}/cyberherd-signer"\ngroup_gid=50030\n[policy]\nmax_net_sats=0\nmax_new_per_hour=0\npeer_uid=50012\nowner="{self.owner}"\n',
         }
         for role, text in self.raw.items():
@@ -203,6 +203,9 @@ class InactiveFiles(unittest.TestCase):
                          ('max_fee_sats=0', 'max_fee_sats=0\nmax_net_sats=1'),
                          ('max_fee_sats=0', 'max_fee_sats=0\nmax_net_sats=false'),
                          ('intake_uid=50011', 'intake_uid=50010'),
+                         ('environment="retained-cashu"', 'environment="strike-production"'),
+                         ('funding_source="retained_cashu"', 'funding_source="strike"'),
+                         (f'account_id="{self.epoch}"', 'account_id="00000000-0000-0000-0000-000000000001"'),
                          (self.epoch, '00000000-0000-0000-0000-000000000001'),
                          ('22' * 32, '0' * 64)]:
             path.write_text(self.raw['cyberherd-payout'].replace(old, new))

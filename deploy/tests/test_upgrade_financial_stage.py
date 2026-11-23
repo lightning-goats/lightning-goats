@@ -45,7 +45,7 @@ def fixture():
     core['lnurl']['zap']={'receipt_pubkey':OWNER,'payee_pubkeys':payees,'alias_origins':['https://lnb.bolverker.com/']}
     core['core_bridge']={'socket':member['core_socket'],'peer_uid':10002,'group_gid':10005,
         'payout_execution_enabled':False,'delegated_feeder_messages':False,
-        'reward_policy':{'owner':OWNER,'member_percent_ceiling':0,'max_sats_per_feed':0,'max_sats_per_24h':0}}
+        'reward_policy':{'owner':OWNER,'funding_source':'retained_cashu','member_percent_ceiling':0,'max_sats_per_feed':0,'max_sats_per_24h':0}}
     member.update(enabled=True,project_pubkey=OWNER)
     member['core'].update(core_uid=10001,epoch='11111111-1111-4111-8111-111111111111',payees=payees)
     member['messaging']={'enabled':True,'start_after':5,'poll_millis':1000,'relays':['wss://relay.damus.io/'],'lifecycle':False}
@@ -53,7 +53,7 @@ def fixture():
                     'auth':{'public_origin':'https://example.com','operators':[]}}
     payout.update(intake_uid=10002,signer_uid=10004)
     payout['policy']['scope'].update(core_uid=10001,owner=OWNER,epoch=member['core']['epoch'])
-    payout['policy']['scope']['provider'].update(account_id='22222222-2222-4222-8222-222222222222',credential_fingerprint='11'*32)
+    payout['policy']['scope']['provider'].update(account_id=member['core']['epoch'],credential_fingerprint='11'*32)
     payout['policy']['operation_addresses'].append('operator@wallet.example')
     signer['group_gid']=10007
     signer['policy'].update(owner=OWNER,peer_uid=10003,

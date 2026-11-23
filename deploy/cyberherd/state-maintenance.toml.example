@@ -6,7 +6,8 @@ epoch = "00000000-0000-0000-0000-000000000000"
 max_component_bytes = 8589934592
 
 [provider]
-environment = "strike-production"
+# Use the exact persisted scope for historical journals.
+environment = "retained-cashu"
 account_id = "00000000-0000-0000-0000-000000000000"
 credential_fingerprint = "0000000000000000000000000000000000000000000000000000000000000000"
 

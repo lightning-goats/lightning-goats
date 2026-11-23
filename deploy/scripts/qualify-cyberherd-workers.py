@@ -45,7 +45,7 @@ C = Q.C
 FIXTURE_CORE = 'cyberherd-core-fixture'
 OWNER = 'c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5'
 CLIENT = '79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'
-SYNTHETIC_PAYOUT = b'SYNTHETIC-NO-PROVIDER-PAYOUT-KEY'
+FIXTURE_CUSTODY_FINGERPRINT = hashlib.sha256(b'fixture-only-collector-custody').hexdigest()
 RELAYS = ['wss://nostr.chaima.info/', 'wss://relay.artx.market/', 'wss://relay.damus.io/']
 ZERO_SIGN_REQUEST = {
     'method': 'sign_payout', 'intent': {
@@ -389,7 +389,6 @@ def run(installation, core_transaction, destination, create):
     credentials = {r: {} for r in users}
     keys = {'cyberherd-signer': {'nostr-client-key': ('0' * 63 + '1').encode()}}
     counts = {'post': 0}
-    account = str(uuid.uuid4())
     def add_unit(role, path, command, writes, creds, oneshot=False):
         raw = unit_text(templates[role], users[role].pw_name, C.grp.getgrgid(users[role].pw_gid).gr_name,
                         groups[role], command, writes, creds, namespace_path, oneshot).encode()
@@ -451,7 +450,7 @@ def run(installation, core_transaction, destination, create):
         core['nostr']['bunker_pubkey'] = OWNER; core['nostr']['nak_config_path'] = str(states['core'] / 'nak')
         core['core_bridge'] = {'socket': str(sockets['core']), 'peer_uid': users['cyberherd'].pw_uid,
             'group_gid': C.grp.getgrnam('cyberherd-bridge').gr_gid, 'payout_peer_uid': users['cyberherd-payout'].pw_uid,
-            'payout_execution_enabled': False, 'payout_account_id': account, 'reward_policy': {'owner': OWNER, 'member_percent_ceiling': 0,
+            'payout_execution_enabled': False, 'reward_policy': {'funding_source': 'retained_cashu', 'owner': OWNER, 'member_percent_ceiling': 0,
                                                                'max_sats_per_feed': 0, 'max_sats_per_24h': 0}}
         core_config = root / 'core.toml'; publish(core_config, toml_text(core).encode())
         worker_unit('core', core_config)
@@ -473,7 +472,9 @@ def run(installation, core_transaction, destination, create):
             elif role == 'cyberherd-payout':
                 value.update(core_socket=str(sockets['core']), intake_socket=str(sockets['cyberherd']), signer_socket=str(sockets['cyberherd-signer']))
                 scope = value['policy']['scope']; scope.update(core_uid=probe_user.pw_uid, epoch=epoch, owner=OWNER)
-                scope['provider'].update(account_id=account, credential_fingerprint=hashlib.sha256(SYNTHETIC_PAYOUT).hexdigest())
+                value['funding_source'] = 'retained_cashu'
+                value['cashu_payout_socket'] = str(sockets['core'].parent / 'payouts.sock')
+                scope['provider'].update(environment='retained-cashu', account_id=epoch, credential_fingerprint=FIXTURE_CUSTODY_FINGERPRINT)
             else:
                 value['socket'] = str(sockets[role]); value['policy'].update(owner=OWNER, client_pubkey=CLIENT)
                 value['nostr'].update(bunker_pubkey=OWNER, nak_config_path=str(states[role] / 'nak'), nak_path=str(fake_nak))

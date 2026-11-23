@@ -58,8 +58,6 @@ class ToolLaunchTests(unittest.TestCase):
             self.assertIn('finish', run(ok=True).stdout)
             command[6:] = ['--cyberherd-inactive', '--help']
             self.assertIn('identities', run(ok=True).stdout)
-            command[6:] = ['--cyberherd-payout-key', '--help']
-            self.assertIn('--key-file', run(ok=True).stdout)
             command[6:] = ['--cyberherd-nostr-clients', '--help']
             self.assertIn('--core-client-pubkey', run(ok=True).stdout)
             command[6:] = ['--cashu-signer-client', 'install', '--help']

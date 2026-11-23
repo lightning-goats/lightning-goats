@@ -95,7 +95,6 @@ non-writable ancestor chain. The exact bundle contains only:
 - `install-cyberherd-inactive.py` (separate disabled-role installation)
 - `verify-cyberherd-package.py`
 - `verify-sqlite-vendor.py`
-- `prepare-cyberherd-payout-key.py` (explicit credential import only)
 - `prepare-cyberherd-nostr-clients.py` (explicit new authentication clients only)
 - `prepare-household-nostr-client.py`
 - `qualify-cyberherd-installed.py` (explicit disabled-role OS probes only)

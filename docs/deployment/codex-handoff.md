@@ -79,14 +79,9 @@ Do not guess these values.
 - temporary staging hostname;
 - final production DNS records/TTL state.
 
-### Strike
+### Payment custody
 
-- production core API key with the documented receive-request create/read permissions; CyberHerd independent outcome verification additionally requires `partner.payment.read`, never quote/execute/spend permissions (see [credential qualification](cyberherd-payout-credential.md));
-- production webhook secret;
-- sandbox equivalents for canary where available;
-- operator-defined maximum operational Strike balance and sweep procedure.
-
-Runtime `lightning-goatsd` must not receive outbound/spend/withdraw authority.
+Use the [mint cutover runbook](mint-payment-boundary-cutover.md) for current receiver and collector requirements. The public receiver communicates with the private collector over its authenticated socket. The [payout custody guide](cyberherd-payout-credential.md) covers new and historical journal identities.
 
 ### Nostr
 

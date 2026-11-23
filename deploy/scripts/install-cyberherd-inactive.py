@@ -173,7 +173,9 @@ def configs(source, runtime, evidence):
         if bridge['peer_uid'] != runtime['cyberherd-payout']['uid'] or bridge['group_gid'] != grp.getgrnam('cyberherd-plans').gr_gid:
             raise ValueError('intake bridge differs from the dedicated payout peer/group')
     provider = scope['provider']
-    if provider['environment'] != 'strike-production' or provider['credential_fingerprint'] == '0' * 64:
+    if (payout.get('funding_source') != 'retained_cashu' or not payout.get('cashu_payout_socket')
+            or provider['environment'] != 'retained-cashu' or provider['account_id'] != scope['epoch']
+            or provider['credential_fingerprint'] == '0' * 64):
         raise ValueError('real selected payout scope is required; do not bind a placeholder credential')
     return bytes_by_role
 

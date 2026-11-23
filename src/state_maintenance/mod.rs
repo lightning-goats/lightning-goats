@@ -114,8 +114,7 @@ impl Policy {
         crate::nostr_event::validate_hex(&self.provider.credential_fingerprint, 32)?;
         if self.version != 1
             || self.epoch.is_nil()
-            || self.provider.account_id.is_nil()
-            || self.provider.environment != "strike-production"
+            || !self.provider.matches_journal_epoch(self.epoch)
             || self.components.len() != 4
             || !(1024..=64 * 1024 * 1024 * 1024).contains(&self.max_component_bytes)
         {

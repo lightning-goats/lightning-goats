@@ -37,7 +37,7 @@ class StateCLI(unittest.TestCase):
         self.assertIn("no state, credentials or services accessed", result.stdout)
         for text in ["api_key = 'synthetic-forbidden'\n" + self.text,
                      self.text.replace("uid = 10002", "uid = 10001"),
-                     self.text.replace("strike-production", "unqualified"),
+                     self.text.replace("retained-cashu", "unqualified"),
                      self.text.replace("11111111-1111-4111-8111-111111111111", "00000000-0000-0000-0000-000000000000")]:
             self.assertNotEqual(self.invoke(text, "check").returncode, 0)
 

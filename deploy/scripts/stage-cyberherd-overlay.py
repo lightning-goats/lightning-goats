@@ -126,7 +126,7 @@ def render(core, member, peer_uid, group_gid, message_start_after):
     candidate_core['core_bridge'] = {
         'socket': str(SOCKET), 'peer_uid': peer_uid, 'group_gid': group_gid,
         'payout_execution_enabled': False, 'delegated_feeder_messages': False,
-        'reward_policy': {'owner': owner, 'member_percent_ceiling': 0,
+        'reward_policy': {'owner': owner, 'funding_source': 'retained_cashu', 'member_percent_ceiling': 0,
                           'max_sats_per_feed': 0, 'max_sats_per_24h': 0},
     }
     candidate_member = copy.deepcopy(member)

@@ -9,7 +9,78 @@ from pathlib import Path
 import httpx
 
 from claim_store import ClaimStore
-from collect import collect, recover_payout_refund
+from collect import collect, quote_state, recover_payout_refund
+
+
+class QuotePoller:
+    """One status capability cache per mint client. Each claim keeps its own outputs."""
+
+    def __init__(self):
+        self.limit = 1
+        self.refresh_after = 0
+
+    def refresh(self, client, now):
+        info = client.get("/v1/info").raise_for_status().json()
+        nuts = info.get("nuts", {}) if isinstance(info, dict) else {}
+        caps = nuts.get("29") if isinstance(nuts, dict) else None
+        limit = 1
+        if isinstance(caps, dict) and caps.get("supported", True) is True and not caps.get("disabled", False):
+            methods = caps.get("methods")
+            if methods is None:
+                nut4 = nuts.get("4", {})
+                entries = nut4.get("methods", []) if isinstance(nut4, dict) else []
+                methods = [m.get("method") for m in entries if isinstance(m, dict)]
+            if isinstance(methods, list) and "bolt11" in methods:
+                maximum = caps.get("max_batch_size", 16)
+                if type(maximum) is int and maximum > 0:
+                    limit = min(maximum, 32)
+        self.limit = limit
+        self.refresh_after = now + 300
+
+    def poll(self, store, client, keys, now):
+        rows = store.reserve_polls(now, 15, 32)
+        if not rows:
+            return False
+        if now >= self.refresh_after:
+            try:
+                self.refresh(client, now)
+            except (httpx.HTTPError, ValueError):
+                self.limit = 1
+                self.refresh_after = now + 30
+        while rows:
+            group = rows[:self.limit]
+            observations = [None] * len(group)
+            if len(group) > 1:
+                ids = ["goats-" + row[0] for row in group]
+                reply = client.post("/v1/mint/quote/bolt11/check", json={"quotes": ids})
+                try:
+                    body = reply.json()
+                except ValueError:
+                    body = None
+                if isinstance(body, dict) and body.get("code") == 11017:
+                    self.limit = max(1, len(group) // 2)
+                    continue
+                if reply.status_code in (429, 502, 503, 504):
+                    reply.raise_for_status()
+                if reply.is_success and isinstance(body, list) and len(body) == len(group):
+                    try:
+                        for value, quote_id, (_, invoice, amount) in zip(body, ids, group):
+                            quote_state(value, quote_id, invoice, amount, batch=True)
+                    except ValueError:
+                        pass
+                    else:
+                        observations = body
+            for (request_id, _, _), observation in zip(group, observations):
+                try:
+                    collect(store, client, request_id, keys, observation=observation)
+                except (httpx.TransportError, httpx.HTTPStatusError) as error:
+                    if isinstance(error, httpx.TransportError) or error.response.status_code in (429, 502, 503, 504):
+                        raise
+                    logging.warning("Project invoice recovery deferred (%s)", type(error).__name__)
+                except (KeyError, ValueError, TypeError) as error:
+                    logging.warning("Project invoice recovery deferred (%s)", type(error).__name__)
+            rows = rows[len(group):]
+        return True
 
 
 def main():
@@ -21,6 +92,7 @@ def main():
     store = ClaimStore(args.state_directory)
     with httpx.Client(base_url="https://mint.lightning-goats.com", timeout=10,
                       follow_redirects=False, trust_env=False) as client:
+        poller = QuotePoller()
         refund_cursor = ""
         next_refund = 0
         while True:
@@ -39,15 +111,12 @@ def main():
                     except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:
                         logging.warning("Payout change recovery deferred (%s)", type(error).__name__)
                 next_refund = time.monotonic() + 15
-            request_id = store.reserve_poll(int(time.time()), 15)
-            if request_id is None:
-                time.sleep(1)
-                continue
             try:
-                collect(store, client, request_id, keys)
+                if not poller.poll(store, client, keys, int(time.time())):
+                    time.sleep(1)
             except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:
-                # Provider errors may embed the quote or blinded message in their URL/body.
-                logging.warning("Project invoice collection deferred (%s)", type(error).__name__)
+                logging.warning("Project invoice polling deferred (%s)", type(error).__name__)
+                time.sleep(15)
 
 
 if __name__ == "__main__":

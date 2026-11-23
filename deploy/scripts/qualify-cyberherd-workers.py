@@ -45,7 +45,7 @@ C = Q.C
 FIXTURE_CORE = 'cyberherd-core-fixture'
 OWNER = 'c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5'
 CLIENT = '79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'
-SYNTHETIC_PAYOUT = b'SYNTHETIC-NO-PROVIDER-PAYOUT-KEY'
+FIXTURE_CUSTODY_FINGERPRINT = hashlib.sha256(b'fixture-only-collector-custody').hexdigest()
 RELAYS = ['wss://nostr.chaima.info/', 'wss://relay.artx.market/', 'wss://relay.damus.io/']
 ZERO_SIGN_REQUEST = {
     'method': 'sign_payout', 'intent': {
@@ -474,7 +474,7 @@ def run(installation, core_transaction, destination, create):
                 scope = value['policy']['scope']; scope.update(core_uid=probe_user.pw_uid, epoch=epoch, owner=OWNER)
                 value['funding_source'] = 'retained_cashu'
                 value['cashu_payout_socket'] = str(sockets['core'].parent / 'payouts.sock')
-                scope['provider'].update(environment='retained-cashu', account_id=epoch, credential_fingerprint=hashlib.sha256(SYNTHETIC_PAYOUT).hexdigest())
+                scope['provider'].update(environment='retained-cashu', account_id=epoch, credential_fingerprint=FIXTURE_CUSTODY_FINGERPRINT)
             else:
                 value['socket'] = str(sockets[role]); value['policy'].update(owner=OWNER, client_pubkey=CLIENT)
                 value['nostr'].update(bunker_pubkey=OWNER, nak_config_path=str(states[role] / 'nak'), nak_path=str(fake_nak))

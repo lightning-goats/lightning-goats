@@ -127,14 +127,13 @@ async fn prepare(root: &Path, source: &str) -> Result<Value> {
         "activation_gates": ["verified release provenance and runtime ownership",
             "acknowledged harmless HOME fixture and command-count evidence",
             "approved authenticated network and harmless-test manifest"],
-        "not_proven": ["Strike/provider settlement", "home command delivery",
+        "not_proven": ["mint settlement", "home command delivery",
             "two confirmed feeds and 340 remainder", "production readiness"]
     });
     exclusive_file(
         &root.join("PREPARED.json"),
         &serde_json::to_vec_pretty(&evidence)?,
     )?;
-    File::open(&credentials)?.sync_all()?;
     File::open(root)?.sync_all()?;
     File::open(parent)?.sync_all()?;
     Ok(evidence)

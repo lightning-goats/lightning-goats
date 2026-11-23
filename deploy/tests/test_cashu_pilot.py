@@ -25,7 +25,7 @@ class PilotConfig(unittest.TestCase):
         self.input.update(version=1, core_uid=1010, wallet_uid=1020, wallet_gid=1021,
                           signer_uid=1030, signer_gid=1031, receiving_key='02' + TWO,
                           client_pubkey=THREE, helper_sha256='ab' * 32,
-                          strike_account_id=str(uuid.UUID(int=6)), strike_credential_fingerprint='ac' * 32,
+                          project_account_id=str(uuid.UUID(int=6)), project_credential_fingerprint='ac' * 32,
                           daily_credit_sats=12345, minimum_deposit_sats=1, relay_since_unix=1_800_000_000,
                           mint_keysets=[{'id': '00deadbeef123456', 'keys': {'1': '02' + ONE}}])
 
@@ -47,6 +47,8 @@ class PilotConfig(unittest.TestCase):
         self.assertEqual(signer['socket'], wallet['publication_signing']['socket'])
         self.assertEqual(signer['runtime_uid'], wallet['publication_signing']['signer_uid'])
         self.assertEqual(receipts['core_epoch'], wallet['treasury_intake']['core_epoch'])
+        self.assertEqual(treasury['policy']['destination']['origin'], 'https://mint.lightning-goats.com/')
+        self.assertEqual(treasury['policy']['invoice_expiry_seconds'], 900)
         self.assertEqual(treasury['policy']['destination'], wallet['treasury_intake']['destination'])
         self.assertEqual(signer['policy']['receiving_key'], wallet['receiving_key'][2:])
         self.assertEqual(signer['nak']['relays'], ['wss://signer-relay.example'])

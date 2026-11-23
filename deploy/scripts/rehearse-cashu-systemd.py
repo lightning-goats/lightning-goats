@@ -324,7 +324,7 @@ def rehearse_pilot_config(archive, root, command, binaries, uids, states, core_c
         wallet_instance=wallet['wallet_instance'], wallet_epoch=wallet['wallet_epoch'],
         broker_instance=broker, broker_epoch=broker_epoch, receiving_key=wallet['receiving_key'],
         client_pubkey=signing['nak']['client_pubkey'], helper_sha256=signing['nak']['binary_sha256'],
-        strike_account_id=account, strike_credential_fingerprint='ab' * 32, daily_credit_sats=20000,
+        project_account_id=account, project_credential_fingerprint='ab' * 32, daily_credit_sats=20000,
         minimum_deposit_sats=1, relay_since_unix=1_800_000_000,
         nutzap_relays=[relay],
         mint_keysets=[dict(id='00deadbeef123456', keys={'1': wallet['receiving_key']})],

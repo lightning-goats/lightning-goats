@@ -371,7 +371,7 @@ def rehearse(root, workers, binaries, configurations, core_daemon, archived_sign
         replacements = {
             values['database']['url']: 'sqlite://' + str(dirs['core'] / 'ledger.sqlite'),
             values['service']['listen']: f'127.0.0.1:{port}',
-            values['strike']['api_url']: f'https://127.0.0.1:{outbound_port}/',
+            values['lnurl']['breez_collector']['socket']: str(root / 'isolated-project.sock'),
             values['gateway']['url']: f'http://127.0.0.1:{outbound_port}/',
         }
         if values['service']['mode'] != 'canary' or set(values) & {'core_bridge', 'cashu', 'cashu_receipts', 'cashu_treasury'}:

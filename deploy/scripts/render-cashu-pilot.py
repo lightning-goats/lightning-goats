@@ -26,7 +26,7 @@ SIGNER = '/run/lightning-goats-cashu-signer/sign.sock'
 EPOCHS = ('core_epoch', 'wallet_instance', 'wallet_epoch', 'broker_instance', 'broker_epoch')
 RUNTIME_IDS = ('core_uid', 'wallet_uid', 'wallet_gid', 'signer_uid', 'signer_gid')
 REQUIRED = {*EPOCHS, *RUNTIME_IDS, 'version', 'receiving_key', 'client_pubkey', 'helper_sha256',
-            'strike_account_id', 'strike_credential_fingerprint', 'daily_credit_sats',
+            'project_account_id', 'project_credential_fingerprint', 'daily_credit_sats',
             'minimum_deposit_sats', 'mint_keysets', 'relay_since_unix'}
 
 
@@ -71,14 +71,14 @@ def validate(inputs):
     if (not isinstance(inputs, dict) or set(inputs) - {'nutzap_relays'} != REQUIRED
             or type(inputs['version']) is not int or inputs['version'] != 1):
         raise ValueError('complete version-1 pilot bindings required')
-    if not all(exact_id(inputs[key]) for key in (*EPOCHS, 'strike_account_id')) or len({inputs[key] for key in EPOCHS}) != len(EPOCHS):
+    if not all(exact_id(inputs[key]) for key in (*EPOCHS, 'project_account_id')) or len({inputs[key] for key in EPOCHS}) != len(EPOCHS):
         raise ValueError('distinct canonical registration UUIDs required')
     if (not all(number(inputs[key], 1, 2**32 - 2) for key in RUNTIME_IDS)
             or len({inputs[key] for key in ('core_uid', 'wallet_uid', 'signer_uid')}) != 3
             or inputs['wallet_gid'] == inputs['signer_gid']):
         raise ValueError('isolated core, wallet and signer identities required')
     if (not hex_value(inputs['receiving_key'], '0[23][0-9a-f]{64}')
-            or not all(hex_value(inputs[key]) for key in ('client_pubkey', 'helper_sha256', 'strike_credential_fingerprint'))):
+            or not all(hex_value(inputs[key]) for key in ('client_pubkey', 'helper_sha256', 'project_credential_fingerprint'))):
         raise ValueError('reviewed receiving key, client public key and exact digests required')
     if not number(inputs['daily_credit_sats'], CUSTODY_SATS, 2**63 - 1):
         raise ValueError('rolling credit budget must cover the batch and receipt headroom')
@@ -147,13 +147,8 @@ def render(base, inputs, reviewed_request=None):
     receiver, client = inputs['receiving_key'], inputs['client_pubkey']
     if not hex_value(owner) or len({owner, receiver[2:], client}) != 3:
         raise ValueError('project, receiving and client public keys must be distinct')
-    origin = original['strike']['api_url']
-    parts = urlsplit(origin)
-    if (parts.scheme != 'https' or not parts.hostname or parts.path not in ('', '/')
-            or parts.username is not None or parts.query or parts.fragment):
-        raise ValueError('existing Strike configuration requires a root HTTPS API origin')
-    destination = dict(origin=origin.rstrip('/') + '/', account_id=inputs['strike_account_id'],
-                       credential_fingerprint=inputs['strike_credential_fingerprint'], network='bitcoin')
+    destination = dict(origin='https://mint.lightning-goats.com/', account_id=inputs['project_account_id'],
+                       credential_fingerprint=inputs['project_credential_fingerprint'], network='bitcoin')
     limits = dict(maximum_input_sats=CUSTODY_SATS, maximum_in_flight_sats=CUSTODY_SATS, maximum_fee_sats=FEE_SATS)
     mint_limits = dict(limits, minimum_deposit_sats=inputs['minimum_deposit_sats'], maximum_deposit_sats=CUSTODY_SATS)
     rolling = dict(unlimited_operations_per_24h=True, unlimited_input_sats_per_24h=True, fee_sats_per_24h=ROLLING_FEE_SATS)
@@ -205,7 +200,7 @@ def render(base, inputs, reviewed_request=None):
         'cashu_treasury': dict(socket=TREASURY, deadline_seconds=30),
         'cashu_treasury.controls': dict(plan=False, issue=False, deliver=False, inspect=False, maximum_attempts=8),
         'cashu_treasury.controls.sweep': dict(enabled=False, balance_trigger_sats=SWEEP_SATS),
-        'cashu_treasury.policy': dict(enabled=False, version=POLICY_VERSION, invoice_expiry_seconds=300),
+        'cashu_treasury.policy': dict(enabled=False, version=POLICY_VERSION, invoice_expiry_seconds=900),
         'cashu_treasury.policy.destination': destination,
         'cashu_treasury.policy.limits': treasury,
         'cashu_treasury.policy.approved_mints.minibits': mint_limits,

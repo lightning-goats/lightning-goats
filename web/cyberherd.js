@@ -80,13 +80,60 @@
     el("previous").addEventListener("click",()=>{if(busy) return;offset=Math.max(0,offset-50);update();});
     el("next").addEventListener("click",()=>{if(!busy && next!==null) {offset=next;update();}});
     const auth=window.LightningGoatsAuth;
+    const template = el("member-rewards-template");
+    if (auth?.enabled()) template.after(template.content.cloneNode(true));
+    let preference = null;
+    function resetPreference() {
+        preference = null;
+        if (!el("reward-preferences")) return;
+        el("reward-preferences").hidden = true;
+        el("reward-request").value = "";
+        el("reward-consent").checked = false;
+        el("reward-feedback").textContent = "";
+    }
+    function showFields() {
+        const method = el("reward-method").value;
+        el("reward-request-label").hidden = method !== "private_ecash";
+        el("reward-consent-label").hidden = method !== "public_nutzap";
+        el("reward-request").required = method === "private_ecash";
+        el("reward-consent").required = method === "public_nutzap";
+    }
+    el("reward-method")?.addEventListener("change", showFields);
+    el("reward-preferences")?.addEventListener("submit", async event => {
+        event.preventDefault();
+        const selected = preference;
+        if (!selected || auth.key() !== selected.pubkey) return;
+        const method = el("reward-method").value;
+        const payload = {method, expected_revision: selected.revision,
+            publish_recipient_and_amount: method === "public_nutzap" && el("reward-consent").checked};
+        if (method === "private_ecash") payload.payment_request = el("reward-request").value.trim();
+        try {
+            const saved = await auth.request("/api/v1/cyberherd/me/rewards","POST",JSON.stringify(payload));
+            if (selected !== preference || auth.key() !== selected.pubkey) return;
+            if (saved.method !== method || saved.revision !== selected.revision+1) throw new Error("Refresh your membership to check the saved preference.");
+            preference = {pubkey:selected.pubkey,revision:saved.revision};
+            el("reward-request").value = "";
+            el("reward-feedback").textContent = "Reward preference saved.";
+        } catch (error) {
+            if (selected === preference) el("reward-feedback").textContent = error.message;
+        }
+    });
     async function connectIdentity() {
+        resetPreference();
         try {await auth.connect();const me=await auth.request("/api/v1/cyberherd/me");if(me.pubkey!==auth.key() || !decimal(me.member?.amount_sats))throw new Error("Invalid membership response.");
             el("self-status").textContent=me.member.active?`Your CyberHerd score: ${BigInt(me.member.amount_sats).toLocaleString()} sats` : me.member.banned?"Your membership is banned.":"You are not an active member this cycle.";
             el("operator-link").hidden=me.operator!==true;
+            const pref = me.reward_preference;
+            if (me.member.active && !me.member.banned && pref && integer(pref.revision)
+                && ["lightning","public_nutzap","private_ecash"].includes(pref.method)) {
+                preference = {pubkey:me.pubkey,revision:pref.revision};
+                el("reward-method").value = pref.method;
+                showFields();
+                el("reward-preferences").hidden = false;
+            }
         } catch(error) {el("self-status").textContent=error.message||"Sign-in unavailable.";el("operator-link").hidden=true;}
     }
     if(auth?.enabled()) {el("connect-nostr").hidden=false;el("connect-nostr").addEventListener("click",connectIdentity);}
-    document.addEventListener("nlAuth",event=>{if(event.detail?.type==="logout"){el("self-status").textContent="";el("operator-link").hidden=true;}else if(event.detail?.type==="login"&&auth?.enabled())connectIdentity();});
+    document.addEventListener("nlAuth",event=>{if(event.detail?.type==="logout"){resetPreference();el("self-status").textContent="";el("operator-link").hidden=true;}else if(event.detail?.type==="login"&&auth?.enabled())connectIdentity();});
     if(enabled) {update();setInterval(()=>update(true),10000);} else el("status").textContent="CyberHerd is not available yet.";
 })();

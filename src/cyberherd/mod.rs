@@ -26,6 +26,7 @@ pub mod operator_http;
 pub mod overlay_delivery;
 #[cfg(unix)]
 pub mod payout_bridge;
+pub mod private_reward;
 pub mod relay;
 #[cfg(unix)]
 pub mod result_worker;

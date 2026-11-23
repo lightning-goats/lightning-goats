@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "inventory_sha256": "620a0134d1204d996311d6dd0b0cd7697fe9839d7eaddff591fa293f18f13358",
+  "inventory_sha256": "99dfdc4439cc635032c5ce63af641037b74ce50a5eeef47d0952a77f0670b1d4",
   "scope": "Exact archive-recorded upstream commits, reviewed release source matches and pinned SPDX texts for archive-declared licenses.",
   "packages": [
     {

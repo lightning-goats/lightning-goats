@@ -64,6 +64,7 @@ impl Store {
         now: i64,
         expected: i64,
         method: &str,
+        request: Option<&str>,
     ) -> Result<Option<i64>> {
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         consume(&mut tx, auth, now).await?;
@@ -92,8 +93,8 @@ impl Store {
         let next = expected
             .checked_add(1)
             .context("preference revision exhausted")?;
-        sqlx::query("INSERT INTO member_reward_preferences(owner,member,revision,method) VALUES(?,?,?,?) ON CONFLICT(owner,member) DO UPDATE SET revision=excluded.revision,method=excluded.method,payment_request=NULL")
-            .bind(owner).bind(&auth.actor).bind(next).bind(method).execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO member_reward_preferences(owner,member,revision,method,payment_request) VALUES(?,?,?,?,?) ON CONFLICT(owner,member) DO UPDATE SET revision=excluded.revision,method=excluded.method,payment_request=excluded.payment_request")
+            .bind(owner).bind(&auth.actor).bind(next).bind(method).bind(request).execute(&mut *tx).await?;
         tx.commit().await?;
         Ok(Some(next))
     }

@@ -909,14 +909,14 @@ async fn signed_member_reward_consent_survives_restart_and_rejects_replay_and_st
     );
     let consent = proof(2, 0, "public_nutzap");
     assert_eq!(
-        s.set_reward_preference(&owner, &consent, 125, 0, "public_nutzap")
+        s.set_reward_preference(&owner, &consent, 125, 0, "public_nutzap", None)
             .await
             .unwrap(),
         Some(1)
     );
     let s = Store::connect(&url).await.unwrap();
     assert!(
-        s.set_reward_preference(&owner, &consent, 125, 0, "public_nutzap")
+        s.set_reward_preference(&owner, &consent, 125, 0, "public_nutzap", None)
             .await
             .is_err()
     );
@@ -926,13 +926,14 @@ async fn signed_member_reward_consent_survives_restart_and_rejects_replay_and_st
             &proof(3, 0, "public_nutzap"),
             125,
             0,
-            "public_nutzap"
+            "public_nutzap",
+            None
         )
         .await
         .is_err()
     );
     assert_eq!(
-        s.set_reward_preference(&owner, &proof(2, 0, "lightning"), 125, 0, "lightning")
+        s.set_reward_preference(&owner, &proof(2, 0, "lightning"), 125, 0, "lightning", None)
             .await
             .unwrap(),
         None
@@ -942,7 +943,7 @@ async fn signed_member_reward_consent_survives_restart_and_rejects_replay_and_st
         ("public_nutzap".into(), 1)
     );
     assert_eq!(
-        s.set_reward_preference(&owner, &proof(2, 1, "lightning"), 125, 1, "lightning")
+        s.set_reward_preference(&owner, &proof(2, 1, "lightning"), 125, 1, "lightning", None)
             .await
             .unwrap(),
         Some(2)

@@ -251,6 +251,7 @@ struct RewardSelection {
     method: String,
     #[serde(default)]
     publish_recipient_and_amount: bool,
+    payment_request: Option<String>,
 }
 
 async fn set_rewards(State(s): State<Service>, request: Request) -> Response {
@@ -266,9 +267,24 @@ async fn set_rewards(State(s): State<Service>, request: Request) -> Response {
     };
     if choice.expected_revision < 0
         || !matches!(
-            (choice.method.as_str(), choice.publish_recipient_and_amount),
-            ("lightning", false) | ("public_nutzap", true)
+            (
+                choice.method.as_str(),
+                choice.publish_recipient_and_amount,
+                choice.payment_request.as_deref()
+            ),
+            ("lightning", false, None)
+                | ("public_nutzap", true, None)
+                | ("private_ecash", false, Some(_))
         )
+    {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    if let Some(text) = &choice.payment_request
+        && super::private_reward::PrivateDestination::from_request(
+            text,
+            crate::cashu::treasury::PROJECT_MINT_ORIGIN,
+        )
+        .is_err()
     {
         return StatusCode::BAD_REQUEST.into_response();
     }
@@ -280,6 +296,7 @@ async fn set_rewards(State(s): State<Service>, request: Request) -> Response {
             now,
             choice.expected_revision,
             &choice.method,
+            choice.payment_request.as_deref(),
         )
         .await
     {

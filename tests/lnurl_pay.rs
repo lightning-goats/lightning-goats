@@ -8,7 +8,7 @@ use std::sync::{
 };
 
 use lightning_goats::{
-    config::{BreezCollectorConfig, LightningAddressConfig, LnurlConfig, WalletBackend},
+    config::{BreezCollectorConfig, LightningAddressConfig, LnurlConfig},
     ledger::LedgerStore,
     lnurl::{LnurlService, LnurlServiceError},
 };
@@ -108,8 +108,7 @@ async fn service(state: CollectorFixture) -> (TempDir, LnurlService) {
         &LnurlConfig {
             public_base_url: "https://lightning-goats.com/".to_owned(),
             invoice_expiry_seconds: 900,
-            wallet_backend: WalletBackend::Breez,
-            breez_collector: Some(collector),
+            collector: Some(collector),
             zap: None,
         },
         &addresses(),

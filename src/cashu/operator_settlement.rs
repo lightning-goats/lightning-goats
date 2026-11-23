@@ -101,7 +101,7 @@ pub(super) fn load_config(path: &Path, expected_digest: &str) -> Result<AppConfi
     );
     let config: AppConfig = toml::from_str(std::str::from_utf8(&bytes)?)
         .map_err(|_| anyhow::anyhow!("invalid protected settlement configuration"))?;
-    config.validate()?;
+    config.validate_common()?;
     Ok(config)
 }
 

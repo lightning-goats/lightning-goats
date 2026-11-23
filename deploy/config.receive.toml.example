@@ -40,10 +40,9 @@ url = "sqlite:///var/lib/lightning-goats/lightning-goats.db"
 
 [lnurl]
 public_base_url = "https://lightning-goats.com/"
-wallet_backend = "breez"
 invoice_expiry_seconds = 900
 
-[lnurl.breez_collector]
+[lnurl.collector]
 socket = "/run/lightning-goats-project-invoices.sock"
 peer_uid = 0 # systemd owns the project invoice listener.
 

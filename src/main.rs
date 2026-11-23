@@ -162,11 +162,7 @@ async fn main() -> Result<()> {
                 .cashu_receipts
                 .as_ref()
                 .context("treasury wallet registration missing")?;
-            treasury.worker(
-                receipts,
-                ledger.clone(),
-                config.lnurl.breez_collector.as_ref(),
-            )
+            treasury.worker(receipts, ledger.clone(), config.lnurl.collector.as_ref())
         })
         .transpose()?
         .flatten();
@@ -187,7 +183,7 @@ async fn main() -> Result<()> {
     info!(
         listen = %config.service.listen,
         mode = config.service.mode.as_str(),
-        payment_backend = config.lnurl.wallet_backend.as_str(),
+        payment_backend = "cashu_mint",
         gateway = %config.gateway.url,
         "lightning-goatsd listening"
     );
@@ -202,7 +198,7 @@ async fn main() -> Result<()> {
                 ledger.clone(),
                 config.service.mode,
                 None,
-                config.lnurl.breez_collector.clone(),
+                config.lnurl.collector.clone(),
             ),
         )
     });
@@ -287,7 +283,7 @@ async fn main() -> Result<()> {
 
     let mut breez_claims = tokio::spawn({
         let ledger = ledger.clone();
-        let collector = config.lnurl.breez_collector.clone();
+        let collector = config.lnurl.collector.clone();
         async move {
             match collector {
                 Some(collector) => ledger.run_breez_claim_recovery(collector).await,
@@ -509,7 +505,7 @@ async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse>, S
 
     Ok(Json(StatusResponse {
         mode: state.config.service.mode.as_str(),
-        payment_backend: state.config.lnurl.wallet_backend.as_str(),
+        payment_backend: "cashu_mint",
         lightning_address_users: state.lnurl.configured_users(),
         gateway_reachable,
         feed_credit_sats,
@@ -687,7 +683,7 @@ async fn contact_create(
         return contact_cashu::checkout(&state, &intent, id, &capability, &headers).await;
     }
     // No raw body, deserializer, capability or provider error enters diagnostics.
-    let Some(collector) = &state.config.lnurl.breez_collector else {
+    let Some(collector) = &state.config.lnurl.collector else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
     let result = state
@@ -842,8 +838,7 @@ mod tests {
             toml::from_str(include_str!("../deploy/config.canary.toml.example")).unwrap();
         let mut mint_config = config.lnurl.clone();
         mint_config.invoice_expiry_seconds = 900;
-        mint_config.wallet_backend = lightning_goats::config::WalletBackend::Breez;
-        mint_config.breez_collector = Some(lightning_goats::config::BreezCollectorConfig {
+        mint_config.collector = Some(lightning_goats::config::BreezCollectorConfig {
             socket: "/run/lightning-goats-project-invoices.sock".into(),
             peer_uid: 0,
         });

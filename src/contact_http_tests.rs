@@ -91,8 +91,7 @@ async fn contact_http_rejects_bad_admission_and_only_authoritative_fee_queues_pr
     });
     config.strike = None;
     config.lnurl.invoice_expiry_seconds = 900;
-    config.lnurl.wallet_backend = lightning_goats::config::WalletBackend::Breez;
-    config.lnurl.breez_collector = Some(collector.clone());
+    config.lnurl.collector = Some(collector.clone());
     config.validate().unwrap();
     let origin = config
         .lnurl

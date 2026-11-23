@@ -51,8 +51,7 @@ async fn prepare(root: &Path, source: &str) -> Result<Value> {
         toml::from_str(include_str!("../deploy/config.canary.toml.example"))?;
     config["database"]["url"] = database.clone().into();
     // No real provider, even if a caller later starts this prepared canary.
-    config["lnurl"]["breez_collector"]["socket"] =
-        format!("{root_text}/unused-collector.sock").into();
+    config["lnurl"]["collector"]["socket"] = format!("{root_text}/unused-collector.sock").into();
     config["nostr"]["nak_config_path"] = format!("{root_text}/unused-nak").into();
     let config_text = toml::to_string_pretty(&config)?;
     let parsed: AppConfig = toml::from_str(&config_text)?;
@@ -174,7 +173,7 @@ mod tests {
         assert!(cfg.strike.is_none());
         assert_eq!(cfg.service.mode, RuntimeMode::Canary);
         assert_eq!(
-            cfg.lnurl.breez_collector.unwrap().socket,
+            cfg.lnurl.collector.unwrap().socket,
             root.join("unused-collector.sock")
         );
     }

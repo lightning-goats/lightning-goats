@@ -12,10 +12,9 @@ url = "sqlite:///var/lib/lightning-goats/lightning-goats-canary.db"
 
 [lnurl]
 public_base_url = "https://feeder.lightning-goats.com/"
-wallet_backend = "breez"
 invoice_expiry_seconds = 900
 
-[lnurl.breez_collector]
+[lnurl.collector]
 socket = "/run/lightning-goats-canary-project-invoices.sock"
 peer_uid = 1001 # Set to the isolated canary collector listener UID.
 

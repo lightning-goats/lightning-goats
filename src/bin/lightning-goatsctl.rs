@@ -717,7 +717,7 @@ async fn main() -> Result<()> {
             let threshold = config.feeder.threshold_sats;
             let unresolved = ledger.unresolved_feed_attempt().await?;
             println!("mode={}", config.service.mode.as_str());
-            println!("payment_backend={}", config.lnurl.wallet_backend.as_str());
+            println!("payment_backend=cashu_mint");
             println!("feed_credit_sats={credit}");
             println!("threshold_sats={threshold}");
             println!("feeds_due={}", credit / threshold);

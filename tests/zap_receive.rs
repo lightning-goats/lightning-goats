@@ -14,10 +14,7 @@ use std::{
 };
 
 use lightning_goats::{
-    config::{
-        BreezCollectorConfig, LightningAddressConfig, LnurlConfig, NostrConfig, WalletBackend,
-        ZapConfig,
-    },
+    config::{BreezCollectorConfig, LightningAddressConfig, LnurlConfig, NostrConfig, ZapConfig},
     ledger::LedgerStore,
     lnurl::{LnurlService, LnurlServiceError},
     nostr::NakClient,
@@ -116,8 +113,7 @@ impl Fixture {
         let config = LnurlConfig {
             public_base_url: "https://lightning-goats.com/".into(),
             invoice_expiry_seconds: 900,
-            wallet_backend: WalletBackend::Breez,
-            breez_collector: Some(collector.clone()),
+            collector: Some(collector.clone()),
             zap: zaps.then(|| ZapConfig {
                 receipt_pubkey: signer.clone(),
                 payee_pubkeys: users
@@ -603,8 +599,7 @@ async fn breez_callback_preserves_raw_zap_and_claim_recovery_queues_one_receipt(
     let config = LnurlConfig {
         public_base_url: "https://lightning-goats.com/".into(),
         invoice_expiry_seconds: 900,
-        wallet_backend: WalletBackend::Breez,
-        breez_collector: Some(collector.clone()),
+        collector: Some(collector.clone()),
         zap: Some(ZapConfig {
             receipt_pubkey: f.signer.clone(),
             payee_pubkeys: BTreeMap::from([("herd".into(), f.payee.clone())]),

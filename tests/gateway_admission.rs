@@ -500,7 +500,7 @@ async fn daemon(directory: &impl AsRef<std::path::Path>, gateway_url: &str) -> P
         directory.as_ref().join("daemon.db").display()
     )
     .into();
-    config["lnurl"]["breez_collector"]["socket"] =
+    config["lnurl"]["collector"]["socket"] =
         format!("{}/unused-collector.sock", directory.as_ref().display()).into();
     config["gateway"]["url"] = gateway_url.into();
     config["informational"]["interface_info_enabled"] = false.into();
@@ -557,10 +557,9 @@ async fn breez_daemon_serves_discovery_without_strike_credentials() {
     config["database"]["url"] =
         format!("sqlite://{}", directory.path().join("daemon.db").display()).into();
     let lnurl = config["lnurl"].as_table_mut().unwrap();
-    lnurl.insert("wallet_backend".into(), "breez".into());
     lnurl.insert("invoice_expiry_seconds".into(), 900.into());
     lnurl.insert(
-        "breez_collector".into(),
+        "collector".into(),
         toml::toml! {
             socket = "/run/lightning-goats/project.sock"
             peer_uid = 1001

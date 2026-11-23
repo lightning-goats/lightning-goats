@@ -413,8 +413,7 @@ mod tests {
             &LnurlConfig {
                 public_base_url: "https://lightning-goats.com/".to_owned(),
                 invoice_expiry_seconds: 900,
-                wallet_backend: crate::config::WalletBackend::Breez,
-                breez_collector: Some(crate::config::BreezCollectorConfig {
+                collector: Some(crate::config::BreezCollectorConfig {
                     socket: directory.path().join("project.sock"),
                     peer_uid: 1001,
                 }),
@@ -439,8 +438,7 @@ mod tests {
         let config = LnurlConfig {
             public_base_url: "https://lightning-goats.com/".into(),
             invoice_expiry_seconds: 900,
-            wallet_backend: crate::config::WalletBackend::Breez,
-            breez_collector: Some(crate::config::BreezCollectorConfig {
+            collector: Some(crate::config::BreezCollectorConfig {
                 socket: directory.path().join("collector.sock"),
                 peer_uid: 1001,
             }),

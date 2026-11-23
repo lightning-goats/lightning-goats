@@ -380,14 +380,12 @@ impl Store {
                 .bind(i64::try_from(source.consumed_sats)?).execute(&mut *tx).await?;
         }
         for row in plan.rows.iter().filter(|row| row.skip.is_none()) {
-            let (method, address, recipient_json) = match &row.ecash {
+            let (address, recipient_json) = match &row.ecash {
                 Some(destination) => (
-                    destination.method(),
                     destination.receiving_key(),
                     serde_json::to_string(destination)?,
                 ),
                 None => (
-                    "lightning",
                     row.profile
                         .as_ref()
                         .and_then(|p| p.lud16.as_deref())
@@ -395,8 +393,8 @@ impl Store {
                     serde_json::to_string(row.recipient.as_ref().context("recipient missing")?)?,
                 ),
             };
-            sqlx::query("INSERT INTO payout_rows(grant_id,member,reward_method,address,recipient_json,net_sats,fee_limit_sats,gross_sats) VALUES(?,?,?,?,?,?,?,?)")
-                .bind(grant.id.to_string()).bind(&row.pubkey).bind(method).bind(address).bind(recipient_json)
+            sqlx::query("INSERT INTO payout_rows(grant_id,member,address,recipient_json,net_sats,fee_limit_sats,gross_sats) VALUES(?,?,?,?,?,?,?)")
+                .bind(grant.id.to_string()).bind(&row.pubkey).bind(address).bind(recipient_json)
                 .bind(i64::try_from(row.net_sats)?).bind(i64::try_from(row.fee_limit_sats)?)
                 .bind(i64::try_from(row.gross_sats)?).execute(&mut *tx).await?;
         }

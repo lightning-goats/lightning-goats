@@ -1,4 +1,4 @@
-//! Strict payout-schema-8 -> 14 additive comparison of separate four-journal images.
+//! Strict payout-schema-8 -> 15 additive comparison of separate four-journal images.
 //! It does not migrate a journal, restore state or authorize service resumption.
 use std::{collections::BTreeMap, path::Path};
 
@@ -40,7 +40,16 @@ pub(super) async fn private_catalog() -> Result<BTreeMap<String, Definition>> {
         Ok(catalog(&pool)
             .await?
             .into_iter()
-            .filter(|(_, d)| FEE_TABLES.contains(&d.table.as_str()))
+            .filter(|(key, d)| {
+                FEE_TABLES.contains(&d.table.as_str())
+                    || matches!(
+                        key.as_str(),
+                        "trigger:bind_member_ecash_destination"
+                            | "trigger:forbid_member_ecash_invoice"
+                            | "trigger:forbid_member_ecash_fee_probe"
+                            | "trigger:forbid_member_ecash_invoice_closure"
+                    )
+            })
             .collect())
     }
     .await;

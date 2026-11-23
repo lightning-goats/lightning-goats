@@ -111,13 +111,6 @@ pub enum EcashDestination {
     PrivateEcash(super::private_reward::PrivateDestination),
 }
 impl EcashDestination {
-    pub fn method(&self) -> &'static str {
-        match self {
-            Self::PublicNutzap(_) => "public_nutzap",
-            Self::PrivateEcash(_) => "private_ecash",
-        }
-    }
-
     pub fn validate(&self, member: &str) -> Result<()> {
         let key = self.receiving_key();
         anyhow::ensure!(

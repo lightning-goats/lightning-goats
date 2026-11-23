@@ -452,7 +452,7 @@ impl Store {
 WITH grants AS (
  SELECT * FROM payout_grants WHERE COALESCE(json_extract(qualification_json,'$.execution_provider'),'strike')=?1
 ), state AS (
- SELECT r.grant_id,r.member,r.reward_method,g.admitted_at,
+ SELECT r.grant_id,r.member,COALESCE(json_extract(r.recipient_json,'$.method'),'lightning') AS reward_method,g.admitted_at,
  EXISTS(SELECT 1 FROM payout_unsubmitted c WHERE c.grant_id=r.grant_id AND c.member=r.member) AS closed,
  EXISTS(SELECT 1 FROM payout_invoice_intents i JOIN payout_quote_intents q ON q.invoice_id=i.id JOIN payout_payment_bindings b ON b.intent_id=q.id JOIN payout_payment_records p ON p.payment_id=b.payment_id
  WHERE i.grant_id=r.grant_id AND i.member=r.member AND p.seq=(SELECT MAX(p2.seq) FROM payout_payment_records p2 WHERE p2.payment_id=b.payment_id) AND p.state IN ('COMPLETED','FAILED')) AS terminal,

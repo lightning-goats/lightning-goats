@@ -3,6 +3,7 @@
 These tests establish schema constraints, not typed invoice validation or runtime
 activation. Native Rust tests separately exercise funding and retained grants.
 """
+import json
 import sqlite3
 import unittest
 from pathlib import Path
@@ -25,6 +26,20 @@ class InclusiveFeeSchemaTests(unittest.TestCase):
             "INSERT INTO payout_rows VALUES(?,?,?,?,?,?,?)",
             ("grant", "member", "member@example.com", "{}", 100, 0, 100),
         )
+
+    def test_ecash_assignments_exclude_lightning_intents_and_failure_closure(self):
+        for method in ("public_nutzap","private_ecash"):
+            destination = json.dumps({"method":method,"receiving_key":"key"})
+            self.db.execute("INSERT INTO payout_rows VALUES(?,?,?,?,?,?,?)",
+                            ("grant",method,"key",destination,7,0,7))
+            for statement in (
+                "INSERT INTO payout_invoice_intents VALUES('invoice','grant',?,'{}')",
+                "INSERT INTO payout_fee_probe_intents VALUES('probe','grant',?,0,NULL,7,'{}',100)",
+                "INSERT INTO payout_unsubmitted VALUES('grant',?,'failure',100)",
+            ):
+                with self.assertRaisesRegex(sqlite3.IntegrityError,"ecash"):
+                    self.db.execute(statement,(method,))
+        self.db.execute("INSERT INTO payout_invoice_intents VALUES('old','grant','member','{}')")
 
     def probe(self, round_, net, previous=None, created=100, member="member"):
         self.db.execute(

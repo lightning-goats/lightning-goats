@@ -243,6 +243,7 @@ impl StrikeClient {
         Ok(receive)
     }
 
+    #[cfg(test)]
     async fn receive_page(&self, id: Uuid, offset: u32) -> Result<Vec<StrikeReceive>> {
         let mut endpoint = self
             .base_url
@@ -662,10 +663,7 @@ impl StrikeClient {
             .strike_receive_request(request_id)
             .await?
             .with_context(|| {
-                format!(
-                    "unknown Strike receiveRequestId {}; refusing credit",
-                    request_id
-                )
+                format!("unknown Strike receiveRequestId {request_id}; refusing credit")
             })?;
         #[cfg(unix)]
         let treasury = ledger

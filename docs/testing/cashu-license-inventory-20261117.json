@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "lock_sha256": {
-    "Cargo.lock": "cdb8705c3d1e4b7982d64370cae33e5300dfcdbf8af2d8105be2eda40a8f7170",
+    "Cargo.lock": "862184c233bb420b247fb2ecee383ca847ff893ef93db79fe5cf8a40d5f6a6e9",
     "tools/cashu-compat/Cargo.lock": "efdafa2f651901d846e86d3129a55bc6bbf69a8a619316ec367a2d84174dd05d"
   },
   "scope": "full lockfile graphs, not a linked-binary inventory",
@@ -4245,7 +4245,7 @@
       ],
       "status": "local_manifest",
       "manifest": "Cargo.toml",
-      "manifest_sha256": "c23f7b6e1b7809389f7a343ce00c46cd485e44b76b39282fa7eae730e6b417f2",
+      "manifest_sha256": "408632d66e43b0fbda508864b5178929dee3d33c94d9489eac354ee56482b71d",
       "declared_license": "MIT",
       "license_file": null,
       "license_notice_files_sha256": {

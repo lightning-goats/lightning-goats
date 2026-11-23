@@ -221,6 +221,7 @@ pub enum FeeProbeReply {
 /// The journal stores execute intent first. A fresh root/core observation gives
 /// this short lifetime; recovery may only PATCH that same original quote.
 #[derive(Clone)]
+#[cfg(test)]
 pub struct ExecuteIntent {
     pub(crate) quote: QuoteRecord,
     pub(crate) permitted_until: i64,
@@ -228,6 +229,7 @@ pub struct ExecuteIntent {
     pub(crate) core_uid: u32,
     pub(crate) request: super::execution::Request,
 }
+#[cfg(test)]
 impl ExecuteIntent {
     pub fn claim_request(&self) -> &super::execution::Request {
         &self.request
@@ -460,6 +462,7 @@ mod tests {
     use fixture::{error_id, parse_fee_probe, parse_quote};
     use reqwest::StatusCode;
     use serde_json::json;
+    use std::time::Duration;
 
     #[test]
     fn inclusive_fee_discovery_cannot_promote_an_oversized_quote_to_execution() {

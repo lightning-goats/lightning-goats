@@ -1,7 +1,9 @@
 //! Durable quote/execute correlation. No provider call can erase uncertainty.
 use super::invoices::{load_invoice, touch_clock, write_lock};
 use super::*;
-use crate::{core_bridge::AuthenticatedFundingPage, payout::provider::*};
+#[cfg(test)]
+use crate::core_bridge::AuthenticatedFundingPage;
+use crate::payout::provider::*;
 use sqlx::{Sqlite, Transaction};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -388,6 +390,7 @@ impl Store {
         Ok(())
     }
 
+    #[cfg(test)]
     pub async fn prepare_execute(
         &self,
         id: Uuid,

@@ -50,6 +50,8 @@ pub struct Descriptor {
     pub id: String,
     pub encoding: Encoding,
     pub request: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mints: Vec<String>,
 }
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Encoding {
@@ -74,6 +76,19 @@ impl Descriptor {
         ensure!(
             self.request.len() <= MAX_REQUEST_BYTES,
             "public descriptor exceeds bound"
+        );
+        ensure!(
+            self.mints.len() <= 16
+                && self
+                    .mints
+                    .iter()
+                    .all(|s| url::Url::parse(s).is_ok_and(|u| u.scheme() == "https"
+                        && u.host().is_some()
+                        && u.username().is_empty()
+                        && u.password().is_none()
+                        && u.fragment().is_none()
+                        && u.query().is_none())),
+            "invalid advertised mint list"
         );
         let valid = match self.encoding {
             Encoding::CreqA => self.request.strip_prefix("creqA").is_some_and(|body| {
@@ -193,6 +208,7 @@ mod tests {
                 version: 1,
                 id: value["id"].as_str().unwrap().into(),
                 encoding: serde_json::from_value(value["encoding"].clone())?,
+                mints: Vec::new(),
                 request: value["request"].as_str().unwrap().into(),
             };
             descriptor.validate()?;

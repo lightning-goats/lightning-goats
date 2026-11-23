@@ -87,6 +87,7 @@ impl RetiredDescriptor {
 pub struct Descriptor {
     id: String,
     encoded: String,
+    mints: Vec<String>,
     encoding: Encoding,
 }
 impl Descriptor {
@@ -98,6 +99,7 @@ impl Descriptor {
             id: self.id.clone(),
             encoding: self.encoding,
             request: self.encoded.clone(),
+            mints: self.mints.clone(),
         };
         descriptor.validate()?;
         Ok(descriptor)
@@ -174,6 +176,7 @@ impl Descriptor {
         Ok(Self {
             id,
             encoded,
+            mints: mints.iter().map(|m| m.advertised_url.clone()).collect(),
             encoding,
         })
     }

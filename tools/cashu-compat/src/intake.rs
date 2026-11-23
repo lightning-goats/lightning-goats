@@ -7,7 +7,9 @@ use crate::{
     mint_policy::{MintPolicy, MintRegistry},
 };
 use anyhow::{Result, ensure};
-use cdk::nuts::{CurrencyUnit, Proof, PublicKey, nut10, nut18::PaymentRequestPayload};
+use cdk::nuts::{
+    CurrencyUnit, KeySetInfo, Proof, PublicKey, Token, nut10, nut18::PaymentRequestPayload,
+};
 use lightning_goats_nostr_event::{VerifiedEvent, validate_hex, validate_public_key};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -229,8 +231,45 @@ pub(crate) fn ordinary_json_at(
         !source_ref.is_empty() && source_ref.len() <= 256,
         "invalid admission ID"
     );
-    let payload: PaymentRequestPayload =
-        serde_json::from_slice(body).map_err(|_| anyhow::anyhow!("invalid Cashu payload"))?;
+    let payload: PaymentRequestPayload = match serde_json::from_slice::<String>(body) {
+        Ok(raw) => {
+            let token: Token = raw
+                .parse()
+                .map_err(|_| anyhow::anyhow!("invalid Cashu token"))?;
+            let mint = token
+                .mint_url()
+                .map_err(|_| anyhow::anyhow!("submit one mint group per token"))?;
+            let policy = registry.accepting(&mint.to_string(), false)?;
+            let ids: BTreeSet<_> = keys
+                .0
+                .keys()
+                .filter(|(id, _, _)| id == &policy.id)
+                .map(|(_, keyset, _)| keyset)
+                .collect();
+            let mut keysets = Vec::with_capacity(ids.len());
+            for id in ids {
+                keysets.push(KeySetInfo {
+                    id: id.parse()?,
+                    unit: CurrencyUnit::Sat,
+                    active: false,
+                    input_fee_ppk: 0,
+                    final_expiry: None,
+                });
+            }
+            PaymentRequestPayload {
+                id: None,
+                memo: None,
+                mint,
+                unit: token.unit().unwrap_or(CurrencyUnit::Sat),
+                proofs: token
+                    .proofs(&keysets)
+                    .map_err(|_| anyhow::anyhow!("unrecognized token keyset"))?,
+            }
+        }
+        Err(_) => {
+            serde_json::from_slice(body).map_err(|_| anyhow::anyhow!("invalid Cashu payload"))?
+        }
+    };
     ensure!(payload.unit == CurrencyUnit::Sat, "unsupported unit");
     let policy = registry.accepting(&payload.mint.to_string(), false)?;
     let receiver = match payload.id {
@@ -500,6 +539,12 @@ pub(crate) mod tests {
             receiver(),
         )?;
         assert!(plain.author().is_none());
+        let pasted = Token::new(
+            "https://mint.example".parse()?,
+            vec![p.clone()],
+            None,
+            CurrencyUnit::Sat,
+        );
         let signed = event(&[p], vec![]);
         let zap = nutzap(&serde_json::to_string(&signed)?, &registry, &keys, &limits)?;
         assert_eq!(zap.author(), Some(signed.pubkey.as_str()));
@@ -512,6 +557,18 @@ pub(crate) mod tests {
             _ => panic!("new acquisition expected"),
         };
         assert_eq!(journal.admit(&zap.intake())?, Admission::Duplicate(id));
+        for token in [pasted.to_string(), pasted.to_v3_string()] {
+            let raw = ordinary_json(
+                &serde_json::to_vec(&token)?,
+                "pasted",
+                &[],
+                &registry,
+                &keys,
+                &limits,
+                receiver(),
+            )?;
+            assert_eq!(journal.admit(&raw.intake())?, Admission::Duplicate(id));
+        }
         let other = ordinary_json(
             &private_body(&[proof("different-bearer".into())]),
             "http-2",

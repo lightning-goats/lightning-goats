@@ -760,11 +760,18 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
-                    <p>Pay from your Lightning Goats mint balance. To add the Lightning Goats mint to your wallet, use <code>https://mint.lightning-goats.com</code>. Enter the amount in your wallet.</p>
+                    <p id="cashuMints"></p>
                     <div id="cashuRequestWrap" hidden>
                         <img id="cashuQr" width="252" height="252" alt="Scan for the Lightning Goats Cashu payment request">
                         <textarea id="cashuRequest" class="zap-invoice" readonly aria-label="Cashu payment request"></textarea>
                     </div>
+                    <details id="cashuPaste" hidden>
+                        <summary>Paste Cashu token</summary>
+                        <label for="cashuTender">Token from one accepted mint (cashuA or cashuB)</label>
+                        <textarea id="cashuTender" class="form-control" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="65536"></textarea>
+                        <button type="button" id="cashuSendToken" class="btn btn-warning mt-2">Send token</button>
+                        <p id="cashuTokenStatus" class="small mt-2" role="status"></p>
+                    </details>
                     <div id="cashuStatus" class="small mt-2" role="status"></div>
                 </div>
                 <div class="modal-footer">

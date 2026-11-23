@@ -39,7 +39,7 @@ pub(crate) async fn fetch(policy: &super::intake::Policy) -> Result<Option<Descr
 
 pub(crate) fn public_value(descriptor: Descriptor) -> serde_json::Value {
     serde_json::json!({"version":descriptor.version,"enabled":true,"id":descriptor.id,
-        "encoding":descriptor.encoding,"request":descriptor.request})
+        "encoding":descriptor.encoding,"request":descriptor.request,"mints":descriptor.mints})
 }
 
 #[cfg(test)]

@@ -191,7 +191,12 @@ async fn direct_operator_worker_fixture() -> anyhow::Result<()> {
         assert_eq!(members.len(), 2);
         let mut lost = 0;
         let mut ready = 0;
-        for _ in 0..4 {
+        // A second member can be selected while the first member's swap
+        // still holds the shared input. It must resume after change is restored.
+        for _ in 0..10 {
+            if ready == 2 {
+                break;
+            }
             let w = CashuWorker {
                 reclaim_failed: false,
                 collector_socket: Some(socket.clone()),
@@ -206,7 +211,8 @@ async fn direct_operator_worker_fixture() -> anyhow::Result<()> {
                 result => anyhow::bail!("unexpected member worker step {result:?}"),
             }
         }
-        assert_eq!((ready, lost), (2, 2));
+        assert_eq!(ready, 2);
+        assert!(lost >= 2);
         let claims: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM member_ecash_execution_claims")
             .fetch_one(&ledger.pool)
             .await?;

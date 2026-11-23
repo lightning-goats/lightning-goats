@@ -140,7 +140,6 @@ async fn direct_operator_worker_fixture() -> anyhow::Result<()> {
             store,
             core: Client::new(config.socket.clone(), uid)?,
             plans: Plans::new(root.join("unused"), uid, owner.clone())?,
-            verifier: None,
         })
     };
     let wallet = DirectWallet {

@@ -4,7 +4,6 @@ use std::collections::BTreeSet;
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::{
@@ -12,7 +11,6 @@ use crate::{
     reward_funding::{
         CashuFundingAnchor, Funding, Reservation, RewardFundingSource, StrikeFundingAnchor,
     },
-    strike::StrikeClient,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -21,67 +19,6 @@ pub struct ProviderScope {
     pub environment: String,
     pub account_id: Uuid,
     pub credential_fingerprint: String,
-}
-
-pub struct SourceVerifier {
-    client: StrikeClient,
-    scope: ProviderScope,
-}
-
-impl SourceVerifier {
-    /// Root configuration names the account; resource access with this exact
-    /// credential establishes the relation to actual credited receives. No
-    /// public profile or fabricated provider account attestation is used.
-    pub fn new(account_id: Uuid, expected_fingerprint: &str, api_key: String) -> Result<Self> {
-        let scope = Self::scope(account_id, expected_fingerprint, &api_key)?;
-        Ok(Self {
-            client: StrikeClient::new("https://api.strike.me", api_key)?,
-            scope,
-        })
-    }
-
-    pub(crate) fn scope(account_id: Uuid, expected: &str, key: &str) -> Result<ProviderScope> {
-        crate::nostr_event::validate_hex(expected, 32)?;
-        if account_id.is_nil()
-            || key.is_empty()
-            || key.len() > 4096
-            || key.chars().any(char::is_control)
-            || key.trim() != key
-        {
-            bail!("invalid payout account/credential binding");
-        }
-        let actual = hex::encode(Sha256::digest(key.as_bytes()));
-        if actual != expected {
-            bail!("payout credential differs from root fingerprint");
-        }
-        Ok(ProviderScope {
-            environment: "strike-production".into(),
-            account_id,
-            credential_fingerprint: actual,
-        })
-    }
-
-    pub fn provider_scope(&self) -> &ProviderScope {
-        &self.scope
-    }
-
-    async fn verify(&self, anchor: &StrikeFundingAnchor) -> Result<()> {
-        anchor.validate()?;
-        // Existing authoritative receive verification handles exact signed
-        // request identity and BTC/P2P actual credited amount without rounding.
-        // Keep private request IDs/provider errors out of returned diagnostics.
-        let actual = self
-            .client
-            .reconcile_completed_receive(&anchor.stored_request(), anchor.receive_id)
-            .await
-            .map_err(|_| {
-                anyhow::anyhow!("payout credential could not qualify consumed Strike receive")
-            })?;
-        if actual.amount_msat != anchor.settled_msat || actual.payment_hash != anchor.settled_hash {
-            bail!("provider receive contradicts consumed reward funding");
-        }
-        Ok(())
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -238,13 +175,16 @@ impl Session {
 
     /// Commit page progress only after ALL its provider reads and sums pass.
     /// Retrying a failed read never silently skips the earlier source.
-    pub async fn accept(
+    #[cfg(test)]
+    async fn accept(
         &mut self,
         page: &AuthenticatedFundingPage,
-        verifier: &SourceVerifier,
+        verifier: &tests::SourceVerifier,
     ) -> Result<()> {
-        self.accept_page(page, &verifier.scope, Some(verifier))
-            .await
+        self.accept_page(page, verifier.provider_scope(), async |anchor| {
+            verifier.verify(anchor).await
+        })
+        .await
     }
 
     /// Mixed historical feeds may contain Strike anchors. They confer no
@@ -257,14 +197,17 @@ impl Session {
         if self.funding_source.is_strike() {
             bail!("Strike funding requires provider verification");
         }
-        self.accept_page(page, journal_scope, None).await
+        self.accept_page(page, journal_scope, async |_| {
+            bail!("historical Strike source cannot fund a new payout")
+        })
+        .await
     }
 
     async fn accept_page(
         &mut self,
         page: &AuthenticatedFundingPage,
         scope: &ProviderScope,
-        verifier: Option<&SourceVerifier>,
+        verify: impl AsyncFn(&StrikeFundingAnchor) -> Result<()>,
     ) -> Result<()> {
         let p = page.page();
         p.validate()?;
@@ -315,10 +258,7 @@ impl Session {
                 if !self.funding_source.is_strike() {
                     continue;
                 }
-                verifier
-                    .context("missing Strike funding verifier")?
-                    .verify(anchor)
-                    .await?;
+                verify(anchor).await?;
                 sources.push(QualifiedSource {
                     ledger_id: part.ledger_id,
                     consumed_sats: part.consumed_sats,
@@ -370,4 +310,4 @@ impl Session {
 
 #[cfg(all(test, unix))]
 #[path = "funding_tests.rs"]
-mod tests;
+pub(super) mod tests;

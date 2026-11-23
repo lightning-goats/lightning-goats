@@ -770,3 +770,108 @@ async fn both_checkout_rails_can_settle_once_against_the_same_remaining_amount()
     assert!(reopened.begin_feed_attempt(1000).await?.is_none());
     Ok(())
 }
+
+#[tokio::test]
+async fn contact_cashu_receipt_is_private_and_replayable_after_restart() -> anyhow::Result<()> {
+    use crate::ledger::ContactAction;
+    use lightning_goats_cashu_receipt::public_request::{Descriptor, Encoding};
+    use lightning_goats_cashu_receipt::receive_status::http_delivery_id;
+    let (_dir, url, store, policy) = fixture().await;
+    let intent = crate::contact::tests::fixture();
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/website/fixtures/cashu-requests.json"
+    ))?;
+    let original = &fixture["requests"]["creqA"];
+    let descriptor = Descriptor {
+        version: 1,
+        id: original["id"].as_str().unwrap().into(),
+        request: original["request"].as_str().unwrap().into(),
+        encoding: Encoding::CreqA,
+        mints: vec![],
+    };
+    let ContactAction::Challenge(request) = store
+        .contact_tender(&intent, Some(&descriptor), None)
+        .await?
+    else {
+        anyhow::bail!("missing payment challenge")
+    };
+    let req: ::cashu::nuts::nut18::PaymentRequest = request.parse()?;
+    assert!(req.transports.is_empty());
+    assert_eq!(req.amount, Some(100.into()));
+    assert!(!req.mints.is_empty());
+    let delivery = http_delivery_id(b"private-contact-fixture");
+    let ContactAction::Submit(terms) = store
+        .contact_tender(&intent, Some(&descriptor), Some(delivery))
+        .await?
+    else {
+        anyhow::bail!("missing reservation")
+    };
+    // Lose the submission reply, reconnect without a current public descriptor
+    // and retry. A fresh token must wait for the original disposition.
+    let restarted = LedgerStore::connect(&url).await?;
+    let state = restarted
+        .contact_status(intent.id, &"ab".repeat(32))
+        .await?
+        .unwrap();
+    assert_eq!(state.state, "pending");
+    assert!(matches!(
+        restarted.contact_tender(&intent, None, None).await?,
+        ContactAction::Pending
+    ));
+    assert!(matches!(
+        restarted
+            .contact_tender(&intent, None, Some(delivery))
+            .await?,
+        ContactAction::Submit(_)
+    ));
+    assert!(matches!(
+        restarted
+            .contact_tender(&intent, None, Some(http_delivery_id(b"other")))
+            .await?,
+        ContactAction::Pending
+    ));
+    let mut data = wire(&policy, 109).data().clone();
+    data.source_ref = terms.source_ref(delivery);
+    let receipt = WireReceipt::validate(data)?;
+    let peer = authenticated(&policy, &receipt);
+    let ack = store
+        .import_cashu_with_custody(&policy, &peer, Some("mint-a"))
+        .await?;
+    assert_eq!(ack.event_seq, 0);
+    assert_eq!(ack.net_sats, 109);
+    let reopened = LedgerStore::connect(&url).await?;
+    assert_eq!(
+        reopened
+            .import_cashu_with_custody(&policy, &peer, Some("mint-a"))
+            .await?,
+        ack
+    );
+    assert!(matches!(
+        reopened
+            .contact_tender(&intent, Some(&descriptor), Some(http_delivery_id(b"fresh")))
+            .await?,
+        ContactAction::Fulfilled
+    ));
+    let excess: i64 = sqlx::query_scalar("SELECT excess_sats FROM private_contact_excess_receipts")
+        .fetch_one(&reopened.pool)
+        .await?;
+    assert_eq!(excess, 9);
+    assert_eq!(count(&reopened, "private_contact_tenders").await, 1);
+    assert_eq!(count(&reopened, "private_contact_delivery").await, 1);
+    assert_eq!(count(&reopened, "private_contact_entitlements").await, 1);
+    for table in [
+        "private_contact_fees",
+        "cashu_receipt_inbox",
+        "ledger_entries",
+        "event_log",
+        "settled_payments",
+    ] {
+        assert_eq!(
+            count(&reopened, table).await,
+            0,
+            "unexpected row in {table}"
+        );
+    }
+    assert_eq!(reopened.feed_credit_sats().await?, 0);
+    Ok(())
+}

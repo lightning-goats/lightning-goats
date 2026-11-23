@@ -16,7 +16,7 @@ use std::{os::unix::fs::MetadataExt as _, path::Path, time::Duration};
 const GUARD: &str = "/run/lightning-goats-contact-fixture/ALLOW";
 const ATTESTATION: &[u8] = b"LIGHTNING_GOATS_DISPOSABLE_CONTACT_UPGRADE_CI_v1\n";
 const DATABASE: &str = "/var/lib/lightning-goats/lightning-goats.db";
-const CURRENT_CORE_SCHEMA: usize = 39;
+const CURRENT_CORE_SCHEMA: usize = 40;
 
 fn isolated_fixture() -> Result<u32> {
     let uid = std::fs::metadata("/proc/self")?.uid();

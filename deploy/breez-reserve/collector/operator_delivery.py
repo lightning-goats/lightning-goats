@@ -65,7 +65,7 @@ def destination(text):
     return request.get("i"), wallet_key, recipients[0], relays
 
 
-def envelope(token, amount, request_id, lock, transport_key, wrapper):
+def locked_proofs(token, amount, lock):
     if not token.startswith("cashuA"):
         raise ValueError("unexpected operator token")
     decoded = json.loads(decode64(token[6:]))
@@ -77,7 +77,24 @@ def envelope(token, amount, request_id, lock, transport_key, wrapper):
         kind, fields = json.loads(proof["secret"])
         if kind != "P2PK" or set(fields) != {"nonce","data"} or fields["data"] != lock:
             raise ValueError("token differs from configured recipient")
-    payload = {"mint": MINT, "unit": "sat", "proofs": proofs}
+    return proofs
+
+
+def public_reward_tags(token, amount, assignment):
+    route = assignment["destination"]
+    if (route["method"] != "public_nutzap" or route["member"] != assignment["member_key"]
+            or not route["receiving_key"].startswith("02") or route["mint"].rstrip("/") != MINT):
+        raise ValueError("public reward differs from frozen advertisement")
+    proofs = locked_proofs(token, amount, route["receiving_key"])
+    for proof in proofs:
+        if not isinstance(proof.get("dleq"), dict) or set(proof["dleq"]) != {"e","s","r"}:
+            raise ValueError("public reward requires wallet-verifiable DLEQ")
+    return [["p",route["member"]],["u",route["mint"]],["unit","sat"],
+            *[["proof",json.dumps(proof,separators=(",",":"))] for proof in proofs]]
+
+
+def envelope(token, amount, request_id, lock, transport_key, wrapper):
+    payload = {"mint": MINT, "unit": "sat", "proofs": locked_proofs(token, amount, lock)}
     if request_id is not None:
         payload["id"] = request_id
     result = subprocess.run(["/usr/bin/node", str(wrapper)], input=json.dumps({"recipient":transport_key, "payload":payload}),

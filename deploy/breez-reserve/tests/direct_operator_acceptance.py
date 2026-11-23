@@ -195,7 +195,7 @@ def exercise(ppk, failed_members=False, ecash_members=False):
                             lock = receiver.public_key.format().hex()
                         destination={"method":method,"mint":MINT,"receiving_key":lock}
                         if method=="public_nutzap":
-                            destination.update(member=member_key,advertisement="ab"*32,
+                            destination.update(mint=MINT+"/",member=member_key,advertisement="ab"*32,
                                 token_relays=["wss://relay.example.com"],read_relays=[])
                         else:
                             destination.update(request_digest="cd"*32,payment_id="reward",
@@ -223,6 +223,11 @@ def exercise(ppk, failed_members=False, ecash_members=False):
                         row = store.db.execute("SELECT token FROM member_ecash WHERE feed=?",
                             (f"member-ecash:{feed}:{member_key}",)).fetchone()
                         proofs = [p.model_dump(exclude_none=True) for p in TokenV3.deserialize(row[0]).proofs]
+                        if method == "public_nutzap":
+                            from operator_delivery import public_reward_tags
+                            tags = public_reward_tags(row[0],7-fee,assignment)
+                            assert tags[:3] == [["p",member_key],["u",MINT+"/"],["unit","sat"]]
+                            proofs = [json.loads(value) for kind,value in tags if kind == "proof"]
                         assert sum(p["amount"] for p in proofs)==7-fee
                         for p in proofs:
                             assert p["dleq"] and json.loads(p["secret"])[1]["data"]==lock

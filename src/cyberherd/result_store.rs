@@ -139,7 +139,7 @@ impl Store {
         {
             if matches!(
                 planned.ecash,
-                Some(super::rewards::EcashDestination::PrivateEcash(_))
+                Some(crate::cyberherd::rewards::EcashDestination::PrivateEcash(_))
             ) {
                 // The authenticated result page retains the accounting. A private
                 // reward has no public payout announcement or overlay event.

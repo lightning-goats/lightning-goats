@@ -764,10 +764,10 @@ impl Journal {
     /// Bind CDK's actual swap inputs to the admitted proof index, allowing only
     /// witness/DLEQ transport changes. Inputs cannot be borrowed from another receipt.
     pub fn verify_swap_inputs(&self, id: Uuid, swap: &cdk::nuts::SwapRequest) -> Result<u64> {
-        let count: i64 = self.connection.query_row(
-            "SELECT proof_count FROM acquisitions WHERE id=?",
+        let (count, source): (i64, String) = self.connection.query_row(
+            "SELECT proof_count,source_ref FROM acquisitions WHERE id=?",
             [id.to_string()],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
         ensure!(
             i64::try_from(swap.inputs().len())? == count,
@@ -803,6 +803,14 @@ impl Journal {
                     .all(|item| item.amount > cdk::Amount::ZERO),
             "invalid swap output value"
         );
+        if let Some((_, needed)) =
+            lightning_goats_cashu_receipt::receive_status::FeedingCheckout::source_terms(&source)?
+        {
+            ensure!(
+                u64::from(output) >= needed,
+                "checkout tender does not cover mint input fees"
+            );
+        }
         Ok(u64::from(input) - u64::from(output))
     }
 

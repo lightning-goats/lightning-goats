@@ -405,9 +405,14 @@ async fn main() -> Result<()> {
 
 fn app(state: AppState) -> Router {
     let cashu = state.cashu.clone();
+    let ledger = state.ledger.clone();
     Router::new()
         .route("/healthz", get(healthz))
         .route("/api/v1/status", get(status))
+        .route(
+            "/api/v1/feeding/checkout",
+            post(feeding_checkout).layer(DefaultBodyLimit::max(512)),
+        )
         .route(
             "/api/v1/strike/webhook",
             post(strike_webhook).layer(DefaultBodyLimit::max(MAX_STRIKE_WEBHOOK_BODY)),
@@ -429,7 +434,10 @@ fn app(state: AppState) -> Router {
         )
         .route("/ws/overlay", get(overlay_ws))
         .with_state(state)
-        .merge(lightning_goats::cashu::http::router(cashu))
+        .merge(lightning_goats::cashu::http::router_with_ledger(
+            cashu,
+            Some(ledger),
+        ))
         .layer(middleware::from_fn_with_state(
             Arc::new(tokio::sync::Semaphore::new(64)),
             bounded_http,
@@ -464,6 +472,52 @@ fn task_exit(name: &str, result: Result<Result<()>, tokio::task::JoinError>) -> 
         Ok(Ok(())) => Err(anyhow!("{name} exited unexpectedly")),
         Ok(Err(error)) => Err(anyhow!("{name} failed: {error:#}")),
         Err(error) => Err(anyhow!("{name} task failed: {error}")),
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CheckoutRequest {
+    id: uuid::Uuid,
+    user: String,
+}
+
+async fn feeding_checkout(
+    State(state): State<AppState>,
+    Json(body): Json<CheckoutRequest>,
+) -> Response {
+    if body.id.get_version_num() != 4 || !state.lnurl.configured_users().contains(&body.user) {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    let Some(wallet) = state
+        .cashu
+        .as_ref()
+        .filter(|w| w.ordinary_receiving_enabled())
+    else {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    };
+    let Ok(_slot) = state.status_slots.try_acquire() else {
+        return StatusCode::TOO_MANY_REQUESTS.into_response();
+    };
+    let Ok(safety) = state.gateway.feeder_safety().await else {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    };
+    if !state.config.service.mode.feeder_enabled()
+        || safety.override_enabled
+        || !safety.remote_enabled
+    {
+        return Json(serde_json::json!({"state":"paused"})).into_response();
+    }
+    let Ok(Some(descriptor)) = wallet.public_request().await else {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    };
+    match state
+        .lnurl
+        .finish_feeding(&body.user, body.id, descriptor)
+        .await
+    {
+        Ok(checkout) => Json(checkout).into_response(),
+        Err(_) => StatusCode::SERVICE_UNAVAILABLE.into_response(),
     }
 }
 

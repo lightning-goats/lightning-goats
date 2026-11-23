@@ -65,6 +65,56 @@ pub enum Status {
 #[serde(rename_all = "snake_case")]
 pub enum AdmitOperation {
     OrdinaryAdmit,
+    FeedingCheckout(FeedingCheckout),
+}
+/// Terms from the core's original checkout. The wallet checks the tender
+/// against the fixed request and the underlying receiving policy before admission.
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct FeedingCheckout {
+    pub id: Uuid,
+    pub amount_sats: u64,
+    pub descriptor_id: String,
+}
+impl FeedingCheckout {
+    pub fn validate(&self) -> Result<()> {
+        ensure!(
+            self.id.get_version_num() == 4
+                && self.amount_sats > 0
+                && self.amount_sats <= i64::MAX as u64
+                && self.descriptor_id.len() == 36
+                && self.descriptor_id.starts_with("lg1-")
+                && self.descriptor_id.as_bytes()[4..]
+                    .iter()
+                    .all(|v| v.is_ascii_digit() || (b'a'..=b'f').contains(v)),
+            "invalid checkout terms"
+        );
+        Ok(())
+    }
+    pub fn source_ref(&self, delivery_id: Uuid) -> String {
+        format!("checkout:{}:{}:{}", self.id, self.amount_sats, delivery_id)
+    }
+    pub fn source_terms(source: &str) -> Result<Option<(Uuid, u64)>> {
+        let Some(rest) = source.strip_prefix("checkout:") else {
+            return Ok(None);
+        };
+        let mut parts = rest.split(':');
+        let id: Uuid = parts.next().unwrap_or_default().parse()?;
+        let amount: u64 = parts.next().unwrap_or_default().parse()?;
+        let delivery: Uuid = parts.next().unwrap_or_default().parse()?;
+        ensure!(
+            id.get_version_num() == 4
+                && amount > 0
+                && delivery.get_version_num() == 8
+                && parts.next().is_none()
+                && source == format!("checkout:{id}:{amount}:{delivery}"),
+            "invalid checkout receipt reference"
+        );
+        Ok(Some((id, amount)))
+    }
+    pub fn payment_id(&self) -> String {
+        format!("lgf-{}", self.id)
+    }
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -112,6 +162,13 @@ impl AdmissionQuery {
             epoch,
         )?;
         ensure!(!query.body.is_empty(), "empty ordinary admission body");
+        if let AdmitOperation::FeedingCheckout(checkout) = &query.operation {
+            checkout.validate()?;
+            ensure!(
+                http_delivery_id(query.body.as_bytes()) == query.delivery_id,
+                "invalid checkout delivery identity"
+            );
+        }
         Ok(query)
     }
 }

@@ -1,3 +1,4 @@
+pub mod checkout;
 use std::{collections::HashMap, sync::Arc};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -311,10 +312,6 @@ impl LnurlService {
                     .map_err(LnurlServiceError::Provider)?
                     .ok_or(LnurlServiceError::Busy)?;
                 let result: Result<LnurlPayCallbackResponse> = async {
-                    #[derive(serde::Deserialize)]
-                    struct Reply {
-                        invoice: String,
-                    }
                     let payload = json!({"request_id": id, "amount_sat": amount_msat / 1000,
                     "user": address.user, "credit_pool": address.credit_pool,
                     "description": description, "zap": zap.is_some()});
@@ -325,28 +322,9 @@ impl LnurlService {
                         intent["description_hash"] = json!(zap.description_hash());
                     }
                     self.ledger.prepare_breez_invoice(id, &intent).await?;
-                    let reply: Reply = crate::private_ipc::request(
-                        &collector.socket,
-                        collector.peer_uid,
-                        &payload,
-                        65536,
-                        20,
-                    )
-                    .await?;
-                    let parsed: lightning_invoice::Bolt11Invoice = reply.invoice.parse()?;
-                    let hash = parsed.payment_hash().to_string();
-                    let signed = crate::bolt11::verify(
-                        &reply.invoice,
-                        amount_msat,
-                        &hash,
-                        &hex::encode(Sha256::digest(description.as_bytes())),
-                    )?;
-                    crate::bolt11::verify_issuance_expiry(&signed, self.invoice_expiry_seconds)?;
-                    self.ledger
-                        .bind_breez_invoice(id, &reply.invoice, &hash)
-                        .await?;
+                    let invoice = self.project_invoice(collector, id, &payload, None).await?;
                     Ok(LnurlPayCallbackResponse {
-                        pr: reply.invoice,
+                        pr: invoice,
                         routes: Vec::new(),
                     })
                 }
@@ -406,6 +384,51 @@ impl LnurlService {
         self.addresses
             .get(user)
             .map(|address| address.display_name.as_str())
+    }
+
+    async fn project_invoice(
+        &self,
+        collector: &crate::config::BreezCollectorConfig,
+        id: uuid::Uuid,
+        payload: &serde_json::Value,
+        existing: Option<String>,
+    ) -> Result<String> {
+        #[derive(serde::Deserialize)]
+        struct Reply {
+            invoice: String,
+        }
+        let description = payload["description"]
+            .as_str()
+            .context("missing invoice description")?;
+        let amount_msat = payload["amount_sat"]
+            .as_u64()
+            .and_then(|s| s.checked_mul(1000))
+            .context("invalid invoice amount")?;
+        let invoice = match existing {
+            Some(invoice) => invoice,
+            None => {
+                let reply: Reply = crate::private_ipc::request(
+                    &collector.socket,
+                    collector.peer_uid,
+                    payload,
+                    65536,
+                    20,
+                )
+                .await?;
+                reply.invoice
+            }
+        };
+        let parsed: lightning_invoice::Bolt11Invoice = invoice.parse()?;
+        let hash = parsed.payment_hash().to_string();
+        let signed = crate::bolt11::verify(
+            &invoice,
+            amount_msat,
+            &hash,
+            &hex::encode(Sha256::digest(description.as_bytes())),
+        )?;
+        crate::bolt11::verify_issuance_expiry(&signed, self.invoice_expiry_seconds)?;
+        self.ledger.bind_breez_invoice(id, &invoice, &hash).await?;
+        Ok(invoice)
     }
 
     fn address(&self, user: &str) -> Result<&RegisteredAddress, LnurlServiceError> {

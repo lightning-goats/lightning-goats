@@ -182,8 +182,9 @@ impl LedgerStore {
             "Cashu daily feeder credit limit exceeded"
         );
         let amount = to_i64(contribution, "Cashu contribution")?;
-        let ledger_id = sqlx::query("INSERT INTO ledger_entries(entry_type,source_key,delta_sats,payment_source,payment_source_id,address_user,credit_pool) VALUES('CASHU_RECEIPT',?,?,?,?,'herd','herd')")
-            .bind(source_key(receipt)).bind(amount).bind(&data.transport).bind(data.acquisition_id.to_string())
+        let user = receipt_user(&mut tx, receipt).await?;
+        let ledger_id = sqlx::query("INSERT INTO ledger_entries(entry_type,source_key,delta_sats,payment_source,payment_source_id,address_user,credit_pool) VALUES('CASHU_RECEIPT',?,?,?,?,?,'herd')")
+            .bind(source_key(receipt)).bind(amount).bind(&data.transport).bind(data.acquisition_id.to_string()).bind(&user)
             .execute(&mut *tx).await?.last_insert_rowid();
         let after = super::feed_cap::cap_new_credit(&mut tx, ledger_id, contribution).await?;
         // Intentionally narrow projection. The mint, balances, private evidence,
@@ -191,7 +192,7 @@ impl LedgerStore {
         let event = append_event_in_transaction(
             &mut tx,
             "payment_received",
-            &public_event(receipt, contribution, after),
+            &public_event(receipt, &user, contribution, after),
         )
         .await?;
         sqlx::query("INSERT INTO cashu_receipt_inbox(wallet_instance,acquisition_id,wallet_epoch,core_epoch,mint_id,evidence_digest,receipt_digest,receipt_json,net_sats,ledger_entry_id,event_seq,original_feed_credit_sats,accepted_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)")
@@ -229,9 +230,31 @@ fn source_key(receipt: &WireReceipt) -> String {
         receipt.data().acquisition_id
     )
 }
-fn public_event(receipt: &WireReceipt, contribution: u64, after: u64) -> serde_json::Value {
+async fn receipt_user(tx: &mut Transaction<'_, Sqlite>, receipt: &WireReceipt) -> Result<String> {
+    let data = receipt.data();
+    let Some((id, amount)) =
+        lightning_goats_cashu_receipt::receive_status::FeedingCheckout::source_terms(
+            &data.source_ref,
+        )?
+    else {
+        return Ok("herd".into());
+    };
+    ensure!(
+        data.transport == "cashu" && data.net_sats >= amount,
+        "checkout tender does not match receipt"
+    );
+    let user:String=sqlx::query_scalar("SELECT json_extract(intent,'$.user') FROM breez_project_invoices WHERE id=? AND json_type(intent,'$.checkout')='object' AND json_extract(intent,'$.credit_pool')='herd' AND json_extract(intent,'$.amount_sat')=?")
+        .bind(id.to_string()).bind(i64::try_from(amount)?).fetch_one(&mut **tx).await?;
+    Ok(user)
+}
+fn public_event(
+    receipt: &WireReceipt,
+    user: &str,
+    contribution: u64,
+    after: u64,
+) -> serde_json::Value {
     json!({"source":receipt.data().transport,"amount_sats":contribution,
-        "feed_credit_sats":after,"address_user":"herd","credit_pool":"herd"})
+        "feed_credit_sats":after,"address_user":user,"credit_pool":"herd"})
 }
 
 async fn verify_row(
@@ -260,6 +283,7 @@ async fn verify_row(
         .fetch_one(&mut **tx)
         .await?;
     let data = receipt.data();
+    let user = receipt_user(tx, receipt).await?;
     let contribution = to_u64(ledger.try_get("delta_sats")?, "Cashu contribution")?;
     let retained: bool =
         sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM retained_cashu_lots WHERE ledger_id=?)")
@@ -281,7 +305,7 @@ async fn verify_row(
             && ledger
                 .try_get::<Option<String>, _>("address_user")?
                 .as_deref()
-                == Some("herd")
+                == Some(user.as_str())
             && ledger
                 .try_get::<Option<String>, _>("credit_pool")?
                 .as_deref()
@@ -311,7 +335,7 @@ async fn verify_row(
     }
     ensure!(
         event.try_get::<String, _>("event_type")? == "payment_received"
-            && payload == public_event(receipt, contribution, after),
+            && payload == public_event(receipt, &user, contribution, after),
         "Cashu receipt lost original public event"
     );
     Ok(CashuImportResult {

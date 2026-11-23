@@ -994,6 +994,7 @@ async fn rotated_receivers_redeem_original_queued_and_in_window_proofs() -> Resu
             &payload,
             "old-qr-source",
             DescriptorAcceptance {
+                checkout: None,
                 active: &[],
                 retired: &retired,
                 now,

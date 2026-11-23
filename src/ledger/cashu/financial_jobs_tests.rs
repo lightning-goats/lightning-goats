@@ -306,9 +306,59 @@ async fn local_ecash_funds_confirmed_feeding_and_only_legacy_lots_can_be_swept()
 
 #[tokio::test]
 async fn project_treasury_invoice_reopens_without_issuing_or_crediting_again() {
-    let (dir, url, ledger, registration) = fixture().await;
-    let receipt = wire(&registration, 1000);
-    ledger.import_cashu_receipt(&registration, &authenticated(&registration, &receipt)).await.unwrap();
+    exercise_conversion_restart(false).await;
+}
+
+#[tokio::test]
+async fn project_invoice_local_nutzap_and_foreign_token_fund_one_confirmed_feed() {
+    exercise_conversion_restart(true).await;
+}
+
+async fn exercise_conversion_restart(mixed:bool) {
+    let (dir,url,ledger,mut registration)=fixture().await;
+    if mixed {
+        // Start at the authenticated settlement boundary used by the normal poller.
+        let id=Uuid::new_v4();
+        let hash=hex::encode([0x41;32]);
+        let description_hash="cf".repeat(32);
+        let invoice=crate::test_invoices::invoice_with_payment_hash(600000,&description_hash,
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap(),[0x41;32]);
+        ledger.prepare_breez_invoice(id,&json!({"amount_sat":600,"user":"dexter","credit_pool":"herd","zap":false})).await.unwrap();
+        ledger.bind_breez_invoice(id,&invoice,&hash).await.unwrap();
+        let collector=crate::config::BreezCollectorConfig{socket:dir.path().join("viewer.sock"),peer_uid:crate::private_ipc::uid().unwrap()};
+        let listener=tokio::net::UnixListener::bind(&collector.socket).unwrap();
+        let server=tokio::spawn(async move {
+            let (mut socket,_)=listener.accept().await.unwrap();
+            let request:serde_json::Value=crate::private_ipc::read(&mut socket,65536).await.unwrap();
+            assert_eq!(request,json!({"claim_status":id}));
+            crate::private_ipc::write(&mut socket,&json!({"request_id":id,"payment_hash":hash,"amount_sat":600,"proof_digest":"bc".repeat(32)}),65536).await.unwrap();
+        });
+        assert!(ledger.poll_breez_claim(&collector).await.unwrap());
+        server.await.unwrap();
+        assert_eq!(ledger.feed_credit_sats().await.unwrap(),600);
+        registration.approved.insert(("goats".into(),"v1".into()),MintImportLimit{maximum_gross_sats:1000,maximum_net_sats:1000});
+        let mut nutzap=wire(&registration,249).data().clone();
+        nutzap.mint_id="goats".into();
+        nutzap.transport="nutzap".into();
+        nutzap.source_ref="1c".repeat(32);
+        nutzap.source_author=Some(crate::nostr_event::test_event(3,1,100,"",vec![]).pubkey);
+        let nutzap=WireReceipt::validate(nutzap).unwrap();
+        let peer=authenticated(&registration,&nutzap);
+        let ack=ledger.import_cashu_with_custody(&registration,&peer,Some("goats")).await.unwrap();
+        assert_eq!(ack.net_sats,249);
+        assert_eq!(ledger.import_cashu_with_custody(&registration,&peer,Some("goats")).await.unwrap(),ack);
+        ledger.record_collector_handoff(&lightning_goats_cashu_receipt::CollectorHandoff{
+            wallet_instance:registration.wallet_instance,wallet_epoch:registration.wallet_epoch,core_epoch:registration.core_epoch,
+            acquisition_id:ack.acquisition_id,evidence_digest:nutzap.data().acquisition_evidence_digest.clone(),collected_sats:249
+        }).await.unwrap();
+        assert_eq!(ledger.feed_credit_sats().await.unwrap(),850);
+    }
+    let foreign_net=if mixed {150} else {1000};
+    let receipt=wire(&registration,foreign_net);
+    let foreign=authenticated(&registration,&receipt);
+    let result=ledger.import_cashu_receipt(&registration,&foreign).await.unwrap();
+    assert_eq!(ledger.import_cashu_receipt(&registration,&foreign).await.unwrap(),result);
+    assert_eq!(ledger.feed_credit_sats().await.unwrap(),1000);
     let mut policy = feed_treasury_policy();
     policy.destination.origin = "https://mint.lightning-goats.com/".into();
     assert!(policy.validate().is_err());
@@ -388,7 +438,7 @@ async fn project_treasury_invoice_reopens_without_issuing_or_crediting_again() {
     let now: i64 = sqlx::query_scalar("SELECT unixepoch()").fetch_one(&mut *tx).await.unwrap();
     assert_eq!(super::treasury::daily_fee_remaining(&mut tx,now,100).await.unwrap(), 100-fee);
     tx.rollback().await.unwrap();
-    assert_eq!(count(&ledger, "breez_collected_claims").await, 1);
+    assert_eq!(count(&ledger, "breez_collected_claims").await, 1+i64::from(mixed));
     assert!(!ledger.poll_breez_claim(&collector).await.unwrap());
     assert!(ledger.record_payment(&SettledPayment {
         source: "strike".into(), source_id: Uuid::new_v4().to_string(),
@@ -396,15 +446,18 @@ async fn project_treasury_invoice_reopens_without_issuing_or_crediting_again() {
         credit_pool: "herd".into(), amount_msat: intent.deposit_sats * 1000,
         settled_at: None, context_json: None,
     }).await.is_err());
-    assert_eq!(count(&ledger, "settled_payments").await, 0);
+    assert_eq!(count(&ledger, "settled_payments").await, i64::from(mixed));
     assert_eq!(ledger.feed_credit_sats().await.unwrap(), 1000);
     let range: (i64,i64,i64) = sqlx::query_as("SELECT start_sats,input_sats,deposit_sats FROM cashu_funding_ranges WHERE intent_id=?")
         .bind(intent.id.to_string()).fetch_one(&ledger.pool).await.unwrap();
-    assert_eq!(range, (0, 1000, intent.deposit_sats as i64));
+    assert_eq!(range, (0, foreign_net as i64, intent.deposit_sats as i64));
     let feed = ledger.begin_feed_attempt(1000).await.unwrap().unwrap();
     ledger.confirm_feed_attempt(feed).await.unwrap();
     let mut tx = ledger.pool.begin().await.unwrap();
     let funding = crate::ledger::inspect_confirmed_reward_funding(&mut tx,feed).await.unwrap().unwrap();
-    assert_eq!((funding.strike_sats, funding.retained_cashu_sats),(0,intent.deposit_sats));
+    assert_eq!((funding.strike_sats, funding.retained_cashu_sats),(0,intent.deposit_sats+if mixed {849} else {0}));
+    assert_eq!(ledger.feed_credit_sats().await.unwrap(),0);
+    assert!(ledger.begin_feed_attempt(1000).await.unwrap().is_none());
+    assert_eq!(count(&ledger,"feed_attempts").await,1);
     tx.rollback().await.unwrap();
 }

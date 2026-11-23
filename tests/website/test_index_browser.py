@@ -196,6 +196,29 @@ class IndexBrowserTests(unittest.TestCase):
         self.assertEqual(self.invoices, [])
         self.assertEqual(self.errors, [])
 
+    def test_paste_cashu_uses_body_only_and_follows_private_status(self):
+        self.cashu["mints"] = ["https://mint.example", "https://foreign.example"]
+        calls = []
+        def accept(route):
+            calls.append((route.request.method, route.request.url, route.request.post_data_json))
+            route.fulfill(status=202, json={"status": "pending", "capability": "a" * 64})
+        def status(route):
+            calls.append((route.request.method, route.request.url, route.request.post_data_json))
+            route.fulfill(json={"status": "credited"})
+        self.page.route("**/api/v1/cashu", accept)
+        self.page.route("**/api/v1/cashu/status", status)
+        self.open()
+        self.page.locator("#feedCashuButton").click()
+        self.page.get_by_text("Paste Cashu token", exact=True).click()
+        self.assertIn("https://foreign.example", self.page.locator("#cashuMints").inner_text())
+        self.page.locator("#cashuTender").fill("cashuBfixture")
+        self.page.locator("#cashuSendToken").click()
+        self.page.get_by_text("Payment credited to the feeder.", exact=True).wait_for()
+        self.assertEqual(self.page.locator("#cashuTender").input_value(), "")
+        self.assertEqual(calls, [("POST", ORIGIN + "/api/v1/cashu", "cashuBfixture"),
+                                 ("POST", ORIGIN + "/api/v1/cashu/status", {"capability": "a" * 64})])
+        self.assertEqual(self.errors, [])
+
     def test_mobile_feed_card_handles_cashu_outage_and_preserves_lightning(self):
         self.cashu = None
         self.page.set_viewport_size({"width": 390, "height": 844})

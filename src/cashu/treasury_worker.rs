@@ -126,7 +126,7 @@ impl<W: Wallet> Worker<W> {
         controls: Controls,
         deadline: Duration,
     ) -> Result<Self> {
-        let origin = url::Url::parse(&policy.destination.origin)?;
+        let origin = reqwest::Url::parse(&policy.destination.origin)?;
         ensure!(
             origin
                 .host_str()

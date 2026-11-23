@@ -46,7 +46,12 @@ pub struct Intake<'a> {
     pub writer: &'a WriterLock,
 }
 impl Intake<'_> {
-    fn ordinary(&self, body: &[u8], source_ref: &str) -> Result<ValidatedContribution> {
+    fn ordinary(
+        &self,
+        body: &[u8],
+        source_ref: &str,
+        checkout: Option<&lightning_goats_cashu_receipt::receive_status::FeedingCheckout>,
+    ) -> Result<ValidatedContribution> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
             .as_secs();
@@ -54,6 +59,7 @@ impl Intake<'_> {
             body,
             source_ref,
             DescriptorAcceptance {
+                checkout,
                 active: self.descriptors,
                 retired: self.retired_descriptors,
                 now,
@@ -185,7 +191,14 @@ impl Intake<'_> {
                 !is_content_id || query.delivery_id == http_delivery_id(body),
                 "invalid content-bound delivery ID"
             );
-            let source_ref = format!("http:{}", query.delivery_id);
+            let (checkout, source_ref) = match &query.operation {
+                status::AdmitOperation::OrdinaryAdmit => {
+                    (None, format!("http:{}", query.delivery_id))
+                }
+                status::AdmitOperation::FeedingCheckout(terms) => {
+                    (Some(terms), terms.source_ref(query.delivery_id))
+                }
+            };
             let mut journal = self
                 .journal
                 .lock()
@@ -200,7 +213,7 @@ impl Intake<'_> {
             // after a descriptor expires. Only new admissions use today's policy.
             let id = match existing {
                 Some(id) => Some(id),
-                None => match self.ordinary(body, &source_ref) {
+                None => match self.ordinary(body, &source_ref, checkout) {
                     Err(_) => None,
                     Ok(contribution) => match journal.admit(&contribution.intake()) {
                         Ok(Admission::New(id) | Admission::Duplicate(id)) => Some(id),
@@ -277,7 +290,11 @@ impl Intake<'_> {
                         || request.delivery_id == http_delivery_id(body.as_bytes()),
                     "invalid content-bound delivery ID"
                 );
-                self.ordinary(body.as_bytes(), &format!("http:{}", request.delivery_id))?
+                self.ordinary(
+                    body.as_bytes(),
+                    &format!("http:{}", request.delivery_id),
+                    None,
+                )?
             }
             Payload::Nutzap(body) => {
                 ensure!(self.receive_nutzap, "nutzap receiving disabled");

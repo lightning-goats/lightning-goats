@@ -621,6 +621,8 @@
                         </form>
                         <button id="feedCashuButton" class="btn btn-outline-light" type="button"
                             data-bs-toggle="modal" data-bs-target="#cashuModal">Cashu</button>
+                        <button class="btn btn-warning" type="button" data-bs-toggle="modal"
+                            data-bs-target="#finishFeedingModal">Finish this feeding</button>
                         <a class="feed-nutzap-link" target="_blank" rel="noopener noreferrer"
                             href="https://njump.me/nevent1qqsz972laf2re3qs9mkuvcrwv240ekkn5k3s3zmqsclczycgzmqcrxspzemhxue69uhhyetvv9ujuurjd9kkzmpwdejhgqghwaehxw309aex2mrp0yhxzun50qhx6ctjddjhgq3qv60thnx0gz0wq3n6xdnq46y069l9x70xgmjp6lprdl6fv0eux6mqh70zpp">Send a Nutzap on Nostr</a>
                     </div>
@@ -752,6 +754,30 @@
         </div>
     </div>
 
+    <div class="modal fade" id="finishFeedingModal" tabindex="-1" aria-labelledby="finishTitle" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered"><div class="modal-content bg-dark text-light">
+            <div class="modal-header"><h5 id="finishTitle" class="modal-title">Finish this feeding</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button></div>
+            <div class="modal-body">
+                <label for="finishGoat">Credit this contribution to</label>
+                <select id="finishGoat" class="form-select">
+                    <option value="herd">The herd</option><option value="dexter">Dexter</option>
+                    <option value="rowan">Rowan</option><option value="cosmo">Cosmo</option>
+                    <option value="newton">Newton</option><option value="nova">Nova</option>
+                </select>
+                <p id="finishStatus" class="mt-2" role="status"></p>
+                <div id="finishChoices" hidden>
+                    <img id="finishQr" class="img-fluid" alt="Scan to pay with Lightning or Cashu">
+                    <p class="mt-2"><a id="finishWallet" class="btn btn-warning">Open in wallet</a></p>
+                    <p><a id="finishLightning">Pay with Lightning</a> · <button class="btn btn-outline-light btn-sm" id="copyFinishLightning">Copy invoice</button></p>
+                    <p><a id="finishCashu">Pay with Cashu</a> · <button class="btn btn-outline-light btn-sm" id="copyFinishCashu">Copy request</button></p>
+                    <textarea id="finishCopy" readonly hidden aria-label="Payment to copy"></textarea>
+                </div>
+                <button id="finishRetry" type="button" class="btn btn-outline-light" hidden>Retry checkout</button>
+            </div>
+        </div></div>
+    </div>
+
     <div class="modal fade" id="cashuModal" tabindex="-1" aria-labelledby="cashuModalLabel" aria-hidden="true">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
@@ -787,6 +813,7 @@
     <script src="/vendor/qrcode.js"></script>
     <script src="/lightning-payment.js"></script>
     <script src="/homepage-payments.js" defer></script>
+    <script src="/feeding-checkout.js" defer></script>
 
     <!-- Preserve an injected NIP-07 provider before nostr-login installs its fallback wrapper. -->
     <script>

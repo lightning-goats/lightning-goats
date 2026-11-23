@@ -136,7 +136,7 @@ fn validate_proofs(
     limits: &Limits,
     receiver: PublicKey,
     nutzap: bool,
-) -> Result<()> {
+) -> Result<u64> {
     ensure!(
         !proofs.is_empty() && proofs.len() <= limits.proof_count,
         "invalid proof count"
@@ -180,7 +180,7 @@ fn validate_proofs(
             ensure!(!nutzap, "nutzap requires receiver P2PK");
         }
     }
-    Ok(())
+    Ok(total)
 }
 
 pub fn ordinary_json(
@@ -196,6 +196,7 @@ pub fn ordinary_json(
         body,
         source_ref,
         DescriptorAcceptance {
+            checkout: None,
             active: descriptors,
             retired: &[],
             now: 0,
@@ -208,6 +209,7 @@ pub fn ordinary_json(
 }
 
 pub(crate) struct DescriptorAcceptance<'a> {
+    pub checkout: Option<&'a lightning_goats_cashu_receipt::receive_status::FeedingCheckout>,
     pub active: &'a [String],
     pub retired: &'a [RetiredDescriptor],
     pub now: u64,
@@ -272,7 +274,17 @@ pub(crate) fn ordinary_json_at(
     };
     ensure!(payload.unit == CurrencyUnit::Sat, "unsupported unit");
     let policy = registry.accepting(&payload.mint.to_string(), false)?;
-    let receiver = match payload.id {
+    let descriptor_id = if let Some(checkout) = descriptors.checkout {
+        checkout.validate()?;
+        ensure!(
+            payload.id.as_deref() == Some(checkout.payment_id().as_str()),
+            "payment does not match checkout"
+        );
+        Some(checkout.descriptor_id.clone())
+    } else {
+        payload.id
+    };
+    let receiver = match descriptor_id {
         Some(id) if !descriptors.active.contains(&id) => descriptors
             .retired
             .iter()
@@ -281,7 +293,11 @@ pub(crate) fn ordinary_json_at(
             .receiver(receiver)?,
         _ => receiver,
     };
-    validate_proofs(&payload.proofs, policy, keys, limits, receiver, false)?;
+    let total = validate_proofs(&payload.proofs, policy, keys, limits, receiver, false)?;
+    ensure!(
+        descriptors.checkout.is_none_or(|c| c.amount_sats <= total),
+        "incorrect checkout tender"
+    );
     Ok(ValidatedContribution {
         mint_id: policy.id.clone(),
         policy_version: policy.policy_version.clone(),

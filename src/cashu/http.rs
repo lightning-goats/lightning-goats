@@ -14,12 +14,28 @@ use lightning_goats_cashu_receipt::receive_status::{
 };
 use std::sync::Arc;
 
+#[derive(Clone)]
+struct IntakeState {
+    forwarder: Option<Arc<Forwarder>>,
+    ledger: Option<crate::ledger::LedgerStore>,
+}
+impl axum::extract::FromRef<IntakeState> for Option<Arc<Forwarder>> {
+    fn from_ref(state: &IntakeState) -> Self {
+        state.forwarder.clone()
+    }
+}
 pub fn router(forwarder: Option<Arc<Forwarder>>) -> Router {
+    router_with_ledger(forwarder, None)
+}
+pub fn router_with_ledger(
+    forwarder: Option<Arc<Forwarder>>,
+    ledger: Option<crate::ledger::LedgerStore>,
+) -> Router {
     let limit = forwarder
         .as_ref()
         .filter(|f| f.ordinary_receiving_enabled())
         .map_or(1024, |f| f.body_limit());
-    Router::new()
+    Router::<IntakeState>::new()
         .route("/api/v1/cashu", post(deliver).options(preflight))
         .route(
             "/api/v1/cashu/request",
@@ -32,7 +48,7 @@ pub fn router(forwarder: Option<Arc<Forwarder>>) -> Router {
                 .layer(DefaultBodyLimit::max(512)),
         )
         .layer(DefaultBodyLimit::max(limit))
-        .with_state(forwarder)
+        .with_state(IntakeState { forwarder, ledger })
         .layer(middleware::from_fn(private_cors))
 }
 async fn private_cors(request: Request, next: Next) -> Response {
@@ -61,10 +77,10 @@ async fn preflight(State(forwarder): State<Option<Arc<Forwarder>>>) -> StatusCod
     }
 }
 async fn public_request(
-    State(forwarder): State<Option<Arc<Forwarder>>>,
+    State(state): State<IntakeState>,
     OriginalUri(uri): OriginalUri,
 ) -> Response {
-    let Some(forwarder) = forwarder.filter(|f| f.ordinary_receiving_enabled()) else {
+    let Some(forwarder) = state.forwarder.filter(|f| f.ordinary_receiving_enabled()) else {
         return StatusCode::NOT_FOUND.into_response();
     };
     if uri.query().is_some() {
@@ -84,12 +100,12 @@ async fn public_request(
 }
 
 async fn deliver(
-    State(forwarder): State<Option<Arc<Forwarder>>>,
+    State(state): State<IntakeState>,
     OriginalUri(uri): OriginalUri,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    let Some(forwarder) = forwarder.filter(|f| f.ordinary_receiving_enabled()) else {
+    let Some(forwarder) = state.forwarder.filter(|f| f.ordinary_receiving_enabled()) else {
         return StatusCode::NOT_FOUND.into_response();
     };
     if uri.query().is_some() {
@@ -112,18 +128,40 @@ async fn deliver(
         return StatusCode::BAD_REQUEST.into_response();
     };
     // All mint/proof/descriptor/attribution validation remains in the wallet.
-    if !serde_json::from_str::<serde_json::Value>(&body).is_ok_and(|v| {
-        v.is_object()
-            || v.as_str()
-                .is_some_and(|s| s.starts_with("cashuA") || s.starts_with("cashuB"))
-    }) {
+    let Ok(payload) = serde_json::from_str::<serde_json::Value>(&body) else {
+        return StatusCode::BAD_REQUEST.into_response();
+    };
+    if !(payload.is_object()
+        || payload
+            .as_str()
+            .is_some_and(|s| s.starts_with("cashuA") || s.starts_with("cashuB")))
+    {
         return StatusCode::BAD_REQUEST.into_response();
     }
+    let checkout = if let Some(raw) = payload
+        .get("id")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.strip_prefix("lgf-"))
+    {
+        let (Ok(id), Some(ledger)) = (raw.parse(), state.ledger) else {
+            return StatusCode::BAD_REQUEST.into_response();
+        };
+        match ledger.checkout_terms(id).await {
+            Ok(Some(terms)) => Some(terms),
+            Ok(None) => return StatusCode::BAD_REQUEST.into_response(),
+            Err(_) => return StatusCode::SERVICE_UNAVAILABLE.into_response(),
+        }
+    } else {
+        None
+    };
     // A sender may have lost every previous reply. Identical bounded bodies
     // must reuse their private delivery binding rather than consume one durable
     // source alias per HTTP attempt. This ID grants no status/credit authority.
     let delivery_id = http_delivery_id(body.as_bytes());
-    match forwarder.submit_with_status(delivery_id, body).await {
+    match forwarder
+        .submit_admission(delivery_id, body, checkout)
+        .await
+    {
         Ok(reply) => match reply.result {
             AdmissionOutcome::Rejected => (
                 StatusCode::BAD_REQUEST,

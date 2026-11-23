@@ -1,4 +1,6 @@
 mod admission;
+mod checkout;
+pub(crate) use checkout::FeedingQuote;
 mod breez;
 #[cfg(unix)]
 mod cashu;

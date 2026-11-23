@@ -44,6 +44,14 @@ impl Forwarder {
         delivery_id: Uuid,
         body: String,
     ) -> Result<lightning_goats_cashu_receipt::receive_status::AdmissionReply> {
+        self.submit_admission(delivery_id, body, None).await
+    }
+    pub(super) async fn submit_admission(
+        &self,
+        delivery_id: Uuid,
+        body: String,
+        checkout: Option<lightning_goats_cashu_receipt::receive_status::FeedingCheckout>,
+    ) -> Result<lightning_goats_cashu_receipt::receive_status::AdmissionReply> {
         use lightning_goats_cashu_receipt::receive_status::{
             AdmissionQuery, AdmissionReply, AdmitOperation,
         };
@@ -56,7 +64,10 @@ impl Forwarder {
         );
         let query = AdmissionQuery {
             version: 1,
-            operation: AdmitOperation::OrdinaryAdmit,
+            operation: checkout.map_or(
+                AdmitOperation::OrdinaryAdmit,
+                AdmitOperation::FeedingCheckout,
+            ),
             wallet_instance: self.policy.wallet_instance,
             wallet_epoch: self.policy.wallet_epoch,
             delivery_id,

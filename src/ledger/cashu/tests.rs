@@ -696,3 +696,77 @@ async fn goats_payment_counts_gross_for_feeding_and_net_for_payout_once() {
     assert_eq!(funding.retained_cashu_sats, 20);
     assert_eq!(reopened.feed_credit_sats().await.unwrap(), 0);
 }
+
+#[tokio::test]
+async fn both_checkout_rails_can_settle_once_against_the_same_remaining_amount()
+-> anyhow::Result<()> {
+    use lightning_goats_cashu_receipt::public_request::{Descriptor, Encoding};
+    use lightning_goats_cashu_receipt::receive_status::http_delivery_id;
+    let (dir, url, store, policy) = fixture().await;
+    lightning(&store, 760).await;
+    let requests: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/website/fixtures/cashu-requests.json"
+    ))?;
+    let original = &requests["requests"]["creqA"];
+    let descriptor = Descriptor {
+        version: 1,
+        id: original["id"].as_str().unwrap().into(),
+        request: original["request"].as_str().unwrap().into(),
+        encoding: Encoding::CreqA,
+        mints: vec![],
+    };
+    let id = Uuid::new_v4();
+    let quote = store
+        .prepare_feeding_checkout(id, "cosmo", "herd", "metadata", &descriptor, 1000..=1000000)
+        .await?;
+    assert!(matches!(
+        quote,
+        crate::ledger::FeedingQuote::Prepared(_, None)
+    ));
+    let terms = store.checkout_terms(id).await?.unwrap();
+    assert_eq!(terms.amount_sats, 240);
+    let hash = "ac".repeat(32);
+    store.bind_breez_invoice(id, "fixture", &hash).await?;
+    let collector = crate::config::BreezCollectorConfig {
+        socket: dir.path().join("checkout.sock"),
+        peer_uid: crate::private_ipc::uid()?,
+    };
+    let listener = tokio::net::UnixListener::bind(&collector.socket)?;
+    let reply = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await?;
+        let request: serde_json::Value = crate::private_ipc::read(&mut socket, 65536).await?;
+        assert_eq!(request, json!({"claim_status":id}));
+        crate::private_ipc::write(&mut socket,&json!({"request_id":id,"payment_hash":hash,"amount_sat":240,"proof_digest":"de".repeat(32)}),65536).await
+    });
+    assert!(store.poll_breez_claim(&collector).await?);
+    reply.await??;
+    assert_eq!(store.feed_credit_sats().await?, 1000);
+    let mut data = wire(&policy, 240).data().clone();
+    data.source_ref = terms.source_ref(http_delivery_id(b"checkout-fixture"));
+    data.gross_sats = 240;
+    data.receive_fee_sats = 0;
+    let receipt = authenticated(&policy, &WireReceipt::validate(data)?);
+    let ack = store
+        .import_cashu_with_custody(&policy, &receipt, Some("mint-a"))
+        .await?;
+    assert_eq!(store.feed_credit_sats().await?, 1240);
+    let reopened = LedgerStore::connect(&url).await?;
+    assert_eq!(
+        reopened
+            .import_cashu_with_custody(&policy, &receipt, Some("mint-a"))
+            .await?,
+        ack
+    );
+    assert!(!reopened.poll_breez_claim(&collector).await?);
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM ledger_entries WHERE address_user='cosmo' AND delta_sats=240",
+    )
+    .fetch_one(&reopened.pool)
+    .await?;
+    assert_eq!(count, 2);
+    let feed = reopened.begin_feed_attempt(1000).await?.unwrap();
+    reopened.confirm_feed_attempt(feed).await?;
+    assert_eq!(reopened.feed_credit_sats().await?, 240);
+    assert!(reopened.begin_feed_attempt(1000).await?.is_none());
+    Ok(())
+}

@@ -25,7 +25,6 @@ use lightning_goats::{
     nostr::NakClient,
     overlay::{OverlayResume, serve_overlay_socket},
     presentation::MessageRenderer,
-    strike::StrikeRuntime,
 };
 use serde::{Deserialize, Serialize};
 use tracing::info;
@@ -101,11 +100,7 @@ async fn main() -> Result<()> {
         return paused_recovery::serve(&config).await;
     }
     let mut ledger = LedgerStore::connect(&config.database.url).await?;
-    if matches!(
-        config.lnurl.wallet_backend,
-        lightning_goats::config::WalletBackend::Breez
-    ) && let Some(receipts) = &config.cashu_receipts
-    {
+    if let Some(receipts) = &config.cashu_receipts {
         ledger = ledger.with_retained_wallet_epoch(receipts.wallet_epoch);
     }
     ledger
@@ -138,10 +133,6 @@ async fn main() -> Result<()> {
     {
         tracing::warn!(%error,"initial feeding message state unavailable; settlement is unaffected");
     }
-    let strike = match &config.strike {
-        Some(config) => Some(StrikeRuntime::from_config(config).await?),
-        None => None,
-    };
     let lnurl = LnurlService::new(&config.lnurl, &config.lightning_address, ledger.clone())?;
     let nostr = if config.service.mode.nostr_enabled() {
         Some(NakClient::from_config(&config.nostr).await?)
@@ -160,10 +151,7 @@ async fn main() -> Result<()> {
         .clone()
         .map(|c| {
             let server = lightning_goats::cashu::receipt_server::Server::new(c, ledger.clone())?;
-            match config.lnurl.wallet_backend {
-                lightning_goats::config::WalletBackend::Strike => Ok(server),
-                lightning_goats::config::WalletBackend::Breez => server.retain_mint("goats"),
-            }
+            server.retain_mint("goats")
         })
         .transpose()?;
     let cashu_treasury = config
@@ -207,35 +195,16 @@ async fn main() -> Result<()> {
     let mut server =
         tokio::spawn(async move { lightning_goats::server::serve(listener, app).await });
     #[cfg(unix)]
-    let payout_reader = config
-        .core_bridge
-        .as_ref()
-        .and_then(|bridge| bridge.payout_account_id)
-        .map(|id| {
-            strike
-                .as_ref()
-                .context("Strike payout backend missing")?
-                .payout_reader(id)
-        })
-        .transpose()?;
-    #[cfg(unix)]
     let core_bridge = config.core_bridge.clone().map(|bridge| {
         tokio::spawn(
             lightning_goats::core_bridge::unix::run_optional_with_readers(
                 Some(bridge),
                 ledger.clone(),
                 config.service.mode,
-                payout_reader,
+                None,
                 config.lnurl.breez_collector.clone(),
             ),
         )
-    });
-    let recovery_ledger = ledger.clone();
-    let mut recovery = tokio::spawn(async move {
-        match strike {
-            Some(runtime) => runtime.run_recovery_worker(recovery_ledger).await,
-            None => std::future::pending().await,
-        }
     });
     let mut feeder = tokio::spawn(run_feed_worker(
         ledger.clone(),
@@ -348,7 +317,6 @@ async fn main() -> Result<()> {
         }
         result = &mut server => task_exit("HTTP server", result),
         result = &mut breez_claims => task_exit("Breez claim recovery", result),
-        result = &mut recovery => task_exit("settlement recovery", result),
         result = &mut feeder => task_exit("feed worker", result),
         result = &mut informational => task_exit("informational worker", result),
         result = &mut solar_presentation => task_exit("solar presentation worker", result),
@@ -362,7 +330,6 @@ async fn main() -> Result<()> {
     };
 
     server.abort();
-    recovery.abort();
     breez_claims.abort();
     feeder.abort();
     informational.abort();

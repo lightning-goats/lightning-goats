@@ -17,9 +17,6 @@
 # Optional distinct payout read role. No outgoing worker is installed by this.
 # payout_peer_uid = 0
 # payout_execution_enabled = false
-# Optional core read-only verification of outgoing results. Must match payout
-# account label; core receive key needs partner.payment.read, never spend scope.
-# payout_account_id = "00000000-0000-4000-8000-000000000001"
 #
 # Optional bounded reward reservations, still with no spend key in the core.
 # This explicitly initializes remaining funding provenance and never back-pays
@@ -41,19 +38,14 @@ mode = "shadow"
 [database]
 url = "sqlite:///var/lib/lightning-goats/lightning-goats.db"
 
-# Runtime API key must have only:
-#   partner.receive-request.create
-#   partner.receive-request.read
-[strike]
-api_url = "https://api.strike.me/"
-
 [lnurl]
 public_base_url = "https://lightning-goats.com/"
-invoice_expiry_seconds = 300
-# For the HOME mint, select wallet_backend = "breez" and invoice_expiry_seconds = 900.
-# [lnurl.breez_collector]
-# socket = "/run/lightning-goats-project-invoices.sock"
-# peer_uid = 0 # systemd owns the listener passed to the collector service.
+wallet_backend = "breez"
+invoice_expiry_seconds = 900
+
+[lnurl.breez_collector]
+socket = "/run/lightning-goats-project-invoices.sock"
+peer_uid = 0 # systemd owns the project invoice listener.
 
 # Native NIP-57 is an explicit opt-in after installing its verified binary/schema
 # and qualifying the receipt worker. Public keys only; signing stays in the bunker.

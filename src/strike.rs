@@ -1,4 +1,4 @@
-use std::{net::IpAddr, str::FromStr, sync::Arc, time::Duration};
+use std::{net::IpAddr, str::FromStr, time::Duration};
 
 use anyhow::{Context, Result, bail};
 use hmac::{Hmac, Mac};
@@ -41,7 +41,8 @@ pub struct StrikeWebhookVerifier {
 pub struct StrikeRuntime {
     client: StrikeClient,
     verifier: StrikeWebhookVerifier,
-    issuance_slots: Arc<tokio::sync::Semaphore>,
+    #[cfg(test)]
+    issuance_slots: std::sync::Arc<tokio::sync::Semaphore>,
 }
 
 #[derive(Debug)]
@@ -60,15 +61,6 @@ pub struct CreatedStrikeReceiveRequest {
     pub payment_hash: String,
     pub description_hash: String,
     pub created_provider: Option<String>,
-}
-
-struct ReceiveIssuance<'a> {
-    address_user: &'a str,
-    credit_pool: &'a str,
-    amount_msat: u64,
-    description_hash: &'a str,
-    expiry_seconds: u64,
-    zap: Option<&'a crate::zap::ZapRequest>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -427,11 +419,6 @@ impl StrikeClient {
 }
 
 impl StrikeWebhookVerifier {
-    pub async fn from_systemd_credential() -> Result<Self> {
-        let secret = read_systemd_credential("strike-webhook-secret").await?;
-        Self::new(secret)
-    }
-
     pub fn new(secret: String) -> Result<Self> {
         if secret.is_empty() {
             bail!("Strike webhook secret is empty");
@@ -478,19 +465,12 @@ impl StrikeRuntime {
     pub fn payout_reader(&self, account_id: Uuid) -> Result<crate::payout::outcome::Reader> {
         crate::payout::outcome::Reader::new(self.client.clone(), account_id)
     }
-    pub async fn from_config(config: &StrikeConfig) -> Result<Self> {
-        Ok(Self {
-            client: StrikeClient::from_config(config).await?,
-            verifier: StrikeWebhookVerifier::from_systemd_credential().await?,
-            issuance_slots: Arc::new(tokio::sync::Semaphore::new(4)),
-        })
-    }
-
     pub fn new(client: StrikeClient, verifier: StrikeWebhookVerifier) -> Self {
         Self {
             client,
             verifier,
-            issuance_slots: Arc::new(tokio::sync::Semaphore::new(4)),
+            #[cfg(test)]
+            issuance_slots: std::sync::Arc::new(tokio::sync::Semaphore::new(4)),
         }
     }
 
@@ -577,7 +557,8 @@ impl StrikeRuntime {
         }
     }
 
-    pub async fn create_and_record_receive_request(
+    #[cfg(test)]
+    async fn create_and_record_receive_request(
         &self,
         ledger: &LedgerStore,
         address_user: &str,
@@ -586,56 +567,6 @@ impl StrikeRuntime {
         description_hash: &str,
         expiry_seconds: u64,
     ) -> Result<CreatedStrikeReceiveRequest> {
-        self.issue_receive_request(
-            ledger,
-            ReceiveIssuance {
-                address_user,
-                credit_pool,
-                amount_msat,
-                description_hash,
-                expiry_seconds,
-                zap: None,
-            },
-        )
-        .await
-    }
-
-    pub(crate) async fn create_and_record_zap_receive_request(
-        &self,
-        ledger: &LedgerStore,
-        address_user: &str,
-        credit_pool: &str,
-        zap: &crate::zap::ZapRequest,
-        expiry_seconds: u64,
-    ) -> Result<CreatedStrikeReceiveRequest> {
-        let description_hash = zap.description_hash();
-        self.issue_receive_request(
-            ledger,
-            ReceiveIssuance {
-                address_user,
-                credit_pool,
-                amount_msat: zap.amount_msat(),
-                description_hash: &description_hash,
-                expiry_seconds,
-                zap: Some(zap),
-            },
-        )
-        .await
-    }
-
-    async fn issue_receive_request(
-        &self,
-        ledger: &LedgerStore,
-        issuance: ReceiveIssuance<'_>,
-    ) -> Result<CreatedStrikeReceiveRequest> {
-        let ReceiveIssuance {
-            address_user,
-            credit_pool,
-            amount_msat,
-            description_hash,
-            expiry_seconds,
-            zap,
-        } = issuance;
         crate::domain::invoice::validate_user(address_user)?;
         crate::domain::invoice::validate_user(credit_pool)?;
         if ["contact", "cashu_treasury"].contains(&address_user)
@@ -671,19 +602,16 @@ impl StrikeRuntime {
                 .create_bolt11_receive_request(amount_msat, description_hash, expiry_seconds)
                 .await?;
             ledger
-                .record_strike_receive_request_with_zap(
-                    &StoredStrikeReceiveRequest {
-                        receive_request_id: created.receive_request_id,
-                        address_user: address_user.to_owned(),
-                        credit_pool: credit_pool.to_owned(),
-                        amount_msat,
-                        description_hash: created.description_hash.clone(),
-                        payment_hash: created.payment_hash.clone(),
-                        invoice: created.invoice.clone(),
-                        created_provider: created.created_provider.clone(),
-                    },
-                    zap,
-                )
+                .record_strike_receive_request(&StoredStrikeReceiveRequest {
+                    receive_request_id: created.receive_request_id,
+                    address_user: address_user.to_owned(),
+                    credit_pool: credit_pool.to_owned(),
+                    amount_msat,
+                    description_hash: created.description_hash.clone(),
+                    payment_hash: created.payment_hash.clone(),
+                    invoice: created.invoice.clone(),
+                    created_provider: created.created_provider.clone(),
+                })
                 .await?;
             Ok(created)
         })

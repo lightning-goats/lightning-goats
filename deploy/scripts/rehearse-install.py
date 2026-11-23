@@ -143,7 +143,7 @@ def rehearse(archive, source, daemon_user, gateway_user, launcher_factory=None):
         private_directory(gateway_state, gateway_user)
         credentials = {}
         for name, user, secrets in [
-            ("daemon", daemon_user, ["strike-api-key", "strike-webhook-secret"]),
+            ("daemon", daemon_user, []),
             ("gateway", gateway_user, ["openhab-token"]),
         ]:
             path = root / f"{name}-credentials"
@@ -195,7 +195,7 @@ def rehearse(archive, source, daemon_user, gateway_user, launcher_factory=None):
         for old, new in [
             ('127.0.0.1:8788', f'127.0.0.1:{daemon_port}'),
             ('sqlite:///var/lib/lightning-goats/lightning-goats-canary.db',f'sqlite://{daemon_state}/daemon.db'),
-            ('https://api.dev.strike.me/', 'https://127.0.0.1:9/'),
+            ('/run/lightning-goats-canary-project-invoices.sock', str(daemon_state / 'isolated-mint.sock')),
             ('http://10.8.0.6:8790/', gateway_url + '/'),
             ('interface_info_enabled = true', 'interface_info_enabled = false'),
             ('weather_enabled = true', 'weather_enabled = false'),
@@ -213,10 +213,13 @@ def rehearse(archive, source, daemon_user, gateway_user, launcher_factory=None):
         root_file(configs["gateway"], gateway_config, gateway_user.pw_gid, 0o640)
         for name,user,other in [("daemon",daemon_user,"gateway"),("gateway",gateway_user,"daemon")]:
             # Each runtime can read only its own credentials and cannot alter code/config.
-            program = "import os,sys; assert all(not os.access(p,os.W_OK) for p in sys.argv[1:5]); assert os.access(sys.argv[5],os.R_OK); assert not os.access(sys.argv[6],os.R_OK)"
-            own_secret = credentials[name] / ("strike-api-key" if name == "daemon" else "openhab-token")
-            other_secret = credentials[other] / ("openhab-token" if name == "daemon" else "strike-api-key")
-            subprocess.run(command_as(user,[sys.executable,"-c",program,*[installed/n for n in sorted(RELEASE.BINARIES)],configs[name],own_secret,other_secret]),check=True,cwd="/")
+            program = ("import os,sys; role,config,gateway_token,other_dir,*binaries=sys.argv[1:]; "
+                       "assert os.access(config,os.R_OK); assert not os.access(other_dir,os.R_OK); "
+                       "assert all(not os.access(path,os.W_OK) for path in [config,*binaries]); "
+                       "assert os.access(gateway_token,os.R_OK) == (role == 'gateway')")
+            subprocess.run(command_as(user,[sys.executable,"-c",program,name,configs[name],
+                           credentials["gateway"] / "openhab-token",credentials[other],
+                           *[installed/n for n in sorted(RELEASE.BINARIES)]]),check=True,cwd="/")
         if launcher:
             launcher.prepare(credentials, installed, configs)
         def start(name,user,binary,url):

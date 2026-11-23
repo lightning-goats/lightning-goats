@@ -112,6 +112,7 @@ impl LedgerStore {
 
     /// A claimed creation never expires into a second POST. A lost response
     /// requires lookup/adoption of the original provider resource.
+    #[cfg(test)]
     pub(crate) async fn claim_cashu_treasury_issuance(&self, id: Uuid) -> Result<Option<Uuid>> {
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let intent = load_intent(&mut tx, id)

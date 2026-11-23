@@ -558,7 +558,7 @@ mod combined_fixture {
             maximum_attempts: 8,
             ..Default::default()
         };
-        let planner = Worker::new(
+        let planner = Worker::historical_fixture(
             ledger.clone(),
             runtime.clone(),
             registration.clone(),
@@ -624,7 +624,7 @@ mod combined_fixture {
             receive_request_id: state.receive_request_id,
             receive_id: state.receive_id,
         };
-        let worker = Worker::new(
+        let worker = Worker::historical_fixture(
             ledger.clone(),
             runtime.clone(),
             registration.clone(),
@@ -770,7 +770,7 @@ mod combined_fixture {
                 receive_request_id: state2.receive_request_id,
                 receive_id: state2.receive_id,
             };
-            let worker2 = Worker::new(
+            let worker2 = Worker::historical_fixture(
                 ledger.clone(),
                 runtime.clone(),
                 registration.clone(),

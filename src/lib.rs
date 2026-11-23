@@ -1,22 +1,47 @@
 #![forbid(unsafe_code)]
 
-mod bolt11;
-mod sqlite;
+#[cfg(test)]
+#[path = "../tests/support/breez_schema_fixture.rs"]
+mod breez_schema_fixture;
 
+mod bolt11;
+#[cfg(unix)]
+mod private_ipc;
+mod sqlite;
+#[cfg(unix)]
+mod state_bootstrap;
+#[cfg(unix)]
+pub mod state_maintenance;
+
+#[cfg(unix)]
+pub mod cashu;
 pub mod config;
+pub mod contact;
+pub mod contact_delivery;
+mod contact_state;
+pub mod core_bridge;
+pub mod cyberherd;
 pub mod domain;
 pub mod feeder;
+pub mod feeding_presentation;
 pub mod gateway;
 pub mod informational;
 pub mod ledger;
 pub mod lnurl;
 pub mod messaging;
 pub mod nostr;
+pub mod nostr_event;
 pub mod openhab;
 pub mod overlay;
+pub mod payout;
 pub mod presentation;
+pub mod public_network;
+pub mod relay_routing;
+pub mod reward_funding;
 pub mod secrets;
 pub mod strike;
+pub mod zap;
+pub mod zap_receipts;
 
 pub mod http;
 
@@ -25,3 +50,5 @@ pub mod http;
 mod test_invoices;
 
 pub mod server;
+
+pub(crate) mod zap_presentation;

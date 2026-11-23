@@ -1,0 +1,8 @@
+# Install inside cashu-token-waf.d/ when the Cashu site uses ModSecurity.
+# Match the selected pilot's 64 KiB body setting. The inherited engine,
+# request processor, attack rules and logging policy remain in effect.
+modsecurity_rules '
+    SecRequestBodyLimit 65536
+    SecRequestBodyNoFilesLimit 65536
+    SecRequestBodyLimitAction Reject
+';

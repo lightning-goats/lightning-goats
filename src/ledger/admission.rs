@@ -4,6 +4,34 @@ use anyhow::Result;
 use uuid::Uuid;
 
 impl LedgerStore {
+    pub(crate) async fn prepare_breez_invoice(
+        &self,
+        id: Uuid,
+        intent: &serde_json::Value,
+    ) -> Result<()> {
+        sqlx::query("INSERT INTO breez_project_invoices(id,intent) VALUES (?,?)")
+            .bind(id.to_string())
+            .bind(serde_json::to_string(intent)?)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub(crate) async fn bind_breez_invoice(
+        &self,
+        id: Uuid,
+        invoice: &str,
+        hash: &str,
+    ) -> Result<()> {
+        let result = sqlx::query("UPDATE breez_project_invoices SET invoice=?,payment_hash=? WHERE id=? AND (invoice IS NULL OR (invoice=? AND payment_hash=?))")
+            .bind(invoice).bind(hash).bind(id.to_string()).bind(invoice).bind(hash).execute(&self.pool).await?;
+        anyhow::ensure!(
+            result.rows_affected() == 1,
+            "conflicting Breez invoice binding"
+        );
+        Ok(())
+    }
+
     pub(crate) async fn reserve_invoice(&self) -> Result<Option<Uuid>> {
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         sqlx::query("DELETE FROM invoice_admissions WHERE created_at<=unixepoch()-60 AND (finished=1 OR expires_at<=unixepoch())").execute(&mut *tx).await?;
@@ -18,7 +46,7 @@ impl LedgerStore {
         .fetch_one(&mut *tx)
         .await?;
         let recently_issued: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM strike_receive_requests WHERE created_at>unixepoch()-86400",
+            "SELECT (SELECT COUNT(*) FROM strike_receive_requests WHERE created_at>unixepoch()-86400) + (SELECT COUNT(*) FROM breez_project_invoices WHERE created_at>unixepoch()-86400)",
         )
         .fetch_one(&mut *tx)
         .await?;
@@ -47,6 +75,56 @@ impl LedgerStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn breez_invoice_replay_keeps_one_payment_hash_across_providers() {
+        let directory = tempfile::TempDir::new().unwrap();
+        let url = format!("sqlite://{}", directory.path().join("claims.db").display());
+        let ledger = LedgerStore::connect(&url).await.unwrap();
+        let intent = serde_json::json!({"user":"dexter","credit_pool":"herd","amount_sat":10});
+        let id = Uuid::new_v4();
+        ledger.prepare_breez_invoice(id, &intent).await.unwrap();
+        let hash = "ab".repeat(32);
+        ledger
+            .bind_breez_invoice(id, "invoice", &hash)
+            .await
+            .unwrap();
+        let reopened = LedgerStore::connect(&url).await.unwrap();
+        reopened
+            .bind_breez_invoice(id, "invoice", &hash)
+            .await
+            .unwrap();
+        assert!(
+            reopened
+                .bind_breez_invoice(id, "changed", &hash)
+                .await
+                .is_err()
+        );
+        let insert_strike = "INSERT INTO strike_receive_requests(receive_request_id,address_user,credit_pool,amount_msat,description_hash,payment_hash,invoice) VALUES ('strike-fixture','dexter','herd',10000,?,?, 'strike-invoice')";
+        assert!(
+            sqlx::query(insert_strike)
+                .bind(&hash)
+                .bind(&hash)
+                .execute(&ledger.pool)
+                .await
+                .is_err()
+        );
+        let other_hash = "cd".repeat(32);
+        sqlx::query(insert_strike)
+            .bind(&hash)
+            .bind(&other_hash)
+            .execute(&ledger.pool)
+            .await
+            .unwrap();
+        let other = Uuid::new_v4();
+        ledger.prepare_breez_invoice(other, &intent).await.unwrap();
+        assert!(
+            ledger
+                .bind_breez_invoice(other, "other", &other_hash)
+                .await
+                .is_err()
+        );
+    }
 
     #[tokio::test]
     async fn admission_is_shared_durable_and_bounded_across_connections() {

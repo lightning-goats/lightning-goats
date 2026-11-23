@@ -1,0 +1,179 @@
+{
+  "date": "2026-11-17",
+  "source_parent_commit": "7f8a2d7ee7ca36662ca1a43b28b18a54ef5d14c2",
+  "scope": "Local composition of the new collector/key helper with qualified 7f native runtime programs. Exact-source CI is pending.",
+  "source_files_sha256": {
+    ".github/workflows/ci.yml": "a20cb226960aa3d8f4cbf8fdcc28b750190c49e7112a4591f758654f5b056399",
+    "deploy/scripts/collect-cashu-backup.py": "38a765454b3bd8a4f4d203efe8ce8304af01077d38c27ea7fa772df3a96209ec",
+    "deploy/scripts/launch-cashu-backup.py": "8af2d75cc43ec520b373fb94d5dc0f39b0bde3554d327357e0d53aff2c085944",
+    "deploy/scripts/cashu-collector-fixture.py": "62d542b6d5b7b6d239e9d030a259f7af0e288f5a88723b8c9fb4c0a8b9888baa",
+    "deploy/scripts/prepare-cashu-backup-age.py": "68cc37f839da0810c8f8371e02ccd72cbeccd7eaf3fb02b451485fda96e70f93",
+    "deploy/scripts/test-cashu-native-backup.py": "5c23421aec5af1414d9ba0c2dc3b4077a16befb71fa56645d02701c6ba4b2ff8",
+    "deploy/tests/test_cashu_collector.py": "f4c24f1cf137fcc1df71849a946673568855e8ef9c64b6c77e065c47327f35ea",
+    "tools/cashu-compat/src/backup_copy.rs": "8b1c73a4a5671422e8848b0e19afcdac5969d2d4f4664422807b8646d67d30e2",
+    "tools/cashu-compat/src/backup_keys.rs": "ac18f39ff57f99fb601ab2df9eaa4b71a707d0f616b1c8b73408c088eac92817",
+    "tools/cashu-compat/src/bin/lightning-goats-cashu-statectl.rs": "1b804b80983d50c626a9abc83215fa24998f34a94f1c474c61f87f1039d698c9",
+    "tools/cashu-compat/src/lib.rs": "827ca3d17843c69cf789cd3074464cc1edb1251d9d467428e1e449b3964def54",
+    "tools/cashu-compat/tests/backup_copy_cli.rs": "83f6f24444f72cd0bc249ed696188b3df955efe1aad14d01795ff3790269cab8"
+  },
+  "copy_helper_local_sha256": "7586d32364b68b5014608c477f6c9feff0cc8571819225649ea323599e496b63",
+  "qualified_runtime_artifacts_sha256": {
+    "core": "87015d260bbfa0b49eb20c03089697bb7c0a518591dbf431e8d6e4a84d795a34",
+    "membership": "c858e6e9f9368030d2904f92002420fb19604833f20745e8e3a8c2ecf14a8a33",
+    "payout": "ba3c5c41e9f3d9fd592b97c5601a8062686bd498502039edc1c2361c108f7e43",
+    "payout_signer": "4b8b53f51a4ace5b5e206d3e92e95dab5c92c6c52792b72c4d71b086f856141e",
+    "signer": "30dfc68576cd47ed69594cc6a88b5adb8873b70e48e171f3258c1166559b76c2",
+    "statectl": "9cd45ef036a364a032d259ad5c9385382c243ff7ff90c0d8ae0de9b28885474b",
+    "wallet": "b95f2b195fa1b2baaa880afbf59366d8a8f424859933126c74850022aef45e14"
+  },
+  "collector_result": {
+    "actual_age_archive_roundtrip": true,
+    "authenticated_launcher_executed": false,
+    "client_credential_optional_lf_accepted": true,
+    "committed_wal_copy_hashes_verified": true,
+    "empty_native_state_only": true,
+    "encryption_output_limit_refused": true,
+    "encryption_timeout_stub_refused": true,
+    "funded_restore_qualified": false,
+    "installed_or_live_acceptance": false,
+    "maintenance_lock_path_is_disposable": true,
+    "native_database_inventory_and_correlations": true,
+    "native_key_bindings": true,
+    "native_key_material_refusal_cases": 6,
+    "original_application_bytes_unchanged": true,
+    "proc_uid_scan_actual": true,
+    "production_or_physical_side_effects": false,
+    "refusal_cases": 4,
+    "result": "CASHU_COORDINATED_COLLECTOR_FIXTURE_VERIFIED",
+    "systemctl_calls_mocked": 31
+  },
+  "root_unit_tests": {
+    "passed": 13,
+    "skipped": 0,
+    "actual_isolated_bootstrap_unreviewed_policy_refusal": true
+  },
+  "wallet_strict_clippy": "passed",
+  "native_cli_help_and_redacted_refusal_test": "passed",
+  "root_and_wallet_format": "passed",
+  "age_dependency": {
+    "archive_bytes": 19405817,
+    "archive_sha256": "cbe24006683f8eb669266162894b9a522a1af52f2665fbc63a4bb032ed26ac10",
+    "files": {
+      "LICENSE": {
+        "bytes": 2975,
+        "sha256": "afbdb4e07a359499db587ae632815809b1fc1670a92d5449af112ce9a67833a2"
+      },
+      "age": {
+        "bytes": 6977014,
+        "sha256": "eb7dd1b518f0a307c99cd97782623c5321da049154b04acd2d98d21aa7bc9b2c"
+      },
+      "age-keygen": {
+        "bytes": 4051278,
+        "sha256": "0a0009db842259d6717f7eeb30acb6b90d2a2eb924c6acd0a0db0ca1f1537899"
+      }
+    },
+    "release_url": "https://github.com/FiloSottile/age/releases/download/v1.3.2/age-v1.3.2-linux-amd64.tar.gz",
+    "system_installation": false,
+    "version": "v1.3.2"
+  },
+  "limitations": [
+    "Initialized empty native journals, no funded rollback or external reconciliation.",
+    "systemctl status responses and the maintenance-lock path are mocked; UID process scans and native/key/age operations are actual.",
+    "The complete collector was invoked through its function in the fixture. An actual isolated authenticated launcher separately proved refusal before collection, not installed collection acceptance.",
+    "Portable production credential export, complete installed credential coverage, historical descriptor/key administration, off-host retention and operator recovery-key possession remain unqualified.",
+    "No operator seed, installed database, service, real transfer or physical action was accessed."
+  ],
+  "native_fixture": {
+    "artifacts_sha256": {
+      "core": "87015d260bbfa0b49eb20c03089697bb7c0a518591dbf431e8d6e4a84d795a34",
+      "membership": "c858e6e9f9368030d2904f92002420fb19604833f20745e8e3a8c2ecf14a8a33",
+      "payout": "ba3c5c41e9f3d9fd592b97c5601a8062686bd498502039edc1c2361c108f7e43",
+      "payout_signer": "4b8b53f51a4ace5b5e206d3e92e95dab5c92c6c52792b72c4d71b086f856141e",
+      "signer": "30dfc68576cd47ed69594cc6a88b5adb8873b70e48e171f3258c1166559b76c2",
+      "statectl": "9cd45ef036a364a032d259ad5c9385382c243ff7ff90c0d8ae0de9b28885474b",
+      "wallet": "b95f2b195fa1b2baaa880afbf59366d8a8f424859933126c74850022aef45e14"
+    },
+    "combined_native_review": {
+      "cashu_and_payout_signer_substitution_refused": true,
+      "cashu_inventory_result": {
+        "acknowledged_receipts_checked": 0,
+        "components": 14,
+        "core_wallet_signer_registration_agrees": true,
+        "database_foreign_keys_checked": true,
+        "external_reconciliation_verified": false,
+        "mint_stores_checked": 2,
+        "restore_authorized": false,
+        "result": "CASHU_BACKUP_INVENTORY_VERIFIED",
+        "source_databases_opened": false
+      },
+      "checkpoint_id": "ea59b2a8-31d3-484e-886a-b88773071fe5",
+      "combined_manifest_sha256": "7bcb9de4e41689a84bcf49a4df33606120dfe5947c736f4fe7875fc290226e00",
+      "core_image_sha256": "cf74d8e9a28468587dd42f8bc20ed243cf673632c9d5f35a14077bdbec32ebef",
+      "empty_initialized_state_only": true,
+      "external_reconciliation_verified": false,
+      "funded_restore_qualified": false,
+      "identical_core_image_verified": true,
+      "native_cli_sha256": "9cd45ef036a364a032d259ad5c9385382c243ff7ff90c0d8ae0de9b28885474b",
+      "native_four_journal_correlations_verified": true,
+      "restore_authorized": false,
+      "result": "CASHU_COMBINED_BACKUP_REVIEW_VERIFIED",
+      "resume_authorized": false,
+      "services_changed": false
+    },
+    "coordinated_collector": {
+      "actual_age_archive_roundtrip": true,
+      "authenticated_launcher_executed": false,
+      "client_credential_optional_lf_accepted": true,
+      "committed_wal_copy_hashes_verified": true,
+      "empty_native_state_only": true,
+      "encryption_output_limit_refused": true,
+      "encryption_timeout_stub_refused": true,
+      "funded_restore_qualified": false,
+      "installed_or_live_acceptance": false,
+      "maintenance_lock_path_is_disposable": true,
+      "native_database_inventory_and_correlations": true,
+      "native_key_bindings": true,
+      "native_key_material_refusal_cases": 6,
+      "original_application_bytes_unchanged": true,
+      "proc_uid_scan_actual": true,
+      "production_or_physical_side_effects": false,
+      "refusal_cases": 4,
+      "result": "CASHU_COORDINATED_COLLECTOR_FIXTURE_VERIFIED",
+      "systemctl_calls_mocked": 31
+    },
+    "core_recovery_marker_refused": true,
+    "distinct_runtime_uids": true,
+    "empty_initialized_state_only": true,
+    "external_reconciliation_verified": false,
+    "fenced_core_bytes_unchanged": true,
+    "fenced_signer_bytes_unchanged": true,
+    "fenced_wallet_bytes_unchanged": true,
+    "funded_restore_qualified": false,
+    "inventory_result": {
+      "acknowledged_receipts_checked": 0,
+      "components": 14,
+      "core_wallet_signer_registration_agrees": true,
+      "database_foreign_keys_checked": true,
+      "external_reconciliation_verified": false,
+      "mint_stores_checked": 2,
+      "restore_authorized": false,
+      "result": "CASHU_BACKUP_INVENTORY_VERIFIED",
+      "source_databases_opened": false
+    },
+    "missing_key_refused": true,
+    "missing_mint_namespace_refused": true,
+    "positive_signer_startup_control": true,
+    "production_changes": false,
+    "result": "CASHU_EMPTY_NATIVE_BACKUP_VERIFIED",
+    "signer_recovery_marker_refused": true,
+    "wallet_recovery_marker_refused": true,
+    "wrong_epoch_refused": true
+  },
+  "corrected_wal_regression": {
+    "failed_before_correction": true,
+    "failure": "retained copy digest differs from collection metadata",
+    "cause": "SQLite rebuilt the copied SHM cache, invalidating its recorded original hash.",
+    "correction": "Retain original SHM under a separate .original name; rebuild only the working cache. Preserve original UID/GID/mode in copy metadata.",
+    "committed_wal_and_all_retained_copy_hashes_verified": true
+  }
+}

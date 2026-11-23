@@ -1,0 +1,49 @@
+{
+  "cases": {
+    "receipt": {
+      "artifacts_sha256": {
+        "core-test": "65eb1dd4409ec81e9b8654f337bd888c9572b1b67c9352ca6ac6f9edd028ce82",
+        "wallet-test": "8c94483ca22a2c74b206de81a80ce95c8990cc2f0fa4ed5563bccd9fc92c9d19"
+      },
+      "core_uid": 60000,
+      "credited_sats": 7,
+      "payment_events": 1,
+      "result": "CASHU_CROSS_UID_RECEIPT_VERIFIED",
+      "wallet_uid": 60001
+    },
+    "signer": {
+      "crypto_sign_calls": 2,
+      "external_network": false,
+      "financial_state_unchanged": true,
+      "lost_reply_replayed": true,
+      "restart_crypto_calls": 0,
+      "result": "CASHU_SIGNER_CROSS_UID_VERIFIED",
+      "retained_operations": 2,
+      "signer_uid": 60000,
+      "synthetic_crypto": true,
+      "unauthorized_uid": 60002,
+      "wallet_test_sha256": "8c94483ca22a2c74b206de81a80ce95c8990cc2f0fa4ed5563bccd9fc92c9d19",
+      "wallet_uid": 60001
+    },
+    "treasury": {
+      "artifacts_sha256": {
+        "core-test": "65eb1dd4409ec81e9b8654f337bd888c9572b1b67c9352ca6ac6f9edd028ce82",
+        "wallet-test": "8c94483ca22a2c74b206de81a80ce95c8990cc2f0fa4ed5563bccd9fc92c9d19"
+      },
+      "core_uid": 60000,
+      "melt_requests": 0,
+      "paused_restart_replay": true,
+      "quote_requests": 0,
+      "result": "CASHU_TREASURY_CROSS_UID_VERIFIED",
+      "retained_instructions": 1,
+      "rogue_uid": 60002,
+      "wallet_uid": 60001
+    }
+  },
+  "logs_sha256": {
+    "receipt.log": "3d39f632042917517ce3dfeff993d578eb0f0fa2c85c1368bfa379560fa3ee16",
+    "signer.log": "35991374940fcc56085c7ceef25abbf99e9a4d042f64c12da5b096ac2317ae51",
+    "treasury.log": "f7cee89a16d63d77154c39d646c5ef98aea7d65715a044be37080311b24fed97"
+  },
+  "scope": "selected native artifacts; separate disposable UIDs in fresh network namespaces; synthetic state and no production changes"
+}

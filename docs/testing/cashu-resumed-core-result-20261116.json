@@ -1,0 +1,20 @@
+{
+  "scope": "pre-integration core library run; Cargo stopped at library failure, later integration binaries were not executed",
+  "gates": {
+    "fmt": 0,
+    "clippy": 0,
+    "tests": 101
+  },
+  "library": {
+    "passed": 497,
+    "failed": 1,
+    "ignored": 10
+  },
+  "log_sha256": "de88c8a9e471773a4ea7b294ac7837cb6521e9a44d68f3a0f4e6034980820b92",
+  "source_manifest_sha256": "850b5b29ddb15682c477e7121b08dc5db43bf1c934b4d5435cfbf2eb9df074b8",
+  "failure": "approval test invoked Tokio UID helper outside runtime",
+  "correction_integrated": true,
+  "membership_hotfix_integrated": true,
+  "final_source_native_qualified": false,
+  "wallet_verifier_session": 80915
+}

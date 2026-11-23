@@ -1,0 +1,16 @@
+{
+  "accepted": true,
+  "external_network": false,
+  "fixture_uid": 60000,
+  "kinds": [
+    10019,
+    7376
+  ],
+  "nak_bunker_sha256": "b44b36c792fbc3fb73b7ba3bbc94beda2219826271aa8d5f130f569c3817c3b9",
+  "nak_client_sha256": "d1b7aca5c46d4d4eb5402ebd59ef48a6e9d83ce848f94493f8f46ef948b74822",
+  "nip44_roundtrip": true,
+  "production_credentials_read": false,
+  "retained_result_without_bunker": true,
+  "tampered_mac_rejected": true,
+  "wallet_test_sha256": "f04d71f5688afe354d1761402b229c0d24002c877fa0bb03deaaf2d55456ff15"
+}

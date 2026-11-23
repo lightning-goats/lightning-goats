@@ -1,0 +1,49 @@
+# Inactive review artifact. No [Install] section and no initialization hook.
+# Requires operator-provisioned identity, registered state, keys and protected config.
+[Unit]
+Description=Isolated Lightning Goats Cashu wallet
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/lightning-goats-cashu/config.json
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=lightning-goats-cashu
+Group=lg-cashu-ipc
+SupplementaryGroups=lg-cashu-signer-ipc
+ExecStartPre=/usr/local/bin/lightning-goats-cashud check-config /etc/lightning-goats-cashu/config.json
+ExecStart=/usr/local/bin/lightning-goats-cashud run /etc/lightning-goats-cashu/config.json
+Restart=on-failure
+RestartSec=15s
+TimeoutStopSec=90s
+StateDirectory=lightning-goats-cashu
+StateDirectoryMode=0700
+RuntimeDirectory=lightning-goats-cashu
+RuntimeDirectoryMode=0750
+UMask=0077
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectProc=invisible
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/lightning-goats-cashu /run/lightning-goats-cashu
+InaccessiblePaths=-/etc/lightning-goats -/var/lib/lightning-goats -/etc/cyberherd -/var/lib/cyberherd -/etc/cyberherd-payout -/var/lib/cyberherd-payout -/etc/cyberherd-signer -/var/lib/cyberherd-signer -/etc/lightning-goats-cashu-signer -/var/lib/lightning-goats-cashu-signer -/var/lib/lightning-goats-cashu-nak -/etc/credstore -/etc/credstore.encrypted
+# Deliberately no IP egress in the shipped artifact. Unix IPC remains available.
+# Replace only after host-level mint/relay/DNS containment acceptance.
+IPAddressDeny=any

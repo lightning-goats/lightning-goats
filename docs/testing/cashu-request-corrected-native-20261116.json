@@ -1,0 +1,185 @@
+{
+  "result": "corrected_native_requests_parser_passed",
+  "native": {
+    "short": {
+      "binary_sha256": "ec2b83a8748efe0c9c51b6b80c0bc94eb14bf28654a1862b358be1af983ca273",
+      "long_request": false,
+      "requests": {
+        "creqA": {
+          "descriptor_registered": false,
+          "encoding": "creqA",
+          "id": "lg1-f7987e44d7b44238deb2fc78cd75be1e",
+          "request": "creqAqGFpeCRsZzEtZjc5ODdlNDRkN2I0NDIzOGRlYjJmYzc4Y2Q3NWJlMWVhdWNzYXRhc_RhbYJ4GGh0dHBzOi8vbWludC1vbmUuZXhhbXBsZXgYaHR0cHM6Ly9taW50LXR3by5leGFtcGxlYm1w9GJzbYGhYm1uZmJvbHQxMWFkeCxMaWdodG5pbmcgR29hdHMg4oCUIHNoYXJlZCBoZXJkIGNvbnRyaWJ1dGlvbmF0gaJhdGRwb3N0YWF4IWh0dHBzOi8vbGlnaHRuaW5nLWdvYXRzLmV4YW1wbGUvYw==",
+          "service_started": false,
+          "status": "prepared",
+          "version": 1
+        },
+        "creqB": {
+          "descriptor_registered": false,
+          "encoding": "creqB",
+          "id": "lg1-f7987e44d7b44238deb2fc78cd75be1e",
+          "request": "CREQB1QYQZGMR8XYKKVDEE8QMK2DP5VSMKYDP5XGENSER9VGEXVCEH8P3KGDE4VFJNZEGRQQQSQPQQQYQQ2QQCDP68GURN8GHJ7MTFDE6Z6MMWV5HX27RPD4CXCEG9QQVXSAR5WPEN5TE0D45KUAPDW3MK7TN90PSK6URVV5RQQTZVD9NKSARWD9HXWGZ8DASHGUEQU2QFGGRNDPSHYETYYP5X2UNYYP3K7MN5WF5KYAT5D9HKUPCQ9QQSQQGPQGQZZ6R5W3C8XW309AKXJEMGW3HXJMN894NK7CT5WVHX27RPD4CXCEF0VVYSQQGQPGQQJQGQQE3X7MR5XYCSU8WWLZ",
+          "service_started": false,
+          "status": "prepared",
+          "version": 1
+        }
+      },
+      "result": "CASHU_REQUEST_CLI_VERIFIED",
+      "services_started": false,
+      "state_created": false,
+      "synthetic_only": true
+    },
+    "long": {
+      "binary_sha256": "ec2b83a8748efe0c9c51b6b80c0bc94eb14bf28654a1862b358be1af983ca273",
+      "long_request": true,
+      "requests": {
+        "creqA": {
+          "descriptor_registered": false,
+          "encoding": "creqA",
+          "id": "lg1-cbac906582d1bd91f74ec4d7ab1b81f1",
+          "request": "creqAqGFpeCRsZzEtY2JhYzkwNjU4MmQxYmQ5MWY3NGVjNGQ3YWIxYjgxZjFhdWNzYXRhc_RhbYR4LGh0dHBzOi8vbWludC0wLWNvbXBhdGliaWxpdHktZml4dHVyZS5leGFtcGxleCxodHRwczovL21pbnQtMS1jb21wYXRpYmlsaXR5LWZpeHR1cmUuZXhhbXBsZXgsaHR0cHM6Ly9taW50LTItY29tcGF0aWJpbGl0eS1maXh0dXJlLmV4YW1wbGV4LGh0dHBzOi8vbWludC0zLWNvbXBhdGliaWxpdHktZml4dHVyZS5leGFtcGxlYm1w9GJzbYGhYm1uZmJvbHQxMWFkeCxMaWdodG5pbmcgR29hdHMg4oCUIHNoYXJlZCBoZXJkIGNvbnRyaWJ1dGlvbmF0gaJhdGRwb3N0YWF4hWh0dHBzOi8vbGlnaHRuaW5nLWdvYXRzLmV4YW1wbGUvcmVxdWVzdC1maXh0dXJlLXJlcXVlc3QtZml4dHVyZS1yZXF1ZXN0LWZpeHR1cmUtcmVxdWVzdC1maXh0dXJlLXJlcXVlc3QtZml4dHVyZS1yZXF1ZXN0LWZpeHR1cmUtY2FzaHU=",
+          "service_started": false,
+          "status": "prepared",
+          "version": 1
+        },
+        "creqB": {
+          "descriptor_registered": false,
+          "encoding": "creqB",
+          "id": "lg1-cbac906582d1bd91f74ec4d7ab1b81f1",
+          "request": "CREQB1QYQZGMR8XYKKXCNPVVUNQD348QEXGVTZVSUNZE3HX3JKXDRYXASKYVTZ8QCKVVGRQQQSQPQQQYQQ2QPVDP68GURN8GHJ7MTFDE6Z6VPDVDHK6URPW35KY6TVD968JTTXD9U8GATJV5HX27RPD4CXCEG9QQKXSAR5WPEN5TE0D45KUAPDXYKKXMMDWPSHG6TZD9KXJARE94NXJ7R5W4EX2TN90PSK6URVV5ZSQTRGW368QUE69UHK66TWWSKNYTTRDAKHQCT5D93XJMRFW3UJ6ENF0P682UN99EJHSCTDWPKX2PGQ9358GARSWVAZ7TMDD9H8GTFN943K7MTSV96XJCNFD35HG7FDVE5HSAR4WFJJUETCV9KHQMR9QCQZCNRFVA58GMNFDENJQ3M0V968XG8ZSZ2ZQUMGV9EX2EPQDPJHYEPQVDHKUARJD9382ARFDAHQWQYVQYQQZQGZQZZKSAR5WPEN5TE0D35KW6R5DE5KUEEDVAHKZARN9EJHSCTDWPKX2TMJV4CH2ETNWSKKV6TCW36HYEFDWFJHZAT9WD6Z6ENF0P682UN994EX2UT4V4EHGTTXD9U8GATJV5KHYET3W4JHXAPDVE5HSAR4WFJJ6UN9W96K2UM594NXJ7R5W4EX2TTJV4CH2ETNWSKKV6TCW36HYEFDVDSHX6R4PYQQZQQ2QQYSZQQXVFHKCAP3XYQPFCVQ",
+          "service_started": false,
+          "status": "prepared",
+          "version": 1
+        }
+      },
+      "result": "CASHU_REQUEST_CLI_VERIFIED",
+      "services_started": false,
+      "state_created": false,
+      "synthetic_only": true
+    }
+  },
+  "parser": {
+    "library": "@cashu/cashu-ts",
+    "version": "4.7.2",
+    "results": [
+      {
+        "name": "creqA",
+        "status": "parsed",
+        "encoding": "creqA",
+        "payload_length": 301
+      },
+      {
+        "name": "creqB",
+        "status": "parsed",
+        "encoding": "creqB",
+        "payload_length": 344
+      },
+      {
+        "name": "long_creqA",
+        "status": "parsed",
+        "encoding": "creqA",
+        "payload_length": 609
+      },
+      {
+        "name": "long_creqB",
+        "status": "parsed",
+        "encoding": "creqB",
+        "payload_length": 718
+      }
+    ],
+    "scope": "Independent offline parsing only; no sender payment or phone scan",
+    "live_payment": false
+  },
+  "binary_sha256": "ec2b83a8748efe0c9c51b6b80c0bc94eb14bf28654a1862b358be1af983ca273",
+  "source_sha256": {
+    "tools/cashu-compat/src/acquisition/tests/core_settlement_fixture.rs": "951718eb1f821f1ce958c53166d31881758c9005cf8b13879827f5bb66eee103",
+    "tools/cashu-compat/src/acquisition/tests/split_tests.rs": "0d8dbd014855fe1404c6f6df39093fa2c573c336917445388a4194d96957129d",
+    "tools/cashu-compat/src/acquisition/tests.rs": "d40ed5468b5c8be1ce2e73970a81be19d96b017f6556b93d440e6a1e81a99b56",
+    "tools/cashu-compat/src/acquisition.rs": "03a81ca939de128266737cf5323c10f72ddb74371ab64054712697d76ea78451",
+    "tools/cashu-compat/src/bin/lightning-goats-cashu-signerd.rs": "286a859ef52c06556090b86158b6b5f7004a0ae043c7d21e7a9a8ac08d0e128a",
+    "tools/cashu-compat/src/bin/lightning-goats-cashud.rs": "f3db98cbf40b51ff6e144a70e3ed531dc4416e4786af84f7561682c794f122f0",
+    "tools/cashu-compat/src/descriptor.rs": "523432303a1ff5973c7d2b6c82363c87307c903c41cff62e1f50e52a9978adad",
+    "tools/cashu-compat/src/ingress/public_request_fixture.rs": "9fb862c8544072761b95d2b6b6d8a5c99d3248d14103974be64fc38e54f8058d",
+    "tools/cashu-compat/src/ingress.rs": "d250327108a637df4a14b4e567b041162b12d51604736ef4886be72581cafec9",
+    "tools/cashu-compat/src/intake.rs": "7a9a99a7f8f20e9c4f2ced66f47a6dee00c9221a97fa436e02093cd2bdf4477b",
+    "tools/cashu-compat/src/journal/publication.rs": "7420cf1b5bd7d118760b1af19adec89d34711fe31328fd19b47b98134401fac6",
+    "tools/cashu-compat/src/journal/publication_delivery.rs": "cef4d9daf17de1c6b1b978bbec54f861d37f3f7ea6ba0e9cab18d964d8fe1e9c",
+    "tools/cashu-compat/src/journal/relay_scans.rs": "9e3b395e303682a7ba1dc29dc6dc39ab3afbc6ba4714a601030b796a1d036f80",
+    "tools/cashu-compat/src/journal/scheduling.rs": "41f672cb794a20f0571e8985b3cccb9c3c6a4f0fa95353119b93b5aece34da87",
+    "tools/cashu-compat/src/journal/treasury.rs": "cf5de9793ee8e74b2a67877a39953f47f73cbf743acfca65612cfe11ea79706c",
+    "tools/cashu-compat/src/journal/treasury_budget.rs": "205a856ce21a1fd598daf06440be9cc11cc725ae02564472fe417c6b0fea2782",
+    "tools/cashu-compat/src/journal/treasury_cleanup.rs": "2772a2de924b36c06940ebe30c56dd7796d3c40b74c8e2e45dae33ec1b3adfa7",
+    "tools/cashu-compat/src/journal/treasury_scheduling.rs": "f2813792fcf6b0ac3ce7df2cce21521dd853086cc484e35aa14a330caa5740c1",
+    "tools/cashu-compat/src/journal/treasury_selection.rs": "5e644f035069a0f8c7ff06caeeaf3302417b7bf7da02a3659ec7a5eed4c18d46",
+    "tools/cashu-compat/src/journal/treasury_split/admission.rs": "49ea9306fe0e080988dbcc69e8b02162ff2f1d500c1554b2e1350b281f55e460",
+    "tools/cashu-compat/src/journal/treasury_split/selection.rs": "2d8a79bde281f978aded3ca287c4674c33e7b2692d3660cd172164d1df40ee8b",
+    "tools/cashu-compat/src/journal/treasury_split/submission.rs": "e64d1de0c04b660d96106d23c4a16c7a479db3ab0897ef27c10fde7d9caa194c",
+    "tools/cashu-compat/src/journal/treasury_split.rs": "311e99a580ded80d492ab2774b05e28a61caee8e374e010b34060d801b6dba0b",
+    "tools/cashu-compat/src/journal.rs": "b8a559e8f43ac18e6dc4faf110243fbb6c35efadd08bc6b880c2c82d7a74afb7",
+    "tools/cashu-compat/src/lib.rs": "6b8e526fda4a2d4a1c07d0b7e7adb6d83a7095ab2fcd3a4d4924cb93a2c00ae5",
+    "tools/cashu-compat/src/main.rs": "fae0b42abbcb6c49cc7981932262e0adb6771e864e787088459887f452495c0e",
+    "tools/cashu-compat/src/melt_derivation.rs": "67c958377b05409f4b69ebe84c1d2843733f32edac8edc6737deba89fd7270e7",
+    "tools/cashu-compat/src/melt_reconciliation.rs": "b2159930b85f8f027c5212f09fb8d9fa8806c78d4d10fe6a040f1daf4b710749",
+    "tools/cashu-compat/src/mint_policy.rs": "313674eca44d8b2f6d6aae467e4e141742eda8ad1d867363db06a2096ec0a142",
+    "tools/cashu-compat/src/operation_gate/split.rs": "30898f91e7c6e177240448ec548f342a80446256ce0907e92cb2e4f6bf955274",
+    "tools/cashu-compat/src/operation_gate.rs": "6da9fce27e1beccbf62229ec7679bdd564e6ec3ec31844c85a14fe919985610c",
+    "tools/cashu-compat/src/ownership.rs": "d54433a6c243878c6252068ba5525b9a316ee4773a44cd9e892d4f03b3910a37",
+    "tools/cashu-compat/src/publication.rs": "9319fa0f7e544af290e7939dd31ddbca9e65f637daaf9b54a1694a1efd50d0b7",
+    "tools/cashu-compat/src/publication_broker/cross_uid_fixture.rs": "5317bbccd924db71aad6b9c1e401db71107f6f91334f6afd1cc27cece1502115",
+    "tools/cashu-compat/src/publication_broker.rs": "bbcce28eedc439530ca0af2cf0aaeb6d3443f58f0b720286bae23cb561f9fd60",
+    "tools/cashu-compat/src/publication_delivery.rs": "5fd7ddc4a165e585899a2705096aeb60eec1fd60f326c60639850c4fe7fd0355",
+    "tools/cashu-compat/src/publication_nak.rs": "9548cd8d34fbb00dc7682ec3ce102a90a56284e104f7dde840c54daaf1816727",
+    "tools/cashu-compat/src/publication_relay.rs": "3bf226a84d450e4ce1005d8793d9a82fa4e14594ae66544685947c9cfb8abbdc",
+    "tools/cashu-compat/src/publication_signing.rs": "21de1ce8d7b9315d9514906f4ca910f5b7b0c8e15b696648c94d7b6deca6934f",
+    "tools/cashu-compat/src/receipt_delivery/cross_uid_fixture.rs": "05dc1b3b0d623e15522a3714c9d96307bb62310faea3531c90bf986b83c9e534",
+    "tools/cashu-compat/src/receipt_delivery.rs": "e365f47ce18975beda241d9707b5cb13e59e02cbc90f435cec48b03f33ead901",
+    "tools/cashu-compat/src/receipt_outbox.rs": "141c5786743d3a240bad9658581d7618082a8f50d3a278d8e09e0ac1b53c049e",
+    "tools/cashu-compat/src/receipt_wire.rs": "5ae4dd6ca984515a2f50e58a32eb6da7034c341a51b4bf086469736f86e128cd",
+    "tools/cashu-compat/src/relay.rs": "c6f265848f4870628befc5c9a096001085eb364a90eca6e015a422d61eb3676c",
+    "tools/cashu-compat/src/relay_intake.rs": "a7e63663cae85417884690dcc8d11e2d8ebfa182a14166b0ba81bca3f3aa1eed",
+    "tools/cashu-compat/src/scheduler.rs": "1935ece237d8a42867f0e7c78d107c613148e0c7235b322364f4ea57aae96179",
+    "tools/cashu-compat/src/service.rs": "6d0a36b515ba57ea5d154cc7446529365fd6abfeded5ff69ca1a32439926c001",
+    "tools/cashu-compat/src/service_config.rs": "9b7978efa3e3830e8b38bd26eb38b89fbd9136014448828c923b1d809c8151e5",
+    "tools/cashu-compat/src/service_keys.rs": "acebe1a94d68098476e093b987dbbc015c00d91c309aca1df818af82b1599c0c",
+    "tools/cashu-compat/src/signing_service.rs": "676c42ffa211d92fc3c1b0111e87010c070cf40d5ddd19f174af42c8ccf845e1",
+    "tools/cashu-compat/src/status.rs": "fc76fce16756b97bd73aca5485fa2e6168d10ec7d4304e003b94cfb5b094e8d1",
+    "tools/cashu-compat/src/transport.rs": "0e1a2b396098df4d4cd47b97c89da53162276a06d27c34218ed32ad28f5ec860",
+    "tools/cashu-compat/src/treasury.rs": "bed12b0214dc38960d55cad82f9fda96cf7e9454e9bc5d58ca3d28812241b0a1",
+    "tools/cashu-compat/src/treasury_config.rs": "ffd80801e2bbb107b8a7f152fff59cf1c55ab20a31f79d3c41b9b84fa1f5bb38",
+    "tools/cashu-compat/src/treasury_execution/split.rs": "516de3520b89e1bb6d06dccee13c7481b2b2ddeea2f6882afcb8238da27a7bc1",
+    "tools/cashu-compat/src/treasury_execution.rs": "ed344139d80f83ddfc31a3307d6a286b2978fbb1a9770b2a5f33516ba1ff90aa",
+    "tools/cashu-compat/src/treasury_ingress/cross_uid_fixture.rs": "6f9f6a5e0b5493565b65ac7526628a6b8c536f0e5827aeb88428b7394830eddf",
+    "tools/cashu-compat/src/treasury_ingress.rs": "8e2b17f3085e5fc2d70edb23891317cb0aa2f6f3f3f9f80f963dabf48a82c2f5",
+    "tools/cashu-compat/src/treasury_recovery/cleanup.rs": "5de303e4905ba459a804de02860e4552eb8e410337795d5d2a3a8af0be0c0ebf",
+    "tools/cashu-compat/src/treasury_recovery.rs": "82c5b2e194d20b7800bd4d044c90dcab1876f9c07939e41316ea5f1a5f2def33",
+    "tools/cashu-compat/src/treasury_scheduler.rs": "e97eb8853e37001637d46600df6931ca225b2f7651439693b15c04b4e02b58c9",
+    "tools/cashu-compat/src/treasury_split.rs": "859c75266f0602ac9bbf95d548c161996a98093244ec468ffb6c6b81270db68c",
+    "tools/cashu-compat/src/wallet.rs": "8a7dd5de4de17c4b8131be3003601b02a4827d7f5408a3f558a7010388ae7a52",
+    "tools/cashu-compat/src/writer_lock.rs": "8d32e5a92d15ac9eee6dbf73bedc9692b5cb6594d2e832ab6e4df584913a4b09",
+    "tools/cashu-compat/Cargo.toml": "18e2787fddde10e89e1b5aab950b5c7d77c51dd9abbed3bd4caf4c10de813647",
+    "tools/cashu-compat/Cargo.lock": "89a2df145d7f8807862645946b84e673ce42d8b11f7d3071ea26eac1ae55fb3a",
+    "crates/cashu-receipt/src/acknowledgment.rs": "6dbdb4e4003919aa75652ed2e1fbc129b0857978911a9d33a014ae0dff5ff029",
+    "crates/cashu-receipt/src/ingress.rs": "5b91733e0a263a355b6aa03b8c1ec9afb3ef323f21a5b8e1834546a9f5d48634",
+    "crates/cashu-receipt/src/lib.rs": "bf731dba65a883afcfdc460023863bee61fa7528d2e98cd313435f95aea1cddd",
+    "crates/cashu-receipt/src/public_request.rs": "7cdafc288616ceb5af6a5353497b50b7943e1bd1ead748b3c4a5fb87b33b73b3",
+    "crates/cashu-receipt/src/treasury.rs": "a2ed2106bcbd468a65d42df93e62023e5ef903ddd2a553aefc872dfffbe67d8d",
+    "crates/cashu-receipt/src/treasury_rpc.rs": "2c1553a428883d2c37b6c5cc30607a1eaa35ee40b21414fab9ed80623fb9b609",
+    "crates/nostr-event/src/lib.rs": "dbc88724d94f2f85628289395a6ee8c9bccfb9ac145ca12ee1f828d67ab561d6",
+    "crates/nostr-event/src/relay_list.rs": "de30c21daf9b7aee5d5cb5f4dd0f9b0b3325ca9949560b9d488d5ba58de088ae",
+    "crates/cashu-receipt/Cargo.toml": "1bb3588363b97e8b4bcbb360e3f8a792579ec6a24f63a600ec3f659dd0bd5116",
+    "crates/nostr-event/Cargo.toml": "2f9ba691b1810e4142537c2a0bb0efd5e95c854420350028f14fb0658d9ba1cc",
+    "tests/website/fixtures/cashu-requests.json": "bd9a3430e92a3d025ca6f70fd42ee132312c09868256a99c55e5f12911f279ac"
+  },
+  "canonical_fixture_replaced": false,
+  "production_changed": false,
+  "browser": {
+    "result": "passed",
+    "log": "............................................\n----------------------------------------------------------------------\nRan 44 tests in 267.276s\n\nOK\n",
+    "source_sha256": {
+      "tests/website/test_overlay.py": "3d3ff235797c331ec3b4f3ddb7ecba652f947d36aab4902f1cfbb2820254494b",
+      "web/overlay.css": "b45d615195c867c139e60438c01ddbd655323a27c004502d1f50165f68eb8223",
+      "web/overlay.html": "c63f418ce92aa32a81ce2344617c188b673993e097470d83e72afd6f911e40f6",
+      "web/overlay.js": "e4a43627fd144666931373d8663dafca921b06b529dcbabf1e4ea518ba7d43ae"
+    }
+  }
+}

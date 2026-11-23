@@ -1,0 +1,20 @@
+# Separate local-only held fixture; never the physical owner or original echo store.
+[service]
+listen = "127.0.0.1:8791"
+[database]
+url = "sqlite:///var/lib/lightning-goats-held-canary/gateway.db"
+[openhab]
+url = "http://127.0.0.1:8080/"
+request_item = "LightningGoatsHeldCanary2Request"
+ack_item = "LightningGoatsHeldCanary2Ack"
+protocol = "uuid_held_canary"
+override_item = "LightningGoatsHeldCanary2Override"
+remote_enabled_item = "LightningGoatsHeldCanary2RemoteEnabled"
+[weather]
+url = "http://127.0.0.1:5000/get_received_data"
+max_stale_seconds = 300
+[feeder]
+ack_timeout_seconds = 5
+ack_poll_milliseconds = 100
+min_feed_interval_seconds = 5
+max_feeds_per_hour = 60

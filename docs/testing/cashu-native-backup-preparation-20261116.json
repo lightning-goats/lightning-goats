@@ -1,0 +1,17 @@
+{
+  "status": "implemented-native-execution-pending",
+  "runner_sha256": "985c51de5e0876a5d6da4880d5648d04316739afed623d51c8f82b7ad9d48127",
+  "syntax_check_passed": true,
+  "ci_yaml_parsed": true,
+  "uses_actual_cli_initialization": true,
+  "expected_mint_namespaces": 2,
+  "planned_refusals": [
+    "missing receiving key",
+    "wrong wallet epoch",
+    "missing mint namespace",
+    "wallet startup behind explicit recovery marker"
+  ],
+  "scope": "Empty disposable initialized state only. No native result, funded rollback, generic snapshot command or external reconciliation is claimed.",
+  "native_cli_build_and_execution_required": true,
+  "production_changes": false
+}

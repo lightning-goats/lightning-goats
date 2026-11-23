@@ -1,0 +1,16 @@
+{
+  "gates": {
+    "fmt": 0,
+    "clippy": 0,
+    "tests": 0,
+    "vendor": 0
+  },
+  "passed": 166,
+  "failed": 0,
+  "ignored": 7,
+  "source_hashes_unchanged": true,
+  "source_manifest_sha256": "61c9c5ce7e9bf55ff68865718d1acc2f2afddf8e83829a854b79d1718f93c3da",
+  "test_log_sha256": "0e7a19dcda65cec8530c0fb53496f243bf35b2381500d47e9b5be557d5ec9c68",
+  "artifact_sha256": "ca0287e404188f044ec5284a223811cbc04d2af7eeaafc5e3f8a2a4926474d8e",
+  "scope": "Treasury IPC wallet fixture compiles; complete native wallet tests pass. Combined treasury socket mode failed core fixture correlation and is not qualified by this result."
+}

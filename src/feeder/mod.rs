@@ -89,7 +89,7 @@ pub async fn run_feed_step(
         return Ok(FeedWorkerStep::Idle);
     };
 
-    let status = match gateway.request_feed(attempt_id).await {
+    let status = match gateway.request_feed_with_pulse_notice(attempt_id).await {
         Ok(status) => status,
         Err(error) => {
             ledger
@@ -97,6 +97,27 @@ pub async fn run_feed_step(
                 .await?;
             return Err(error).context("gateway feed outcome remains unresolved");
         }
+    };
+    let status = if status.status == FeedOutcome::PulseStarted {
+        // Only the first POST can announce a pulse. Keep the same durable
+        // attempt and use read-only status checks until evidence of completion.
+        ledger
+            .append_event(
+                "feeder_pulse_started",
+                &serde_json::json!({"feed_attempt_id":attempt_id}),
+            )
+            .await?;
+        let mut observed = gateway.feed_request_status(attempt_id).await?;
+        for _ in 0..12 {
+            if observed.status != FeedOutcome::Pending {
+                break;
+            }
+            sleep(Duration::from_millis(250)).await;
+            observed = gateway.feed_request_status(attempt_id).await?;
+        }
+        observed
+    } else {
+        status
     };
     apply_outcome(
         ledger,
@@ -141,7 +162,7 @@ async fn apply_outcome(
                 .await?;
             Ok(FeedWorkerStep::NotDispatched { attempt_id })
         }
-        FeedOutcome::Pending | FeedOutcome::Ambiguous => {
+        FeedOutcome::PulseStarted | FeedOutcome::Pending | FeedOutcome::Ambiguous => {
             if stored == StoredFeedAttemptStatus::IntentCommitted {
                 ledger
                     .mark_feed_unknown(
@@ -303,6 +324,29 @@ mod tests {
             override_enabled: false,
             remote_enabled: true,
         }
+    }
+
+    #[tokio::test]
+    async fn a_refusal_after_a_pulse_cannot_release_the_next_dispatch() {
+        let (_directory, ledger) = credited_store(1_000).await;
+        let id = ledger.begin_feed_attempt(1_000).await.unwrap().unwrap();
+        ledger
+            .append_event(
+                "feeder_pulse_started",
+                &serde_json::json!({"feed_attempt_id":id}),
+            )
+            .await
+            .unwrap();
+        assert!(ledger.resolve_feed_not_dispatched(id, 1).await.is_err());
+        ledger
+            .mark_interrupted_feed_intents_unknown()
+            .await
+            .unwrap();
+        assert!(ledger.resolve_feed_not_dispatched(id, 1).await.is_err());
+        assert!(ledger.begin_feed_attempt(1_000).await.is_err());
+        assert_eq!(ledger.feed_credit_sats().await.unwrap(), 1_000);
+        ledger.reconcile_unknown_as_fed(id).await.unwrap();
+        assert_eq!(ledger.feed_credit_sats().await.unwrap(), 0);
     }
 
     #[tokio::test]

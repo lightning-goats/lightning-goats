@@ -1,0 +1,19 @@
+# Render @CRS@ and @TMP@ to reviewed absolute paths before loading.
+SecRuleEngine On
+SecRequestBodyAccess On
+SecRequestBodyLimit 32768
+SecRequestBodyNoFilesLimit 32768
+SecRequestBodyLimitAction Reject
+SecResponseBodyAccess Off
+SecTmpDir @TMP@
+# No request/response bodies, credentials or CRS matched-data in routine logs.
+SecAuditEngine Off
+SecDebugLogLevel 0
+SecRule REQUEST_HEADERS:Content-Type "@rx (?i)^application/json(?:[ ]*;|$)" "id:100001,phase:1,pass,nolog,ctl:requestBodyProcessor=JSON"
+SecRule REQBODY_ERROR "!@eq 0" "id:100002,phase:2,deny,status:400,nolog,noauditlog"
+# Deterministic, harmless enforcement probe. Never grants access.
+SecRule REQUEST_HEADERS:X-Lightning-Goats-Waf-Probe "@streq blocked" "id:100003,phase:1,deny,status:403,nolog,noauditlog"
+Include @CRS@/crs-setup.conf.example
+Include @CRS@/rules/*.conf
+# Suppress matched-data messages without changing detection or blocking actions.
+SecRuleUpdateActionById 900000-999999 "nolog,noauditlog"

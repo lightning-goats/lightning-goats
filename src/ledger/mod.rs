@@ -1,4 +1,12 @@
 mod admission;
+mod breez;
+#[cfg(unix)]
+mod cashu;
+#[cfg(unix)]
+pub(crate) use cashu::TreasurySettlementState;
+#[cfg(unix)]
+pub use cashu::{CashuImportResult, CashuSettlementStatus, FinancialPlanStatus, TreasuryPlan};
+mod credit;
 mod inbox;
 pub use inbox::StrikeInboxWork;
 
@@ -8,27 +16,58 @@ use sqlx::{Row, SqlitePool};
 
 use crate::domain::payment::SettledPayment;
 
+mod contact;
+pub use contact::ContactDelivery;
+mod core_bridge;
+pub(crate) use core_bridge::export_body as inspect_core_event_body;
+mod cyberherd_overlay;
 mod events;
+mod failed_costs;
 mod feed;
+mod feed_cap;
+mod feed_sources;
+mod financial_release;
+pub use feed_cap::CreditRetirementResult;
+mod feeding_notices;
+mod feeding_presentation;
+mod operator_credit;
 mod outbox;
+mod publication;
+pub use publication::{PublicationWork, RelayMetadataIntent};
+mod payout_execution;
+mod reward_funding;
+mod reward_outcomes;
+mod reward_results;
+pub use operator_credit::{OperatorCreditGrant, OperatorCreditResult, OperatorCreditStatus};
+pub(crate) use reward_funding::{
+    confirmed_funding as inspect_confirmed_reward_funding,
+    decode_reservation as inspect_reward_reservation,
+};
 mod overlay;
+mod roster_overlay;
 mod strike;
+mod zap;
+mod zap_presentation;
 pub use events::DurableEvent;
 use events::append_event_in_transaction;
-use feed::feed_credit_in_transaction;
 pub use feed::{StoredFeedAttempt, StoredFeedAttemptStatus};
 pub use outbox::OutboxEntry;
 pub use strike::StoredStrikeReceiveRequest;
+pub use zap::ZapReceiptJob;
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
 #[derive(Debug, Clone)]
 pub struct LedgerStore {
+    retained_wallet_epoch: Option<uuid::Uuid>,
     pool: SqlitePool,
+    publication: std::sync::Arc<tokio::sync::Mutex<publication::Progress>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SettlementOutcome {
+    ContactFeeAccepted,
+    TreasurySettlementAccepted,
     Credited {
         sats: u64,
         address_user: String,
@@ -38,6 +77,24 @@ pub enum SettlementOutcome {
 }
 
 impl LedgerStore {
+    /// Retired wallet receipts retain physical credit. This setting grants no payout custody.
+    pub fn with_retained_wallet_epoch(mut self, epoch: uuid::Uuid) -> Self {
+        self.retained_wallet_epoch = Some(epoch);
+        self
+    }
+
+    /// Open only an existing current ledger for paused recovery status.
+    /// The pool opens every connection read-only and never runs migrations.
+    pub async fn connect_recovery_read_only(database_url: &str) -> Result<Self> {
+        let pool = crate::sqlite::connect_recovery_read_only(database_url).await?;
+        crate::sqlite::require_current_schema(&pool, &MIGRATOR).await?;
+        Ok(Self {
+            pool,
+            publication: Default::default(),
+            retained_wallet_epoch: None,
+        })
+    }
+
     pub async fn connect(database_url: &str) -> Result<Self> {
         let pool = crate::sqlite::connect_durable(database_url, 5)
             .await
@@ -48,15 +105,32 @@ impl LedgerStore {
             .await
             .context("failed applying Lightning Goats database migrations")?;
 
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            publication: Default::default(),
+            retained_wallet_epoch: None,
+        })
     }
 
-    /// Record one provider-authoritative settled payment exactly once.
+    /// Record one provider-authoritative native BTC settlement exactly once.
+    /// Non-BTC receipts must use their asset-specific valuation path, not fake msat.
     ///
     /// Provider delivery ordering is intentionally irrelevant. Identity is the
     /// `(source, source_id)` tuple, with `payment_hash` acting as an additional
     /// collision boundary when the provider exposes one.
     pub async fn record_payment(&self, payment: &SettledPayment) -> Result<SettlementOutcome> {
+        self.record_verified_payment(payment, None).await
+    }
+
+    async fn record_verified_payment(
+        &self,
+        payment: &SettledPayment,
+        claim_digest: Option<&str>,
+    ) -> Result<SettlementOutcome> {
+        anyhow::ensure!(
+            (payment.source == "breez") == claim_digest.is_some(),
+            "Breez credit requires authenticated proof ownership"
+        );
         validate_source(&payment.source)?;
         validate_external_id(&payment.source_id, "payment source_id", 256)?;
         validate_user(&payment.address_user, "address_user")?;
@@ -87,11 +161,41 @@ impl LedgerStore {
         let amount_msat = to_i64(payment.amount_msat, "amount_msat")?;
         let credited_sats = payment.amount_msat / 1_000;
         let credited_sats_i64 = to_i64(credited_sats, "credited_sats")?;
-        let mut transaction = self.pool.begin().await?;
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+
+        if let Some(digest) = claim_digest {
+            let terms_match: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM breez_project_invoices
+                WHERE id=? AND payment_hash=? AND json_extract(intent,'$.amount_sat')=? AND json_extract(intent,'$.user')=?
+                AND json_extract(intent,'$.credit_pool')=? AND json_type(intent,'$.purpose') IS NULL)")
+                .bind(&payment.source_id).bind(&payment.payment_hash).bind(credited_sats_i64)
+                .bind(&payment.address_user).bind(&payment.credit_pool).fetch_one(&mut *transaction).await?;
+            anyhow::ensure!(
+                terms_match,
+                "claimed project invoice conflicts with core terms"
+            );
+            breez::retain_claim(&mut transaction, &payment.source_id, digest).await?;
+        }
+        let contact_collision: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM private_contact_intents i JOIN strike_receive_requests r ON r.receive_request_id=i.receive_request_id WHERE r.payment_hash=lower(?)) OR EXISTS(SELECT 1 FROM breez_project_invoices WHERE payment_hash=lower(?) AND json_extract(intent,'$.purpose')='contact_fee') OR EXISTS(SELECT 1 FROM private_contact_fees WHERE ?='strike' AND receive_id=?)",
+        ).bind(payment.payment_hash.as_deref()).bind(payment.payment_hash.as_deref()).bind(&payment.source).bind(&payment.source_id).fetch_one(&mut *transaction).await?;
+        if contact_collision
+            || payment.address_user == "contact"
+            || payment.credit_pool == "contact"
+        {
+            bail!("private contact fees cannot enter feed-credit settlement");
+        }
+        let treasury_collision:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM breez_project_invoices WHERE payment_hash=lower(?) AND json_extract(intent,'$.purpose')='treasury_conversion') OR EXISTS(SELECT 1 FROM cashu_treasury_issuances WHERE payment_hash=lower(?)) OR EXISTS(SELECT 1 FROM cashu_treasury_deposits WHERE ?='strike' AND receive_id=?)")
+            .bind(payment.payment_hash.as_deref()).bind(payment.payment_hash.as_deref()).bind(&payment.source).bind(&payment.source_id).fetch_one(&mut *transaction).await?;
+        if treasury_collision
+            || payment.address_user == "cashu_treasury"
+            || payment.credit_pool == "cashu_treasury"
+        {
+            bail!("internal Cashu treasury transfers cannot enter contribution accounting");
+        }
 
         let existing = sqlx::query(
             r#"
-            SELECT payment_hash, address_user, credit_pool, amount_msat, settled_at
+            SELECT id, payment_hash, address_user, credit_pool, amount_msat, settled_at
             FROM settled_payments
             WHERE source = ? AND source_id = ?
             "#,
@@ -115,6 +219,7 @@ impl LedgerStore {
                 && existing_settled_at == payment.settled_at;
 
             if matches {
+                credit::verify_native_btc(&mut transaction, row.try_get("id")?).await?;
                 transaction.commit().await?;
                 return Ok(SettlementOutcome::Duplicate);
             }
@@ -144,7 +249,7 @@ impl LedgerStore {
             }
         }
 
-        sqlx::query(
+        let settlement_id = sqlx::query(
             r#"
             INSERT INTO settled_payments
                 (source, source_id, payment_hash, address_user, credit_pool,
@@ -161,10 +266,11 @@ impl LedgerStore {
         .bind(payment.settled_at)
         .bind(payment.context_json.as_deref())
         .execute(&mut *transaction)
-        .await?;
+        .await?
+        .last_insert_rowid();
 
         let source_key = format!("payment:{}:{}", payment.source, payment.source_id);
-        sqlx::query(
+        let ledger_id = sqlx::query(
             r#"
             INSERT INTO ledger_entries
                 (entry_type, source_key, delta_sats, payment_hash,
@@ -180,10 +286,12 @@ impl LedgerStore {
         .bind(&payment.address_user)
         .bind(&payment.credit_pool)
         .execute(&mut *transaction)
-        .await?;
+        .await?
+        .last_insert_rowid();
 
-        let feed_credit_sats = feed_credit_in_transaction(&mut transaction).await?;
-        append_event_in_transaction(
+        let feed_credit_sats =
+            feed_cap::cap_new_credit(&mut transaction, ledger_id, credited_sats).await?;
+        let event_seq = append_event_in_transaction(
             &mut transaction,
             "payment_received",
             &json!({
@@ -198,6 +306,9 @@ impl LedgerStore {
         )
         .await?;
 
+        credit::record_native_btc(&mut transaction, settlement_id, ledger_id, event_seq).await?;
+        zap::stage_receipt(&mut transaction, payment, settlement_id, event_seq).await?;
+        reward_funding::prepare(&mut transaction).await?;
         transaction.commit().await?;
 
         Ok(SettlementOutcome::Credited {
@@ -256,6 +367,15 @@ pub(super) fn to_i64(value: u64, field: &str) -> Result<i64> {
     i64::try_from(value).with_context(|| format!("{field} exceeds SQLite INTEGER range"))
 }
 
+/// Historical maintenance snapshots are verified against their exact migration prefix.
+async fn core_schema_version(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>) -> Result<i64> {
+    Ok(
+        sqlx::query_scalar("SELECT MAX(version) FROM _sqlx_migrations")
+            .fetch_one(&mut **tx)
+            .await?,
+    )
+}
+
 pub(super) fn to_u64(value: i64, field: &str) -> Result<u64> {
     u64::try_from(value).with_context(|| format!("{field} is unexpectedly negative"))
 }
@@ -285,6 +405,80 @@ mod tests {
             settled_at: Some(1_700_000_000),
             context_json: Some(r#"{"receive_request_id":"request-1"}"#.to_owned()),
         }
+    }
+
+    #[tokio::test]
+    async fn recovery_readonly_sees_committed_wal_and_refuses_writes() {
+        let (directory, writer) = store().await;
+        let path = directory.path().join("lightning-goats.db");
+        let url = format!("sqlite://{}", path.display());
+        sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+            .execute(&writer.pool)
+            .await
+            .unwrap();
+        let main = std::fs::read(&path).unwrap();
+        writer
+            .record_payment(&payment("receive-read-only", &"16".repeat(32), 16))
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), main);
+
+        let reader = LedgerStore::connect_recovery_read_only(&url).await.unwrap();
+        assert_eq!(reader.feed_credit_sats().await.unwrap(), 16);
+        let mut connection = reader.pool.acquire().await.unwrap();
+        sqlx::query("PRAGMA query_only=OFF")
+            .execute(&mut *connection)
+            .await
+            .unwrap();
+        assert!(
+            sqlx::query("DELETE FROM ledger_entries")
+                .execute(&mut *connection)
+                .await
+                .is_err()
+        );
+        assert_eq!(writer.feed_credit_sats().await.unwrap(), 16);
+    }
+
+    #[tokio::test]
+    async fn recovery_readonly_requires_an_existing_current_unfenced_ledger() {
+        let (directory, writer) = store().await;
+        let missing = directory.path().join("missing.db");
+        let url = format!("sqlite://{}", missing.display());
+        assert!(LedgerStore::connect_recovery_read_only(&url).await.is_err());
+        assert!(!missing.exists());
+
+        let path = directory.path().join("lightning-goats.db");
+        let url = format!("sqlite://{}", path.display());
+        #[cfg(unix)]
+        {
+            let marker = directory
+                .path()
+                .join(crate::state_maintenance::RECOVERY_MARKER);
+            std::fs::write(&marker, "keep fenced").unwrap();
+            let error = LedgerStore::connect_recovery_read_only(&url)
+                .await
+                .unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("requires explicit external reconciliation")
+            );
+            assert_eq!(std::fs::read_to_string(&marker).unwrap(), "keep fenced");
+            std::fs::remove_file(marker).unwrap();
+        }
+
+        sqlx::query("UPDATE _sqlx_migrations SET success=0 WHERE version=(SELECT MAX(version) FROM _sqlx_migrations)")
+            .execute(&writer.pool)
+            .await
+            .unwrap();
+        assert!(LedgerStore::connect_recovery_read_only(&url).await.is_err());
+        let success: bool = sqlx::query_scalar(
+            "SELECT success FROM _sqlx_migrations ORDER BY version DESC LIMIT 1",
+        )
+        .fetch_one(&writer.pool)
+        .await
+        .unwrap();
+        assert!(!success);
     }
 
     #[tokio::test]

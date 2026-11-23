@@ -1,0 +1,10 @@
+{
+  "result": "failed",
+  "core_sha256": "37aa7d18160b6aaa92af91a63983bda9f2bc42388f0ff8ad1fd84039cb35fc33",
+  "wallet_sha256": "ca0287e404188f044ec5284a223811cbc04d2af7eeaafc5e3f8a2a4926474d8e",
+  "log_sha256": "455c45f21e9344b8283039fc94bde150c5aba7c1d29292196def5de59c4ab910",
+  "cause": "Fixture polled Status using a new request ID then returned its reply as the original Retain reply; worker correlation validation rejected it.",
+  "fix": "After authenticated status reports a retained result, retry the original Retain request and return its actual correlated response.",
+  "production_defect_established": false,
+  "fix_native_qualified": false
+}

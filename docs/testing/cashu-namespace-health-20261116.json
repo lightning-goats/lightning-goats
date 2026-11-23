@@ -1,0 +1,15 @@
+{
+  "gates": {
+    "fmt": 0,
+    "clippy": 0,
+    "tests": 0,
+    "vendor": 0
+  },
+  "library_passed": 159,
+  "other_native_passed": 7,
+  "ignored": 7,
+  "source_hashes_unchanged": true,
+  "source_manifest_sha256": "26b4fed524627074c4db0438426b95f9c4318281f0881df1a1334ef141fb88a9",
+  "test_log_sha256": "b96255ef0d42669edad37438d9c49a3edf5cf70a66303334cf7a497e83f92acd",
+  "scope": "mint-scoped runtime storage, read-only legacy startup inspection, private namespace health and pending unconfigured namespace fence"
+}

@@ -18,7 +18,7 @@
         "reason": "pulse_started",
         "at": "2026-09-11T00:00:00Z"
       },
-      "expected": "pending"
+      "expected": "pulse_started"
     },
     {
       "result": {

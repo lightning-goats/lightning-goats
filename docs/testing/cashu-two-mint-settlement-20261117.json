@@ -1,0 +1,126 @@
+{
+  "source_commit": "0f66d53c5434f1a6872ca7bc22f7e0e59c8d6965",
+  "ci_checkout_commit": "17d8a4fc4b4c0af3c17ecbcb14abea60412bf0b5",
+  "source_tree": "64243af1d146696c3aac883a172e98b76a19d567",
+  "ci_checkout_tree": "64243af1d146696c3aac883a172e98b76a19d567",
+  "checkout_tree_equals_source_tree": true,
+  "ci_run": "https://github.com/lightning-goats/lightning-goats/actions/runs/44154943583",
+  "ci_conclusion": "success",
+  "artifact": {
+    "id": 14362310245,
+    "size_bytes": 18145,
+    "sha256": "005a09a5a66045b0c26f32c19f643ea4715606d66b91711f5de1cf9469577671"
+  },
+  "cases": {
+    "cashu-sdk-multi-mint.json": {
+      "artifacts_sha256": {
+        "core": "2883ab0b244e492bcbc3c4929cfbb52787535403e1607844c2f35d3eac0aaef3",
+        "wallet": "e8cd90244e902ff515ebaaca0ba77d2055423e5af45955df2f59bc59f791cf55"
+      },
+      "cashu_ts_offline_sender": true,
+      "distinct_uid_ipc": true,
+      "distinct_uid_receipt_ipc": true,
+      "financial_result": {
+        "configured_mints": 2,
+        "contributions": 3,
+        "conversion_fee_sats": 4,
+        "credit_sats": 0,
+        "new_transfer_credit_sats": 0,
+        "original_granted_credit_sats": 1000,
+        "receive_fees_sats": 2,
+        "retained_change_sats": 0,
+        "settlement_operations": 2,
+        "supplemental_native_sats": 0,
+        "synthetic_confirmed_feeds": 1,
+        "treasury_deposit_sats": 396
+      },
+      "http_intake": true,
+      "independent_sender": false,
+      "live_provider": false,
+      "lost_melt_reply": false,
+      "multiple_mints": true,
+      "nonzero_fees": true,
+      "physical_actuation": false,
+      "repeat_request": false,
+      "residual_change_settled": false,
+      "result": "CASHU_COMBINED_SETTLEMENT_VERIFIED",
+      "returned_change": false,
+      "sender_inventory": {
+        "bytes": 4549477,
+        "files": 285,
+        "manifest_sha256": "d6e43143902f1edde34f8526fcfa53d4da4a511b9431ae9ceb51f1d6f0afc68f"
+      },
+      "sender_node_sha256": "93956de2e59480474a7b46571da1651180b1a050cdf32641ebec4ce6e478e068",
+      "sender_script_sha256": "7a33eb819d4707d767cc7be89e6b7e87b47bfefef8eaf4a544fff2ce0be9fd26",
+      "strike_before_wallet_report": false,
+      "tls_verified": false,
+      "treasury_ipc": true,
+      "wallet_health_verified": true,
+      "wallet_recovery_while_paused": false
+    },
+    "cashu-sdk-multi-mint-lost.json": {
+      "artifacts_sha256": {
+        "core": "2883ab0b244e492bcbc3c4929cfbb52787535403e1607844c2f35d3eac0aaef3",
+        "wallet": "e8cd90244e902ff515ebaaca0ba77d2055423e5af45955df2f59bc59f791cf55"
+      },
+      "cashu_ts_offline_sender": true,
+      "distinct_uid_ipc": true,
+      "distinct_uid_receipt_ipc": true,
+      "financial_result": {
+        "configured_mints": 2,
+        "contributions": 3,
+        "conversion_fee_sats": 4,
+        "credit_sats": 0,
+        "new_transfer_credit_sats": 0,
+        "original_granted_credit_sats": 1000,
+        "receive_fees_sats": 2,
+        "retained_change_sats": 0,
+        "settlement_operations": 2,
+        "supplemental_native_sats": 0,
+        "synthetic_confirmed_feeds": 1,
+        "treasury_deposit_sats": 396
+      },
+      "http_intake": true,
+      "independent_sender": false,
+      "live_provider": false,
+      "lost_melt_reply": true,
+      "multiple_mints": true,
+      "nonzero_fees": true,
+      "physical_actuation": false,
+      "repeat_request": false,
+      "residual_change_settled": false,
+      "result": "CASHU_COMBINED_SETTLEMENT_VERIFIED",
+      "returned_change": false,
+      "sender_inventory": {
+        "bytes": 4549477,
+        "files": 285,
+        "manifest_sha256": "d6e43143902f1edde34f8526fcfa53d4da4a511b9431ae9ceb51f1d6f0afc68f"
+      },
+      "sender_node_sha256": "93956de2e59480474a7b46571da1651180b1a050cdf32641ebec4ce6e478e068",
+      "sender_script_sha256": "7a33eb819d4707d767cc7be89e6b7e87b47bfefef8eaf4a544fff2ce0be9fd26",
+      "strike_before_wallet_report": true,
+      "tls_verified": false,
+      "treasury_ipc": true,
+      "wallet_health_verified": true,
+      "wallet_recovery_while_paused": true
+    }
+  },
+  "scope": {
+    "issuer_keys_and_keysets": "distinct",
+    "cdk_stores": 2,
+    "shared_wallet_journal": true,
+    "shared_writer_authority": true,
+    "ordinary_http_net_sats": 150,
+    "nutzap_net_sats": 250,
+    "native_lightning_sats": 600,
+    "internal_transfer_credit_sats": 0,
+    "synthetic_confirmed_feeds": 1
+  },
+  "limitations": [
+    "Synthetic mint and Strike providers; no real transfer or physical actuation.",
+    "Offline Cashu-TS sender is not an independent Android application.",
+    "The financial fixture constructs approved mint policies and production namespace/scheduler adapters; it does not establish installed Runtime, egress, phone, relay or TLS acceptance.",
+    "Coordinated funded backup/rollback, historical-key administration and live providers remain open.",
+    "Backup-copy helper changes are later source and are not qualified by this checkpoint."
+  ]
+}

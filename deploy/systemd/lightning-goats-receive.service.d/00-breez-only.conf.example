@@ -1,0 +1,7 @@
+# Install as 00-breez-only.conf when the active config has retired [strike].
+# The base unit loads only Strike credentials. Later drop-ins supply Nostr.
+[Unit]
+Description=Lightning Goats Breez and Cashu payments and feeder automation
+
+[Service]
+LoadCredentialEncrypted=

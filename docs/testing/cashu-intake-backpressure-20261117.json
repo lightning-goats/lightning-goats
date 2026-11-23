@@ -1,0 +1,135 @@
+{
+  "results": [
+    {
+      "name": "wallet-format",
+      "command": [
+        "/home/linuxuser/.cargo/bin/cargo",
+        "fmt",
+        "--manifest-path",
+        "tools/cashu-compat/Cargo.toml",
+        "--all",
+        "--check"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 1.97
+    },
+    {
+      "name": "wallet-clippy",
+      "command": [
+        "/home/linuxuser/.cargo/bin/cargo",
+        "clippy",
+        "--offline",
+        "--locked",
+        "--manifest-path",
+        "tools/cashu-compat/Cargo.toml",
+        "--all-targets",
+        "--all-features",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 64.75
+    },
+    {
+      "name": "wallet-tests",
+      "command": [
+        "/home/linuxuser/.cargo/bin/cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--manifest-path",
+        "tools/cashu-compat/Cargo.toml",
+        "--all-features"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 343.75
+    },
+    {
+      "name": "wallet-vendor",
+      "command": [
+        "python3",
+        "verify_vendor.py"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.28
+    },
+    {
+      "name": "wallet-audit",
+      "command": [
+        "/home/linuxuser/.cargo/bin/cargo",
+        "audit",
+        "--no-fetch",
+        "--stale",
+        "--file",
+        "tools/cashu-compat/Cargo.lock"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 1.43
+    },
+    {
+      "name": "core-format",
+      "command": [
+        "/home/linuxuser/.cargo/bin/cargo",
+        "fmt",
+        "--all",
+        "--check"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 2.11
+    },
+    {
+      "name": "whitespace",
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.06
+    }
+  ],
+  "sources": {
+    "tools/cashu-compat/src/journal.rs": "16c6b0b75260e83394d80dabc472ca6ac6dbf1b9fb6680d8845ab296421e54b7",
+    "tools/cashu-compat/Cargo.lock": "89a2df145d7f8807862645946b84e673ce42d8b11f7d3071ea26eac1ae55fb3a"
+  },
+  "sources_unchanged": true,
+  "providers": "synthetic only",
+  "production_changes": false,
+  "date": "2026-11-17",
+  "base_revision": "d3c72dc93856a6252956a2607023c15474149f8f",
+  "scope": "Shared wallet journal intake backpressure; no core runtime source changes",
+  "wallet_tests": {
+    "passed": 168,
+    "ignored": 7
+  },
+  "vendor_boundary_tests": {
+    "passed": 2
+  },
+  "dependency_audit": {
+    "database": "cached, no fetch",
+    "wallet_allowed_warning": "RUSTSEC-2024-0436 paste unmaintained",
+    "core_exit_code": 0,
+    "core_existing_exception": "RUSTSEC-2023-0071; offline inverse dependency check found no active rsa path"
+  },
+  "limits": {
+    "pending_acquisitions": 1024,
+    "pending_input_proof_bytes": 16777216,
+    "sources_per_acquisition": 64
+  },
+  "limitations": [
+    "Bounds apply to the uncredited intake backlog, not total historical database size.",
+    "Unresolved mint-operation blocking remains open.",
+    "No native financial composition or independent-phone acceptance rerun for this increment.",
+    "No completed security review; operator canceled it."
+  ],
+  "log_sha256": {
+    "wallet-clippy.log": "95fe3a2cdf76765b483394e0d1049e3cea94688b28cc2b2e63752b033ba0fa78",
+    "whitespace.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "wallet-tests.log": "3be9cfd503e3bd3424d059a16912cadc47848a8f34ed68ffd3ab110d4129b7dc",
+    "wallet-audit.log": "e3c64cb22cac5b011a2945e011528a344029e67a47c85135d9a75e532882a318",
+    "wallet-vendor.log": "e64fb22abb8d7c16b93dd3c508ab7783f58babec3002bb8f78842d7ce1f96a7d",
+    "wallet-format.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "core-format.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

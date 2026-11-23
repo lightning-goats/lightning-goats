@@ -2,7 +2,7 @@
 
 use std::{future::pending, path::PathBuf, sync::Arc, time::Duration};
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use axum::{
     Json, Router,
     body::Bytes,
@@ -16,6 +16,7 @@ use clap::Parser;
 use lightning_goats::{
     config::AppConfig,
     feeder::run_feed_worker,
+    feeding_presentation::run_feeding_presentation_worker,
     gateway::GatewayClient,
     informational::run_informational_worker,
     ledger::LedgerStore,
@@ -30,6 +31,8 @@ use serde::{Deserialize, Serialize};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
+mod paused_recovery;
+
 const MAX_STRIKE_WEBHOOK_BODY: usize = 32 * 1024;
 
 #[derive(Debug, Parser)]
@@ -38,6 +41,9 @@ const MAX_STRIKE_WEBHOOK_BODY: usize = 32 * 1024;
 struct Args {
     #[arg(long, default_value = "/etc/lightning-goats/config.toml")]
     config: PathBuf,
+    /// Serve local readiness and read-only ledger status for paused recovery.
+    #[arg(long)]
+    recovery_paused: bool,
 }
 
 #[derive(Clone)]
@@ -45,11 +51,13 @@ struct AppState {
     config: Arc<AppConfig>,
     ledger: LedgerStore,
     gateway: GatewayClient,
-    strike: StrikeRuntime,
+    strike: Option<StrikeRuntime>,
     lnurl: LnurlService,
     renderer: MessageRenderer,
     status_slots: Arc<tokio::sync::Semaphore>,
     overlay_slots: Arc<tokio::sync::Semaphore>,
+    contact_slots: Arc<tokio::sync::Semaphore>,
+    cashu: Option<Arc<lightning_goats::cashu::intake::Forwarder>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -76,6 +84,8 @@ struct StatusResponse {
 #[derive(Debug, Deserialize)]
 struct LnurlCallbackQuery {
     amount: Option<String>,
+    nostr: Option<String>,
+    lnurl: Option<String>,
 }
 
 #[tokio::main]
@@ -88,7 +98,30 @@ async fn main() -> Result<()> {
 
     let args = Args::parse();
     let config = Arc::new(AppConfig::load(&args.config)?);
-    let ledger = LedgerStore::connect(&config.database.url).await?;
+    if args.recovery_paused {
+        return paused_recovery::serve(&config).await;
+    }
+    let mut ledger = LedgerStore::connect(&config.database.url).await?;
+    if matches!(
+        config.lnurl.wallet_backend,
+        lightning_goats::config::WalletBackend::Breez
+    ) && let Some(receipts) = &config.cashu_receipts
+    {
+        ledger = ledger.with_retained_wallet_epoch(receipts.wallet_epoch);
+    }
+    ledger
+        .configure_feeder_credit_cap(config.feeder.threshold_sats)
+        .await?;
+    ledger
+        .configure_feeding_notices(
+            config
+                .core_bridge
+                .as_ref()
+                .filter(|b| b.delegated_feeder_messages)
+                .and_then(|b| b.reward_policy.as_ref())
+                .map(|p| p.owner.as_str()),
+        )
+        .await?;
     let renderer = MessageRenderer::embedded()?;
 
     let interrupted = ledger.mark_interrupted_feed_intents_unknown().await?;
@@ -100,7 +133,16 @@ async fn main() -> Result<()> {
     }
 
     let gateway = GatewayClient::new(&config.gateway.url)?;
-    let strike = StrikeRuntime::from_config(&config.strike).await?;
+    if let Err(error) = ledger
+        .update_feeding_presentation(config.feeder.threshold_sats, config.service.mode, None)
+        .await
+    {
+        tracing::warn!(%error,"initial feeding message state unavailable; settlement is unaffected");
+    }
+    let strike = match &config.strike {
+        Some(config) => Some(StrikeRuntime::from_config(config).await?),
+        None => None,
+    };
     let lnurl = LnurlService::new(
         &config.lnurl,
         &config.lightning_address,
@@ -113,7 +155,56 @@ async fn main() -> Result<()> {
         None
     };
 
+    let cashu = config
+        .cashu
+        .as_ref()
+        .map(|c| c.forwarder())
+        .transpose()?
+        .map(Arc::new);
+    let cashu_receipts = config
+        .cashu_receipts
+        .clone()
+        .map(|c| {
+            let server = lightning_goats::cashu::receipt_server::Server::new(c, ledger.clone())?;
+            match config.lnurl.wallet_backend {
+                lightning_goats::config::WalletBackend::Strike => Ok(server),
+                lightning_goats::config::WalletBackend::Breez => server.retain_mint("goats"),
+            }
+        })
+        .transpose()?;
+    let cashu_treasury = config
+        .cashu_treasury
+        .as_ref()
+        .map(|treasury| {
+            let receipts = config
+                .cashu_receipts
+                .as_ref()
+                .context("treasury wallet registration missing")?;
+            treasury.worker(
+                receipts,
+                ledger.clone(),
+                if treasury.policy.destination.origin
+                    == lightning_goats::cashu::treasury::PROJECT_MINT_ORIGIN
+                {
+                    lightning_goats::cashu::treasury_worker::InvoiceBackend::Project(
+                        config
+                            .lnurl
+                            .breez_collector
+                            .clone()
+                            .context("project treasury collector missing")?,
+                    )
+                } else {
+                    strike
+                        .clone()
+                        .context("Strike treasury backend missing")?
+                        .into()
+                },
+            )
+        })
+        .transpose()?
+        .flatten();
     let state = AppState {
+        cashu,
         config: Arc::clone(&config),
         ledger: ledger.clone(),
         gateway: gateway.clone(),
@@ -122,6 +213,7 @@ async fn main() -> Result<()> {
         renderer: renderer.clone(),
         status_slots: Arc::new(tokio::sync::Semaphore::new(4)),
         overlay_slots: Arc::new(tokio::sync::Semaphore::new(32)),
+        contact_slots: Arc::new(tokio::sync::Semaphore::new(4)),
     };
     let app = app(state);
 
@@ -129,14 +221,44 @@ async fn main() -> Result<()> {
     info!(
         listen = %config.service.listen,
         mode = config.service.mode.as_str(),
-        payment_backend = "strike",
+        payment_backend = config.lnurl.wallet_backend.as_str(),
         gateway = %config.gateway.url,
         "lightning-goatsd listening"
     );
 
     let mut server =
         tokio::spawn(async move { lightning_goats::server::serve(listener, app).await });
-    let mut recovery = tokio::spawn(strike.run_recovery_worker(ledger.clone()));
+    #[cfg(unix)]
+    let payout_reader = config
+        .core_bridge
+        .as_ref()
+        .and_then(|bridge| bridge.payout_account_id)
+        .map(|id| {
+            strike
+                .as_ref()
+                .context("Strike payout backend missing")?
+                .payout_reader(id)
+        })
+        .transpose()?;
+    #[cfg(unix)]
+    let core_bridge = config.core_bridge.clone().map(|bridge| {
+        tokio::spawn(
+            lightning_goats::core_bridge::unix::run_optional_with_readers(
+                Some(bridge),
+                ledger.clone(),
+                config.service.mode,
+                payout_reader,
+                config.lnurl.breez_collector.clone(),
+            ),
+        )
+    });
+    let recovery_ledger = ledger.clone();
+    let mut recovery = tokio::spawn(async move {
+        match strike {
+            Some(runtime) => runtime.run_recovery_worker(recovery_ledger).await,
+            None => std::future::pending().await,
+        }
+    });
     let mut feeder = tokio::spawn(run_feed_worker(
         ledger.clone(),
         gateway.clone(),
@@ -144,6 +266,27 @@ async fn main() -> Result<()> {
         Duration::from_secs(config.feeder.inter_feed_delay_seconds),
         config.service.mode,
     ));
+    let mut feeding_presentation = tokio::spawn(run_feeding_presentation_worker(
+        ledger.clone(),
+        gateway.clone(),
+        config.feeder.threshold_sats,
+        config.service.mode,
+    ));
+    let mut solar_presentation = tokio::spawn({
+        let enabled = config.core_bridge.is_some();
+        let ledger = ledger.clone();
+        let gateway = gateway.clone();
+        async move {
+            if enabled {
+                lightning_goats::feeding_presentation::run_solar_presentation_worker(
+                    ledger, gateway,
+                )
+                .await
+            } else {
+                pending::<Result<()>>().await
+            }
+        }
+    });
     let mut informational = tokio::spawn(run_informational_worker(
         ledger.clone(),
         gateway,
@@ -158,12 +301,65 @@ async fn main() -> Result<()> {
     ));
     let mut publisher = tokio::spawn({
         let ledger = ledger.clone();
+        let nostr = nostr.clone();
         async move {
             if let Some(nak) = nostr {
                 run_outbox_publisher(ledger, nak).await
             } else {
                 pending::<Result<()>>().await
             }
+        }
+    });
+    let mut zap_receipts = tokio::spawn({
+        let ledger = ledger.clone();
+        let nostr = if config.lnurl.zap.is_some() {
+            nostr.clone()
+        } else {
+            None
+        };
+        async move {
+            if let Some(nak) = nostr {
+                lightning_goats::zap_receipts::run_receipt_worker(ledger, nak).await
+            } else {
+                pending::<Result<()>>().await
+            }
+        }
+    });
+
+    let mut contact_delivery = tokio::spawn({
+        let enabled = config.contact.is_some();
+        let ledger = ledger.clone();
+        async move {
+            if enabled {
+                lightning_goats::contact_delivery::run(ledger).await
+            } else {
+                pending::<Result<()>>().await
+            }
+        }
+    });
+
+    let mut breez_claims = tokio::spawn({
+        let ledger = ledger.clone();
+        let collector = config.lnurl.breez_collector.clone();
+        async move {
+            match collector {
+                Some(collector) => ledger.run_breez_claim_recovery(collector).await,
+                None => pending::<Result<()>>().await,
+            }
+        }
+    });
+
+    let mut cashu_receipts = tokio::spawn(async move {
+        match cashu_receipts {
+            Some(server) => server.serve(pending()).await,
+            None => pending::<Result<()>>().await,
+        }
+    });
+
+    let mut cashu_treasury = tokio::spawn(async move {
+        match cashu_treasury {
+            Some(worker) => worker.run().await,
+            None => pending::<Result<()>>().await,
         }
     });
 
@@ -173,23 +369,42 @@ async fn main() -> Result<()> {
             Ok(())
         }
         result = &mut server => task_exit("HTTP server", result),
+        result = &mut breez_claims => task_exit("Breez claim recovery", result),
         result = &mut recovery => task_exit("settlement recovery", result),
         result = &mut feeder => task_exit("feed worker", result),
         result = &mut informational => task_exit("informational worker", result),
+        result = &mut solar_presentation => task_exit("solar presentation worker", result),
+        result = &mut feeding_presentation => task_exit("feeding presentation worker", result),
         result = &mut message_processor => task_exit("Nostr message processor", result),
         result = &mut publisher => task_exit("Nostr outbox publisher", result),
+        result = &mut zap_receipts => task_exit("zap receipt publisher", result),
+        result = &mut contact_delivery => task_exit("private contact delivery", result),
+        result = &mut cashu_treasury => task_exit("Cashu treasury coordination", result),
+        result = &mut cashu_receipts => task_exit("private Cashu receipt import", result),
     };
 
     server.abort();
     recovery.abort();
+    breez_claims.abort();
     feeder.abort();
     informational.abort();
+    feeding_presentation.abort();
+    solar_presentation.abort();
     message_processor.abort();
     publisher.abort();
+    zap_receipts.abort();
+    contact_delivery.abort();
+    cashu_receipts.abort();
+    cashu_treasury.abort();
+    #[cfg(unix)]
+    if let Some(bridge) = core_bridge {
+        bridge.abort();
+    }
     result
 }
 
 fn app(state: AppState) -> Router {
+    let cashu = state.cashu.clone();
     Router::new()
         .route("/healthz", get(healthz))
         .route("/api/v1/status", get(status))
@@ -198,9 +413,23 @@ fn app(state: AppState) -> Router {
             post(strike_webhook).layer(DefaultBodyLimit::max(MAX_STRIKE_WEBHOOK_BODY)),
         )
         .route("/.well-known/lnurlp/{user}", get(lnurl_discovery))
-        .route("/lnurlp/{user}/callback", get(lnurl_callback))
+        .route(
+            "/lnurlp/{user}/callback",
+            get(lnurl_callback).head(|| async { StatusCode::METHOD_NOT_ALLOWED }),
+        )
+        .route(
+            "/api/v1/contact",
+            post(contact_create).layer(DefaultBodyLimit::max(
+                lightning_goats::contact::MAX_REQUEST_BYTES,
+            )),
+        )
+        .route(
+            "/api/v1/contact/status",
+            post(contact_status).layer(DefaultBodyLimit::max(1024)),
+        )
         .route("/ws/overlay", get(overlay_ws))
         .with_state(state)
+        .merge(lightning_goats::cashu::http::router(cashu))
         .layer(middleware::from_fn_with_state(
             Arc::new(tokio::sync::Semaphore::new(64)),
             bounded_http,
@@ -285,7 +514,7 @@ async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse>, S
 
     Ok(Json(StatusResponse {
         mode: state.config.service.mode.as_str(),
-        payment_backend: "strike",
+        payment_backend: state.config.lnurl.wallet_backend.as_str(),
         lightning_address_users: state.lnurl.configured_users(),
         gateway_reachable,
         feed_credit_sats,
@@ -327,12 +556,24 @@ async fn lnurl_callback(
         Err(_) => return lnurl_error(StatusCode::OK, "Invalid amount"),
     };
 
-    match state.lnurl.callback(&user, amount_msat).await {
+    match state
+        .lnurl
+        .callback_with_zap(
+            &user,
+            amount_msat,
+            query.nostr.as_deref(),
+            query.lnurl.as_deref(),
+        )
+        .await
+    {
         Ok(response) => (StatusCode::OK, Json(response)).into_response(),
         Err(LnurlServiceError::UnknownUser) => {
             lnurl_error(StatusCode::NOT_FOUND, "Unknown Lightning Address")
         }
         Err(LnurlServiceError::InvalidAmount(reason)) => lnurl_error(StatusCode::OK, reason),
+        Err(LnurlServiceError::InvalidZap) => {
+            lnurl_error(StatusCode::OK, "Invalid or unsupported zap request")
+        }
         Err(LnurlServiceError::Busy) => lnurl_error(
             StatusCode::TOO_MANY_REQUESTS,
             "Invoice service is busy; retry later",
@@ -355,6 +596,9 @@ async fn strike_webhook(
     headers: HeaderMap,
     body: Bytes,
 ) -> StatusCode {
+    let Some(strike) = &state.strike else {
+        return StatusCode::NOT_FOUND;
+    };
     if !headers
         .get("content-type")
         .and_then(|v| v.to_str().ok())
@@ -380,11 +624,11 @@ async fn strike_webhook(
         return StatusCode::UNAUTHORIZED;
     };
 
-    if let Err(error) = state.strike.verify_webhook_signature(&body, signature) {
+    if let Err(error) = strike.verify_webhook_signature(&body, signature) {
         tracing::warn!(%error, "rejected Strike webhook with invalid signature");
         return StatusCode::UNAUTHORIZED;
     }
-    let event = match state.strike.parse_completed_event(&body) {
+    let event = match strike.parse_completed_event(&body) {
         Ok(event) => event,
         Err(error) => {
             tracing::warn!(%error, "rejected unsupported or malformed signed Strike webhook");
@@ -398,6 +642,158 @@ async fn strike_webhook(
             tracing::error!(%error,"Strike inbox persistence failed; notification remains retryable");
             StatusCode::SERVICE_UNAVAILABLE
         }
+    }
+}
+
+fn private_response(status: StatusCode, value: serde_json::Value) -> Response {
+    (
+        status,
+        [
+            ("cache-control", "no-store"),
+            ("referrer-policy", "no-referrer"),
+        ],
+        Json(value),
+    )
+        .into_response()
+}
+fn contact_ingress(
+    config: &AppConfig,
+    headers: &HeaderMap,
+    query: Option<&str>,
+) -> Result<(), StatusCode> {
+    if config.contact.is_none() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    if query.is_some() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let origin = config.lnurl.public_base_url.trim_end_matches('/');
+    if headers.get("origin").and_then(|v| v.to_str().ok()) != Some(origin) {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    if !headers
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| {
+            v.split(';')
+                .next()
+                .unwrap_or("")
+                .trim()
+                .eq_ignore_ascii_case("application/json")
+        })
+    {
+        return Err(StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    }
+    Ok(())
+}
+async fn contact_create(
+    State(state): State<AppState>,
+    uri: axum::extract::OriginalUri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    if let Err(code) = contact_ingress(&state.config, &headers, uri.query()) {
+        return private_response(code, serde_json::json!({"error":"contact request refused"}));
+    }
+    let Ok(_permit) = state.contact_slots.clone().try_acquire_owned() else {
+        return private_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            serde_json::json!({"error":"contact service busy"}),
+        );
+    };
+    let Some(config) = &state.config.contact else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let Ok(request) = serde_json::from_slice::<lightning_goats::contact::Request>(&body) else {
+        return private_response(
+            StatusCode::BAD_REQUEST,
+            serde_json::json!({"error":"invalid private contact"}),
+        );
+    };
+    let capability = request.capability.clone();
+    let intent = lightning_goats::cyberherd::calendar::now()
+        .ok()
+        .and_then(|now| {
+            lightning_goats::contact::Intent::validate(
+                request,
+                &config.recipient,
+                &config.inbox_relays,
+                now,
+            )
+            .ok()
+        });
+    let Some(intent) = intent else {
+        return private_response(
+            StatusCode::BAD_REQUEST,
+            serde_json::json!({"error":"invalid private contact"}),
+        );
+    };
+    // No raw body, deserializer, capability or provider error enters diagnostics.
+    let result = match state.config.lnurl.wallet_backend {
+        lightning_goats::config::WalletBackend::Breez => {
+            let Some(collector) = &state.config.lnurl.breez_collector else {
+                return StatusCode::SERVICE_UNAVAILABLE.into_response();
+            };
+            state
+                .ledger
+                .create_breez_contact_invoice(collector, &intent, &capability)
+                .await
+        }
+        lightning_goats::config::WalletBackend::Strike => {
+            let Some(strike) = &state.strike else {
+                return StatusCode::SERVICE_UNAVAILABLE.into_response();
+            };
+            strike
+                .create_contact_invoice(&state.ledger, &intent, &capability)
+                .await
+        }
+    };
+    match result {
+        Ok(status) => private_response(
+            StatusCode::OK,
+            serde_json::to_value(status).unwrap_or_default(),
+        ),
+        Err(_) => private_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            serde_json::json!({"error":"contact invoice unavailable; check the saved contact status before retrying"}),
+        ),
+    }
+}
+async fn contact_status(
+    State(state): State<AppState>,
+    uri: axum::extract::OriginalUri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    if let Err(code) = contact_ingress(&state.config, &headers, uri.query()) {
+        return private_response(code, serde_json::json!({"error":"contact status refused"}));
+    }
+    let Ok(_permit) = state.contact_slots.clone().try_acquire_owned() else {
+        return private_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            serde_json::json!({"error":"contact service busy"}),
+        );
+    };
+    let Ok(request) = serde_json::from_slice::<lightning_goats::contact::StatusRequest>(&body)
+    else {
+        return private_response(
+            StatusCode::BAD_REQUEST,
+            serde_json::json!({"error":"invalid contact status request"}),
+        );
+    };
+    match state
+        .ledger
+        .contact_status(request.id, &request.capability)
+        .await
+    {
+        Ok(Some(status)) => private_response(
+            StatusCode::OK,
+            serde_json::to_value(status).unwrap_or_default(),
+        ),
+        Ok(None) | Err(_) => private_response(
+            StatusCode::NOT_FOUND,
+            serde_json::json!({"error":"contact status unavailable"}),
+        ),
     }
 }
 
@@ -415,6 +811,7 @@ async fn overlay_ws(
     let ledger = state.ledger.clone();
     let renderer = state.renderer.clone();
     let threshold_sats = state.config.feeder.threshold_sats;
+    let cashu = state.cashu.clone();
     ws.max_message_size(1024)
         .max_frame_size(1024)
         .write_buffer_size(4096)
@@ -422,7 +819,7 @@ async fn overlay_ws(
         .on_upgrade(move |socket| async move {
             let _permit = permit;
             if let Err(error) =
-                serve_overlay_socket(socket, ledger, renderer, threshold_sats, resume).await
+                serve_overlay_socket(socket, ledger, renderer, threshold_sats, resume, cashu).await
             {
                 tracing::warn!(%error, "overlay websocket disconnected after server-side error");
             }
@@ -439,6 +836,55 @@ async fn shutdown_signal() {
 mod tests {
     use super::*;
     use hmac::{Hmac, Mac};
+
+    #[test]
+    fn private_contact_ingress_is_default_off_and_refuses_capabilities_in_urls() {
+        let mut config: AppConfig =
+            toml::from_str(include_str!("../deploy/config.canary.toml.example")).unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "origin",
+            config
+                .lnurl
+                .public_base_url
+                .trim_end_matches('/')
+                .parse()
+                .unwrap(),
+        );
+        headers.insert("content-type", "application/json".parse().unwrap());
+        assert_eq!(
+            contact_ingress(&config, &headers, None),
+            Err(StatusCode::NOT_FOUND)
+        );
+        config.contact = Some(lightning_goats::contact::Config {
+            recipient: config.nostr.bunker_pubkey.clone(),
+            inbox_relays: vec!["wss://relay.example.org".into()],
+        });
+        assert!(contact_ingress(&config, &headers, None).is_ok());
+        assert_eq!(
+            contact_ingress(&config, &headers, Some("capability=private")),
+            Err(StatusCode::BAD_REQUEST)
+        );
+        headers.insert("origin", "https://unrelated.example".parse().unwrap());
+        assert_eq!(
+            contact_ingress(&config, &headers, None),
+            Err(StatusCode::FORBIDDEN)
+        );
+        headers.insert(
+            "origin",
+            config
+                .lnurl
+                .public_base_url
+                .trim_end_matches('/')
+                .parse()
+                .unwrap(),
+        );
+        headers.insert("content-type", "text/plain".parse().unwrap());
+        assert_eq!(
+            contact_ingress(&config, &headers, None),
+            Err(StatusCode::UNSUPPORTED_MEDIA_TYPE)
+        );
+    }
     use lightning_goats::strike::{StrikeClient, StrikeWebhookVerifier};
     use sha2::Sha256;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -479,14 +925,16 @@ mod tests {
         )
         .unwrap();
         let router = app(AppState {
+            cashu: None,
             config: Arc::new(config),
             ledger: ledger.clone(),
             gateway: GatewayClient::new("http://127.0.0.1:9/").unwrap(),
-            strike,
+            strike: Some(strike),
             lnurl,
             renderer: MessageRenderer::embedded().unwrap(),
             status_slots: Arc::new(tokio::sync::Semaphore::new(4)),
             overlay_slots: Arc::new(tokio::sync::Semaphore::new(32)),
+            contact_slots: Arc::new(tokio::sync::Semaphore::new(4)),
         });
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -501,6 +949,24 @@ mod tests {
             .timeout(Duration::from_secs(2))
             .build()
             .unwrap();
+        // Axum normally runs GET handlers for HEAD. A probe must never issue
+        // a provider invoice or consume the durable invoice admission budget.
+        assert_eq!(
+            client
+                .head(format!("http://{address}/lnurlp/herd/callback?amount=1000"))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::METHOD_NOT_ALLOWED
+        );
+        let pool = sqlx::SqlitePool::connect(&db).await.unwrap();
+        let admissions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM invoice_admissions")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(admissions, 0);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
         let body = serde_json::json!({"id":uuid::Uuid::new_v4(),"eventType":"receive-request.receive-completed","webhookVersion":"v1","data":{"entityId":uuid::Uuid::new_v4(),"receiveId":uuid::Uuid::new_v4()}}).to_string();
         let signature = |body: &str| {
             let mut mac = Hmac::<Sha256>::new_from_slice(b"synthetic-webhook-secret").unwrap();
@@ -720,3 +1186,6 @@ mod tests {
         server.abort();
     }
 }
+
+#[cfg(test)]
+mod contact_http_tests;

@@ -1,0 +1,13 @@
+{
+  "result": "CASHU_FINANCIAL_RELEASE_APPROVAL_VERIFIED",
+  "core_test_sha256": "65eb1dd4409ec81e9b8654f337bd888c9572b1b67c9352ca6ac6f9edd028ce82",
+  "runner_sha256": "64ca6a39c15de91fe69d77b77243134722369e712a7ec16d4d3cfd9473087029",
+  "tests_passed": 3,
+  "root_protected_file_branch_executed": true,
+  "fresh_network_namespace": true,
+  "positive_release_cli_qualified": false,
+  "ledger_opened": false,
+  "services_changed": false,
+  "unprivileged_focused_test_passed": true,
+  "unprivileged_sandbox_socket_denial": "focused rerun passed with local Unix socket access"
+}

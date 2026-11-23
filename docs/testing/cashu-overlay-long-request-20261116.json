@@ -1,0 +1,20 @@
+{
+  "result": "passed",
+  "test": "test_cashu_requests_decode_without_case_conversion_at_both_sizes",
+  "scope": "Four native-CDK generated payloads: two encodings each for short two-mint and long four-mint synthetic configurations, decoded at 1080p and 720p; QR/status/banner geometry checked",
+  "log": ".\n----------------------------------------------------------------------\nRan 1 test in 22.964s\n\nOK\n",
+  "source_sha256": {
+    "web/overlay.html": "c63f418ce92aa32a81ce2344617c188b673993e097470d83e72afd6f911e40f6",
+    "web/overlay.css": "b45d615195c867c139e60438c01ddbd655323a27c004502d1f50165f68eb8223",
+    "web/overlay.js": "e4a43627fd144666931373d8663dafca921b06b529dcbabf1e4ea518ba7d43ae",
+    "tests/website/test_overlay.py": "af7452b1d5284cff1fafb0e50daa8846fcd55aefd21a8059d96d2ff09f7590a6",
+    "tests/website/fixtures/cashu-requests.json": "bd9a3430e92a3d025ca6f70fd42ee132312c09868256a99c55e5f12911f279ac",
+    "deploy/scripts/test-cashu-request-cli.py": "34a9bccec0dd35911ff6c19f709d7cbdbdf96877ec3e76a46b182ea02d3543e8"
+  },
+  "long_request_payload_lengths": {
+    "creqA": 613,
+    "creqB": 718
+  },
+  "production_changed": false,
+  "real_wallet_or_phone_scan": false
+}

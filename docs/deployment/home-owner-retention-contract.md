@@ -1,13 +1,13 @@
 # Owner retention and restore contract — proposed for coordination
 
-**Design proposal, not implemented or accepted. Production HOLD.** This makes
+**Design contract for future retention work.** This records
 HOME's issue #17 comment5655433594 concrete. It builds on owner candidate PR72
 and source-accepted v2 adapter PR76 at `bdd5a534a91015cdfadfc7f2f4fdc6ca69a74865`.
 It does not replace the deployed physical owner or authorize compaction.
 
 ## Existing boundary and required outcome
 
-The owner currently retains at most 32 receipts and refuses the 33rd distinct
+The repository’s OpenHAB v2 owner candidate retains at most 32 receipts and refuses the 33rd distinct
 request. This is safe exhaustion, not sustained operation. The gateway retains
 requests and refusal tombstones in SQLite; v2 recovery additionally requires an
 exact committed owner/JDBC completion. An owner Item, an HTTP success, or a local
@@ -76,12 +76,11 @@ Physical admission must start disabled after every gateway/owner restart and
 restore until explicit local reconciliation. Any eventual enable operation must
 bind the current gateway and owner process generations through a local-only
 administrative channel; a restorable Item/flag or a VPS API call is insufficient.
-The mechanism must close admission if either generation changes. Its exact
+Use fresh, unpredictable identities for both process generations. Keep the permit in volatile state and synchronously invalidate it before another owner POST if either generation changes. Its exact
 implementation and tests require coordination before coding shared paths.
 
 Reconciliation compares preserved gateway requests/refusals, owner durable
-receipts and witness history. Import their UUID union without downgrading or
-synthesizing terminal results. Conflicting records, missing newer history or an
+receipts and witness history. Preserve the original records and audit each reconciliation decision. Missing or contradictory coverage may add an ambiguity record or a replay tombstone. It cannot establish a new dispatch, confirmation, or no-dispatch result. Conflicting records, missing newer history or an
 unresolved request prevent enablement. Full-host rollback requires independent
 post-backup evidence or operator resolution; absent that evidence, stay disabled.
 An operator acknowledgement alone is not a proof that an old UUID is fresh.

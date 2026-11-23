@@ -1,0 +1,48 @@
+{
+  "scope": "one-attempt split submission and reply retention",
+  "production_state_changed": false,
+  "source_hashes_rechecked": true,
+  "snapshot_sha256": "4850141e7c7e17347733f928864e4d89d8b43d055bd8b3d893db83d6e1edf7b3",
+  "test_log_sha256": "e842ef54da142512067c6ee7edacca97e2a4726976910067f698565f852b5b7f",
+  "results": [
+    {
+      "passed": 136,
+      "failed": 0,
+      "ignored": 5
+    },
+    {
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0
+    }
+  ],
+  "total_passed": 143,
+  "strict_clippy": "passed",
+  "format": "passed",
+  "vendor": "passed"
+}

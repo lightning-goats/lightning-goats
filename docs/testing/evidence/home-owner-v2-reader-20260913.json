@@ -1,0 +1,21 @@
+{
+  "date": "2026-09-13",
+  "adapter_source_commit": "fe4f406",
+  "adapter_sha256": "e0d425d855fa6cf39f581c31d096b7c7aff86d998fc8b20ccc54191884c73408",
+  "probe_sha256": "744390864c4a5b7ddd30741836a280bcfc2a36eee3d6548bb38429ce9a571a12",
+  "scope": "actual unlinked fixture, read-only same-UUID JDBC recovery",
+  "runtime_identity": "lightning-goats-gateway-canary",
+  "credential": "existing dedicated encrypted systemd credential; never exported",
+  "result": "Complete",
+  "fixture_counter": 1,
+  "fixture_on_deliveries": 1,
+  "fixture_actuator": "OFF",
+  "probe_commands": 0,
+  "first_launch": "blocked by noexec /run before execution; policy preserved",
+  "production_owner_changed": false,
+  "limitations": [
+    "not a physical test",
+    "not full-host restore or sustained retention acceptance",
+    "independent exact-head review required"
+  ]
+}

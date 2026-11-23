@@ -1,0 +1,27 @@
+{
+  "result": "standalone_synthetic_change_probe_passed",
+  "exit_code": 0,
+  "source_sha256": {
+    ".artifacts/cashu-fee-change-draft/mint-tests.rs": "55ff9af782d51b5542021f1d33153292f43267807674aa2d8174b1c37e973b62",
+    ".artifacts/cashu-fee-change-draft/mint-probe.rs": "f07bbad9ab84ae781a9e2b81741b7ac344d49ed46b98f0a75e1709f0738ad02a"
+  },
+  "binary_sha256": "498aa1c8a7286bd9dc32541bc1f5fa93c16cd41b2639a91ad6b609f6ffa54b21",
+  "build": "rustc 1.88.0 against existing locked Cashu 0.18.3 library artifacts; extracted unused fixture members produce dead-code warnings",
+  "result_log": "SYNTHETIC_MELT_CHANGE_SIGNATURE_DLEQ_RESTORE_REPLAY_VERIFIED\n",
+  "network_namespace_isolated": true,
+  "checks": [
+    "Malformed blank-output request rejects before spending",
+    "400-sat input: 398 deposit, 1 input fee, 1 returned change",
+    "Original blinded output signed and DLEQ verified",
+    "Unblinded change matches original secret and mint key",
+    "Original blind signature retained for NUT-09 material",
+    "Spent input replay rejects with one retained change signature"
+  ],
+  "not_qualified": [
+    "Actual CDK melt/scheduler handling of returned change",
+    "Combined wallet-to-core fee/change conservation",
+    "HTTP NUT-09 restore request and full process restart",
+    "Production/providers/physical actuation"
+  ],
+  "production_changed": false
+}

@@ -1,0 +1,8 @@
+{
+  "result": "CASHU_FINANCIAL_RELEASE_OLD_ARTIFACT_REJECTED",
+  "runner_sha256": "64ca6a39c15de91fe69d77b77243134722369e712a7ec16d4d3cfd9473087029",
+  "scope": "root in a fresh network namespace; older native test lacks required approval tests",
+  "positive_current_artifact_qualification": false,
+  "services_changed": false,
+  "ledger_opened": false
+}

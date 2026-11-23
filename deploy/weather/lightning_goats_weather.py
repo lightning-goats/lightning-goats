@@ -86,7 +86,10 @@ valid, nonregressing selected observation can restore availability.
     except (ValueError, TypeError, OverflowError):
         epoch, snapshot = None, None
     with closing(sqlite3.connect(path, timeout=0.1)) as db, db:
-        db.execute('PRAGMA journal_mode=WAL')
+        # A separate read-only exporter must not create WAL/SHM files after
+        # this short-lived writer closes. Rollback journaling keeps committed
+        # snapshots readable with no directory or database write permission.
+        db.execute('PRAGMA journal_mode=DELETE')
         db.execute('PRAGMA synchronous=FULL')
         db.execute('CREATE TABLE IF NOT EXISTS snapshot (singleton INTEGER PRIMARY KEY CHECK(singleton=1), high_water REAL NOT NULL, payload TEXT)')
         db.execute('BEGIN IMMEDIATE')

@@ -319,4 +319,4 @@ if __name__=="__main__":
     verify_legacy_upgrade()
     for rate in (0,100): exercise(rate)
     exercise(100, failed_members=True)
-    exercise(100, ecash_members=True)
+    for rate in (0,100): exercise(rate, ecash_members=True)

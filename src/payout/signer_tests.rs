@@ -13,7 +13,7 @@ fn installed_worker_wire_fixture_is_valid_before_zero_limit_rejection() {
     let Call::SignPayout { intent } = call else {
         panic!("expected payout invoice")
     };
-    let intent = Intent::restore(intent).unwrap();
+    let intent = Intent::restore(*intent).unwrap();
     assert!(intent.uses_nostr());
     assert_eq!(intent.unsigned_zap().unwrap().unwrap().kind, 9734);
     let policy = Policy {

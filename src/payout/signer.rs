@@ -420,7 +420,7 @@ impl Backend for NakClient {
 #[serde(tag = "method", rename_all = "snake_case", deny_unknown_fields)]
 enum Call {
     SignPayout {
-        intent: Document,
+        intent: Box<Document>,
     },
     SignMemberReward {
         feed: uuid::Uuid,
@@ -478,7 +478,7 @@ impl Server {
                     )
                     .await
                     {
-                        Ok(Ok(Call::SignPayout { intent })) => match Intent::restore(intent) {
+                        Ok(Ok(Call::SignPayout { intent })) => match Intent::restore(*intent) {
                             Ok(intent) => match store.sign(intent, backend.as_ref()).await {
                                 Ok(event_json) => Reply::Signed { event_json },
                                 Err(_) => Reply::Rejected,
@@ -537,7 +537,7 @@ impl Client {
             &self.socket,
             self.peer_uid,
             &Call::SignPayout {
-                intent: intent.0.clone(),
+                intent: Box::new(intent.0.clone()),
             },
             MAX_FRAME,
             65,

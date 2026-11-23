@@ -1,0 +1,1751 @@
+//! Wallet saga recovery module.
+//!
+//! This module handles recovery from incomplete wallet sagas after a crash.
+//! It follows the same pattern as the mint's `start_up_check.rs` module.
+//!
+//! # Recovery Strategy
+//!
+//! The recovery logic examines the state of each incomplete saga:
+//!
+//! - **Safe to Rollback:** If no external calls were made (e.g. ProofsReserved),
+//!   the saga is compensated by releasing resources (proofs, quotes).
+//! - **Check External State:** If external calls were possible (e.g. SwapRequested),
+//!   the wallet queries the mint to determine if the operation succeeded.
+//!   - If successful: The wallet completes the local state update (e.g. marking proofs spent).
+//!   - If failed/unknown: The wallet may rollback or retry depending on the specific state.
+
+use std::collections::{HashMap, HashSet};
+
+use async_trait::async_trait;
+use cdk_common::wallet::{ProofInfo, WalletSagaState};
+use cdk_common::BlindedMessage;
+use tracing::instrument;
+
+use crate::dhke::construct_proofs;
+use crate::nuts::{CheckStateRequest, PreMintSecrets, Proofs, RestoreRequest, State, SwapRequest};
+use crate::wallet::blind_signature::{
+    validate_mint_response_signatures, SignatureAmountValidation,
+};
+use crate::wallet::util::escape_log_value;
+use crate::{Error, Wallet};
+
+/// Parameters for recovering outputs using stored blinded messages.
+///
+/// This struct captures the common data needed across swap, receive, and issue
+/// saga recovery operations.
+struct OutputRecoveryParams<'a> {
+    /// The blinded messages stored during the original operation
+    blinded_messages: &'a [BlindedMessage],
+    /// Counter start for re-deriving secrets
+    counter_start: u32,
+    /// Counter end for re-deriving secrets
+    counter_end: u32,
+}
+
+/// Whether all requested outputs must have been signed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OutputRecoveryMode {
+    /// Fixed outputs from swap, receive, or issuance must all be recovered.
+    Complete,
+    /// Melt change may leave some blank outputs unsigned.
+    Partial,
+}
+
+/// Report of recovery operations performed by [`Wallet::recover_incomplete_sagas`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct RecoveryReport {
+    /// Operations successfully completed after crash
+    pub recovered: usize,
+    /// Operations rolled back (resources released)
+    pub compensated: usize,
+    /// Operations still pending (will retry on next call)
+    pub skipped: usize,
+    /// Operations that could not be recovered
+    pub failed: usize,
+}
+
+impl RecoveryReport {
+    /// Returns true if no operations were recovered, compensated, skipped, or failed.
+    pub fn is_empty(&self) -> bool {
+        self.recovered == 0 && self.compensated == 0 && self.skipped == 0 && self.failed == 0
+    }
+}
+
+/// Result of a saga recovery operation.
+///
+/// Used by individual saga resume functions to indicate the outcome.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecoveryAction {
+    /// The saga was successfully recovered (outputs saved)
+    Recovered,
+    /// The saga was compensated (rolled back)
+    Compensated,
+    /// The saga was skipped (e.g., mint unreachable, payment pending)
+    Skipped,
+}
+
+/// Detailed result of a restore attempt against the mint.
+#[derive(Debug, Clone)]
+pub(crate) enum OutputRecoveryResult {
+    /// The mint returned signatures and the wallet reconstructed proofs.
+    Restored(Vec<ProofInfo>),
+    /// The mint accepted the restore request but had no matching signatures.
+    EmptyResponse,
+    /// The restore attempt could not be made definitively.
+    Unavailable,
+}
+
+/// Shared recovery helpers for saga resume operations.
+///
+/// These methods are used by individual saga resume modules to check
+/// external state and restore outputs.
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+pub trait RecoveryHelpers {
+    /// Check if all proofs are spent by querying the mint.
+    ///
+    /// This is a simple check that doesn't update the database.
+    ///
+    /// Returns:
+    /// - `Ok(true)` if all proofs are spent
+    /// - `Ok(false)` if any proofs are not spent
+    /// - `Err` if the mint is unreachable
+    async fn are_proofs_spent(&self, proofs: &[ProofInfo]) -> Result<bool, Error>;
+
+    /// Restore outputs using stored blinded messages.
+    ///
+    /// Queries the mint's /restore endpoint to recover proof signatures,
+    /// then reconstructs the proofs. An incomplete response returns an error so
+    /// callers retain the operation for retry.
+    ///
+    /// Returns:
+    /// - `Ok(Some(proofs))` if outputs were successfully restored
+    /// - `Ok(None)` if restoration failed (mint unreachable, no data, etc.)
+    /// - `Err` for unrecoverable errors (cryptographic failures, etc.)
+    async fn restore_outputs(
+        &self,
+        saga_id: &uuid::Uuid,
+        saga_type: &str,
+        blinded_messages: Option<&[BlindedMessage]>,
+        counter_start: Option<u32>,
+        counter_end: Option<u32>,
+    ) -> Result<Option<Vec<ProofInfo>>, Error>;
+
+    /// Attempt to replay a swap request using stored data.
+    ///
+    /// This leverages NUT-19 caching: if the mint has a cached response for the
+    /// exact request, it will return the signatures immediately. This also works
+    /// if the swap wasn't actually executed yet (inputs not spent).
+    ///
+    /// Works for both Swap and Receive sagas since both use `post_swap`.
+    ///
+    /// Returns:
+    /// - `Ok(Some(proofs))` if replay succeeded and we got signatures
+    /// - `Ok(None)` if replay failed (fall back to other recovery methods)
+    /// - `Err` only for unrecoverable errors
+    async fn try_replay_swap_request(
+        &self,
+        saga_id: &uuid::Uuid,
+        saga_type: &str,
+        blinded_messages: Option<&[BlindedMessage]>,
+        counter_start: Option<u32>,
+        counter_end: Option<u32>,
+        input_proofs: &[ProofInfo],
+    ) -> Result<Option<Vec<ProofInfo>>, Error>;
+}
+
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+impl RecoveryHelpers for Wallet {
+    /// Check if all proofs are spent by querying the mint.
+    async fn are_proofs_spent(&self, proofs: &[ProofInfo]) -> Result<bool, Error> {
+        if proofs.is_empty() {
+            return Ok(false);
+        }
+
+        let ys: Vec<_> = proofs.iter().map(|p| p.y).collect();
+        let response = self
+            .client
+            .post_check_state(CheckStateRequest { ys })
+            .await?;
+
+        Ok(response.states.iter().all(|s| s.state == State::Spent))
+    }
+
+    /// Restore outputs using stored blinded messages.
+    async fn restore_outputs(
+        &self,
+        saga_id: &uuid::Uuid,
+        saga_type: &str,
+        blinded_messages: Option<&[BlindedMessage]>,
+        counter_start: Option<u32>,
+        counter_end: Option<u32>,
+    ) -> Result<Option<Vec<ProofInfo>>, Error> {
+        match self
+            .restore_outputs_with_result(
+                saga_id,
+                saga_type,
+                blinded_messages,
+                counter_start,
+                counter_end,
+                OutputRecoveryMode::Complete,
+            )
+            .await?
+        {
+            OutputRecoveryResult::Restored(proofs) => Ok(Some(proofs)),
+            OutputRecoveryResult::EmptyResponse | OutputRecoveryResult::Unavailable => Ok(None),
+        }
+    }
+
+    /// Attempt to replay a swap request using stored data.
+    async fn try_replay_swap_request(
+        &self,
+        saga_id: &uuid::Uuid,
+        saga_type: &str,
+        blinded_messages: Option<&[BlindedMessage]>,
+        counter_start: Option<u32>,
+        counter_end: Option<u32>,
+        input_proofs: &[ProofInfo],
+    ) -> Result<Option<Vec<ProofInfo>>, Error> {
+        // We need blinded messages to reconstruct the request
+        let blinded_messages = match blinded_messages {
+            Some(bm) if !bm.is_empty() => bm,
+            _ => {
+                tracing::debug!(
+                    "{} saga {} - no blinded messages stored, cannot replay",
+                    saga_type,
+                    saga_id
+                );
+                return Ok(None);
+            }
+        };
+
+        // We need counter range to re-derive secrets
+        let (counter_start, counter_end) = match (counter_start, counter_end) {
+            (Some(start), Some(end)) => (start, end),
+            _ => {
+                tracing::debug!(
+                    "{} saga {} - no counter range stored, cannot replay",
+                    saga_type,
+                    saga_id
+                );
+                return Ok(None);
+            }
+        };
+
+        // Extract input proofs
+        let inputs: Proofs = input_proofs.iter().map(|pi| pi.proof.clone()).collect();
+
+        if inputs.is_empty() {
+            tracing::debug!(
+                "{} saga {} - no input proofs available, cannot replay",
+                saga_type,
+                saga_id
+            );
+            return Ok(None);
+        }
+
+        // Reconstruct the swap request
+        let swap_request = SwapRequest::new(inputs, blinded_messages.to_vec());
+
+        tracing::info!(
+            "{} saga {} - attempting replay of post_swap request",
+            saga_type,
+            saga_id
+        );
+
+        // Attempt the replay
+        let swap_response = match self.client.post_swap(swap_request).await {
+            Ok(response) => response,
+            Err(e) => {
+                tracing::info!(
+                    "{} saga {} - replay failed ({}), falling back to other recovery",
+                    saga_type,
+                    saga_id,
+                    escape_log_value(&e)
+                );
+                return Ok(None);
+            }
+        };
+
+        // Replay succeeded - construct proofs from signatures
+        tracing::info!(
+            "{} saga {} - replay succeeded, got {} signatures",
+            saga_type,
+            saga_id,
+            swap_response.signatures.len()
+        );
+
+        // Get keyset ID from the first blinded message
+        let keyset_id = blinded_messages[0].keyset_id;
+
+        // Re-derive premint secrets
+        let premint_secrets =
+            PreMintSecrets::restore_batch(keyset_id, &self.seed, counter_start, counter_end)?;
+
+        // Load keyset keys
+        let keys = self.keyset(keyset_id).await?.keys;
+
+        validate_mint_response_signatures(
+            self,
+            &swap_response.signatures,
+            blinded_messages.iter(),
+            SignatureAmountValidation::Exact,
+        )
+        .await?;
+
+        // Construct proofs
+        let proofs = construct_proofs(
+            swap_response.signatures,
+            premint_secrets.rs(),
+            premint_secrets.secrets(),
+            &keys,
+        )?;
+
+        // Convert to ProofInfo
+        let proof_infos: Vec<ProofInfo> = proofs
+            .into_iter()
+            .zip(&premint_secrets.secrets)
+            .map(|(p, premint)| {
+                let proof_info =
+                    ProofInfo::new(p, self.mint_url.clone(), State::Unspent, self.unit.clone())?;
+                Ok::<_, Error>(match premint.derivation_index {
+                    Some(index) => proof_info.with_derivation_index(index),
+                    None => proof_info,
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(Some(proof_infos))
+    }
+}
+
+impl Wallet {
+    /// Restore outputs, requiring complete coverage for fixed-output operations.
+    pub(crate) async fn restore_outputs_with_result(
+        &self,
+        saga_id: &uuid::Uuid,
+        saga_type: &str,
+        blinded_messages: Option<&[BlindedMessage]>,
+        counter_start: Option<u32>,
+        counter_end: Option<u32>,
+        mode: OutputRecoveryMode,
+    ) -> Result<OutputRecoveryResult, Error> {
+        let blinded_messages_owned = blinded_messages.map(|bm| bm.to_vec());
+
+        let params = match Self::extract_recovery_params(
+            saga_id,
+            saga_type,
+            blinded_messages_owned.as_ref(),
+            counter_start,
+            counter_end,
+        ) {
+            Some(p) => p,
+            None => return Ok(OutputRecoveryResult::Unavailable),
+        };
+
+        self.recover_outputs_from_blinded_messages(saga_id, saga_type, params, mode)
+            .await
+    }
+
+    /// Recover from incomplete operations after a crash. Call on startup.
+    ///
+    /// Handles interrupted swap, send, receive, and melt operations to prevent
+    /// proofs from being stuck in reserved states. Requires network connection.
+    #[instrument(skip(self))]
+    pub async fn recover_incomplete_sagas(&self) -> Result<RecoveryReport, Error> {
+        self.cleanup_orphaned_quote_reservations().await?;
+
+        let sagas = self.localstore.get_incomplete_sagas().await?;
+
+        // Filter to only include sagas for this wallet (mint and unit)
+        let sagas: Vec<_> = sagas
+            .into_iter()
+            .filter(|s| s.mint_url == self.mint_url && s.unit == self.unit)
+            .collect();
+
+        if sagas.is_empty() {
+            tracing::debug!("No incomplete sagas to recover");
+            return Ok(RecoveryReport::default());
+        }
+
+        tracing::info!("Found {} incomplete saga(s) to recover", sagas.len());
+
+        let mut report = RecoveryReport::default();
+
+        for saga in sagas {
+            tracing::info!(
+                "Recovering saga {} (kind: {:?}, state: {})",
+                saga.id,
+                saga.kind,
+                saga.state.state_str()
+            );
+
+            let result: Result<RecoveryAction, Error> = match &saga.state {
+                WalletSagaState::Swap(_) => self.resume_swap_saga(&saga).await,
+                WalletSagaState::Send(_) => self.resume_send_saga(&saga).await,
+                WalletSagaState::Receive(_) => self.resume_receive_saga(&saga).await,
+                WalletSagaState::Issue(_) => self.resume_issue_saga(&saga).await,
+                WalletSagaState::Melt(_) => {
+                    // Melt saga returns Option<FinalizedMelt>, convert to RecoveryAction
+                    self.resume_melt_saga(&saga).await.map(|opt| match opt {
+                        Some(finalized) => {
+                            use cdk_common::MeltQuoteState;
+                            if finalized.state() == MeltQuoteState::Paid {
+                                RecoveryAction::Recovered
+                            } else {
+                                RecoveryAction::Compensated
+                            }
+                        }
+                        None => RecoveryAction::Skipped,
+                    })
+                }
+            };
+
+            match result {
+                Ok(RecoveryAction::Recovered) => {
+                    tracing::info!("Saga {} recovered successfully", saga.id);
+                    report.recovered += 1;
+                }
+                Ok(RecoveryAction::Compensated) => {
+                    tracing::info!("Saga {} compensated (rolled back)", saga.id);
+                    report.compensated += 1;
+                }
+                Ok(RecoveryAction::Skipped) => {
+                    tracing::info!("Saga {} skipped", saga.id);
+                    report.skipped += 1;
+                }
+                Err(e) => {
+                    tracing::error!(
+                        "Failed to recover saga {}: {}",
+                        saga.id,
+                        escape_log_value(&e)
+                    );
+                    report.failed += 1;
+                }
+            }
+        }
+
+        tracing::info!(
+            "Recovery complete: {} recovered, {} compensated, {} skipped, {} failed",
+            report.recovered,
+            report.compensated,
+            report.skipped,
+            report.failed
+        );
+
+        Ok(report)
+    }
+
+    /// Recover outputs using stored blinded messages.
+    ///
+    /// This is the core recovery logic shared between swap, receive, and issue saga
+    /// recovery. It queries the mint for signatures using the stored blinded messages
+    /// and reconstructs the proofs.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(OutputRecoveryResult::Restored(proofs))` - Successfully recovered proofs
+    /// - `Ok(OutputRecoveryResult::EmptyResponse)` - Mint had no matching signatures
+    /// - `Ok(OutputRecoveryResult::Unavailable)` - Could not make a definitive restore attempt
+    /// - `Err(_)` - Unrecoverable error (e.g., cryptographic failure)
+    #[instrument(skip(self, params))]
+    async fn recover_outputs_from_blinded_messages(
+        &self,
+        saga_id: &uuid::Uuid,
+        saga_type: &str,
+        params: OutputRecoveryParams<'_>,
+        mode: OutputRecoveryMode,
+    ) -> Result<OutputRecoveryResult, Error> {
+        tracing::info!(
+            "{} saga {} - attempting to recover {} outputs using stored blinded messages",
+            saga_type,
+            saga_id,
+            params.blinded_messages.len()
+        );
+
+        let restore_request = RestoreRequest {
+            outputs: params.blinded_messages.to_vec(),
+        };
+
+        let restore_response = match self.client.post_restore(restore_request).await {
+            Ok(response) => response,
+            Err(e) => {
+                if e.is_definitive_failure() {
+                    tracing::warn!(
+                        "{} saga {} - failed to restore from mint (definitive): {}. \
+                         Run wallet.restore() to recover any missing proofs.",
+                        saga_type,
+                        saga_id,
+                        escape_log_value(&e)
+                    );
+                    return Ok(OutputRecoveryResult::Unavailable);
+                } else {
+                    tracing::warn!(
+                        "{} saga {} - failed to restore from mint (ambiguous): {}. \
+                         Skipping recovery to retry later.",
+                        saga_type,
+                        saga_id,
+                        escape_log_value(&e)
+                    );
+                    return Err(e);
+                }
+            }
+        };
+
+        // Validate coverage before constructing or saving any proofs. A nonempty
+        // subset is not enough to finish an operation with fixed outputs.
+        if mode == OutputRecoveryMode::Complete {
+            let mut expected: HashSet<_> = params
+                .blinded_messages
+                .iter()
+                .map(|output| output.blinded_secret)
+                .collect();
+            if expected.len() != params.blinded_messages.len()
+                || restore_response.outputs.len() != restore_response.signatures.len()
+                || restore_response.outputs.len() != expected.len()
+                || !restore_response
+                    .outputs
+                    .iter()
+                    .all(|output| expected.remove(&output.blinded_secret))
+                || !expected.is_empty()
+            {
+                return Err(Error::InvalidMintResponse(
+                    "restore response does not cover every expected output exactly once".to_owned(),
+                ));
+            }
+        }
+
+        if restore_response.signatures.is_empty() {
+            tracing::warn!(
+                "{} saga {} - mint returned no signatures. \
+                 Outputs may have already been saved or mint doesn't have them.",
+                saga_type,
+                saga_id
+            );
+            return Ok(OutputRecoveryResult::EmptyResponse);
+        }
+
+        // Get keyset ID from the first blinded message
+        let keyset_id = params.blinded_messages[0].keyset_id;
+
+        let premint_secrets = PreMintSecrets::restore_batch(
+            keyset_id,
+            &self.seed,
+            params.counter_start,
+            params.counter_end,
+        )?;
+
+        let premints_by_blinded_secret = premint_secrets
+            .secrets
+            .iter()
+            .map(|premint| (premint.blinded_message.blinded_secret, premint))
+            .collect::<HashMap<_, _>>();
+        let requested_outputs_by_blinded_secret = params
+            .blinded_messages
+            .iter()
+            .map(|output| (output.blinded_secret, output))
+            .collect::<HashMap<_, _>>();
+
+        // Match the returned outputs to our premint secrets by B_ value, preserving
+        // the mint response order used by the returned signatures.
+        let matched: Vec<_> = restore_response
+            .outputs
+            .iter()
+            .filter_map(|output| {
+                let premint = premints_by_blinded_secret.get(&output.blinded_secret)?;
+                let requested_output =
+                    requested_outputs_by_blinded_secret.get(&output.blinded_secret)?;
+                Some((*premint, *requested_output))
+            })
+            .collect();
+
+        if matched.len() != restore_response.signatures.len() {
+            tracing::warn!(
+                "{} saga {} - signature count mismatch: {} secrets, {} signatures",
+                saga_type,
+                saga_id,
+                matched.len(),
+                restore_response.signatures.len()
+            );
+        }
+
+        // Load keyset keys for proof construction
+        let keys = self.keyset(keyset_id).await?.keys;
+
+        validate_mint_response_signatures(
+            self,
+            &restore_response.signatures,
+            matched
+                .iter()
+                .map(|(_, requested_output)| *requested_output),
+            SignatureAmountValidation::AllowZeroAmountPlaceholder,
+        )
+        .await?;
+
+        // Construct proofs from signatures
+        let proofs = construct_proofs(
+            restore_response.signatures,
+            matched.iter().map(|(p, _)| p.r.clone()).collect(),
+            matched.iter().map(|(p, _)| p.secret.clone()).collect(),
+            &keys,
+        )?;
+
+        tracing::info!(
+            "{} saga {} - recovered {} proofs",
+            saga_type,
+            saga_id,
+            proofs.len()
+        );
+
+        // Convert to ProofInfo
+        let proof_infos: Vec<ProofInfo> = proofs
+            .into_iter()
+            .zip(matched)
+            .map(|(p, (premint, _))| {
+                let proof_info =
+                    ProofInfo::new(p, self.mint_url.clone(), State::Unspent, self.unit.clone())?;
+                Ok::<_, Error>(match premint.derivation_index {
+                    Some(index) => proof_info.with_derivation_index(index),
+                    None => proof_info,
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(OutputRecoveryResult::Restored(proof_infos))
+    }
+
+    /// Extract recovery parameters from operation data.
+    ///
+    /// Returns `None` if the required data (blinded messages, counter range) is missing.
+    fn extract_recovery_params<'a>(
+        saga_id: &uuid::Uuid,
+        saga_type: &str,
+        blinded_messages: Option<&'a Vec<BlindedMessage>>,
+        counter_start: Option<u32>,
+        counter_end: Option<u32>,
+    ) -> Option<OutputRecoveryParams<'a>> {
+        let blinded_messages = match blinded_messages {
+            Some(bm) if !bm.is_empty() => bm,
+            _ => {
+                tracing::warn!(
+                    "{} saga {} - no blinded messages stored, cannot recover outputs. \
+                     Run wallet.restore() to recover any missing proofs.",
+                    saga_type,
+                    saga_id
+                );
+                return None;
+            }
+        };
+
+        let (counter_start, counter_end) = match (counter_start, counter_end) {
+            (Some(start), Some(end)) => (start, end),
+            _ => {
+                tracing::warn!(
+                    "{} saga {} - no counter range stored, cannot recover outputs. \
+                     Run wallet.restore() to recover any missing proofs.",
+                    saga_type,
+                    saga_id
+                );
+                return None;
+            }
+        };
+
+        Some(OutputRecoveryParams {
+            blinded_messages,
+            counter_start,
+            counter_end,
+        })
+    }
+
+    /// Clean up orphaned quote reservations.
+    ///
+    /// This handles the case where the wallet crashed after reserving a quote
+    /// but before creating the saga record. In this case, the quote is stuck
+    /// in a reserved state with no corresponding saga.
+    ///
+    /// This method:
+    /// 1. Gets all quotes with `used_by_operation` set
+    /// 2. Checks if a corresponding saga exists
+    /// 3. If no saga exists, releases the quote reservation
+    #[instrument(skip(self))]
+    async fn cleanup_orphaned_quote_reservations(&self) -> Result<(), Error> {
+        // Check melt quotes for orphaned reservations
+        let melt_quotes = self.localstore.get_melt_quotes().await?;
+        for quote in melt_quotes {
+            // Filter by unit
+            if quote.unit != self.unit {
+                continue;
+            }
+
+            // Filter by mint url if present
+            if let Some(ref mint_url) = quote.mint_url {
+                if mint_url != &self.mint_url {
+                    continue;
+                }
+            }
+
+            if let Some(ref operation_id_str) = quote.used_by_operation {
+                if let Ok(operation_id) = uuid::Uuid::parse_str(operation_id_str) {
+                    // Check if saga exists
+                    match self.localstore.get_saga(&operation_id).await {
+                        Ok(Some(_)) => {
+                            // Saga exists, this is not orphaned
+                        }
+                        Ok(None) => {
+                            // No saga found - this is an orphaned reservation
+                            tracing::warn!(
+                                "Found orphaned melt quote reservation: quote={}, operation={}. Releasing.",
+                                escape_log_value(&quote.id),
+                                operation_id
+                            );
+                            if let Err(e) = self.localstore.release_melt_quote(&operation_id).await
+                            {
+                                tracing::error!(
+                                    "Failed to release orphaned melt quote {}: {}",
+                                    escape_log_value(&quote.id),
+                                    escape_log_value(&e)
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "Failed to check saga for melt quote {}: {}",
+                                escape_log_value(&quote.id),
+                                escape_log_value(&e)
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        // Check mint quotes for orphaned reservations
+        let mint_quotes = self.localstore.get_mint_quotes().await?;
+        for quote in mint_quotes {
+            // Filter by mint and unit
+            if quote.mint_url != self.mint_url || quote.unit != self.unit {
+                continue;
+            }
+
+            if let Some(ref operation_id_str) = quote.used_by_operation {
+                if let Ok(operation_id) = uuid::Uuid::parse_str(operation_id_str) {
+                    // Check if saga exists
+                    match self.localstore.get_saga(&operation_id).await {
+                        Ok(Some(_)) => {
+                            // Saga exists, this is not orphaned
+                        }
+                        Ok(None) => {
+                            // No saga found - this is an orphaned reservation
+                            tracing::warn!(
+                                "Found orphaned mint quote reservation: quote={}, operation={}. Releasing.",
+                                escape_log_value(&quote.id),
+                                operation_id
+                            );
+                            if let Err(e) = self.localstore.release_mint_quote(&operation_id).await
+                            {
+                                tracing::error!(
+                                    "Failed to release orphaned mint quote {}: {}",
+                                    escape_log_value(&quote.id),
+                                    escape_log_value(&e)
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "Failed to check saga for mint quote {}: {}",
+                                escape_log_value(&quote.id),
+                                escape_log_value(&e)
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::str::FromStr;
+    use std::sync::Arc;
+
+    use cdk_common::mint_url::MintUrl;
+    use cdk_common::nuts::{MeltQuoteBolt11Response, MeltQuoteState, PaymentMethod, State};
+    use cdk_common::wallet::{
+        IssueSagaState, MeltOperationData, MeltSagaState, MintOperationData, OperationData,
+        ReceiveOperationData, ReceiveSagaState, TransactionDirection, WalletSaga, WalletSagaState,
+    };
+    use cdk_common::Amount;
+
+    use crate::wallet::test_utils::*;
+
+    #[tokio::test]
+    async fn test_fixed_output_recovery_rejects_incomplete_responses_and_retries() {
+        use cdk_common::amount::{FeeAndAmounts, SplitTarget};
+        use cdk_common::wallet::{SwapOperationData, SwapSagaState, TransactionStatus};
+
+        use crate::nuts::{
+            BlindSignature, CheckStateResponse, CurrencyUnit, PreMintSecrets, RestoreResponse,
+        };
+        use crate::Error;
+
+        for (kind, repeated_amounts) in [
+            ("Swap", false),
+            ("Issue", false),
+            ("Receive", false),
+            ("Swap", true),
+            ("Issue", true),
+            ("Receive", true),
+        ] {
+            let issue = kind == "Issue";
+            let receive = kind == "Receive";
+            let db = create_test_db().await;
+            let client = Arc::new(MockMintConnector::new());
+            client.enable_mint_signing();
+            let keyset_id = client.keysets.lock().unwrap()[0].id;
+            let wallet = create_test_wallet_with_mock(db.clone(), client.clone()).await;
+            let amount = Amount::from(13);
+            let split = if repeated_amounts {
+                SplitTarget::Values(vec![4.into(), 4.into(), 4.into(), 1.into()])
+            } else {
+                SplitTarget::None
+            };
+            let premints = PreMintSecrets::from_seed(
+                keyset_id,
+                0,
+                &wallet.seed,
+                amount,
+                &split,
+                &FeeAndAmounts::from((0, vec![1, 2, 4, 8])),
+            )
+            .unwrap();
+            let outputs = premints.blinded_messages();
+            let output_count = outputs.len();
+            assert_eq!(output_count, if repeated_amounts { 4 } else { 3 });
+            let signatures: Vec<_> = outputs
+                .iter()
+                .map(|output| BlindSignature {
+                    amount: output.amount,
+                    keyset_id,
+                    c: crate::dhke::sign_message(
+                        &client.mint_signing_keys.lock().unwrap().as_ref().unwrap()[&output.amount],
+                        &output.blinded_secret,
+                    )
+                    .unwrap(),
+                    dleq: None,
+                })
+                .collect();
+            client._set_restore_response(Ok(RestoreResponse {
+                outputs: outputs[..1].to_vec(),
+                signatures: signatures[..1].to_vec(),
+            }));
+            let mut blank_outputs = outputs.clone();
+            for output in &mut blank_outputs {
+                output.amount = Amount::ZERO;
+            }
+            let melt_result = wallet
+                .restore_outputs_with_result(
+                    &uuid::Uuid::new_v4(),
+                    "Melt",
+                    Some(&blank_outputs),
+                    Some(0),
+                    Some(output_count as u32),
+                    super::OutputRecoveryMode::Partial,
+                )
+                .await
+                .unwrap();
+            assert!(
+                matches!(melt_result, super::OutputRecoveryResult::Restored(proofs) if proofs.len() == 1)
+            );
+            let saga_id = uuid::Uuid::new_v4();
+            let (state, data) = match kind {
+                "Issue" => (
+                    WalletSagaState::Issue(IssueSagaState::MintRequested),
+                    OperationData::Mint(MintOperationData::new_single(
+                        "restore-test".to_owned(),
+                        amount,
+                        Some(0),
+                        Some(output_count as u32),
+                        Some(outputs.clone()),
+                    )),
+                ),
+                "Receive" => (
+                    WalletSagaState::Receive(ReceiveSagaState::SwapRequested),
+                    OperationData::Receive(ReceiveOperationData {
+                        token: None,
+                        counter_start: Some(0),
+                        counter_end: Some(output_count as u32),
+                        amount: Some(amount),
+                        blinded_messages: Some(outputs.clone()),
+                    }),
+                ),
+                _ => (
+                    WalletSagaState::Swap(SwapSagaState::SwapRequested),
+                    OperationData::Swap(SwapOperationData {
+                        input_amount: amount,
+                        output_amount: amount,
+                        counter_start: Some(0),
+                        counter_end: Some(output_count as u32),
+                        blinded_messages: Some(outputs.clone()),
+                    }),
+                ),
+            };
+            let input = test_proof_info(keyset_id, 13, test_mint_url());
+            if receive {
+                db.update_proofs(vec![input.clone()], vec![]).await.unwrap();
+                db.reserve_proofs(vec![input.y], &saga_id).await.unwrap();
+            }
+            let stage_spent_inputs = || {
+                client.set_post_swap_response(Err(Error::TokenAlreadySpent));
+                client.set_check_state_response(Ok(CheckStateResponse {
+                    states: vec![(input.y, State::Spent).into()],
+                }));
+            };
+            db.add_saga(WalletSaga::new(
+                saga_id,
+                state,
+                amount,
+                test_mint_url(),
+                CurrencyUnit::Sat,
+                data,
+            ))
+            .await
+            .unwrap();
+
+            let mut duplicate_outputs = outputs.clone();
+            let duplicate_index = outputs
+                .iter()
+                .position(|o| {
+                    o.amount == outputs[1].amount && o.blinded_secret != outputs[1].blinded_secret
+                })
+                .unwrap_or(0);
+            duplicate_outputs[1] = duplicate_outputs[duplicate_index].clone();
+            let mut duplicate_signatures = signatures.clone();
+            duplicate_signatures[1] = duplicate_signatures[duplicate_index].clone();
+            let mut unknown_outputs = outputs.clone();
+            unknown_outputs[0].blinded_secret = test_proof(keyset_id, 1).c;
+            // Repeated denominations let a valid duplicate signature preserve
+            // both count and total amount while omitting an expected identity.
+            let invalid_responses = [
+                RestoreResponse {
+                    outputs: vec![],
+                    signatures: vec![],
+                },
+                RestoreResponse {
+                    outputs: outputs[..1].to_vec(),
+                    signatures: signatures[..1].to_vec(),
+                },
+                RestoreResponse {
+                    outputs: duplicate_outputs,
+                    signatures: duplicate_signatures,
+                },
+                RestoreResponse {
+                    outputs: unknown_outputs,
+                    signatures: signatures.clone(),
+                },
+                RestoreResponse {
+                    outputs: outputs.clone(),
+                    signatures: signatures[..1].to_vec(),
+                },
+            ];
+            for (case, response) in invalid_responses.into_iter().enumerate() {
+                client._set_restore_response(Ok(response));
+                stage_spent_inputs();
+                let report = wallet.recover_incomplete_sagas().await.unwrap();
+                assert_eq!(
+                    report.failed, 1,
+                    "kind={kind}, repeated={repeated_amounts}, case={case}"
+                );
+                assert_eq!(report.recovered, 0);
+                assert!(db.get_saga(&saga_id).await.unwrap().is_some());
+                let stored = db.get_proofs(None, None, None, None).await.unwrap();
+                assert_eq!(stored.len(), usize::from(receive));
+                if receive {
+                    assert_eq!(stored[0].y, input.y);
+                    assert_eq!(db.get_reserved_proofs(&saga_id).await.unwrap().len(), 1);
+                }
+                if issue || receive {
+                    let transactions = db.list_transactions(None, None, None).await.unwrap();
+                    assert_eq!(transactions.len(), 1);
+                    assert_eq!(transactions[0].status, TransactionStatus::Pending);
+                }
+            }
+
+            client._set_restore_response(Ok(RestoreResponse {
+                outputs: outputs.into_iter().rev().collect(),
+                signatures: signatures.into_iter().rev().collect(),
+            }));
+            stage_spent_inputs();
+            let report = wallet.recover_incomplete_sagas().await.unwrap();
+            assert_eq!(report.recovered, 1);
+            assert_eq!(report.failed, 0);
+            assert!(db.get_saga(&saga_id).await.unwrap().is_none());
+            let proofs = db.get_proofs(None, None, None, None).await.unwrap();
+            assert_eq!(proofs.len(), output_count);
+            assert_eq!(
+                Amount::try_sum(proofs.iter().map(|p| p.proof.amount)).unwrap(),
+                amount
+            );
+            if issue || receive {
+                let transactions = db.list_transactions(None, None, None).await.unwrap();
+                assert_eq!(transactions[0].status, TransactionStatus::Completed);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_recover_receive_proofs_pending() {
+        // Test that receive saga in ProofsPending state gets compensated:
+        // - Saga is deleted
+        // - If there are no reserved proofs (proofs are just Pending), just cleanup saga
+        let db = create_test_db().await;
+        let mint_url = test_mint_url();
+        let saga_id = uuid::Uuid::new_v4();
+
+        // Create saga in ProofsPending state (no proofs to reserve for this test,
+        // just test that the saga gets cleaned up)
+        let saga = WalletSaga::new(
+            saga_id,
+            WalletSagaState::Receive(ReceiveSagaState::ProofsPending),
+            Amount::from(100),
+            mint_url.clone(),
+            cdk_common::nuts::CurrencyUnit::Sat,
+            OperationData::Receive(ReceiveOperationData {
+                token: Some("cashu...".to_string()),
+                counter_start: None,
+                counter_end: None,
+                amount: Some(Amount::from(100)),
+                blinded_messages: None,
+            }),
+        );
+        db.add_saga(saga).await.unwrap();
+
+        // Run recovery
+        let wallet = create_test_wallet(db.clone()).await;
+        let report = wallet.recover_incomplete_sagas().await.unwrap();
+
+        assert_eq!(report.compensated, 1);
+
+        // Verify saga is deleted
+        assert!(db.get_saga(&saga_id).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_recover_issue_secrets_prepared() {
+        // Test that issue saga in SecretsPrepared state gets compensated:
+        // - Quote reservation is released
+        // - Saga is deleted
+        // - Counter gaps are acceptable (not tested here, just cleanup)
+        let db = create_test_db().await;
+        let mint_url = test_mint_url();
+        let saga_id = uuid::Uuid::new_v4();
+
+        // Create a mint quote reserved by this operation
+        let mut quote = test_mint_quote(mint_url.clone());
+        quote.used_by_operation = Some(saga_id.to_string());
+        db.add_mint_quote(quote.clone()).await.unwrap();
+
+        // Create saga in SecretsPrepared state
+        let saga = WalletSaga::new(
+            saga_id,
+            WalletSagaState::Issue(IssueSagaState::SecretsPrepared),
+            Amount::from(1000),
+            mint_url.clone(),
+            cdk_common::nuts::CurrencyUnit::Sat,
+            OperationData::Mint(MintOperationData::new_single(
+                quote.id.clone(),
+                Amount::from(1000),
+                Some(0),
+                Some(10),
+                None,
+            )),
+        );
+        db.add_saga(saga).await.unwrap();
+
+        // Run recovery
+        let wallet = create_test_wallet(db.clone()).await;
+        let report = wallet.recover_incomplete_sagas().await.unwrap();
+
+        assert_eq!(report.compensated, 1);
+
+        // Verify quote reservation is released
+        let retrieved_quote = db.get_mint_quote(&quote.id).await.unwrap().unwrap();
+        assert!(retrieved_quote.used_by_operation.is_none());
+
+        // Verify saga is deleted
+        assert!(db.get_saga(&saga_id).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_recover_melt_proofs_reserved() {
+        // Test that melt saga in ProofsReserved state gets compensated:
+        // - Reserved proofs are released
+        // - Quote reservation is released
+        // - Saga is deleted
+        let db = create_test_db().await;
+        let mint_url = test_mint_url();
+        let keyset_id = test_keyset_id();
+        let saga_id = uuid::Uuid::new_v4();
+
+        // Create and store proofs, then reserve them
+        let proof_info = test_proof_info(keyset_id, 100, mint_url.clone());
+        let proof_y = proof_info.y;
+        db.update_proofs(vec![proof_info], vec![]).await.unwrap();
+        db.reserve_proofs(vec![proof_y], &saga_id).await.unwrap();
+
+        // Create a melt quote reserved by this operation
+        let mut quote = test_melt_quote();
+        quote.used_by_operation = Some(saga_id.to_string());
+        db.add_melt_quote(quote.clone()).await.unwrap();
+
+        // Create saga in ProofsReserved state
+        let saga = WalletSaga::new(
+            saga_id,
+            WalletSagaState::Melt(MeltSagaState::ProofsReserved),
+            Amount::from(100),
+            mint_url.clone(),
+            cdk_common::nuts::CurrencyUnit::Sat,
+            OperationData::Melt(MeltOperationData {
+                quote_id: quote.id.clone(),
+                amount: Amount::from(100),
+                fee_reserve: Amount::from(10),
+                counter_start: None,
+                counter_end: None,
+                change_amount: None,
+                metadata: HashMap::new(),
+                final_proof_ys: None,
+                change_blinded_messages: None,
+            }),
+        );
+        db.add_saga(saga).await.unwrap();
+
+        // Run recovery
+        let wallet = create_test_wallet(db.clone()).await;
+        let report = wallet.recover_incomplete_sagas().await.unwrap();
+
+        assert_eq!(report.compensated, 1);
+
+        // Verify proofs are released
+        let proofs = db
+            .get_proofs(None, None, Some(vec![State::Unspent]), None)
+            .await
+            .unwrap();
+        assert_eq!(proofs.len(), 1);
+
+        // Verify melt quote reservation is released
+        let retrieved_quote = db.get_melt_quote(&quote.id).await.unwrap().unwrap();
+        assert!(retrieved_quote.used_by_operation.is_none());
+
+        // Verify saga is deleted
+        assert!(db.get_saga(&saga_id).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_recover_no_incomplete_sagas() {
+        // Test that recovery with no incomplete sagas returns empty report
+        let db = create_test_db().await;
+        let wallet = create_test_wallet(db.clone()).await;
+
+        let report = wallet.recover_incomplete_sagas().await.unwrap();
+
+        assert_eq!(report.recovered, 0);
+        assert_eq!(report.compensated, 0);
+        assert_eq!(report.skipped, 0);
+        assert_eq!(report.failed, 0);
+    }
+
+    #[tokio::test]
+    async fn test_recover_multiple_sagas() {
+        // Test that recovery handles multiple sagas
+        // (Note: We'll use Melt sagas here since we removed the Swap logic for testing)
+        let db = create_test_db().await;
+        let mint_url = test_mint_url();
+        let keyset_id = test_keyset_id();
+
+        // Create 3 sagas in different early states
+        for i in 0..3 {
+            let saga_id = uuid::Uuid::new_v4();
+
+            let proof_info = test_proof_info(keyset_id, 100, mint_url.clone());
+            let proof_y = proof_info.y;
+            db.update_proofs(vec![proof_info], vec![]).await.unwrap();
+            db.reserve_proofs(vec![proof_y], &saga_id).await.unwrap();
+
+            let mut quote = test_melt_quote();
+            quote.id = format!("quote_{}", i);
+            quote.used_by_operation = Some(saga_id.to_string());
+            db.add_melt_quote(quote.clone()).await.unwrap();
+
+            let saga = WalletSaga::new(
+                saga_id,
+                WalletSagaState::Melt(MeltSagaState::ProofsReserved),
+                Amount::from(100),
+                mint_url.clone(),
+                cdk_common::nuts::CurrencyUnit::Sat,
+                OperationData::Melt(MeltOperationData {
+                    quote_id: quote.id.clone(),
+                    amount: Amount::from(100),
+                    fee_reserve: Amount::from(10),
+                    counter_start: None,
+                    counter_end: None,
+                    change_amount: None,
+                    metadata: HashMap::new(),
+                    final_proof_ys: None,
+                    change_blinded_messages: None,
+                }),
+            );
+            db.add_saga(saga).await.unwrap();
+        }
+
+        // Run recovery
+        let wallet = create_test_wallet(db.clone()).await;
+        let report = wallet.recover_incomplete_sagas().await.unwrap();
+
+        assert_eq!(report.compensated, 3);
+
+        // All proofs should be released
+        let proofs = db
+            .get_proofs(None, None, Some(vec![State::Unspent]), None)
+            .await
+            .unwrap();
+        assert_eq!(proofs.len(), 3);
+
+        // All sagas should be deleted
+        let sagas = db.get_incomplete_sagas().await.unwrap();
+        assert!(sagas.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_orphaned_melt_quote_reservation() {
+        // Test that orphaned melt quote reservations are cleaned up
+        let db = create_test_db().await;
+        let operation_id = uuid::Uuid::new_v4();
+
+        // Create a melt quote with reservation but NO corresponding saga
+        let mut quote = test_melt_quote();
+        quote.used_by_operation = Some(operation_id.to_string());
+        db.add_melt_quote(quote.clone()).await.unwrap();
+
+        // Run recovery
+        let wallet = create_test_wallet(db.clone()).await;
+        let _report = wallet.recover_incomplete_sagas().await.unwrap();
+
+        // Verify orphaned quote reservation is released
+        let retrieved_quote = db.get_melt_quote(&quote.id).await.unwrap().unwrap();
+        assert!(retrieved_quote.used_by_operation.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_orphaned_mint_quote_reservation() {
+        // Test that orphaned mint quote reservations are cleaned up
+        let db = create_test_db().await;
+        let mint_url = test_mint_url();
+        let operation_id = uuid::Uuid::new_v4();
+
+        // Create a mint quote with reservation but NO corresponding saga
+        let mut quote = test_mint_quote(mint_url);
+        quote.used_by_operation = Some(operation_id.to_string());
+        db.add_mint_quote(quote.clone()).await.unwrap();
+
+        // Run recovery
+        let wallet = create_test_wallet(db.clone()).await;
+        let _report = wallet.recover_incomplete_sagas().await.unwrap();
+
+        // Verify orphaned quote reservation is released
+        let retrieved_quote = db.get_mint_quote(&quote.id).await.unwrap().unwrap();
+        assert!(retrieved_quote.used_by_operation.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_recover_melt_requested_quote_failed() {
+        // When melt quote failed, should compensate
+        let db = create_test_db().await;
+        let mint_url = test_mint_url();
+        let keyset_id = test_keyset_id();
+        let saga_id = uuid::Uuid::new_v4();
+
+        // Create pending proofs as they would be after a melt request is sent.
+        let mut proof_info = test_proof_info(keyset_id, 100, mint_url.clone());
+        proof_info.state = State::Pending;
+        proof_info.used_by_operation = Some(saga_id);
+        db.update_proofs(vec![proof_info], vec![]).await.unwrap();
+
+        // Create a melt quote
+        let mut quote = test_melt_quote();
+        quote.used_by_operation = Some(saga_id.to_string());
+        let quote_id = quote.id.clone();
+        db.add_melt_quote(quote).await.unwrap();
+
+        // Create saga in MeltRequested state
+        let saga = WalletSaga::new(
+            saga_id,
+            WalletSagaState::Melt(MeltSagaState::MeltRequested),
+            Amount::from(100),
+            mint_url.clone(),
+            cdk_common::nuts::CurrencyUnit::Sat,
+            OperationData::Melt(MeltOperationData {
+                quote_id: quote_id.clone(),
+                amount: Amount::from(100),
+                fee_reserve: Amount::from(10),
+                counter_start: None,
+                counter_end: None,
+                change_amount: None,
+                metadata: HashMap::new(),
+                final_proof_ys: None,
+                change_blinded_messages: None,
+            }),
+        );
+        db.add_saga(saga).await.unwrap();
+
+        // Mock: quote is Failed
+        let mock_client = Arc::new(MockMintConnector::new());
+        mock_client.set_melt_quote_status_response(Ok(MeltQuoteBolt11Response {
+            quote: quote_id.clone(),
+            amount: Amount::from(100),
+            fee_reserve: Amount::from(10),
+            state: MeltQuoteState::Failed,
+            expiry: 9999999999,
+            payment_preimage: None,
+            change: None,
+            request: None,
+            unit: None,
+            method: PaymentMethod::BOLT11,
+        }));
+
+        let wallet = create_test_wallet_with_mock(db.clone(), mock_client).await;
+        let report = wallet.recover_incomplete_sagas().await.unwrap();
+
+        // Should compensate (quote failed)
+        assert_eq!(report.compensated, 1);
+        assert_eq!(report.recovered, 0);
+
+        // Proofs should be released
+        let proofs = db
+            .get_proofs(None, None, Some(vec![State::Unspent]), None)
+            .await
+            .unwrap();
+        assert_eq!(proofs.len(), 1);
+
+        // Melt quote reservation should be released
+        let retrieved_quote = db.get_melt_quote(&quote_id).await.unwrap().unwrap();
+        assert!(retrieved_quote.used_by_operation.is_none());
+
+        // Saga should be deleted
+        assert!(db.get_saga(&saga_id).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_recover_melt_requested_quote_pending() {
+        // When melt quote payment is still in progress (Pending), should skip
+        let db = create_test_db().await;
+        let mint_url = test_mint_url();
+        let keyset_id = test_keyset_id();
+        let saga_id = uuid::Uuid::new_v4();
+
+        // Create and reserve proofs
+        let proof_info = test_proof_info(keyset_id, 100, mint_url.clone());
+        let proof_y = proof_info.y;
+        db.update_proofs(vec![proof_info], vec![]).await.unwrap();
+        db.reserve_proofs(vec![proof_y], &saga_id).await.unwrap();
+
+        // Create a melt quote
+        let mut quote = test_melt_quote();
+        quote.used_by_operation = Some(saga_id.to_string());
+        let quote_id = quote.id.clone();
+        db.add_melt_quote(quote).await.unwrap();
+
+        // Create saga in MeltRequested state
+        let saga = WalletSaga::new(
+            saga_id,
+            WalletSagaState::Melt(MeltSagaState::MeltRequested),
+            Amount::from(100),
+            mint_url.clone(),
+            cdk_common::nuts::CurrencyUnit::Sat,
+            OperationData::Melt(MeltOperationData {
+                quote_id: quote_id.clone(),
+                amount: Amount::from(100),
+                fee_reserve: Amount::from(10),
+                counter_start: None,
+                counter_end: None,
+                change_amount: None,
+                metadata: HashMap::new(),
+                final_proof_ys: None,
+                change_blinded_messages: None,
+            }),
+        );
+        db.add_saga(saga).await.unwrap();
+
+        // Mock: quote payment is in progress (Pending state)
+        let mock_client = Arc::new(MockMintConnector::new());
+        mock_client.set_melt_quote_status_response(Ok(MeltQuoteBolt11Response {
+            quote: quote_id.clone(),
+            amount: Amount::from(100),
+            fee_reserve: Amount::from(10),
+            state: MeltQuoteState::Pending,
+            expiry: 9999999999,
+            payment_preimage: None,
+            change: None,
+            request: None,
+            unit: None,
+            method: PaymentMethod::BOLT11,
+        }));
+
+        let wallet = create_test_wallet_with_mock(db.clone(), mock_client).await;
+        let report = wallet.recover_incomplete_sagas().await.unwrap();
+
+        // Should skip (payment still in progress)
+        assert_eq!(report.skipped, 1);
+        assert_eq!(report.compensated, 0);
+        assert_eq!(report.recovered, 0);
+
+        // Proofs should still be reserved
+        let reserved = db.get_reserved_proofs(&saga_id).await.unwrap();
+        assert_eq!(reserved.len(), 1);
+
+        // Saga should still exist
+        assert!(db.get_saga(&saga_id).await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn test_recover_melt_requested_quote_unpaid() {
+        // When melt quote is Unpaid (payment was never initiated), should compensate
+        let db = create_test_db().await;
+        let mint_url = test_mint_url();
+        let keyset_id = test_keyset_id();
+        let saga_id = uuid::Uuid::new_v4();
+
+        // Create and reserve proofs
+        let proof_info = test_proof_info(keyset_id, 100, mint_url.clone());
+        let proof_y = proof_info.y;
+        db.update_proofs(vec![proof_info], vec![]).await.unwrap();
+        db.reserve_proofs(vec![proof_y], &saga_id).await.unwrap();
+
+        // Create a melt quote
+        let mut quote = test_melt_quote();
+        quote.used_by_operation = Some(saga_id.to_string());
+        let quote_id = quote.id.clone();
+        db.add_melt_quote(quote).await.unwrap();
+
+        // Create saga in MeltRequested state
+        let saga = WalletSaga::new(
+            saga_id,
+            WalletSagaState::Melt(MeltSagaState::MeltRequested),
+            Amount::from(100),
+            mint_url.clone(),
+            cdk_common::nuts::CurrencyUnit::Sat,
+            OperationData::Melt(MeltOperationData {
+                quote_id: quote_id.clone(),
+                amount: Amount::from(100),
+                fee_reserve: Amount::from(10),
+                counter_start: None,
+                counter_end: None,
+                change_amount: None,
+                metadata: HashMap::new(),
+                final_proof_ys: None,
+                change_blinded_messages: None,
+            }),
+        );
+        db.add_saga(saga).await.unwrap();
+
+        // Mock: quote is Unpaid (payment was never initiated or was rolled back)
+        let mock_client = Arc::new(MockMintConnector::new());
+        mock_client.set_melt_quote_status_response(Ok(MeltQuoteBolt11Response {
+            quote: quote_id.clone(),
+            amount: Amount::from(100),
+            fee_reserve: Amount::from(10),
+            state: MeltQuoteState::Unpaid,
+            expiry: 9999999999,
+            payment_preimage: None,
+            change: None,
+            request: None,
+            unit: None,
+            method: PaymentMethod::BOLT11,
+        }));
+
+        let wallet = create_test_wallet_with_mock(db.clone(), mock_client).await;
+        let report = wallet.recover_incomplete_sagas().await.unwrap();
+
+        // Should compensate (payment was never initiated, safe to release proofs)
+        assert_eq!(report.compensated, 1);
+        assert_eq!(report.skipped, 0);
+        assert_eq!(report.recovered, 0);
+
+        // Proofs should be released back to Unspent
+        let proofs = db
+            .get_proofs(None, None, Some(vec![State::Unspent]), None)
+            .await
+            .unwrap();
+        assert_eq!(proofs.len(), 1);
+
+        // Melt quote reservation should be released
+        let retrieved_quote = db.get_melt_quote(&quote_id).await.unwrap().unwrap();
+        assert!(retrieved_quote.used_by_operation.is_none());
+
+        // Saga should be deleted
+        assert!(db.get_saga(&saga_id).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_recover_melt_requested_quote_paid() {
+        // When melt quote is Paid, should recover (mark proofs spent, cleanup)
+        let db = create_test_db().await;
+        let mint_url = test_mint_url();
+        let keyset_id = test_keyset_id();
+        let saga_id = uuid::Uuid::new_v4();
+
+        // Create a melt quote
+        let mut quote = test_melt_quote();
+        quote.used_by_operation = Some(saga_id.to_string());
+        let quote_id = quote.id.clone();
+        db.add_melt_quote(quote).await.unwrap();
+
+        let mut metadata = HashMap::new();
+        metadata.insert("label".to_string(), "restored melt".to_string());
+
+        // Create pending proofs as they would be after a melt request is sent.
+        let mut proof_info = test_proof_info(keyset_id, 100, mint_url.clone());
+        proof_info.state = State::Pending;
+        proof_info.used_by_operation = Some(saga_id);
+        db.update_proofs(vec![proof_info], vec![]).await.unwrap();
+
+        // Create saga in MeltRequested state (no change blinded messages for simplicity)
+        let saga = WalletSaga::new(
+            saga_id,
+            WalletSagaState::Melt(MeltSagaState::MeltRequested),
+            Amount::from(100),
+            mint_url.clone(),
+            cdk_common::nuts::CurrencyUnit::Sat,
+            OperationData::Melt(MeltOperationData {
+                quote_id: quote_id.clone(),
+                amount: Amount::from(100),
+                fee_reserve: Amount::from(10),
+                counter_start: None,
+                counter_end: None,
+                change_amount: None,
+                metadata: metadata.clone(),
+                final_proof_ys: None,
+                change_blinded_messages: None, // No change to recover
+            }),
+        );
+        db.add_saga(saga).await.unwrap();
+
+        // Mock: quote is Paid
+        let mock_client = Arc::new(MockMintConnector::new());
+        mock_client.set_melt_quote_status_response(Ok(MeltQuoteBolt11Response {
+            quote: quote_id.clone(),
+            amount: Amount::from(100),
+            fee_reserve: Amount::from(10),
+            state: MeltQuoteState::Paid,
+            expiry: 9999999999,
+            payment_preimage: Some("preimage123".to_string()),
+            change: None,
+            request: None,
+            unit: None,
+            method: PaymentMethod::BOLT11,
+        }));
+
+        let wallet = create_test_wallet_with_mock(db.clone(), mock_client).await;
+        let report = wallet.recover_incomplete_sagas().await.unwrap();
+
+        // Should recover (payment succeeded)
+        assert_eq!(report.recovered, 1);
+        assert_eq!(report.compensated, 0);
+        assert_eq!(report.skipped, 0);
+
+        // Proofs should be marked as Spent
+        let proofs = db
+            .get_proofs(None, None, Some(vec![State::Spent]), None)
+            .await
+            .unwrap();
+        assert_eq!(proofs.len(), 1);
+
+        // Saga should be deleted
+        assert!(db.get_saga(&saga_id).await.unwrap().is_none());
+
+        let transactions = db
+            .list_transactions(None, Some(TransactionDirection::Outgoing), None)
+            .await
+            .unwrap();
+        assert_eq!(transactions.len(), 1);
+        assert_eq!(transactions[0].metadata, metadata);
+        assert_eq!(transactions[0].saga_id, Some(saga_id));
+        assert_eq!(
+            transactions[0].payment_proof,
+            Some("preimage123".to_string())
+        );
+
+        let recovered_quote = db.get_melt_quote(&quote_id).await.unwrap().unwrap();
+        assert_eq!(recovered_quote.state, MeltQuoteState::Paid);
+    }
+
+    #[tokio::test]
+    async fn test_recover_incomplete_sagas_filters_by_mint_and_unit() {
+        // Test that recovery only processes sagas for its own mint and unit
+        let db = create_test_db().await;
+        let mint_url = test_mint_url();
+        let other_mint_url = MintUrl::from_str("https://other-mint.example.com").unwrap();
+        let saga_id_1 = uuid::Uuid::new_v4();
+        let saga_id_2 = uuid::Uuid::new_v4();
+        let saga_id_3 = uuid::Uuid::new_v4();
+
+        // 1. Saga for our mint and unit (should be recovered/compensated)
+        let saga_1 = WalletSaga::new(
+            saga_id_1,
+            WalletSagaState::Receive(ReceiveSagaState::ProofsPending),
+            Amount::from(100),
+            mint_url.clone(),
+            cdk_common::nuts::CurrencyUnit::Sat,
+            OperationData::Receive(ReceiveOperationData {
+                token: Some("cashu...".to_string()),
+                counter_start: None,
+                counter_end: None,
+                amount: Some(Amount::from(100)),
+                blinded_messages: None,
+            }),
+        );
+        db.add_saga(saga_1).await.unwrap();
+
+        // 2. Saga for OTHER mint (should be skipped)
+        let saga_2 = WalletSaga::new(
+            saga_id_2,
+            WalletSagaState::Receive(ReceiveSagaState::ProofsPending),
+            Amount::from(100),
+            other_mint_url.clone(),
+            cdk_common::nuts::CurrencyUnit::Sat,
+            OperationData::Receive(ReceiveOperationData {
+                token: Some("cashu...".to_string()),
+                counter_start: None,
+                counter_end: None,
+                amount: Some(Amount::from(100)),
+                blinded_messages: None,
+            }),
+        );
+        db.add_saga(saga_2).await.unwrap();
+
+        // 3. Saga for our mint but OTHER unit (should be skipped)
+        let saga_3 = WalletSaga::new(
+            saga_id_3,
+            WalletSagaState::Receive(ReceiveSagaState::ProofsPending),
+            Amount::from(100),
+            mint_url.clone(),
+            cdk_common::nuts::CurrencyUnit::Usd,
+            OperationData::Receive(ReceiveOperationData {
+                token: Some("cashu...".to_string()),
+                counter_start: None,
+                counter_end: None,
+                amount: Some(Amount::from(100)),
+                blinded_messages: None,
+            }),
+        );
+        db.add_saga(saga_3).await.unwrap();
+
+        // Run recovery
+        let wallet = create_test_wallet(db.clone()).await;
+        let report = wallet.recover_incomplete_sagas().await.unwrap();
+
+        // Only saga_1 should be processed (it gets compensated because no proofs were reserved)
+        assert_eq!(report.compensated, 1);
+        assert_eq!(report.recovered, 0);
+        assert_eq!(report.skipped, 0);
+
+        // Verify saga_1 is deleted
+        assert!(db.get_saga(&saga_id_1).await.unwrap().is_none());
+
+        // Verify saga_2 and saga_3 STILL EXIST in the DB (they were filtered out)
+        assert!(db.get_saga(&saga_id_2).await.unwrap().is_some());
+        assert!(db.get_saga(&saga_id_3).await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_orphaned_quote_reservations_filters_by_mint_and_unit() {
+        // Test that orphaned reservation cleanup only processes quotes for its own mint/unit
+        let db = create_test_db().await;
+        let mint_url = test_mint_url();
+        let other_mint_url = MintUrl::from_str("https://other-mint.example.com").unwrap();
+
+        // 1. Melt quote for our unit (should be cleaned up)
+        // Note: MeltQuote currently lacks mint_url, so we only filter by unit
+        let mut melt_quote_1 = test_melt_quote();
+        melt_quote_1.unit = cdk_common::nuts::CurrencyUnit::Sat;
+        melt_quote_1.used_by_operation = Some(uuid::Uuid::new_v4().to_string());
+        let melt_quote_id_1 = melt_quote_1.id.clone();
+        db.add_melt_quote(melt_quote_1).await.unwrap();
+
+        // 2. Melt quote for OTHER mint (should be skipped)
+        let mut melt_quote_2 = test_melt_quote();
+        melt_quote_2.mint_url = Some(other_mint_url.clone());
+        melt_quote_2.unit = cdk_common::nuts::CurrencyUnit::Sat;
+        melt_quote_2.used_by_operation = Some(uuid::Uuid::new_v4().to_string());
+        let melt_quote_id_2 = melt_quote_2.id.clone();
+        db.add_melt_quote(melt_quote_2).await.unwrap();
+
+        // 3. Mint quote for our mint and unit (should be cleaned up)
+        let mut mint_quote_1 = test_mint_quote(mint_url.clone());
+        mint_quote_1.unit = cdk_common::nuts::CurrencyUnit::Sat;
+        mint_quote_1.used_by_operation = Some(uuid::Uuid::new_v4().to_string());
+        let mint_quote_id_1 = mint_quote_1.id.clone();
+        db.add_mint_quote(mint_quote_1).await.unwrap();
+
+        // 4. Mint quote for OTHER mint (should be skipped)
+        let mut mint_quote_2 = test_mint_quote(other_mint_url.clone());
+        mint_quote_2.unit = cdk_common::nuts::CurrencyUnit::Sat;
+        mint_quote_2.used_by_operation = Some(uuid::Uuid::new_v4().to_string());
+        let mint_quote_id_2_mint = mint_quote_2.id.clone();
+        db.add_mint_quote(mint_quote_2).await.unwrap();
+
+        // 5. Mint quote for our mint but OTHER unit (should be skipped)
+        let mut mint_quote_3 = test_mint_quote(mint_url.clone());
+        mint_quote_3.unit = cdk_common::nuts::CurrencyUnit::Usd;
+        mint_quote_3.used_by_operation = Some(uuid::Uuid::new_v4().to_string());
+        let mint_quote_id_3 = mint_quote_3.id.clone();
+        db.add_mint_quote(mint_quote_3).await.unwrap();
+
+        // Run recovery (which calls cleanup_orphaned_quote_reservations)
+        let wallet = create_test_wallet(db.clone()).await;
+        // Call it directly to avoid side effects from recover_incomplete_sagas if any
+        wallet.cleanup_orphaned_quote_reservations().await.unwrap();
+
+        // Verify quote 1 and 3 are released (orphaned and match our wallet)
+        assert!(db
+            .get_melt_quote(&melt_quote_id_1)
+            .await
+            .unwrap()
+            .unwrap()
+            .used_by_operation
+            .is_none());
+        assert!(db
+            .get_mint_quote(&mint_quote_id_1)
+            .await
+            .unwrap()
+            .unwrap()
+            .used_by_operation
+            .is_none());
+
+        // Verify quote 2, 4, 5 are STILL RESERVED (orphaned but different mint/unit)
+        assert!(db
+            .get_melt_quote(&melt_quote_id_2)
+            .await
+            .unwrap()
+            .unwrap()
+            .used_by_operation
+            .is_some());
+        assert!(db
+            .get_mint_quote(&mint_quote_id_2_mint)
+            .await
+            .unwrap()
+            .unwrap()
+            .used_by_operation
+            .is_some());
+        assert!(db
+            .get_mint_quote(&mint_quote_id_3)
+            .await
+            .unwrap()
+            .unwrap()
+            .used_by_operation
+            .is_some());
+    }
+}

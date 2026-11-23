@@ -1,0 +1,26 @@
+[Unit]
+Description=Execute CyberHerd payouts from project Cashu proofs
+Requires=lightning-goats-project-payouts.socket
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=goats-project-collector
+Group=goats-project-collector
+StateDirectory=lightning-goats-project-collector
+StateDirectoryMode=0700
+UMask=0077
+EnvironmentFile=/etc/lightning-goats-project-collector/config.env
+Environment=PYTHONPATH=/opt/lightning-goats-project-collector/modules
+Environment=PYTHONNOUSERSITE=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/lightning-goats-project-collector/python/bin/python3.11 /opt/lightning-goats-project-collector/collector/payout_server.py --keyset ${MINT_KEYSET} --state-directory /var/lib/lightning-goats-project-collector --pinned-keysets /etc/lightning-goats-project-collector/keysets.json
+Restart=on-failure
+RestartSec=3s
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6

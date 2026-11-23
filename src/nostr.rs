@@ -1,8 +1,16 @@
-use std::{ffi::OsStr, path::PathBuf, process::Stdio, sync::Arc, time::Duration};
+use std::{
+    ffi::OsStr,
+    path::PathBuf,
+    process::Stdio,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+    time::Duration,
+};
 
 use anyhow::{Context, Result, bail};
 use reqwest::Url;
-use serde::{Deserialize, Serialize};
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWriteExt},
     process::Command,
@@ -19,28 +27,187 @@ const MAX_NAK_STDOUT: usize = 64 * 1024;
 const MAX_NAK_STDERR: usize = 8 * 1024;
 const PUBLISH_DUMMY_SECRET: &str = "01";
 
+pub(crate) fn validate_client_credential(owner: &str, client: &str, key: &str) -> Result<()> {
+    let bytes = Zeroizing::new(
+        hex::decode(key).map_err(|_| anyhow::anyhow!("NIP-46 client credential must be hex"))?,
+    );
+    let mut secret = bitcoin::secp256k1::SecretKey::from_slice(&bytes)
+        .map_err(|_| anyhow::anyhow!("invalid NIP-46 client credential"))?;
+    let public = bitcoin::secp256k1::PublicKey::from_secret_key(
+        &bitcoin::secp256k1::Secp256k1::new(),
+        &secret,
+    )
+    .x_only_public_key()
+    .0
+    .to_string();
+    secret.non_secure_erase();
+    if public != client || public == owner {
+        bail!("credential must match the pinned NIP-46 client, distinct from project identity");
+    }
+    Ok(())
+}
+
 #[derive(Clone)]
 pub struct NakClient {
     nak_path: PathBuf,
     nak_config_path: PathBuf,
     bunker_uri: String,
+    protocol_bunkers: Arc<Vec<String>>,
+    preferred_bunker: Arc<AtomicUsize>,
     project_pubkey: String,
     client_key: Arc<Zeroizing<String>>,
     relays: Vec<String>,
+    signing_lock: Arc<tokio::sync::Mutex<()>>,
+    relay_router: Arc<tokio::sync::Mutex<Option<Arc<crate::relay_routing::Router>>>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SignedNostrEvent {
-    pub id: String,
-    pub pubkey: String,
-    pub created_at: u64,
-    pub kind: u64,
-    pub tags: Vec<Vec<String>>,
-    pub content: String,
-    pub sig: String,
-}
+pub use lightning_goats_nostr_event::SignedNostrEvent;
 
 impl NakClient {
+    pub fn project_pubkey(&self) -> &str {
+        &self.project_pubkey
+    }
+    pub fn publication_relays(&self) -> &[String] {
+        &self.relays
+    }
+
+    /// Typed protocol callers freeze all unsigned fields before signing. Native
+    /// verification prevents a signer/tool response from changing that intent.
+    pub(crate) async fn sign_protocol_event(
+        &self,
+        kind: u64,
+        created_at: u64,
+        content: &str,
+        tags: Vec<Vec<String>>,
+    ) -> Result<crate::nostr_event::VerifiedEvent> {
+        if !matches!(kind, 1 | 1311 | 9734 | 9735 | 10002)
+            || created_at > i64::MAX as u64
+            || content.len() > 32_768
+            || tags.len() > 1024
+            || tags.iter().any(|tag| {
+                tag.is_empty() || tag.len() > 32 || tag.iter().any(|value| value.len() > 8192)
+            })
+        {
+            bail!("unsupported or oversized protocol signing intent");
+        }
+        let _signing_guard = self.signing_lock.lock().await;
+        tokio::fs::create_dir_all(&self.nak_config_path).await?;
+        let partial =
+            serde_json::json!({"kind":kind,"created_at":created_at,"content":content,"tags":tags})
+                .to_string();
+        let (output, relay) = self
+            .run_protocol_signer(&partial, NAK_TIMEOUT, Duration::from_secs(15))
+            .await?;
+        // Malformed helper output can contain a credential. Never include that
+        // output or its deserialization error in logs or returned diagnostics.
+        let event: SignedNostrEvent = serde_json::from_str(output.trim())
+            .map_err(|_| anyhow::anyhow!("remote signer returned malformed protocol event"))?;
+        if event.pubkey != self.project_pubkey
+            || event.kind != kind
+            || event.created_at != created_at
+            || event.content != content
+            || event.tags != tags
+        {
+            bail!("remote signer changed the frozen protocol intent");
+        }
+        let event = crate::nostr_event::VerifiedEvent::verify(event)
+            .map_err(|_| anyhow::anyhow!("remote signer returned an invalid protocol signature"))?;
+        self.preferred_bunker.store(relay, Ordering::Relaxed);
+        Ok(event)
+    }
+
+    /// Some helpers wait for every relay in a bunker URI to connect. Give each
+    /// attempt exactly one configured relay and the same frozen unsigned bytes.
+    /// Transport failure can fall back; malformed or mutated signer output is
+    /// still rejected by the caller without retrying around its validation.
+    async fn run_protocol_signer(
+        &self,
+        partial: &str,
+        total: Duration,
+        per_relay: Duration,
+    ) -> Result<(String, usize)> {
+        let start = tokio::time::Instant::now();
+        let count = self.protocol_bunkers.len();
+        let first = self.preferred_bunker.load(Ordering::Relaxed) % count;
+        for offset in 0..count {
+            let remaining = total.saturating_sub(start.elapsed() + NAK_CLEANUP_TIMEOUT);
+            if remaining.is_zero() {
+                break;
+            }
+            let index = (first + offset) % count;
+            let limit = if count == 1 {
+                remaining
+            } else {
+                remaining.min(per_relay)
+            };
+            match self
+                .run_nak_with_timeout(
+                    [OsStr::new("event")],
+                    partial,
+                    Some((&self.protocol_bunkers[index], self.client_key.as_str())),
+                    limit,
+                )
+                .await
+            {
+                Ok(output) => return Ok((output, index)),
+                Err(_) if offset == 0 => self
+                    .preferred_bunker
+                    .store((first + 1) % count, Ordering::Relaxed),
+                Err(_) => {}
+            }
+        }
+        bail!("remote protocol signing unavailable on configured relays")
+    }
+
+    /// Best-effort NIP-65 attachment on member-note destinations. It reuses a
+    /// verified existing signature and never changes or delays accounting.
+    pub(crate) async fn advertise_on(&self, relay: &str) {
+        let router = {
+            let mut cached = self.relay_router.lock().await;
+            if cached.is_none() {
+                *cached = crate::relay_routing::Router::new(&self.relays)
+                    .ok()
+                    .map(Arc::new);
+            }
+            let Some(router) = cached.as_ref().cloned() else {
+                return;
+            };
+            router
+        };
+        let Ok(now) = crate::cyberherd::calendar::now() else {
+            return;
+        };
+        if let Ok(lists) = router.lists(&[self.project_pubkey.clone()], now).await
+            && let Some(list) = lists.get(&self.project_pubkey)
+        {
+            let _ = crate::zap_receipts::publish_protocol_event(list.event(), relay).await;
+        }
+    }
+
+    pub async fn sign_zap_receipt(
+        &self,
+        job: &crate::ledger::ZapReceiptJob,
+    ) -> Result<crate::nostr_event::VerifiedEvent> {
+        if job.request.receipt_signer() != self.project_pubkey {
+            bail!("zap receipt requires another remote signing identity");
+        }
+        let invoice: lightning_invoice::Bolt11Invoice =
+            job.invoice.parse().context("invalid receipt invoice")?;
+        crate::bolt11::verify(
+            &job.invoice,
+            job.request.amount_msat(),
+            &invoice.payment_hash().to_string(),
+            &job.request.description_hash(),
+        )?;
+        self.sign_protocol_event(
+            9735,
+            job.paid_at,
+            "",
+            job.request.receipt_tags(&job.invoice)?,
+        )
+        .await
+    }
+
     pub async fn from_config(config: &NostrConfig) -> Result<Self> {
         let client_key = read_systemd_credential("nostr-client-key").await?;
         Self::new(config, client_key)
@@ -50,14 +217,26 @@ impl NakClient {
         if client_key.trim().is_empty() {
             bail!("NIP-46 client key is empty");
         }
-        let bunker_uri = build_bunker_uri(&config.bunker_pubkey, &config.relays)?;
+        if config.bunker_relays().is_empty() {
+            bail!("NIP-46 transport requires at least one relay");
+        }
+        let bunker_uri = build_bunker_uri(&config.bunker_pubkey, config.bunker_relays())?;
+        let protocol_bunkers = config
+            .bunker_relays()
+            .iter()
+            .map(|relay| build_bunker_uri(&config.bunker_pubkey, std::slice::from_ref(relay)))
+            .collect::<Result<Vec<_>>>()?;
         Ok(Self {
             nak_path: config.nak_path.clone(),
             nak_config_path: config.nak_config_path.clone(),
             bunker_uri,
+            protocol_bunkers: Arc::new(protocol_bunkers),
+            preferred_bunker: Arc::new(AtomicUsize::new(0)),
             project_pubkey: config.bunker_pubkey.to_ascii_lowercase(),
             client_key: Arc::new(Zeroizing::new(client_key)),
             relays: config.relays.clone(),
+            relay_router: Arc::new(tokio::sync::Mutex::new(None)),
+            signing_lock: Arc::new(tokio::sync::Mutex::new(())),
         })
     }
 
@@ -66,6 +245,7 @@ impl NakClient {
         content: &str,
         tags: Vec<Vec<String>>,
     ) -> Result<SignedNostrEvent> {
+        let _signing_guard = self.signing_lock.lock().await;
         tokio::fs::create_dir_all(&self.nak_config_path)
             .await
             .with_context(|| {
@@ -304,11 +484,77 @@ mod tests {
             nak_path: PathBuf::from("/usr/local/bin/nak"),
             nak_config_path: PathBuf::from("/run/lightning-goats/nak"),
             bunker_pubkey: "ab".repeat(32),
+            bunker_relays: None,
             relays: vec![
                 "wss://relay-one.example".to_owned(),
                 "wss://relay-two.example".to_owned(),
             ],
         }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn protocol_signing_freezes_timestamp_verifies_signature_and_redacts_bad_helper_output() {
+        use std::{fs, os::unix::fs::PermissionsExt};
+        let directory = tempfile::TempDir::new().unwrap();
+        let script = directory.path().join("nak-stub");
+        fs::write(&script, include_str!("../tests/fixtures/nak_stub.py")).unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o700)).unwrap();
+        let event = crate::nostr_event::test_event(
+            3,
+            9735,
+            100,
+            "",
+            vec![vec![
+                "p".into(),
+                crate::nostr_event::test_event(2, 1, 100, "", vec![]).pubkey,
+            ]],
+        );
+        fs::write(
+            directory.path().join("protocol-event.json"),
+            serde_json::to_string(&event).unwrap(),
+        )
+        .unwrap();
+        let mut config = config();
+        config.nak_path = script;
+        config.nak_config_path = directory.path().to_owned();
+        config.bunker_pubkey = event.pubkey.clone();
+        let client = NakClient::new(&config, "synthetic-secret-client-key".into()).unwrap();
+        for mode in [
+            "protocol_fixture",
+            "protocol_wrong_signature",
+            "protocol_mutated_created",
+            "protocol_malformed_secret",
+        ] {
+            fs::write(directory.path().join("mode"), mode).unwrap();
+            let result = client
+                .sign_protocol_event(9735, 100, "", event.tags.clone())
+                .await;
+            if mode == "protocol_fixture" {
+                assert_eq!(result.unwrap().event(), &event);
+            } else {
+                let error = result.unwrap_err();
+                assert!(!format!("{error:#}").contains("synthetic-secret-client-key"));
+            }
+        }
+        let calls = fs::read_to_string(directory.path().join("calls.jsonl")).unwrap();
+        assert_eq!(calls.lines().count(), 4);
+        for line in calls.lines() {
+            let call: serde_json::Value = serde_json::from_str(line).unwrap();
+            assert_eq!(call["phase"], "sign");
+            assert_eq!(call["payload"]["created_at"], 100);
+            assert_eq!(call["has_client_key"], true);
+        }
+        assert!(
+            client
+                .sign_protocol_event(0, 100, "", vec![])
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            fs::read_to_string(directory.path().join("calls.jsonl")).unwrap(),
+            calls
+        );
     }
 
     #[test]
@@ -324,6 +570,117 @@ mod tests {
             .collect();
         assert_eq!(relays, config().relays);
         assert!(!uri.contains("secret="));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn protocol_signer_uses_single_relay_fallback_and_reuses_frozen_intent_on_clones() {
+        use std::{fs, os::unix::fs::PermissionsExt};
+        let root = tempfile::TempDir::new().unwrap();
+        let script = root.path().join("nak-stub");
+        fs::write(&script, include_str!("../tests/fixtures/nak_stub.py")).unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o700)).unwrap();
+        let event = crate::nostr_event::test_event(3, 1, 100, "welcome", vec![]);
+        fs::write(
+            root.path().join("protocol-event.json"),
+            serde_json::to_string(&event).unwrap(),
+        )
+        .unwrap();
+        fs::write(root.path().join("mode"), "protocol_first_relay_fail").unwrap();
+        let mut config = config();
+        config.nak_path = script;
+        config.nak_config_path = root.path().to_owned();
+        config.bunker_pubkey = event.pubkey.clone();
+        let client = NakClient::new(&config, "synthetic-secret-client-key".into()).unwrap();
+        for signer in [&client, &client.clone()] {
+            assert_eq!(
+                signer
+                    .sign_protocol_event(1, 100, "welcome", vec![])
+                    .await
+                    .unwrap()
+                    .event(),
+                &event
+            );
+        }
+        let calls: Vec<serde_json::Value> = fs::read_to_string(root.path().join("calls.jsonl"))
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(calls.len(), 3);
+        for (index, call) in calls.iter().enumerate() {
+            assert_eq!(
+                call["bunker_relays"],
+                serde_json::json!([config.relays[usize::from(index > 0)]])
+            );
+            assert_eq!(call["payload"], calls[0]["payload"]);
+        }
+        // An unavailable signer leaves the original intent retryable, and its
+        // helper diagnostics (including credentials) stay out of the error.
+        fs::write(root.path().join("mode"), "protocol_all_relays_fail").unwrap();
+        let error = client
+            .sign_protocol_event(1, 100, "welcome", vec![])
+            .await
+            .unwrap_err();
+        assert!(!format!("{error:#}").contains("synthetic-secret-client-key"));
+        assert_eq!(
+            client.preferred_bunker.load(Ordering::Relaxed),
+            0,
+            "rotate the starting relay after a failed round so a slow tail cannot starve"
+        );
+        fs::write(root.path().join("mode"), "protocol_fixture").unwrap();
+        assert_eq!(
+            client
+                .sign_protocol_event(1, 100, "welcome", vec![])
+                .await
+                .unwrap()
+                .event(),
+            &event
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn stalled_protocol_relay_is_reaped_before_fallback_within_one_total_deadline() {
+        use std::{fs, os::unix::fs::PermissionsExt};
+        let root = tempfile::TempDir::new().unwrap();
+        let script = root.path().join("nak-stub");
+        fs::write(&script, include_str!("../tests/fixtures/nak_stub.py")).unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o700)).unwrap();
+        let event = crate::nostr_event::test_event(3, 1, 100, "welcome", vec![]);
+        fs::write(
+            root.path().join("protocol-event.json"),
+            serde_json::to_string(&event).unwrap(),
+        )
+        .unwrap();
+        fs::write(root.path().join("mode"), "protocol_first_relay_stall").unwrap();
+        let mut config = config();
+        config.nak_path = script;
+        config.nak_config_path = root.path().to_owned();
+        let client = NakClient::new(&config, "synthetic-secret-client-key".into()).unwrap();
+        let partial = serde_json::json!({"kind":1,"created_at":100,"content":"welcome","tags":[]})
+            .to_string();
+        let (raw, index) = timeout(
+            Duration::from_secs(7),
+            client.run_protocol_signer(
+                &partial,
+                Duration::from_secs(6),
+                Duration::from_millis(300),
+            ),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(index, 1);
+        assert_eq!(
+            crate::nostr_event::VerifiedEvent::from_json(&raw)
+                .unwrap()
+                .event(),
+            &event
+        );
+        let pid = fs::read_to_string(root.path().join("stalled-pid")).unwrap();
+        #[cfg(target_os = "linux")]
+        assert!(!std::path::Path::new(&format!("/proc/{pid}")).exists());
     }
 
     #[test]

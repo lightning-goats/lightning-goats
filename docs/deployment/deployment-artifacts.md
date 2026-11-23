@@ -21,8 +21,9 @@ Standalone downloads include all three binaries (`lightning-goatsd`,
 commit/target/Rust/Cargo versions, and `SHA256SUMS` covering those files and the
 archive. The archive also includes `deploy/`, `docs/`, `web/`, `AGENTS.md`, `Cargo.lock`
 and an internal checksum manifest covering every payload file. It contains
-examples and the imported static website with payments disabled; it contains no
-production secrets. Install the
+examples and the imported static website with payments disabled. The packager
+reads the source files directly from the selected Git commit, so ignored caches
+and local operator files cannot enter the archive. Install the
 daemon/CLI on the VPS; install the gateway only on the trusted host.
 
 From a clean reviewed checkout, build and assemble without installing services:

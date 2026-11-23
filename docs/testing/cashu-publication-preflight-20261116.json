@@ -1,0 +1,71 @@
+{
+  "candidate_files": 543,
+  "candidate_bytes": 8946190,
+  "extension_counts": {
+    ".crate": 2,
+    ".css": 1,
+    ".csv": 1,
+    ".example": 4,
+    ".html": 1,
+    ".js": 1,
+    ".json": 98,
+    ".lock": 3,
+    ".md": 33,
+    ".mjs": 1,
+    ".orig": 2,
+    ".patch": 1,
+    ".py": 23,
+    ".rs": 348,
+    ".sh": 1,
+    ".sql": 1,
+    ".toml": 6,
+    ".txt": 1,
+    ".yml": 2,
+    "<none>": 13
+  },
+  "generated_or_sensitive_name_candidates": [],
+  "excluded_artifacts": true,
+  "scope": "Candidate path inventory only; not a credential scan or publication approval.",
+  "credential_pattern_scan": {
+    "result": "LIMITED_PUBLICATION_CREDENTIAL_PATTERN_SCAN",
+    "text_files_scanned": 541,
+    "non_utf8_files": [
+      "tools/cashu-compat/vendor/cdk-0.18.3.crate",
+      "tools/cashu-compat/vendor/rusqlite-0.31.0.crate"
+    ],
+    "hits": [
+      {
+        "path": "src/payout/funding_tests.rs",
+        "pattern": "literal_bearer",
+        "count": 2,
+        "lines": [
+          901,
+          923
+        ]
+      }
+    ],
+    "patterns": [
+      "nostr_private_key",
+      "private_key_pem",
+      "github_token",
+      "aws_access_key",
+      "slack_token",
+      "stripe_live_key",
+      "literal_bearer"
+    ],
+    "scope": "Changed/untracked publication candidate text only; this pattern scan is not comprehensive security review. No matched values are printed."
+  },
+  "reviewed_pattern_hits": [
+    {
+      "path": "src/payout/funding_tests.rs",
+      "lines": [
+        901,
+        923
+      ],
+      "classification": "Fixed mock-provider authorization header, using the same local test KEY constant; module compiled only under cfg(all(test, unix)).",
+      "production_credential_found": false
+    }
+  ],
+  "publication_authorized_by_this_check": false,
+  "comprehensive_security_review_complete": false
+}

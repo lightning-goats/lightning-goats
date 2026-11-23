@@ -1,0 +1,39 @@
+{
+  "scope": "One synthetic Strike receive selected from funded rollback journal copies and verified by the locally built native operator CLI in a loopback-only namespace",
+  "funded_fixture_programs": {
+    "source_commit": "963111a0b34b6b38769e942c5e1686d70c5f8602",
+    "checkout_commit": "dc57d945933f36722cf4e04dfb15d7578f55d255",
+    "matching_tree": "6ac09c837d632271873b1564e6ed07c15948d4d0",
+    "core_artifact_id": 14374977105,
+    "core_test_sha256": "f3c7f9a1d7e7d4f5f257199fbef3076b7dbf2d7412cdffac29a55ded937a6476",
+    "wallet_artifact_id": 14375360613,
+    "wallet_test_sha256": "a0ddf73d19a788f49ec9076e6c1a76d43983af2862b08053ea4dc9373dd204a2"
+  },
+  "locally_built_core_cli_sha256": "ef68ab62e0dd646fe6b0cd7752e012c5d3e7da73105831dab8be859ad9733317",
+  "verification_sources_sha256": {
+    "src/state_maintenance/cashu_strike_review.rs": "74addbb169dd3bd806271a19be78c33332f820770b66877bb1437e8a6ba3c116",
+    "src/bin/lightning-goatsctl.rs": "dc533b5794fd61f6d2c371e625e87bea6612934d4d6a5da4105b1f1aa0728b3d",
+    "deploy/scripts/review-cashu-restore.py": "2291ecda8b73298bb2469232936d1b21db5eb8c0b5b41b4584ad8cdc9c2e419c",
+    "deploy/scripts/test-cashu-combined-settlement.py": "c0c71e34fbf07c4807dfc1f5e13721b11483d5dba7ba5bfed3278c294cd7cb4a",
+    "deploy/scripts/cashu-collector-fixture.py": "4d8d695c14801a2a3a247bbdeafe500a41c98824760adc1771fb032f133a2f85"
+  },
+  "results": {
+    "original_synthetic_strike_receive_sats": 398,
+    "authoritative_gets": 2,
+    "settled_receive_bound_to_original_selection": true,
+    "wrong_credential_no_provider_calls": true,
+    "wrong_selection_digest_no_provider_calls": true,
+    "contradicting_retained_receive_id_refused": true,
+    "wrong_btc_target_refused_before_receive_lookup": true,
+    "private_observation_bound_to_selection_sha256": true,
+    "funded_checkpoint_bytes_unchanged": true,
+    "unknown_intent_refused_by_authenticated_encrypted_restore_launcher": true,
+    "funded_fixture_extra_transfer_credit_sats": 0,
+    "funded_fixture_synthetic_confirmed_feeds": 1
+  },
+  "live_provider": false,
+  "physical_actuation": false,
+  "external_reconciliation_verified": false,
+  "resume_authorized": false,
+  "scope_limits": "The funded selector fixture uses consistent native copies. The encrypted archive path is tested separately with initialized disposable journals. Installed recovery and safe resumption still require qualification."
+}

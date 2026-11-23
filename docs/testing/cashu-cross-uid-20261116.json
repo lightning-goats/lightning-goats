@@ -1,0 +1,11 @@
+{
+  "artifacts_sha256": {
+    "core-test": "5629f7ce0f6bfc6ec8d4f76fd4e1619afbb2631d5b5106ccbe7cdf6117e4061b",
+    "wallet-test": "83ba68a8317b1d4ceb40e87782a2381cb1cce6e6ac534b537c5084fd246bc0d4"
+  },
+  "core_uid": 60000,
+  "credited_sats": 7,
+  "payment_events": 1,
+  "result": "CASHU_CROSS_UID_RECEIPT_VERIFIED",
+  "wallet_uid": 60001
+}

@@ -1,0 +1,16 @@
+# Dedicated service OUTPUT policy; no forwarding/NAT or unrelated identity changes.
+# Render @UID@ from the installed lightning-goats-display identity.
+# destroy+create is one atomic transaction, scoped only to this owned table.
+destroy table inet lightning_goats_display
+table inet lightning_goats_display {
+    chain output {
+        type filter hook output priority -5; policy accept;
+        meta skuid @UID@ ip daddr 10.8.0.6 tcp dport 8789 accept
+        meta skuid @UID@ ip daddr 127.0.0.0/8 udp dport 53 accept
+        meta skuid @UID@ ip daddr 127.0.0.0/8 tcp dport 53 accept
+        meta skuid @UID@ ip6 daddr ::1 udp dport 53 accept
+        meta skuid @UID@ ip6 daddr ::1 tcp dport 53 accept
+        meta skuid @UID@ ip daddr { 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } reject
+        meta skuid @UID@ ip6 daddr { ::1, fc00::/7, fe80::/10 } reject
+    }
+}

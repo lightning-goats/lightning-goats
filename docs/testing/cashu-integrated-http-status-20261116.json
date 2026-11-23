@@ -1,0 +1,19 @@
+{
+  "result": "CASHU_PUBLIC_REQUEST_CROSS_UID_VERIFIED",
+  "artifacts_sha256": {
+    "core": "65eb1dd4409ec81e9b8654f337bd888c9572b1b67c9352ca6ac6f9edd028ce82",
+    "wallet": "8c94483ca22a2c74b206de81a80ce95c8990cc2f0fa4ed5563bccd9fc92c9d19"
+  },
+  "acquisitions_created": 2,
+  "acquired_or_credited": false,
+  "malformed_before_valid_rejected": true,
+  "same_descriptor_two_payments": true,
+  "replay_same_capability": true,
+  "status_survives_paused_restart": true,
+  "rogue_peer_rejected": true,
+  "quote_requests": 0,
+  "melt_requests": 0,
+  "core_uid": 60000,
+  "wallet_uid": 60001,
+  "rogue_uid": 60002
+}

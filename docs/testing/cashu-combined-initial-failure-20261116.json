@@ -1,0 +1,16 @@
+{
+  "scope": "First composed wallet/core fixture execution",
+  "result": "failed",
+  "cause": "Synthetic nutzap fixture used full compressed receiving key instead of required even-parity NIP-61 P2PK encoding",
+  "wallet_error": "invalid NIP-61 key encoding",
+  "core_artifact": {
+    "path": "/home/linuxuser/lightning-goats/.worktrees/cashu-nutnovember-20261115/.artifacts/cashu-combined-fixture-20261116/core-test",
+    "sha256": "adf7e3637317f5e2fabef5d01d6e4690816eaf1f21d778cc769c5f89bc9cf00d"
+  },
+  "wallet_artifact": {
+    "path": "/home/linuxuser/lightning-goats/.worktrees/cashu-nutnovember-20261115/.artifacts/cashu-combined-fixture-20261116/wallet-test",
+    "sha256": "284ec7d8ffb72989c71fe5f991524280ba624c0afe71691913546bdd9f41acd6"
+  },
+  "production_state_changed": false,
+  "fix_scope": "fixture encoding only; production validator unchanged"
+}

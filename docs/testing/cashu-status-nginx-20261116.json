@@ -1,0 +1,21 @@
+{
+  "result": "passed",
+  "tests": 4,
+  "log": "....\n----------------------------------------------------------------------\nRan 4 tests in 0.970s\n\nOK\n",
+  "source_sha256": {
+    "deploy/nginx/lightning-goats-cashu.conf.example": "322ecc9194dbe6c2c4891e421251d1b7e7563fdc95cec8a57bd10a9765683172",
+    "deploy/tests/test_cashu_nginx.py": "9745dd02de292e83ec4745bd6822315267d9411d7d847bb6c4a709b372f5c6d3"
+  },
+  "scope": [
+    "Real isolated nginx exact receive/request/status route forwarding",
+    "Status POST/OPTIONS only, query strings and suffix paths denied",
+    "513-byte status body rejected without forwarding or disk spooling",
+    "Synthetic capability markers absent from local access/error logs"
+  ],
+  "unqualified": [
+    "Wallet/core status application integration",
+    "External WAF/CDN logging policy",
+    "Real sender payment/status behavior"
+  ],
+  "production_changed": false
+}

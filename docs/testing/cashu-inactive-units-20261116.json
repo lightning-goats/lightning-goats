@@ -1,0 +1,12 @@
+{
+  "scope": "Inactive wallet and signer unit syntax only",
+  "units_sha256": {
+    "deploy/systemd/lightning-goats-cashu.service.example": "8eb1deee9dd453838c387a91c55facc82f9a8c14a6195a43c0dc9c2fa66b245d",
+    "deploy/systemd/lightning-goats-cashu-signer.service.example": "25bf8ca7bba77d93040ff7233f144c6666f1db1d0d12640bf59b0fc9133d01de"
+  },
+  "verification_exit_code": 0,
+  "verification": "systemd-analyze verify --man=no on temporary unit copies with only the uninstalled executable paths replaced by /usr/bin/true",
+  "services_started": false,
+  "installed": false,
+  "runtime_or_network_qualified": false
+}

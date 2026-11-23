@@ -1,0 +1,83 @@
+{
+  "source_commit": "7f8a2d7ee7ca36662ca1a43b28b18a54ef5d14c2",
+  "source_tree": "f1fe33337e76a63999a39c68afc8566a6dcdb424",
+  "ci_checkout_commit": "7031383d41ec5de2b08ff73195124fb03b43f40a",
+  "ci_checkout_tree": "f1fe33337e76a63999a39c68afc8566a6dcdb424",
+  "checkout_tree_equals_source_tree": true,
+  "workflows": [
+    {
+      "name": "Home owner candidate",
+      "id": 44163943251,
+      "conclusion": "success",
+      "url": "https://github.com/lightning-goats/lightning-goats/actions/runs/44163943251"
+    },
+    {
+      "name": "Deployment artifacts",
+      "id": 44163943133,
+      "conclusion": "success",
+      "url": "https://github.com/lightning-goats/lightning-goats/actions/runs/44163943133"
+    },
+    {
+      "name": "Home staging filter",
+      "id": 44163943421,
+      "conclusion": "success",
+      "url": "https://github.com/lightning-goats/lightning-goats/actions/runs/44163943421"
+    },
+    {
+      "name": "VPS staging client filter",
+      "id": 44163943144,
+      "conclusion": "success",
+      "url": "https://github.com/lightning-goats/lightning-goats/actions/runs/44163943144"
+    },
+    {
+      "name": "WireGuard peer authentication",
+      "id": 44163943225,
+      "conclusion": "success",
+      "url": "https://github.com/lightning-goats/lightning-goats/actions/runs/44163943225"
+    },
+    {
+      "name": "Home held canary",
+      "id": 44163943274,
+      "conclusion": "success",
+      "url": "https://github.com/lightning-goats/lightning-goats/actions/runs/44163943274"
+    },
+    {
+      "name": "Security",
+      "id": 44163943397,
+      "conclusion": "success",
+      "url": "https://github.com/lightning-goats/lightning-goats/actions/runs/44163943397"
+    },
+    {
+      "name": "Real NIP-46 acceptance",
+      "id": 44163943187,
+      "conclusion": "success",
+      "url": "https://github.com/lightning-goats/lightning-goats/actions/runs/44163943187"
+    },
+    {
+      "name": "Home weather compatibility",
+      "id": 44163943155,
+      "conclusion": "success",
+      "url": "https://github.com/lightning-goats/lightning-goats/actions/runs/44163943155"
+    },
+    {
+      "name": "CI",
+      "id": 44163943356,
+      "conclusion": "success",
+      "url": "https://github.com/lightning-goats/lightning-goats/actions/runs/44163943356"
+    }
+  ],
+  "artifact": {
+    "id": 14365765060,
+    "size_bytes": 2660,
+    "sha256": "390c4c73472815af64c573008a56b6dabf653cdffac2e63c8e8a779c00bd4180"
+  },
+  "scope": "Native copy normalizer and FIFO refusal; later coordinated collector and recovery-key verification are separate source.",
+  "browser_retry": {
+    "reason": "Ubuntu mirror network unreachable while installing browser dependencies",
+    "failed_job": 134324845189,
+    "retry_website_job": 134337431161,
+    "retry_conclusion": "success"
+  },
+  "production_changes": false,
+  "funded_restore_qualified": false
+}

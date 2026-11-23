@@ -243,3 +243,11 @@ see [overlay stream version 1](overlay-stream.md). The authoritative site's
 handling of explicit keys, reset/skip events and visible-weather expiry requires
 browser acceptance. No reconstructed website or live source observation is
 claimed by the loopback fixture tests.
+
+## Paused messaging update — 2026-11-09
+
+The operator requested normal informational/weather messages during a feeding
+pause, with explicit pause/queued-feed context. Earlier override-based suppression
+is superseded for presentation only. Scheduling probabilities, observation
+freshness and overlay-only audience remain unchanged. See
+[paused feeding and queues](../deployment/paused-feeding-queue.md).

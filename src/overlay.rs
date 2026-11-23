@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, time::Duration};
+use std::{collections::VecDeque, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result, bail};
 use axum::extract::ws::{Message, WebSocket};
@@ -59,6 +59,7 @@ pub async fn serve_overlay_socket(
     renderer: MessageRenderer,
     threshold_sats: u64,
     resume: OverlayResume,
+    cashu: Option<Arc<crate::cashu::intake::Forwarder>>,
 ) -> Result<()> {
     serve_with_timing(
         socket,
@@ -67,6 +68,7 @@ pub async fn serve_overlay_socket(
         threshold_sats,
         resume,
         Timing::default(),
+        cashu,
     )
     .await
 }
@@ -106,9 +108,22 @@ async fn snapshot(
     threshold: u64,
     stream: Uuid,
     reason: Option<&str>,
+    cashu: Option<&crate::cashu::intake::Forwarder>,
 ) -> Result<Queued> {
+    let as_of = crate::gateway::now_epoch()?;
     let (seq, encoded) = ledger.overlay_snapshot_message(threshold).await?;
     let mut value: Value = serde_json::from_str(&encoded)?;
+    value["cashu"] = match cashu {
+        Some(wallet) => wallet
+            .public_request()
+            .await
+            .ok()
+            .flatten()
+            .map(crate::cashu::public_request::public_value)
+            .unwrap_or(Value::Null),
+        None => Value::Null,
+    };
+    value["as_of"] = as_of.into();
     value["version"] = 1.into();
     value["stream_id"] = stream.to_string().into();
     if let Some(reason) = reason {
@@ -121,7 +136,8 @@ async fn snapshot(
     })
 }
 
-fn render_window(
+async fn render_window(
+    ledger: &LedgerStore,
     events: Vec<DurableEvent>,
     renderer: &MessageRenderer,
     threshold: u64,
@@ -130,10 +146,16 @@ fn render_window(
     let mut size = 0;
     for event in events {
         let seq = event.seq;
+        let message_limit = if event.event_type == "cyberherd_message" {
+            crate::core_bridge::MAX_FRAME
+        } else {
+            MAX_MESSAGE
+        };
         let is_weather = event.event_type == "weather_status";
-        let body = durable_event_message(event, renderer, threshold)?;
+        let zap = ledger.verified_zap_attribution(&event).await?;
+        let body = durable_event_message_with_zap(event, renderer, threshold, zap.as_ref())?;
         size += body.len();
-        if body.len() > MAX_MESSAGE || size > MAX_QUEUE {
+        if body.len() > message_limit || size > MAX_QUEUE {
             bail!("overlay replay exceeds output bounds");
         }
         let weather_observed_at = if is_weather {
@@ -169,19 +191,22 @@ async fn serve_with_timing(
     threshold: u64,
     resume: OverlayResume,
     timing: Timing,
+    cashu: Option<Arc<crate::cashu::intake::Forwarder>>,
 ) -> Result<()> {
     resume.validate()?;
     let stream = ledger.overlay_stream_id().await?;
     let (mut sender, mut receiver) = socket.split();
-    let mut checkpoint = snapshot(&ledger, threshold, stream, None).await?;
+    let mut checkpoint = snapshot(&ledger, threshold, stream, None, cashu.as_deref()).await?;
     let mut last_seq = checkpoint.seq;
     let mut queue = VecDeque::new();
     if let Some(after) = resume.after {
         let replay = if resume.stream == Some(stream) {
-            ledger
-                .overlay_event_window(after, checkpoint.seq)
-                .await?
-                .and_then(|events| render_window(events, &renderer, threshold).ok())
+            match ledger.overlay_event_window(after, checkpoint.seq).await? {
+                Some(events) => render_window(&ledger, events, &renderer, threshold)
+                    .await
+                    .ok(),
+                None => None,
+            }
         } else {
             None
         };
@@ -194,7 +219,14 @@ async fn serve_with_timing(
             last_seq = after;
             queue = replay;
         } else {
-            checkpoint = snapshot(&ledger, threshold, stream, Some("resume_unavailable")).await?;
+            checkpoint = snapshot(
+                &ledger,
+                threshold,
+                stream,
+                Some("resume_unavailable"),
+                cashu.as_deref(),
+            )
+            .await?;
             last_seq = checkpoint.seq;
         }
     }
@@ -244,21 +276,33 @@ async fn serve_with_timing(
                 let latest = ledger.latest_event_seq().await?;
                 if latest == last_seq { continue; }
                 let through = latest.min(last_seq.saturating_add(100));
-                let messages = ledger.overlay_event_window(last_seq, through).await?
-                    .and_then(|events| render_window(events, &renderer, threshold).ok());
+                let messages = match ledger.overlay_event_window(last_seq, through).await? {
+                    Some(events) => render_window(&ledger, events, &renderer, threshold).await.ok(),
+                    None => None,
+                };
                 match messages {
                     Some(messages) => queue = messages,
-                    None => queue.push_back(snapshot(&ledger, threshold, stream, Some("event_window_unavailable")).await?),
+                    None => queue.push_back(snapshot(&ledger, threshold, stream, Some("event_window_unavailable"), cashu.as_deref()).await?),
                 }
             }
         }
     }
 }
 
+#[cfg(test)]
 fn durable_event_message(
     event: DurableEvent,
     renderer: &MessageRenderer,
     threshold_sats: u64,
+) -> Result<String> {
+    durable_event_message_with_zap(event, renderer, threshold_sats, None)
+}
+
+fn durable_event_message_with_zap(
+    event: DurableEvent,
+    renderer: &MessageRenderer,
+    threshold_sats: u64,
+    zap: Option<&crate::zap_presentation::ZapAttribution>,
 ) -> Result<String> {
     let mut payload: Value = serde_json::from_str(&event.payload_json)
         .context("durable overlay event contains invalid JSON")?;
@@ -268,10 +312,29 @@ fn durable_event_message(
         return Ok(skipped_weather(event.seq));
     }
 
-    let presentation = renderer.render(&event, threshold_sats)?;
+    let presentation = renderer.render_with_zap(&event, threshold_sats, zap)?;
+    if matches!(
+        event.event_type.as_str(),
+        "payment_received" | "operator_credit_added"
+    ) && presentation.overlay_type.is_none()
+    {
+        return Ok(
+            json!({"type":"event_skipped", "source_type":event.event_type,
+            "seq":event.seq, "reason":"payment_below_message_minimum",
+            "feed_credit_sats":payload["feed_credit_sats"]})
+            .to_string(),
+        );
+    }
     let object = payload
         .as_object_mut()
         .context("durable overlay event payload must be a JSON object")?;
+    if matches!(
+        event.event_type.as_str(),
+        "payment_received" | "operator_credit_added"
+    ) && presentation.overlay_message.is_none()
+    {
+        object.remove("message");
+    }
 
     let overlay_type = presentation
         .overlay_type
@@ -297,6 +360,41 @@ mod tests {
 
     fn renderer() -> MessageRenderer {
         MessageRenderer::embedded().unwrap()
+    }
+
+    #[tokio::test]
+    async fn unavailable_cashu_metadata_preserves_snapshot_and_financial_sequence() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let ledger = LedgerStore::connect(&format!(
+            "sqlite://{}",
+            directory.path().join("overlay.sqlite").display()
+        ))
+        .await?;
+        let stream = ledger.overlay_stream_id().await?;
+        let baseline = snapshot(&ledger, 1000, stream, None, None).await?;
+        let wallet = crate::cashu::intake::Forwarder::new(crate::cashu::intake::Policy {
+            socket: directory.path().join("missing.sock"),
+            wallet_uid: crate::private_ipc::uid()?.checked_add(1).unwrap(),
+            wallet_instance: Uuid::new_v4(),
+            wallet_epoch: Uuid::new_v4(),
+            receive_cashu: true,
+            receive_nutzap: false,
+            body_bytes: 1024,
+            concurrent_requests: 1,
+            deadline: Duration::from_secs(60),
+        })?;
+        let actual = tokio::time::timeout(
+            Duration::from_secs(2),
+            snapshot(&ledger, 1000, stream, None, Some(&wallet)),
+        )
+        .await??;
+        assert_eq!(actual.seq, baseline.seq);
+        assert_eq!(
+            serde_json::from_str::<Value>(&actual.body)?,
+            serde_json::from_str::<Value>(&baseline.body)?
+        );
+        assert!(serde_json::from_str::<Value>(&actual.body)?["cashu"].is_null());
+        Ok(())
     }
 
     #[test]
@@ -327,6 +425,58 @@ mod tests {
         assert!(value["message"].as_str().unwrap().contains("Dexter"));
         assert_eq!(value["goats"][0]["name"], "Dexter");
         assert_eq!(value["goats"][0]["imageUrl"], "images/dexter.png");
+    }
+
+    #[test]
+    fn feeding_funding_payment_keeps_amount_and_progress_without_receipt_text() {
+        for kind in ["payment_received", "operator_credit_added"] {
+            let wire = durable_event_message(
+                DurableEvent {
+                    seq: 42,
+                    event_type: kind.into(),
+                    payload_json: json!({
+                        "amount_sats":1000,"feed_credit_sats":1305,"message":"old receipt text",
+                        "feeding":{"paused":false,"reason":"ready","threshold_sats":1000,
+                            "awaiting_confirmation":false}
+                    })
+                    .to_string(),
+                },
+                &renderer(),
+                1000,
+            )
+            .unwrap();
+            let value: Value = serde_json::from_str(&wire).unwrap();
+            assert_eq!(value["type"], "sats_received");
+            assert_eq!(value["source_type"], kind);
+            assert_eq!(value["seq"], 42);
+            assert_eq!(value["amount_sats"], 1000);
+            assert_eq!(value["feed_credit_sats"], 1305);
+            assert!(value.get("message").is_none());
+        }
+    }
+
+    #[test]
+    fn small_payment_advances_cursor_and_credit_without_presentation() {
+        for kind in ["payment_received", "operator_credit_added"] {
+            let message = durable_event_message(
+                DurableEvent {
+                    seq: 7,
+                    event_type: kind.into(),
+                    payload_json:
+                        json!({"amount_sats":9,"feed_credit_sats":1003,"address_user":"herd"})
+                            .to_string(),
+                },
+                &renderer(),
+                1000,
+            )
+            .unwrap();
+            let value: Value = serde_json::from_str(&message).unwrap();
+            assert_eq!(value["type"], "event_skipped");
+            assert_eq!(value["seq"], 7);
+            assert_eq!(value["feed_credit_sats"], 1003);
+            assert!(value.get("message").is_none());
+            assert!(value.get("goats").is_none());
+        }
     }
 
     #[test]

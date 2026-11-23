@@ -1,0 +1,62 @@
+{
+  "library": "@cashu/cashu-ts",
+  "version": "4.7.2",
+  "results": [
+    {
+      "name": "creqA",
+      "status": "parsed",
+      "encoding": "creqA",
+      "payload_length": 301
+    },
+    {
+      "name": "creqB",
+      "status": "parsed",
+      "encoding": "creqB",
+      "payload_length": 344
+    },
+    {
+      "name": "long_creqA",
+      "status": "parsed",
+      "encoding": "creqA",
+      "payload_length": 609
+    },
+    {
+      "name": "long_creqB",
+      "status": "parsed",
+      "encoding": "creqB",
+      "payload_length": 718
+    }
+  ],
+  "scope": "Independent offline parsing only; no sender payment or phone scan",
+  "live_payment": false,
+  "result": "candidate_parser_passed",
+  "network_namespace_isolated": true,
+  "integrated_in_wallet_encoder": false,
+  "native_cli_fixture": false,
+  "typed_cdk_roundtrip_checked": true,
+  "source_sha256": {
+    ".artifacts/cashu-public-request-fixture-draft/amountless-probe.rs": "c40759aecba2c7002dfee21cef1367c8e48f42b9907748f003fe1bf36b3b9fad",
+    ".artifacts/cashu-public-request-fixture-draft/amountless-candidate.json": "422a98ef897423db3324ceb3119c1eca9fdf2e68fcaf3b5048c8f2b6fb2a82cf",
+    "tools/cashu-client-compat/packages.json": "dce4f9f5b8365809397454e79f882dfd77ed32b502859fdcff09e63d0700c36e",
+    "tools/cashu-client-compat/prepare.py": "6ff11238b1d45856255ad2156974cf4e37c47a21686fbbe6d59b7a41e7a01254",
+    "tools/cashu-client-compat/verify-requests.mjs": "af2f164c444e9ca2bf0b54f904b9d192de9b60fc6b6bb8c09129a56e28253e63"
+  },
+  "limitations": [
+    "Diagnostic candidate, not wallet encoder or native CLI qualification",
+    "No sender payment, mint, relay, phone or installed acceptance",
+    "Native fixture regeneration and full Rust verification required after integration"
+  ],
+  "cbor_amount_field_absent_checked": true,
+  "browser_candidate_checks": {
+    "passed": 2,
+    "log": "..\n----------------------------------------------------------------------\nRan 2 tests in 45.922s\n\nOK\n",
+    "scope": "Four candidate request payloads decoded at 1080p/720p plus full roster/goat/banner/payment/feed-effect collision checks",
+    "source_sha256": {
+      "tests/website/test_overlay.py": "3d3ff235797c331ec3b4f3ddb7ecba652f947d36aab4902f1cfbb2820254494b",
+      "web/overlay.js": "e4a43627fd144666931373d8663dafca921b06b529dcbabf1e4ea518ba7d43ae",
+      "web/overlay.css": "b45d615195c867c139e60438c01ddbd655323a27c004502d1f50165f68eb8223",
+      "web/overlay.html": "c63f418ce92aa32a81ce2344617c188b673993e097470d83e72afd6f911e40f6"
+    }
+  },
+  "probe_binary_sha256": "9cfa7614cdd1a07daea8d0aaaaae3354b76c21ad39a161097ec318c25bc32534"
+}

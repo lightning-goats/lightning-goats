@@ -18,6 +18,15 @@ class SystemdRehearsalTests(unittest.TestCase):
         daemon = REHEARSAL.service_properties(REHEARSAL.TEMPLATES / "lightning-goats-canary.service")
         self.assertEqual([v.split(":",1)[0] for k,v in daemon if k == "LoadCredentialEncrypted"], ["strike-api-key","strike-webhook-secret"])
 
+    def test_breez_cutover_drops_strike_and_preserves_later_credentials(self):
+        base = REHEARSAL.TEMPLATES / "lightning-goats-receive.service"
+        override = base.parent / (base.name + ".d") / "00-breez-only.conf.example"
+        base_credentials = [value.split(":", 1)[0] for key, value in REHEARSAL.service_properties(base)
+                            if key == "LoadCredentialEncrypted"]
+        self.assertEqual(base_credentials, ["strike-api-key", "strike-webhook-secret"])
+        self.assertEqual(REHEARSAL.service_properties(override), [("LoadCredentialEncrypted", "")])
+        self.assertLess(override.name, "50-household-nostr.conf")
+
     def test_unsupported_continuation_does_not_drop_a_sandbox_constraint(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "test.service"

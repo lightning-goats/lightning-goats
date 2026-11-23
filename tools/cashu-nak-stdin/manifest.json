@@ -1,0 +1,9 @@
+{
+  "upstream_commit": "fb21939f45538eff414068fa1bb6f1bea705f447",
+  "source_sha256": "7b131f380afbd4bc62264c210596b6679a3f155fb06fbeb0d985d49953c83b0a",
+  "go_version": "1.27.4",
+  "go_archive_sha256": "7226736c2339719cda28fbf3a54d71aa63bcefe376e98cef00034268dab24840",
+  "patch_sha256": "2f85827d5e5b05dab81697538d28625e89e9fda1739a020d8756a5138a4c4df6",
+  "upstream_encrypt_decrypt_sha256": "9359f1eb4b17f034d34a7f568314acf161cac4ffa4ca139d48f05bd3044ad2ad",
+  "version": "v0.20.6+cashu-stdin.1"
+}

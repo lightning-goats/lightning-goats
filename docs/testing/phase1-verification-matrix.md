@@ -1,23 +1,70 @@
-# Phase 1 Verification Matrix
+# Phase 1 Verification Matrix — Risk-Tiered Live Pilot
 
-Audit addendum (2026-09-10): production is on HOLD. The 2026-09-08 findings and
-`../deployment/audit-remediation.md` add required negative, concurrent, delayed,
-missing-notification and restart cases. Existing always-successful gateway mocks
-do not satisfy the combined daemon -> real gateway -> mock OpenHAB gate.
+Effective 2026-09-14; tracker #15. Apply
+[parallel-live-pilot.md](../deployment/parallel-live-pilot.md) first.
 
-Artifact checks now run via `python3 -m unittest discover -s deploy/tests -v`
-and the `Deployment artifacts` workflow. They cover nginx TLS assembly/routing
-and complete release archives, not payment settlement or physical completion.
+This replaces the former all-checks-before-first-payment launch gate. Keep existing
+regression suites and historical audit evidence; do not represent skipped or
+unperformed cases as passed. A concrete fault blocks the affected path. The complete
+checklist is not a prerequisite to the operator's small parallel live pilot.
 
-Status: required before production cutover.
+## A. Before first pilot payment: short preflight
 
-Tracker: issue #15.
+| Check | Required result |
+| --- | --- |
+| Origin/TLS/routes | `herd@feeder.lightning-goats.com` resolves to the new daemon; callback/metadata use the pilot origin; old public addresses unchanged |
+| Issuance and settlement | Valid signed mainnet BOLT11 binding amount/hash/expiry; authoritative Strike completion, not a trusted webhook body alone; amount/user restrictions retained |
+| Secrets and runtime | Protected receive/read-only Strike key, no spend/OpenHAB key on VPS; non-admin runtime and existing service protections |
+| State and provenance | Fresh pilot durable ledger on first start, selected source/binary/config recorded; no fixture/copied production ledger; no known corruption defect in this path |
+| Ability to stop | Close new pilot issuance/dispatch without deleting state or disrupting old production; preserve late settlement recovery |
 
-This document converts the Phase 1 security and functional requirements into explicit acceptance checks. Codex may automate these checks, but real DNS/WireGuard cutover and physical feeder actuation remain operator-gated.
+No fixed payment-count/220-sat/time ceiling was adopted. The operator chooses manual
+payments within configured invoice and feeding limits. Sandbox provisioning, complete
+weather/site work, optional guard tooling and extra agents are not prerequisites.
 
-## 1. Build / static verification
+## B. Before and during live feeding: inspect the actual path
 
-Required on the release candidate:
+| Check | Required result |
+| --- | --- |
+| Gateway target | Intended existing local owner, compatible UUID/completion contract; VPS reaches only the narrow gateway, no generic OpenHAB/weather/admin route |
+| Parallel arbitration | Both paths obey the same local owner/interval/cap; otherwise legacy feeder dispatch alone is paused and its credit retained |
+| Local safety | Override/enable, minimum interval, absolute cap and persistent duplicate controls remain effective |
+| Start state | Inspect accumulated credit/feeds due/unresolved UUID before enabling; no empty-state assumption after earlier real payments |
+| Delivery and debit | One actual completion for the UUID produces one debit/event; receipt alone is not completion |
+| Ambiguity/capacity | Unknown result blocks fresh automatic dispatch; reached retention capacity stops admission, never causes identity deletion/reset |
+
+A quick initial shadow payment is optional. `canary` can perform real feeds without
+public Nostr; `active` additionally publishes. Do not assume a mode name identifies
+the physical versus harmless gateway target. A failed physical preflight need not
+prevent clearly labelled payment-only testing with new dispatch disabled.
+
+## C. Observe through operator payments, not another synthetic launch ceremony
+
+Record one durable credit/event per real settled receive and correct `address_user`.
+Observe threshold crossing, actual feed, correlated completion, debit and remainder.
+At a 1000-sat threshold with zero starting credit, 2340 sats means two confirmations,
+340 remaining and no third feed. Adapt the expected result to the real starting balance.
+
+Restart only the pilot process against its unchanged database. Confirm no extra credit
+and no repeated physical command for a confirmed UUID. Inspect same-ID replay/status
+without inventing a fresh request. Stop on extra feeding, contradictory money or unknown
+delivery. Do not inject dangerous failures into a live actuator to fill a checklist.
+
+Preview overlay payment/feed messages and reconnect behavior. Weather may be unavailable;
+when enabled it uses actual observation age/units and remains overlay-only. In canary
+mode, public Nostr is intentionally untested/off. If active mode is enabled, observe
+normal payment/feed posts and exact signed-event retry without a historical flood.
+
+Genuine Strike webhook delivery is distinct from scanner recovery. The first payment
+may use recovery scanning while subscription work is pending; report that limitation.
+Later verify real signed notification handling/recovery without duplicate credit. Do
+not count a synthetic HMAC payload as provider delivery or a Lightning-only payment as
+proof of Strike-to-Strike P2P/FX behavior.
+
+## D. Keep the automated regression inventory
+
+Run existing relevant suites on the selected candidate; reuse matching CI evidence.
+For Rust changes:
 
 ```sh
 cargo fmt --all --check
@@ -25,445 +72,508 @@ cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo test --locked --all-features
 ```
 
-Run the repository security/audit workflow documented in `docs/implementation-status.md`.
-
-Record:
-
-- Git commit SHA;
-- release tag if used;
-- Rust toolchain version;
-- SHA-256 of deployed binaries;
-- config/template revision.
-
-Durable storage startup is also mandatory: both config and direct-store entry
-points must reject volatile SQLite aliases, nested native URIs, custom VFS and
-read-only/immutable modes before migrations or admission. All pool connections
-must report a real main file, WAL, FULL synchronization and enabled foreign keys.
-Preserve normal filesystem paths and prove payment deduplication, credit, events
-and overlay identity survive another process/reopen. See
-`sqlite-durability-review.md` for the inherited defect and regression criteria.
-
-## 2. Lightning Address registry
-
-Required configured users:
-
-```text
-herd
-dexter
-rowan
-cosmo
-newton
-nova
-```
-
-For each configured user verify:
-
-- discovery endpoint succeeds;
-- callback URL references the same canonical user;
-- min/max amounts are correct;
-- exact metadata string is stable;
-- callback creates a Strike BOLT11 invoice;
-- completed payment records the correct `address_user`;
-- payment credits `credit_pool=herd` exactly once.
-
-Negative tests:
-
-- uppercase/noncanonical user;
-- path traversal / encoded separator attempts;
-- unknown user;
-- empty user;
-- overlong user;
-- amount below minimum;
-- amount above maximum;
-- malformed amount.
-
-For unknown/invalid users assert **zero Strike API calls**.
-
-## 3. LNURL metadata / BOLT11 contract
-
-Verify:
-
-- callback amount is millisatoshi-safe and sat alignment policy is explicit;
-- metadata used for discovery and `descriptionHash` is byte-for-byte identical;
-- returned BOLT11 commits to the expected description hash;
-- callback error paths produce LNURL-compatible safe errors.
-
-## 4. Public abuse controls
-
-### LNURL callback
-
-Verify nginx and application limits independently:
-
-- normal wallet traffic succeeds;
-- burst invoice creation is throttled;
-- discovery can have a higher limit than invoice creation;
-- provider is not contacted after application-level rejection;
-- rate-limit logging contains no secrets.
-
-### Strike webhook
-
-Verify rejection of:
-
-- GET/PUT/etc.;
-- wrong content type;
-- oversized body;
-- invalid HMAC/signature;
-- malformed JSON;
-- unsupported event type.
-
-Verify no financial side effect occurs for rejected requests.
-
-## 5. Strike settlement
-
-Test:
-
-- receive-request creation success;
-- provider 4xx error;
-- 429/rate limit;
-- 5xx;
-- connect timeout;
-- read timeout;
-- malformed provider JSON;
-- webhook points to pending/incomplete receive;
-- completed receive;
-- duplicate webhook;
-- reordered webhook;
-- replay after restart;
-- same source ID with conflicting data;
-- same payment hash with conflicting source data.
-
-Requirements:
-
-- webhook itself never directly credits;
-- authoritative provider read occurs before credit;
-- duplicate/replay is idempotent;
-- conflicts fail closed;
-- settlement + credit + `payment_received` event commit atomically.
-
-Verify the production runtime Strike key cannot spend/withdraw.
-
-## 6. Feeder accounting
-
-Canonical test:
-
-```text
-2340 sats received
--> feed credit 2340
--> feed #1 confirmed
--> feed credit 1340
--> feed #2 confirmed
--> feed credit 340
--> no third feed
-```
-
-Test:
-
-- one threshold exactly;
-- multiple thresholds;
-- remainder;
-- threshold configuration validation;
-- restart before feed;
-- restart after intent but before ack;
-- unresolved feed blocks subsequent automatic feed.
-
-## 7. In-house integration gateway / OpenHAB
-
-Follow `docs/security/openhab-feeder-gateway.md`.
-
-Production host context:
-
-```text
-10.8.0.6   OpenHAB/weather/integration host
-```
-
-### Positive feeder path
-
-- gateway health reachable from VPS;
-- override read works;
-- optional temperature read works;
-- unique request UUID accepted;
-- OpenHAB local rule evaluates safety gates;
-- authoritative ack for UUID returned;
-- one ack causes one durable feeder debit/event.
-
-### Duplicate/replay
-
-Send the exact same feed UUID twice.
-
-Requirement: physical feeder actuation count remains one.
-
-### Safety gates
-
-Test at least:
-
-- `LightningGoatsRemoteEnabled=OFF`;
-- `FeederOverride=ON`;
-- override invalid/unavailable;
-- minimum feed interval not elapsed;
-- absolute feed cap reached;
-- malformed UUID;
-- unknown request UUID query.
-
-No rejected condition may actuate the feeder.
-
-### Ambiguity
-
-Inject loss/timeout after a request may have reached OpenHAB.
-
-Requirement:
-
-- daemon marks attempt unknown or remains pending for authoritative same-UUID lookup;
-- never submits a new actuation UUID automatically;
-- later same-UUID acknowledgement may reconcile safely;
-- otherwise operator reconciliation required.
-
-## 8. Weather overlay compatibility
-
-Follow `docs/architecture/weather-overlay.md` and issue #21.
-
-Existing trusted source:
-
-```text
-http://10.8.0.6:5000/get_received_data
-```
-
-But the VPS must use only:
-
-```text
-integration gateway GET /v1/weather
-```
-
-Verify:
-
-- gateway can read the legacy weather source locally/trusted-side;
-- normalized response includes correct available temperature/humidity/wind/UV and optional pressure/rain/solar values;
-- invalid types/out-of-range fields are rejected/omitted safely;
-- empty response is safe;
-- malformed response is safe;
-- stale response policy is enforced when timestamp parsing is available;
-- weather failure does not affect payment/feed state;
-- weather scheduler interval is configurable (initial default 60 seconds);
-- broadcast probability is configurable (initial default 0.30);
-- deterministic tests control randomness;
-- `weather_status` renders in the expected `🌤️ Weather Update:` style;
-- `weather_status` goes to overlay only;
-- weather never enters Nostr outbox.
-
-Security negative checks:
-
-```text
-VPS -> 10.8.0.6:5000                     blocked
-VPS -> legacy /weather mutation           impossible
-VPS -> generic weather proxy path         nonexistent
-```
-
-## 9. WireGuard / UFW containment
-
-Existing network:
-
-```text
-10.8.0.0/24
-10.8.0.1 = old production hub during staging
-10.8.0.6 = in-house integration/OpenHAB/weather host
-```
-
-### Staging
-
-Verify:
-
-- new VPS has a new WireGuard keypair;
-- new VPS uses an inventoried unused temporary `10.8.0.x` address;
-- new VPS does not claim `10.8.0.1`;
-- old production clients continue using old hub;
-- gateway port on `10.8.0.6` is reachable from staging source.
-
-Verify negative paths from staging VPS:
-
-```text
-10.8.0.6:5000                    blocked
-OpenHAB REST/admin               blocked
-trusted-host SSH                 blocked unless explicitly approved
-PostgreSQL                       blocked
-unrelated LAN hosts              blocked
-unrelated WireGuard peers        blocked unless explicitly approved
-```
-
-### Production hub cutover rehearsal/config check
-
-Without activating it during staging, inspect/validate the prepared production config where the new VPS will assume:
-
-```text
-10.8.0.1/24
-```
-
-Verify the documented procedure requires old hub shutdown before activation.
-
-If the VPS is also a WireGuard router/hub, verify routed peer traffic separately from local-process-originated traffic.
-
-## 10. Messaging
-
-Payment event:
-
-- chooses from `sats_received` template pool;
-- renders amount/difference correctly;
-- produces one logical Nostr event;
-- produces overlay event;
-- renderer failure does not alter payment credit.
-
-Feeder event:
-
-- chooses from `feeder_trigger` pool;
-- publishes only after confirmed physical feed;
-- Nostr + overlay presentation succeeds independently of feeder accounting.
-
-Informational events:
-
-- interface/weather visible on overlay;
-- never enter Nostr outbox.
-
-## 11. Nostr durable outbox
-
-Test:
-
-- sign failure before outbox persistence;
-- relay publish failure;
-- restart with pending outbox event;
-- successful retry.
-
-Requirement: retry publishes the exact persisted signed event; no new event ID is generated for the same logical message.
-
-## 12. Overlay
-
-Verify:
-
-- snapshot on connect;
-- ordered event sequence;
-- reconnect/resnapshot;
-- gap detection;
-- multi-feed backlog;
-- payment animation/message;
-- feeder animation only on `feeder_confirmed`;
-- informational/weather queue;
-- client messages cannot cause server-side state changes.
-
-## 13. VPS host hardening
-
-Verify:
-
-- SSH password authentication disabled;
-- direct root SSH disabled;
-- stale keys/accounts removed;
-- production binary/config root-owned;
-- runtime user cannot modify binary/config/systemd/nginx;
-- deploy user cannot read final runtime secrets after sudo reduction;
-- no OpenHAB token exists on VPS;
-- no CLN/LNbits secrets remain in production runtime paths;
-- service systemd sandbox settings load successfully;
-- deployed binary SHA-256 matches recorded release artifact.
-
-## 14. Domain / DNS readiness
-
-Record status of:
-
-- registrar hardware-key MFA;
-- DNS-provider hardware-key MFA;
-- transfer/domain lock;
-- DNSSEC;
-- CAA;
-- record inventory;
-- recovery method.
-
-Controls unsupported by the provider should be marked `N/A` with rationale.
-
-Do not change production DNS as part of staging tests.
-
-## 15. Operational Strike balance
-
-Before production acceptance define and record:
-
-- target online balance;
-- maximum online balance;
-- manual sweep procedure/destination;
-- who performs/reviews the sweep.
-
-Verify staging/production account balance is below the approved maximum before cutover.
-
-## 16. Parallel VPS real canary
-
-Before DNS cutover:
-
-1. use staging hostname/direct SNI/hosts override;
-2. verify staging `10.8.0.x` WireGuard peer and gateway-only trusted path;
-3. resolve all six configured Lightning Addresses;
-4. prove unknown address rejection;
-5. pay one tiny real Strike invoice;
-6. confirm exactly one durable payment credit/event;
-7. verify recipient metadata;
-8. verify Nostr + overlay;
-9. fetch/weather-render one sanitized overlay-only weather event;
-10. confirm direct `10.8.0.6:5000` failure;
-11. test harmless/simulated feeder gateway path;
-12. with explicit operator approval, perform one controlled physical feed;
-13. replay same feed UUID and prove no second actuation.
-
-## 17. Cutover gate
-
-Issue #16 may begin only when:
-
-- all required issue #15 checks pass;
-- issues #17–#21 are complete or explicitly waived by the operator with rationale where applicable;
-- broad Codex/deploy sudo is revoked/narrowed;
-- production secrets/access review is complete;
-- old VPS remains recoverable and is still the only active `10.8.0.1` hub;
-- final new-VPS `10.8.0.1` hub config is prepared but inactive;
-- production DNS remains unchanged until operator starts the cutover runbook.
-
-## F11/F12 corrected presentation acceptance
-
-Use the versioned cursor contract in `../architecture/overlay-stream.md`.
-Verify ordered gap replay before its checkpoint, deduplication, explicit resets
-for foreign/future/missing/oversized history, and restart-persistent stream IDs.
-Exercise actual WebSocket capacity and reuse after disconnect, receive-only input
-and frame limits, heartbeat survival beyond the edge timeout, missing Pong and
-slow-consumer closure. Repeat against the imported authoritative browser before
-closing site compatibility; Rust socket mocks alone do not satisfy that gate.
-
-Weather must reject stale first responses, stale repeats/restarts, future/regressed
-observations and malformed timestamps. Check explicit Fahrenheit versus converted
-Celsius, optional field units, array ordering, and invalid data not advancing the
-watermark. Weather failure or skipped replay must not affect credit/settlement or
-enter the Nostr outbox. The earlier optional-timestamp wording is superseded by
-mandatory actual-age validation in `../architecture/weather-overlay.md`.
-
-## Actual systemd rehearsal candidate
-
-Base: draft PR #39 head `5becfbd4b8b321ecb205a70233d1970a822645f9`.
-The candidate adds actual transient-system-service execution of the canary sandbox
-and synthetic encrypted credential delivery. See `../deployment/systemd-rehearsal.md`.
-It preserves duplicate/restart command-count checks and adds runtime probes plus
-negative wrong-name/corrupt ciphertext failures at systemd CREDENTIALS (243).
-The Fedora rehearsal preserves SELinux enforcing and maps only disposable binary
-labels to their real installation defaults; no host policy changes are made.
-The six added deployment regressions cover credential-store recovery guards and
-preservation of repeated/empty sandbox directives. Final local/CI execution
-results must be attached before treating this candidate as verified.
-
-Initial systemd candidate `fffee25537e6e5194c381a1f96afe6d5b300ae32` passed
-[Rust CI](https://github.com/lightning-goats/lightning-goats/actions/runs/34541274452),
-[Security](https://github.com/lightning-goats/lightning-goats/actions/runs/34541274566), and
-[Deployment including actual Ubuntu systemd](https://github.com/lightning-goats/lightning-goats/actions/runs/34541274456).
-Local format, locked Clippy, the full locked Rust suite, RSA-unreachable check and
-all 23 then-existing deployment tests passed. `cargo-audit` is not installed on
-this VPS; the exact-commit Security workflow provides the dependency audit result.
-
-The final follow-up strengthens credential separation: each role must have an
-in-sandbox startup probe while the other application is already running. A fifth
-service start restarts only the gateway while the daemon remains active, checks
-the same UUID again and still observes one total mock-owner command. A regression
-rejects evidence inferred only from an absent other service. Fedora execution
-passed; `evidence/systemd-rehearsal-fedora-20260910.json` records final harness,
-archive/binary/template hashes, all five starts and credential/protection probes.
-The earlier reload-probe experiment was rejected because systemd does not provide
-startup credentials to ExecReload; the final test uses actual startup delivery.
-Final GitHub checks for this follow-up must be read on draft #40. Production HOLD
-and all live gates remain open.
+Also use the existing Security/Deployment gates. Check actual exits/logs, not a green
+`tee` pipeline or an empty test selection. Ordinary-suite ignored tests are not counted
+as executed; distinguish dedicated-workflow evidence. No tests or workflow assertions
+are removed or weakened by this planning revision.
+
+Preserve coverage for:
+
+- signed invoice signature/checksum/network/amount/metadata/expiry and invalid users;
+- provider errors/429/timeouts, forged/missing/reordered notifications, durable recovery,
+  conflicting IDs/hashes and atomic credit/event creation;
+- SQLite file/WAL/FULL startup, concurrency, duplicate/restart persistence, interrupted
+  intent and ambiguity-safe UUID recovery;
+- feeder override/caps/refusal, real daemon-to-gateway with harmless-owner counts,
+  and ordering such as receipt before debits (do not use the known-bad #82 checker
+  as accepted evidence; #91 is its correction candidate, subject to normal review);
+- constrained nginx/webhook/WS ingress, authentic peer containment including forwarding,
+  established flows, IPv6 and rollback; separate synthetic namespace evidence from hosts;
+- overlay replay/reset/heartbeat/limits, weather units/observation age/regression,
+  exact signed Nostr retries, release/installation/credential-isolation checks.
+
+These remain engineering tools, not requirements to re-run every experiment on both
+real hosts before a manually observed pilot. Do not count source review as live evidence.
+
+## E. Follow-up and operator cutover
+
+Additional goat-address coverage, public webhook/P2P variants, extended browser/weather
+compatibility, long-retention/co-restore redesign, optional CI tooling, comprehensive
+hardening and full-host rehearsals remain follow-up unless an identified defect affects
+the enabled pilot. Existing local capacity and secret restrictions still apply. Never
+perform destructive restore/fault experiments against paid state just to complete a row.
+
+The operator decides when live results justify the DNS/Nostr-profile switch. Use
+[production-cutover.md](../deployment/production-cutover.md), preserving pilot state,
+old outstanding invoices/credit and one physical dispatcher/owner. Hub migration need
+not coincide with payment cutover. Check additional addresses as they become public;
+there is no requirement for six paid tests or closing every parent issue first.
+
+## Evidence format
+
+A short source-pinned note with starting/ending credit, receive/feed counts, restart
+result, concrete failures, enabled modes and still-untested features is enough. Keep
+sensitive payment/account details private. Leave unverified items open without making
+each one a launch gate. Previous exhaustive matrix/history is retained in Git at
+`df6be90f1b0505d183643ec55a298b382cd43b6c` and in existing audit/testing records.
+
+## Local operator credits — 2026-11-08
+
+The operator-approved local grant path and per-event 10-sat announcement threshold
+are specified in [operator-credits.md](../deployment/operator-credits.md). Validate
+atomic/idempotent grants independently from provider settlement, plus concurrent
+retry, exact feed debit through the existing override, 9/10-sat overlay and Nostr
+boundaries, and preserved real paid state during deployment. Isolated grant/feeder
+fixtures are not evidence of a live Lightning payment or physical feeding.
+
+## Paused queue messages — 2026-11-09
+
+Verify paused credit retention and confirmation-only debits, including an already
+in-flight feeding completing after pause. Advisory message state must never
+authorize dispatch or block financial credit. Cover queued versus pending counts,
+restart/retry stability, normal information/weather while paused and their
+nonpublic audience. The implementation/acceptance contract is in
+[paused-feeding-queue.md](../deployment/paused-feeding-queue.md).
+
+## Household NIP-46 and audience separation — 2026-11-09
+
+Verify legacy shared-relay compatibility, independent bunker/publication routes,
+client credentials only during signing, and identical persisted events on relay
+retry. Validate the actual household identity/allowlist and a signing-only round
+trip as the daemon UID before public activation. Weather/information must remain
+overlay-only, including paused events; scrolling overlay text omits the paused
+prefix while the banner remains. Current configuration/evidence is in
+[household-nostr-bunker.md](../deployment/household-nostr-bunker.md). Do not treat
+relay EOSE or a signature as proof of public note acceptance. The new audit
+finding is recorded [separately](../security/sqlite-wal-advisory-20261109.md).
+
+## CyberHerd payout outcome source regression additions
+
+The current [495-test operations checkpoint](cyberherd-installation-checkpoint-20261110.md)
+adds native main-only/copied-WAL inspection, a prepared paid-core transaction,
+fresh inactive installation and separate credential/client factories. Preserve
+strict unknown-image rejection and committed WAL rows. The disposable systemd
+installer positively checks actual NSS identities, masks and native per-UID init;
+mock filesystem fixtures do not substitute for that job. Combined actual core
+upgrade/migration, live-host sandbox/network/helper/provider/household/browser
+and external recovery-adoption qualification remain distinct, unfinished gates.
+
+For `feat/cyberherd-20261109`, qualify the separate journal/core outcome protocol
+using temporary databases and loopback provider credentials. Verify independent
+core reads disagree safely with a claimed terminal state/cost; exact completed
+costs and unused fees; failed-cost holds; lost final ACK/restart; denied intake
+role; permanent never-executed closure; retained execute uncertainty; partial
+hash-chain ordering and rollback on final-write failure. Run full locked Rust,
+deployment and dependency-audit gates for the exact candidate source. These tests
+do not authorize production spending or replace the full CyberHerd port contract.
+
+
+## Optional CyberHerd lifecycle source checks
+
+The standalone port's lifecycle checks are recorded in
+[`cyberherd-lifecycle-checkpoint-20261110.md`](cyberherd-lifecycle-checkpoint-20261110.md).
+Its ten new regressions cover actual-override/unknown handling, quiet initial OFF,
+initial ON, ordered note/chat relay receipts, exact signed retries, invitation
+cooldowns/cancellation/capacity, template opt-out, evening context, backpressure
+and the fixed read-only gateway Astro route. The final code passed all required
+Rust commands through source-pinned CI and inactive artifact checks. The known
+unignored SQLite dependency advisory remains a release blocker.
+
+Before opting into live lifecycle notices, still qualify the installed dedicated
+UIDs/configuration, household gateway's three fixed Astro Items and unknown/error
+behavior, the distinct household NIP-46 client for kinds 1 and 1311, and actual
+relay acknowledgments. Review the retained outbox and baseline before activation;
+do not clear signatures/cooldowns or infer permission for feeding/payments from
+these read-only presentation tests. The full CyberHerd completion contract remains
+in `docs/planning/cyberherd-implementation-plan.md`.
+
+
+## Optional CyberHerd confirmed-feeding presentation checks
+
+The [458-test source checkpoint](cyberherd-feeding-announcements-checkpoint-20261110.md)
+records nine new regressions for original triggering-payment attribution, frozen
+herd summary/stream context, per-payment presentation deduplication without loss
+of per-UUID rewards, native event-ID uniqueness, exact retries, optional templates,
+legacy operation, nonpublic/ambiguous states and correlated private overlay import.
+The full source-pinned Rust and inactive artifact checks passed; the unignored
+SQLite advisory remains open. These temporary-ledger fixtures are not physical
+feeding, provider-spend or public Nostr acceptance evidence.
+
+Keep `core_bridge.delegated_feeder_messages=false` until the compatible intake,
+root-pinned owner/epoch/cursors and separate identities/signer have been qualified.
+An inactive installation rehearsal must also prove that lost overlay ACKs and a
+paused member queue cannot duplicate physical effects, food/debits or text, and
+that new equal-valued payments remain distinct while same-payment batches share
+one announcement. Public relay and household-client acceptance are separate from
+the synthetic fixtures. Follow the full CyberHerd contract before activation.
+
+
+## Optional read-only roster and repost-hint source checks
+
+The [466-test checkpoint](cyberherd-roster-checkpoint-20261110.md) records the
+completed exact-source Rust, 24 browser, nine CLI and inactive archive checks.
+The existing SQLite audit remains open; new live roles/features are disabled.
+
+Verify exact point/share projection and sat strings above the browser safe-integer
+range, active/banned filtering and public-picture bounds. Exercise API pagination,
+revision conflict, stale-cache refusal, unknown-vs-empty target discovery,
+non-loopback configuration refusal and absence of mutation/private fields. Browser
+fixtures must block all external traffic and show that default flags make no API
+request, unsafe names/images stay inert, exact amounts survive and empty rosters
+clear. Private IPC must reject wrong owner/epoch/role and changed stale revisions;
+lost ACK returns one sequence, and the atomic reconnect snapshot retains current
+cards without money, food effects or core Nostr jobs.
+
+For optional no-treat hints verify both frozen/current repost awards, category
+opt-out, once-per-cycle persistence, canonical source aliases and rollback of the
+claim/cursor when message insertion fails. Preserve the full locked Rust checks,
+audit gate, inactive CLI/archive and existing browser/systemd regressions. These
+fixtures do not authorize installing the proxy/roles, signing publicly, spending
+or feeding. Browser authentication/operator controls and full-port operational
+qualification remain separate requirements.
+
+
+## Optional Nostr HTTP sign-in and operator commands
+
+The [476-test checkpoint](cyberherd-operator-checkpoint-20261110.md) records the
+completed exact-source Rust, 28 browser, ten CLI and inactive archive checks.
+New live roles/routes/flags remain disabled; the SQLite audit stays open.
+
+Verify native NIP-98 signature/ID, exact configured HTTPS origin/path/query/method,
+mandatory command body hash, time window, singleton tags, GET-body rejection and
+replay prevention across reopen. User self reads must never become operator
+reads through payload/Host/forwarded-header claims. Root configuration alone
+pins operator public keys; templates and commands accept no private-key fields.
+
+Verify atomic revision-fenced settings/member/template/reset changes, explicit
+unban, zero member pool, exact desired totals, no fabricated lifetime payment,
+once-only promotion of retained social types, retained receipts and owner scope.
+Inject failure after state changes and before audit insertion: retry must retain
+its identity with no partial mutation/nonce. Core epoch/UID/high-water/freshness
+and pending-feeding fences must prevent editing an already-confirmed feeding's
+snapshot. Known committed retries recover without a fresh core ordering read.
+Manual notices freeze their own human/public bodies and one optional compact share
+footer; no reset announcement, fake received payment or additional mention is made.
+
+All browser traffic is mocked. Check disabled flags make no API/signing request,
+nonoperators cannot reveal controls, native browser signing binds exact bodies,
+and a lost response retains one command body/UUID while explicit retry signs a
+fresh HTTP event. No automatic mutation retry or raw/private-key login is allowed.
+Keep full locked Rust, audit, inactive CLI/archive/browser/nginx/systemd gates;
+actual new household client, WAF, UIDs and activation remain separate evidence.
+
+
+## Explicit failed-payment cost recovery
+
+Verify full holds remain until a protected operator decision and matching evidence
+plus a fresh independent original Failed payment read agree. The API state alone
+must never imply refund. Wrong epoch/account/manifest/member/payment/hash, pending
+or incomplete outcomes, expired reviews and changed receipt identities fail. No
+financial mutation enters the browser operator API or intake role.
+
+Exercise actual root-owned private approval/evidence files and protected ancestors,
+not only mocked metadata. Ordinary Rust tests cover unprivileged rejection; the
+CI root fixture must identify exactly one native test and require its positive
+ownership completion marker inside a network namespace. Unknown approval fields,
+changed evidence, group-writable/public files and symlinks must fail.
+
+Test append-only exact retry, final-write rollback, actual cost/window conservation,
+original final ACK/source retention, no extra provider quote/execute or public/member
+message, private payout-role-only receipt reads and payout ACK loss/reopen recovery.
+Synchronization loads no sender key. CLI argument/config/private-state checks must
+run before credentials or new state. Recovery opens require existing private paths
+and the exact successful migration checksum history; missing/empty/old schemas
+must not be created or migrated by preview/synchronization.
+
+Run the full locked Rust, audit, root fixture, inactive CLI/archive/browser/systemd
+gates on the exact candidate. Source fixtures do not approve a real financial cost,
+prove a provider refund or qualify whole-stack restore/new installed identities.
+
+Run `python3 -B -m unittest discover -s deploy/tests -p test_restore.py -v`.
+The legacy pair helper must reject even an uninitialized CyberHerd core before
+creating a destination database or changing its epoch. Pre-CyberHerd restore
+fixtures must still pass; neither path establishes consistent four-journal recovery.
+The native `legacy_paired_store_restore_preserves_pending_identity_settlement_and_signed_bytes`
+test builds the historical pre-CyberHerd schema explicitly, preserves its actual
+paid/pending/signed rows and schema history, then exercises migration and real
+loopback daemon/gateway restart. Do not weaken current-schema refusal merely to
+reuse a legacy two-store fixture, or claim this fixture qualifies CyberHerd restore.
+
+## CyberHerd four-journal maintenance
+
+Before inactive installation, also qualify [fresh offline initialization](../deployment/cyberherd-offline-initialization.md):
+disabled root-protected policy, separate actual runtime UID/primary group and
+private state under protected ancestors; refusal of existing databases/sidecars/
+recovery markers; complete synced image publication without overwrite; no key,
+network worker or financial/signing work. Required ignored root/child fixtures
+must actually run under distinct kernel UIDs and emit their positive markers;
+ordinary test counts alone do not prove this authority.
+
+Follow [the offline maintenance contract](../deployment/cyberherd-state-maintenance.md).
+Check policy-only CLI behavior without credentials/state, protected root policy,
+four separate runtime owners, stopped/masked exact units and writer attestation.
+Use committed WAL and real schemas to prove unchanged original main/WAL/SHM,
+pending feed UUIDs, paid receipts and exact signed bytes. Reverify all image
+hashes, private manifests, migration checksums and selected owner/epoch/provider.
+Changed frozen plan JSON must fail even if hash columns and SQLite integrity
+still agree. Recompute the original plan hash and compare both journal copies.
+Missing/changed files, old payout quotes, changed scope, active writers or a reused
+output destination must fail. Incomplete output cannot become a backup.
+
+Exercise native four-journal correlation through Pending, Failed-with-held-cost,
+final core ACK, explicit synthetic cost review and payout cost ACK. Inspection
+must not call a provider, sign, submit another payment, release funds or activate
+food. Staged restore must preserve IDs/bytes and make all four normal store opens
+fail before creation/migration while `CYBERHERD_RECOVERY_REQUIRED` exists.
+Run the dedicated root fixture with its positive marker in the isolated CI network
+namespace, separately from ordinary unprivileged rejection tests. Record the real
+root fixture and pure systemctl parser boundaries; do not claim a mocked unit
+observer qualifies actual service quiescence. External Strike/home-owner
+reconciliation and explicit adoption remain required before restored work resumes.
+
+For private-contact schema 24, qualify the separate schema-23-to-24 comparison
+with all four native journals, a pending feed UUID and retained signed bytes.
+Refuse changed rows, migration checksums/history, old or added schema definitions,
+nonempty new private tables and unexpected files. Ordinary backup/restore must
+continue to refuse the preceding schema; the comparison grants no resumption or
+recovery-marker authority. Native retained-contact inspection must recompute
+encrypted-envelope identity, fixed fee purpose and signed invoice commitments,
+require private delivery state, and refuse any private/public credit collision.
+Exercise enabled HTTP admission through authoritative mocked settlement while
+proving malformed input never calls the provider and accepted private fees add
+zero feed credit or public presentation work. Mocks do not qualify a real fee or
+recipient-side DM observation.
+
+The explicit pre-contact snapshot/source-verification commands accept only the
+compiled known schema-23 prefix, never general old schemas. Run their separate
+root fixture with actual distinct-owned sources, committed WAL, writer-fence
+refusal before output creation, unchanged main/WAL/SHM bytes, source revalidation
+and ordinary restore refusal. The tool must still refuse current-schema input,
+dirty/unknown checksums and preexisting contact objects at this upgrade boundary.
+
+For contact configuration activation on current schema 24, exercise native
+contact-only validation, a fresh four-writer native backup, unchanged live
+main/WAL/SHM fingerprints, exact original programs/units, failed-backup refusal
+and independent service resumption. A static release must preserve every existing
+site flag and OBS/artwork/vendor asset except its explicitly selected browser
+files. Retain the existing public-directory/file and nginx SELinux contexts;
+caller namespace status probes do not establish worker confinement. Test exact
+private ingress, WAF/no-store/logging boundaries and actual public desktop/mobile
+rendering without creating a valid contact or invoice. Mock/native/browser and
+[actual deployment evidence](private-contact-live-20261111.md) remain distinct
+from a real fee settlement and recipient-side DM observation.
+
+## Initial future-only CyberHerd rewards
+
+Follow [the cutoff contract](../architecture/cyberherd-initial-reward-cutover.md)
+without changing the paid ledger or granting historical payouts.
+
+- Derive the complete frozen/deferred/unreceived historical feeding inventory from
+  an accepted stopped-writer checkpoint. Retain original proofs and signed bytes.
+- Require the native comparison's full `decision_sha256` during clone rehearsal;
+  an older four-field acknowledgement must refuse before a live audit write.
+- Bind separately reviewed completed cutoff preparation/application receipts into
+  a new financial plan. Re-verify native before/after comparison and independently
+  recompute the accepted post-cutoff report; reject missing, changed or partial
+  scope, including a different full-decision hash with matching counts/IDs.
+- Verify exact binding on financial plan load/application/resumption. Historical
+  excluded/pending inputs remain visible; future funded barriers may qualify only
+  after the audited boundary. Existing reservations, holds, unreceived financial
+  events and unclassified eligible pending feedings still refuse first activation.
+- Keep the no-binding path strict. An unbound cutoff summary or positive old
+  funded work cannot authorize configuration or outgoing worker starts.
+
+Coverage is in native `reward_cutover`/`reward_review` tests and protected-file
+`test_upgrade_reward_cutover.py`/`test_upgrade_financial_activation.py` fixtures.
+The latter mock services/native calls; root UID/native-store qualification runs
+separately. Combined installed-systemd, provider/recipient, recovery adoption and
+explicit production activation remain separate acceptance requirements.
+
+## Homepage Cashu payments
+
+For the public homepage, verify that the lower Cashu hit target scales with
+the embedded 1920 × 1080 stream and stays separate from the upper Lightning
+target. Both the Cashu video target and the feed card must open the same
+live payment request. Decode the QR and compare the copied value byte for
+byte. Check the mobile layout and the original Lightning flow during a
+Cashu request outage. Check that a feed-card click submits the selected
+amount directly to WebLN, or opens an already prepared QR when WebLN is
+unavailable. Permission refusal must create no invoice, and an explicit
+retry after an uncertain result must reuse the same invoice. Feeder progress
+and status are shown in the stream overlay. The browser fixture does not
+send payments.
+
+## Dated Cashu exception: private operational health
+
+For the [Cashu implementation plan](../planning/cashu-nutnovember-implementation-plan.md),
+qualify the protected wallet status command with its isolated wallet gates.
+It must remain readable with hidden keys and an active writer, without modifying
+journals, initializing missing stores or querying a provider. Configured/observed
+wallet identity mismatches must report a recovery fence while daemon startup
+continues to refuse them. Retained core acknowledgment epochs are diagnostics,
+not evidence of the live core's identity.
+
+Check timestamp replay/restart preservation, legacy unknown ages, missing timing
+tables, future timestamps, overdue schedules, invalid acknowledgment JSON and
+detail truncation beyond 64 historical mints. Global financial totals must include
+value outside the displayed mint detail list. Unverified input face value must
+never be reported as acquired custody or credit.
+
+Use actual CDK split/melt regressions and the explicit combined HTTP/receipt/
+treasury fixture to verify receive fees, completed conversion costs, unfinished
+preparation fees, dust change and pending reservations. Completed split fees
+must not be counted twice. The combined runner requires the wallet's health
+accounting marker; older artifacts without that check must refuse qualification.
+Mocked deposits/simulated feed confirmation do not qualify installed providers,
+real mint custody or physical dispatch.
+
+## Dated Cashu exception: protected operator controls
+
+Qualify `lightning-goatsctl plan-cashu-settlement` against the exact selected
+core artifact. Its approval must bind the protected configuration bytes, core
+and wallet identities, mint, request UUID, input ceiling and a bounded current
+review window. Preview must roll back the same planner transaction used by
+apply, including source reservations and request rows. Funded apply/restart
+retries must return the original intent without a second reservation or credit.
+Conflicting reuse, unapproved mint and excessive input must fail closed.
+
+Run the actual CLI through `deploy/scripts/test-cashu-operator-settlement-cli.py`
+in fresh mount/network namespaces using `test-cashu-private-run.py` and the
+selected executable SHA-256. Confirm active/unknown core-service refusal, exact
+configuration/scope/permissions, no initialization of a missing core epoch, and
+stable empty-custody request retention. This fixture uses mocked systemctl and
+empty custody; qualify funded selection separately with the native ledger test.
+Neither check authorizes installed systemd changes, provider requests or feeding.
+
+For `lightning-goats-cashud reconcile-acquisition`, qualify the protected exact
+configuration and wallet/mint/acquisition binding, time/review limits, exclusive
+writer lock and restore fence. New, prepared, exported and credited states
+must refuse this procedure. An ownership hold is eligible only with an explicit
+held-work approval and the original `acquiring` journal history. Bind the exact
+hold reason, with older approvals scoped to `missing_owned_outputs`. Use
+actual CDK-owned output tests to prove that fresh mint-state
+verification can complete only the original receive, without another swap/melt
+or receipt export. Missing derivations and unavailable or incomplete responses
+must preserve active holds. A successful recheck must preserve the original
+request, hold history, and exactly-once output attribution. Verify that a hold
+recorded before submission preserves proof claims while disjoint payments at
+the same mint can proceed. Missing evidence for an acquiring hold or an
+unfinished CDK saga must retain the mint's original recovery fence.
+While a mint is locally fenced, verify that later payments at that mint
+retain their attempt budgets across ticks and restart. The worker must
+still select ready work from another configured mint. Unconfigured mints
+retain their scheduled history. Once the fence clears, charge one durable
+attempt before the fresh mint request.
+Exhaust an acquisition's retry budget after the original request is frozen.
+With reconciliation enabled, verify that read-only checks continue on the
+persisted schedule across restart. Simulate an unavailable mint-state response
+and then verify the original signed outputs. Preserve the attempt count and
+confirm there is no replay even when original replay is enabled. Verify that
+an expired scheduling selection cannot advance the new schedule.
+Use a funded mint fixture that commits the swap and loses the reply before
+CDK stores its outputs. Expire the response cache, reject unavailable or
+invalid restores, then recover the exact NUT-09 signatures. Interrupt after the
+proofs are saved and verify restart completes the same local transaction
+without an extra swap, a second signature restore, or early receipt export.
+
+With the core and wallet using the explicit unlimited daily conversion-count
+setting, settle multiple transfers inside one rolling day and preserve the
+exact fee reservations, in-flight exposure and no-duplicate-credit checks.
+Verify that existing positive daily count caps are still enforced and that
+configurations specifying both a positive cap and unlimited count fail.
+
+Run `deploy/scripts/test-cashu-operator-reconciliation-cli.py` with the selected
+wallet executable/hash through the private-run helper in fresh mount/network
+namespaces. Its synthetic unfunded cases cover exact CLI authority and unchanged
+pending and held states. Use the funded CDK test for a successful transition and
+separately qualify live provider reconciliation. Re-run the complete financial
+HTTP/receipt/treasury fixture on source-matched core and wallet test artifacts.
+On a disposable Actions runner, run the mint-policy fixture with
+`--installed-systemd` in private mount and network namespaces. Verify refusal
+while the actual wallet unit is active and while it is inactive but unmasked.
+Verify that applying and retrying the candidate preserves the mask, and that
+an explicitly started synthetic wallet loads the new namespace and retains
+the original held operation. Production mint-policy and provider acceptance
+remain separate.
+
+## Cashu retired request compatibility
+
+Rotate a reusable descriptor while retaining its exact old endpoint, mint
+scope, policy versions and receiving key. Validate the inclusive beginning
+and exclusive end of the approved window. Refuse a changed historical ID,
+endpoint, key or policy by regenerating the old request identity. An old ID
+cannot accept payment from a mint added later or a mint disabled for current
+receiving. A late new body must be refused. Replay the exact admitted HTTP
+body after expiry and verify its original status capability, one journal
+entry, and no new mint request. A changed body using that delivery ID must
+refuse. Verify that the current request continues to accept new payments.
+
+## Cashu receiving-key rotation
+
+Initialize a wallet with the original key file, then add a new current key
+while preserving the wallet epoch, registration, seed and original file.
+Admit a P2PK payment before rotation and verify its original lock is signed
+after restart. Admit a delayed nutzap and an old QR payment within their
+respective windows, and verify that each acquires its original eight sats once.
+Refuse new admission against the old key at the cutoff. A queued proof for an
+unavailable non-anchor key must prevent wallet startup until the key returns.
+
+Run the authenticated archive rehearsal with `--rotate-receiving-key`. Verify
+the original and new files against the checkpoint and native key verifier,
+reject a replaced copied key, and check the recovered filename and bytes before
+running the six fenced native commands.
+
+The inactive release rehearsal starts the packaged wallet and signer as distinct
+systemd users. Rotate their receiving policy while the synthetic services are
+stopped. The wallet must refuse to start with a missing or mismatched new key.
+With the matching key installed, verify both services restart with the original
+registrations, wallet seed, anchor key and mint namespaces. The restarted
+signer must preserve the original request, refuse an announcement for the
+retired key and route the current-key request to the inert helper. This
+rehearsal keeps relay and mint access blocked. The native fixture above
+qualifies redemption using the retired key.
+
+## Cashu mint policy review and installation
+
+Review a protected candidate that pauses a mint with held work and introduces
+a separately named issuer. Match both config digests, the wallet registration,
+the original held count and the two proposed admission settings. Refuse an
+active writer, restore fence, changed recovery keys or mint URL, removed mint
+or unrelated configuration change. The review leaves financial rows intact.
+In a disposable wallet, run the authenticated installer with root-owned
+artifacts and the reviewed digests. Verify that it retains the config's
+ownership, mode and extended attributes. Verify the exact retry reports the
+previous installation. Refuse changed metadata, a running or unmasked unit,
+an unrelated process using the wallet UID, a competing maintenance command,
+an active wallet writer, and a recovery fence. Test systemd status responses
+with a fixture and test processes and locks directly. After a native restart,
+verify the original held request and both namespace registrations. The retained
+issuer test must refuse the original URL and its trailing-slash spelling under
+a new internal ID.
+
+## Original Cashu treasury cleanup
+
+Use the funded lost-melt-reply fixture with new wallet execution paused.
+Retain the original wallet report after the independent synthetic Strike
+verification. Refuse an unrelated report digest without contacting the mint,
+and leave the original CDK inputs and saga intact after unavailable or
+incomplete spent-state evidence. Interrupt the checkpoint after the validated
+local CDK updates and retry the same operation. Verify the exact report is
+preserved and the completed retry performs no mint lookup. Keep the original
+single melt submission, Strike deposit and simulated feeder confirmation.
+Use the native CLI fixture to check review-purpose, digest, exact config and
+missing-original refusals.
+
+## Original Cashu treasury settlement in core
+
+Verify the original retained intent and receive request under an exact protected
+configuration and approval. Preview both observations and verify that the
+financial ledger is intact. Simulate an unavailable wallet while core records
+the verified Strike deposit. Credit may support the original feed only after
+core retains the authenticated wallet report. Retry from the recorded deposit,
+verify completion once, and verify the exact completed retry contacts neither
+source. Refuse conflicting receipt IDs and wrong scopes. Verify one deposit,
+one wallet result, one completion, and one simulated feed.
+
+Use the actual core CLI in private namespaces to exercise stopped-service,
+configuration, approval, missing-original and restored-journal fence refusals.

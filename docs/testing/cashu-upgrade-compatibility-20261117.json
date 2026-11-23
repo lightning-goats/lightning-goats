@@ -1,0 +1,85 @@
+{
+  "source_commit": "cb582e9371f22eae5217cd2934a62bc72a6a4d0c",
+  "source_tree": "cf670378f6ea004670a67f891da43cc935babdb5",
+  "result": "All ten selected-source PR workflows passed.",
+  "workflows": [
+    {
+      "name": "Home held canary",
+      "id": 44149672002,
+      "url": "https://github.com/lightning-goats/lightning-goats/actions/runs/44149672002",
+      "conclusion": "success"
+    },
+    {
+      "name": "VPS staging client filter",
+      "id": 44149671992,
+      "url": "https://github.com/lightning-goats/lightning-goats/actions/runs/44149671992",
+      "conclusion": "success"
+    },
+    {
+      "name": "Home weather compatibility",
+      "id": 44149672001,
+      "url": "https://github.com/lightning-goats/lightning-goats/actions/runs/44149672001",
+      "conclusion": "success"
+    },
+    {
+      "name": "Real NIP-46 acceptance",
+      "id": 44149671963,
+      "url": "https://github.com/lightning-goats/lightning-goats/actions/runs/44149671963",
+      "conclusion": "success"
+    },
+    {
+      "name": "CI",
+      "id": 44149672097,
+      "url": "https://github.com/lightning-goats/lightning-goats/actions/runs/44149672097",
+      "conclusion": "success"
+    },
+    {
+      "name": "Home staging filter",
+      "id": 44149671681,
+      "url": "https://github.com/lightning-goats/lightning-goats/actions/runs/44149671681",
+      "conclusion": "success"
+    },
+    {
+      "name": "Home owner candidate",
+      "id": 44149671801,
+      "url": "https://github.com/lightning-goats/lightning-goats/actions/runs/44149671801",
+      "conclusion": "success"
+    },
+    {
+      "name": "WireGuard peer authentication",
+      "id": 44149671477,
+      "url": "https://github.com/lightning-goats/lightning-goats/actions/runs/44149671477",
+      "conclusion": "success"
+    },
+    {
+      "name": "Security",
+      "id": 44149671579,
+      "url": "https://github.com/lightning-goats/lightning-goats/actions/runs/44149671579",
+      "conclusion": "success"
+    },
+    {
+      "name": "Deployment artifacts",
+      "id": 44149671724,
+      "url": "https://github.com/lightning-goats/lightning-goats/actions/runs/44149671724",
+      "conclusion": "success"
+    }
+  ],
+  "local_orchestration": {
+    "command": "sudo unshare --net -- python3 -B -m unittest discover -s deploy/tests -p test_upgrade_program_maintenance.py -v",
+    "passed": 26,
+    "skipped": 0,
+    "scope": "Actual root-owned disposable files; native processes, SQLite and services mocked."
+  },
+  "qualified_behaviors": [
+    "Exact schema-23 to schema-26 contact comparison permits only empty compiled Cashu additions and preserves original four-journal state.",
+    "Explicit cashu_core_source preparation selects current native source verification of exact core-26/payout-8 state with twenty empty Cashu tables.",
+    "Default historical payout source still requires both original and selected verifier acceptance; no automatic verifier fallback.",
+    "Payout-only clone/live migration, native comparisons and separately approved mock-service resumption run on a guarded disposable CI host.",
+    "Retained clocks, source/backup identity drift and wrong preparation modes refuse."
+  ],
+  "limitations": [
+    "No production service, configuration, credential, seed, real payment or physical actuation changed.",
+    "Does not qualify Cashu custody backup, funded rollback, historical keys, independent phone clients or live mint/Strike behavior.",
+    "The new two-mint financial fixture is later source and is not covered by this checkpoint."
+  ]
+}

@@ -1,0 +1,186 @@
+# CyberHerd household signing checks — 2026-11-10
+
+Checker source `20b9f60f46dc390c43b07531e5f8947577b401fc` adds a bounded
+[non-admin signing-only helper](../deployment/cyberherd-nostr-clients.md#signing-only-qualification)
+and two isolated one-shot unit templates. It supports only membership kinds
+1/1311 and payout-signing kind 9734. It publishes no project event, requests no
+invoice, loads no financial credential and cannot enable an application worker.
+
+Six focused local tests passed. In
+[Deployment](https://github.com/lightning-goats/lightning-goats/actions/runs/42856844331),
+job `129972088289`, all six passed again; discovery ran 194 tests with 36 environment
+skips, plus 31 separate successful root tests. All five deployment jobs passed,
+including the existing native worker fixture. The
+[CI](https://github.com/lightning-goats/lightning-goats/actions/runs/42856843983),
+[Security](https://github.com/lightning-goats/lightning-goats/actions/runs/42856843974)
+and [synthetic real-NIP-46](https://github.com/lightning-goats/lightning-goats/actions/runs/42856843971)
+workflows also passed. Rust runtime source is unchanged by this checker.
+
+The operator reports that the household environment contains both prepared
+CyberHerd public clients alongside existing clients, with the selected bunker
+active/running and zero restarts. The authorization helper reported that the
+clients were already present and did not restart it. That establishes file
+configuration and reported service health, not the running process's loaded
+allowlist or successful client authorization.
+
+On the VPS, the committed helper and public-client substitutions were assembled
+as data, independently hashed and installed into a new protected prefix.
+Assembled unit verification first encountered restricted-sandbox socket errors;
+the same read-only validation outside that restriction passed. No unit was
+started until validation and installed-byte hashes matched.
+
+Each actual non-admin signing-only unit loaded just its own encrypted client
+credential. Local pinned-nak public derivation matched the expected membership
+or payout-signing identity, so neither attempt failed on parsing or mismatched
+stored credential bytes. Both NIP-46 requests through the previously qualified
+Primal transport then returned **unauthorized**. Membership kinds 1/1311 and payout
+kind 9734 therefore remain unqualified. No signature, public project post,
+invoice or payment success is claimed. Raw helper output, keys and signed bytes
+were withheld; only sanitized failures were retained privately.
+
+Original role journal hashes and all original service states matched before and
+after both attempts. The existing receive process remained unchanged, and the
+three production CyberHerd units remained masked/inactive. Temporary check units
+are terminal failed, with no automatic restart. Their reviewed files and private
+evidence are retained pending the operator's household reload; no repeated
+attempt has been made without a state change.
+
+The operator subsequently confirmed restarting only the existing household
+bunker. One fresh Primal retry per client produced a membership timeout and a
+payout-client authorization refusal. Membership-only checks on the other two
+approved household transports, nos.lol and Damus, timed out. No payout check on
+those alternate transports was executed. The full expected kinds remain
+unqualified; no partial signature or successful publication is inferred from a
+timeout. A stale allowlist remains an unproven hypothesis, not the established
+cause. No key was regenerated or household setting changed by these checks.
+
+All check processes were terminal, with no automatic retry. Original role-journal
+hashes and all original service states still matched after these attempts. The
+five exact temporary unit copies were removed, including one alternate payout
+unit that was staged but never run. Private reports retain the failures and
+`household_qualified=false`; the pinned non-admin helper remains available.
+
+Next evidence is the household's actual loaded public clients. A separate
+read-only script is prepared at
+`/home/linuxuser/lightning-goats/check-household-cyberherd-clients.sh` on the VPS,
+from `deploy/scripts/check-household-cyberherd-clients.py`. Its three disposable
+tests passed locally: only explicit authorized-key flags are selected, raw
+argument secrets cannot enter the report, and unexpected errors emit no private
+input. It prints service health, four known public-client yes/no comparisons and
+the running program's digest, never raw arguments, process environment, signing
+credential files, journals or pairing capabilities. It modifies nothing. The
+operator was asked to copy/run it on the household and return its JSON because
+household administrator access is not configured from this VPS. That result is
+now supplied, as recorded below.
+
+## Running-client result and connection diagnostic
+
+The operator returned all four configured public clients present in the selected
+stable process arguments, zero malformed flags, active/running, zero restarts and
+the expected executable digest. A missing restart is no longer a supported
+hypothesis. No key regeneration or additional restart is requested.
+
+Checker source `978063fcac146579852217d22abb67fb730cd7e9` adds private-pipe
+diagnostics and an existing receive-client control. All ten workflows passed,
+including [Deployment](https://github.com/lightning-goats/lightning-goats/actions/runs/42869089242),
+[CI](https://github.com/lightning-goats/lightning-goats/actions/runs/42869089217),
+[Security](https://github.com/lightning-goats/lightning-goats/actions/runs/42869089173)
+and [real NIP-46](https://github.com/lightning-goats/lightning-goats/actions/runs/42869089262).
+Eight focused helper tests passed locally. A subsequent fixed-label addition
+distinguishes a decrypted RPC refusal without exposing arbitrary error text.
+
+Protected helper bytes and temporary units were independently hashed and verified
+before execution. Sequential Primal checks under separate non-admin users loaded
+only each user's own client credential. Both the payout client and existing
+receive control returned unauthorized with `nak_client_key_used_matches=true`.
+That checks the actual key passed into nak's NIP-46 connector. Membership was not
+retried. A fresh payout diagnostic then returned `failed to connect` and
+`response error: unauthorized`. The pinned dependency's connector issues
+`connect` first and formats decrypted RPC refusals as `response error: ...`;
+this identifies a bunker RPC refusal, without proving which signer instance
+answered. No required kind was verified.
+
+Only fixed labels, booleans and completed-kind numbers leave private pipes. Nak's
+verbose authentication key never reaches a terminal, journal or retained report.
+No signed challenge bytes are retained. The receive control additionally hides
+the running receive service's credentials. No invoice/provider operation or
+project publication occurred.
+
+No nak bunker process runs on this VPS. The operator ran the extended household
+inventory from `/home/linuxuser/lightning-goats/inspect-household-bunkers.sh`:
+exactly one bunker process, matching the selected service, expected digest and
+all four public-client arguments; no malformed flags or vanished processes.
+This rules out an additional household process observed by that inventory,
+not another host answering as the same identity. Four inspector tests pass, including
+multiple-process filtering and secrecy. It reports only candidate counts,
+known-public-client comparisons, executable hashes and whether a candidate is
+the selected service; it reads no process environment or credential file. A
+competing remote instance remains a hypothesis, not an established cause.
+
+All three diagnostic processes were terminal. Their exact temporary unit files
+were removed after byte comparison; private sanitized evidence/helper generations
+remain. Original role journal hashes, configurations and all four original
+service states match before/after. Receive health/status both return 200.
+Production CyberHerd units stay masked/inactive with zero limits.
+
+A synthetic four-client trial subsequently passed, including the exact VPS
+v0.20.6 client and household v0.20.7 bunker digests. The latter matches the official
+release asset. Using public test scalars and fresh loopback-only namespaces, it
+verified kinds 1/1311/9734 for all four repeated client flags, rejected an unknown
+fifth client by bunker RPC, retained authorized access and found no project
+publication. This rules out that version pair as a general interoperability
+failure; it alone does not establish actual household/relay acceptance.
+
+## Competing streaming-laptop bunker stopped; required client checks pass
+
+The operator found a second bunker on the streaming laptop and reported stopping
+it. No household key, allowlist, relay setting or service was changed on the VPS.
+One new membership signing-only check using qualified helper source
+`978063fcac146579852217d22abb67fb730cd7e9` then passed kinds **1 and 1311**,
+including actual selected-client matching, exact author/content/tags/timestamp,
+canonical IDs and pinned-nak signature verification.
+
+The first subsequent payout check timed out in its 128 MiB sandbox. This is
+retained as a failed attempt, without asserting its cause. The bounded observer
+from source `d894ea0ce7d453c9fe023200b9c3b224a529920f` then ran once in a 256 MiB
+temporary sandbox and passed kind **9734** with the same exact-field/cryptographic
+checks. Its independently signature-verified/local-decrypted connect observation
+reported one RPC group, one acknowledgment, zero unauthorized groups and zero
+conflicting groups. No decrypted response, RPC ID or signed challenge was emitted
+or retained. That successful attempt supersedes the earlier failed qualification.
+
+The [real NIP-46 workflow](https://github.com/lightning-goats/lightning-goats/actions/runs/42874248193)
+passed stock and cross-version four-client fixtures, including actual read-only
+observation/local decryption. Ten focused helper tests also cover fixed purposes,
+frozen fields, bounds, diagnostic secrecy and conflicting-response grouping;
+four separate inspector tests pass. No runtime Rust or dependency change was
+needed. All ten workflows on that source passed, including
+[CI](https://github.com/lightning-goats/lightning-goats/actions/runs/42874247865)
+(format, strict locked all-target/all-feature Clippy and tests),
+[Security](https://github.com/lightning-goats/lightning-goats/actions/runs/42874248110)
+and [Deployment](https://github.com/lightning-goats/lightning-goats/actions/runs/42874247868).
+The observer's initially staged unit was removed without starting; its
+exact reviewed copy was later restored and started only for this post-stop check.
+
+All final temporary checks are terminal and their exact unit copies were removed
+after byte comparison. Private evidence retains both successful reports and the
+intervening timeout. Original three role-journal hashes, configurations, masks
+and all four original service states match before/after; receive health/status
+return 200. New roles remain masked/inactive, with zero execution/signing limits
+and no enabled live core bridge. No invoice, provider/payment operation, public
+project note/chat/zap request or physical actuation was produced by these checks.
+
+This qualifies household signing round trips for membership 1/1311 and outgoing
+9734 only. Incoming receipt kind 9735, actual CyberHerd relay delivery and financial
+activation remain separate. The household bunker broadly authorizes its listed
+clients; the application's purpose-limited broker boundary remains necessary.
+
+The operator also requested the streaming agent's household connection URI. The
+secret-free URI uses the qualified Primal transport (no LAN listener needed):
+
+```text
+bunker://669ebbcccf409ee0467a33660ae88fd17e5379e646e41d7c236ff4963f3c36b6?relay=wss%3A%2F%2Frelay.primal.net
+```
+
+That client needs its own authorized authentication key. Do not transfer either
+CyberHerd credential, reopen the competing signer or share a pairing secret.

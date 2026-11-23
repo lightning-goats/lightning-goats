@@ -27,8 +27,10 @@ The helper never enables or starts either unit. Partial failures stay inactive;
 inspect what was created before preparing an exact recovery, never blindly rerun
 with overwrite flags. Existing deployments need a separate upgrade plan.
 
-Production retains `feeder_request_v1`, 30-second minimum and 10/hour cap pending
-operator sizing. Canary uses only `LightningGoatsCanary*` Items, `uuid_canary`,
+Production retains `feeder_request_v1`. The operator-selected production defaults
+are a two-second minimum and no hourly cap (`max_feeds_per_hour = 0`); see
+[feed-limit semantics](gateway-feed-limits.md). Positive hourly caps remain
+available. Canary uses only `LightningGoatsCanary*` Items, `uuid_canary`,
 5-second minimum/ack timeout and 60/hour cap. Its database and service account are
 separate. Unit credentials remain named `openhab-token`, with distinct ciphertexts:
 `/etc/credstore.encrypted/lightning-goats-gateway-openhab` and

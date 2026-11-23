@@ -1,0 +1,47 @@
+[Unit]
+Description=Isolated CyberHerd payout and reconciliation
+After=network-online.target lightning-goats-receive.service cyberherd.service cyberherd-signer.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cyberherd-payout
+Group=cyberherd-payout
+SupplementaryGroups=cyberherd-bridge cyberherd-plans cyberherd-payout-signer
+ExecStart=/usr/local/bin/cyberherd-payoutd --config /etc/cyberherd-payout/config.toml
+LoadCredentialEncrypted=strike-payout-api-key:/etc/credstore.encrypted/cyberherd-strike-payout
+Restart=on-failure
+RestartSec=5s
+StateDirectory=cyberherd-payout
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectProc=invisible
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/cyberherd-payout
+InaccessiblePaths=-/etc/lightning-goats -/var/lib/lightning-goats -/var/lib/cyberherd -/var/lib/cyberherd-signer
+IPAddressDeny=10.0.0.0/8
+IPAddressDeny=172.16.0.0/12
+IPAddressDeny=192.168.0.0/16
+IPAddressDeny=169.254.0.0/16
+IPAddressDeny=fc00::/7
+IPAddressDeny=fe80::/10
+TimeoutStopSec=90
+
+[Install]
+WantedBy=multi-user.target

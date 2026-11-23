@@ -1,0 +1,9 @@
+{
+  "result": "ROOT_CORRELATION_FIXTURE_FAILED",
+  "test_sha256": "5e9f8656a2cccac694c4678c7261639e20b53fb32244f80f9fdc8124f188fbb1",
+  "failure": "negative setup attempted forbidden membership core-binding update; native immutability trigger refused it",
+  "positive_review_and_ordinary_restore_refusal_reached": true,
+  "full_fixture_qualified": false,
+  "next_action": "construct separate native membership journal with different epoch and rehash its frozen image; preserve immutability trigger",
+  "production_changes": false
+}

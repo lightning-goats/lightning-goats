@@ -1,0 +1,114 @@
+--- a/encrypt_decrypt.go
++++ b/encrypt_decrypt.go
+@@ -3,6 +3,10 @@
+ import (
+ 	"context"
+ 	"fmt"
++	"io"
++	"os"
++	"strings"
++	"unicode/utf8"
+ 
+ 	"fiatjaf.com/nostr/nip04"
+ 	"github.com/urfave/cli/v3"
+@@ -14,6 +18,7 @@
+ 	ArgsUsage:                 "[plaintext string]",
+ 	DisableSliceFlagSeparator: true,
+ 	Flags: []cli.Flag{
++		&cli.BoolFlag{Name: "stdin", Usage: "read bounded UTF-8 input from stdin instead of process arguments"},
+ 		&PubKeyFlag{
+ 			Name:     "recipient-pubkey",
+ 			Aliases:  []string{"p", "tgt", "target", "pubkey", "to"},
+@@ -27,7 +32,10 @@
+ 	Action: func(ctx context.Context, c *cli.Command) error {
+ 		target := getPubKey(c, "recipient-pubkey")
+ 
+-		plaintext := c.Args().First()
++		plaintext, err := cashuCryptoInput(c)
++		if err != nil {
++			return err
++		}
+ 
+ 		if c.Bool("nip04") {
+ 			sec, bunker, err := gatherSecretKeyOrBunkerFromArguments(ctx, c)
+@@ -75,6 +83,7 @@
+ 	ArgsUsage:                 "[ciphertext base64]",
+ 	DisableSliceFlagSeparator: true,
+ 	Flags: []cli.Flag{
++		&cli.BoolFlag{Name: "stdin", Usage: "read bounded UTF-8 input from stdin instead of process arguments"},
+ 		&PubKeyFlag{
+ 			Name:     "sender-pubkey",
+ 			Aliases:  []string{"p", "src", "source", "pubkey", "from"},
+@@ -88,7 +97,10 @@
+ 	Action: func(ctx context.Context, c *cli.Command) error {
+ 		source := getPubKey(c, "sender-pubkey")
+ 
+-		ciphertext := c.Args().First()
++		ciphertext, err := cashuCryptoInput(c)
++		if err != nil {
++			return err
++		}
+ 
+ 		if c.Bool("nip04") {
+ 			sec, bunker, err := gatherSecretKeyOrBunkerFromArguments(ctx, c)
+@@ -129,3 +141,29 @@
+ 		return nil
+ 	},
+ }
++
++// Cashu's bounded private IPC adapter must not expose history metadata in argv.
++func cashuCryptoInput(c *cli.Command) (string, error) {
++	if !c.Bool("stdin") {
++		return c.Args().First(), nil
++	}
++	if c.Args().Len() != 0 {
++		return "", fmt.Errorf("--stdin cannot be combined with positional input")
++	}
++	return readCashuStdin(os.Stdin)
++}
++
++func readCashuStdin(reader io.Reader) (string, error) {
++	payload, err := io.ReadAll(io.LimitReader(reader, 1026))
++	if err != nil {
++		return "", fmt.Errorf("failed reading bounded crypto input")
++	}
++	if len(payload) > 1025 {
++		return "", fmt.Errorf("crypto stdin exceeds bound")
++	}
++	value := strings.TrimSuffix(string(payload), "\n")
++	if len(value) == 0 || len(value) > 1024 || !utf8.ValidString(value) {
++		return "", fmt.Errorf("invalid bounded crypto stdin")
++	}
++	return value, nil
++}
+--- /dev/null
++++ b/cashu_stdin_test.go
+@@ -0,0 +1,28 @@
++package main
++
++import (
++	"errors"
++	"strings"
++	"testing"
++)
++
++type brokenCashuReader struct{}
++
++func (brokenCashuReader) Read(p []byte) (int, error) { return 0, errors.New("private-input") }
++
++func TestCashuBoundedStdin(t *testing.T) {
++	for _, value := range []string{"value", "value\n", strings.Repeat("x", 1024), strings.Repeat("x", 1024) + "\n"} {
++		got, err := readCashuStdin(strings.NewReader(value))
++		if err != nil || got != strings.TrimSuffix(value, "\n") {
++			t.Fatal("valid input changed or rejected")
++		}
++	}
++	for _, value := range []string{"", "\n", strings.Repeat("x", 1025), strings.Repeat("x", 1025) + "\n", string([]byte{255})} {
++		if _, err := readCashuStdin(strings.NewReader(value)); err == nil {
++			t.Fatal("invalid input accepted")
++		}
++	}
++	if _, err := readCashuStdin(brokenCashuReader{}); err == nil || strings.Contains(err.Error(), "private-input") {
++		t.Fatal("input error not redacted")
++	}
++}

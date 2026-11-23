@@ -1,0 +1,20 @@
+[
+  {
+    "file": "docs/licenses/upstream/cdk-LICENSE-MIT",
+    "url": "https://github.com/cashubtc/cdk/blob/b2035a3525c98b22226926bdc20fa128a1351ae5/LICENSE-MIT",
+    "git_blob_sha1": "604328316cfbd34cf4e614f6bee296a16ca20cc9",
+    "sha256": "3663aab5c30dee2b10b4f358b46774d09d6e9713a01a38abd5bada63fe547257"
+  },
+  {
+    "file": "docs/licenses/upstream/cdk-LICENSE-APACHE",
+    "url": "https://github.com/cashubtc/cdk/blob/b2035a3525c98b22226926bdc20fa128a1351ae5/LICENSE-APACHE",
+    "git_blob_sha1": "9af4720b40cad9d8f66fcce557b2f6353cddf9e8",
+    "sha256": "26c2ed53b6f7afb4de9846d94e2af5cde27c348fcc5abeb7e28d9964c3aa22d4"
+  },
+  {
+    "file": "docs/licenses/upstream/valuable-LICENSE",
+    "url": "https://github.com/tokio-rs/valuable/blob/9efc29b6e58cef28f6566a47aa7e142a55fead77/LICENSE",
+    "git_blob_sha1": "4ca822a5cb54142a14070f5be388e60497781615",
+    "sha256": "ed60d479b8fd1f64e9cbc3de449a16a53ac1b3d1b6aeb9bf9d190a8e93061b44"
+  }
+]

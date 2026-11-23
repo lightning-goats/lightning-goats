@@ -34,6 +34,6 @@ def handler(database):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--database', required=True, type=Path)
-    parser.add_argument('--port', type=int, default=5001)
+    parser.add_argument('--port', type=int, default=5002)
     args = parser.parse_args()
     HTTPServer(('127.0.0.1', args.port), handler(args.database)).serve_forever()

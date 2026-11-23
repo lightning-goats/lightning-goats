@@ -1,0 +1,130 @@
+{
+  "source_commit": "69ba9de8f34dc1029210bec81036da0ffe39bd62",
+  "ci_checkout_commit": "e3c8f961120595fd63026cd54bb582a1a68757a5",
+  "ci_run": "https://github.com/lightning-goats/lightning-goats/actions/runs/44142341545",
+  "ci_conclusion": "success",
+  "artifact": {
+    "id": 14355232728,
+    "size_bytes": 16229,
+    "sha256": "b8d17fcfa277dd95d866ba743f133ca6252eb612505cb921e690d9ef5e108c6d"
+  },
+  "cases": {
+    "cashu-sdk-residual.json": {
+      "artifacts_sha256": {
+        "core": "41b21dea90246b0d676f3bd58cf943860b8d372bfa5478a382b6d5aaca2014ce",
+        "wallet": "1dd7487fc2b301ba227778061232b9fae001841f1618c46c76d38854049d1f2d"
+      },
+      "cashu_ts_offline_sender": true,
+      "distinct_uid_ipc": true,
+      "distinct_uid_receipt_ipc": true,
+      "financial_result": {
+        "contributions": 4,
+        "conversion_fee_sats": 3,
+        "credit_sats": 16,
+        "new_transfer_credit_sats": 0,
+        "original_granted_credit_sats": 1016,
+        "receive_fees_sats": 3,
+        "retained_change_sats": 0,
+        "settlement_operations": 2,
+        "supplemental_native_sats": 0,
+        "synthetic_confirmed_feeds": 1,
+        "treasury_deposit_sats": 413
+      },
+      "http_intake": true,
+      "independent_sender": false,
+      "live_provider": false,
+      "lost_melt_reply": false,
+      "nonzero_fees": true,
+      "physical_actuation": false,
+      "repeat_request": false,
+      "residual_change_settled": true,
+      "result": "CASHU_COMBINED_SETTLEMENT_VERIFIED",
+      "returned_change": true,
+      "sender_inventory": {
+        "bytes": 4549477,
+        "files": 285,
+        "manifest_sha256": "d6e43143902f1edde34f8526fcfa53d4da4a511b9431ae9ceb51f1d6f0afc68f"
+      },
+      "sender_node_sha256": "93956de2e59480474a7b46571da1651180b1a050cdf32641ebec4ce6e478e068",
+      "sender_script_sha256": "7a33eb819d4707d767cc7be89e6b7e87b47bfefef8eaf4a544fff2ce0be9fd26",
+      "strike_before_wallet_report": false,
+      "tls_verified": false,
+      "treasury_ipc": true,
+      "wallet_health_verified": true,
+      "wallet_recovery_while_paused": false
+    },
+    "cashu-sdk-residual-lost.json": {
+      "artifacts_sha256": {
+        "core": "41b21dea90246b0d676f3bd58cf943860b8d372bfa5478a382b6d5aaca2014ce",
+        "wallet": "1dd7487fc2b301ba227778061232b9fae001841f1618c46c76d38854049d1f2d"
+      },
+      "cashu_ts_offline_sender": true,
+      "distinct_uid_ipc": true,
+      "distinct_uid_receipt_ipc": true,
+      "financial_result": {
+        "contributions": 4,
+        "conversion_fee_sats": 3,
+        "credit_sats": 16,
+        "new_transfer_credit_sats": 0,
+        "original_granted_credit_sats": 1016,
+        "receive_fees_sats": 3,
+        "retained_change_sats": 0,
+        "settlement_operations": 2,
+        "supplemental_native_sats": 0,
+        "synthetic_confirmed_feeds": 1,
+        "treasury_deposit_sats": 413
+      },
+      "http_intake": true,
+      "independent_sender": false,
+      "live_provider": false,
+      "lost_melt_reply": true,
+      "nonzero_fees": true,
+      "physical_actuation": false,
+      "repeat_request": false,
+      "residual_change_settled": true,
+      "result": "CASHU_COMBINED_SETTLEMENT_VERIFIED",
+      "returned_change": true,
+      "sender_inventory": {
+        "bytes": 4549477,
+        "files": 285,
+        "manifest_sha256": "d6e43143902f1edde34f8526fcfa53d4da4a511b9431ae9ceb51f1d6f0afc68f"
+      },
+      "sender_node_sha256": "93956de2e59480474a7b46571da1651180b1a050cdf32641ebec4ce6e478e068",
+      "sender_script_sha256": "7a33eb819d4707d767cc7be89e6b7e87b47bfefef8eaf4a544fff2ce0be9fd26",
+      "strike_before_wallet_report": true,
+      "tls_verified": false,
+      "treasury_ipc": true,
+      "wallet_health_verified": true,
+      "wallet_recovery_while_paused": true
+    }
+  },
+  "scope": {
+    "ordinary_cashu_contributions": 2,
+    "nutzap_contributions": 1,
+    "native_contributions": 1,
+    "third_cashu_admission": "before first conversion; excluded from first financial plan",
+    "first_conversion": {
+      "input_sats": 400,
+      "deposit_sats": 398,
+      "fee_sats": 1,
+      "returned_change_sats": 1
+    },
+    "second_conversion": {
+      "input_sats": 17,
+      "deposit_sats": 15,
+      "fee_sats": 2,
+      "returned_change_sats": 0
+    },
+    "native_donation_rows_after_two_transfers": 1,
+    "synthetic_providers": true,
+    "physical_actuation": false,
+    "multi_mint": false
+  },
+  "limitations": [
+    "Does not establish post-first-melt admission of the third payment.",
+    "Does not establish multiple-mint financial composition, live providers, independent sender applications, phone/TLS or physical acceptance.",
+    "Deployment artifacts run 44142341080 fails contact-upgrade schema comparison; full source qualification remains incomplete."
+  ],
+  "source_tree": "db93d1aa65344cbe535244a8f6d38770f2bb657e",
+  "ci_tree_matches_source": true
+}

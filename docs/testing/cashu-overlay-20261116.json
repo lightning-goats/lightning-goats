@@ -1,0 +1,27 @@
+{
+  "result": "passed",
+  "tests": 19,
+  "failures": 0,
+  "source_sha256": {
+    "web/overlay.html": "c63f418ce92aa32a81ce2344617c188b673993e097470d83e72afd6f911e40f6",
+    "web/overlay.css": "52ea4cf05d8eb6b75fcc93ef90169f4f2ece2a058bb7894358e9e381813120db",
+    "web/overlay.js": "e4a43627fd144666931373d8663dafca921b06b529dcbabf1e4ea518ba7d43ae",
+    "tests/website/test_overlay.py": "3d01d138e7f78b69a7a74efede88229357c5330ef21dcb9347925f7e36bd143f",
+    "tests/website/fixtures/cashu-requests.json": "2381950ff9b32eb20edf672da46aa0f02f548e5ebfb046423be96602eb9ac285"
+  },
+  "test_command": "/home/linuxuser/lg-browser-venv/bin/python -m unittest discover -s tests/website -p test_overlay.py",
+  "log": "...................\n----------------------------------------------------------------------\nRan 19 tests in 79.672s\n\nOK\n",
+  "scope": [
+    "Synthetic public metadata injected over mocked WebSocket",
+    "Actual native-CDK creqA and creqB payloads decoded at 1920x1080 and 1280x720 fit=1",
+    "Malformed/disabled/stale metadata and disconnect",
+    "Existing overlay regression suite"
+  ],
+  "unqualified": [
+    "Backend public descriptor snapshot wiring",
+    "Full card/banner/effect collision matrix",
+    "Independent wallet clients and physical phone scans",
+    "Production deployment"
+  ],
+  "production_changed": false
+}

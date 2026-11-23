@@ -183,22 +183,7 @@ async fn main() -> Result<()> {
             treasury.worker(
                 receipts,
                 ledger.clone(),
-                if treasury.policy.destination.origin
-                    == lightning_goats::cashu::treasury::PROJECT_MINT_ORIGIN
-                {
-                    lightning_goats::cashu::treasury_worker::InvoiceBackend::Project(
-                        config
-                            .lnurl
-                            .breez_collector
-                            .clone()
-                            .context("project treasury collector missing")?,
-                    )
-                } else {
-                    strike
-                        .clone()
-                        .context("Strike treasury backend missing")?
-                        .into()
-                },
+                config.lnurl.breez_collector.as_ref(),
             )
         })
         .transpose()?

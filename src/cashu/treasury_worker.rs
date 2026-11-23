@@ -4,7 +4,7 @@ use super::{
     treasury::Policy,
     treasury_client::{Client, Response},
 };
-use crate::{ledger::LedgerStore, strike::StrikeRuntime};
+use crate::{config::BreezCollectorConfig, ledger::LedgerStore};
 use anyhow::{Result, ensure};
 use lightning_goats_cashu_receipt::treasury_rpc::{Command, FEE_TIME_VERSION, Request};
 use serde::Deserialize;
@@ -71,19 +71,20 @@ impl Wallet for Client {
         self.send(request).await
     }
 }
-pub enum InvoiceBackend {
-    Strike(StrikeRuntime),
-    Project(crate::config::BreezCollectorConfig),
+enum Issuer {
+    Mint(BreezCollectorConfig),
+    #[cfg(test)]
+    HistoricalFixture(crate::strike::StrikeRuntime),
 }
-impl From<StrikeRuntime> for InvoiceBackend {
-    fn from(strike: StrikeRuntime) -> Self {
-        Self::Strike(strike)
+impl Issuer {
+    fn is_project(&self) -> bool {
+        matches!(self, Self::Mint(_))
     }
 }
 
 pub struct Worker<W: Wallet = Client> {
     ledger: LedgerStore,
-    backend: InvoiceBackend,
+    issuer: Issuer,
     registration: Arc<ReceiptPolicy>,
     policy: Arc<Policy>,
     wallet: W,
@@ -93,7 +94,60 @@ pub struct Worker<W: Wallet = Client> {
 impl<W: Wallet> Worker<W> {
     pub fn new(
         ledger: LedgerStore,
-        backend: impl Into<InvoiceBackend>,
+        collector: BreezCollectorConfig,
+        registration: Arc<ReceiptPolicy>,
+        policy: Arc<Policy>,
+        wallet: W,
+        controls: Controls,
+        deadline: Duration,
+    ) -> Result<Self> {
+        ensure!(
+            policy.destination.origin == super::treasury::PROJECT_MINT_ORIGIN,
+            "new treasury work must target the project mint"
+        );
+        Self::from_issuer(
+            ledger,
+            Issuer::Mint(collector),
+            registration,
+            policy,
+            wallet,
+            controls,
+            deadline,
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn historical_fixture(
+        ledger: LedgerStore,
+        runtime: crate::strike::StrikeRuntime,
+        registration: Arc<ReceiptPolicy>,
+        policy: Arc<Policy>,
+        wallet: W,
+        controls: Controls,
+        deadline: Duration,
+    ) -> Result<Self> {
+        let origin = url::Url::parse(&policy.destination.origin)?;
+        ensure!(
+            origin
+                .host_str()
+                .and_then(|host| host.parse::<std::net::IpAddr>().ok())
+                .is_some_and(|ip| ip.is_loopback()),
+            "historical fixture requires loopback"
+        );
+        Self::from_issuer(
+            ledger,
+            Issuer::HistoricalFixture(runtime),
+            registration,
+            policy,
+            wallet,
+            controls,
+            deadline,
+        )
+    }
+
+    fn from_issuer(
+        ledger: LedgerStore,
+        issuer: Issuer,
         registration: Arc<ReceiptPolicy>,
         policy: Arc<Policy>,
         wallet: W,
@@ -108,7 +162,7 @@ impl<W: Wallet> Worker<W> {
         );
         Ok(Self {
             ledger,
-            backend: backend.into(),
+            issuer,
             registration,
             policy,
             wallet,
@@ -127,7 +181,7 @@ impl<W: Wallet> Worker<W> {
             .claim_cashu_treasury_work(
                 &self.registration,
                 &controls,
-                matches!(self.backend, InvoiceBackend::Project(_)),
+                self.issuer.is_project(),
                 now,
                 self.deadline.as_secs(),
             )
@@ -186,8 +240,9 @@ impl<W: Wallet> Worker<W> {
     }
     async fn advance(&self, work: Work, now: i64) -> Result<bool> {
         match work.stage {
-            Stage::Issue => match &self.backend {
-                InvoiceBackend::Strike(strike) => Ok(strike
+            Stage::Issue => match &self.issuer {
+                #[cfg(test)]
+                Issuer::HistoricalFixture(strike) => Ok(strike
                     .create_cashu_treasury_invoice(
                         &self.ledger,
                         &self.registration,
@@ -196,7 +251,7 @@ impl<W: Wallet> Worker<W> {
                     )
                     .await?
                     .is_some()),
-                InvoiceBackend::Project(collector) => {
+                Issuer::Mint(collector) => {
                     self.ledger
                         .issue_breez_treasury_invoice(
                             collector,
@@ -221,10 +276,7 @@ impl<W: Wallet> Worker<W> {
                     let now = Duration::from_secs(u64::try_from(now)?);
                     if invoice.expires_at().is_none_or(|expiry| now >= expiry) {
                         self.ledger
-                            .close_cashu_treasury_delivery(
-                                work.id,
-                                matches!(self.backend, InvoiceBackend::Project(_)),
-                            )
+                            .close_cashu_treasury_delivery(work.id, self.issuer.is_project())
                             .await?;
                         deliver = false;
                     }
@@ -258,10 +310,7 @@ impl<W: Wallet> Worker<W> {
                 } else {
                     // A valid reply proves the original instruction is retained.
                     self.ledger
-                        .close_cashu_treasury_delivery(
-                            work.id,
-                            matches!(self.backend, InvoiceBackend::Project(_)),
-                        )
+                        .close_cashu_treasury_delivery(work.id, self.issuer.is_project())
                         .await?;
                     Ok(false)
                 }

@@ -196,6 +196,46 @@ class IndexBrowserTests(unittest.TestCase):
         self.assertEqual(self.invoices, [])
         self.assertEqual(self.errors, [])
 
+    def test_finish_feeding_scannable_qr_links_and_retry_identity(self):
+        self.context.grant_permissions(["clipboard-read", "clipboard-write"], origin=ORIGIN)
+        descriptor = json.loads((Path(__file__).parent / "fixtures/cashu-requests.json").read_text())
+        creq = descriptor["requests"]["creqB"]["request"]
+        uri = f"bitcoin:?lightning={INVOICE}&creq={creq}"
+        calls = []
+
+        def checkout(route):
+            self.assertEqual(route.request.method, "POST")
+            calls.append(route.request.post_data_json)
+            if len(calls) == 1:
+                route.fulfill(status=503, body="")
+            elif len(calls) == 2:
+                route.fulfill(json={"state":"ready","amount_sats":240,"invoice":INVOICE,"cashu":creq,"uri":uri})
+            else:
+                route.fulfill(json={"state":"funded","credit_sats":1000,"threshold_sats":1000})
+
+        self.page.route("**/api/v1/feeding/checkout", checkout)
+        self.open()
+        self.page.get_by_role("button", name="Finish this feeding").click()
+        self.page.locator("#finishRetry").click()
+        image = self.page.locator("#finishQr")
+        image.wait_for(state="visible")
+        decoded = zxingcpp.read_barcode(Image.open(io.BytesIO(image.screenshot())))
+        self.assertIsNotNone(decoded)
+        self.assertEqual(decoded.text, uri)
+        for name, target in [("finishWallet",uri), ("finishLightning","lightning:"+INVOICE),
+                             ("finishCashu","bitcoin:?creq="+creq)]:
+            self.assertEqual(self.page.locator("#"+name).get_attribute("href"),target)
+        for name, text in [("copyFinishLightning", INVOICE), ("copyFinishCashu", creq)]:
+            self.page.locator("#"+name).click()
+            self.page.wait_for_function("async expected => (await navigator.clipboard.readText()) === expected", arg=text)
+        self.assertEqual(calls[0], calls[1])
+        self.page.locator("#finishGoat").select_option("dexter")
+        self.page.get_by_text("This feeding is already funded.").wait_for()
+        self.assertTrue(image.is_hidden())
+        self.assertEqual(calls[2]["user"], "dexter")
+        self.assertNotEqual(calls[1]["id"], calls[2]["id"])
+        self.assertEqual(self.errors, [])
+
     def test_paste_cashu_uses_body_only_and_follows_private_status(self):
         self.cashu["mints"] = ["https://mint.example", "https://foreign.example"]
         calls = []

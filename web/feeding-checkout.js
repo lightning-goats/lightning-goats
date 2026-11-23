@@ -31,12 +31,13 @@
                 !/^lnbc[0-9a-z]+$/.test(result.invoice) || !/^CREQB1[0-9A-Z]+$/.test(result.cashu) ||
                 result.uri !== `bitcoin:?lightning=${result.invoice}&creq=${result.cashu}`) throw Error();
             const qr = window.qrcode(0, "M");
-            qr.addData(result.uri, "Byte");
+            qr.addData(`bitcoin:?lightning=${result.invoice}&creq=`, "Byte");
+            qr.addData(result.cashu, "Alphanumeric");
             qr.make();
             el("finishQr").src = qr.createDataURL(4, 16);
             el("finishWallet").href = result.uri;
             el("finishLightning").href = "lightning:" + result.invoice;
-            el("finishCashu").href = "cashu:" + result.cashu;
+            el("finishCashu").href = "bitcoin:?creq=" + result.cashu;
             quote = result;
             status.textContent = `${result.amount_sats} sats remained when you opened checkout. Pay once with either option.`;
             el("finishChoices").hidden = false;

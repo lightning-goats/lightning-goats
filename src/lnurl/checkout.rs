@@ -71,7 +71,6 @@ pub(crate) fn fixed_request(descriptor: &Descriptor, id: Uuid, amount: u64) -> R
             && reqwest::Url::parse(&req.transports[0].target).is_ok_and(|url| url.scheme()
                 == "https"
                 && url.host().is_some()
-                && url.path() == "/api/v1/cashu"
                 && url.username().is_empty()
                 && url.password().is_none()
                 && url.query().is_none()

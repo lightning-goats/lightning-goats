@@ -21,21 +21,13 @@ pub struct ZapReceiptJob {
 pub(super) async fn stage_receipt(
     tx: &mut Transaction<'_, Sqlite>,
     payment: &SettledPayment,
+    invoice_id: Uuid,
     settlement_id: i64,
     event_seq: u64,
 ) -> Result<()> {
-    if !matches!(payment.source.as_str(), "strike" | "breez") {
-        return Ok(());
-    }
-    let Some(context) = payment.context_json.as_ref() else {
-        return Ok(());
-    };
-    let context: Value = serde_json::from_str(context)?;
-    let Some(id) = context["receive_request_id"].as_str() else {
-        return Ok(());
-    };
+    let id = invoice_id.to_string();
     let row=sqlx::query("SELECT z.request_json,z.payee_pubkey,z.receipt_pubkey,z.amount_msat,z.address_user,z.credit_pool,z.description_hash FROM zap_invoice_terms z WHERE z.receive_request_id=? AND z.provider=?")
-        .bind(id).bind(&payment.source).fetch_optional(&mut **tx).await?;
+        .bind(&id).bind(&payment.source).fetch_optional(&mut **tx).await?;
     let Some(row) = row else {
         return Ok(());
     };
@@ -54,8 +46,15 @@ pub(super) async fn stage_receipt(
         .bind(settlement_id)
         .fetch_one(&mut **tx)
         .await?;
-    let provider_time = context["completed_provider"]
-        .as_str()
+    let context: Option<Value> = payment
+        .context_json
+        .as_deref()
+        .map(serde_json::from_str)
+        .transpose()?;
+    let provider_time = context
+        .as_ref()
+        .and_then(|value| value.get("completed_provider"))
+        .and_then(Value::as_str)
         .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
         .map(|value| value.timestamp())
         .filter(|value| *value >= 0 && *value <= observed.saturating_add(300));

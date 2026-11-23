@@ -479,6 +479,11 @@ impl InvoiceFetcher for MemberInvoiceFetcher<'_> {
 }
 impl CashuWorker {
     pub async fn tick(&self) -> Result<Step> {
+        // Production requests reach a PID 1-owned collector socket.
+        self.tick_with_collector_uid(0).await
+    }
+
+    pub(crate) async fn tick_with_collector_uid(&self, collector_uid: u32) -> Result<Step> {
         let policy = self.store.policy();
         let Some(work) = self
             .store
@@ -513,7 +518,11 @@ impl CashuWorker {
             {
                 return Ok(Step::Waiting);
             }
-            return match self.core.submit_member_ecash(&terms, socket).await? {
+            return match self
+                .core
+                .submit_member_ecash(&terms, socket, collector_uid)
+                .await?
+            {
                 super::operator::DirectStatus::Ready {
                     amount_sat,
                     fee_sat,

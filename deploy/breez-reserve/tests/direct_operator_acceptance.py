@@ -54,7 +54,7 @@ def verify_legacy_upgrade():
             raise AssertionError("legacy writer could spend a direct allocation")
 
 
-def exercise(ppk, failed_members=False, ecash_members=False):
+def exercise(ppk, failed_members=False, ecash_members=False, worker_members=False):
     with TemporaryDirectory(prefix="lg-direct-") as raw:
         root = Path(raw)
         (root / "mint-seed").write_text(Mnemonic("english").generate(strength=128))
@@ -110,8 +110,15 @@ def exercise(ppk, failed_members=False, ecash_members=False):
                 else: raise AssertionError("invalid receiving key accepted")
                 fee=1 if ppk else 0
                 if binary := os.environ.get("LG_DIRECT_WORKER_TEST"):
-                    (root/"worker.json").write_text(json.dumps({"claim":claim,"recipient":request["recipient"],
-                                                              "payment_hash":payment_hash,"fee":fee}))
+                    terms = {"claim":claim,"recipient":request["recipient"],"payment_hash":payment_hash,"fee":fee}
+                    if worker_members:
+                        members = [PrivateKey(),PrivateKey()]
+                        terms["members"] = [{"pubkey":PrivateKey().public_key.format()[1:].hex(),
+                            "destination":{"method":"private_ecash","mint":MINT,"receiving_key":key.public_key.format().hex(),
+                                "request_digest":hashlib.sha256(key.public_key.format()).hexdigest(),
+                                "payment_id":"member-worker-test","transport_key":PrivateKey().public_key.format()[1:].hex(),
+                                "relays":["wss://relay.example.com"]}} for key in members]
+                    (root/"worker.json").write_text(json.dumps(terms))
                     class Handler(socketserver.BaseRequestHandler):
                         def handle(self):
                             local=ClaimStore(root)
@@ -155,6 +162,24 @@ def exercise(ppk, failed_members=False, ecash_members=False):
                     with ThreadPoolExecutor(2) as pool: results=list(pool.map(retry,range(2)))
                     fee=1 if ppk else 0
                     assert results==[{"state":"ready","amount_sat":18-fee,"fee_sat":fee}]*2
+                if worker_members:
+                    assert paths.count("/v1/swap")==3 and reserve.pay_attempts==0
+                    store=ClaimStore(root)
+                    for member,key in zip(terms["members"],members,strict=True):
+                        row = store.db.execute("SELECT token,amount_sat,fee_sat FROM member_ecash WHERE feed=?",
+                                               (f"member-ecash:{feed}:{member['pubkey']}",)).fetchone()
+                        assert row[1:]==(7-fee,fee)
+                        proofs = [p.model_dump(exclude_none=True) for p in TokenV3.deserialize(row[0]).proofs]
+                        assert sum(p["amount"] for p in proofs)==7-fee
+                        for p in proofs:
+                            assert json.loads(p["secret"])[1]["data"]==key.public_key.format().hex()
+                            p["witness"]=json.dumps({"signatures":[key.sign_schnorr(hashlib.sha256(p["secret"].encode()).digest()).hex()]})
+                        net=7-2*fee
+                        outs,_=new_outputs(keyset,[1<<i for i in range(net.bit_length()) if net & (1<<i)])
+                        expect(mint.post("/v1/swap",json={"inputs":proofs,"outputs":encode_outputs(outs)}))
+                    store.db.close()
+                    print("Verified normal worker, core and collector through two member payouts",flush=True)
+                    return
                 assert paths.count("/v1/swap")==1 and reserve.pay_attempts==0
                 store=ClaimStore(root)
                 assert store.db.execute("SELECT COUNT(*) FROM proof_disposition").fetchone()==(1,)
@@ -320,3 +345,5 @@ if __name__=="__main__":
     for rate in (0,100): exercise(rate)
     exercise(100, failed_members=True)
     for rate in (0,100): exercise(rate, ecash_members=True)
+    if os.environ.get("LG_DIRECT_WORKER_TEST"):
+        for rate in (0,100): exercise(rate, worker_members=True)

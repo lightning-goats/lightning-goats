@@ -260,3 +260,71 @@ async fn client_credential_is_bound_to_its_public_identity_and_cannot_be_the_pro
     same.client_pubkey = same.owner.clone();
     assert!(same.validate().is_err());
 }
+
+#[tokio::test]
+async fn member_publication_recovers_frozen_signature_from_signer_journal() -> Result<()> {
+    let root = tempfile::tempdir()?;
+    let intent = intent();
+    let policy = policy(&intent);
+    let member = intent.0.member.clone();
+    let feed = uuid::Uuid::new_v4();
+    let terms = "cd".repeat(32);
+    let socket = root.path().join("public.sock");
+    let listener = UnixListener::bind(&socket)?;
+    let unsigned = UnsignedZap {
+        kind: 9321,
+        created_at: 100,
+        content: String::new(),
+        tags: vec![vec!["p".into(), member.clone()]],
+    };
+    let projection = serde_json::json!({"owner":policy.owner,"unsigned":unsigned,"amount_sats":7,"signed":false});
+    let expected = serde_json::json!({"feed":feed,"member":member,"terms_hash":terms});
+    let server = tokio::spawn(async move {
+        let mut first_event = None;
+        for round in 0..4 {
+            let (mut stream, _) = listener.accept().await?;
+            let mut request: serde_json::Value = ipc::read(&mut stream, 65536).await?;
+            let event = request.as_object_mut().unwrap().remove("event");
+            assert_eq!(request, expected);
+            if round % 2 == 0 {
+                assert!(event.is_none());
+                ipc::write(&mut stream, &projection, 65536).await?;
+            } else {
+                let event = event.unwrap();
+                let signed = VerifiedEvent::from_json(&serde_json::to_string(&event)?)?;
+                unsigned.check_signed(&signed, projection["owner"].as_str().unwrap())?;
+                if round == 1 {
+                    first_event = Some(event);
+                    continue;
+                }
+                assert_eq!(Some(event), first_event);
+                let mut stored = projection.clone();
+                stored["signed"] = true.into();
+                ipc::write(&mut stream, &stored, 65536).await?;
+            }
+        }
+        Ok::<(), anyhow::Error>(())
+    });
+    let url = format!("sqlite://{}", root.path().join("signer.db").display());
+    let uid = ipc::uid()?;
+    let backend = fake(false, false);
+    {
+        let signer = Store::connect(&url, policy.clone()).await?;
+        assert!(
+            signer
+                .sign_member_reward(feed, &member, &terms, &backend, (&socket, uid))
+                .await
+                .is_err()
+        );
+        assert_eq!(backend.calls.load(Ordering::SeqCst), 1);
+        signer.pool.close().await;
+    }
+    let signer = Store::connect(&url, policy).await?;
+    let offline = fake(true, false);
+    signer
+        .sign_member_reward(feed, &member, &terms, &offline, (&socket, uid))
+        .await?;
+    assert_eq!(offline.calls.load(Ordering::SeqCst), 0);
+    server.await??;
+    Ok(())
+}

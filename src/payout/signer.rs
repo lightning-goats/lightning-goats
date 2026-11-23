@@ -334,6 +334,7 @@ impl Store {
         member: &str,
         terms_hash: &str,
         backend: &B,
+        projection: (&Path, u32),
     ) -> Result<()> {
         crate::nostr_event::validate_public_key(member)?;
         crate::nostr_event::validate_hex(terms_hash, 32)?;
@@ -345,10 +346,9 @@ impl Store {
             unsigned: UnsignedZap,
             signed: bool,
         }
-        // PID 1 owns this listening socket. Only the collector serves the frozen token.
-        let socket = Path::new("/run/lightning-goats-member-publication.sock");
+        let (socket, peer_uid) = projection;
         let mut lookup = serde_json::json!({"feed":feed,"member":member,"terms_hash":terms_hash});
-        let projected: Projection = ipc::request(socket, 0, &lookup, 65536, 10).await?;
+        let projected: Projection = ipc::request(socket, peer_uid, &lookup, 65536, 10).await?;
         let event = projected.unsigned;
         anyhow::ensure!(
             projected.owner == self.policy.owner
@@ -383,7 +383,7 @@ impl Store {
         let signed = VerifiedEvent::from_json(&raw)?;
         event.check_signed(&signed, &self.policy.owner)?;
         lookup["event"] = serde_json::to_value(signed.event())?;
-        let result: Projection = ipc::request(socket, 0, &lookup, 65536, 10).await?;
+        let result: Projection = ipc::request(socket, peer_uid, &lookup, 65536, 10).await?;
         anyhow::ensure!(
             result.signed && result.unsigned == event && result.owner == self.policy.owner,
             "public reward storage pending"
@@ -491,7 +491,13 @@ impl Server {
                             terms_hash,
                         })) => {
                             match store
-                                .sign_member_reward(feed, &member, &terms_hash, backend.as_ref())
+                                .sign_member_reward(
+                                    feed,
+                                    &member,
+                                    &terms_hash,
+                                    backend.as_ref(),
+                                    (Path::new("/run/lightning-goats-member-publication.sock"), 0),
+                                )
                                 .await
                             {
                                 Ok(()) => Reply::MemberRewardStored,

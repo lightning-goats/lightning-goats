@@ -182,10 +182,26 @@ def deliver_token(journal, feed, token, amount, recipient, resolve_destination, 
     return False
 
 
+def delivery_rows(source, query):
+    # Release the collector read transaction before doing relay I/O. A relay
+    # outage must not hold a read lock across a swap or a claim commit.
+    after = 0
+    while True:
+        cursor = source.execute(query,(after,))
+        try:
+            batch = cursor.fetchall()
+        finally:
+            cursor.close()
+        if not batch:
+            return
+        for after,*fields in batch:
+            yield fields
+
+
 def deliver(source, journal, request, wrapper=HERE/"operator_wrap.cjs", send=publish):
-    rows = source.execute("""
-        SELECT e.feed,e.token,e.amount_sat,p.binding FROM operator_ecash e
-        JOIN proof_disposition p ON p.id=e.feed WHERE e.token IS NOT NULL
+    rows = delivery_rows(source,"""
+        SELECT e.rowid,e.feed,e.token,e.amount_sat,p.binding FROM operator_ecash e
+        JOIN proof_disposition p ON p.id=e.feed WHERE e.token IS NOT NULL AND e.rowid>? ORDER BY e.rowid LIMIT 32
     """)
     for feed, token, amount, binding in rows:
         try:
@@ -201,10 +217,10 @@ def publish_member(url, event):
 
 
 def deliver_private_members(source, journal, wrapper=HERE/"operator_wrap.cjs", send=publish_member):
-    rows = source.execute("""
-        SELECT m.feed,m.token,m.amount_sat,p.binding FROM member_ecash m
+    rows = delivery_rows(source,"""
+        SELECT m.rowid,m.feed,m.token,m.amount_sat,p.binding FROM member_ecash m
         JOIN proof_disposition p ON p.id=m.feed WHERE m.token IS NOT NULL
-        AND json_extract(p.binding,'$.assignment.destination.method')='private_ecash'
+        AND json_extract(p.binding,'$.assignment.destination.method')='private_ecash' AND m.rowid>? ORDER BY m.rowid LIMIT 32
     """)
     for disposition, token, amount, binding in rows:
         try:
@@ -219,32 +235,40 @@ def deliver_private_members(source, journal, wrapper=HERE/"operator_wrap.cjs", s
 def deliver_public_members(source, journal, send=publish_member):
     journal.execute("CREATE TABLE IF NOT EXISTS delivery(feed TEXT PRIMARY KEY,token_hash TEXT NOT NULL,event TEXT NOT NULL,relays TEXT NOT NULL,ack_at INTEGER)")
     journal.execute("CREATE TABLE IF NOT EXISTS public_relay_ack(feed TEXT NOT NULL,relay TEXT NOT NULL,PRIMARY KEY(feed,relay))")
-    rows = source.execute("""
-        SELECT m.feed,m.token,b.signed_event,p.binding FROM member_publications b JOIN member_ecash m USING(feed)
-        JOIN proof_disposition p ON p.id=m.feed WHERE b.signed_event IS NOT NULL
+    rows = delivery_rows(source,"""
+        SELECT m.rowid,m.feed,m.token,b.signed_event,p.binding FROM member_publications b JOIN member_ecash m USING(feed)
+        JOIN proof_disposition p ON p.id=m.feed WHERE b.signed_event IS NOT NULL AND m.rowid>? ORDER BY m.rowid LIMIT 32
     """)
     for disposition, token, message, binding in rows:
-        route = json.loads(binding)["assignment"]["destination"]
-        urls = list(dict.fromkeys(route["token_relays"] + route["read_relays"]))
-        stamp = hashlib.sha256(token.encode()).hexdigest()
-        with journal:
-            journal.execute("INSERT INTO delivery VALUES(?,?,?,?,NULL) ON CONFLICT(feed) DO NOTHING",
-                            (disposition,stamp,message,json.dumps(urls)))
-            saved = journal.execute("SELECT token_hash,event,relays FROM delivery WHERE feed=?",(disposition,)).fetchone()
-            if saved != (stamp,message,json.dumps(urls)):
-                raise ValueError("public delivery differs from original")
-        acked = {url for url, in journal.execute("SELECT relay FROM public_relay_ack WHERE feed=?",(disposition,))}
-        pending = [url for url in urls if url not in acked]
-        if not pending:
-            continue
-        event = json.loads(message)
-        with ThreadPoolExecutor(max_workers=min(8,len(pending))) as pool:
-            for url,accepted in zip(pending,pool.map(lambda relay: send(relay,event),pending),strict=True):
-                if accepted:
-                    with journal:
-                        journal.execute("INSERT OR IGNORE INTO public_relay_ack VALUES(?,?)",(disposition,url))
-                        if url in route["token_relays"]:
-                            journal.execute("UPDATE delivery SET ack_at=COALESCE(ack_at,unixepoch()) WHERE feed=?",(disposition,))
+        try:
+            deliver_public_event(journal, disposition, token, message, binding, send)
+        except (ValueError, TypeError, KeyError, OSError):
+            print("Public member delivery deferred for one reward; original event retained.", flush=True)
+
+
+def deliver_public_event(journal, disposition, token, message, binding, send):
+    route = json.loads(binding)["assignment"]["destination"]
+    urls = list(dict.fromkeys(route["token_relays"] + route["read_relays"]))
+    stamp = hashlib.sha256(token.encode()).hexdigest()
+    with journal:
+        journal.execute("INSERT INTO delivery VALUES(?,?,?,?,NULL) ON CONFLICT(feed) DO NOTHING",
+                        (disposition,stamp,message,json.dumps(urls)))
+        saved = journal.execute("SELECT token_hash,event,relays FROM delivery WHERE feed=?",(disposition,)).fetchone()
+        if saved != (stamp,message,json.dumps(urls)):
+            raise ValueError("public delivery differs from original")
+    acked = {url for url, in journal.execute("SELECT relay FROM public_relay_ack WHERE feed=?",(disposition,))}
+    pending = [url for url in urls if url not in acked]
+    if not pending:
+        return
+    event = json.loads(message)
+    with ThreadPoolExecutor(max_workers=min(8,len(pending))) as pool:
+        for url,accepted in zip(pending,pool.map(lambda relay: send(relay,event),pending),strict=True):
+            if accepted:
+                with journal:
+                    journal.execute("INSERT OR IGNORE INTO public_relay_ack VALUES(?,?)",(disposition,url))
+                    if url in route["token_relays"]:
+                        journal.execute("UPDATE delivery SET ack_at=COALESCE(ack_at,unixepoch()) WHERE feed=?",(disposition,))
+
 
 
 if __name__ == "__main__":
@@ -256,8 +280,11 @@ if __name__ == "__main__":
     while True:
         try:
             deliver(source, journal, args.request.read_text().strip())
-            deliver_private_members(source, journal)
-            deliver_public_members(source, journal)
-        except Exception:
+        except (OSError, ValueError, sqlite3.Error):
             print("Operator delivery deferred; original token retained.", flush=True)
+        for deliver_members in (deliver_private_members, deliver_public_members):
+            try:
+                deliver_members(source, journal)
+            except (OSError, ValueError, sqlite3.Error):
+                print("Member delivery deferred; original reward retained.", flush=True)
         time.sleep(5)

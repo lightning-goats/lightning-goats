@@ -846,6 +846,7 @@ impl Client {
         &self,
         terms: &crate::payout::cashu::MemberExecution,
         collector: &std::path::Path,
+        collector_uid: u32,
     ) -> Result<crate::payout::operator::DirectStatus> {
         self.authorize_collector_spend(
             Request::ClaimMemberEcash {
@@ -854,7 +855,7 @@ impl Client {
             terms.digest()?,
         )
         .await?;
-        crate::private_ipc::request(collector, 0, &terms.payload(), 65536, 30).await
+        crate::private_ipc::request(collector, collector_uid, &terms.payload(), 65536, 30).await
     }
     pub(crate) async fn submit_direct_operator(
         &self,

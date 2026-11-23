@@ -19,7 +19,7 @@ repo = Path(__file__).resolve().parents[3]
 collector = repo/"deploy/breez-reserve/collector"
 sys.path.insert(0, str(collector))
 from invoice_server import member_delivery_ack
-from operator_delivery import MINT, deliver, deliver_private_members, destination, public_relay_socket, publish
+from operator_delivery import MINT, delivery_rows, deliver, deliver_private_members, destination, public_relay_socket, publish
 
 
 def run():
@@ -46,6 +46,20 @@ def run():
     source.execute("insert into proof_disposition values('feed',?)",(json.dumps({"recipient":lock}),))
     with tempfile.TemporaryDirectory() as tmp:
         root=Path(tmp)
+        # The production collector may use SQLite's rollback journal. Hold a
+        # reader midway through a delivery batch while another connection commits.
+        with sqlite3.connect(root/"locking.sqlite",timeout=0) as writer:
+            writer.execute("CREATE TABLE queue(value INTEGER)")
+            writer.executemany("INSERT INTO queue VALUES(?)",((n,) for n in range(65)))
+            writer.commit()
+            reader = sqlite3.connect((root/"locking.sqlite").as_uri()+"?mode=ro",uri=True)
+            pending = delivery_rows(reader,"SELECT rowid,value FROM queue WHERE rowid>? ORDER BY rowid LIMIT 32")
+            assert next(pending) == [0]
+            writer.execute("UPDATE queue SET value=99 WHERE rowid=65")
+            writer.commit()
+            assert [n for (n,) in pending] == [*range(1,64),99]
+            reader.close()
+        writer.close()
         wrapper=root/"operator_wrap.cjs"
         shutil.copyfile(collector/wrapper.name, wrapper)
         shutil.copyfile(repo/"web/vendor/nostr.bundle.js",root/"nostr.bundle.js")

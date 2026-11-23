@@ -223,23 +223,7 @@ impl Intake<'_> {
             deadline,
             256 * 1024,
         )?;
-        let listed =
-            crate::mint_probe::sat_inventory(&transport, &policy.advertised_url.parse()?).await?;
-        let mut counts = std::collections::HashMap::new();
-        let mut rates = std::collections::HashMap::new();
-        let mut gross = 0u64;
-        for proof in checked.proofs {
-            let Some(set) = listed.get(&proof.keyset_id.to_string()) else {
-                return Ok(Some(rejected()?));
-            };
-            *counts.entry(proof.keyset_id).or_default() += 1;
-            rates.insert(proof.keyset_id, set.input_fee_ppk);
-            gross = gross
-                .checked_add(u64::from(proof.amount))
-                .ok_or_else(|| anyhow::anyhow!("contact amount overflow"))?;
-        }
-        let fee = u64::from(cdk::fees::calculate_fee(&counts, &rates)?.total);
-        if gross.saturating_sub(fee) < lightning_goats_cashu_receipt::contact_fee::FEE_SATS {
+        if !covers_contact_fee(&transport, &policy.advertised_url.parse()?, checked.proofs).await? {
             return Ok(Some(rejected()?));
         }
         Ok(None)
@@ -300,12 +284,7 @@ impl Intake<'_> {
                     Err(_) => None,
                     Ok(contribution) => match journal.admit(&contribution.intake()) {
                         Ok(Admission::New(id) | Admission::Duplicate(id)) => Some(id),
-                        Err(error)
-                            if matches!(query.operation, status::AdmitOperation::ContactFee(_))
-                                && error.is::<crate::journal::AdmissionConflict>() =>
-                        {
-                            None
-                        }
+                        Err(error) if error.is::<crate::journal::AdmissionConflict>() => None,
                         Err(error)
                             if error.downcast_ref::<AdmissionCapacity>()
                                 == Some(&AdmissionCapacity::TooLarge) =>
@@ -419,6 +398,29 @@ impl Intake<'_> {
             disposition,
         })
     }
+}
+
+pub(crate) async fn covers_contact_fee(
+    transport: &impl cdk_http_client::Transport,
+    mint: &cdk::mint_url::MintUrl,
+    proofs: &[cdk::nuts::Proof],
+) -> Result<bool> {
+    let listed = crate::mint_probe::sat_inventory(transport, mint).await?;
+    let mut counts = std::collections::HashMap::new();
+    let mut rates = std::collections::HashMap::new();
+    let mut gross = 0u64;
+    for proof in proofs {
+        let Some(set) = listed.get(&proof.keyset_id.to_string()) else {
+            return Ok(false);
+        };
+        *counts.entry(proof.keyset_id).or_default() += 1;
+        rates.insert(proof.keyset_id, set.input_fee_ppk);
+        gross = gross
+            .checked_add(u64::from(proof.amount))
+            .ok_or_else(|| anyhow::anyhow!("contact amount overflow"))?;
+    }
+    let fee = u64::from(cdk::fees::calculate_fee(&counts, &rates)?.total);
+    Ok(gross.saturating_sub(fee) >= lightning_goats_cashu_receipt::contact_fee::FEE_SATS)
 }
 
 #[cfg(test)]

@@ -3033,3 +3033,33 @@ async fn operator_ownership_check_uses_existing_outputs_without_swap_or_receipt_
     assert_eq!(harness.mint.melt_attempts.load(Ordering::SeqCst), 0);
     Ok(())
 }
+
+#[tokio::test]
+async fn contact_tenders_cover_the_net_fee_before_spending_any_proofs() -> Result<()> {
+    for (rate, amount, accepted) in [
+        (0, 99_u64, false),
+        (0, 100, true),
+        (0, 101, true),
+        (100, 100, false),
+        (100, 101, true),
+        (100, 110, true),
+    ] {
+        let h = Harness::new(rate)?;
+        let mint = h.policy().advertised_url.parse()?;
+        let proofs: Vec<_> = (0..7)
+            .map(|bit| 1_u64 << bit)
+            .filter(|denomination| amount & denomination != 0)
+            .map(|denomination| {
+                h.mint
+                    .issue_amount(format!("contact-{denomination}"), denomination)
+            })
+            .collect();
+        assert_eq!(
+            crate::ingress::covers_contact_fee(&h.mint, &mint, &proofs).await?,
+            accepted
+        );
+        assert_eq!(h.mint.swap_attempts.load(Ordering::SeqCst), 0);
+        assert!(h.mint.state.lock().unwrap().spent.is_empty());
+    }
+    Ok(())
+}

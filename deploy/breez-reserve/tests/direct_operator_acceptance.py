@@ -184,6 +184,7 @@ def exercise(ppk, failed_members=False, ecash_members=False):
                     return
                 if ecash_members:
                     grant = str(uuid4())
+                    sender_key = PrivateKey()
                     for method in ("private_ecash","public_nutzap"):
                         receiver, identity = PrivateKey(), PrivateKey()
                         member_key = identity.public_key.format()[1:].hex()
@@ -196,11 +197,11 @@ def exercise(ppk, failed_members=False, ecash_members=False):
                         destination={"method":method,"mint":MINT,"receiving_key":lock}
                         if method=="public_nutzap":
                             destination.update(mint=MINT+"/",member=member_key,advertisement="ab"*32,
-                                token_relays=["wss://relay.example.com"],read_relays=[])
+                                token_relays=["wss://relay.example.com"],read_relays=["wss://read.example.com"])
                         else:
                             destination.update(request_digest="cd"*32,payment_id="reward",
                                 transport_key=member_key,relays=["wss://relay.example.com"])
-                        assignment = {"feed":feed,"grant":grant,"member_key":member_key,"plan_hash":request["plan_hash"],
+                        assignment = {"feed":feed,"grant":grant,"owner":sender_key.public_key.format()[1:].hex(),"member_key":member_key,"plan_hash":request["plan_hash"],
                             "destination":destination,"gross":7,"reserved":14,"lots":request["lots"],
                             "fee_limit":2,"minimum_net":5,"maximum_net":7}
                         def send(terms):
@@ -228,6 +229,37 @@ def exercise(ppk, failed_members=False, ecash_members=False):
                             tags = public_reward_tags(row[0],7-fee,assignment)
                             assert tags[:3] == [["p",member_key],["u",MINT+"/"],["unit","sat"]]
                             proofs = [json.loads(value) for kind,value in tags if kind == "proof"]
+                            from member_publication import publication
+                            from operator_delivery import deliver_public_members
+                            import sqlite3
+                            digest = hashlib.sha256(json.dumps(assignment,ensure_ascii=False,sort_keys=True,separators=(",",":")).encode()).hexdigest()
+                            lookup = {"feed":feed,"member":member_key,"terms_hash":digest}
+                            draft = publication(store,lookup)
+                            assert not draft["signed"] and draft["unsigned"]["tags"] == tags
+                            event = dict(draft["unsigned"],pubkey=assignment["owner"])
+                            serialized = json.dumps([0,event["pubkey"],event["created_at"],9321,tags,""],separators=(",",":")).encode()
+                            event["id"] = hashlib.sha256(serialized).hexdigest()
+                            event["sig"] = sender_key.sign_schnorr(bytes.fromhex(event["id"])).hex()
+                            try:
+                                publication(store,{**lookup,"event":{**event,"pubkey":member_key}})
+                            except ValueError:
+                                pass
+                            else:
+                                raise AssertionError("accepted changed sender")
+                            assert publication(store,{**lookup,"event":event})["signed"]
+                            assert publication(store,lookup)["signed"]
+                            seen = {}
+                            def relay(url,signed):
+                                assert signed == event
+                                seen[url] = seen.get(url,0)+1
+                                return url in destination["read_relays"] or seen[url]==2
+                            for attempt in range(3):
+                                journal = sqlite3.connect(root/"public-outbox.sqlite")
+                                deliver_public_members(store.db,journal,relay)
+                                ack = journal.execute("SELECT ack_at FROM delivery").fetchone()[0]
+                                assert (ack is not None) == (attempt>0)
+                                journal.close()
+                            assert seen == {"wss://relay.example.com":2,"wss://read.example.com":1}
                         assert sum(p["amount"] for p in proofs)==7-fee
                         for p in proofs:
                             assert p["dleq"] and json.loads(p["secret"])[1]["data"]==lock

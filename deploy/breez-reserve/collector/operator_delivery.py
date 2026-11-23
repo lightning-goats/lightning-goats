@@ -216,6 +216,37 @@ def deliver_private_members(source, journal, wrapper=HERE/"operator_wrap.cjs", s
             print("Private member delivery deferred; original token retained.", flush=True)
 
 
+def deliver_public_members(source, journal, send=publish_member):
+    journal.execute("CREATE TABLE IF NOT EXISTS delivery(feed TEXT PRIMARY KEY,token_hash TEXT NOT NULL,event TEXT NOT NULL,relays TEXT NOT NULL,ack_at INTEGER)")
+    journal.execute("CREATE TABLE IF NOT EXISTS public_relay_ack(feed TEXT NOT NULL,relay TEXT NOT NULL,PRIMARY KEY(feed,relay))")
+    rows = source.execute("""
+        SELECT m.feed,m.token,b.signed_event,p.binding FROM member_publications b JOIN member_ecash m USING(feed)
+        JOIN proof_disposition p ON p.id=m.feed WHERE b.signed_event IS NOT NULL
+    """)
+    for disposition, token, message, binding in rows:
+        route = json.loads(binding)["assignment"]["destination"]
+        urls = list(dict.fromkeys(route["token_relays"] + route["read_relays"]))
+        stamp = hashlib.sha256(token.encode()).hexdigest()
+        with journal:
+            journal.execute("INSERT INTO delivery VALUES(?,?,?,?,NULL) ON CONFLICT(feed) DO NOTHING",
+                            (disposition,stamp,message,json.dumps(urls)))
+            saved = journal.execute("SELECT token_hash,event,relays FROM delivery WHERE feed=?",(disposition,)).fetchone()
+            if saved != (stamp,message,json.dumps(urls)):
+                raise ValueError("public delivery differs from original")
+        acked = {url for url, in journal.execute("SELECT relay FROM public_relay_ack WHERE feed=?",(disposition,))}
+        pending = [url for url in urls if url not in acked]
+        if not pending:
+            continue
+        event = json.loads(message)
+        with ThreadPoolExecutor(max_workers=min(8,len(pending))) as pool:
+            for url,accepted in zip(pending,pool.map(lambda relay: send(relay,event),pending),strict=True):
+                if accepted:
+                    with journal:
+                        journal.execute("INSERT OR IGNORE INTO public_relay_ack VALUES(?,?)",(disposition,url))
+                        if url in route["token_relays"]:
+                            journal.execute("UPDATE delivery SET ack_at=COALESCE(ack_at,unixepoch()) WHERE feed=?",(disposition,))
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--request", type=Path, required=True)
@@ -226,6 +257,7 @@ if __name__ == "__main__":
         try:
             deliver(source, journal, args.request.read_text().strip())
             deliver_private_members(source, journal)
+            deliver_public_members(source, journal)
         except Exception:
             print("Operator delivery deferred; original token retained.", flush=True)
         time.sleep(5)

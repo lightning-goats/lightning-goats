@@ -355,7 +355,7 @@ impl MemberExecution {
     }
     pub(crate) fn payload(&self) -> serde_json::Value {
         let r = &self.reservation;
-        serde_json::json!({"member_ecash":{"feed":r.request_id,"grant":r.id,"member_key":self.member,
+        serde_json::json!({"member_ecash":{"feed":r.request_id,"grant":r.id,"owner":r.owner,"member_key":self.member,
             "plan_hash":r.plan_hash,"destination":self.destination,"lots":self.lots,
             "gross":self.gross_sats,"reserved":r.reserved_sats,"fee_limit":self.fee_limit,
             "minimum_net":self.minimum_net,"maximum_net":self.maximum_net}})

@@ -80,7 +80,7 @@ impl NakClient {
         content: &str,
         tags: Vec<Vec<String>>,
     ) -> Result<crate::nostr_event::VerifiedEvent> {
-        if !matches!(kind, 1 | 1311 | 9734 | 9735 | 10002)
+        if !matches!(kind, 1 | 1311 | 9321 | 9734 | 9735 | 10002)
             || created_at > i64::MAX as u64
             || content.len() > 32_768
             || tags.len() > 1024

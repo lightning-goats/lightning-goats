@@ -518,6 +518,12 @@ impl CashuWorker {
                     amount_sat,
                     fee_sat,
                 } => {
+                    if matches!(
+                        terms.destination,
+                        crate::cyberherd::rewards::EcashDestination::PublicNutzap(_)
+                    ) {
+                        self.signer.sign_member_reward(&terms).await?;
+                    }
                     self.store
                         .record_member_ecash_ready(&terms, amount_sat, fee_sat)
                         .await?;

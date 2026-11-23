@@ -45,7 +45,7 @@ def transfer(store, client, request, keyset, keys):
 
 
 def member_transfer(store, client, assignment, keyset, keys):
-    fields = {"feed", "grant", "member_key", "plan_hash", "destination", "lots",
+    fields = {"feed", "grant", "owner", "member_key", "plan_hash", "destination", "lots",
               "gross", "reserved", "fee_limit", "minimum_net", "maximum_net"}
     if set(assignment) != fields:
         raise ValueError("invalid member assignment")
@@ -54,6 +54,7 @@ def member_transfer(store, client, assignment, keyset, keys):
     feed = str(UUID(assignment["feed"]))
     destination = assignment["destination"]
     if (not isinstance(member, str) or not re.fullmatch(r"[0-9a-f]{64}", member)
+            or not re.fullmatch(r"[0-9a-f]{64}", assignment["owner"]) or assignment["owner"] == member
             or destination.get("method") not in ("public_nutzap", "private_ecash")
             or destination.get("mint", "").rstrip("/") != MINT
             or destination["method"] == "public_nutzap" and destination.get("member") != member):
@@ -70,7 +71,7 @@ def member_transfer(store, client, assignment, keyset, keys):
     # conflicts with the original binding even when it has the same lock key.
     disposition = f"member-ecash:{feed}:{member}"
     digest = hashlib.sha256(json.dumps(assignment, ensure_ascii=False, sort_keys=True, separators=(",",":")).encode()).hexdigest()
-    terms = {"terms_hash":digest, "grant":grant, "member_key":member, "reserved":reserved,
+    terms = {"terms_hash":digest, "owner":assignment["owner"], "grant":grant, "member_key":member, "reserved":reserved,
              "minimum_net":minimum, "maximum_net":maximum, "destination":destination}
     return _transfer(store, client, request, keyset, keys, disposition, None, terms)
 

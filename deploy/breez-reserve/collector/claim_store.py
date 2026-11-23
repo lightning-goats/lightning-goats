@@ -168,6 +168,23 @@ class ClaimStore:
                     BEGIN SELECT RAISE(ABORT, 'locked swap is retained'); END
                 """)
             self.db.execute("""
+                CREATE TABLE IF NOT EXISTS member_publications (
+                    feed TEXT PRIMARY KEY REFERENCES member_ecash(feed),
+                    created_at INTEGER NOT NULL DEFAULT(unixepoch()),
+                    signed_event TEXT
+                )
+            """)
+            self.db.execute("""
+                CREATE TRIGGER IF NOT EXISTS immutable_member_publication BEFORE UPDATE ON member_publications
+                WHEN OLD.feed IS NOT NEW.feed OR OLD.created_at IS NOT NEW.created_at
+                    OR OLD.signed_event IS NOT NULL OR NEW.signed_event IS NULL
+                BEGIN SELECT RAISE(ABORT,'signed member publication is immutable'); END
+            """)
+            self.db.execute("""
+                CREATE TRIGGER IF NOT EXISTS retain_member_publication BEFORE DELETE ON member_publications
+                BEGIN SELECT RAISE(ABORT,'member publication is retained'); END
+            """)
+            self.db.execute("""
                 CREATE TABLE IF NOT EXISTS proof_split (
                     secret TEXT PRIMARY KEY REFERENCES disposition_input(secret),
                     material TEXT NOT NULL,

@@ -1,5 +1,5 @@
 use super::{Policy, Role};
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use futures_util::TryStreamExt as _;
 use serde::{Deserialize, Serialize};
 use sqlx::{
@@ -589,6 +589,36 @@ async fn cross_check(pools: &BTreeMap<Role, SqlitePool>, policy: &Policy) -> Res
     let mut intents = sqlx::query("SELECT id,document_json FROM signer_intents").fetch(signer);
     while let Some(row) = intents.try_next().await? {
         let id: String = row.try_get("id")?;
+        if let Some(key) = id.strip_prefix("member-ecash:") {
+            let (feed, member) = key
+                .split_once(':')
+                .context("invalid member signing identity")?;
+            let (hash, event): (String, crate::payout::invoice::UnsignedZap) =
+                serde_json::from_str(&row.try_get::<String, _>("document_json")?)?;
+            let grant: String = sqlx::query_scalar("SELECT r.id FROM reward_reservations r JOIN member_ecash_execution_claims c ON c.reservation_id=r.id WHERE r.request_id=? AND r.owner=? AND c.member=? AND c.terms_hash=?")
+                .bind(feed).bind(&policy.owner).bind(member).bind(hash).fetch_one(core).await?;
+            let dest: String = sqlx::query_scalar(
+                "SELECT recipient_json FROM payout_rows WHERE grant_id=? AND member=?",
+            )
+            .bind(grant)
+            .bind(member)
+            .fetch_one(payout)
+            .await?;
+            let crate::cyberherd::rewards::EcashDestination::PublicNutzap(route) =
+                serde_json::from_str(&dest)?
+            else {
+                bail!("signing intent lacks public consent");
+            };
+            anyhow::ensure!(
+                event.kind == 9321
+                    && event.content.is_empty()
+                    && route.member == member
+                    && event.tags.first() == Some(&vec!["p".to_owned(), member.to_owned()])
+                    && event.tags.get(1) == Some(&vec!["u".to_owned(), route.mint]),
+                "public reward lost recipient or mint binding"
+            );
+            continue;
+        }
         let original = signing_intent(payout, &id).await?;
         if row.try_get::<String, _>("document_json")? != original {
             bail!("signer lost its original payout invoice intent");
@@ -600,6 +630,20 @@ async fn cross_check(pools: &BTreeMap<Role, SqlitePool>, policy: &Policy) -> Res
     let mut results = sqlx::query("SELECT id,event_json FROM signer_results").fetch(signer);
     while let Some(row) = results.try_next().await? {
         let id: String = row.try_get("id")?;
+        if id.starts_with("member-ecash:") {
+            let raw: String =
+                sqlx::query_scalar("SELECT document_json FROM signer_intents WHERE id=?")
+                    .bind(&id)
+                    .fetch_one(signer)
+                    .await?;
+            let (_, event): (String, crate::payout::invoice::UnsignedZap) =
+                serde_json::from_str(&raw)?;
+            let verified = crate::nostr_event::VerifiedEvent::from_json(
+                &row.try_get::<String, _>("event_json")?,
+            )?;
+            event.check_signed(&verified, &policy.owner)?;
+            continue;
+        }
         let document = signing_intent(payout, &id).await?;
         let intent = crate::payout::invoice::Intent::restore(serde_json::from_str(&document)?)?;
         let signed: String = row.try_get("event_json")?;

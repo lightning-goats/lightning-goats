@@ -51,7 +51,8 @@ async fn prepare(root: &Path, source: &str) -> Result<Value> {
         toml::from_str(include_str!("../deploy/config.canary.toml.example"))?;
     config["database"]["url"] = database.clone().into();
     // No real provider, even if a caller later starts this prepared canary.
-    config["strike"]["api_url"] = "https://127.0.0.1:9/".into();
+    config["lnurl"]["breez_collector"]["socket"] =
+        format!("{root_text}/unused-collector.sock").into();
     config["nostr"]["nak_config_path"] = format!("{root_text}/unused-nak").into();
     let config_text = toml::to_string_pretty(&config)?;
     let parsed: AppConfig = toml::from_str(&config_text)?;
@@ -72,11 +73,6 @@ async fn prepare(root: &Path, source: &str) -> Result<Value> {
     // Atomic creation refuses existing stores and dangling destination symlinks.
     // On any later failure retain partial evidence; never auto-delete or retry it.
     DirBuilder::new().mode(0o700).create(root)?;
-    let credentials = root.join("synthetic-credentials");
-    DirBuilder::new().mode(0o700).create(&credentials)?;
-    for name in ["strike-api-key", "strike-webhook-secret"] {
-        exclusive_file(&credentials.join(name), b"synthetic-cross-host-only\n")?;
-    }
     exclusive_file(&root.join("daemon.toml"), config_text.as_bytes())?;
 
     let run_id = Uuid::new_v4();
@@ -176,15 +172,11 @@ mod tests {
         assert!(prepare(&root, &"a".repeat(40)).await.is_err());
         assert_eq!(before, fs::read(root.join("PREPARED.json")).unwrap());
         let cfg = AppConfig::load(&root.join("daemon.toml")).unwrap();
-        assert_eq!(cfg.strike.as_ref().unwrap().api_url, "https://127.0.0.1:9/");
+        assert!(cfg.strike.is_none());
         assert_eq!(cfg.service.mode, RuntimeMode::Canary);
         assert_eq!(
-            fs::metadata(root.join("synthetic-credentials/strike-api-key"))
-                .unwrap()
-                .permissions()
-                .mode()
-                & 0o777,
-            0o600
+            cfg.lnurl.breez_collector.unwrap().socket,
+            root.join("unused-collector.sock")
         );
     }
 

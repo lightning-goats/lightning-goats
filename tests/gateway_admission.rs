@@ -500,13 +500,11 @@ async fn daemon(directory: &impl AsRef<std::path::Path>, gateway_url: &str) -> P
         directory.as_ref().join("daemon.db").display()
     )
     .into();
-    config["strike"]["api_url"] = "https://127.0.0.1:9/".into();
+    config["lnurl"]["breez_collector"]["socket"] =
+        format!("{}/unused-collector.sock", directory.as_ref().display()).into();
     config["gateway"]["url"] = gateway_url.into();
     config["informational"]["interface_info_enabled"] = false.into();
     config["informational"]["weather_enabled"] = false.into();
-    for name in ["strike-api-key", "strike-webhook-secret"] {
-        std::fs::write(directory.as_ref().join(name), "synthetic-mock-only").unwrap();
-    }
     launch_daemon(directory.as_ref(), address, &config).await
 }
 

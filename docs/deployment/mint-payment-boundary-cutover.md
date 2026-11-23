@@ -89,4 +89,6 @@ On 2026-11-23 the VPS installed the receiver from PR #176, merged at `31c7e590`.
 
 The live ledger had 16 historical treasury intents bound to their original Strike invoices. Twelve had recorded deposits. Four had issued invoices for 1 sat each and lacked a recorded deposit. Preserve their original intent, invoice, payment hash, funding sources and wallet result for reconciliation. The absence of a deposit alone cannot establish whether a wallet submitted a payment. The installer compared every original binding and deposit before and after restart and found them identical.
 
+For the four issued invoices without deposits, the original wallet journal contained four bound instructions, four quote requests and four source holds. It contained zero recorded quotes, split submissions, melt requests, melt replies or results for those IDs. The receiver-v2 journal contained no matching instructions or downstream records. Retain those holds pending reconciliation.
+
 The operator also confirmed browser contact invoice issuance. The journal recorded one 100-sat contact invoice at 20:19:58 UTC, with zero fee entitlements and delivery jobs when inspected. Funded delivery remains pending.

@@ -95,10 +95,11 @@ async fn main() -> Result<()> {
         .init();
 
     let args = Args::parse();
-    let config = Arc::new(AppConfig::load(&args.config)?);
     if args.recovery_paused {
+        let config = AppConfig::load_for_recovery(&args.config)?;
         return paused_recovery::serve(&config).await;
     }
+    let config = Arc::new(AppConfig::load(&args.config)?);
     let mut ledger = LedgerStore::connect(&config.database.url).await?;
     if let Some(receipts) = &config.cashu_receipts {
         ledger = ledger.with_retained_wallet_epoch(receipts.wallet_epoch);

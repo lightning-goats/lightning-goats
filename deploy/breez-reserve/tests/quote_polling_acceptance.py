@@ -70,6 +70,28 @@ def run(directory, client, reserve):
     query = "SELECT id, payment_hash, proofs FROM project_claim ORDER BY id"
     assert store.db.execute(query).fetchall() == comparison.db.execute(query).fetchall()
     assert store.db.execute("SELECT sum(amount_sat) FROM collected_output").fetchone() == (5,)
+    # Interrupt after the mint creates a quote but before the collector can bind the invoice.
+    original_id = str(uuid4())
+    class LostQuoteReply:
+        def post(self, path, **kwargs):
+            assert path == "/private/v1/project-quotes"
+            reply = client.post(path, **kwargs).raise_for_status().json()
+            reserve.paid.add(bolt11.decode(reply["request"]).payment_hash)
+            raise httpx.ReadTimeout("original quote reply lost")
+    try:
+        issue(store, LostQuoteReply(), PROJECT_TOKEN, original_id, 7, hashlib.sha256(b"lost").hexdigest(),
+              keyset["id"], {"user":"dexter", "credit_pool":"herd"})
+    except httpx.ReadTimeout:
+        pass
+    else:
+        raise AssertionError("expected a lost quote response")
+    store.db.close()
+    store = ClaimStore(wallet)
+    paths.clear()
+    assert QuotePoller().poll(store, client, keys, int(time.time()))
+    assert "/private/v1/project-quotes" not in paths and "/v1/mint/quote/bolt11" not in paths
+    assert paths.count("/v1/mint/quote/bolt11/goats-" + original_id) >= 1
+    assert store.db.execute("SELECT sum(amount_sat) FROM collected_output WHERE request_id=?", (original_id,)).fetchone() == (7,)
     print("Mixed batch: 1 status call, individual: 3, identical receipts, 5 acquired fixture sats")
 
 

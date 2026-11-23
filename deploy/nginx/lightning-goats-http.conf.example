@@ -15,11 +15,9 @@ upstream lightning_goats_canary_backend {
 limit_req_zone $binary_remote_addr zone=lightning_goats_lnurl_discovery:10m rate=60r/m;
 limit_req_zone $binary_remote_addr zone=lightning_goats_lnurl_invoice:10m rate=12r/m;
 limit_req_zone $binary_remote_addr zone=lightning_goats_read:10m rate=30r/m;
-limit_req_zone $binary_remote_addr zone=lightning_goats_strike_webhook:10m rate=60r/m;
 limit_req_zone $binary_remote_addr zone=lg_canary_lnurl_discovery:10m rate=60r/m;
 limit_req_zone $binary_remote_addr zone=lg_canary_lnurl_invoice:10m rate=12r/m;
 limit_req_zone $binary_remote_addr zone=lg_canary_read:10m rate=30r/m;
-limit_req_zone $binary_remote_addr zone=lg_canary_webhook:10m rate=60r/m;
 limit_req_status 429;
 
 map $http_upgrade $lightning_goats_connection_upgrade {

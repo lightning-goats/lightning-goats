@@ -71,9 +71,9 @@ deadline_seconds = 5
 [cashu_treasury.policy]
 enabled = true
 version = "operator-fixture-v1"
-invoice_expiry_seconds = 300
+invoice_expiry_seconds = 900
 [cashu_treasury.policy.destination]
-origin = "https://treasury.example/"
+origin = "https://mint.lightning-goats.com/"
 account_id = "{uuid.uuid4()}"
 credential_fingerprint = "{'55'*32}"
 network = "bitcoin"
@@ -192,6 +192,18 @@ maximum_in_flight_sats = 1000
             save(dict(reconciliation, **change))
             if expected not in call(*reconcile, success=False).stderr:
                 raise ValueError('native original-settlement refusal differs from fixture')
+        # Even a correctly signed-off configuration for an old destination cannot
+        # create a new reservation. It remains usable for original-ID recovery.
+        historical = config_text.replace('https://mint.lightning-goats.com/', 'https://treasury.example/')
+        config.write_text(historical)
+        old_digest = hashlib.sha256(config.read_bytes()).hexdigest()
+        save(dict(decision, config_sha256=old_digest))
+        if 'new treasury work requires' not in call(*arguments, '--apply', success=False).stderr:
+            raise ValueError('historical destination was accepted for new planning')
+        save(dict(reconciliation, config_sha256=old_digest))
+        if 'unknown treasury intent' not in call(*reconcile, success=False).stderr:
+            raise ValueError('historical configuration could not inspect the original intent')
+        config.write_text(config_text)
         save(reconciliation)
         status.write_text(stopped.replace('ActiveState=inactive','ActiveState=active'))
         if 'core must be fully stopped' not in call(*reconcile, success=False).stderr:
@@ -216,7 +228,7 @@ maximum_in_flight_sats = 1000
         intent = dict(version=1, purpose='cashu_treasury_settlement', id=str(uuid.uuid4()),
                       core_epoch=epoch, wallet_instance=instance, wallet_epoch=wallet_epoch,
                       mint_id='mint-a', treasury_policy='operator-fixture-v1', destination=destination,
-                      input_sats=8, deposit_sats=7, maximum_fee_sats=1, invoice_expiry_seconds=300,
+                      input_sats=8, deposit_sats=7, maximum_fee_sats=1, invoice_expiry_seconds=900,
                       sources=[dict(ledger_id=1, acquisition_id=str(uuid.uuid4()),
                                     receipt_digest='ab'*32, input_sats=8)])
         encoded = json.dumps(intent, separators=(',', ':'))

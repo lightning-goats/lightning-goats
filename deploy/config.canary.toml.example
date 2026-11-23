@@ -1,5 +1,5 @@
 # Non-secret Lightning Goats canary configuration.
-# Canary mode uses a separate SQLite database, Strike sandbox credentials, and
+# Canary mode uses a separate SQLite database, an isolated mint collector, and
 # a separate trusted gateway instance whose OpenHAB request/ack path MUST be
 # harmless. Canary mode never enables Nostr signing/publication.
 
@@ -10,12 +10,13 @@ mode = "canary"
 [database]
 url = "sqlite:///var/lib/lightning-goats/lightning-goats-canary.db"
 
-[strike]
-api_url = "https://api.dev.strike.me/"
-
 [lnurl]
 public_base_url = "https://feeder.lightning-goats.com/"
-invoice_expiry_seconds = 300
+invoice_expiry_seconds = 900
+
+[lnurl.collector]
+socket = "/run/lightning-goats-canary-project-invoices.sock"
+peer_uid = 1001 # Set to the isolated canary collector listener UID.
 
 [[lightning_address]]
 user = "herd"

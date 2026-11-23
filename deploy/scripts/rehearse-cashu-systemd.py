@@ -219,7 +219,6 @@ def rehearse_receipt_socket(archive, root, cleanup, systemd, accounts, uids,
                          .replace('sqlite://' + str(core_state / 'ledger.sqlite'), 'sqlite://' + str(ledger))
                          .replace('listen = "127.0.0.1:8788"', 'listen = "127.0.0.1:0"')
                          .replace('mode = "canary"', 'mode = "shadow"')
-                         .replace('https://api.dev.strike.me/', 'https://127.0.0.1:9/')
                          .replace('http://10.8.0.6:8790/', 'http://127.0.0.1:9/') + f'''
 [cashu_receipts]
 socket = "{endpoint}"
@@ -235,7 +234,7 @@ maximum_custody_sats = 20
 deadline_seconds = 5
 connections_per_second = 8
 [[cashu_receipts.approved]]
-mint_id = "fixture"
+mint_id = "goats"
 policy_version = "v1"
 maximum_gross_sats = 10
 maximum_net_sats = 10
@@ -254,8 +253,6 @@ maximum_net_sats = 10
                  f'User={core_user}', f'Group={groups["core"].gr_name}', f'ReadWritePaths={state}',
                  namespace, 'IPAddressDeny=any', 'ProtectSystem=strict',
                  'NoNewPrivileges=yes', 'CapabilityBoundingSet=',
-                 'SetCredential=strike-api-key:synthetic-credentials-only',
-                 'SetCredential=strike-webhook-secret:synthetic-credentials-only',
                  f'StandardOutput=append:{log}', f'StandardError=append:{log}')],
              '--', str(core), '--config', str(candidate)])
     ready(command, process, endpoint, log)
@@ -268,7 +265,7 @@ maximum_net_sats = 10
     receipt = root / 'receipt.json'
     receipt.write_text(json.dumps(dict(identity, schema_version=1, acquisition_id=str(uuid.uuid4()),
                                       transport='cashu', source_ref='synthetic-systemd-receipt',
-                                      source_author=None, mint_id='fixture', unit='sat', gross_sats=8,
+                                      source_author=None, mint_id='goats', unit='sat', gross_sats=8,
                                       receive_fee_sats=1, net_sats=7, acquisition_evidence_digest='12' * 32,
                                       policy_version='v1', credit_pool='herd')))
     for path in (probe, receipt):
@@ -327,7 +324,7 @@ def rehearse_pilot_config(archive, root, command, binaries, uids, states, core_c
         wallet_instance=wallet['wallet_instance'], wallet_epoch=wallet['wallet_epoch'],
         broker_instance=broker, broker_epoch=broker_epoch, receiving_key=wallet['receiving_key'],
         client_pubkey=signing['nak']['client_pubkey'], helper_sha256=signing['nak']['binary_sha256'],
-        strike_account_id=account, strike_credential_fingerprint='ab' * 32, daily_credit_sats=20000,
+        project_account_id=account, project_credential_fingerprint='ab' * 32, daily_credit_sats=20000,
         minimum_deposit_sats=1, relay_since_unix=1_800_000_000,
         nutzap_relays=[relay],
         mint_keysets=[dict(id='00deadbeef123456', keys={'1': wallet['receiving_key']})],

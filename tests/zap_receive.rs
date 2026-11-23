@@ -13,23 +13,21 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use axum::{
-    Json, Router,
-    extract::{Path, State},
-    routing::{get, post},
-};
 use lightning_goats::{
-    config::{LightningAddressConfig, LnurlConfig, NostrConfig, ZapConfig},
-    ledger::{LedgerStore, SettlementOutcome},
+    config::{BreezCollectorConfig, LightningAddressConfig, LnurlConfig, NostrConfig, ZapConfig},
+    ledger::LedgerStore,
     lnurl::{LnurlService, LnurlServiceError},
     nostr::NakClient,
     nostr_event::VerifiedEvent,
-    strike::{StrikeClient, StrikeCompletedReceiveEvent, StrikeRuntime, StrikeWebhookVerifier},
     zap_receipts::receipt_step,
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::{UnixListener, UnixStream},
+};
 use uuid::Uuid;
 
 #[derive(Clone, Default)]
@@ -39,33 +37,43 @@ struct Provider {
     receives: Arc<Mutex<BTreeMap<Uuid, Value>>>,
 }
 
-async fn create(State(state): State<Provider>, Json(body): Json<Value>) -> Json<Value> {
-    state.calls.fetch_add(1, Ordering::SeqCst);
-    let id = Uuid::new_v4();
-    let receive_id = Uuid::new_v4();
-    let hash: [u8; 32] = Sha256::digest(id.as_bytes()).into();
-    let amount = body["bolt11"]["amount"]["amount"].as_str().unwrap();
-    let (whole, fraction) = amount.split_once('.').unwrap();
-    let msat = whole.parse::<u64>().unwrap() * 100_000_000_000 + fraction.parse::<u64>().unwrap();
-    let desc = body["bolt11"]["descriptionHash"].as_str().unwrap();
-    let invoice = invoices::invoice_with_payment_hash(
-        msat,
-        desc,
-        SystemTime::now().duration_since(UNIX_EPOCH).unwrap(),
-        hash,
-    );
-    let request = json!({"receiveRequestId":id,"created":"2026-11-09T00:00:00Z","targetCurrency":"BTC","bolt11":{"invoice":invoice,"requestedAmount":{"amount":amount,"currency":"BTC"},"btcAmount":amount,"descriptionHash":desc,"paymentHash":hex::encode(hash)}});
-    let receive = json!({"receiveId":receive_id,"receiveRequestId":id,"state":"COMPLETED","type":"LIGHTNING","amountReceived":{"amount":amount,"currency":"BTC"},"lightning":{"invoice":invoice,"paymentHash":hex::encode(hash),"descriptionHash":desc}});
-    state.requests.lock().unwrap().insert(id, request.clone());
-    state.receives.lock().unwrap().insert(id, receive);
-    Json(request)
-}
-
-async fn request(Path(id): Path<Uuid>, State(state): State<Provider>) -> Json<Value> {
-    Json(state.requests.lock().unwrap()[&id].clone())
-}
-async fn receives(Path(id): Path<Uuid>, State(state): State<Provider>) -> Json<Value> {
-    Json(json!({"items":[state.receives.lock().unwrap()[&id].clone()]}))
+async fn serve_collector(listener: UnixListener, state: Provider) {
+    while let Ok((mut stream, _)) = listener.accept().await {
+        let len = stream.read_u32().await.unwrap();
+        assert!(len <= 65536);
+        let mut bytes = vec![0; len as usize];
+        stream.read_exact(&mut bytes).await.unwrap();
+        let body: Value = serde_json::from_slice(&bytes).unwrap();
+        let reply = if let Some(id) = body["claim_status"].as_str() {
+            state.receives.lock().unwrap()[&Uuid::parse_str(id).unwrap()].clone()
+        } else {
+            state.calls.fetch_add(1, Ordering::SeqCst);
+            let id: Uuid = serde_json::from_value(body["request_id"].clone()).unwrap();
+            let hash: [u8; 32] = Sha256::digest(id.as_bytes()).into();
+            let amount = body["amount_sat"].as_u64().unwrap();
+            let description = body["description"].as_str().unwrap();
+            let invoice = invoices::invoice_with_expiry(
+                amount * 1000,
+                &hex::encode(Sha256::digest(description)),
+                SystemTime::now().duration_since(UNIX_EPOCH).unwrap(),
+                hash,
+                std::time::Duration::from_secs(900),
+            );
+            state
+                .requests
+                .lock()
+                .unwrap()
+                .insert(id, json!({"invoice":invoice,"intent":body}));
+            state.receives.lock().unwrap().insert(id,json!({"request_id":id,"amount_sat":amount,"payment_hash":hex::encode(hash),"proof_digest":hex::encode(Sha256::digest(hash))}));
+            json!({"invoice":invoice})
+        };
+        let encoded = serde_json::to_vec(&reply).unwrap();
+        stream
+            .write_u32(encoded.len().try_into().unwrap())
+            .await
+            .unwrap();
+        stream.write_all(&encoded).await.unwrap();
+    }
 }
 
 struct Fixture {
@@ -73,7 +81,7 @@ struct Fixture {
     database_url: String,
     ledger: LedgerStore,
     service: LnurlService,
-    runtime: StrikeRuntime,
+    collector: BreezCollectorConfig,
     provider: Provider,
     server: tokio::task::JoinHandle<()>,
     payee: String,
@@ -89,31 +97,23 @@ impl Drop for Fixture {
 impl Fixture {
     async fn new(zaps: bool) -> Self {
         let provider = Provider::default();
-        let app = Router::new()
-            .route("/v1/receive-requests", post(create))
-            .route("/v1/receive-requests/{id}", get(request))
-            .route("/v1/receive-requests/{id}/receives", get(receives))
-            .with_state(provider.clone());
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let base = format!("http://{}/", listener.local_addr().unwrap());
-        let server = tokio::spawn(async move {
-            axum::serve(listener, app).await.unwrap();
-        });
         let directory = TempDir::new().unwrap();
         let database_url = format!("sqlite://{}/receive.db", directory.path().display());
         let ledger = LedgerStore::connect(&database_url).await.unwrap();
-        let runtime = StrikeRuntime::new(
-            StrikeClient::new(&base, "synthetic-receive-only-key".into()).unwrap(),
-            StrikeWebhookVerifier::new("synthetic-webhook-key".into()).unwrap(),
-        );
+        let socket = directory.path().join("project.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let collector = BreezCollectorConfig {
+            socket,
+            peer_uid: UnixStream::pair().unwrap().0.peer_cred().unwrap().uid(),
+        };
+        let server = tokio::spawn(serve_collector(listener, provider.clone()));
         let payee = nostr::signed(2, 1, 100, "", vec![]).pubkey;
         let signer = nostr::signed(3, 1, 100, "", vec![]).pubkey;
         let users = ["herd", "dexter", "rowan", "cosmo", "newton", "nova"];
         let config = LnurlConfig {
             public_base_url: "https://lightning-goats.com/".into(),
-            invoice_expiry_seconds: 300,
-            wallet_backend: Default::default(),
-            breez_collector: None,
+            invoice_expiry_seconds: 900,
+            collector: Some(collector.clone()),
             zap: zaps.then(|| ZapConfig {
                 receipt_pubkey: signer.clone(),
                 payee_pubkeys: users
@@ -140,14 +140,13 @@ impl Fixture {
                 max_sendable_msat: 1_000_000_000,
             })
             .collect::<Vec<_>>();
-        let service =
-            LnurlService::new(&config, &addresses, runtime.clone(), ledger.clone()).unwrap();
+        let service = LnurlService::new(&config, &addresses, ledger.clone()).unwrap();
         Self {
             directory,
             database_url,
             ledger,
             service,
-            runtime,
+            collector,
             provider,
             server,
             payee,
@@ -165,15 +164,26 @@ impl Fixture {
         serde_json::to_string_pretty(&nostr::signed(1, 9734, 100, "Thank you ⚡", tags)).unwrap()
     }
 
-    fn event(&self, id: Uuid) -> StrikeCompletedReceiveEvent {
-        StrikeCompletedReceiveEvent {
-            event_id: Uuid::new_v4(),
-            receive_request_id: id,
-            receive_id: serde_json::from_value(
-                self.provider.receives.lock().unwrap()[&id]["receiveId"].clone(),
-            )
-            .unwrap(),
-        }
+    async fn claim(&self, id: Uuid) -> anyhow::Result<bool> {
+        let db = sqlx::SqlitePool::connect(&self.database_url).await?;
+        sqlx::query("UPDATE breez_project_invoices SET next_poll=0 WHERE id=?")
+            .bind(id.to_string())
+            .execute(&db)
+            .await?;
+        db.close().await;
+        self.ledger.poll_breez_claim(&self.collector).await
+    }
+
+    async fn stored(&self, id: Uuid) -> Value {
+        let db = sqlx::SqlitePool::connect(&self.database_url).await.unwrap();
+        let raw: String =
+            sqlx::query_scalar("SELECT intent FROM breez_project_invoices WHERE id=?")
+                .bind(id.to_string())
+                .fetch_one(&db)
+                .await
+                .unwrap();
+        db.close().await;
+        serde_json::from_str(&raw).unwrap()
     }
 
     fn issued_id(&self, invoice: &str) -> Uuid {
@@ -183,7 +193,7 @@ impl Fixture {
             .lock()
             .unwrap()
             .iter()
-            .find(|(_, value)| value["bolt11"]["invoice"] == invoice)
+            .find(|(_, value)| value["invoice"] == invoice)
             .unwrap()
             .0
     }
@@ -195,13 +205,7 @@ impl Fixture {
             .await
             .unwrap();
         let id = self.issued_id(&response.pr);
-        assert!(matches!(
-            self.runtime
-                .reconcile_and_credit(&self.ledger, &self.event(id))
-                .await
-                .unwrap(),
-            SettlementOutcome::Credited { sats: 10, .. }
-        ));
+        assert!(self.claim(id).await.unwrap());
         id
     }
 }
@@ -278,11 +282,8 @@ async fn ordinary_lnurl_keeps_metadata_hash_and_opt_in_discovery_is_explicit() {
     assert_eq!(f.provider.calls.load(Ordering::SeqCst), 0);
     let response = f.service.callback("herd", 10000).await.unwrap();
     let id = f.issued_id(&response.pr);
-    let stored = f.ledger.strike_receive_request(id).await.unwrap().unwrap();
-    assert_eq!(
-        stored.description_hash,
-        hex::encode(Sha256::digest(discovery.metadata.as_bytes()))
-    );
+    let stored = f.stored(id).await;
+    assert_eq!(stored["description"], discovery.metadata);
     assert!(f.ledger.zap_request(id).await.unwrap().is_none());
     let enabled = Fixture::new(true).await;
     let discovery = serde_json::to_value(enabled.service.discovery("herd").unwrap()).unwrap();
@@ -316,17 +317,14 @@ async fn each_registered_goat_binds_its_payee_and_preserves_the_shared_credit_po
             .await
             .unwrap();
         let id = f.issued_id(&response.pr);
-        let stored = f.ledger.strike_receive_request(id).await.unwrap().unwrap();
-        assert_eq!(stored.address_user, user);
-        assert_eq!(stored.credit_pool, "herd");
+        let stored = f.stored(id).await;
+        assert_eq!(stored["user"], user);
+        assert_eq!(stored["credit_pool"], "herd");
         assert_eq!(
             f.ledger.zap_request(id).await.unwrap().unwrap().payee(),
             payee
         );
-        f.runtime
-            .reconcile_and_credit(&f.ledger, &f.event(id))
-            .await
-            .unwrap();
+        f.claim(id).await.unwrap();
     }
     assert_eq!(f.ledger.feed_credit_sats().await.unwrap(), 60);
     let before = f.provider.calls.load(Ordering::SeqCst);
@@ -360,10 +358,7 @@ async fn a_small_zap_has_a_protocol_receipt_without_a_payment_announcement() {
         .await
         .unwrap();
     let id = f.issued_id(&response.pr);
-    f.runtime
-        .reconcile_and_credit(&f.ledger, &f.event(id))
-        .await
-        .unwrap();
+    f.claim(id).await.unwrap();
     assert_eq!(f.ledger.feed_credit_sats().await.unwrap(), 1);
     let event = f.ledger.events_after(0, 100).await.unwrap().remove(0);
     let rendered = lightning_goats::presentation::MessageRenderer::embedded()
@@ -397,10 +392,7 @@ async fn copied_provider_label_and_invoice_context_cannot_stage_a_zap_receipt() 
     };
     f.ledger.record_payment(&generic).await.unwrap();
     assert!(f.ledger.reserve_zap_receipt().await.unwrap().is_none());
-    f.runtime
-        .reconcile_and_credit(&f.ledger, &f.event(id))
-        .await
-        .unwrap();
+    f.claim(id).await.unwrap();
     let job = f.ledger.reserve_zap_receipt().await.unwrap().unwrap();
     assert_eq!(job.invoice, issued.pr);
     assert_eq!(job.request.raw_json(), raw);
@@ -422,9 +414,9 @@ async fn exact_request_alias_binding_settlement_duplicates_and_distinct_invoices
         .await
         .unwrap();
     let id = f.issued_id(&response.pr);
-    let stored = f.ledger.strike_receive_request(id).await.unwrap().unwrap();
+    let stored = f.stored(id).await;
     assert_eq!(
-        stored.description_hash,
+        stored["description_hash"],
         hex::encode(Sha256::digest(raw.as_bytes()))
     );
     assert_eq!(
@@ -432,17 +424,8 @@ async fn exact_request_alias_binding_settlement_duplicates_and_distinct_invoices
         raw
     );
     assert!(f.ledger.reserve_zap_receipt().await.unwrap().is_none());
-    f.runtime
-        .reconcile_and_credit(&f.ledger, &f.event(id))
-        .await
-        .unwrap();
-    assert_eq!(
-        f.runtime
-            .reconcile_and_credit(&f.ledger, &f.event(id))
-            .await
-            .unwrap(),
-        SettlementOutcome::Duplicate
-    );
+    f.claim(id).await.unwrap();
+    assert!(!f.claim(id).await.unwrap());
     assert_eq!(f.ledger.feed_credit_sats().await.unwrap(), 10);
     let first = f.ledger.reserve_zap_receipt().await.unwrap().unwrap();
     assert_eq!(first.request.raw_json(), raw);
@@ -521,7 +504,7 @@ async fn signed_receipt_retry_survives_reopen_with_the_exact_same_bytes() {
 }
 
 #[tokio::test]
-async fn actual_p2p_credit_is_preserved_without_attesting_a_different_zap_amount() {
+async fn mismatched_mint_claim_cannot_credit_or_attest_a_different_zap_amount() {
     let f = Fixture::new(true).await;
     let response = f
         .service
@@ -529,19 +512,9 @@ async fn actual_p2p_credit_is_preserved_without_attesting_a_different_zap_amount
         .await
         .unwrap();
     let id = f.issued_id(&response.pr);
-    {
-        let mut receives = f.provider.receives.lock().unwrap();
-        let value = receives.get_mut(&id).unwrap();
-        value["type"] = "P2P".into();
-        value["amountReceived"] = json!({"amount":"0.00000008000","currency":"BTC"});
-        value["amountCredited"] = json!({"amount":"0.00000008000","currency":"BTC"});
-        value.as_object_mut().unwrap().remove("lightning");
-    }
-    f.runtime
-        .reconcile_and_credit(&f.ledger, &f.event(id))
-        .await
-        .unwrap();
-    assert_eq!(f.ledger.feed_credit_sats().await.unwrap(), 8);
+    f.provider.receives.lock().unwrap().get_mut(&id).unwrap()["amount_sat"] = json!(8);
+    assert!(f.claim(id).await.is_err());
+    assert_eq!(f.ledger.feed_credit_sats().await.unwrap(), 0);
     assert!(f.ledger.reserve_zap_receipt().await.unwrap().is_none());
 }
 
@@ -590,42 +563,28 @@ async fn immutable_invoice_context_and_atomic_receipt_intent_survive_storage_fai
         .unwrap();
     let id = f.issued_id(&response.pr);
     let db = sqlx::SqlitePool::connect(&f.database_url).await.unwrap();
-    assert!(
-        sqlx::query("UPDATE zap_receive_context SET request_json='{}'")
-            .execute(&db)
-            .await
-            .is_err()
-    );
-    assert!(
-        sqlx::query("DELETE FROM zap_receive_context")
-            .execute(&db)
-            .await
-            .is_err()
-    );
+    let terms = f.stored(id).await;
     sqlx::query("CREATE TRIGGER fail_receipt BEFORE INSERT ON zap_receipt_jobs BEGIN SELECT RAISE(ABORT,'simulated disk failure'); END").execute(&db).await.unwrap();
-    assert!(
-        f.runtime
-            .reconcile_and_credit(&f.ledger, &f.event(id))
-            .await
-            .is_err()
-    );
+    assert!(f.claim(id).await.is_err());
     assert_eq!(f.ledger.feed_credit_sats().await.unwrap(), 0);
     assert!(f.ledger.events_after(0, 100).await.unwrap().is_empty());
     sqlx::query("DROP TRIGGER fail_receipt")
         .execute(&db)
         .await
         .unwrap();
-    f.runtime
-        .reconcile_and_credit(&f.ledger, &f.event(id))
-        .await
-        .unwrap();
+    f.claim(id).await.unwrap();
     assert_eq!(f.ledger.feed_credit_sats().await.unwrap(), 10);
-    assert!(f.ledger.reserve_zap_receipt().await.unwrap().is_some());
+    assert_eq!(f.stored(id).await, terms);
+    let job = f.ledger.reserve_zap_receipt().await.unwrap().unwrap();
+    assert_eq!(
+        job.request.raw_json(),
+        terms["description"].as_str().unwrap()
+    );
+    assert_eq!(job.invoice, response.pr);
 }
 
 #[tokio::test]
 async fn breez_callback_preserves_raw_zap_and_claim_recovery_queues_one_receipt() {
-    use lightning_goats::config::{BreezCollectorConfig, WalletBackend};
     use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::{UnixListener, UnixStream};
@@ -640,8 +599,7 @@ async fn breez_callback_preserves_raw_zap_and_claim_recovery_queues_one_receipt(
     let config = LnurlConfig {
         public_base_url: "https://lightning-goats.com/".into(),
         invoice_expiry_seconds: 900,
-        wallet_backend: WalletBackend::Breez,
-        breez_collector: Some(collector.clone()),
+        collector: Some(collector.clone()),
         zap: Some(ZapConfig {
             receipt_pubkey: f.signer.clone(),
             payee_pubkeys: BTreeMap::from([("herd".into(), f.payee.clone())]),
@@ -656,8 +614,7 @@ async fn breez_callback_preserves_raw_zap_and_claim_recovery_queues_one_receipt(
         min_sendable_msat: 1000,
         max_sendable_msat: 1_000_000_000,
     };
-    let service =
-        LnurlService::new(&config, &[address], f.runtime.clone(), f.ledger.clone()).unwrap();
+    let service = LnurlService::new(&config, &[address], f.ledger.clone()).unwrap();
     let raw = f.raw_zap();
     let frozen = raw.clone();
     let collector_task = tokio::spawn(async move {

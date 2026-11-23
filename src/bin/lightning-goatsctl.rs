@@ -26,6 +26,13 @@ struct Args {
 enum Command {
     /// Validate protected daemon settings offline, without opening its database or credentials.
     CheckConfig,
+    /// Apply one authenticated late receive to its original historical contribution or contact.
+    ReconcileHistoricalReceive {
+        #[arg(long)]
+        request_id: Uuid,
+        #[arg(long)]
+        receive_id: Uuid,
+    },
     /// Read the gateway status of one original feeder UUID from a fenced Cashu checkpoint.
     ObserveRestoredCashuFeeder {
         #[arg(long)]
@@ -307,7 +314,9 @@ async fn main() -> Result<()> {
     #[cfg(unix)]
     if matches!(
         args.command,
-        Command::ReconcileFailedCost { .. } | Command::FailedCostTemplate { .. }
+        Command::ReconcileFailedCost { .. }
+            | Command::FailedCostTemplate { .. }
+            | Command::ReconcileHistoricalReceive { .. }
     ) {
         lightning_goats::payout::cost_recovery::require_protected_configuration(&args.config)?;
     }
@@ -368,7 +377,7 @@ async fn main() -> Result<()> {
         #[cfg(unix)]
         {
             lightning_goats::payout::cost_recovery::require_protected_configuration(&args.config)?;
-            let config = AppConfig::load(&args.config)?;
+            let config = AppConfig::load_for_recovery(&args.config)?;
             lightning_goats::payout::cost_recovery::existing_private_database(
                 &config.database.url,
             )?;
@@ -482,7 +491,12 @@ async fn main() -> Result<()> {
             bail!("financial release requires Unix protected-file authority");
         }
     }
-    let config = AppConfig::load(&args.config)?;
+    let config = match args.command {
+        Command::Status | Command::ReconcileHistoricalReceive { .. } => {
+            AppConfig::load_for_recovery(&args.config)?
+        }
+        _ => AppConfig::load(&args.config)?,
+    };
     if let Command::RetireFeedCredit {
         id,
         credit_entry_id,
@@ -507,7 +521,9 @@ async fn main() -> Result<()> {
     }
     let ledger = if matches!(
         args.command,
-        Command::ReconcileFailedCost { .. } | Command::FailedCostTemplate { .. }
+        Command::ReconcileFailedCost { .. }
+            | Command::FailedCostTemplate { .. }
+            | Command::ReconcileHistoricalReceive { .. }
     ) {
         #[cfg(unix)]
         {
@@ -532,6 +548,41 @@ async fn main() -> Result<()> {
         | Command::BackupLegacyCore { .. }
         | Command::VerifyCoreUpgrade { .. } => {
             bail!("legacy core upgrade operations require Unix protected-file authority");
+        }
+        Command::ReconcileHistoricalReceive {
+            request_id,
+            receive_id,
+        } => {
+            let original = ledger
+                .strike_receive_request(request_id)
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("historical invoice missing"))?;
+            if original.address_user == "cashu_treasury" || original.credit_pool == "cashu_treasury"
+            {
+                bail!(
+                    "treasury receipts require reconcile-cashu-settlement with the original approval and wallet evidence"
+                );
+            }
+            let client = lightning_goats::strike::StrikeClient::from_config(
+                &lightning_goats::config::StrikeConfig {
+                    api_url: "https://api.strike.me/".to_owned(),
+                },
+            )
+            .await?;
+            let outcome = client
+                .reconcile_original_receive(&ledger, request_id, receive_id)
+                .await?;
+            use lightning_goats::ledger::SettlementOutcome;
+            println!(
+                "{}",
+                match outcome {
+                    SettlementOutcome::Credited { .. } => "contribution recorded",
+                    SettlementOutcome::ContactFeeAccepted => "contact fee accepted",
+                    SettlementOutcome::Duplicate => "already recorded",
+                    SettlementOutcome::TreasurySettlementAccepted =>
+                        bail!("unexpected treasury receipt"),
+                }
+            );
         }
         Command::FailedCostTemplate {
             reservation,
@@ -671,7 +722,7 @@ async fn main() -> Result<()> {
             let threshold = config.feeder.threshold_sats;
             let unresolved = ledger.unresolved_feed_attempt().await?;
             println!("mode={}", config.service.mode.as_str());
-            println!("payment_backend={}", config.lnurl.wallet_backend.as_str());
+            println!("payment_backend=cashu_mint");
             println!("feed_credit_sats={credit}");
             println!("threshold_sats={threshold}");
             println!("feeds_due={}", credit / threshold);

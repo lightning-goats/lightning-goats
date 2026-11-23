@@ -550,7 +550,7 @@ mod combined_fixture {
         assert!(ledger.begin_feed_attempt(1000).await?.is_none());
         let runtime = StrikeRuntime::new(
             StrikeClient::new(&origin, state.api_key.into())?,
-            StrikeWebhookVerifier::new("synthetic-webhook".into())?,
+
         );
         let controls = Controls {
             plan: true,

@@ -43,15 +43,36 @@ pub struct AppConfig {
 
 impl AppConfig {
     pub fn load(path: &Path) -> Result<Self> {
-        let raw = fs::read_to_string(path)
-            .with_context(|| format!("failed reading config {}", path.display()))?;
-        let config: Self = toml::from_str(&raw)
-            .with_context(|| format!("failed parsing config {}", path.display()))?;
+        let config = Self::parse_file(path)?;
         config.validate()?;
         Ok(config)
     }
 
+    /// Load a historical configuration for commands that cannot initiate payments.
+    pub fn load_for_recovery(path: &Path) -> Result<Self> {
+        let config = Self::parse_file(path)?;
+        config.validate_common()?;
+        Ok(config)
+    }
+
+    fn parse_file(path: &Path) -> Result<Self> {
+        let raw = fs::read_to_string(path)
+            .with_context(|| format!("failed reading config {}", path.display()))?;
+        toml::from_str(&raw).with_context(|| format!("failed parsing config {}", path.display()))
+    }
+
     pub fn validate(&self) -> Result<()> {
+        self.lnurl.project_collector()?;
+        if self.cashu_treasury.as_ref().is_some_and(|t| {
+            t.policy.destination.origin != crate::cashu::treasury::PROJECT_MINT_ORIGIN
+        }) {
+            bail!("new treasury work requires the project mint destination");
+        }
+        self.validate_common()
+    }
+
+    /// Also used by operator recovery with the original digest-bound configuration.
+    pub(crate) fn validate_common(&self) -> Result<()> {
         if !self.service.listen.ip().is_loopback() {
             bail!("service.listen must use a loopback address; nginx is the public boundary");
         }
@@ -69,22 +90,8 @@ impl AppConfig {
             {
                 bail!("strike.api_url must not contain credentials, query, or fragment");
             }
-        } else if self.lnurl.wallet_backend != WalletBackend::Breez
-            || self.lnurl.breez_collector.is_none()
-            || self.cashu_treasury.as_ref().is_some_and(|t| {
-                t.policy.destination.origin != crate::cashu::treasury::PROJECT_MINT_ORIGIN
-            })
-            || self
-                .core_bridge
-                .as_ref()
-                .is_some_and(|b| b.payout_account_id.is_some())
-        {
-            bail!("configuration requests a Strike-dependent service without a Strike backend");
         }
-
-        if self.lnurl.wallet_backend == WalletBackend::Breez {
-            self.lnurl.project_collector()?;
-        } else if let Some(collector) = &self.lnurl.breez_collector {
+        if let Some(collector) = &self.lnurl.collector {
             collector.validate()?;
         }
         self.validate_lnurl()?;
@@ -317,9 +324,8 @@ pub struct StrikeConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct LnurlConfig {
-    #[serde(default)]
-    pub wallet_backend: WalletBackend,
-    pub breez_collector: Option<BreezCollectorConfig>,
+    #[serde(alias = "breez_collector")]
+    pub collector: Option<BreezCollectorConfig>,
     pub public_base_url: String,
     pub invoice_expiry_seconds: u64,
     #[serde(default)]
@@ -329,31 +335,14 @@ pub struct LnurlConfig {
 impl LnurlConfig {
     pub(crate) fn project_collector(&self) -> Result<&BreezCollectorConfig> {
         let collector = self
-            .breez_collector
+            .collector
             .as_ref()
-            .context("Breez requires a private collector")?;
+            .context("project invoice collector is required")?;
         collector.validate()?;
         if self.invoice_expiry_seconds != HOME_INVOICE_EXPIRY_SECONDS {
-            bail!("Breez requires the HOME invoice expiry of 900 seconds");
+            bail!("project invoices require a 900-second expiry");
         }
         Ok(collector)
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum WalletBackend {
-    #[default]
-    Strike,
-    Breez,
-}
-
-impl WalletBackend {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Strike => "strike",
-            Self::Breez => "breez",
-        }
     }
 }
 
@@ -508,9 +497,11 @@ mod tests {
             }),
             lnurl: LnurlConfig {
                 public_base_url: "https://lightning-goats.com/".to_owned(),
-                invoice_expiry_seconds: 300,
-                wallet_backend: Default::default(),
-                breez_collector: None,
+                invoice_expiry_seconds: 900,
+                collector: Some(BreezCollectorConfig {
+                    socket: "/run/lightning-goats-project-invoices.sock".into(),
+                    peer_uid: 0,
+                }),
                 zap: None,
             },
             lightning_address: phase1_addresses(),
@@ -544,10 +535,10 @@ mod tests {
     fn breez_can_run_without_strike_configuration() {
         let mut config = valid_config();
         config.strike = None;
+        config.lnurl.collector = None;
         assert!(config.validate().is_err());
-        config.lnurl.wallet_backend = WalletBackend::Breez;
         config.lnurl.invoice_expiry_seconds = 900;
-        config.lnurl.breez_collector = Some(BreezCollectorConfig {
+        config.lnurl.collector = Some(BreezCollectorConfig {
             socket: "/run/lightning-goats/project.sock".into(),
             peer_uid: 1001,
         });
@@ -555,11 +546,26 @@ mod tests {
         config.lnurl.invoice_expiry_seconds = 600;
         assert!(config.validate().is_err());
         config.lnurl.invoice_expiry_seconds = 900;
-        config.lnurl.breez_collector.as_mut().unwrap().peer_uid = 0;
+        config.lnurl.collector.as_mut().unwrap().peer_uid = 0;
         assert!(config.validate().is_err());
-        config.lnurl.breez_collector.as_mut().unwrap().socket =
+        config.lnurl.collector.as_mut().unwrap().socket =
             "/run/lightning-goats-project-invoices.sock".into();
         config.validate().unwrap();
+    }
+
+    #[test]
+    fn original_collector_config_opens_the_same_mint_socket() {
+        let current = include_str!("../deploy/config.receive.toml.example");
+        let legacy = current.replace(
+            "[lnurl.collector]",
+            "wallet_backend = \"breez\"\n[lnurl.breez_collector]",
+        );
+        let config: AppConfig = toml::from_str(&legacy).unwrap();
+        config.validate().unwrap();
+        assert_eq!(
+            config.lnurl.project_collector().unwrap().socket,
+            Path::new("/run/lightning-goats-project-invoices.sock")
+        );
     }
 
     #[test]

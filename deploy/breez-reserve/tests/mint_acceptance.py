@@ -38,6 +38,10 @@ def invoice(sats, *, memo=None, digest=None, key=None, created_at=None):
     tags = bolt11.Tags([
         bolt11.Tag(bolt11.TagChar.payment_hash, payment_hash),
         bolt11.Tag(bolt11.TagChar.payment_secret, "22" * 32),
+        bolt11.Tag(bolt11.TagChar.features, bolt11.Features.from_feature_list({
+            bolt11.Feature.payment_secret: bolt11.FeatureState.required,
+            bolt11.Feature.var_onion_optin: bolt11.FeatureState.required,
+        })),
         bolt11.Tag(bolt11.TagChar.expire_time, 900),
         bolt11.Tag(bolt11.TagChar.description_hash if digest else bolt11.TagChar.description, digest or memo),
     ])
@@ -464,6 +468,10 @@ def exercise_payout(operator_transfer):
                 claims.db.close()
                 claims = ClaimStore(claim_dir)
                 assert collect(claims, viewer, claim_id, {keyset: keys})
+                assert create({"feeder_invoice_lookup": claim_id}, claims, None, None, None) == {
+                    "request_id": claim_id, "invoice": invoice_text,
+                    "payment_hash": bolt11.decode(invoice_text).payment_hash}
+                assert create({"feeder_invoice_lookup": str(uuid.uuid4())}, claims, None, None, None) is None
                 status = create({"claim_status": claim_id}, claims, None, None, None)
                 assert status == {"request_id": claim_id, "payment_hash": bolt11.decode(invoice_text).payment_hash,
                                   "amount_sat": 10, "proof_digest": hashlib.sha256(claims.db.execute(
@@ -541,6 +549,7 @@ def exercise_payout(operator_transfer):
                     if collect(claims, viewer, contact_id, {keyset: keys}):
                         break
                     time.sleep(.1)
+                assert create({"feeder_invoice_lookup": contact_id}, claims, None, None, None) is None
                 contact_digest = create({"contact_claim_status": contact_id}, claims, None, None, None)["proof_digest"]
                 assert contact_digest
                 try:

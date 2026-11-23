@@ -7,7 +7,9 @@ use lightning_goats_cashu_receipt::treasury::{
 use sqlx::{Row, Sqlite, Transaction};
 use uuid::Uuid;
 
-use super::super::{LedgerStore, StoredStrikeReceiveRequest, to_i64, to_u64};
+#[cfg(test)]
+use super::super::StoredStrikeReceiveRequest;
+use super::super::{LedgerStore, to_i64, to_u64};
 use crate::cashu::{
     receipt_authority::ReceiptPolicy,
     treasury::{PeerMelt, Policy, TREASURY_USER},
@@ -126,6 +128,7 @@ impl LedgerStore {
         Ok((changed == 1).then_some(claim))
     }
 
+    #[cfg(test)]
     pub(crate) async fn cashu_treasury_issuance_claim(&self, id: Uuid) -> Result<Option<Uuid>> {
         sqlx::query_scalar::<_, String>(
             "SELECT claim_id FROM cashu_treasury_claims WHERE intent_id=?",
@@ -137,6 +140,7 @@ impl LedgerStore {
         .transpose()
     }
 
+    #[cfg(test)]
     pub(crate) async fn record_cashu_treasury_invoice(
         &self,
         id: Uuid,

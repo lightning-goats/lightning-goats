@@ -115,11 +115,12 @@ impl LedgerStore {
         })
     }
 
-    pub(super) async fn poll_breez_claim(&self, collector: &BreezCollectorConfig) -> Result<bool> {
+    /// Reconcile one due project invoice against its original collector claim.
+    pub async fn poll_breez_claim(&self, collector: &BreezCollectorConfig) -> Result<bool> {
         let row = sqlx::query(
             "UPDATE breez_project_invoices SET next_poll=unixepoch()+30
              WHERE id=(SELECT i.id FROM breez_project_invoices i
-                WHERE (i.invoice IS NOT NULL OR
+                WHERE (i.invoice IS NOT NULL OR json_type(i.intent,'$.purpose') IS NULL OR
                   (json_extract(i.intent,'$.purpose')='contact_fee' AND i.created_at>unixepoch()-900))
                   AND (json_type(i.intent,'$.purpose') IS NULL
                        OR json_extract(i.intent,'$.purpose') IN ('contact_fee','treasury_conversion'))
@@ -137,7 +138,53 @@ impl LedgerStore {
         let terms: Value = serde_json::from_str(&row.try_get::<String, _>("intent")?)?;
         let contact = terms["purpose"] == "contact_fee";
         let Some(hash) = hash else {
-            ensure!(contact, "missing feeder invoice");
+            if !contact {
+                #[derive(Deserialize)]
+                struct OriginalInvoice {
+                    request_id: String,
+                    invoice: String,
+                    payment_hash: String,
+                }
+                let reply: Option<OriginalInvoice> = crate::private_ipc::request(
+                    &collector.socket,
+                    collector.peer_uid,
+                    &json!({"feeder_invoice_lookup":id}),
+                    65536,
+                    20,
+                )
+                .await?;
+                if let Some(reply) = reply {
+                    use sha2::{Digest, Sha256};
+                    ensure!(
+                        reply.request_id == id,
+                        "collector returned a different original intent"
+                    );
+                    let description = terms["description"]
+                        .as_str()
+                        .context("missing invoice commitment")?;
+                    let msat = terms["amount_sat"]
+                        .as_u64()
+                        .and_then(|n| n.checked_mul(1000))
+                        .context("invalid invoice amount")?;
+                    let signed = crate::bolt11::verify(
+                        &reply.invoice,
+                        msat,
+                        &reply.payment_hash,
+                        &hex::encode(Sha256::digest(description.as_bytes())),
+                    )?;
+                    crate::bolt11::verify_expiry_terms(
+                        &signed,
+                        crate::config::HOME_INVOICE_EXPIRY_SECONDS,
+                        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?,
+                    )?;
+                    self.bind_breez_invoice(id.parse()?, &reply.invoice, &reply.payment_hash)
+                        .await?;
+                } else {
+                    sqlx::query("UPDATE breez_project_invoices SET next_poll=unixepoch()+300 WHERE id=? AND invoice IS NULL")
+                        .bind(&id).execute(&self.pool).await?;
+                }
+                return Ok(true);
+            }
             self.issue_reserved_contact(
                 collector,
                 id.parse()?,
@@ -330,12 +377,25 @@ mod tests {
         ledger.initialize_reward_funding().await.unwrap();
         let id = Uuid::new_v4();
         let hash = "ac".repeat(32);
-        let terms = json!({"amount_sat":10,"user":"dexter","credit_pool":"herd","zap":false});
+        let description = "dexter fixture metadata";
+        let terms = json!({"amount_sat":10,"user":"dexter","credit_pool":"herd","zap":false,"description":description});
         ledger.prepare_breez_invoice(id, &terms).await.unwrap();
-        ledger
-            .bind_breez_invoice(id, "fixture", &hash)
-            .await
-            .unwrap();
+        // The collector issued the invoice and the original IPC reply was lost.
+        // Restart after expiry. The only permissible recovery operation is lookup.
+        drop(ledger);
+        let ledger = LedgerStore::connect(&url).await.unwrap();
+        let invoice = crate::test_invoices::invoice_with_expiry(
+            10_000,
+            &hex::encode(<sha2::Sha256 as sha2::Digest>::digest(
+                description.as_bytes(),
+            )),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                - Duration::from_secs(1200),
+            [0xac; 32],
+            Duration::from_secs(900),
+        );
         let socket = directory.path().join("collector.sock");
         let listener = tokio::net::UnixListener::bind(&socket).unwrap();
         let collector = BreezCollectorConfig {
@@ -343,6 +403,16 @@ mod tests {
             peer_uid: crate::private_ipc::uid().unwrap(),
         };
         let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let lookup: Value = crate::private_ipc::read(&mut stream, 65536).await.unwrap();
+            assert_eq!(lookup, json!({"feeder_invoice_lookup":id}));
+            crate::private_ipc::write(
+                &mut stream,
+                &json!({"request_id":id,"invoice":invoice,"payment_hash":hash}),
+                65536,
+            )
+            .await
+            .unwrap();
             for collected in [false, true] {
                 let (mut connection, _) = listener.accept().await.unwrap();
                 let request: Value = crate::private_ipc::read(&mut connection, 65536)
@@ -352,6 +422,12 @@ mod tests {
                 crate::private_ipc::write(&mut connection,&json!({"request_id":id,"payment_hash":hash,"amount_sat":10,"proof_digest":collected.then(|| "de".repeat(32))}),65536).await.unwrap();
             }
         });
+        assert!(ledger.poll_breez_claim(&collector).await.unwrap());
+        assert_eq!(ledger.feed_credit_sats().await.unwrap(), 0);
+        sqlx::query("UPDATE breez_project_invoices SET next_poll=0")
+            .execute(&ledger.pool)
+            .await
+            .unwrap();
         assert!(ledger.poll_breez_claim(&collector).await.unwrap());
         assert_eq!(ledger.feed_credit_sats().await.unwrap(), 0);
         sqlx::query("UPDATE breez_project_invoices SET next_poll=0")

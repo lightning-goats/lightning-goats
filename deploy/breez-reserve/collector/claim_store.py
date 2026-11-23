@@ -483,14 +483,16 @@ class ClaimStore:
         with self.write():
             rows = self.db.execute("""
                 SELECT c.id,c.invoice,json_extract(c.terms,'$.amount') FROM project_claim c LEFT JOIN project_claim_poll p ON p.id=c.id
-                WHERE c.invoice IS NOT NULL AND c.proofs IS NULL
+                WHERE (c.invoice IS NOT NULL OR
+                       (json_type(c.terms,'$.description_hash')='text' AND json_type(c.material,'$.owner')='text'))
+                  AND c.proofs IS NULL
                   AND COALESCE(p.next_attempt,0)<=?
                 ORDER BY COALESCE(p.next_attempt,0), c.rowid LIMIT ?
             """, (now, limit)).fetchall()
             self.db.executemany("""
                 INSERT INTO project_claim_poll(id,next_attempt) VALUES (?,?)
                 ON CONFLICT(id) DO UPDATE SET next_attempt=excluded.next_attempt
-            """, [(row[0], now + lease_seconds) for row in rows])
+            """, [(row[0], now + (lease_seconds if row[1] else 300)) for row in rows])
             return rows
 
     def schedule_unpaid(self, request_id, now, expiry):

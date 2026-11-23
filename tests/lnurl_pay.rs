@@ -1,3 +1,4 @@
+#[allow(dead_code)]
 #[path = "support/invoices.rs"]
 mod invoices;
 
@@ -6,72 +7,59 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
-use axum::{Json, Router, extract::State, routing::post};
 use lightning_goats::{
-    config::{LightningAddressConfig, LnurlConfig},
+    config::{BreezCollectorConfig, LightningAddressConfig, LnurlConfig},
     ledger::LedgerStore,
     lnurl::{LnurlService, LnurlServiceError},
-    strike::{StrikeClient, StrikeRuntime, StrikeWebhookVerifier},
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tempfile::TempDir;
-use tokio::net::TcpListener;
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::UnixListener,
+};
 
 #[derive(Clone)]
-struct StrikeMockState {
+struct CollectorFixture {
     calls: Arc<AtomicUsize>,
     last_body: Arc<Mutex<Option<Value>>>,
     invalid_invoice: bool,
 }
 
-async fn create_receive_request(
-    State(state): State<StrikeMockState>,
-    Json(body): Json<Value>,
-) -> Json<Value> {
-    state.calls.fetch_add(1, Ordering::SeqCst);
-    *state.last_body.lock().unwrap() = Some(body.clone());
-    let amount = body["bolt11"]["amount"]["amount"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    let description_hash = body["bolt11"]["descriptionHash"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    let (whole, fraction) = amount.split_once('.').unwrap();
-    assert_eq!(fraction.len(), 11);
-    let amount_msat =
-        whole.parse::<u64>().unwrap() * 100_000_000_000 + fraction.parse::<u64>().unwrap();
-    let invoice = if state.invalid_invoice {
-        "lnbc10u1lightninggoats-test".into()
-    } else {
-        invoices::invoice(amount_msat, &description_hash)
-    };
-    Json(json!({
-        "receiveRequestId": "0191382f-387c-4eec-bc74-980872bfc5e5",
-        "created": "2026-09-07T18:00:00Z",
-        "targetCurrency": "BTC",
-        "bolt11": {
-            "invoice": invoice,
-            "requestedAmount": {"amount": amount, "currency": "BTC"},
-            "btcAmount": amount,
-            "descriptionHash": description_hash,
-            "paymentHash": "22".repeat(32)
-        }
-    }))
-}
-
-async fn spawn_strike_mock(state: StrikeMockState) -> String {
-    let app = Router::new()
-        .route("/v1/receive-requests", post(create_receive_request))
-        .with_state(state);
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap();
-    tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
-    format!("http://{address}/")
+async fn serve_collector(listener: UnixListener, state: CollectorFixture) {
+    while let Ok((mut stream, _)) = listener.accept().await {
+        let len = stream.read_u32().await.unwrap();
+        assert!(len <= 65_536);
+        let mut bytes = vec![0; len as usize];
+        stream.read_exact(&mut bytes).await.unwrap();
+        let body: Value = serde_json::from_slice(&bytes).unwrap();
+        let index = state.calls.fetch_add(1, Ordering::SeqCst);
+        let amount = body["amount_sat"].as_u64().unwrap();
+        let description = body["description"].as_str().unwrap();
+        let mut hash = [0x22; 32];
+        hash[..8].copy_from_slice(&(index as u64).to_be_bytes());
+        let commitment = if state.invalid_invoice {
+            "unrelated description"
+        } else {
+            description
+        };
+        let invoice = invoices::invoice_with_expiry(
+            amount * 1000,
+            &hex::encode(Sha256::digest(commitment)),
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap(),
+            hash,
+            Duration::from_secs(900),
+        );
+        *state.last_body.lock().unwrap() = Some(body);
+        let reply = serde_json::to_vec(&json!({"invoice":invoice})).unwrap();
+        stream
+            .write_u32(reply.len().try_into().unwrap())
+            .await
+            .unwrap();
+        stream.write_all(&reply).await.unwrap();
+    }
 }
 
 fn addresses() -> Vec<LightningAddressConfig> {
@@ -96,8 +84,7 @@ fn addresses() -> Vec<LightningAddressConfig> {
     .collect()
 }
 
-async fn service(state: StrikeMockState) -> (TempDir, LnurlService) {
-    let base_url = spawn_strike_mock(state).await;
+async fn service(state: CollectorFixture) -> (TempDir, LnurlService) {
     let directory = TempDir::new().unwrap();
     let ledger = LedgerStore::connect(&format!(
         "sqlite://{}",
@@ -105,20 +92,26 @@ async fn service(state: StrikeMockState) -> (TempDir, LnurlService) {
     ))
     .await
     .unwrap();
-    let strike = StrikeRuntime::new(
-        StrikeClient::new(&base_url, "test-receive-only-key".to_owned()).unwrap(),
-        StrikeWebhookVerifier::new("test-webhook-secret".to_owned()).unwrap(),
-    );
+    let socket = directory.path().join("project.sock");
+    let listener = UnixListener::bind(&socket).unwrap();
+    tokio::spawn(serve_collector(listener, state));
+    let collector = BreezCollectorConfig {
+        socket,
+        peer_uid: tokio::net::UnixStream::pair()
+            .unwrap()
+            .0
+            .peer_cred()
+            .unwrap()
+            .uid(),
+    };
     let service = LnurlService::new(
         &LnurlConfig {
             public_base_url: "https://lightning-goats.com/".to_owned(),
-            invoice_expiry_seconds: 300,
-            wallet_backend: Default::default(),
-            breez_collector: None,
+            invoice_expiry_seconds: 900,
+            collector: Some(collector),
             zap: None,
         },
         &addresses(),
-        strike,
         ledger,
     )
     .unwrap();
@@ -126,8 +119,8 @@ async fn service(state: StrikeMockState) -> (TempDir, LnurlService) {
 }
 
 #[tokio::test]
-async fn callback_sends_hash_of_exact_discovery_metadata_to_strike() {
-    let state = StrikeMockState {
+async fn callback_commits_to_exact_discovery_metadata_through_collector() {
+    let state = CollectorFixture {
         calls: Arc::new(AtomicUsize::new(0)),
         last_body: Arc::new(Mutex::new(None)),
         invalid_invoice: false,
@@ -149,15 +142,25 @@ async fn callback_sends_hash_of_exact_discovery_metadata_to_strike() {
     assert_eq!(state.calls.load(Ordering::SeqCst), 1);
 
     let body = state.last_body.lock().unwrap().clone().unwrap();
-    assert_eq!(body["targetCurrency"], "BTC");
-    assert_eq!(body["bolt11"]["amount"]["currency"], "BTC");
-    assert_eq!(body["bolt11"]["amount"]["amount"], "0.00001000000");
-    assert_eq!(body["bolt11"]["descriptionHash"], expected_hash);
+    assert_eq!(body["user"], "dexter");
+    assert_eq!(body["credit_pool"], "herd");
+    assert_eq!(body["amount_sat"], 1000);
+    assert_eq!(body["description"], discovery.metadata);
+    assert_eq!(body["zap"], false);
+    let signed = callback
+        .pr
+        .parse::<lightning_invoice::Bolt11Invoice>()
+        .unwrap();
+    let lightning_invoice::Bolt11InvoiceDescriptionRef::Hash(commitment) = signed.description()
+    else {
+        panic!("missing LNURL metadata commitment");
+    };
+    assert_eq!(commitment.0.to_string(), expected_hash);
 }
 
 #[tokio::test]
-async fn unknown_and_invalid_amount_requests_never_call_strike() {
-    let state = StrikeMockState {
+async fn unknown_and_invalid_amount_requests_never_call_collector() {
+    let state = CollectorFixture {
         calls: Arc::new(AtomicUsize::new(0)),
         last_body: Arc::new(Mutex::new(None)),
         invalid_invoice: false,
@@ -181,8 +184,8 @@ async fn unknown_and_invalid_amount_requests_never_call_strike() {
 }
 
 #[tokio::test]
-async fn invalid_provider_invoice_never_leaves_callback_or_enters_issued_store() {
-    let state = StrikeMockState {
+async fn signed_invoice_with_wrong_metadata_never_leaves_callback_or_enters_issued_store() {
+    let state = CollectorFixture {
         calls: Arc::new(AtomicUsize::new(0)),
         last_body: Arc::new(Mutex::new(None)),
         invalid_invoice: true,
@@ -199,16 +202,17 @@ async fn invalid_provider_invoice_never_leaves_callback_or_enters_issued_store()
     ))
     .await
     .unwrap();
-    let issued: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM strike_receive_requests")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let issued: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM breez_project_invoices WHERE invoice IS NOT NULL")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(issued, 0);
 }
 
 #[tokio::test]
 async fn dotted_user_discovery_callback_and_persistence_share_one_identity() {
-    let state = StrikeMockState {
+    let state = CollectorFixture {
         calls: Arc::new(AtomicUsize::new(0)),
         last_body: Arc::new(Mutex::new(None)),
         invalid_invoice: false,
@@ -225,7 +229,7 @@ async fn dotted_user_discovery_callback_and_persistence_share_one_identity() {
     ))
     .await
     .unwrap();
-    let user: String = sqlx::query_scalar("SELECT address_user FROM strike_receive_requests")
+    let user: String = sqlx::query_scalar("SELECT json_extract(intent,'$.user') FROM breez_project_invoices WHERE invoice IS NOT NULL")
         .fetch_one(&pool)
         .await
         .unwrap();
@@ -234,7 +238,7 @@ async fn dotted_user_discovery_callback_and_persistence_share_one_identity() {
 
 #[tokio::test]
 async fn issuance_budget_is_shared_across_users_and_invalid_inputs_do_not_spend_it() {
-    let state = StrikeMockState {
+    let state = CollectorFixture {
         calls: Arc::new(AtomicUsize::new(0)),
         last_body: Arc::new(Mutex::new(None)),
         invalid_invoice: false,
@@ -252,13 +256,10 @@ async fn issuance_budget_is_shared_across_users_and_invalid_inputs_do_not_spend_
     }
     assert_eq!(state.calls.load(Ordering::SeqCst), 0);
     for index in 0..30 {
-        // This provider deliberately reuses an ID; conflicting issuance may
-        // fail persistence but must still consume the provider-attempt budget.
-        let result = service
-            .clone()
+        service
             .callback(if index % 2 == 0 { "herd" } else { "dexter" }, 1_000_000)
-            .await;
-        assert!(!matches!(result, Err(LnurlServiceError::Busy)));
+            .await
+            .unwrap();
     }
     assert!(matches!(
         service.callback("goat.name", 1_000_000).await,

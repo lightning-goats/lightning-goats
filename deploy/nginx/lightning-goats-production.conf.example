@@ -30,19 +30,6 @@ location ~ "^/lnurlp/[a-z0-9._-]{1,64}/callback$" {
     add_header Cache-Control "no-store" always;
 }
 
-# Strike completed-receive notification endpoint. Signature verification occurs
-# in lightning-goatsd before event parsing, provider reads, or ledger changes.
-location = /api/v1/strike/webhook {
-    limit_except POST { deny all; }
-    if ($lightning_goats_json_content_type = 0) { return 415; }
-    limit_req zone=lightning_goats_strike_webhook burst=30 nodelay;
-    client_max_body_size 32k;
-    proxy_pass http://lightning_goats_backend/api/v1/strike/webhook;
-    proxy_set_header Host $host;
-    proxy_set_header X-Forwarded-Proto $scheme;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-}
-
 # Read-only operational status used by the overlay.
 location = /api/v1/status {
     limit_except GET { deny all; }

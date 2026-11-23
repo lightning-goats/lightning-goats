@@ -111,7 +111,13 @@ def render(original, identities, plans_gid, limits):
     reward.update(member_percent_ceiling=limits['member_percent'],
                   max_sats_per_feed=limits['max_sats_per_feed'], max_sats_per_24h=limits['max_sats_per_24h'])
     core['core_bridge'].update(payout_peer_uid=identities['payout']['uid'],
-        payout_account_id=payout['policy']['scope']['provider']['account_id'], payout_execution_enabled=True)
+        payout_execution_enabled=True)
+    if payout.get('funding_source') == 'retained_cashu':
+        if reward.get('funding_source') != 'retained_cashu' or not payout.get('cashu_payout_socket'):
+            raise ValueError('retained ecash requires matching reward funding and collector socket')
+        core['core_bridge'].pop('payout_account_id', None)
+    else:
+        core['core_bridge']['payout_account_id'] = payout['policy']['scope']['provider']['account_id']
     # This aligns the seed/configuration with the separately observed stored
     # setting. It is never a command to modify the running membership journal.
     member['settings']['member_percent'] = limits['member_percent']

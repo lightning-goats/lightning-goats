@@ -97,10 +97,14 @@ import sys
 import re
 import urllib.request
 state, config, installed, expected, namespace, tmp_marker, home_marker, other_unit = sys.argv[1:]
-credentials = Path(os.environ["CREDENTIALS_DIRECTORY"])
-names = expected.split(",")
-assert sorted(p.name for p in credentials.iterdir()) == sorted(names)
-assert all((credentials / name).read_text() == "synthetic-install-only" for name in names)
+names = [] if expected == "-" else expected.split(",")
+directory = os.environ.get("CREDENTIALS_DIRECTORY")
+if directory:
+    credentials = Path(directory)
+    assert sorted(p.name for p in credentials.iterdir()) == sorted(names)
+    assert all((credentials / name).read_text() == "synthetic-install-only" for name in names)
+else:
+    assert not names
 assert not os.access(Path("/run/credentials") / other_unit, os.R_OK)
 assert os.geteuid() != 0 and os.getegid() != 0
 assert not os.access(config, os.W_OK)
@@ -268,7 +272,7 @@ class SystemdLauncher:
         self.sandbox_properties[role] = [f"{key}={value}" for key,value in props if key not in changes and key != "LoadCredentialEncrypted"]
         other = "daemon" if role == "gateway" else "gateway"
         probe_args = ["/usr/bin/python3", str(self.probe), str(self.state_path(role)), str(config), str(self.installed),
-                      ",".join(sorted(self.encrypted[role])), self.namespace, str(self.tmp_marker),
+                      ",".join(sorted(self.encrypted[role])) or "-", self.namespace, str(self.tmp_marker),
                       str(Path(__file__).resolve()), f"{self.prefix}-{other}.service"]
         # All paths are controlled without whitespace; namespace contains brackets.
         props.extend([

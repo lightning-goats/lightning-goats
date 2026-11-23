@@ -9,6 +9,7 @@ from pathlib import Path
 import httpx
 
 from claim_store import ClaimStore
+from project_quote import recover_invoice
 from collect import collect, quote_state, recover_payout_refund
 
 
@@ -47,6 +48,18 @@ class QuotePoller:
             except (httpx.HTTPError, ValueError):
                 self.limit = 1
                 self.refresh_after = now + 30
+        for request_id, invoice, _ in rows:
+            if invoice is None:
+                try:
+                    recover_invoice(store, client, request_id)
+                    collect(store, client, request_id, keys)
+                except (httpx.TransportError, httpx.HTTPStatusError) as error:
+                    if isinstance(error, httpx.TransportError) or error.response.status_code in (429, 502, 503, 504):
+                        raise
+                    logging.warning("Original project quote lookup deferred (%s)", type(error).__name__)
+                except (KeyError, ValueError, TypeError) as error:
+                    logging.warning("Original project quote binding deferred (%s)", type(error).__name__)
+        rows = [row for row in rows if row[1] is not None]
         while rows:
             group = rows[:self.limit]
             observations = [None] * len(group)

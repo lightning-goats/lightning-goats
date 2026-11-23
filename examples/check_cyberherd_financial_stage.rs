@@ -112,7 +112,12 @@ fn validate_stage(
         "candidate kernel peer or socket binding differs"
     );
     ensure!(
-        bridge.payout_account_id == Some(p.scope.provider.account_id)
+        reward.funding_source == payout.funding_source
+            && if payout.funding_source.is_strike() {
+                bridge.payout_account_id == Some(p.scope.provider.account_id)
+            } else {
+                bridge.payout_account_id.is_none() && payout.cashu_payout_socket.is_some()
+            }
             && member.core.epoch == p.scope.epoch
             && p.scope.owner == member.project_pubkey
             && reward.owner == member.project_pubkey
@@ -268,7 +273,6 @@ mod tests {
     fn fixture() -> [toml::Value; 4] {
         let owner = "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798";
         let epoch = "11111111-1111-4111-8111-111111111111";
-        let account = "22222222-2222-4222-8222-222222222222";
         let mut core: toml::Value =
             toml::from_str(include_str!("../deploy/config.receive.toml.example")).unwrap();
         let mut member: toml::Value =
@@ -286,8 +290,8 @@ mod tests {
             .unwrap(),
         );
         core.as_table_mut().unwrap().insert("core_bridge".into(), toml::Value::try_from(json!({"socket":"/run/lightning-goats-bridge/core.sock",
-            "peer_uid":10002,"group_gid":10005,"payout_peer_uid":10003,"payout_account_id":account,
-            "payout_execution_enabled":true,"reward_policy":{"owner":owner,"member_percent_ceiling":10,
+            "peer_uid":10002,"group_gid":10005,"payout_peer_uid":10003,
+            "payout_execution_enabled":true,"reward_policy":{"owner":owner,"funding_source":"retained_cashu","member_percent_ceiling":10,
             "max_sats_per_feed":100,"max_sats_per_24h":1000}})).unwrap());
         member["enabled"] = true.into();
         member["project_pubkey"] = owner.into();
@@ -321,7 +325,13 @@ mod tests {
         payout["policy"]["scope"]["core_uid"] = 10001.into();
         payout["policy"]["scope"]["epoch"] = epoch.into();
         payout["policy"]["scope"]["owner"] = owner.into();
-        payout["policy"]["scope"]["provider"]["account_id"] = account.into();
+        payout["funding_source"] = "retained_cashu".into();
+        payout.as_table_mut().unwrap().insert(
+            "cashu_payout_socket".into(),
+            "/run/lightning-goats-project-payouts.sock".into(),
+        );
+        payout["policy"]["scope"]["provider"]["environment"] = "retained-cashu".into();
+        payout["policy"]["scope"]["provider"]["account_id"] = epoch.into();
         payout["policy"]["scope"]["provider"]["credential_fingerprint"] = "11".repeat(32).into();
         for (name, value) in [
             ("member_percent_ceiling", 10),
@@ -365,8 +375,8 @@ mod tests {
                 toml::Value::Integer(10004),
             ),
             (
-                0,
-                vec!["core_bridge", "payout_account_id"],
+                2,
+                vec!["policy", "scope", "provider", "account_id"],
                 toml::Value::String("33333333-3333-4333-8333-333333333333".into()),
             ),
             (

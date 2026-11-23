@@ -79,7 +79,7 @@ The binding file has these fields.
 | `core_uid`, `wallet_uid`, `wallet_gid`, `signer_uid`, `signer_gid` | Actual dedicated numeric UIDs and the two Cashu IPC GIDs |
 | `core_epoch`, `wallet_instance`, `wallet_epoch`, `broker_instance`, `broker_epoch` | Retained core epoch and the reviewed wallet and signer registration UUIDs |
 | `receiving_key`, `client_pubkey`, `helper_sha256` | Reviewed compressed receiving public key, dedicated x-only signer public key and exact installed signer helper digest |
-| `strike_account_id`, `strike_credential_fingerprint` | The reviewed Strike destination account UUID and receive-only credential fingerprint |
+| `project_account_id`, `project_credential_fingerprint` | The reviewed Goats collector destination account UUID and credential fingerprint |
 | `daily_credit_sats`, `minimum_deposit_sats`, `relay_since_unix` | Explicit rolling credit-sat limit of at least 1,999 sats, qualified minimum Strike deposit and starting NIP-61 observation time |
 | `mint_keysets` | Pinned Minibits sat records of the form `{"id":"…","keys":{"1":"…"}}`, copied from reviewed public mint evidence |
 | `nutzap_relays` (optional) | Nonempty reviewed subset of the existing core Nostr relay list |

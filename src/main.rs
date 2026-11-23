@@ -25,7 +25,6 @@ use lightning_goats::{
     nostr::NakClient,
     overlay::{OverlayResume, serve_overlay_socket},
     presentation::MessageRenderer,
-    strike::StrikeRuntime,
 };
 use serde::{Deserialize, Serialize};
 use tracing::info;
@@ -35,11 +34,9 @@ use tracing_subscriber::EnvFilter;
 mod contact_cashu;
 mod paused_recovery;
 
-const MAX_STRIKE_WEBHOOK_BODY: usize = 32 * 1024;
-
 #[derive(Debug, Parser)]
 #[command(name = "lightning-goatsd")]
-#[command(about = "Lightning Goats Strike payment accounting and feeder automation service")]
+#[command(about = "Lightning Goats payment accounting and feeder automation service")]
 struct Args {
     #[arg(long, default_value = "/etc/lightning-goats/config.toml")]
     config: PathBuf,
@@ -53,7 +50,6 @@ struct AppState {
     config: Arc<AppConfig>,
     ledger: LedgerStore,
     gateway: GatewayClient,
-    strike: Option<StrikeRuntime>,
     lnurl: LnurlService,
     renderer: MessageRenderer,
     status_slots: Arc<tokio::sync::Semaphore>,
@@ -99,16 +95,13 @@ async fn main() -> Result<()> {
         .init();
 
     let args = Args::parse();
-    let config = Arc::new(AppConfig::load(&args.config)?);
     if args.recovery_paused {
+        let config = AppConfig::load_for_recovery(&args.config)?;
         return paused_recovery::serve(&config).await;
     }
+    let config = Arc::new(AppConfig::load(&args.config)?);
     let mut ledger = LedgerStore::connect(&config.database.url).await?;
-    if matches!(
-        config.lnurl.wallet_backend,
-        lightning_goats::config::WalletBackend::Breez
-    ) && let Some(receipts) = &config.cashu_receipts
-    {
+    if let Some(receipts) = &config.cashu_receipts {
         ledger = ledger.with_retained_wallet_epoch(receipts.wallet_epoch);
     }
     ledger
@@ -141,16 +134,7 @@ async fn main() -> Result<()> {
     {
         tracing::warn!(%error,"initial feeding message state unavailable; settlement is unaffected");
     }
-    let strike = match &config.strike {
-        Some(config) => Some(StrikeRuntime::from_config(config).await?),
-        None => None,
-    };
-    let lnurl = LnurlService::new(
-        &config.lnurl,
-        &config.lightning_address,
-        strike.clone(),
-        ledger.clone(),
-    )?;
+    let lnurl = LnurlService::new(&config.lnurl, &config.lightning_address, ledger.clone())?;
     let nostr = if config.service.mode.nostr_enabled() {
         Some(NakClient::from_config(&config.nostr).await?)
     } else {
@@ -166,13 +150,7 @@ async fn main() -> Result<()> {
     let cashu_receipts = config
         .cashu_receipts
         .clone()
-        .map(|c| {
-            let server = lightning_goats::cashu::receipt_server::Server::new(c, ledger.clone())?;
-            match config.lnurl.wallet_backend {
-                lightning_goats::config::WalletBackend::Strike => Ok(server),
-                lightning_goats::config::WalletBackend::Breez => server.retain_mint("goats"),
-            }
-        })
+        .map(|c| lightning_goats::cashu::receipt_server::Server::new(c, ledger.clone()))
         .transpose()?;
     let cashu_treasury = config
         .cashu_treasury
@@ -182,11 +160,7 @@ async fn main() -> Result<()> {
                 .cashu_receipts
                 .as_ref()
                 .context("treasury wallet registration missing")?;
-            treasury.worker(
-                receipts,
-                ledger.clone(),
-                config.lnurl.breez_collector.as_ref(),
-            )
+            treasury.worker(receipts, ledger.clone(), config.lnurl.collector.as_ref())
         })
         .transpose()?
         .flatten();
@@ -195,7 +169,6 @@ async fn main() -> Result<()> {
         config: Arc::clone(&config),
         ledger: ledger.clone(),
         gateway: gateway.clone(),
-        strike: strike.clone(),
         lnurl,
         renderer: renderer.clone(),
         status_slots: Arc::new(tokio::sync::Semaphore::new(4)),
@@ -208,7 +181,7 @@ async fn main() -> Result<()> {
     info!(
         listen = %config.service.listen,
         mode = config.service.mode.as_str(),
-        payment_backend = config.lnurl.wallet_backend.as_str(),
+        payment_backend = "cashu_mint",
         gateway = %config.gateway.url,
         "lightning-goatsd listening"
     );
@@ -216,35 +189,16 @@ async fn main() -> Result<()> {
     let mut server =
         tokio::spawn(async move { lightning_goats::server::serve(listener, app).await });
     #[cfg(unix)]
-    let payout_reader = config
-        .core_bridge
-        .as_ref()
-        .and_then(|bridge| bridge.payout_account_id)
-        .map(|id| {
-            strike
-                .as_ref()
-                .context("Strike payout backend missing")?
-                .payout_reader(id)
-        })
-        .transpose()?;
-    #[cfg(unix)]
     let core_bridge = config.core_bridge.clone().map(|bridge| {
         tokio::spawn(
             lightning_goats::core_bridge::unix::run_optional_with_readers(
                 Some(bridge),
                 ledger.clone(),
                 config.service.mode,
-                payout_reader,
-                config.lnurl.breez_collector.clone(),
+                None,
+                config.lnurl.collector.clone(),
             ),
         )
-    });
-    let recovery_ledger = ledger.clone();
-    let mut recovery = tokio::spawn(async move {
-        match strike {
-            Some(runtime) => runtime.run_recovery_worker(recovery_ledger).await,
-            None => std::future::pending().await,
-        }
     });
     let mut feeder = tokio::spawn(run_feed_worker(
         ledger.clone(),
@@ -327,7 +281,7 @@ async fn main() -> Result<()> {
 
     let mut breez_claims = tokio::spawn({
         let ledger = ledger.clone();
-        let collector = config.lnurl.breez_collector.clone();
+        let collector = config.lnurl.collector.clone();
         async move {
             match collector {
                 Some(collector) => ledger.run_breez_claim_recovery(collector).await,
@@ -357,7 +311,6 @@ async fn main() -> Result<()> {
         }
         result = &mut server => task_exit("HTTP server", result),
         result = &mut breez_claims => task_exit("Breez claim recovery", result),
-        result = &mut recovery => task_exit("settlement recovery", result),
         result = &mut feeder => task_exit("feed worker", result),
         result = &mut informational => task_exit("informational worker", result),
         result = &mut solar_presentation => task_exit("solar presentation worker", result),
@@ -371,7 +324,6 @@ async fn main() -> Result<()> {
     };
 
     server.abort();
-    recovery.abort();
     breez_claims.abort();
     feeder.abort();
     informational.abort();
@@ -399,10 +351,6 @@ fn app(state: AppState) -> Router {
         .route(
             "/api/v1/feeding/checkout",
             post(feeding_checkout).layer(DefaultBodyLimit::max(512)),
-        )
-        .route(
-            "/api/v1/strike/webhook",
-            post(strike_webhook).layer(DefaultBodyLimit::max(MAX_STRIKE_WEBHOOK_BODY)),
         )
         .route("/.well-known/lnurlp/{user}", get(lnurl_discovery))
         .route(
@@ -555,7 +503,7 @@ async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse>, S
 
     Ok(Json(StatusResponse {
         mode: state.config.service.mode.as_str(),
-        payment_backend: state.config.lnurl.wallet_backend.as_str(),
+        payment_backend: "cashu_mint",
         lightning_address_users: state.lnurl.configured_users(),
         gateway_reachable,
         feed_credit_sats,
@@ -621,7 +569,7 @@ async fn lnurl_callback(
         ),
         Err(error @ LnurlServiceError::Provider(_)) => {
             if let Some(internal) = error.internal_error() {
-                tracing::error!(%internal, %user, amount_msat, "Strike-backed LNURL invoice creation failed");
+                tracing::error!(%internal, %user, amount_msat, "mint-backed LNURL invoice creation failed");
             }
             lnurl_error(StatusCode::BAD_GATEWAY, error.public_reason())
         }
@@ -630,60 +578,6 @@ async fn lnurl_callback(
 
 fn lnurl_error(status: StatusCode, reason: &str) -> Response {
     (status, Json(LnurlErrorResponse::new(reason))).into_response()
-}
-
-async fn strike_webhook(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    body: Bytes,
-) -> StatusCode {
-    let Some(strike) = &state.strike else {
-        return StatusCode::NOT_FOUND;
-    };
-    if !headers
-        .get("content-type")
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| {
-            v.split(';')
-                .next()
-                .unwrap_or("")
-                .trim()
-                .eq_ignore_ascii_case("application/json")
-        })
-    {
-        return StatusCode::UNSUPPORTED_MEDIA_TYPE;
-    }
-    if body.len() > MAX_STRIKE_WEBHOOK_BODY {
-        tracing::warn!(body_len = body.len(), "rejected oversized Strike webhook");
-        return StatusCode::PAYLOAD_TOO_LARGE;
-    }
-    let Some(signature) = headers
-        .get("x-webhook-signature")
-        .and_then(|value| value.to_str().ok())
-    else {
-        tracing::warn!("rejected Strike webhook without a valid signature header");
-        return StatusCode::UNAUTHORIZED;
-    };
-
-    if let Err(error) = strike.verify_webhook_signature(&body, signature) {
-        tracing::warn!(%error, "rejected Strike webhook with invalid signature");
-        return StatusCode::UNAUTHORIZED;
-    }
-    let event = match strike.parse_completed_event(&body) {
-        Ok(event) => event,
-        Err(error) => {
-            tracing::warn!(%error, "rejected unsupported or malformed signed Strike webhook");
-            return StatusCode::BAD_REQUEST;
-        }
-    };
-
-    match state.ledger.enqueue_strike_event(&event).await {
-        Ok(()) => StatusCode::NO_CONTENT,
-        Err(error) => {
-            tracing::error!(%error,"Strike inbox persistence failed; notification remains retryable");
-            StatusCode::SERVICE_UNAVAILABLE
-        }
-    }
 }
 
 fn private_response(status: StatusCode, value: serde_json::Value) -> Response {
@@ -787,25 +681,13 @@ async fn contact_create(
         return contact_cashu::checkout(&state, &intent, id, &capability, &headers).await;
     }
     // No raw body, deserializer, capability or provider error enters diagnostics.
-    let result = match state.config.lnurl.wallet_backend {
-        lightning_goats::config::WalletBackend::Breez => {
-            let Some(collector) = &state.config.lnurl.breez_collector else {
-                return StatusCode::SERVICE_UNAVAILABLE.into_response();
-            };
-            state
-                .ledger
-                .create_breez_contact_invoice(collector, &intent, &capability)
-                .await
-        }
-        lightning_goats::config::WalletBackend::Strike => {
-            let Some(strike) = &state.strike else {
-                return StatusCode::SERVICE_UNAVAILABLE.into_response();
-            };
-            strike
-                .create_contact_invoice(&state.ledger, &intent, &capability)
-                .await
-        }
+    let Some(collector) = &state.config.lnurl.collector else {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
+    let result = state
+        .ledger
+        .create_breez_contact_invoice(collector, &intent, &capability)
+        .await;
     match result {
         Ok(status) => private_response(
             StatusCode::OK,
@@ -893,7 +775,6 @@ async fn shutdown_signal() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hmac::{Hmac, Mac};
 
     #[test]
     fn private_contact_ingress_is_default_off_and_refuses_capabilities_in_urls() {
@@ -943,51 +824,29 @@ mod tests {
             Err(StatusCode::UNSUPPORTED_MEDIA_TYPE)
         );
     }
-    use lightning_goats::strike::{StrikeClient, StrikeWebhookVerifier};
-    use sha2::Sha256;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[tokio::test]
-    async fn webhook_acknowledges_only_durable_inbox_without_waiting_for_provider() {
+    async fn retired_webhook_and_public_resource_limits_preserve_paid_state() {
         let directory = tempfile::TempDir::new().unwrap();
         let db = format!("sqlite://{}", directory.path().join("inbox.db").display());
         let ledger = LedgerStore::connect(&db).await.unwrap();
-        let calls = Arc::new(AtomicUsize::new(0));
-        let provider = Router::new().fallback({
-            let calls = calls.clone();
-            move || {
-                let calls = calls.clone();
-                async move {
-                    calls.fetch_add(1, Ordering::SeqCst);
-                    tokio::time::sleep(Duration::from_secs(30)).await;
-                    StatusCode::SERVICE_UNAVAILABLE
-                }
-            }
-        });
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let provider_url = format!("http://{}/", listener.local_addr().unwrap());
-        let provider_task =
-            tokio::spawn(async move { axum::serve(listener, provider).await.unwrap() });
-        let strike = StrikeRuntime::new(
-            StrikeClient::new(&provider_url, "synthetic-receive-only".into()).unwrap(),
-            StrikeWebhookVerifier::new("synthetic-webhook-secret".into()).unwrap(),
-        );
         let config: AppConfig =
             toml::from_str(include_str!("../deploy/config.canary.toml.example")).unwrap();
-        let lnurl = LnurlService::new(
-            &config.lnurl,
-            &config.lightning_address,
-            strike.clone(),
-            ledger.clone(),
-        )
-        .unwrap();
+        let mut mint_config = config.lnurl.clone();
+        mint_config.invoice_expiry_seconds = 900;
+        mint_config.collector = Some(lightning_goats::config::BreezCollectorConfig {
+            socket: "/run/lightning-goats-project-invoices.sock".into(),
+            peer_uid: 0,
+        });
+        let lnurl =
+            LnurlService::new(&mint_config, &config.lightning_address, ledger.clone()).unwrap();
         let router = app(AppState {
             cashu: None,
             config: Arc::new(config),
             ledger: ledger.clone(),
             gateway: GatewayClient::new("http://127.0.0.1:9/").unwrap(),
-            strike: Some(strike),
             lnurl,
             renderer: MessageRenderer::embedded().unwrap(),
             status_slots: Arc::new(tokio::sync::Semaphore::new(4)),
@@ -1024,29 +883,21 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(admissions, 0);
-        assert_eq!(calls.load(Ordering::SeqCst), 0);
-        let body = serde_json::json!({"id":uuid::Uuid::new_v4(),"eventType":"receive-request.receive-completed","webhookVersion":"v1","data":{"entityId":uuid::Uuid::new_v4(),"receiveId":uuid::Uuid::new_v4()}}).to_string();
-        let signature = |body: &str| {
-            let mut mac = Hmac::<Sha256>::new_from_slice(b"synthetic-webhook-secret").unwrap();
-            mac.update(body.as_bytes());
-            hex::encode(mac.finalize().into_bytes())
-        };
-        let post = |body: String| {
+        assert_eq!(
             client
                 .post(&url)
-                .header("content-type", "application/json")
-                .header("x-webhook-signature", signature(&body))
-                .body(body)
+                .json(&serde_json::json!({}))
                 .send()
-        };
-        for _ in 0..2 {
-            assert_eq!(
-                post(body.clone()).await.unwrap().status(),
-                StatusCode::NO_CONTENT
-            );
-        }
-        assert_eq!(calls.load(Ordering::SeqCst), 0);
-        let pool = sqlx::SqlitePool::connect(&db).await.unwrap();
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::NOT_FOUND
+        );
+        let inbox: i64 = sqlx::query_scalar("SELECT count(*) FROM strike_inbox")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(inbox, 0);
         sqlx::query("WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<30) INSERT INTO invoice_admissions(id,finished) SELECT 'synthetic:'||x,1 FROM n").execute(&pool).await.unwrap();
         let limited = client
             .get(format!(
@@ -1058,54 +909,11 @@ mod tests {
         assert_eq!(limited.status(), StatusCode::TOO_MANY_REQUESTS);
         let limited: serde_json::Value = limited.json().await.unwrap();
         assert_eq!(limited["status"], "ERROR");
-        // Saturating public issuance must not disable webhook persistence.
-        assert_eq!(
-            post(body.clone()).await.unwrap().status(),
-            StatusCode::NO_CONTENT
-        );
-        assert_eq!(calls.load(Ordering::SeqCst), 0);
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM strike_inbox")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        assert_eq!(count, 1);
-        let restored = LedgerStore::connect(&db).await.unwrap();
-        assert!(restored.due_strike_work().await.unwrap().is_some());
-        assert_eq!(restored.feed_credit_sats().await.unwrap(), 0);
-
-        sqlx::query("CREATE TRIGGER fail_inbox BEFORE INSERT ON strike_inbox BEGIN SELECT RAISE(FAIL,'injected storage failure'); END").execute(&pool).await.unwrap();
-        let mut changed: serde_json::Value = serde_json::from_str(&body).unwrap();
-        changed["id"] = uuid::Uuid::new_v4().to_string().into();
-        assert_eq!(
-            post(changed.to_string()).await.unwrap().status(),
-            StatusCode::SERVICE_UNAVAILABLE
-        );
-        assert_eq!(
-            client
-                .post(&url)
-                .header("content-type", "application/json")
-                .header("x-webhook-signature", "00".repeat(32))
-                .body(body.clone())
-                .send()
-                .await
-                .unwrap()
-                .status(),
-            StatusCode::UNAUTHORIZED
-        );
-        assert_eq!(
-            client.post(&url).body(body).send().await.unwrap().status(),
-            StatusCode::UNSUPPORTED_MEDIA_TYPE
-        );
-        assert_eq!(
-            client.get(&url).send().await.unwrap().status(),
-            StatusCode::METHOD_NOT_ALLOWED
-        );
-
         // No Content-Length: the extractor must stop a chunked body at the same bound.
         let mut socket = tokio::net::TcpStream::connect(address).await.unwrap();
-        let oversized = "x".repeat(MAX_STRIKE_WEBHOOK_BODY + 1);
+        let oversized = "x".repeat(1025);
         let wire = format!(
-            "POST /api/v1/strike/webhook HTTP/1.1\r\nHost: {address}\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n{:x}\r\n{oversized}\r\n0\r\n\r\n",
+            "POST /api/v1/contact/status HTTP/1.1\r\nHost: {address}\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n{:x}\r\n{oversized}\r\n0\r\n\r\n",
             oversized.len()
         );
         socket.write_all(wire.as_bytes()).await.unwrap();
@@ -1115,7 +923,6 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(response.starts_with("HTTP/1.1 413"), "{response}");
-        assert_eq!(calls.load(Ordering::SeqCst), 0);
         // Actual application upgrade route: permits last for the whole socket.
         use futures_util::{SinkExt, StreamExt};
         use tokio_tungstenite::{connect_async, tungstenite::Message};
@@ -1157,10 +964,9 @@ mod tests {
             socket.close(None).await.unwrap();
         }
         assert_eq!(ledger.feed_credit_sats().await.unwrap(), 0);
-        assert_eq!(calls.load(Ordering::SeqCst), 0);
 
         let mut slow = tokio::net::TcpStream::connect(address).await.unwrap();
-        slow.write_all(format!("POST /api/v1/strike/webhook HTTP/1.1\r\nHost: {address}\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n100\r\nx").as_bytes()).await.unwrap();
+        slow.write_all(format!("POST /api/v1/contact/status HTTP/1.1\r\nHost: {address}\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n100\r\nx").as_bytes()).await.unwrap();
         let mut timed_out = String::new();
         tokio::time::timeout(Duration::from_secs(45), slow.read_to_string(&mut timed_out))
             .await
@@ -1168,7 +974,6 @@ mod tests {
             .unwrap();
         assert!(timed_out.starts_with("HTTP/1.1 408"), "{timed_out}");
         server.abort();
-        provider_task.abort();
     }
 
     #[tokio::test]

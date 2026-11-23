@@ -20,8 +20,6 @@ UMask=0077
 
 Environment=RUST_LOG=info
 # Receive/read-only Strike runtime credentials.
-LoadCredentialEncrypted=strike-api-key:/etc/credstore.encrypted/lightning-goats-strike-api-key
-LoadCredentialEncrypted=strike-webhook-secret:/etc/credstore.encrypted/lightning-goats-strike-webhook-secret
 # Initial install uses shadow mode; operator-approved canary enables gated feeding.
 # Both modes keep public Nostr signing disabled until separately configured.
 # No OpenHAB, CLN, or LNbits credential belongs on this host/service.

@@ -212,16 +212,19 @@ impl Fixture {
             .await
             .unwrap();
         self.core
-            .record_payment(&SettledPayment {
-                source: "strike".into(),
-                source_id: format!("paid-{id}"),
-                payment_hash: Some(hex::encode([id; 32])),
-                address_user: "herd".into(),
-                credit_pool: "herd".into(),
-                amount_msat: sats * 1000,
-                settled_at: Some(self.now),
-                context_json: Some(json!({"receive_request_id":request}).to_string()),
-            })
+            .record_reconciled_invoice(
+                &SettledPayment {
+                    source: "strike".into(),
+                    source_id: format!("paid-{id}"),
+                    payment_hash: Some(hex::encode([id; 32])),
+                    address_user: "herd".into(),
+                    credit_pool: "herd".into(),
+                    amount_msat: sats * 1000,
+                    settled_at: Some(self.now),
+                    context_json: Some(json!({"receive_request_id":request}).to_string()),
+                },
+                request,
+            )
             .await
             .unwrap();
     }

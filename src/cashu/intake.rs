@@ -52,9 +52,37 @@ impl Forwarder {
         body: String,
         checkout: Option<lightning_goats_cashu_receipt::receive_status::FeedingCheckout>,
     ) -> Result<lightning_goats_cashu_receipt::receive_status::AdmissionReply> {
-        use lightning_goats_cashu_receipt::receive_status::{
-            AdmissionQuery, AdmissionReply, AdmitOperation,
-        };
+        use lightning_goats_cashu_receipt::receive_status::AdmitOperation;
+        self.submit_operation(
+            delivery_id,
+            body,
+            checkout.map_or(
+                AdmitOperation::OrdinaryAdmit,
+                AdmitOperation::FeedingCheckout,
+            ),
+        )
+        .await
+    }
+    pub async fn submit_contact_tender(
+        &self,
+        delivery_id: Uuid,
+        body: String,
+        terms: lightning_goats_cashu_receipt::contact_fee::ContactTender,
+    ) -> Result<lightning_goats_cashu_receipt::receive_status::AdmissionReply> {
+        self.submit_operation(
+            delivery_id,
+            body,
+            lightning_goats_cashu_receipt::receive_status::AdmitOperation::ContactFee(terms),
+        )
+        .await
+    }
+    async fn submit_operation(
+        &self,
+        delivery_id: Uuid,
+        body: String,
+        operation: lightning_goats_cashu_receipt::receive_status::AdmitOperation,
+    ) -> Result<lightning_goats_cashu_receipt::receive_status::AdmissionReply> {
+        use lightning_goats_cashu_receipt::receive_status::{AdmissionQuery, AdmissionReply};
         ensure!(
             self.policy.receive_cashu
                 && !delivery_id.is_nil()
@@ -64,10 +92,7 @@ impl Forwarder {
         );
         let query = AdmissionQuery {
             version: 1,
-            operation: checkout.map_or(
-                AdmitOperation::OrdinaryAdmit,
-                AdmitOperation::FeedingCheckout,
-            ),
+            operation,
             wallet_instance: self.policy.wallet_instance,
             wallet_epoch: self.policy.wallet_epoch,
             delivery_id,

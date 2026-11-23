@@ -73,7 +73,7 @@ pub async fn probe(config: &Config, mint_id: &str) -> Result<Report> {
     .context("public mint probe timed out")?
 }
 
-async fn sat_inventory(
+pub(crate) async fn sat_inventory(
     transport: &impl Transport,
     url: &MintUrl,
 ) -> Result<BTreeMap<String, KeySetInfo>> {

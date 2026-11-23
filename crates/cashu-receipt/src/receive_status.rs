@@ -66,6 +66,7 @@ pub enum Status {
 pub enum AdmitOperation {
     OrdinaryAdmit,
     FeedingCheckout(FeedingCheckout),
+    ContactFee(crate::contact_fee::ContactTender),
 }
 /// Terms from the core's original checkout. The wallet checks the tender
 /// against the fixed request and the underlying receiving policy before admission.
@@ -167,6 +168,18 @@ impl AdmissionQuery {
             ensure!(
                 http_delivery_id(query.body.as_bytes()) == query.delivery_id,
                 "invalid checkout delivery identity"
+            );
+        }
+        if let AdmitOperation::ContactFee(terms) = &query.operation {
+            terms.validate()?;
+            ensure!(
+                http_delivery_id(query.body.as_bytes()) == query.delivery_id,
+                "invalid contact tender delivery identity"
+            );
+            let token: String = serde_json::from_str(&query.body)?;
+            ensure!(
+                token.starts_with("cashuB") && token.len() <= crate::contact_fee::MAX_TOKEN_BYTES,
+                "expected bounded V4 contact tender"
             );
         }
         Ok(query)

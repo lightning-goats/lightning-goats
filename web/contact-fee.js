@@ -2,8 +2,8 @@
 (() => {
     "use strict";
     const KEY = "lightning-goats-contact-fee-v1";
-    const STATES = ["new", "issuing", "uncertain", "issued", "paid", "delivered"];
-    const rank = (state) => ({new:0,issuing:1,uncertain:1,issued:2,paid:3,delivered:4})[state] ?? -1;
+    const STATES = ["new", "issuing", "uncertain", "issued", "pending", "paid", "delivered"];
+    const rank = (state) => ({new:0,issuing:1,uncertain:1,issued:2,pending:2,paid:3,delivered:4})[state] ?? -1;
 
     async function post(path, value, missing = false) {
         const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 10000);
@@ -71,8 +71,8 @@
                 if (window.NostrTools.nip57.getSatoshisAmountFromBolt11(value.invoice) !== 100) throw new Error("The contact invoice must be exactly 100 sats.");
                 if (pending.invoice && pending.invoice !== value.invoice) throw new Error("The contact service changed the saved invoice.");
             }
-            if (["issued","paid","delivered"].includes(value.state) && !value.invoice) throw new Error("The contact service omitted the saved invoice.");
-            if (rank(value.state) < rank(pending.state || "new")) return;
+            if (value.state === "issued" && !value.invoice) throw new Error("The contact service omitted the saved invoice.");
+            if (rank(value.state) < rank(pending.state || "new") && !(pending.state === "pending" && value.state === "new")) return;
             pending.state = value.state;
             if (value.invoice) pending.invoice = value.invoice;
             save();render();
@@ -80,6 +80,8 @@
                 reset();
                 byId("contactMessage").value = byId("contactEmail").value = "";
                 status("An inbox relay accepted your encrypted message. This does not confirm it has been read.");
+            } else if (value.state === "pending") {
+                status("Your Cashu payment is awaiting confirmation.");
             } else if (value.state === "paid") {
                 status("Payment confirmed. Your encrypted message is queued for the Lightning Goats inbox.");
             } else if (["issuing","uncertain"].includes(value.state)) {
@@ -110,7 +112,7 @@
             if (pending) {
                 await check();
                 if (!pending) return; // Acknowledgment must never start a new fee.
-                if (["issuing","uncertain","paid"].includes(pending.state)) {polls = 0;schedule();return;}
+                if (["issuing","uncertain","pending","paid"].includes(pending.state)) {polls = 0;schedule();return;}
             }
             if (!enabled()) {status("New contact payments are paused. The saved contact has been retained.");return;}
             const wallet = window.LightningGoatsPayment.wallet();

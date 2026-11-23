@@ -113,7 +113,6 @@ async fn service(state: CollectorFixture) -> (TempDir, LnurlService) {
             zap: None,
         },
         &addresses(),
-        None,
         ledger,
     )
     .unwrap();

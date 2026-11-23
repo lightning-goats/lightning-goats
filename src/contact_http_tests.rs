@@ -109,13 +109,14 @@ async fn contact_http_rejects_bad_admission_and_only_authoritative_fee_queues_pr
         .public_base_url
         .trim_end_matches('/')
         .to_owned();
-    let lnurl = LnurlService::new(
-        &config.lnurl,
-        &config.lightning_address,
-        strike.clone(),
-        ledger.clone(),
-    )
-    .unwrap();
+    let mut mint_config = config.lnurl.clone();
+    mint_config.invoice_expiry_seconds = 900;
+    mint_config.wallet_backend = lightning_goats::config::WalletBackend::Breez;
+    mint_config.breez_collector = Some(lightning_goats::config::BreezCollectorConfig {
+        socket: "/run/lightning-goats-project-invoices.sock".into(),
+        peer_uid: 0,
+    });
+    let lnurl = LnurlService::new(&mint_config, &config.lightning_address, ledger.clone()).unwrap();
     let state = AppState {
         cashu: None,
         config: Arc::new(config),

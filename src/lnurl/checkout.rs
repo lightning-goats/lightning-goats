@@ -29,9 +29,6 @@ impl LnurlService {
         descriptor: Descriptor,
     ) -> Result<Checkout> {
         let address = self.address(user).map_err(|e| anyhow!(e.public_reason()))?;
-        let InvoiceBackend::Breez(collector) = &self.backend else {
-            bail!("checkout requires mint invoicing")
-        };
         let admission = self
             .ledger
             .reserve_invoice()
@@ -49,7 +46,7 @@ impl LnurlService {
             let cashu=intent["checkout"]["creq"].as_str().context("checkout lost Cashu request")?.to_owned();
             let payload=json!({"request_id":id,"amount_sat":amount_sats,"user":address.user,"credit_pool":address.credit_pool,
                 "description":intent["description"],"zap":false});
-            let invoice=self.project_invoice(collector,id,&payload,saved_invoice).await?;
+            let invoice=self.project_invoice(&self.collector,id,&payload,saved_invoice).await?;
             let uri=format!("bitcoin:?lightning={invoice}&creq={cashu}");
             Ok(Checkout::Ready{amount_sats,invoice,cashu,uri})
         }.await;

@@ -115,7 +115,8 @@ impl LedgerStore {
         })
     }
 
-    pub(super) async fn poll_breez_claim(&self, collector: &BreezCollectorConfig) -> Result<bool> {
+    /// Reconcile one due project invoice against its original collector claim.
+    pub async fn poll_breez_claim(&self, collector: &BreezCollectorConfig) -> Result<bool> {
         let row = sqlx::query(
             "UPDATE breez_project_invoices SET next_poll=unixepoch()+30
              WHERE id=(SELECT i.id FROM breez_project_invoices i

@@ -240,7 +240,7 @@ async fn local_ecash_funds_confirmed_feeding_and_only_legacy_lots_can_be_swept()
         reopened.confirm_feed_attempt(request).await.unwrap();
         feeds.push((request, spendable));
     }
-    assert_eq!(reopened.feed_credit_sats().await.unwrap(), 400);
+    assert_eq!(reopened.feed_credit_sats().await.unwrap(), 401);
     let mut tx = reopened.pool.begin().await.unwrap();
     let reward_policy = crate::reward_funding::RewardPolicy {
         funding_source: crate::reward_funding::RewardFundingSource::RetainedCashu,

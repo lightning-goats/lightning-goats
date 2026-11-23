@@ -31,6 +31,8 @@ use serde::{Deserialize, Serialize};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
+#[path = "http/contact_cashu.rs"]
+mod contact_cashu;
 mod paused_recovery;
 
 const MAX_STRIKE_WEBHOOK_BODY: usize = 32 * 1024;
@@ -717,7 +719,12 @@ fn contact_ingress(
         return Err(StatusCode::BAD_REQUEST);
     }
     let origin = config.lnurl.public_base_url.trim_end_matches('/');
-    if headers.get("origin").and_then(|v| v.to_str().ok()) != Some(origin) {
+    if headers
+        .get("origin")
+        .is_some_and(|v| v.to_str().ok() != Some(origin))
+        || (headers.get("origin").is_none()
+            && (headers.contains_key("cookie") || headers.contains_key("sec-fetch-site")))
+    {
         return Err(StatusCode::FORBIDDEN);
     }
     if !headers
@@ -759,24 +766,36 @@ async fn contact_create(
             serde_json::json!({"error":"invalid private contact"}),
         );
     };
+    let id = request.id;
     let capability = request.capability.clone();
-    let intent = lightning_goats::cyberherd::calendar::now()
+    let now = match state.ledger.contact_admitted_at(id, &capability).await {
+        Ok(Some(original)) => Ok(original),
+        Ok(None) => lightning_goats::cyberherd::calendar::now(),
+        Err(_) => {
+            return private_response(
+                StatusCode::BAD_REQUEST,
+                serde_json::json!({"error":"invalid private contact"}),
+            );
+        }
+    };
+    let intent = now.ok().and_then(|stamp| {
+        lightning_goats::contact::Intent::validate(
+            request,
+            &config.recipient,
+            &config.inbox_relays,
+            stamp,
+        )
         .ok()
-        .and_then(|now| {
-            lightning_goats::contact::Intent::validate(
-                request,
-                &config.recipient,
-                &config.inbox_relays,
-                now,
-            )
-            .ok()
-        });
+    });
     let Some(intent) = intent else {
         return private_response(
             StatusCode::BAD_REQUEST,
             serde_json::json!({"error":"invalid private contact"}),
         );
     };
+    if headers.contains_key("x-cashu") || !headers.contains_key("origin") {
+        return contact_cashu::checkout(&state, &intent, id, &capability, &headers).await;
+    }
     // No raw body, deserializer, capability or provider error enters diagnostics.
     let result = match state.config.lnurl.wallet_backend {
         lightning_goats::config::WalletBackend::Breez => {

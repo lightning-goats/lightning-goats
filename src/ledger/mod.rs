@@ -19,7 +19,7 @@ use sqlx::{Row, SqlitePool};
 use crate::domain::payment::SettledPayment;
 
 mod contact;
-pub use contact::ContactDelivery;
+pub use contact::{ContactAction, ContactDelivery};
 mod core_bridge;
 pub(crate) use core_bridge::export_body as inspect_core_event_body;
 mod cyberherd_overlay;
@@ -546,6 +546,72 @@ mod tests {
         );
         assert_eq!(store.feed_credit_sats().await.unwrap(), 1_000);
         assert_eq!(store.events_after(0, 10).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn replay_after_migrating_a_spent_strike_receipt_preserves_the_original_feed() {
+        let directory = TempDir::new().unwrap();
+        let url = format!("sqlite://{}", directory.path().join("paid.db").display());
+        let old = crate::sqlite::connect_durable(&url, 1).await.unwrap();
+        let prefix = MIGRATOR
+            .iter()
+            .take_while(|m| m.version <= 9)
+            .cloned()
+            .collect::<Vec<_>>();
+        sqlx::migrate::Migrator {
+            migrations: prefix.into(),
+            ..sqlx::migrate::Migrator::DEFAULT
+        }
+        .run(&old)
+        .await
+        .unwrap();
+
+        // Populate the original schema before asset grants and payout reservations existed.
+        let receipt = payment("historical-receive", &"52".repeat(32), 1_000);
+        let feed_id = uuid::Uuid::new_v4().to_string();
+        let mut tx = old.begin().await.unwrap();
+        sqlx::query("INSERT INTO settled_payments(source,source_id,payment_hash,address_user,credit_pool,amount_msat,settled_at,context_json)
+            VALUES ('strike',?,?,'dexter','herd',1000000,?,?)")
+            .bind(&receipt.source_id).bind(&receipt.payment_hash).bind(receipt.settled_at)
+            .bind(&receipt.context_json).execute(&mut *tx).await.unwrap();
+        sqlx::query("INSERT INTO ledger_entries(entry_type,source_key,delta_sats,payment_hash,payment_source,payment_source_id,address_user,credit_pool)
+            SELECT 'HERD_RECEIPT','payment:strike:'||source_id,1000,payment_hash,source,source_id,address_user,credit_pool FROM settled_payments")
+            .execute(&mut *tx).await.unwrap();
+        sqlx::query("INSERT INTO feed_attempts(id,status,threshold_sats,resolved_at) VALUES (?,'confirmed',1000,1700000001)")
+            .bind(&feed_id).execute(&mut *tx).await.unwrap();
+        sqlx::query("INSERT INTO ledger_entries(entry_type,source_key,delta_sats,feed_attempt_id) VALUES ('FEED_DEBIT',?,-1000,?)")
+            .bind(format!("feed:{feed_id}")).bind(&feed_id).execute(&mut *tx).await.unwrap();
+        tx.commit().await.unwrap();
+        old.close().await;
+
+        for _ in 0..2 {
+            let store = LedgerStore::connect(&url).await.unwrap();
+            assert_eq!(
+                store.record_payment(&receipt).await.unwrap(),
+                SettlementOutcome::Duplicate
+            );
+            assert_eq!(store.feed_credit_sats().await.unwrap(), 0);
+            let original: (String, String) = sqlx::query_as("SELECT f.id,f.status FROM feed_attempts f JOIN ledger_entries l ON l.feed_attempt_id=f.id WHERE l.delta_sats=-1000")
+                .fetch_one(&store.pool).await.unwrap();
+            assert_eq!(original, (feed_id.clone(), "confirmed".to_owned()));
+            for (table, expected) in [
+                ("settled_payments", 1),
+                ("credit_grants", 1),
+                ("ledger_entries", 2),
+                ("feed_attempts", 1),
+                ("reward_reservations", 0),
+                ("payout_execution_claims", 0),
+                ("event_log", 0),
+                ("message_outbox", 0),
+            ] {
+                let count: i64 = sqlx::query_scalar(&format!("SELECT count(*) FROM {table}"))
+                    .fetch_one(&store.pool)
+                    .await
+                    .unwrap();
+                assert_eq!(count, expected, "{table}");
+            }
+            store.pool.close().await;
+        }
     }
 
     #[tokio::test]

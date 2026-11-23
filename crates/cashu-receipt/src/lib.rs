@@ -7,6 +7,7 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 pub mod acknowledgment;
+pub mod contact_fee;
 pub mod ingress;
 pub mod public_request;
 pub mod receive_status;

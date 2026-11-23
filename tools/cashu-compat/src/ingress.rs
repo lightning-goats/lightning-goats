@@ -1,4 +1,4 @@
-//! One bounded, authenticated private receiving connection. No mint calls here.
+//! Authenticated private receiving connection. Fixed contact tenders also require mint fee metadata.
 use crate::{
     descriptor::RetiredDescriptor,
     intake::{
@@ -50,16 +50,23 @@ impl Intake<'_> {
         &self,
         body: &[u8],
         source_ref: &str,
-        checkout: Option<&lightning_goats_cashu_receipt::receive_status::FeedingCheckout>,
+        operation: &lightning_goats_cashu_receipt::receive_status::AdmitOperation,
     ) -> Result<ValidatedContribution> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
             .as_secs();
+        use lightning_goats_cashu_receipt::receive_status::AdmitOperation;
+        let (checkout, contact_descriptor) = match operation {
+            AdmitOperation::ContactFee(terms) => (None, Some(terms.descriptor_id.as_str())),
+            AdmitOperation::FeedingCheckout(terms) => (Some(terms), None),
+            AdmitOperation::OrdinaryAdmit => (None, None),
+        };
         ordinary_json_at(
             body,
             source_ref,
             DescriptorAcceptance {
                 checkout,
+                contact_descriptor,
                 active: self.descriptors,
                 retired: self.retired_descriptors,
                 now,
@@ -149,9 +156,12 @@ impl Intake<'_> {
             );
             let mut bytes = vec![0; length];
             stream.read_exact(&mut bytes).await?;
-            let encoded = self
-                .reply_frame(&bytes)
-                .map_err(|_| anyhow::anyhow!("private intake rejected"))?;
+            let encoded = match self.check_contact_fee(&bytes, deadline).await? {
+                Some(rejection) => rejection,
+                None => self
+                    .reply_frame(&bytes)
+                    .map_err(|_| anyhow::anyhow!("private intake rejected"))?,
+            };
             ensure!(
                 encoded.len() <= lightning_goats_cashu_receipt::public_request::MAX_REPLY_BYTES,
                 "private intake reply exceeds bound"
@@ -163,6 +173,57 @@ impl Intake<'_> {
         })
         .await
         .map_err(|_| anyhow::anyhow!("private intake deadline exceeded"))?
+    }
+
+    async fn check_contact_fee(&self, bytes: &[u8], deadline: Duration) -> Result<Option<Vec<u8>>> {
+        use lightning_goats_cashu_receipt::receive_status as status;
+        let Ok(query) =
+            status::AdmissionQuery::decode(bytes, self.wallet_instance, self.wallet_epoch)
+        else {
+            return Ok(None);
+        };
+        let status::AdmitOperation::ContactFee(terms) = &query.operation else {
+            return Ok(None);
+        };
+        ensure!(self.receive_cashu, "contact intake disabled");
+        let source = terms.source_ref(query.delivery_id);
+        if self
+            .journal
+            .lock()
+            .map_err(|_| anyhow::anyhow!("wallet journal unavailable"))?
+            .existing_http_delivery(&source)?
+            .is_some()
+        {
+            return Ok(None);
+        }
+        let rejected = || {
+            serde_json::to_vec(&status::AdmissionReply {
+                version: 1,
+                wallet_instance: self.wallet_instance,
+                wallet_epoch: self.wallet_epoch,
+                delivery_id: query.delivery_id,
+                result: status::AdmissionOutcome::Rejected,
+            })
+        };
+        let Ok(contribution) = self.ordinary(query.body.as_bytes(), &source, &query.operation)
+        else {
+            return Ok(Some(rejected()?));
+        };
+        let checked = contribution.intake();
+        let policy = self
+            .registry
+            .cashu_mints()
+            .find(|policy| policy.id == checked.mint_id)
+            .ok_or_else(|| anyhow::anyhow!("mint unavailable"))?;
+        let transport = crate::transport::MintTransport::new(
+            policy.advertised_url.parse()?,
+            deadline,
+            256 * 1024,
+        )?;
+        if !covers_contact_fee(&transport, &policy.advertised_url.parse()?, checked.proofs).await? {
+            return Ok(Some(rejected()?));
+        }
+        Ok(None)
     }
 
     pub(crate) fn reply_frame(&self, bytes: &[u8]) -> Result<Vec<u8>> {
@@ -191,12 +252,13 @@ impl Intake<'_> {
                 !is_content_id || query.delivery_id == http_delivery_id(body),
                 "invalid content-bound delivery ID"
             );
-            let (checkout, source_ref) = match &query.operation {
+            let source_ref = match &query.operation {
                 status::AdmitOperation::OrdinaryAdmit => {
-                    (None, format!("http:{}", query.delivery_id))
+                    format!("http:{}", query.delivery_id)
                 }
+                status::AdmitOperation::ContactFee(terms) => terms.source_ref(query.delivery_id),
                 status::AdmitOperation::FeedingCheckout(terms) => {
-                    (Some(terms), terms.source_ref(query.delivery_id))
+                    terms.source_ref(query.delivery_id)
                 }
             };
             let mut journal = self
@@ -213,10 +275,11 @@ impl Intake<'_> {
             // after a descriptor expires. Only new admissions use today's policy.
             let id = match existing {
                 Some(id) => Some(id),
-                None => match self.ordinary(body, &source_ref, checkout) {
+                None => match self.ordinary(body, &source_ref, &query.operation) {
                     Err(_) => None,
                     Ok(contribution) => match journal.admit(&contribution.intake()) {
                         Ok(Admission::New(id) | Admission::Duplicate(id)) => Some(id),
+                        Err(error) if error.is::<crate::journal::AdmissionConflict>() => None,
                         Err(error)
                             if error.downcast_ref::<AdmissionCapacity>()
                                 == Some(&AdmissionCapacity::TooLarge) =>
@@ -293,7 +356,7 @@ impl Intake<'_> {
                 self.ordinary(
                     body.as_bytes(),
                     &format!("http:{}", request.delivery_id),
-                    None,
+                    &lightning_goats_cashu_receipt::receive_status::AdmitOperation::OrdinaryAdmit,
                 )?
             }
             Payload::Nutzap(body) => {
@@ -330,6 +393,29 @@ impl Intake<'_> {
             disposition,
         })
     }
+}
+
+pub(crate) async fn covers_contact_fee(
+    transport: &impl cdk_http_client::Transport,
+    mint: &cdk::mint_url::MintUrl,
+    proofs: &[cdk::nuts::Proof],
+) -> Result<bool> {
+    let listed = crate::mint_probe::sat_inventory(transport, mint).await?;
+    let mut counts = std::collections::HashMap::new();
+    let mut rates = std::collections::HashMap::new();
+    let mut gross = 0u64;
+    for proof in proofs {
+        let Some(set) = listed.get(&proof.keyset_id.to_string()) else {
+            return Ok(false);
+        };
+        *counts.entry(proof.keyset_id).or_default() += 1;
+        rates.insert(proof.keyset_id, set.input_fee_ppk);
+        gross = gross
+            .checked_add(u64::from(proof.amount))
+            .ok_or_else(|| anyhow::anyhow!("contact amount overflow"))?;
+    }
+    let fee = u64::from(cdk::fees::calculate_fee(&counts, &rates)?.total);
+    Ok(gross.saturating_sub(fee) >= lightning_goats_cashu_receipt::contact_fee::FEE_SATS)
 }
 
 #[cfg(test)]

@@ -2,6 +2,30 @@
 use anyhow::{Context, Result, ensure};
 
 pub async fn strip_empty(transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>) -> Result<()> {
+    let contact_v40: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM _sqlx_migrations WHERE version=40)")
+            .fetch_one(&mut **transaction)
+            .await?;
+    if contact_v40 {
+        for table in [
+            "private_contact_cashu_receipts",
+            "private_contact_tenders",
+            "private_contact_requests",
+            "private_contact_delivery",
+            "private_contact_entitlements",
+            "private_contact_fees",
+            "private_contact_intents",
+        ] {
+            let rows: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
+                .fetch_one(&mut **transaction)
+                .await?;
+            ensure!(rows == 0, "fixture contains private contact history");
+        }
+        sqlx::raw_sql("DROP VIEW private_contact_excess_receipts; DROP TABLE private_contact_cashu_receipts; DROP TABLE private_contact_tenders; DROP TABLE private_contact_requests; DROP TABLE private_contact_delivery; DROP TABLE private_contact_entitlements; DROP TABLE private_contact_fees; DROP TABLE private_contact_intents; DELETE FROM _sqlx_migrations WHERE version=40;").execute(&mut **transaction).await?;
+        sqlx::raw_sql(include_str!("../../migrations/0024_private_contacts.sql"))
+            .execute(&mut **transaction)
+            .await?;
+    }
     let has_members: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='member_ecash_execution_claims')",
     )

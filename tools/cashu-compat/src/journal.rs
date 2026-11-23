@@ -583,11 +583,16 @@ impl Journal {
             AdmissionConflict
         );
         let id = if let Some(id) = existing {
-            let count: i64 = tx.query_row(
-                "SELECT proof_count FROM acquisitions WHERE id=?",
+            let (count, source): (i64, String) = tx.query_row(
+                "SELECT proof_count,source_ref FROM acquisitions WHERE id=?",
                 [&id],
-                |r| r.get(0),
+                |r| Ok((r.get(0)?, r.get(1)?)),
             )?;
+            // A contact entitlement can only consume its own tender. Ordinary
+            // HTTP and relay aliases keep their existing cross-transport deduplication.
+            if source.starts_with("contact_fee:") || intake.source_ref.starts_with("contact_fee:") {
+                ensure!(source == intake.source_ref, AdmissionConflict);
+            }
             ensure!(
                 old_count == proofs.len() && count == i64::try_from(proofs.len())?,
                 AdmissionConflict
@@ -809,6 +814,14 @@ impl Journal {
             ensure!(
                 u64::from(output) >= needed,
                 "checkout tender does not cover mint input fees"
+            );
+        }
+        if lightning_goats_cashu_receipt::contact_fee::ContactTender::source_terms(&source)?
+            .is_some()
+        {
+            ensure!(
+                u64::from(output) >= lightning_goats_cashu_receipt::contact_fee::FEE_SATS,
+                "contact tender does not cover its fee"
             );
         }
         Ok(u64::from(input) - u64::from(output))

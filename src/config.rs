@@ -43,12 +43,22 @@ pub struct AppConfig {
 
 impl AppConfig {
     pub fn load(path: &Path) -> Result<Self> {
-        let raw = fs::read_to_string(path)
-            .with_context(|| format!("failed reading config {}", path.display()))?;
-        let config: Self = toml::from_str(&raw)
-            .with_context(|| format!("failed parsing config {}", path.display()))?;
+        let config = Self::parse_file(path)?;
         config.validate()?;
         Ok(config)
+    }
+
+    /// Load a historical configuration for commands that cannot initiate payments.
+    pub fn load_for_recovery(path: &Path) -> Result<Self> {
+        let config = Self::parse_file(path)?;
+        config.validate_common()?;
+        Ok(config)
+    }
+
+    fn parse_file(path: &Path) -> Result<Self> {
+        let raw = fs::read_to_string(path)
+            .with_context(|| format!("failed reading config {}", path.display()))?;
+        toml::from_str(&raw).with_context(|| format!("failed parsing config {}", path.display()))
     }
 
     pub fn validate(&self) -> Result<()> {

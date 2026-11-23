@@ -377,7 +377,7 @@ async fn main() -> Result<()> {
         #[cfg(unix)]
         {
             lightning_goats::payout::cost_recovery::require_protected_configuration(&args.config)?;
-            let config = AppConfig::load(&args.config)?;
+            let config = AppConfig::load_for_recovery(&args.config)?;
             lightning_goats::payout::cost_recovery::existing_private_database(
                 &config.database.url,
             )?;
@@ -491,7 +491,12 @@ async fn main() -> Result<()> {
             bail!("financial release requires Unix protected-file authority");
         }
     }
-    let config = AppConfig::load(&args.config)?;
+    let config = match args.command {
+        Command::Status | Command::ReconcileHistoricalReceive { .. } => {
+            AppConfig::load_for_recovery(&args.config)?
+        }
+        _ => AppConfig::load(&args.config)?,
+    };
     if let Command::RetireFeedCredit {
         id,
         credit_entry_id,

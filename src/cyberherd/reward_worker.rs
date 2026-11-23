@@ -168,7 +168,7 @@ impl<R: Query> Worker<R> {
             return Ok(Step::RecipientsStaged);
         }
         let mint = crate::cashu::treasury::PROJECT_MINT_ORIGIN;
-        let mut destinations = stream::iter(profiles.iter_mut().map(|read| async {
+        let mut destinations = stream::iter(profiles.into_iter().map(|mut read| async move {
             use super::rewards::EcashDestination;
             read.ecash = match &read.preference {
                 None => None,
@@ -187,13 +187,13 @@ impl<R: Query> Worker<R> {
                 }
                 _ => anyhow::bail!("invalid stored member reward method"),
             };
-            Ok::<_, anyhow::Error>(())
+            Ok::<_, anyhow::Error>(read)
         }))
         .buffer_unordered(4);
+        let mut profiles = Vec::new();
         while let Some(resolved) = destinations.next().await {
-            resolved?;
+            profiles.push(resolved?);
         }
-        drop(destinations);
         self.store
             .freeze_reward_plan(
                 &self.owner,

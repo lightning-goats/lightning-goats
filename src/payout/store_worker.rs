@@ -452,7 +452,7 @@ impl Store {
 WITH grants AS (
  SELECT * FROM payout_grants WHERE COALESCE(json_extract(qualification_json,'$.execution_provider'),'strike')=?1
 ), state AS (
- SELECT r.grant_id,r.member,g.admitted_at,
+ SELECT r.grant_id,r.member,r.reward_method,g.admitted_at,
  EXISTS(SELECT 1 FROM payout_unsubmitted c WHERE c.grant_id=r.grant_id AND c.member=r.member) AS closed,
  EXISTS(SELECT 1 FROM payout_invoice_intents i JOIN payout_quote_intents q ON q.invoice_id=i.id JOIN payout_payment_bindings b ON b.intent_id=q.id JOIN payout_payment_records p ON p.payment_id=b.payment_id
  WHERE i.grant_id=r.grant_id AND i.member=r.member AND p.seq=(SELECT MAX(p2.seq) FROM payout_payment_records p2 WHERE p2.payment_id=b.payment_id) AND p.state IN ('COMPLETED','FAILED')) AS terminal,
@@ -460,7 +460,7 @@ WITH grants AS (
  FROM payout_rows r JOIN grants g ON g.id=r.grant_id
 ), jobs AS (
  SELECT 'row:'||s.grant_id||':'||s.member AS work_key,s.grant_id,s.member,s.admitted_at FROM state s
- WHERE NOT s.closed AND NOT s.terminal AND NOT s.conflicted AND NOT EXISTS(SELECT 1 FROM payout_outcome_manifests m WHERE m.grant_id=s.grant_id)
+ WHERE s.reward_method='lightning' AND NOT s.closed AND NOT s.terminal AND NOT s.conflicted AND NOT EXISTS(SELECT 1 FROM payout_outcome_manifests m WHERE m.grant_id=s.grant_id)
  UNION ALL
  SELECT 'outcome:'||g.id,g.id,NULL,g.admitted_at FROM grants g
  WHERE NOT EXISTS(SELECT 1 FROM payout_outcome_acks a WHERE a.grant_id=g.id)

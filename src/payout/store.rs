@@ -380,14 +380,23 @@ impl Store {
                 .bind(i64::try_from(source.consumed_sats)?).execute(&mut *tx).await?;
         }
         for row in plan.rows.iter().filter(|row| row.skip.is_none()) {
-            let address = row
-                .profile
-                .as_ref()
-                .and_then(|p| p.lud16.as_ref())
-                .context("payee missing")?;
-            sqlx::query("INSERT INTO payout_rows(grant_id,member,address,recipient_json,net_sats,fee_limit_sats,gross_sats) VALUES(?,?,?,?,?,?,?)")
-                .bind(grant.id.to_string()).bind(&row.pubkey).bind(address)
-                .bind(serde_json::to_string(row.recipient.as_ref().context("recipient missing")?)?)
+            let (method, address, recipient_json) = match &row.ecash {
+                Some(destination) => (
+                    destination.method(),
+                    destination.receiving_key(),
+                    serde_json::to_string(destination)?,
+                ),
+                None => (
+                    "lightning",
+                    row.profile
+                        .as_ref()
+                        .and_then(|p| p.lud16.as_deref())
+                        .context("payee missing")?,
+                    serde_json::to_string(row.recipient.as_ref().context("recipient missing")?)?,
+                ),
+            };
+            sqlx::query("INSERT INTO payout_rows(grant_id,member,reward_method,address,recipient_json,net_sats,fee_limit_sats,gross_sats) VALUES(?,?,?,?,?,?,?,?)")
+                .bind(grant.id.to_string()).bind(&row.pubkey).bind(method).bind(address).bind(recipient_json)
                 .bind(i64::try_from(row.net_sats)?).bind(i64::try_from(row.fee_limit_sats)?)
                 .bind(i64::try_from(row.gross_sats)?).execute(&mut *tx).await?;
         }
@@ -469,6 +478,7 @@ fn validate_admission(plan: &Plan, q: &QualifiedFunding, policy: &Policy, now: i
     let mut members = BTreeSet::new();
     let mut addresses = BTreeSet::new();
     let mut callbacks = BTreeSet::new();
+    let mut wallet_keys = BTreeSet::new();
     let mut total = 0u64;
     for row in &plan.rows {
         crate::nostr_event::validate_public_key(&row.pubkey)?;
@@ -481,31 +491,50 @@ fn validate_admission(plan: &Plan, q: &QualifiedFunding, policy: &Policy, now: i
             }
             continue;
         }
-        let profile = row.profile.as_ref().context("payout profile missing")?;
-        profile.validate()?;
-        crate::nostr_event::validate_hex(
-            row.profile_event_id
-                .as_deref()
-                .context("signed profile missing")?,
-            32,
-        )?;
-        let address = profile.lud16.as_deref().context("payout address missing")?;
-        let identity = address_identity(address)?;
-        let recipient = row.recipient.as_ref().context("payout recipient missing")?;
-        recipient.validate(address)?;
+        if let Some(profile) = &row.profile {
+            profile.validate()?;
+            crate::nostr_event::validate_hex(
+                row.profile_event_id
+                    .as_deref()
+                    .context("signed profile missing")?,
+                32,
+            )?;
+        }
+        let address = row.profile.as_ref().and_then(|p| p.lud16.as_deref());
+        if let Some(address) = address {
+            let identity = address_identity(address)?;
+            anyhow::ensure!(
+                !operations.contains(&identity) && addresses.insert(identity),
+                "excluded or shared payout address"
+            );
+        }
         let amount = row
             .net_sats
             .checked_mul(1000)
             .context("payout amount overflow")?;
+        match (&row.ecash, &row.recipient) {
+            (Some(destination), None) => {
+                destination.validate(&row.pubkey)?;
+                anyhow::ensure!(
+                    !plan.funding_source.is_strike()
+                        && wallet_keys.insert(destination.receiving_key()),
+                    "invalid or shared ecash funding destination"
+                );
+            }
+            (None, Some(recipient)) => {
+                recipient.validate(address.context("payout address missing")?)?;
+                anyhow::ensure!(
+                    callbacks.insert(recipient.callback_identity()?)
+                        && (recipient.min_msat..=recipient.max_msat).contains(&amount),
+                    "shared callback or invoice amount outside bounds"
+                );
+            }
+            _ => bail!("each payable member requires one frozen destination"),
+        }
         if row.pubkey == plan.owner
-            || operations.contains(&identity)
-            || !addresses.insert(identity)
-            || !callbacks.insert(recipient.callback_identity()?)
             || row.net_sats == 0
             || row.net_sats > policy.max_net_sats
             || amount > i64::MAX as u64
-            || amount < recipient.min_msat
-            || amount > recipient.max_msat
             || row.fee_limit_sats > policy.max_fee_sats
             || row.net_sats.checked_add(row.fee_limit_sats) != Some(row.gross_sats)
         {

@@ -12,6 +12,7 @@ use std::str::FromStr;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PrivateDestination {
+    pub mint: String,
     pub request_digest: String,
     pub payment_id: Option<String>,
     pub receiving_key: String,
@@ -90,6 +91,7 @@ impl PrivateDestination {
         }
         ensure!(!relays.is_empty(), "missing wallet relay");
         Ok(Self {
+            mint: mint.trim_end_matches('/').to_owned(),
             request_digest: hex::encode(Sha256::digest(text)),
             payment_id: req.payment_id,
             receiving_key,

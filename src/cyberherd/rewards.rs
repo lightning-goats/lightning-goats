@@ -111,6 +111,51 @@ pub enum EcashDestination {
     PrivateEcash(super::private_reward::PrivateDestination),
 }
 impl EcashDestination {
+    pub fn method(&self) -> &'static str {
+        match self {
+            Self::PublicNutzap(_) => "public_nutzap",
+            Self::PrivateEcash(_) => "private_ecash",
+        }
+    }
+
+    pub fn validate(&self, member: &str) -> Result<()> {
+        let key = self.receiving_key();
+        anyhow::ensure!(
+            key.len() == 66
+                && bitcoin::secp256k1::PublicKey::from_slice(&hex::decode(key)?)?.to_string()
+                    == key,
+            "invalid frozen recipient lock"
+        );
+        let (mint, relays) = match self {
+            Self::PublicNutzap(d) => {
+                anyhow::ensure!(
+                    d.member == member && key.starts_with("02"),
+                    "invalid public reward identity"
+                );
+                crate::nostr_event::validate_hex(&d.advertisement, 32)?;
+                anyhow::ensure!(d.read_relays.len() <= 80, "too many read relays");
+                for relay in &d.read_relays {
+                    crate::public_network::validate_destination(relay, "wss")?;
+                }
+                (&d.mint, &d.token_relays)
+            }
+            Self::PrivateEcash(d) => {
+                crate::nostr_event::validate_public_key(&d.transport_key)?;
+                crate::nostr_event::validate_hex(&d.request_digest, 32)?;
+                (&d.mint, &d.relays)
+            }
+        };
+        anyhow::ensure!(
+            mint.trim_end_matches('/')
+                == crate::cashu::treasury::PROJECT_MINT_ORIGIN.trim_end_matches('/')
+                && (1..=8).contains(&relays.len()),
+            "invalid member reward mint or relay count"
+        );
+        for relay in relays {
+            crate::public_network::validate_destination(relay, "wss")?;
+        }
+        Ok(())
+    }
     pub fn receiving_key(&self) -> &str {
         match self {
             Self::PublicNutzap(destination) => &destination.receiving_key,
@@ -519,7 +564,7 @@ mod tests {
             if cashu && private {
                 read.profile.as_mut().unwrap().lud16=None;
                 read.ecash=Some(EcashDestination::PrivateEcash(crate::cyberherd::private_reward::PrivateDestination{
-                    request_digest:"12".repeat(32),payment_id:Some("offline".into()),
+                    mint:crate::cashu::treasury::PROJECT_MINT_ORIGIN.into(), request_digest:"12".repeat(32),payment_id:Some("offline".into()),
                     receiving_key:format!("02{}",public(3)),transport_key:public(4),
                     relays:vec!["wss://relay.example.com/".into()],
                 }));

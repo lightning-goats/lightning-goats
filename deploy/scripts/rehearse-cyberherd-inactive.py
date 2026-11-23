@@ -750,7 +750,7 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
         assert fee_before['report']['rows']['core']['_sqlx_migrations'] == 39
         assert fee_after['report']['rows']['core']['_sqlx_migrations'] == 39
         assert fee_before['report']['rows']['payout']['_sqlx_migrations'] == 7
-        assert fee_after['report']['rows']['payout']['_sqlx_migrations'] == 13
+        assert fee_after['report']['rows']['payout']['_sqlx_migrations'] == 14
         fee_resumed = json.loads(run(*launcher, '--cyberherd-program-maintenance', 'resume-inclusive-fees',
             str(fee_review), '--review-sha256', fee_sha, '--approve-resumption'))
         assert fee_resumed['core_running'] is True and fee_resumed['membership_running'] is True

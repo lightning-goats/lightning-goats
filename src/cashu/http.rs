@@ -112,7 +112,11 @@ async fn deliver(
         return StatusCode::BAD_REQUEST.into_response();
     };
     // All mint/proof/descriptor/attribution validation remains in the wallet.
-    if !serde_json::from_str::<serde_json::Value>(&body).is_ok_and(|v| v.is_object()) {
+    if !serde_json::from_str::<serde_json::Value>(&body).is_ok_and(|v| {
+        v.is_object()
+            || v.as_str()
+                .is_some_and(|s| s.starts_with("cashuA") || s.starts_with("cashuB"))
+    }) {
         return StatusCode::BAD_REQUEST.into_response();
     }
     // A sender may have lost every previous reply. Identical bounded bodies

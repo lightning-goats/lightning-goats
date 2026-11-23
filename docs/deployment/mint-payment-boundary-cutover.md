@@ -39,6 +39,12 @@ PR #170 deployed to the receiver at 17:53:31 UTC on 2026-11-23. Main revision `4
 
 At 17:54:55 UTC receipt `ddbd78d0` verified the deployed change. The acquired Goats token had a gross value of 10 sats and a 1-sat receive fee. The wallet retained 9 sats. Exactly one ledger entry credited 10 sats, taking the pool from 22 to 32. Event 156905 carried 10 sats. At 17:54:59 UTC the signed-message outbox recorded note `67225ae67732` as published, announcing a gift of 10 sats and 968 sats until the next feeding.
 
+### Verified zap settlement source
+
+At 18:48:37 UTC on 2026-11-23 the VPS receive service activated main revision `19e02fe` (PR #171). The CI package and merged main had the same Git tree, `9f9270e6419c8d83abbc20db6d2d5b77c5d5d5e4`. All package checksums passed, and the staged CLI validated the installed receive configuration under the service account. The executable of the running process had SHA-256 `1c3b8965443b28ddc8840e6532b87fdfbbf12031e5a7c2395b47d3d25284502c`. The previous gross-credit-capable receiver is preserved at `/usr/local/bin/lightning-goatsd.pre-pr171`. This release has no schema change.
+
+The loopback health check returned OK. Status reported active mode, a reachable gateway, all six Lightning Address users and 32 of 1,000 sats. The pool also held 32 sats immediately before restart. The typed settlement path passed the Rust zap, bridge and CyberHerd regression tests. A signed mainnet zap and its published kind-9735 receipt still need to be correlated on this revision.
+
 ## CyberHerd member reward delivery
 
 This stage needs coordinated core, membership, payout, signer and collector releases. Quiesce writers and take a verified current backup before applying the additive migrations. Check the archive includes `member_publication.py`, the updated delivery worker and its Nostr wrapper. Install the accompanying `lightning-goats-member-publication.socket` and service on the collector host. The socket must grant access to the payout signer group and the service must verify the connecting signer UID. Its only source is the collector journal. The projection service requires Unix sockets only.

@@ -16,7 +16,7 @@ use std::{os::unix::fs::MetadataExt as _, path::Path, time::Duration};
 const GUARD: &str = "/run/lightning-goats-contact-fixture/ALLOW";
 const ATTESTATION: &[u8] = b"LIGHTNING_GOATS_DISPOSABLE_CONTACT_UPGRADE_CI_v1\n";
 const DATABASE: &str = "/var/lib/lightning-goats/lightning-goats.db";
-const CURRENT_CORE_SCHEMA: usize = 39;
+const CURRENT_CORE_SCHEMA: usize = 40;
 
 fn isolated_fixture() -> Result<u32> {
     let uid = std::fs::metadata("/proc/self")?.uid();
@@ -90,11 +90,15 @@ async fn strip_empty_cashu_fixture(
 ) -> Result<()> {
     // Inspect the entire extension before any DDL. Even a monotonic clock row
     // means the extension was used and must retain its state.
-    for table in CASHU_FIXTURE_TABLES
-        .iter()
-        .copied()
-        .chain(["breez_collected_claims", "breez_project_invoices"])
-    {
+    for table in CASHU_FIXTURE_TABLES.iter().copied().chain([
+        "breez_collected_claims",
+        "breez_project_invoices",
+        "private_contact_entitlements",
+        "private_contact_requests",
+        "private_contact_tenders",
+        "private_contact_cashu_receipts",
+        "private_contact_delivery",
+    ]) {
         let count: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
             .fetch_one(&mut **transaction)
             .await?;
@@ -103,6 +107,41 @@ async fn strip_empty_cashu_fixture(
         }
     }
     breez_schema_fixture::strip_empty(transaction).await?;
+    // Rebuild the unused delivery table with its original Lightning-fee FK,
+    // indexes and triggers from the checked-in migration, inside this fixture only.
+    let original = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await?;
+    sqlx::raw_sql(include_str!("../migrations/0024_private_contacts.sql"))
+        .execute(&original)
+        .await?;
+    let delivery_ddl: Vec<String> = sqlx::query_scalar(
+        "SELECT sql FROM sqlite_schema WHERE tbl_name='private_contact_delivery' AND sql IS NOT NULL ORDER BY rowid",
+    ).fetch_all(&original).await?;
+    original.close().await;
+    sqlx::raw_sql(
+        "DROP VIEW private_contact_excess_receipts;
+        DROP TRIGGER private_contact_lightning_entitlement;
+        DROP TABLE private_contact_delivery;
+        DROP TABLE private_contact_cashu_receipts;
+        DROP TABLE private_contact_tenders;
+        DROP TABLE private_contact_requests;
+        DROP TABLE private_contact_entitlements;",
+    )
+    .execute(&mut **transaction)
+    .await?;
+    for statement in delivery_ddl {
+        sqlx::query(&statement).execute(&mut **transaction).await?;
+    }
+    if sqlx::query("DELETE FROM _sqlx_migrations WHERE version=40")
+        .execute(&mut **transaction)
+        .await?
+        .rows_affected()
+        != 1
+    {
+        bail!("synthetic contact migration missing");
+    }
     for table in CASHU_FIXTURE_TABLES {
         sqlx::query(&format!("DROP TABLE {table}"))
             .execute(&mut **transaction)

@@ -77,6 +77,18 @@ pub(crate) fn verify_issuance_expiry(invoice: &Bolt11Invoice, expected_seconds: 
 }
 
 fn verify_expiry_at(invoice: &Bolt11Invoice, expected_seconds: u64, now: Duration) -> Result<()> {
+    verify_expiry_terms(invoice, expected_seconds, now)?;
+    if invoice.expires_at().is_none_or(|expires| expires <= now) {
+        bail!("BOLT11 is already expired");
+    }
+    Ok(())
+}
+
+pub(crate) fn verify_expiry_terms(
+    invoice: &Bolt11Invoice,
+    expected_seconds: u64,
+    now: Duration,
+) -> Result<()> {
     // Strike derives an integer BOLT11 expiry from an absolute expiration and
     // can round it down by one second. Never accept a longer lifetime, zero,
     // or any larger shortening; all timestamp/expired checks still apply.
@@ -91,9 +103,6 @@ fn verify_expiry_at(invoice: &Bolt11Invoice, expected_seconds: u64, now: Duratio
     // Permit small provider clock skew, never an arbitrarily future invoice.
     if invoice.duration_since_epoch() > now.saturating_add(Duration::from_secs(30)) {
         bail!("BOLT11 timestamp is too far in the future");
-    }
-    if invoice.expires_at().is_none_or(|expires| expires <= now) {
-        bail!("BOLT11 is already expired");
     }
     Ok(())
 }

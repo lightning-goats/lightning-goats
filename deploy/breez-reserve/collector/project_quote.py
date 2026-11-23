@@ -48,13 +48,28 @@ def issue(store, private_client, token, request_id, amount, digest, keyset, attr
         "description_hash": digest, "claim_pubkey": owner,
     }, follow_redirects=False)
     response.raise_for_status()
-    quote = response.json()
+    return record_quote(store, response.json(), request_id, owner, amount, digest, require_current=True)
+
+
+def record_quote(store, quote, request_id, owner, amount, digest, *, require_current):
     if quote["quote"] != "goats-" + request_id or quote["pubkey"] != owner:
         raise ValueError("project quote owner or identity differs")
     invoice = bolt11.decode(quote["request"])
     if (invoice.currency != "bc" or invoice.amount_msat != amount * 1000
-            or invoice.description_hash != digest or invoice.expiry_time <= time.time()
+            or invoice.description_hash != digest or (require_current and invoice.expiry_time <= time.time())
             or not 0 < invoice.expiry <= 3600):
         raise ValueError("signed project invoice differs from requested terms")
     store.record_invoice(request_id, quote["request"], invoice.payment_hash)
     return quote["request"]
+
+
+def recover_invoice(store, client, request_id):
+    """Look up the original quote after an interrupted creation. Never create one here."""
+    terms_text, material_text = store.db.execute(
+        "SELECT terms,material FROM project_claim WHERE id=?", (request_id,)
+    ).fetchone()
+    terms = json.loads(terms_text)
+    owner = PrivateKey(bytes.fromhex(json.loads(material_text)["owner"])).public_key.format().hex()
+    quote = client.get("/v1/mint/quote/bolt11/goats-" + str(UUID(request_id))).raise_for_status().json()
+    record_quote(store, quote, request_id, owner, terms["amount"], terms["description_hash"],
+                 require_current=False)

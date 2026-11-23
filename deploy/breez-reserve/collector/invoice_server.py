@@ -69,6 +69,13 @@ def create(request, store, client, token, keyset, *, delivery_journal=Path("/var
         invoice = issue(store, client, token, request["treasury_id"], request["amount_sat"],
                         request["description_hash"], keyset, {"purpose": "treasury_conversion"})
         return {"invoice": invoice}
+    if set(request) == {"feeder_invoice_lookup"}:
+        row = store.db.execute("""
+            SELECT id,invoice,payment_hash FROM project_claim WHERE id=? AND invoice IS NOT NULL
+              AND json_type(terms,'$.attribution.purpose') IS NULL
+              AND json_extract(terms,'$.attribution.credit_pool')='herd'
+        """, (request["feeder_invoice_lookup"],)).fetchone()
+        return None if row is None else dict(zip(("request_id", "invoice", "payment_hash"), row))
     claim_purposes = {"claim_status": None, "contact_claim_status": "contact_fee",
                       "treasury_claim_status": "treasury_conversion"}
     if len(request) == 1 and next(iter(request)) in claim_purposes:

@@ -441,7 +441,8 @@ def run(installation, core_transaction, destination, create):
         core['service'] = {'listen': '127.0.0.1:18787', 'mode': 'shadow'}
         core['database']['url'] = 'sqlite://' + str(states['core'] / 'lightning-goats.db')
         core['gateway']['url'] = 'http://127.0.0.1:18789/'
-        core.pop('strike', None)
+        for section in ('strike', 'contact', 'cashu', 'cashu_receipts', 'cashu_treasury'):
+            core.pop(section, None)
         core['lnurl'].pop('zap', None)
         core['lnurl'].pop('breez_collector', None)
         core['lnurl']['collector'] = {'socket': str(sockets['core'].parent / 'invoices.sock'),

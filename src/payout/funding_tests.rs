@@ -27,6 +27,59 @@ use crate::{
     reward_funding::{FundingPage, RewardPolicy},
 };
 
+use crate::strike::StrikeClient;
+use sha2::{Digest, Sha256};
+
+pub struct SourceVerifier {
+    client: StrikeClient,
+    scope: ProviderScope,
+}
+
+impl SourceVerifier {
+    pub(crate) fn scope(account_id: Uuid, expected: &str, key: &str) -> Result<ProviderScope> {
+        crate::nostr_event::validate_hex(expected, 32)?;
+        if account_id.is_nil()
+            || key.is_empty()
+            || key.len() > 4096
+            || key.chars().any(char::is_control)
+            || key.trim() != key
+        {
+            bail!("invalid payout account/credential binding");
+        }
+        let actual = hex::encode(Sha256::digest(key.as_bytes()));
+        if actual != expected {
+            bail!("payout credential differs from root fingerprint");
+        }
+        Ok(ProviderScope {
+            environment: "strike-production".into(),
+            account_id,
+            credential_fingerprint: actual,
+        })
+    }
+
+    pub fn provider_scope(&self) -> &ProviderScope {
+        &self.scope
+    }
+
+    pub(super) async fn verify(&self, anchor: &StrikeFundingAnchor) -> Result<()> {
+        anchor.validate()?;
+        // Existing authoritative receive verification handles exact signed
+        // request identity and BTC/P2P actual credited amount without rounding.
+        // Keep private request IDs/provider errors out of returned diagnostics.
+        let actual = self
+            .client
+            .reconcile_completed_receive(&anchor.stored_request(), anchor.receive_id)
+            .await
+            .map_err(|_| {
+                anyhow::anyhow!("payout credential could not qualify consumed Strike receive")
+            })?;
+        if actual.amount_msat != anchor.settled_msat || actual.payment_hash != anchor.settled_hash {
+            bail!("provider receive contradicts consumed reward funding");
+        }
+        Ok(())
+    }
+}
+
 const KEY: &str = "synthetic-payout-read-key";
 
 #[path = "provider_workflow_tests.rs"]
@@ -1549,10 +1602,10 @@ fn payout_identity_configuration_and_key_fingerprint_cannot_be_silently_rebound(
         assert!(c.validate().is_err());
     }
     let fingerprint = hex::encode(Sha256::digest(KEY.as_bytes()));
-    assert!(SourceVerifier::new(Uuid::nil(), &fingerprint, KEY.into()).is_err());
-    assert!(SourceVerifier::new(Uuid::new_v4(), &"00".repeat(32), KEY.into()).is_err());
-    assert!(SourceVerifier::new(Uuid::new_v4(), &fingerprint, format!("{KEY}\n")).is_err());
-    assert!(SourceVerifier::new(Uuid::new_v4(), &fingerprint, KEY.into()).is_ok());
+    assert!(SourceVerifier::scope(Uuid::nil(), &fingerprint, KEY).is_err());
+    assert!(SourceVerifier::scope(Uuid::new_v4(), &"00".repeat(32), KEY).is_err());
+    assert!(SourceVerifier::scope(Uuid::new_v4(), &fingerprint, &format!("{KEY}\n")).is_err());
+    assert!(SourceVerifier::scope(Uuid::new_v4(), &fingerprint, KEY).is_ok());
 }
 
 #[tokio::test]

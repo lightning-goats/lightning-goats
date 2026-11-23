@@ -66,7 +66,6 @@ async fn admitted_plan_recovers_lost_intake_checkpoint_without_core_or_new_provi
         store: store.clone(),
         core: Client::new(f.root.path().join("offline-core.sock"), uid + 1).unwrap(),
         plans: Plans::new(socket, uid, owner()).unwrap(),
-        verifier: None,
     };
     let db = sqlx::SqlitePool::connect(&url).await.unwrap();
     sqlx::query("CREATE TRIGGER fail_intake BEFORE INSERT ON payout_intake_receipts BEGIN SELECT RAISE(ABORT,'synthetic checkpoint failure'); END").execute(&db).await.unwrap();

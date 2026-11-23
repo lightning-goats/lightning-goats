@@ -1,5 +1,6 @@
 """Verify private NUT-18 delivery, offline retry and recipient-only decryption."""
 import base64
+import hashlib
 import json
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -17,7 +18,8 @@ from cashu.core.nuts import nut18, nut26
 repo = Path(__file__).resolve().parents[3]
 collector = repo/"deploy/breez-reserve/collector"
 sys.path.insert(0, str(collector))
-from operator_delivery import MINT, deliver, destination, publish
+from invoice_server import member_delivery_ack
+from operator_delivery import MINT, deliver, deliver_private_members, destination, public_relay_socket, publish
 
 
 def run():
@@ -61,6 +63,7 @@ def run():
         assert len(observed)==2 and observed[0]==observed[1]
         # A relay acknowledging another event cannot complete this token's delivery.
         relay = Mock()
+        relay.getstatus.return_value = 101
         relay.recv.side_effect = [json.dumps(["OK", "00"*32, True, ""]), ConnectionError()]
         with patch("operator_delivery.websocket.create_connection", return_value=relay):
             assert not publish("wss://relay.example", observed[0])
@@ -73,6 +76,29 @@ process.stdout.write(rumor.content);"""
         result=subprocess.run(["node","-e",program],cwd=root,input=json.dumps({"key":key.secret.hex(),"event":observed[0]}),
                               capture_output=True,text=True,check=True)
         assert json.loads(result.stdout)=={"mint":MINT,"unit":"sat","proofs":proofs,"id":"fixture"}
+        source.execute("create table member_ecash(feed,token,amount_sat)")
+        source.execute("insert into member_ecash select 'member-ecash:feed:alice',token,amount_sat from operator_ecash where feed='feed'")
+        frozen = {"recipient":lock, "assignment":{"destination":{"method":"private_ecash",
+                  "payment_id":"member-test", "receiving_key":lock, "transport_key":expected[2], "relays":expected[3]}}}
+        source.execute("insert into proof_disposition values('member-ecash:feed:alice',?)",(json.dumps(frozen),))
+        observed.clear()
+        stamp = hashlib.sha256(source.execute("select token from member_ecash").fetchone()[0].encode()).hexdigest()
+        for n in range(3):
+            assert member_delivery_ack("member-ecash:feed:alice",stamp,root/"outbox.sqlite") == (n == 2)
+            journal = sqlite3.connect(root/"outbox.sqlite")
+            deliver_private_members(source,journal,wrapper,sender)
+            journal.close()
+        assert len(observed)==2 and observed[0]==observed[1]
+        result=subprocess.run(["node","-e",program],cwd=root,input=json.dumps({"key":key.secret.hex(),"event":observed[0]}),
+                              capture_output=True,text=True,check=True)
+        assert json.loads(result.stdout)=={"mint":MINT,"unit":"sat","proofs":proofs,"id":"member-test"}
+        with patch("operator_delivery.socket.getaddrinfo", return_value=[(2,1,6,"",("127.0.0.1",443))]):
+            try:
+                public_relay_socket("wss://relay.example")
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("accepted private relay address")
         print("Private wallet delivery passed: decrypted NUT-18 payload, identical retry and one acknowledged delivery.")
 
 

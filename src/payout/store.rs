@@ -206,6 +206,7 @@ impl Store {
             "payout_operator_invoices",
             "payout_operator_allocations",
             "payout_worker_clock",
+            "member_ecash_ready",
             "payout_worker_attempts",
             "payout_core_execution_claims",
             "payout_cost_acks",

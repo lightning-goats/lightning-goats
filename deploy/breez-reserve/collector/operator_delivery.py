@@ -3,9 +3,12 @@ import argparse
 import base64
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
+import ipaddress
 import json
 from pathlib import Path
+import socket
 import sqlite3
+import ssl
 import subprocess
 import time
 from urllib.parse import urlsplit
@@ -82,10 +85,40 @@ def envelope(token, amount, request_id, lock, transport_key, wrapper):
     return result.stdout
 
 
-def publish(url, event):
+def public_relay_socket(url):
+    parsed = urlsplit(url)
+    if (parsed.scheme != "wss" or not parsed.hostname or parsed.username is not None
+            or parsed.password is not None or parsed.fragment or "%" in parsed.hostname):
+        raise ValueError("invalid member relay")
+    addresses = socket.getaddrinfo(parsed.hostname, parsed.port or 443, type=socket.SOCK_STREAM)
+    for _, _, _, _, endpoint in addresses:
+        address = ipaddress.ip_address(endpoint[0])
+        if (not address.is_global or address.is_multicast
+                or address.version == 6 and (address not in ipaddress.ip_network("2000::/3")
+                    or address in ipaddress.ip_network("2002::/16")
+                    or address in ipaddress.ip_network("2001::/23"))
+                or address in ipaddress.ip_network("192.0.0.0/24")):
+            raise ValueError("member relay requires public unicast")
+    context = ssl.create_default_context()
+    for family, kind, protocol, _, endpoint in addresses:
+        with socket.socket(family, kind, protocol) as raw:
+            raw.settimeout(5)
+            try:
+                raw.connect(endpoint)
+                return context.wrap_socket(raw, server_hostname=parsed.hostname)
+            except OSError:
+                continue
+    raise ConnectionError("member relay unavailable")
+
+
+def publish(url, event, *, public_only=False):
     conn = None
+    stream = None
     try:
-        conn = websocket.create_connection(url, timeout=5, redirect_limit=0, suppress_origin=True)
+        stream = public_relay_socket(url) if public_only else None
+        conn = websocket.create_connection(url, timeout=5, redirect_limit=0, suppress_origin=True, socket=stream)
+        if conn.getstatus() != 101:
+            return False
         conn.send(json.dumps(["EVENT", event]))
         deadline = time.monotonic() + 6
         while time.monotonic() < deadline:
@@ -98,10 +131,12 @@ def publish(url, event):
     finally:
         if conn is not None:
             conn.close(timeout=1)
+        if stream is not None:
+            stream.close()
     return False
 
 
-def deliver_token(journal, feed, token, amount, recipient, request, wrapper=HERE/"operator_wrap.cjs", send=publish):
+def deliver_token(journal, feed, token, amount, recipient, resolve_destination, wrapper, send):
     journal.execute("CREATE TABLE IF NOT EXISTS delivery(feed TEXT PRIMARY KEY,token_hash TEXT NOT NULL,event TEXT NOT NULL,relays TEXT NOT NULL,ack_at INTEGER)")
     stamp = hashlib.sha256(token.encode()).hexdigest()
     with journal:
@@ -115,7 +150,7 @@ def deliver_token(journal, feed, token, amount, recipient, request, wrapper=HERE
             message, urls = row[1], json.loads(row[2])
         else:
             # Rotation applies to matching tokens only. Existing envelopes keep their route.
-            rid, lock, transport_key, relays = destination(request)
+            rid, lock, transport_key, relays = resolve_destination()
             if recipient != lock:
                 return False
             message, urls = envelope(token, amount, rid, lock, transport_key, wrapper), relays
@@ -137,11 +172,31 @@ def deliver(source, journal, request, wrapper=HERE/"operator_wrap.cjs", send=pub
     """)
     for feed, token, amount, binding in rows:
         try:
-            deliver_token(journal, feed, token, amount, json.loads(binding)["recipient"], request, wrapper, send)
+            deliver_token(journal, feed, token, amount, json.loads(binding)["recipient"], lambda: destination(request), wrapper, send)
         except (ValueError, TypeError, KeyError, subprocess.SubprocessError):
             # A held envelope must not block delivery for later confirmed feeds.
             # Keep token material and recipient details out of the service log.
             print("Operator delivery deferred for one feed; original token retained.", flush=True)
+
+
+def publish_member(url, event):
+    return publish(url, event, public_only=True)
+
+
+def deliver_private_members(source, journal, wrapper=HERE/"operator_wrap.cjs", send=publish_member):
+    rows = source.execute("""
+        SELECT m.feed,m.token,m.amount_sat,p.binding FROM member_ecash m
+        JOIN proof_disposition p ON p.id=m.feed WHERE m.token IS NOT NULL
+        AND json_extract(p.binding,'$.assignment.destination.method')='private_ecash'
+    """)
+    for disposition, token, amount, binding in rows:
+        try:
+            terms = json.loads(binding)
+            frozen = terms["assignment"]["destination"]
+            route = frozen.get("payment_id"), frozen["receiving_key"], frozen["transport_key"], frozen["relays"]
+            deliver_token(journal, disposition, token, amount, terms["recipient"], lambda: route, wrapper, send)
+        except (ValueError, TypeError, KeyError, subprocess.SubprocessError):
+            print("Private member delivery deferred; original token retained.", flush=True)
 
 
 if __name__ == "__main__":
@@ -153,6 +208,7 @@ if __name__ == "__main__":
     while True:
         try:
             deliver(source, journal, args.request.read_text().strip())
+            deliver_private_members(source, journal)
         except Exception:
             print("Operator delivery deferred; original token retained.", flush=True)
         time.sleep(5)

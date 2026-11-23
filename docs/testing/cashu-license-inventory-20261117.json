@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "lock_sha256": {
-    "Cargo.lock": "e42a331088ba14028d6c5d63d3fa00afc991a9026bf9e530777da21f89eede6b",
+    "Cargo.lock": "d8c86b79e6cdd0aeca5e3000ba62ff59fe6a689cc0ba2a42f6877e965613cc44",
     "tools/cashu-compat/Cargo.lock": "efdafa2f651901d846e86d3129a55bc6bbf69a8a619316ec367a2d84174dd05d"
   },
   "scope": "full lockfile graphs, not a linked-binary inventory",
@@ -2058,6 +2058,30 @@
       "archive_vcs_info": {
         "git": {
           "sha1": "ce6f07fc3d56d6a56ecfc32256d2c33bd0b4ad09"
+        },
+        "path_in_vcs": ""
+      }
+    },
+    {
+      "name": "emojis",
+      "version": "0.9.1",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "graphs": [
+        "Cargo.lock"
+      ],
+      "status": "verified_archive",
+      "checksum": "589871e639330783bc20ad89d32ac1b049e02c273d96c907ca27478c8bc674a2",
+      "declared_license": "(MIT OR Apache-2.0) AND Unicode-3.0",
+      "license_file": null,
+      "license_notice_files_sha256": {
+        "LICENSE-APACHE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+        "LICENSE-MIT": "f9c4c77baa3828004ee54b8a4f2db2e88ed44a6237a493965bf551fac0fcb62d",
+        "LICENSE-UNICODE": "f7db81051789b729fea528a63ec4c938fdcb93d9d61d97dc8cc2e9df6d47f2a1"
+      },
+      "archive_repository": "https://github.com/rossmacarthur/emojis",
+      "archive_vcs_info": {
+        "git": {
+          "sha1": "7dcf97cdb6241a4f37569ab76a4fed1d1643a6cc"
         },
         "path_in_vcs": ""
       }
@@ -4190,7 +4214,7 @@
       ],
       "status": "local_manifest",
       "manifest": "Cargo.toml",
-      "manifest_sha256": "26beec3bab6d3eb5cce54eefeb2a49e78a660b4fd74e748c0880f59ba4d5a68c",
+      "manifest_sha256": "f9e0f28ab559f18561de3e3d505a6e64caed0f5bc943647d6c8192973cbc26c3",
       "declared_license": "MIT",
       "license_file": null,
       "license_notice_files_sha256": {
@@ -5133,6 +5157,28 @@
       }
     },
     {
+      "name": "phf",
+      "version": "0.13.1",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "graphs": [
+        "Cargo.lock"
+      ],
+      "status": "verified_archive",
+      "checksum": "c1562dc717473dbaa4c1f85a36410e03c047b2e7df7f45ee938fbef64ae7fadf",
+      "declared_license": "MIT",
+      "license_file": null,
+      "license_notice_files_sha256": {
+        "LICENSE": "0ab4d106b6faac07fb6a051815fd1b4d862d730895e2d7d7358c2f13565e7a38"
+      },
+      "archive_repository": "https://github.com/rust-phf/rust-phf",
+      "archive_vcs_info": {
+        "git": {
+          "sha1": "1e518a6e94a2444b8df7d89078cfc69859537971"
+        },
+        "path_in_vcs": "phf"
+      }
+    },
+    {
       "name": "phf_shared",
       "version": "0.12.1",
       "source": "registry+https://github.com/rust-lang/crates.io-index",
@@ -5150,6 +5196,28 @@
       "archive_vcs_info": {
         "git": {
           "sha1": "03a930696231da01005e762425841f91587b3e04"
+        },
+        "path_in_vcs": "phf_shared"
+      }
+    },
+    {
+      "name": "phf_shared",
+      "version": "0.13.1",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "graphs": [
+        "Cargo.lock"
+      ],
+      "status": "verified_archive",
+      "checksum": "e57fef6bc5981e38c2ce2d63bfa546861309f875b8a75f092d1d54ae2d64f266",
+      "declared_license": "MIT",
+      "license_file": null,
+      "license_notice_files_sha256": {
+        "LICENSE": "0ab4d106b6faac07fb6a051815fd1b4d862d730895e2d7d7358c2f13565e7a38"
+      },
+      "archive_repository": "https://github.com/rust-phf/rust-phf",
+      "archive_vcs_info": {
+        "git": {
+          "sha1": "1e518a6e94a2444b8df7d89078cfc69859537971"
         },
         "path_in_vcs": "phf_shared"
       }

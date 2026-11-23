@@ -55,7 +55,7 @@ python3 deploy/scripts/export-cashu-notices.py \
   --supplement docs/licenses/cashu-upstream-supplement.json
 ```
 
-Choose a new output directory. The export covers all 462 locked package
+Choose a new output directory. The export covers all 465 locked package
 entries. The report retains `distribution_ready:false` pending selection and
 verification of the actual distribution artifact and its linked dependencies.
 

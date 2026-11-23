@@ -194,6 +194,17 @@ impl LedgerStore {
             bail!("invalid feeder cooldown");
         }
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        // A later refusal cannot undo this owner's correlated ON notification.
+        // Preserve the original attempt for positive confirmation or manual review.
+        let pulse_seen: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM event_log WHERE event_type='feeder_pulse_started' AND json_extract(payload_json,'$.feed_attempt_id')=?)",
+        )
+        .bind(id.to_string())
+        .fetch_one(&mut *tx)
+        .await?;
+        if pulse_seen {
+            bail!("gateway refusal contradicts recorded feeder pulse");
+        }
         let changed = sqlx::query("UPDATE feed_attempts SET status='reconciled_not_fed', resolved_at=unixepoch(), error=NULL WHERE id=? AND status IN ('intent_committed','unknown')")
             .bind(id.to_string()).execute(&mut *tx).await?;
         if changed.rows_affected() != 1 {

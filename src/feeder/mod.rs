@@ -327,6 +327,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_refusal_after_a_pulse_cannot_release_the_next_dispatch() {
+        let (_directory, ledger) = credited_store(1_000).await;
+        let id = ledger.begin_feed_attempt(1_000).await.unwrap().unwrap();
+        ledger
+            .append_event(
+                "feeder_pulse_started",
+                &serde_json::json!({"feed_attempt_id":id}),
+            )
+            .await
+            .unwrap();
+        assert!(ledger.resolve_feed_not_dispatched(id, 1).await.is_err());
+        ledger
+            .mark_interrupted_feed_intents_unknown()
+            .await
+            .unwrap();
+        assert!(ledger.resolve_feed_not_dispatched(id, 1).await.is_err());
+        assert!(ledger.begin_feed_attempt(1_000).await.is_err());
+        assert_eq!(ledger.feed_credit_sats().await.unwrap(), 1_000);
+        ledger.reconcile_unknown_as_fed(id).await.unwrap();
+        assert_eq!(ledger.feed_credit_sats().await.unwrap(), 0);
+    }
+
+    #[tokio::test]
     async fn drains_two_thresholds_and_leaves_340() {
         let (_directory, ledger) = credited_store(2_340).await;
         let posts = Arc::new(AtomicUsize::new(0));

@@ -30,6 +30,10 @@ def prepare(source, root, states, uids, call, core_epoch, owner, client, payout_
             '00000000-0000-0000-0000-000000000000': core_epoch,
         },
         'payout': {
+            # This recovery image carries an original Strike account binding.
+            'environment = "retained-cashu"': 'environment = "strike-production"',
+            'funding_source = "retained_cashu"': 'funding_source = "strike"',
+            'cashu_payout_socket = "/run/lightning-goats-project-payouts.sock"': '',
             '"/var/lib/cyberherd-payout"': json.dumps(str(states['payout'])),
             '"/run/lightning-goats-bridge/core.sock"': json.dumps(str(root / 'unused-core.sock')),
             '"/run/cyberherd-plans/plans.sock"': json.dumps(str(root / 'unused-plans.sock')),

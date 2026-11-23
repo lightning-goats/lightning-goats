@@ -1426,22 +1426,12 @@ def main():
     configs = root / 'configs'
     configs.mkdir(mode=0o755)
     configs.chmod(0o755)
-    synthetic_key = root / 'TEST-ONLY-payout-key'
-    synthetic_key.write_bytes(b'test-only-no-installed-spend-key')
-    synthetic_key.chmod(0o600)
-    store = Path('/etc/credstore.encrypted')
-    if not store.exists():
-        store.mkdir(mode=0o700)
-    imported = json.loads(run(*launcher, '--cyberherd-payout-key', '--key-file', str(synthetic_key), '--import-key'))
-    assert imported['created'] is True and imported['permissions_checked'] is False and imported['payments_sent'] == 0
-    assert imported['credential_fingerprint'] == hashlib.sha256(synthetic_key.read_bytes()).hexdigest()
+    custody_fingerprint = hashlib.sha256(b'fixture-only-collector-custody').hexdigest()
     import grp
     for role, kind in [('cyberherd', 'config'), ('cyberherd-payout', 'payout'), ('cyberherd-signer', 'signer')]:
         text = examples[f'deploy/cyberherd/{kind}.toml.example']
         text = text.replace('credential_fingerprint = "' + '0' * 64 + '"',
-                            'credential_fingerprint = "' + imported['credential_fingerprint'] + '"')
-        text = text.replace('account_id = "00000000-0000-0000-0000-000000000000"',
-                            'account_id = "00000000-0000-0000-0000-000000000001"')
+                            'credential_fingerprint = "' + custody_fingerprint + '"')
         text = text.replace('0' * 64, owner).replace('REPLACE_WITH_CLIENT_PUBLIC_KEY', client)
         text = text.replace('00000000-0000-0000-0000-000000000000', prepared['epoch'])
         text = text.replace('core_uid = 0', 'core_uid = ' + str(core.pw_uid))

@@ -55,10 +55,7 @@ is not needed to install/initialize. Preserve optional capabilities as disabled.
 Choose these values from the existing system and operator policy, not fixture
 values in tests. Unknown/native-invalid fields fail before installing paths.
 
-The separate [payout-key import](cyberherd-payout-credential.md) provides a reviewed
-file-based command for deriving that fingerprint without a webhook secret,
-changing the receive key, starting a service or making a payment. Actual import
-remains an explicit operator step; offline encryption does not prove API scopes.
+Use the [collector payout scope](cyberherd-payout-credential.md) for a fresh journal.
 The [separate NIP-46 client preparation](cyberherd-nostr-clients.md) likewise
 creates only authentication clients; household authorization/signing qualification
 remains separate and the project's signing secret never moves to the VPS.

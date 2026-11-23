@@ -66,6 +66,12 @@ async fn policy_check_has_no_file_authority_and_rejects_missing_roles_shared_own
     let root = tempfile::TempDir::new().unwrap();
     let good = policy(root.path());
     good.validate().unwrap();
+    let mut retained = good.clone();
+    retained.provider.environment = "retained-cashu".into();
+    retained.provider.account_id = retained.epoch;
+    retained.validate().unwrap();
+    retained.provider.account_id = Uuid::new_v4();
+    assert!(retained.validate().is_err());
     for change in 0..5 {
         let mut bad = good.clone();
         match change {

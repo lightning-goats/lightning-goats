@@ -21,6 +21,14 @@ pub struct ProviderScope {
     pub credential_fingerprint: String,
 }
 
+impl ProviderScope {
+    pub(crate) fn matches_journal_epoch(&self, epoch: Uuid) -> bool {
+        !self.account_id.is_nil()
+            && (self.environment == "strike-production"
+                || (self.environment == "retained-cashu" && self.account_id == epoch))
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ExpectedPlan {
     pub core_uid: u32,

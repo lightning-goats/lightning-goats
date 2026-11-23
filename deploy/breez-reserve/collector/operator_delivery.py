@@ -133,7 +133,12 @@ def deliver(source, journal, request, wrapper=HERE/"operator_wrap.cjs", send=pub
         JOIN proof_disposition p ON p.id=e.feed WHERE e.token IS NOT NULL
     """)
     for feed, token, amount, binding in rows:
-        deliver_token(journal, feed, token, amount, json.loads(binding)["recipient"], request, wrapper, send)
+        try:
+            deliver_token(journal, feed, token, amount, json.loads(binding)["recipient"], request, wrapper, send)
+        except (ValueError, TypeError, KeyError, subprocess.SubprocessError):
+            # A held envelope must not block delivery for later confirmed feeds.
+            # Keep token material and recipient details out of the service log.
+            print("Operator delivery deferred for one feed; original token retained.", flush=True)
 
 
 if __name__ == "__main__":

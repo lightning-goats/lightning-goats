@@ -31,6 +31,8 @@ def run():
     raw = json.dumps({"unit":"sat","token":[{"mint":MINT,"proofs":proofs}]})
     source = sqlite3.connect(":memory:")
     source.executescript("create table operator_ecash(feed,token,amount_sat);create table proof_disposition(id,binding);")
+    source.execute("insert into operator_ecash values('earlier','invalid',8)")
+    source.execute("insert into proof_disposition values('earlier','{}')")
     source.execute("insert into operator_ecash values('feed',?,8)",("cashuA"+base64.urlsafe_b64encode(raw.encode()).decode(),))
     source.execute("insert into proof_disposition values('feed',?)",(json.dumps({"recipient":lock}),))
     with tempfile.TemporaryDirectory() as tmp:

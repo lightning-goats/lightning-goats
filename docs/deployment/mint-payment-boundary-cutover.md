@@ -62,3 +62,9 @@ A live POST for the herd froze 968 sats with 32 sats of credit toward a 1,000-sa
 ### Treasury destination after direct-provider retirement
 
 Configure the treasury destination for the Goats mint and use the existing project collector socket. The production worker selects only reservations already bound to that mint and wallet epoch. Historical reservations retain their original destination, signed invoice, funding lots and payment hash. Read or reconcile them under their original identity. Changing the configured mint cannot turn an old reservation into a project quote or create an additional feeder credit.
+
+### VPS payout worker, 2026-11-23
+
+The VPS installed the CyberHerd payout worker and service unit from main commit `91ab30df2972c5780b11ec8b778e14c22f4736ef` (PR #175). The release verifier checked all 114 package files. After restart the running executable matched SHA-256 `caf2dc572d4c29dfffe26b1c62d78dc448469e66369467197943a1d8ced387ad`, with zero automatic restarts. The service used retained Cashu funding and had no Strike payout API key mounted.
+
+The ledger contained three historical Strike payment bindings before deployment. All three had a final completed payment record. The installer compared their original intent IDs, payment IDs and final states before and after restart and found them identical, with zero conflicts. The previous executable and unit are in `/var/backups/retire-direct-payout-175-7hqdl5c8` on the VPS. This release check involved no transfers. Live verification of a new opted-in member payout requires an eligible member and confirmed feeding.

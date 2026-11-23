@@ -3,8 +3,6 @@
 Usage: python3 -B deploy/waf/acceptance.py /path/to/coreruleset-4.30.0 /path/to/module.so
 LG_WAF_MODE=DetectionOnly exercises the tuning stage; default On proves blocking.
 """
-import hashlib
-import hmac
 import json
 import os
 from pathlib import Path
@@ -52,16 +50,6 @@ class WafAcceptance(NginxAssemblyTests):
         for file in self.root.rglob("*.log"):
             self.assertNotIn(sentinel, file.read_text(errors="replace"), str(file))
             self.assertNotIn(token, file.read_text(errors="replace"), str(file))
-
-    def test_exact_signed_body_and_headers(self):
-        body = b'{ "id": "synthetic-private-body", "eventType": "receive-request.receive-completed" }\n'
-        signature = hmac.new(b"synthetic-test-secret", body, hashlib.sha256).hexdigest()
-        headers = {"Content-Type": "application/json", "X-Webhook-Signature": signature}
-        status, _, _ = self.request("production", "/api/v1/strike/webhook", "POST", body, headers)
-        self.assertEqual(status, 200)
-        backend = self.backends["production"]
-        self.assertEqual(backend.bodies[-1], body)
-        self.assertEqual(backend.calls[-1][2]["X-Webhook-Signature"], signature)
 
     def test_crs_and_engine_enforcement(self):
         for path, headers in [
@@ -171,7 +159,7 @@ class CashuWaf(unittest.TestCase):
             if expected == 200:
                 self.assertEqual(backend.bodies[-1], body)
         before = len(backend.calls)
-        status, _, _ = self.request('production', '/api/v1/strike/webhook', 'POST',
+        status, _, _ = self.request('production', '/api/v1/contact', 'POST',
                                     b'{}' + b' ' * 32767, headers, source='127.0.9.3')
         self.assertEqual(status, 413)
         self.assertEqual(len(backend.calls), before)

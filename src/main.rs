@@ -35,11 +35,9 @@ use tracing_subscriber::EnvFilter;
 mod contact_cashu;
 mod paused_recovery;
 
-const MAX_STRIKE_WEBHOOK_BODY: usize = 32 * 1024;
-
 #[derive(Debug, Parser)]
 #[command(name = "lightning-goatsd")]
-#[command(about = "Lightning Goats Strike payment accounting and feeder automation service")]
+#[command(about = "Lightning Goats payment accounting and feeder automation service")]
 struct Args {
     #[arg(long, default_value = "/etc/lightning-goats/config.toml")]
     config: PathBuf,
@@ -53,7 +51,6 @@ struct AppState {
     config: Arc<AppConfig>,
     ledger: LedgerStore,
     gateway: GatewayClient,
-    strike: Option<StrikeRuntime>,
     lnurl: LnurlService,
     renderer: MessageRenderer,
     status_slots: Arc<tokio::sync::Semaphore>,
@@ -205,7 +202,6 @@ async fn main() -> Result<()> {
         config: Arc::clone(&config),
         ledger: ledger.clone(),
         gateway: gateway.clone(),
-        strike: strike.clone(),
         lnurl,
         renderer: renderer.clone(),
         status_slots: Arc::new(tokio::sync::Semaphore::new(4)),
@@ -409,10 +405,6 @@ fn app(state: AppState) -> Router {
         .route(
             "/api/v1/feeding/checkout",
             post(feeding_checkout).layer(DefaultBodyLimit::max(512)),
-        )
-        .route(
-            "/api/v1/strike/webhook",
-            post(strike_webhook).layer(DefaultBodyLimit::max(MAX_STRIKE_WEBHOOK_BODY)),
         )
         .route("/.well-known/lnurlp/{user}", get(lnurl_discovery))
         .route(
@@ -631,7 +623,7 @@ async fn lnurl_callback(
         ),
         Err(error @ LnurlServiceError::Provider(_)) => {
             if let Some(internal) = error.internal_error() {
-                tracing::error!(%internal, %user, amount_msat, "Strike-backed LNURL invoice creation failed");
+                tracing::error!(%internal, %user, amount_msat, "mint-backed LNURL invoice creation failed");
             }
             lnurl_error(StatusCode::BAD_GATEWAY, error.public_reason())
         }
@@ -640,60 +632,6 @@ async fn lnurl_callback(
 
 fn lnurl_error(status: StatusCode, reason: &str) -> Response {
     (status, Json(LnurlErrorResponse::new(reason))).into_response()
-}
-
-async fn strike_webhook(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    body: Bytes,
-) -> StatusCode {
-    let Some(strike) = &state.strike else {
-        return StatusCode::NOT_FOUND;
-    };
-    if !headers
-        .get("content-type")
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| {
-            v.split(';')
-                .next()
-                .unwrap_or("")
-                .trim()
-                .eq_ignore_ascii_case("application/json")
-        })
-    {
-        return StatusCode::UNSUPPORTED_MEDIA_TYPE;
-    }
-    if body.len() > MAX_STRIKE_WEBHOOK_BODY {
-        tracing::warn!(body_len = body.len(), "rejected oversized Strike webhook");
-        return StatusCode::PAYLOAD_TOO_LARGE;
-    }
-    let Some(signature) = headers
-        .get("x-webhook-signature")
-        .and_then(|value| value.to_str().ok())
-    else {
-        tracing::warn!("rejected Strike webhook without a valid signature header");
-        return StatusCode::UNAUTHORIZED;
-    };
-
-    if let Err(error) = strike.verify_webhook_signature(&body, signature) {
-        tracing::warn!(%error, "rejected Strike webhook with invalid signature");
-        return StatusCode::UNAUTHORIZED;
-    }
-    let event = match strike.parse_completed_event(&body) {
-        Ok(event) => event,
-        Err(error) => {
-            tracing::warn!(%error, "rejected unsupported or malformed signed Strike webhook");
-            return StatusCode::BAD_REQUEST;
-        }
-    };
-
-    match state.ledger.enqueue_strike_event(&event).await {
-        Ok(()) => StatusCode::NO_CONTENT,
-        Err(error) => {
-            tracing::error!(%error,"Strike inbox persistence failed; notification remains retryable");
-            StatusCode::SERVICE_UNAVAILABLE
-        }
-    }
 }
 
 fn private_response(status: StatusCode, value: serde_json::Value) -> Response {
@@ -891,7 +829,6 @@ async fn shutdown_signal() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hmac::{Hmac, Mac};
 
     #[test]
     fn private_contact_ingress_is_default_off_and_refuses_capabilities_in_urls() {
@@ -941,36 +878,14 @@ mod tests {
             Err(StatusCode::UNSUPPORTED_MEDIA_TYPE)
         );
     }
-    use lightning_goats::strike::{StrikeClient, StrikeWebhookVerifier};
-    use sha2::Sha256;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[tokio::test]
-    async fn webhook_acknowledges_only_durable_inbox_without_waiting_for_provider() {
+    async fn retired_webhook_and_public_resource_limits_preserve_paid_state() {
         let directory = tempfile::TempDir::new().unwrap();
         let db = format!("sqlite://{}", directory.path().join("inbox.db").display());
         let ledger = LedgerStore::connect(&db).await.unwrap();
-        let calls = Arc::new(AtomicUsize::new(0));
-        let provider = Router::new().fallback({
-            let calls = calls.clone();
-            move || {
-                let calls = calls.clone();
-                async move {
-                    calls.fetch_add(1, Ordering::SeqCst);
-                    tokio::time::sleep(Duration::from_secs(30)).await;
-                    StatusCode::SERVICE_UNAVAILABLE
-                }
-            }
-        });
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let provider_url = format!("http://{}/", listener.local_addr().unwrap());
-        let provider_task =
-            tokio::spawn(async move { axum::serve(listener, provider).await.unwrap() });
-        let strike = StrikeRuntime::new(
-            StrikeClient::new(&provider_url, "synthetic-receive-only".into()).unwrap(),
-            StrikeWebhookVerifier::new("synthetic-webhook-secret".into()).unwrap(),
-        );
         let config: AppConfig =
             toml::from_str(include_str!("../deploy/config.canary.toml.example")).unwrap();
         let mut mint_config = config.lnurl.clone();
@@ -987,7 +902,6 @@ mod tests {
             config: Arc::new(config),
             ledger: ledger.clone(),
             gateway: GatewayClient::new("http://127.0.0.1:9/").unwrap(),
-            strike: Some(strike),
             lnurl,
             renderer: MessageRenderer::embedded().unwrap(),
             status_slots: Arc::new(tokio::sync::Semaphore::new(4)),
@@ -1024,29 +938,21 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(admissions, 0);
-        assert_eq!(calls.load(Ordering::SeqCst), 0);
-        let body = serde_json::json!({"id":uuid::Uuid::new_v4(),"eventType":"receive-request.receive-completed","webhookVersion":"v1","data":{"entityId":uuid::Uuid::new_v4(),"receiveId":uuid::Uuid::new_v4()}}).to_string();
-        let signature = |body: &str| {
-            let mut mac = Hmac::<Sha256>::new_from_slice(b"synthetic-webhook-secret").unwrap();
-            mac.update(body.as_bytes());
-            hex::encode(mac.finalize().into_bytes())
-        };
-        let post = |body: String| {
+        assert_eq!(
             client
                 .post(&url)
-                .header("content-type", "application/json")
-                .header("x-webhook-signature", signature(&body))
-                .body(body)
+                .json(&serde_json::json!({}))
                 .send()
-        };
-        for _ in 0..2 {
-            assert_eq!(
-                post(body.clone()).await.unwrap().status(),
-                StatusCode::NO_CONTENT
-            );
-        }
-        assert_eq!(calls.load(Ordering::SeqCst), 0);
-        let pool = sqlx::SqlitePool::connect(&db).await.unwrap();
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::NOT_FOUND
+        );
+        let inbox: i64 = sqlx::query_scalar("SELECT count(*) FROM strike_inbox")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(inbox, 0);
         sqlx::query("WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<30) INSERT INTO invoice_admissions(id,finished) SELECT 'synthetic:'||x,1 FROM n").execute(&pool).await.unwrap();
         let limited = client
             .get(format!(
@@ -1058,54 +964,11 @@ mod tests {
         assert_eq!(limited.status(), StatusCode::TOO_MANY_REQUESTS);
         let limited: serde_json::Value = limited.json().await.unwrap();
         assert_eq!(limited["status"], "ERROR");
-        // Saturating public issuance must not disable webhook persistence.
-        assert_eq!(
-            post(body.clone()).await.unwrap().status(),
-            StatusCode::NO_CONTENT
-        );
-        assert_eq!(calls.load(Ordering::SeqCst), 0);
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM strike_inbox")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        assert_eq!(count, 1);
-        let restored = LedgerStore::connect(&db).await.unwrap();
-        assert!(restored.due_strike_work().await.unwrap().is_some());
-        assert_eq!(restored.feed_credit_sats().await.unwrap(), 0);
-
-        sqlx::query("CREATE TRIGGER fail_inbox BEFORE INSERT ON strike_inbox BEGIN SELECT RAISE(FAIL,'injected storage failure'); END").execute(&pool).await.unwrap();
-        let mut changed: serde_json::Value = serde_json::from_str(&body).unwrap();
-        changed["id"] = uuid::Uuid::new_v4().to_string().into();
-        assert_eq!(
-            post(changed.to_string()).await.unwrap().status(),
-            StatusCode::SERVICE_UNAVAILABLE
-        );
-        assert_eq!(
-            client
-                .post(&url)
-                .header("content-type", "application/json")
-                .header("x-webhook-signature", "00".repeat(32))
-                .body(body.clone())
-                .send()
-                .await
-                .unwrap()
-                .status(),
-            StatusCode::UNAUTHORIZED
-        );
-        assert_eq!(
-            client.post(&url).body(body).send().await.unwrap().status(),
-            StatusCode::UNSUPPORTED_MEDIA_TYPE
-        );
-        assert_eq!(
-            client.get(&url).send().await.unwrap().status(),
-            StatusCode::METHOD_NOT_ALLOWED
-        );
-
         // No Content-Length: the extractor must stop a chunked body at the same bound.
         let mut socket = tokio::net::TcpStream::connect(address).await.unwrap();
-        let oversized = "x".repeat(MAX_STRIKE_WEBHOOK_BODY + 1);
+        let oversized = "x".repeat(1025);
         let wire = format!(
-            "POST /api/v1/strike/webhook HTTP/1.1\r\nHost: {address}\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n{:x}\r\n{oversized}\r\n0\r\n\r\n",
+            "POST /api/v1/contact/status HTTP/1.1\r\nHost: {address}\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n{:x}\r\n{oversized}\r\n0\r\n\r\n",
             oversized.len()
         );
         socket.write_all(wire.as_bytes()).await.unwrap();
@@ -1115,7 +978,6 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(response.starts_with("HTTP/1.1 413"), "{response}");
-        assert_eq!(calls.load(Ordering::SeqCst), 0);
         // Actual application upgrade route: permits last for the whole socket.
         use futures_util::{SinkExt, StreamExt};
         use tokio_tungstenite::{connect_async, tungstenite::Message};
@@ -1157,10 +1019,9 @@ mod tests {
             socket.close(None).await.unwrap();
         }
         assert_eq!(ledger.feed_credit_sats().await.unwrap(), 0);
-        assert_eq!(calls.load(Ordering::SeqCst), 0);
 
         let mut slow = tokio::net::TcpStream::connect(address).await.unwrap();
-        slow.write_all(format!("POST /api/v1/strike/webhook HTTP/1.1\r\nHost: {address}\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n100\r\nx").as_bytes()).await.unwrap();
+        slow.write_all(format!("POST /api/v1/contact/status HTTP/1.1\r\nHost: {address}\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n100\r\nx").as_bytes()).await.unwrap();
         let mut timed_out = String::new();
         tokio::time::timeout(Duration::from_secs(45), slow.read_to_string(&mut timed_out))
             .await
@@ -1168,7 +1029,6 @@ mod tests {
             .unwrap();
         assert!(timed_out.starts_with("HTTP/1.1 408"), "{timed_out}");
         server.abort();
-        provider_task.abort();
     }
 
     #[tokio::test]

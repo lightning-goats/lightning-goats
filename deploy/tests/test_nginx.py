@@ -273,16 +273,12 @@ http {{
             self.assertEqual(self.request(mode, oversized, source="127.0.0.4")[0], 414)
             self.assertEqual(len(self.backends[mode].calls), before)
 
-    def test_webhook_content_type_methods_and_size(self):
-        path = "/api/v1/strike/webhook"
-        for mode in self.backends:
-            before = len(self.backends[mode].calls)
-            self.assertEqual(self.request(mode, path, "GET", headers={"Content-Type": "application/json"})[0], 403)
-            self.assertEqual(self.request(mode, path, "POST", b"{}", {"Content-Type": "text/plain"})[0], 415)
-            self.assertEqual(self.request(mode, path, "POST", b"x" * 32769, {"Content-Type": "application/json"})[0], 413)
-            self.assertEqual(len(self.backends[mode].calls), before)
-            self.assertEqual(self.request(mode, path, "POST", b"{}", {"Content-Type": "application/json; charset=utf-8"})[0], 200)
-            self.assertEqual(len(self.backends[mode].calls), before + 1)
+    def test_retired_webhook_cannot_reach_a_backend(self):
+        for mode, backend in self.backends.items():
+            before = len(backend.calls)
+            status, _, _ = self.request(mode, "/api/v1/strike/webhook", "POST", b"{}", {"Content-Type": "application/json"})
+            self.assertGreaterEqual(status, 400)
+            self.assertEqual(len(backend.calls), before)
 
     def test_websocket_upgrade_and_frame(self):
         for mode in self.backends:

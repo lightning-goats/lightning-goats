@@ -182,10 +182,6 @@ def overlay_maintenance(launcher, root, fixture_directory, installation, core_ar
              'NetworkNamespacePath=' + str(namespace),
              'ReadWritePaths=/var/lib/lightning-goats /run/lightning-goats']
     lines += [name + '=' + data for name, data in w.properties(template)]
-    for name in ('strike-api-key', 'strike-webhook-secret'):
-        credential = root / (name + '.overlay-synthetic.cred')
-        w.encrypt(credential, name, b'SYNTHETIC-OVERLAY-NO-EXTERNAL-ACCOUNT')
-        lines.append('LoadCredentialEncrypted=' + name + ':' + str(credential))
     unit_bytes = ('\n'.join(lines) + '\n').encode()
     unit_path.write_bytes(unit_bytes); unit_path.chmod(0o644)
     # This existing, protected override is frozen in the review, verified before

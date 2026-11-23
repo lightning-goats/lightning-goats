@@ -1,12 +1,13 @@
 //! Reserve the purpose and exact tender identity before private wallet admission.
 use super::*;
-use cashu::nuts::{CurrencyUnit, nut18::PaymentRequest};
+use ::cashu::nuts::{CurrencyUnit, nut18::PaymentRequest};
 use lightning_goats_cashu_receipt::{
     contact_fee::{ContactTender, FEE_SATS},
     public_request::Descriptor,
 };
 
 pub enum ContactAction {
+    NeedsDescriptor,
     Fulfilled,
     Pending,
     Invalid,
@@ -18,7 +19,7 @@ impl LedgerStore {
     pub async fn contact_tender(
         &self,
         intent: &Intent,
-        descriptor: &Descriptor,
+        descriptor: Option<&Descriptor>,
         delivery: Option<Uuid>,
     ) -> Result<ContactAction> {
         self.create_contact_intent(intent).await?;
@@ -43,6 +44,10 @@ impl LedgerStore {
         let (request, descriptor_id) = match saved {
             Some(saved) => saved,
             None => {
+                let Some(descriptor) = descriptor else {
+                    tx.commit().await?;
+                    return Ok(ContactAction::NeedsDescriptor);
+                };
                 descriptor.validate()?;
                 let mut request: PaymentRequest = descriptor.request.parse()?;
                 anyhow::ensure!(
@@ -90,6 +95,9 @@ impl LedgerStore {
                     }
                 }
             }
+        } else if sqlx::query_scalar::<_,bool>("SELECT EXISTS(SELECT 1 FROM private_contact_tenders WHERE contact_id=? AND state='reserved')")
+            .bind(&id).fetch_one(&mut *tx).await? {
+            ContactAction::Pending
         } else {
             ContactAction::Challenge(request)
         };

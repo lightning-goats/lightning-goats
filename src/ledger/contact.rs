@@ -17,6 +17,19 @@ pub struct ContactDelivery {
 }
 
 impl LedgerStore {
+    /// Replays validate the original encrypted envelope against its admission time.
+    /// A mismatched capability never authenticates a prior contact.
+    pub async fn contact_admitted_at(&self, id: Uuid, capability: &str) -> Result<Option<i64>> {
+        let hash = capability_hash(capability)?;
+        Ok(sqlx::query_scalar(
+            "SELECT created_at FROM private_contact_intents WHERE id=? AND capability_hash=?",
+        )
+        .bind(id.to_string())
+        .bind(hash)
+        .fetch_optional(&self.pool)
+        .await?)
+    }
+
     pub async fn create_contact_intent(&self, intent: &Intent) -> Result<()> {
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         if let Some(row) = sqlx::query("SELECT capability_hash,reply_email_hash,envelope_id,envelope_json,recipient,description_hash,relays_json FROM private_contact_intents WHERE id=?")
@@ -62,7 +75,7 @@ impl LedgerStore {
 
     pub async fn contact_status(&self, id: Uuid, capability: &str) -> Result<Option<Status>> {
         let hash = capability_hash(capability)?;
-        let row=sqlx::query("SELECT CASE WHEN b.invoice IS NOT NULL THEN 'issued' ELSE i.state END AS state,COALESCE(r.invoice,b.invoice) AS invoice,f.contact_id AS paid,d.accepted_at FROM private_contact_intents i LEFT JOIN breez_project_invoices b ON b.id=i.id AND json_extract(b.intent,'$.purpose')='contact_fee' LEFT JOIN strike_receive_requests r ON r.receive_request_id=i.receive_request_id LEFT JOIN private_contact_entitlements f ON f.contact_id=i.id LEFT JOIN private_contact_delivery d ON d.contact_id=i.id WHERE i.id=? AND i.capability_hash=?")
+        let row=sqlx::query("SELECT CASE WHEN EXISTS(SELECT 1 FROM private_contact_tenders t WHERE t.contact_id=i.id AND t.state='reserved') THEN 'pending' WHEN b.invoice IS NOT NULL THEN 'issued' ELSE i.state END AS state,COALESCE(r.invoice,b.invoice) AS invoice,f.contact_id AS paid,d.accepted_at FROM private_contact_intents i LEFT JOIN breez_project_invoices b ON b.id=i.id AND json_extract(b.intent,'$.purpose')='contact_fee' LEFT JOIN strike_receive_requests r ON r.receive_request_id=i.receive_request_id LEFT JOIN private_contact_entitlements f ON f.contact_id=i.id LEFT JOIN private_contact_delivery d ON d.contact_id=i.id WHERE i.id=? AND i.capability_hash=?")
             .bind(id.to_string()).bind(hash).fetch_optional(&self.pool).await?;
         row.map(|row| {
             let state = if row.try_get::<Option<i64>, _>("accepted_at")?.is_some() {

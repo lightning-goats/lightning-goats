@@ -64,14 +64,18 @@ pub(super) async fn checkout(
     let Some(wallet) = &state.cashu else {
         return unavailable();
     };
-    let Ok(Some(descriptor)) = wallet.public_request().await else {
-        return unavailable();
-    };
-    match state
-        .ledger
-        .contact_tender(intent, &descriptor, delivery)
-        .await
-    {
+    let mut action = state.ledger.contact_tender(intent, None, delivery).await;
+    if matches!(action, Ok(ContactAction::NeedsDescriptor)) {
+        let Ok(Some(descriptor)) = wallet.public_request().await else {
+            return unavailable();
+        };
+        action = state
+            .ledger
+            .contact_tender(intent, Some(&descriptor), delivery)
+            .await;
+    }
+    match action {
+        Ok(ContactAction::NeedsDescriptor) => unavailable(),
         Ok(ContactAction::Fulfilled) => match state.ledger.contact_status(id, capability).await {
             Ok(Some(status)) => private_response(
                 StatusCode::OK,

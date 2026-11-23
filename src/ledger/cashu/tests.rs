@@ -789,8 +789,9 @@ async fn contact_cashu_receipt_is_private_and_replayable_after_restart() -> anyh
         encoding: Encoding::CreqA,
         mints: vec![],
     };
-    let ContactAction::Challenge(request) =
-        store.contact_tender(&intent, &descriptor, None).await?
+    let ContactAction::Challenge(request) = store
+        .contact_tender(&intent, Some(&descriptor), None)
+        .await?
     else {
         anyhow::bail!("missing payment challenge")
     };
@@ -800,11 +801,35 @@ async fn contact_cashu_receipt_is_private_and_replayable_after_restart() -> anyh
     assert!(!req.mints.is_empty());
     let delivery = http_delivery_id(b"private-contact-fixture");
     let ContactAction::Submit(terms) = store
-        .contact_tender(&intent, &descriptor, Some(delivery))
+        .contact_tender(&intent, Some(&descriptor), Some(delivery))
         .await?
     else {
         anyhow::bail!("missing reservation")
     };
+    // Lose the submission reply, reconnect without a current public descriptor
+    // and retry. A fresh token must wait for the original disposition.
+    let restarted = LedgerStore::connect(&url).await?;
+    let state = restarted
+        .contact_status(intent.id, &"ab".repeat(32))
+        .await?
+        .unwrap();
+    assert_eq!(state.state, "pending");
+    assert!(matches!(
+        restarted.contact_tender(&intent, None, None).await?,
+        ContactAction::Pending
+    ));
+    assert!(matches!(
+        restarted
+            .contact_tender(&intent, None, Some(delivery))
+            .await?,
+        ContactAction::Submit(_)
+    ));
+    assert!(matches!(
+        restarted
+            .contact_tender(&intent, None, Some(http_delivery_id(b"other")))
+            .await?,
+        ContactAction::Pending
+    ));
     let mut data = wire(&policy, 109).data().clone();
     data.source_ref = terms.source_ref(delivery);
     let receipt = WireReceipt::validate(data)?;
@@ -823,7 +848,7 @@ async fn contact_cashu_receipt_is_private_and_replayable_after_restart() -> anyh
     );
     assert!(matches!(
         reopened
-            .contact_tender(&intent, &descriptor, Some(http_delivery_id(b"fresh")))
+            .contact_tender(&intent, Some(&descriptor), Some(http_delivery_id(b"fresh")))
             .await?,
         ContactAction::Fulfilled
     ));

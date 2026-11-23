@@ -773,17 +773,25 @@ async fn contact_create(
     };
     let id = request.id;
     let capability = request.capability.clone();
-    let intent = lightning_goats::cyberherd::calendar::now()
+    let now = match state.ledger.contact_admitted_at(id, &capability).await {
+        Ok(Some(original)) => Ok(original),
+        Ok(None) => lightning_goats::cyberherd::calendar::now(),
+        Err(_) => {
+            return private_response(
+                StatusCode::BAD_REQUEST,
+                serde_json::json!({"error":"invalid private contact"}),
+            );
+        }
+    };
+    let intent = now.ok().and_then(|stamp| {
+        lightning_goats::contact::Intent::validate(
+            request,
+            &config.recipient,
+            &config.inbox_relays,
+            stamp,
+        )
         .ok()
-        .and_then(|now| {
-            lightning_goats::contact::Intent::validate(
-                request,
-                &config.recipient,
-                &config.inbox_relays,
-                now,
-            )
-            .ok()
-        });
+    });
     let Some(intent) = intent else {
         return private_response(
             StatusCode::BAD_REQUEST,

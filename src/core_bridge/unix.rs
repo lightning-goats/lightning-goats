@@ -78,6 +78,7 @@ impl Role {
                     | Request::PayoutFunding { .. }
                     | Request::OperatorFunding { .. }
                     | Request::ClaimOperatorExecution { .. }
+                    | Request::ClaimMemberEcash { .. }
                     | Request::ClaimDirectOperator { .. }
                     | Request::ClaimCashuExecution { .. }
                     | Request::ClaimPayoutExecution { .. }
@@ -319,6 +320,7 @@ async fn serve_one(
             ) {
                 (
                     crate::payout::outcome::Disposition::CashuPaid { .. }
+                    | crate::payout::outcome::Disposition::MemberEcash { .. }
                     | crate::payout::outcome::Disposition::OperatorReclaimed,
                     Some(collector),
                     _,
@@ -395,6 +397,31 @@ async fn serve_one(
                         page: page.map(Box::new),
                     },
                     Err(_) => Response::Rejected,
+                }
+            }
+            Request::ClaimMemberEcash { request } => {
+                if let Some(policy) = reward_policy {
+                    match ledger
+                        .claim_member_ecash(
+                            &request,
+                            policy,
+                            payout_execution_enabled
+                                && mode.feeder_enabled()
+                                && (!matches!(
+                                    &request.destination,
+                                    crate::cyberherd::rewards::EcashDestination::PublicNutzap(_)
+                                ) || mode.nostr_enabled()),
+                        )
+                        .await
+                    {
+                        Ok((terms_hash, observed_at)) => Response::OperatorExecutionClaim {
+                            terms_hash,
+                            observed_at,
+                        },
+                        Err(_) => Response::Rejected,
+                    }
+                } else {
+                    Response::Rejected
                 }
             }
             Request::ClaimDirectOperator { request } => {
@@ -788,7 +815,7 @@ impl Client {
     ) -> Result<crate::payout::cashu::CollectorResult> {
         let expected = terms.digest()?;
         let payload = terms.payload();
-        self.authorize_operator(
+        self.authorize_collector_spend(
             Request::ClaimOperatorExecution {
                 request: Box::new(terms.clone()),
             },
@@ -801,7 +828,7 @@ impl Client {
         Ok(result)
     }
 
-    async fn authorize_operator(&self, request: Request, expected: String) -> Result<()> {
+    async fn authorize_collector_spend(&self, request: Request, expected: String) -> Result<()> {
         let Response::OperatorExecutionClaim {
             terms_hash,
             observed_at,
@@ -815,6 +842,21 @@ impl Client {
         }
         Ok(())
     }
+    pub(crate) async fn submit_member_ecash(
+        &self,
+        terms: &crate::payout::cashu::MemberExecution,
+        collector: &std::path::Path,
+        collector_uid: u32,
+    ) -> Result<crate::payout::operator::DirectStatus> {
+        self.authorize_collector_spend(
+            Request::ClaimMemberEcash {
+                request: Box::new(terms.clone()),
+            },
+            terms.digest()?,
+        )
+        .await?;
+        crate::private_ipc::request(collector, collector_uid, &terms.payload(), 65536, 30).await
+    }
     pub(crate) async fn submit_direct_operator(
         &self,
         terms: &crate::payout::operator::DirectExecution,
@@ -825,7 +867,7 @@ impl Client {
         let payload = serde_json::json!({"operator_ecash":{"feed":a.request_id,"mint":terms.wallet.mint,
             "recipient":terms.wallet.recipient,"plan_hash":a.plan_hash,"gross":a.operator_sats,
             "member":a.member_reserved_sats,"lots":terms.lots,"fee_limit":terms.fee_limit}});
-        self.authorize_operator(
+        self.authorize_collector_spend(
             Request::ClaimDirectOperator {
                 request: Box::new(terms.clone()),
             },

@@ -848,3 +848,108 @@ async fn manual_reset_discards_same_second_deferred_work_atomically_without_eras
         1
     );
 }
+
+#[tokio::test]
+async fn signed_member_reward_consent_survives_restart_and_rejects_replay_and_stale_revision() {
+    let root = tempfile::TempDir::new().unwrap();
+    let (s, url) = store(&root).await;
+    let owner = key(1);
+    let member = key(2);
+    let activate = command(
+        s.snapshot(&owner).await.unwrap().revision,
+        Action::Activate {
+            pubkey: member.clone(),
+            profile: profile(),
+        },
+    );
+    s.operator_command(
+        &owner,
+        &auth(&activate, 3, 120),
+        &activate,
+        env(FeederAvailability::Ready, 120),
+    )
+    .await
+    .unwrap();
+    let path = "/api/v1/cyberherd/me/rewards";
+    let proof = |actor: u8, revision: i64, method: &str| {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "expected_revision": revision, "method": method, "publish_recipient_and_amount": method=="public_nutzap"
+        })).unwrap();
+        let event = test_event(
+            actor,
+            27235,
+            125,
+            "",
+            vec![
+                vec!["u".into(), format!("https://example.com{path}")],
+                vec!["method".into(), "POST".into()],
+                vec!["payload".into(), hex::encode(Sha256::digest(&body))],
+                vec!["nonce".into(), uuid::Uuid::new_v4().to_string()],
+            ],
+        );
+        http_auth::Config {
+            public_origin: "https://example.com".into(),
+            operators: vec![],
+        }
+        .verify(
+            &format!(
+                "Nostr {}",
+                STANDARD.encode(serde_json::to_vec(&event).unwrap())
+            ),
+            "POST",
+            path,
+            &body,
+            125,
+        )
+        .unwrap()
+    };
+    assert_eq!(
+        s.reward_preference(&owner, &member).await.unwrap(),
+        ("lightning".into(), 0)
+    );
+    let consent = proof(2, 0, "public_nutzap");
+    assert_eq!(
+        s.set_reward_preference(&owner, &consent, 125, 0, "public_nutzap", None)
+            .await
+            .unwrap(),
+        Some(1)
+    );
+    let s = Store::connect(&url).await.unwrap();
+    assert!(
+        s.set_reward_preference(&owner, &consent, 125, 0, "public_nutzap", None)
+            .await
+            .is_err()
+    );
+    assert!(
+        s.set_reward_preference(
+            &owner,
+            &proof(3, 0, "public_nutzap"),
+            125,
+            0,
+            "public_nutzap",
+            None
+        )
+        .await
+        .is_err()
+    );
+    assert_eq!(
+        s.set_reward_preference(&owner, &proof(2, 0, "lightning"), 125, 0, "lightning", None)
+            .await
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        s.reward_preference(&owner, &member).await.unwrap(),
+        ("public_nutzap".into(), 1)
+    );
+    assert_eq!(
+        s.set_reward_preference(&owner, &proof(2, 1, "lightning"), 125, 1, "lightning", None)
+            .await
+            .unwrap(),
+        Some(2)
+    );
+    assert_eq!(
+        s.reward_preference(&owner, &member).await.unwrap(),
+        ("lightning".into(), 2)
+    );
+}

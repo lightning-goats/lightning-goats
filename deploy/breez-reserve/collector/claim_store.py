@@ -141,28 +141,48 @@ class ClaimStore:
                     material TEXT NOT NULL
                 )
             """)
+            # Keep member proofs out of operator export, delivery and reclaim queries.
+            for role in ("operator", "member"):
+                table = role + "_ecash"
+                self.db.execute(f"""
+                    CREATE TABLE IF NOT EXISTS {table} (
+                        feed TEXT PRIMARY KEY REFERENCES proof_disposition(id),
+                        material TEXT NOT NULL, amount_sat INTEGER NOT NULL CHECK(amount_sat>0),
+                        fee_sat INTEGER NOT NULL CHECK(fee_sat>=0), token TEXT
+                    )
+                """)
+                self.db.execute(f"""
+                    CREATE TRIGGER IF NOT EXISTS immutable_{role}_swap BEFORE UPDATE ON {table}
+                    WHEN OLD.feed != NEW.feed OR OLD.material != NEW.material
+                      OR OLD.amount_sat != NEW.amount_sat OR OLD.fee_sat != NEW.fee_sat
+                      OR OLD.token IS NOT NULL OR NEW.token IS NULL
+                    BEGIN SELECT RAISE(ABORT, 'locked swap terms are immutable'); END
+                """)
+                self.db.execute(f"""
+                    CREATE TRIGGER IF NOT EXISTS original_{role}_swap BEFORE INSERT ON {table}
+                    WHEN EXISTS(SELECT 1 FROM {table} WHERE feed=NEW.feed)
+                    BEGIN SELECT RAISE(ABORT, 'locked swap already reserved'); END
+                """)
+                self.db.execute(f"""
+                    CREATE TRIGGER IF NOT EXISTS retain_{role}_swap BEFORE DELETE ON {table}
+                    BEGIN SELECT RAISE(ABORT, 'locked swap is retained'); END
+                """)
             self.db.execute("""
-                CREATE TABLE IF NOT EXISTS operator_ecash (
-                    feed TEXT PRIMARY KEY REFERENCES proof_disposition(id),
-                    material TEXT NOT NULL, amount_sat INTEGER NOT NULL CHECK(amount_sat>0),
-                    fee_sat INTEGER NOT NULL CHECK(fee_sat>=0), token TEXT
+                CREATE TABLE IF NOT EXISTS member_publications (
+                    feed TEXT PRIMARY KEY REFERENCES member_ecash(feed),
+                    created_at INTEGER NOT NULL DEFAULT(unixepoch()),
+                    signed_event TEXT
                 )
             """)
             self.db.execute("""
-                CREATE TRIGGER IF NOT EXISTS immutable_operator_swap BEFORE UPDATE ON operator_ecash
-                WHEN OLD.feed != NEW.feed OR OLD.material != NEW.material
-                  OR OLD.amount_sat != NEW.amount_sat OR OLD.fee_sat != NEW.fee_sat
-                  OR OLD.token IS NOT NULL OR NEW.token IS NULL
-                BEGIN SELECT RAISE(ABORT, 'operator swap terms are immutable'); END
+                CREATE TRIGGER IF NOT EXISTS immutable_member_publication BEFORE UPDATE ON member_publications
+                WHEN OLD.feed IS NOT NEW.feed OR OLD.created_at IS NOT NEW.created_at
+                    OR OLD.signed_event IS NOT NULL OR NEW.signed_event IS NULL
+                BEGIN SELECT RAISE(ABORT,'signed member publication is immutable'); END
             """)
             self.db.execute("""
-                CREATE TRIGGER IF NOT EXISTS original_operator_swap BEFORE INSERT ON operator_ecash
-                WHEN EXISTS(SELECT 1 FROM operator_ecash WHERE feed=NEW.feed)
-                BEGIN SELECT RAISE(ABORT, 'operator swap already reserved'); END
-            """)
-            self.db.execute("""
-                CREATE TRIGGER IF NOT EXISTS retain_operator_swap BEFORE DELETE ON operator_ecash
-                BEGIN SELECT RAISE(ABORT, 'operator swap is retained'); END
+                CREATE TRIGGER IF NOT EXISTS retain_member_publication BEFORE DELETE ON member_publications
+                BEGIN SELECT RAISE(ABORT,'member publication is retained'); END
             """)
             self.db.execute("""
                 CREATE TABLE IF NOT EXISTS proof_split (

@@ -318,3 +318,46 @@ mod tests {
         assert_eq!(pending.verified_fee(&hash, 12, 4).unwrap(), None);
     }
 }
+
+/// Frozen assignment and original funding lots checked by core before a member swap.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct MemberExecution {
+    pub reservation: crate::reward_funding::Reservation,
+    pub member: String,
+    pub destination: crate::cyberherd::rewards::EcashDestination,
+    pub lots: Vec<super::funding::RetainedAllocation>,
+    pub gross_sats: u64,
+    pub fee_limit: u64,
+    pub minimum_net: u64,
+    pub maximum_net: u64,
+}
+impl MemberExecution {
+    pub fn digest(&self) -> Result<String> {
+        self.reservation.validate()?;
+        crate::nostr_event::validate_public_key(&self.member)?;
+        self.destination.validate(&self.member)?;
+        ensure!(
+            self.member != self.reservation.owner
+                && !self.lots.is_empty()
+                && self.minimum_net > 0
+                && self.minimum_net <= self.maximum_net
+                && self.maximum_net <= self.gross_sats
+                && self.gross_sats <= self.reservation.reserved_sats
+                && self.fee_limit <= self.gross_sats - self.minimum_net,
+            "invalid member assignment budget"
+        );
+        let mut payload = self.payload();
+        payload.sort_all_objects();
+        Ok(hex::encode(Sha256::digest(serde_json::to_vec(
+            &payload["member_ecash"],
+        )?)))
+    }
+    pub(crate) fn payload(&self) -> serde_json::Value {
+        let r = &self.reservation;
+        serde_json::json!({"member_ecash":{"feed":r.request_id,"grant":r.id,"owner":r.owner,"member_key":self.member,
+            "plan_hash":r.plan_hash,"destination":self.destination,"lots":self.lots,
+            "gross":self.gross_sats,"reserved":r.reserved_sats,"fee_limit":self.fee_limit,
+            "minimum_net":self.minimum_net,"maximum_net":self.maximum_net}})
+    }
+}

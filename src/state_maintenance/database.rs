@@ -1,5 +1,5 @@
 use super::{Policy, Role};
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use futures_util::TryStreamExt as _;
 use serde::{Deserialize, Serialize};
 use sqlx::{
@@ -25,7 +25,7 @@ static CORE: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 static MEMBERSHIP: sqlx::migrate::Migrator = sqlx::migrate!("./cyberherd-migrations");
 static PAYOUT: sqlx::migrate::Migrator = sqlx::migrate!("./payout-migrations");
 static SIGNER: sqlx::migrate::Migrator = sqlx::migrate!("./signer-migrations");
-pub(super) const CURRENT_CORE_SCHEMA: i64 = 38;
+pub(super) const CURRENT_CORE_SCHEMA: i64 = 39;
 
 #[derive(Clone, Copy)]
 enum ReviewScope {
@@ -298,7 +298,9 @@ async fn report(
         engine: "3.54.1".into(),
         pending_feeds: count(core, "SELECT COUNT(*) FROM feed_attempts WHERE status IN ('intent_committed','unknown')").await?,
         unresolved_provider_payments: count(payout, "SELECT COUNT(*) FROM payout_execute_intents e LEFT JOIN payout_payment_bindings b ON b.intent_id=e.intent_id WHERE b.payment_id IS NULL OR EXISTS(SELECT 1 FROM payout_payment_conflicts c WHERE c.payment_id=b.payment_id) OR NOT EXISTS(SELECT 1 FROM payout_payment_records r WHERE r.payment_id=b.payment_id AND r.state IN ('COMPLETED','FAILED'))").await?,
-        execution_claims: count(core, if core_version >= 38 {
+        execution_claims: count(core, if core_version >= 39 {
+            "SELECT (SELECT COUNT(*) FROM payout_execution_claims)+(SELECT COUNT(*) FROM cashu_payout_execution_claims)+(SELECT COUNT(*) FROM operator_cashu_execution_claims)+(SELECT COUNT(*) FROM operator_p2pk_claims)+(SELECT COUNT(*) FROM member_ecash_execution_claims)"
+        } else if core_version >= 38 {
             "SELECT (SELECT COUNT(*) FROM payout_execution_claims)+(SELECT COUNT(*) FROM cashu_payout_execution_claims)+(SELECT COUNT(*) FROM operator_cashu_execution_claims)+(SELECT COUNT(*) FROM operator_p2pk_claims)"
         } else if core_version >= 37 {
             "SELECT (SELECT COUNT(*) FROM payout_execution_claims)+(SELECT COUNT(*) FROM cashu_payout_execution_claims)+(SELECT COUNT(*) FROM operator_cashu_execution_claims)"
@@ -587,6 +589,36 @@ async fn cross_check(pools: &BTreeMap<Role, SqlitePool>, policy: &Policy) -> Res
     let mut intents = sqlx::query("SELECT id,document_json FROM signer_intents").fetch(signer);
     while let Some(row) = intents.try_next().await? {
         let id: String = row.try_get("id")?;
+        if let Some(key) = id.strip_prefix("member-ecash:") {
+            let (feed, member) = key
+                .split_once(':')
+                .context("invalid member signing identity")?;
+            let (hash, event): (String, crate::payout::invoice::UnsignedZap) =
+                serde_json::from_str(&row.try_get::<String, _>("document_json")?)?;
+            let grant: String = sqlx::query_scalar("SELECT r.id FROM reward_reservations r JOIN member_ecash_execution_claims c ON c.reservation_id=r.id WHERE r.request_id=? AND r.owner=? AND c.member=? AND c.terms_hash=?")
+                .bind(feed).bind(&policy.owner).bind(member).bind(hash).fetch_one(core).await?;
+            let dest: String = sqlx::query_scalar(
+                "SELECT recipient_json FROM payout_rows WHERE grant_id=? AND member=?",
+            )
+            .bind(grant)
+            .bind(member)
+            .fetch_one(payout)
+            .await?;
+            let crate::cyberherd::rewards::EcashDestination::PublicNutzap(route) =
+                serde_json::from_str(&dest)?
+            else {
+                bail!("signing intent lacks public consent");
+            };
+            anyhow::ensure!(
+                event.kind == 9321
+                    && event.content.is_empty()
+                    && route.member == member
+                    && event.tags.first() == Some(&vec!["p".to_owned(), member.to_owned()])
+                    && event.tags.get(1) == Some(&vec!["u".to_owned(), route.mint]),
+                "public reward lost recipient or mint binding"
+            );
+            continue;
+        }
         let original = signing_intent(payout, &id).await?;
         if row.try_get::<String, _>("document_json")? != original {
             bail!("signer lost its original payout invoice intent");
@@ -598,6 +630,20 @@ async fn cross_check(pools: &BTreeMap<Role, SqlitePool>, policy: &Policy) -> Res
     let mut results = sqlx::query("SELECT id,event_json FROM signer_results").fetch(signer);
     while let Some(row) = results.try_next().await? {
         let id: String = row.try_get("id")?;
+        if id.starts_with("member-ecash:") {
+            let raw: String =
+                sqlx::query_scalar("SELECT document_json FROM signer_intents WHERE id=?")
+                    .bind(&id)
+                    .fetch_one(signer)
+                    .await?;
+            let (_, event): (String, crate::payout::invoice::UnsignedZap) =
+                serde_json::from_str(&raw)?;
+            let verified = crate::nostr_event::VerifiedEvent::from_json(
+                &row.try_get::<String, _>("event_json")?,
+            )?;
+            event.check_signed(&verified, &policy.owner)?;
+            continue;
+        }
         let document = signing_intent(payout, &id).await?;
         let intent = crate::payout::invoice::Intent::restore(serde_json::from_str(&document)?)?;
         let signed: String = row.try_get("event_json")?;
@@ -631,7 +677,7 @@ async fn equal_rows(local: &SqlitePool, core: &SqlitePool, rows: &str, lookup: &
 pub(super) async fn require_before_inclusive_fees(pool: &SqlitePool) -> Result<()> {
     let compiled: Vec<_> = PAYOUT.iter().collect();
     if compiled.iter().map(|m| m.version).collect::<Vec<_>>()
-        != [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14]
+        != [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15]
     {
         bail!("inclusive-fee source requires the separately qualified payout migrations");
     }

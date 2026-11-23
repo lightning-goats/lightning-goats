@@ -262,6 +262,7 @@ impl Fixture {
                     recipient: Some(recipient),
                     skip: None,
                     conversation: None,
+                    ecash: None,
                     score_basis: None,
                     zap_content: None,
                     zap_wording: None,

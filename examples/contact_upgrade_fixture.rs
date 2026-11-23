@@ -16,7 +16,7 @@ use std::{os::unix::fs::MetadataExt as _, path::Path, time::Duration};
 const GUARD: &str = "/run/lightning-goats-contact-fixture/ALLOW";
 const ATTESTATION: &[u8] = b"LIGHTNING_GOATS_DISPOSABLE_CONTACT_UPGRADE_CI_v1\n";
 const DATABASE: &str = "/var/lib/lightning-goats/lightning-goats.db";
-const CURRENT_CORE_SCHEMA: usize = 38;
+const CURRENT_CORE_SCHEMA: usize = 39;
 
 fn isolated_fixture() -> Result<u32> {
     let uid = std::fs::metadata("/proc/self")?.uid();
@@ -359,12 +359,12 @@ async fn strip_empty_inclusive_fee_schema(uid: u32) -> Result<()> {
     }
     let migrations = sqlx::migrate!("./payout-migrations");
     if migrations.iter().map(|m| m.version).collect::<Vec<_>>()
-        != [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14]
+        != [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15]
     {
         bail!("unqualified fixture payout schema");
     }
     let rows = sqlx::query(
-        "SELECT version,success,checksum FROM _sqlx_migrations ORDER BY version LIMIT 14",
+        "SELECT version,success,checksum FROM _sqlx_migrations ORDER BY version LIMIT 15",
     )
     .fetch_all(&pool)
     .await?;
@@ -394,11 +394,12 @@ async fn strip_empty_inclusive_fee_schema(uid: u32) -> Result<()> {
         bail!("only an empty synthetic payout journal may be transformed");
     }
     sqlx::raw_sql(
-        "DROP TRIGGER check_operator_invoice_method; DROP TRIGGER bind_legacy_operator_method;",
+        "DROP TRIGGER bind_member_ecash_destination; DROP TRIGGER forbid_member_ecash_invoice; DROP TRIGGER forbid_member_ecash_invoice_closure; DROP TRIGGER check_operator_invoice_method; DROP TRIGGER bind_legacy_operator_method;",
     )
     .execute(&mut *tx)
     .await?;
     for table in [
+        "member_ecash_ready",
         "payout_operator_ecash_status",
         "payout_operator_methods",
         "payout_operator_receipts",
@@ -422,11 +423,11 @@ async fn strip_empty_inclusive_fee_schema(uid: u32) -> Result<()> {
             .execute(&mut *tx)
             .await?;
     }
-    if sqlx::query("DELETE FROM _sqlx_migrations WHERE version IN (9,10,11,12,13,14)")
+    if sqlx::query("DELETE FROM _sqlx_migrations WHERE version IN (9,10,11,12,13,14,15)")
         .execute(&mut *tx)
         .await?
         .rows_affected()
-        != 6
+        != 7
     {
         bail!("fixture payout migration prefix changed");
     }

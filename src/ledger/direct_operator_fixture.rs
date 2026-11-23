@@ -64,6 +64,10 @@ async fn direct_operator_worker_fixture() -> anyhow::Result<()> {
     let bridge = root.join("bridge");
     std::fs::create_dir(&bridge)?;
     std::fs::set_permissions(&bridge, std::fs::Permissions::from_mode(0o750))?;
+    let lots = ledger
+        .operator_funding_page(&rewards, epoch, feed, 0)
+        .await?
+        .allocations;
     let config = BridgeConfig {
         socket: bridge.join("core.sock"),
         peer_uid: uid + 1,
@@ -102,7 +106,25 @@ async fn direct_operator_worker_fixture() -> anyhow::Result<()> {
     let store = Store::connect(&url, policy.clone()).await?;
     let db = sqlx::SqlitePool::connect(&url).await?;
     // Seed the journal at its admitted-plan boundary, with a real core reservation.
-    sqlx::query("INSERT INTO payout_grants(id,request_id,plan_hash,plan_json,qualification_json,reserved_sats,admitted_at) VALUES(?,?,?,'{}','{}',14,0)").bind(grant.id.to_string()).bind(feed.to_string()).bind(&grant.plan_hash).execute(&db).await?;
+    let fee = inputs["fee"].as_i64().unwrap();
+    let plan = serde_json::json!({"version":2,"owner":owner,"epoch":epoch,"core_uid":uid,"request_id":feed,
+        "barrier_hash":"aa".repeat(32),"cycle":1,"roster_revision":1,"funding_hash":grant.funding_hash,
+        "real_sats":32,"threshold_sats":32,"member_percent":50,"budget_sats":16,"reserved_sats":14,
+        "operations_sats":18,"root_policy_hash":grant.policy_hash,"created_at":grant.created_at,"rows":[],
+        "planning_policy":{"fee_basis_points":0,"minimum_fee_sats":fee,"minimum_net_sats":1,"maximum_net_sats":32,
+            "profile_max_age_seconds":3600,"operation_addresses":[]}});
+    let qualification = serde_json::json!({"execution_provider":"cashu","reservation":grant,"retained_allocations":lots});
+    sqlx::query("INSERT INTO payout_grants(id,request_id,plan_hash,plan_json,qualification_json,reserved_sats,admitted_at) VALUES(?,?,?,?,?,14,0)")
+        .bind(grant.id.to_string()).bind(feed.to_string()).bind(&grant.plan_hash).bind(plan.to_string())
+        .bind(qualification.to_string()).execute(&db).await?;
+    if let Some(members) = inputs["members"].as_array() {
+        for member in members {
+            let d = &member["destination"];
+            sqlx::query("INSERT INTO payout_rows(grant_id,member,address,recipient_json,net_sats,fee_limit_sats,gross_sats) VALUES(?,?,?,?,?,?,7)")
+                .bind(grant.id.to_string()).bind(member["pubkey"].as_str().unwrap()).bind(d["receiving_key"].as_str().unwrap())
+                .bind(d.to_string()).bind(7-fee).bind(fee).execute(&db).await?;
+        }
+    }
     sqlx::query("INSERT INTO payout_intake_receipts VALUES(1,?,?,?)")
         .bind(&grant.plan_hash)
         .bind(feed.to_string())
@@ -143,7 +165,7 @@ async fn direct_operator_worker_fixture() -> anyhow::Result<()> {
             .is_err()
     );
     // The mint accepted the swap and the fixture discarded its response. Restart with legacy config.
-    let worker = intake(Store::connect(&url, policy).await?)?;
+    let worker = intake(Store::connect(&url, policy.clone()).await?)?;
     worker
         .operator_tick(&socket, Some("sat@lightning-goats.com"), None, uid)
         .await?;
@@ -161,6 +183,49 @@ async fn direct_operator_worker_fixture() -> anyhow::Result<()> {
         1
     );
     assert!(worker.store.next_operator_allocation().await?.is_none());
+    if let Some(members) = inputs["members"].as_array() {
+        use crate::payout::{
+            signer::Client as Signer,
+            worker::{CashuWorker, Step},
+        };
+        assert_eq!(members.len(), 2);
+        let mut lost = 0;
+        let mut ready = 0;
+        // A second member can be selected while the first member's swap
+        // still holds the shared input. It must resume after change is restored.
+        let core = Client::new(config.socket.clone(), uid)?
+            .with_request_spacing(std::time::Duration::from_secs(1));
+        for _ in 0..10 {
+            if ready == 2 {
+                break;
+            }
+            let w = CashuWorker {
+                reclaim_failed: false,
+                collector_socket: Some(socket.clone()),
+                store: Store::connect(&url, policy.clone()).await?,
+                core: core.clone(),
+                signer: Signer::new(root.join("unused"), uid)?,
+                plans: Plans::new(root.join("unused"), uid, owner.clone())?,
+            };
+            match w.tick_with_collector_uid(uid).await {
+                Ok(Step::Observed) => ready += 1,
+                Err(_) => lost += 1,
+                result => anyhow::bail!("unexpected member worker step {result:?}"),
+            }
+        }
+        assert_eq!(ready, 2);
+        assert!(lost >= 2);
+        let claims: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM member_ecash_execution_claims")
+            .fetch_one(&ledger.pool)
+            .await?;
+        let sums: (i64, i64, i64) =
+            sqlx::query_as("SELECT COUNT(*),SUM(amount_sat),SUM(fee_sat) FROM member_ecash_ready")
+                .fetch_one(&db)
+                .await?;
+        assert_eq!(claims, 2);
+        assert_eq!(sums, (2, 14 - 2 * fee, 2 * fee));
+        assert_eq!(ledger.feed_credit_sats().await?, 0);
+    }
     std::fs::write(root.join("feed"), feed.to_string())?;
     task.abort();
     Ok(())

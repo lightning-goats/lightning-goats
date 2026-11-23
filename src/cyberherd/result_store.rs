@@ -92,11 +92,12 @@ impl Store {
                         && net_sats
                             .checked_add(fee_sats)
                             .is_some_and(|total| total <= planned.gross_sats)
-                        && planned.recipient.as_ref().is_some_and(|r| {
-                            net_sats
-                                .checked_mul(1000)
-                                .is_some_and(|msat| msat >= r.min_msat && msat <= r.max_msat)
-                        })
+                        && (planned.ecash.is_some()
+                            || planned.recipient.as_ref().is_some_and(|r| {
+                                net_sats
+                                    .checked_mul(1000)
+                                    .is_some_and(|msat| msat >= r.min_msat && msat <= r.max_msat)
+                            }))
                 };
                 if !valid {
                     bail!("verified payment changed planned amount/fee ceiling");
@@ -136,6 +137,14 @@ impl Store {
             .iter()
             .zip(payable.iter().skip(usize::from(page.after)))
         {
+            if matches!(
+                planned.ecash,
+                Some(crate::cyberherd::rewards::EcashDestination::PrivateEcash(_))
+            ) {
+                // The authenticated result page retains the accounting. A private
+                // reward has no public payout announcement or overlay event.
+                continue;
+            }
             let payload = serde_json::json!({"request_id":reservation.request_id,
                 "result":result,"breakdown":planned,"manifest_hash":page.manifest_hash,
                 "roster_revision":plan.plan.roster_revision});

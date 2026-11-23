@@ -249,8 +249,26 @@ impl Store {
             )
             .await?
             .context("reward profile unavailable or changed while resolving recipient")?;
-            if current.head_id != read.head_id
+            use rewards::EcashDestination;
+            let destination_matches = match (&current.preference, &read.ecash) {
+                (None, None) => true,
+                (Some((_, method, None)), None) => method == "lightning",
+                (Some((_, method, None)), Some(EcashDestination::PublicNutzap(d))) => {
+                    method == "public_nutzap" && d.member == read.pubkey
+                }
+                (Some((_, method, Some(text))), Some(EcashDestination::PrivateEcash(d))) => {
+                    method == "private_ecash"
+                        && &crate::cyberherd::private_reward::PrivateDestination::from_request(
+                            text,
+                            crate::cashu::treasury::PROJECT_MINT_ORIGIN,
+                        )? == d
+                }
+                _ => false,
+            };
+            if !destination_matches
+                || current.head_id != read.head_id
                 || current.observed_at != read.observed_at
+                || current.preference != read.preference
                 || current.profile != read.profile
             {
                 bail!("reward profile changed during recipient resolution");
@@ -270,7 +288,7 @@ impl Store {
             if let Some(conversation) = &row.conversation {
                 conversation.validate(owner)?;
             }
-            if row.skip.is_none() {
+            if row.skip.is_none() && row.ecash.is_none() {
                 row.zap_wording = catalog
                     .select("cyber_herd_zap_request", &format!("{}:{}", id, row.pubkey))?
                     .map(|template| rewards::ZapWording {
@@ -406,7 +424,11 @@ async fn profile_read(
             )
         })
         .transpose()?;
+    let preference=sqlx::query_as("SELECT revision,method,payment_request FROM member_reward_preferences WHERE owner=? AND member=?")
+        .bind(owner).bind(key).fetch_optional(&mut **tx).await?;
     Ok(Some(ProfileRead {
+        preference,
+        ecash: None,
         pubkey: key.into(),
         head_id,
         profile,

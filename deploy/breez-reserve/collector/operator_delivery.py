@@ -3,15 +3,19 @@ import argparse
 import base64
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
+import ipaddress
 import json
 from pathlib import Path
+import socket
 import sqlite3
+import ssl
 import subprocess
 import time
 from urllib.parse import urlsplit
 
 import bech32
-import cbor2
+from cashu.core.nuts import nut18
+from coincurve import PublicKey
 import websocket
 
 MINT = "https://mint.lightning-goats.com"
@@ -23,9 +27,9 @@ def decode64(text):
 
 
 def destination(text):
-    if not text.startswith("creqA") or len(text) > 8192:
+    if not isinstance(text, str) or not 5 < len(text) <= 8192:
         raise ValueError("invalid wallet payment request")
-    request = cbor2.loads(decode64(text[5:]))
+    request = nut18.deserialize(text).model_dump(exclude_none=True)
     lock = request["nut10"]
     if (request.get("u") != "sat" or request.get("a") is not None
             or request.get("s") or request.get("sm")
@@ -53,13 +57,15 @@ def destination(text):
                 raise ValueError("expected secure wallet relay")
             if url not in relays:
                 relays.append(url)
-    if (len(recipients) != 1 or len(recipients[0]) != 64 or lock["d"][:2] not in ("02","03")
-            or recipients[0] != lock["d"][2:] or not 1 <= len(relays) <= 8):
-        raise ValueError("wallet receiving and transport keys differ or missing relays")
-    return request.get("i"), lock["d"], relays
+    if (len(recipients) != 1 or len(recipients[0]) != 64 or not 1 <= len(relays) <= 8
+            or len(lock["d"]) != 66 or lock["d"][:2] not in ("02", "03")):
+        raise ValueError("invalid receiving key or Nostr transport")
+    wallet_key = PublicKey(bytes.fromhex(lock["d"])).format().hex()
+    PublicKey(bytes.fromhex("02" + recipients[0]))
+    return request.get("i"), wallet_key, recipients[0], relays
 
 
-def envelope(token, amount, request_id, lock, wrapper):
+def locked_proofs(token, amount, lock):
     if not token.startswith("cashuA"):
         raise ValueError("unexpected operator token")
     decoded = json.loads(decode64(token[6:]))
@@ -71,18 +77,65 @@ def envelope(token, amount, request_id, lock, wrapper):
         kind, fields = json.loads(proof["secret"])
         if kind != "P2PK" or set(fields) != {"nonce","data"} or fields["data"] != lock:
             raise ValueError("token differs from configured recipient")
-    payload = {"mint": MINT, "unit": "sat", "proofs": proofs}
+    return proofs
+
+
+def public_reward_tags(token, amount, assignment):
+    route = assignment["destination"]
+    if (route["method"] != "public_nutzap" or route["member"] != assignment["member_key"]
+            or not route["receiving_key"].startswith("02") or route["mint"].rstrip("/") != MINT):
+        raise ValueError("public reward differs from frozen advertisement")
+    proofs = locked_proofs(token, amount, route["receiving_key"])
+    for proof in proofs:
+        if not isinstance(proof.get("dleq"), dict) or set(proof["dleq"]) != {"e","s","r"}:
+            raise ValueError("public reward requires wallet-verifiable DLEQ")
+    return [["p",route["member"]],["u",route["mint"]],["unit","sat"],
+            *[["proof",json.dumps(proof,separators=(",",":"))] for proof in proofs]]
+
+
+def envelope(token, amount, request_id, lock, transport_key, wrapper):
+    payload = {"mint": MINT, "unit": "sat", "proofs": locked_proofs(token, amount, lock)}
     if request_id is not None:
         payload["id"] = request_id
-    result = subprocess.run(["/usr/bin/node", str(wrapper)], input=json.dumps({"recipient":lock[2:], "payload":payload}),
+    result = subprocess.run(["/usr/bin/node", str(wrapper)], input=json.dumps({"recipient":transport_key, "payload":payload}),
                             text=True, capture_output=True, timeout=12, check=True)
     return result.stdout
 
 
-def publish(url, event):
+def public_relay_socket(url):
+    parsed = urlsplit(url)
+    if (parsed.scheme != "wss" or not parsed.hostname or parsed.username is not None
+            or parsed.password is not None or parsed.fragment or "%" in parsed.hostname):
+        raise ValueError("invalid member relay")
+    addresses = socket.getaddrinfo(parsed.hostname, parsed.port or 443, type=socket.SOCK_STREAM)
+    for _, _, _, _, endpoint in addresses:
+        address = ipaddress.ip_address(endpoint[0])
+        if (not address.is_global or address.is_multicast
+                or address.version == 6 and (address not in ipaddress.ip_network("2000::/3")
+                    or address in ipaddress.ip_network("2002::/16")
+                    or address in ipaddress.ip_network("2001::/23"))
+                or address in ipaddress.ip_network("192.0.0.0/24")):
+            raise ValueError("member relay requires public unicast")
+    context = ssl.create_default_context()
+    for family, kind, protocol, _, endpoint in addresses:
+        with socket.socket(family, kind, protocol) as raw:
+            raw.settimeout(5)
+            try:
+                raw.connect(endpoint)
+                return context.wrap_socket(raw, server_hostname=parsed.hostname)
+            except OSError:
+                continue
+    raise ConnectionError("member relay unavailable")
+
+
+def publish(url, event, *, public_only=False):
     conn = None
+    stream = None
     try:
-        conn = websocket.create_connection(url, timeout=5, redirect_limit=0, suppress_origin=True)
+        stream = public_relay_socket(url) if public_only else None
+        conn = websocket.create_connection(url, timeout=5, redirect_limit=0, suppress_origin=True, socket=stream)
+        if conn.getstatus() != 101:
+            return False
         conn.send(json.dumps(["EVENT", event]))
         deadline = time.monotonic() + 6
         while time.monotonic() < deadline:
@@ -95,11 +148,12 @@ def publish(url, event):
     finally:
         if conn is not None:
             conn.close(timeout=1)
+        if stream is not None:
+            stream.close()
     return False
 
 
-def deliver_token(journal, feed, token, amount, recipient, request, wrapper=HERE/"operator_wrap.cjs", send=publish):
-    rid, lock, relays = destination(request)
+def deliver_token(journal, feed, token, amount, recipient, resolve_destination, wrapper, send):
     journal.execute("CREATE TABLE IF NOT EXISTS delivery(feed TEXT PRIMARY KEY,token_hash TEXT NOT NULL,event TEXT NOT NULL,relays TEXT NOT NULL,ack_at INTEGER)")
     stamp = hashlib.sha256(token.encode()).hexdigest()
     with journal:
@@ -113,9 +167,10 @@ def deliver_token(journal, feed, token, amount, recipient, request, wrapper=HERE
             message, urls = row[1], json.loads(row[2])
         else:
             # Rotation applies to matching tokens only. Existing envelopes keep their route.
+            rid, lock, transport_key, relays = resolve_destination()
             if recipient != lock:
                 return False
-            message, urls = envelope(token, amount, rid, lock, wrapper), relays
+            message, urls = envelope(token, amount, rid, lock, transport_key, wrapper), relays
             journal.execute("INSERT INTO delivery VALUES(?,?,?,?,NULL)", (feed,stamp,message,json.dumps(urls)))
     event = json.loads(message)
     with ThreadPoolExecutor(max_workers=len(urls)) as pool:
@@ -127,18 +182,93 @@ def deliver_token(journal, feed, token, amount, recipient, request, wrapper=HERE
     return False
 
 
+def delivery_rows(source, query):
+    # Release the collector read transaction before doing relay I/O. A relay
+    # outage must not hold a read lock across a swap or a claim commit.
+    after = 0
+    while True:
+        cursor = source.execute(query,(after,))
+        try:
+            batch = cursor.fetchall()
+        finally:
+            cursor.close()
+        if not batch:
+            return
+        for after,*fields in batch:
+            yield fields
+
+
 def deliver(source, journal, request, wrapper=HERE/"operator_wrap.cjs", send=publish):
-    rows = source.execute("""
-        SELECT e.feed,e.token,e.amount_sat,p.binding FROM operator_ecash e
-        JOIN proof_disposition p ON p.id=e.feed WHERE e.token IS NOT NULL
+    rows = delivery_rows(source,"""
+        SELECT e.rowid,e.feed,e.token,e.amount_sat,p.binding FROM operator_ecash e
+        JOIN proof_disposition p ON p.id=e.feed WHERE e.token IS NOT NULL AND e.rowid>? ORDER BY e.rowid LIMIT 32
     """)
     for feed, token, amount, binding in rows:
         try:
-            deliver_token(journal, feed, token, amount, json.loads(binding)["recipient"], request, wrapper, send)
+            deliver_token(journal, feed, token, amount, json.loads(binding)["recipient"], lambda: destination(request), wrapper, send)
         except (ValueError, TypeError, KeyError, subprocess.SubprocessError):
             # A held envelope must not block delivery for later confirmed feeds.
             # Keep token material and recipient details out of the service log.
             print("Operator delivery deferred for one feed; original token retained.", flush=True)
+
+
+def publish_member(url, event):
+    return publish(url, event, public_only=True)
+
+
+def deliver_private_members(source, journal, wrapper=HERE/"operator_wrap.cjs", send=publish_member):
+    rows = delivery_rows(source,"""
+        SELECT m.rowid,m.feed,m.token,m.amount_sat,p.binding FROM member_ecash m
+        JOIN proof_disposition p ON p.id=m.feed WHERE m.token IS NOT NULL
+        AND json_extract(p.binding,'$.assignment.destination.method')='private_ecash' AND m.rowid>? ORDER BY m.rowid LIMIT 32
+    """)
+    for disposition, token, amount, binding in rows:
+        try:
+            terms = json.loads(binding)
+            frozen = terms["assignment"]["destination"]
+            route = frozen.get("payment_id"), frozen["receiving_key"], frozen["transport_key"], frozen["relays"]
+            deliver_token(journal, disposition, token, amount, terms["recipient"], lambda: route, wrapper, send)
+        except (ValueError, TypeError, KeyError, subprocess.SubprocessError):
+            print("Private member delivery deferred; original token retained.", flush=True)
+
+
+def deliver_public_members(source, journal, send=publish_member):
+    journal.execute("CREATE TABLE IF NOT EXISTS delivery(feed TEXT PRIMARY KEY,token_hash TEXT NOT NULL,event TEXT NOT NULL,relays TEXT NOT NULL,ack_at INTEGER)")
+    journal.execute("CREATE TABLE IF NOT EXISTS public_relay_ack(feed TEXT NOT NULL,relay TEXT NOT NULL,PRIMARY KEY(feed,relay))")
+    rows = delivery_rows(source,"""
+        SELECT m.rowid,m.feed,m.token,b.signed_event,p.binding FROM member_publications b JOIN member_ecash m USING(feed)
+        JOIN proof_disposition p ON p.id=m.feed WHERE b.signed_event IS NOT NULL AND m.rowid>? ORDER BY m.rowid LIMIT 32
+    """)
+    for disposition, token, message, binding in rows:
+        try:
+            deliver_public_event(journal, disposition, token, message, binding, send)
+        except (ValueError, TypeError, KeyError, OSError):
+            print("Public member delivery deferred for one reward; original event retained.", flush=True)
+
+
+def deliver_public_event(journal, disposition, token, message, binding, send):
+    route = json.loads(binding)["assignment"]["destination"]
+    urls = list(dict.fromkeys(route["token_relays"] + route["read_relays"]))
+    stamp = hashlib.sha256(token.encode()).hexdigest()
+    with journal:
+        journal.execute("INSERT INTO delivery VALUES(?,?,?,?,NULL) ON CONFLICT(feed) DO NOTHING",
+                        (disposition,stamp,message,json.dumps(urls)))
+        saved = journal.execute("SELECT token_hash,event,relays FROM delivery WHERE feed=?",(disposition,)).fetchone()
+        if saved != (stamp,message,json.dumps(urls)):
+            raise ValueError("public delivery differs from original")
+    acked = {url for url, in journal.execute("SELECT relay FROM public_relay_ack WHERE feed=?",(disposition,))}
+    pending = [url for url in urls if url not in acked]
+    if not pending:
+        return
+    event = json.loads(message)
+    with ThreadPoolExecutor(max_workers=min(8,len(pending))) as pool:
+        for url,accepted in zip(pending,pool.map(lambda relay: send(relay,event),pending),strict=True):
+            if accepted:
+                with journal:
+                    journal.execute("INSERT OR IGNORE INTO public_relay_ack VALUES(?,?)",(disposition,url))
+                    if url in route["token_relays"]:
+                        journal.execute("UPDATE delivery SET ack_at=COALESCE(ack_at,unixepoch()) WHERE feed=?",(disposition,))
+
 
 
 if __name__ == "__main__":
@@ -150,6 +280,11 @@ if __name__ == "__main__":
     while True:
         try:
             deliver(source, journal, args.request.read_text().strip())
-        except Exception:
+        except (OSError, ValueError, sqlite3.Error):
             print("Operator delivery deferred; original token retained.", flush=True)
+        for deliver_members in (deliver_private_members, deliver_public_members):
+            try:
+                deliver_members(source, journal)
+            except (OSError, ValueError, sqlite3.Error):
+                print("Member delivery deferred; original reward retained.", flush=True)
         time.sleep(5)

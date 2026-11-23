@@ -1,5 +1,6 @@
 """Verify private NUT-18 delivery, offline retry and recipient-only decryption."""
 import base64
+import hashlib
 import json
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -12,22 +13,29 @@ import tempfile
 import bech32
 import cbor2
 from coincurve import PrivateKey
+from cashu.core.nuts import nut18, nut26
 
 repo = Path(__file__).resolve().parents[3]
 collector = repo/"deploy/breez-reserve/collector"
 sys.path.insert(0, str(collector))
-from operator_delivery import MINT, deliver, publish
+from invoice_server import member_delivery_ack
+from operator_delivery import MINT, delivery_rows, deliver, deliver_private_members, destination, public_relay_socket, publish
 
 
 def run():
     key = PrivateKey()
-    lock = key.public_key.format().hex()
+    lock = PrivateKey().public_key.format().hex()
     url = b"wss://relay.example"
-    profile = bytes([0,32])+bytes.fromhex(lock[2:])+bytes([1,len(url)])+url
+    profile = bytes([0,32])+key.public_key.format()[1:]+bytes([1,len(url)])+url
     address = bech32.bech32_encode("nprofile",bech32.convertbits(profile,8,5,True))
     req = {"i":"fixture","u":"sat","nut10":{"k":"P2PK","d":lock},
            "t":[{"t":"nostr","a":address,"g":[["n","17"]]}]}
     encoded = "creqA"+base64.urlsafe_b64encode(cbor2.dumps(req)).decode()
+    bech = nut26.serialize(nut18.deserialize(encoded))
+    expected = ("fixture", lock, key.public_key.format()[1:].hex(), ["wss://relay.example"])
+    for representation in (encoded, bech.upper(), bech.lower()):
+        assert destination(representation) == expected
+
     proofs = [{"amount":8,"secret":json.dumps(["P2PK",{"nonce":"fixture-private-nonce","data":lock}])}]
     raw = json.dumps({"unit":"sat","token":[{"mint":MINT,"proofs":proofs}]})
     source = sqlite3.connect(":memory:")
@@ -38,6 +46,20 @@ def run():
     source.execute("insert into proof_disposition values('feed',?)",(json.dumps({"recipient":lock}),))
     with tempfile.TemporaryDirectory() as tmp:
         root=Path(tmp)
+        # The production collector may use SQLite's rollback journal. Hold a
+        # reader midway through a delivery batch while another connection commits.
+        with sqlite3.connect(root/"locking.sqlite",timeout=0) as writer:
+            writer.execute("CREATE TABLE queue(value INTEGER)")
+            writer.executemany("INSERT INTO queue VALUES(?)",((n,) for n in range(65)))
+            writer.commit()
+            reader = sqlite3.connect((root/"locking.sqlite").as_uri()+"?mode=ro",uri=True)
+            pending = delivery_rows(reader,"SELECT rowid,value FROM queue WHERE rowid>? ORDER BY rowid LIMIT 32")
+            assert next(pending) == [0]
+            writer.execute("UPDATE queue SET value=99 WHERE rowid=65")
+            writer.commit()
+            assert [n for (n,) in pending] == [*range(1,64),99]
+            reader.close()
+        writer.close()
         wrapper=root/"operator_wrap.cjs"
         shutil.copyfile(collector/wrapper.name, wrapper)
         shutil.copyfile(repo/"web/vendor/nostr.bundle.js",root/"nostr.bundle.js")
@@ -55,6 +77,7 @@ def run():
         assert len(observed)==2 and observed[0]==observed[1]
         # A relay acknowledging another event cannot complete this token's delivery.
         relay = Mock()
+        relay.getstatus.return_value = 101
         relay.recv.side_effect = [json.dumps(["OK", "00"*32, True, ""]), ConnectionError()]
         with patch("operator_delivery.websocket.create_connection", return_value=relay):
             assert not publish("wss://relay.example", observed[0])
@@ -67,6 +90,29 @@ process.stdout.write(rumor.content);"""
         result=subprocess.run(["node","-e",program],cwd=root,input=json.dumps({"key":key.secret.hex(),"event":observed[0]}),
                               capture_output=True,text=True,check=True)
         assert json.loads(result.stdout)=={"mint":MINT,"unit":"sat","proofs":proofs,"id":"fixture"}
+        source.execute("create table member_ecash(feed,token,amount_sat)")
+        source.execute("insert into member_ecash select 'member-ecash:feed:alice',token,amount_sat from operator_ecash where feed='feed'")
+        frozen = {"recipient":lock, "assignment":{"destination":{"method":"private_ecash",
+                  "payment_id":"member-test", "receiving_key":lock, "transport_key":expected[2], "relays":expected[3]}}}
+        source.execute("insert into proof_disposition values('member-ecash:feed:alice',?)",(json.dumps(frozen),))
+        observed.clear()
+        stamp = hashlib.sha256(source.execute("select token from member_ecash").fetchone()[0].encode()).hexdigest()
+        for n in range(3):
+            assert member_delivery_ack("member-ecash:feed:alice",stamp,root/"outbox.sqlite") == (n == 2)
+            journal = sqlite3.connect(root/"outbox.sqlite")
+            deliver_private_members(source,journal,wrapper,sender)
+            journal.close()
+        assert len(observed)==2 and observed[0]==observed[1]
+        result=subprocess.run(["node","-e",program],cwd=root,input=json.dumps({"key":key.secret.hex(),"event":observed[0]}),
+                              capture_output=True,text=True,check=True)
+        assert json.loads(result.stdout)=={"mint":MINT,"unit":"sat","proofs":proofs,"id":"member-test"}
+        with patch("operator_delivery.socket.getaddrinfo", return_value=[(2,1,6,"",("127.0.0.1",443))]):
+            try:
+                public_relay_socket("wss://relay.example")
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("accepted private relay address")
         print("Private wallet delivery passed: decrypted NUT-18 payload, identical retry and one acknowledged delivery.")
 
 

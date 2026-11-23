@@ -14,6 +14,77 @@ pub(crate) struct Work {
     pub member: Option<String>,
 }
 impl Store {
+    pub(crate) async fn member_ecash_assignment(
+        &self,
+        grant: Uuid,
+        member: &str,
+    ) -> Result<Option<crate::payout::cashu::MemberExecution>> {
+        let row=sqlx::query("SELECT r.recipient_json,r.gross_sats,r.fee_limit_sats,r.net_sats,g.qualification_json FROM payout_rows r JOIN payout_grants g ON g.id=r.grant_id WHERE r.grant_id=? AND r.member=? AND json_type(r.recipient_json,'$.method') IS NOT NULL")
+            .bind(grant.to_string()).bind(member).fetch_optional(&self.pool).await?;
+        let Some(row) = row else { return Ok(None) };
+        let evidence: serde_json::Value =
+            serde_json::from_str(&row.try_get::<String, _>("qualification_json")?)?;
+        let planning = self.grant_planning_policy(grant).await?;
+        let gross_sats = u64::try_from(row.try_get::<i64, _>("gross_sats")?)?;
+        let (minimum_net, maximum_net, fee_limit) = if planning.fee_mode.is_fixed() {
+            let net = u64::try_from(row.try_get::<i64, _>("net_sats")?)?;
+            (
+                net,
+                net,
+                u64::try_from(row.try_get::<i64, _>("fee_limit_sats")?)?,
+            )
+        } else {
+            (
+                planning.minimum_net_sats,
+                gross_sats,
+                gross_sats
+                    .checked_sub(planning.minimum_net_sats)
+                    .context("member minimum exceeds share")?,
+            )
+        };
+        let terms = crate::payout::cashu::MemberExecution {
+            member: member.into(),
+            reservation: serde_json::from_value(evidence["reservation"].clone())?,
+            lots: self.cashu_probe_allocations(grant).await?,
+            destination: serde_json::from_str(&row.try_get::<String, _>("recipient_json")?)?,
+            gross_sats,
+            fee_limit,
+            minimum_net,
+            maximum_net,
+        };
+        terms.digest()?;
+        Ok(Some(terms))
+    }
+    pub(crate) async fn record_member_ecash_ready(
+        &self,
+        terms: &crate::payout::cashu::MemberExecution,
+        amount: u64,
+        fee: u64,
+    ) -> Result<()> {
+        let digest = terms.digest()?;
+        anyhow::ensure!(
+            (terms.minimum_net..=terms.maximum_net).contains(&amount)
+                && fee <= terms.fee_limit
+                && amount
+                    .checked_add(fee)
+                    .is_some_and(|v| v <= terms.gross_sats),
+            "member swap differs from assignment"
+        );
+        let id = terms.reservation.id.to_string();
+        let amount = i64::try_from(amount)?;
+        let fee = i64::try_from(fee)?;
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        sqlx::query("INSERT INTO member_ecash_ready VALUES(?,?,?,?,?) ON CONFLICT(grant_id,member) DO NOTHING")
+            .bind(&id).bind(&terms.member).bind(&digest).bind(amount).bind(fee).execute(&mut *tx).await?;
+        let saved:(String,i64,i64)=sqlx::query_as("SELECT terms_hash,amount_sat,fee_sat FROM member_ecash_ready WHERE grant_id=? AND member=?")
+            .bind(id).bind(&terms.member).fetch_one(&mut *tx).await?;
+        anyhow::ensure!(
+            saved == (digest, amount, fee),
+            "member swap receipt changed"
+        );
+        tx.commit().await?;
+        Ok(())
+    }
     pub async fn saved_invoice_intent(
         &self,
         grant: Uuid,
@@ -457,14 +528,15 @@ WITH grants AS (
  EXISTS(SELECT 1 FROM payout_invoice_intents i JOIN payout_quote_intents q ON q.invoice_id=i.id JOIN payout_payment_bindings b ON b.intent_id=q.id JOIN payout_payment_records p ON p.payment_id=b.payment_id
  WHERE i.grant_id=r.grant_id AND i.member=r.member AND p.seq=(SELECT MAX(p2.seq) FROM payout_payment_records p2 WHERE p2.payment_id=b.payment_id) AND p.state IN ('COMPLETED','FAILED')) AS terminal,
  EXISTS(SELECT 1 FROM payout_invoice_intents i JOIN payout_quote_intents q ON q.invoice_id=i.id JOIN payout_payment_bindings b ON b.intent_id=q.id JOIN payout_payment_conflicts c ON c.payment_id=b.payment_id WHERE i.grant_id=r.grant_id AND i.member=r.member) AS conflicted
+, EXISTS(SELECT 1 FROM member_ecash_ready e WHERE e.grant_id=r.grant_id AND e.member=r.member) AS ecash_ready
  FROM payout_rows r JOIN grants g ON g.id=r.grant_id
 ), jobs AS (
  SELECT 'row:'||s.grant_id||':'||s.member AS work_key,s.grant_id,s.member,s.admitted_at FROM state s
- WHERE NOT s.closed AND NOT s.terminal AND NOT s.conflicted AND NOT EXISTS(SELECT 1 FROM payout_outcome_manifests m WHERE m.grant_id=s.grant_id)
+ WHERE NOT s.ecash_ready AND NOT s.closed AND NOT s.terminal AND NOT s.conflicted AND NOT EXISTS(SELECT 1 FROM payout_outcome_manifests m WHERE m.grant_id=s.grant_id)
  UNION ALL
  SELECT 'outcome:'||g.id,g.id,NULL,g.admitted_at FROM grants g
  WHERE NOT EXISTS(SELECT 1 FROM payout_outcome_acks a WHERE a.grant_id=g.id)
- AND (EXISTS(SELECT 1 FROM payout_outcome_manifests m WHERE m.grant_id=g.id) OR NOT EXISTS(SELECT 1 FROM state s WHERE s.grant_id=g.id AND (s.conflicted OR (NOT s.closed AND NOT s.terminal))))
+ AND (EXISTS(SELECT 1 FROM payout_outcome_manifests m WHERE m.grant_id=g.id) OR NOT EXISTS(SELECT 1 FROM state s WHERE s.grant_id=g.id AND (s.conflicted OR (NOT s.closed AND NOT s.terminal AND NOT s.ecash_ready))))
 )
 SELECT j.* FROM jobs j LEFT JOIN payout_worker_attempts a ON a.work_key=j.work_key ORDER BY COALESCE(a.sequence,0),j.admitted_at,j.work_key LIMIT 1
 "#).bind(provider).fetch_optional(&mut *tx).await?;

@@ -55,6 +55,25 @@ pub struct UnsignedZap {
     pub tags: Vec<Vec<String>>,
 }
 
+impl UnsignedZap {
+    pub(crate) fn check_signed(
+        &self,
+        signed: &crate::nostr_event::VerifiedEvent,
+        owner: &str,
+    ) -> anyhow::Result<()> {
+        let event = signed.event();
+        anyhow::ensure!(
+            event.pubkey == owner
+                && event.kind == self.kind
+                && event.tags == self.tags
+                && event.created_at == self.created_at
+                && event.content == self.content,
+            "signed reward differs from original intent"
+        );
+        Ok(())
+    }
+}
+
 #[derive(Clone)]
 pub struct Intent(pub(crate) Document);
 

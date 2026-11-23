@@ -34,6 +34,7 @@ pub(crate) struct Service {
 pub(crate) fn router(service: Service) -> Router {
     Router::new()
         .route("/api/v1/cyberherd/me", get(me))
+        .route("/api/v1/cyberherd/me/rewards", post(set_rewards))
         .route("/api/v1/cyberherd/operator/state", get(state))
         .route("/api/v1/cyberherd/operator/templates", get(templates))
         .route("/api/v1/cyberherd/operator/command", post(command))
@@ -129,10 +130,13 @@ async fn me(
     let Ok(snapshot) = s.store.snapshot(&s.owner).await else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
+    let Ok((method, revision)) = s.store.reward_preference(&s.owner, &proof.actor).await else {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    };
     let m = snapshot.roster.members.get(&proof.actor);
     json(
         serde_json::json!({"pubkey":proof.actor,"operator":s.config.operator(&proof.actor),"cycle":snapshot.cycle,"revision":snapshot.revision,
-        "member":{"active":m.is_some_and(|m|m.active),"banned":snapshot.roster.banned.contains(&proof.actor),"amount_sats":m.map_or(0,|m|m.amount_sats).to_string(),"lifetime_sats":m.map_or(0,|m|m.lifetime_sats).to_string(),"awards":snapshot.roster.awards.get(&proof.actor).copied().unwrap_or_default()}}),
+        "reward_preference":{"method":method,"revision":revision},"member":{"active":m.is_some_and(|m|m.active),"banned":snapshot.roster.banned.contains(&proof.actor),"amount_sats":m.map_or(0,|m|m.amount_sats).to_string(),"lifetime_sats":m.map_or(0,|m|m.lifetime_sats).to_string(),"awards":snapshot.roster.awards.get(&proof.actor).copied().unwrap_or_default()}}),
     )
 }
 #[derive(Deserialize)]
@@ -202,9 +206,12 @@ async fn templates(
         Err(_) => StatusCode::CONFLICT.into_response(),
     }
 }
-async fn command(State(s): State<Service>, request: Request) -> Response {
+async fn signed_body(
+    s: &Service,
+    request: Request,
+) -> Result<(String, String, axum::body::Bytes, i64), StatusCode> {
     if request.uri().query().is_some() {
-        return StatusCode::BAD_REQUEST.into_response();
+        return Err(StatusCode::BAD_REQUEST);
     }
     let content_type = request
         .headers()
@@ -215,24 +222,95 @@ async fn command(State(s): State<Service>, request: Request) -> Response {
         content_type,
         "application/json" | "application/json; charset=utf-8"
     ) {
-        return StatusCode::UNSUPPORTED_MEDIA_TYPE.into_response();
+        return Err(StatusCode::UNSUPPORTED_MEDIA_TYPE);
     }
     let Some(header) = header_value(request.headers()).map(str::to_owned) else {
-        return StatusCode::UNAUTHORIZED.into_response();
+        return Err(StatusCode::UNAUTHORIZED);
     };
     if request
         .headers()
         .get(header::ORIGIN)
         .is_some_and(|v| v.to_str().ok() != Some(s.config.public_origin.as_str()))
     {
-        return StatusCode::UNAUTHORIZED.into_response();
+        return Err(StatusCode::UNAUTHORIZED);
     }
     let uri = request.uri().to_string();
     let Ok(body) = axum::body::to_bytes(request.into_body(), 16384).await else {
-        return StatusCode::PAYLOAD_TOO_LARGE.into_response();
+        return Err(StatusCode::PAYLOAD_TOO_LARGE);
     };
     let Ok(now) = calendar::now() else {
-        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+        return Err(StatusCode::SERVICE_UNAVAILABLE);
+    };
+    Ok((header, uri, body, now))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RewardSelection {
+    expected_revision: i64,
+    method: String,
+    #[serde(default)]
+    publish_recipient_and_amount: bool,
+    payment_request: Option<String>,
+}
+
+async fn set_rewards(State(s): State<Service>, request: Request) -> Response {
+    let (header, uri, body, now) = match signed_body(&s, request).await {
+        Ok(v) => v,
+        Err(code) => return code.into_response(),
+    };
+    let Ok(proof) = s.config.verify(&header, "POST", &uri, &body, now) else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    let Ok(choice) = serde_json::from_slice::<RewardSelection>(&body) else {
+        return StatusCode::BAD_REQUEST.into_response();
+    };
+    if choice.expected_revision < 0
+        || !matches!(
+            (
+                choice.method.as_str(),
+                choice.publish_recipient_and_amount,
+                choice.payment_request.as_deref()
+            ),
+            ("lightning", false, None)
+                | ("public_nutzap", true, None)
+                | ("private_ecash", false, Some(_))
+        )
+    {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    if let Some(text) = &choice.payment_request
+        && super::private_reward::PrivateDestination::from_request(
+            text,
+            crate::cashu::treasury::PROJECT_MINT_ORIGIN,
+        )
+        .is_err()
+    {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    match s
+        .store
+        .set_reward_preference(
+            &s.owner,
+            &proof,
+            now,
+            choice.expected_revision,
+            &choice.method,
+            choice.payment_request.as_deref(),
+        )
+        .await
+    {
+        Ok(Some(revision)) => json(serde_json::json!({"method":choice.method,"revision":revision})),
+        Ok(None) => StatusCode::CONFLICT.into_response(),
+        Err(error) if error.is::<http_auth::Rejected>() => StatusCode::UNAUTHORIZED.into_response(),
+        Err(_) => StatusCode::FORBIDDEN.into_response(),
+    }
+}
+
+async fn command(State(s): State<Service>, request: Request) -> Response {
+    let (header, uri, body, now) = match signed_body(&s, request).await {
+        Ok(v) => v,
+        Err(code) => return code.into_response(),
     };
     let Ok(proof) = s.config.verify_operator(&header, &uri, &body, now) else {
         return StatusCode::UNAUTHORIZED.into_response();

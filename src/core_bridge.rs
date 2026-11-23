@@ -86,6 +86,9 @@ pub enum Request {
         reservation: Box<crate::reward_funding::Reservation>,
         after: u16,
     },
+    ClaimMemberEcash {
+        request: Box<crate::payout::cashu::MemberExecution>,
+    },
     ClaimDirectOperator {
         request: Box<crate::payout::operator::DirectExecution>,
     },

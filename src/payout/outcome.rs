@@ -22,6 +22,11 @@ pub enum UnsubmittedReason {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Disposition {
     OperatorReclaimed,
+    MemberEcash {
+        terms_hash: String,
+        amount_sats: u64,
+        fee_sats: u64,
+    },
     CashuPaid {
         disposition_id: Uuid,
         payment_hash: String,
@@ -119,12 +124,29 @@ impl Packet {
         next_hash(&self.before_hash, &self.row)?;
         if matches!(
             self.row.disposition,
-            Disposition::CashuPaid { .. } | Disposition::OperatorReclaimed
+            Disposition::CashuPaid { .. }
+                | Disposition::MemberEcash { .. }
+                | Disposition::OperatorReclaimed
         ) != (self.header.scope.environment == "retained-cashu")
         {
             bail!("settlement row differs from manifest provider");
         }
         match &self.row.disposition {
+            Disposition::MemberEcash {
+                terms_hash,
+                amount_sats,
+                fee_sats,
+            } => {
+                crate::nostr_event::validate_hex(terms_hash, 32)?;
+                anyhow::ensure!(
+                    *amount_sats > 0
+                        && amount_sats
+                            .checked_add(*fee_sats)
+                            .is_some_and(|n| n <= self.row.gross_sats),
+                    "invalid member ecash outcome amount"
+                );
+                Ok(None)
+            }
             Disposition::CashuPaid {
                 disposition_id,
                 payment_hash,
@@ -230,7 +252,9 @@ impl Reader {
         let binding = packet.validate()?;
         if matches!(
             packet.row.disposition,
-            Disposition::CashuPaid { .. } | Disposition::OperatorReclaimed
+            Disposition::CashuPaid { .. }
+                | Disposition::MemberEcash { .. }
+                | Disposition::OperatorReclaimed
         ) {
             bail!("Cashu outcome requires custody verification");
         }
@@ -289,6 +313,41 @@ pub(crate) struct VerifiedRow {
     invoice_hash: Option<String>,
 }
 impl VerifiedRow {
+    pub(crate) async fn from_member_ecash(
+        packet: &Packet,
+        collector: &crate::config::BreezCollectorConfig,
+    ) -> Result<Self> {
+        packet.validate()?;
+        let Disposition::MemberEcash {
+            terms_hash,
+            amount_sats,
+            fee_sats,
+        } = &packet.row.disposition
+        else {
+            bail!("expected member ecash receipt");
+        };
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Receipt {
+            amount_sat: u64,
+            fee_sat: u64,
+        }
+        let receipt:Option<Receipt>=crate::private_ipc::request(&collector.socket,collector.peer_uid,
+            &serde_json::json!({"member_ecash_receipt":packet.header.reservation.request_id,"member":packet.row.member,"terms_hash":terms_hash}),65536,20).await?;
+        anyhow::ensure!(
+            receipt.is_some_and(|r| r.amount_sat == *amount_sats && r.fee_sat == *fee_sats),
+            "collector has no matching member swap"
+        );
+        Ok(Self {
+            packet: packet.clone(),
+            spent: amount_sats
+                .checked_add(*fee_sats)
+                .context("member ecash sum overflow")?,
+            held: 0,
+            payment_id: None,
+            invoice_hash: None,
+        })
+    }
     pub async fn from_reclaim(
         packet: &Packet,
         collector: &crate::config::BreezCollectorConfig,

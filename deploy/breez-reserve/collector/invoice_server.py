@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+import sqlite3
 import socket
 import ssl
 import struct
@@ -18,7 +19,28 @@ from project_quote import issue
 MAX_FRAME = 65536
 
 
-def create(request, store, client, token, keyset):
+def member_delivery_ack(disposition, token_hash, journal):
+    if not journal.is_file():
+        return False
+    db = sqlite3.connect(journal.as_uri()+"?mode=ro", uri=True)
+    try:
+        return db.execute("SELECT 1 FROM delivery WHERE feed=? AND token_hash=? AND ack_at IS NOT NULL",
+                          (disposition,token_hash)).fetchone() is not None
+    finally:
+        db.close()
+
+
+def create(request, store, client, token, keyset, *, delivery_journal=Path("/var/lib/lightning-goats-operator-delivery/outbox.sqlite")):
+    if set(request) == {"member_ecash_receipt","member","terms_hash"}:
+        disposition = f"member-ecash:{request['member_ecash_receipt']}:{request['member']}"
+        row = store.db.execute("""
+            SELECT m.amount_sat,m.fee_sat,m.token FROM member_ecash m JOIN proof_disposition p ON p.id=m.feed
+            WHERE m.feed=? AND m.token IS NOT NULL AND p.purpose='cyberherd_payout'
+            AND json_extract(p.binding,'$.assignment.terms_hash')=?
+        """,(disposition,request["terms_hash"])).fetchone()
+        if row is None or not member_delivery_ack(disposition, hashlib.sha256(row[2].encode()).hexdigest(), delivery_journal):
+            return None
+        return {"amount_sat":row[0], "fee_sat":row[1]}
     if set(request) == {"reclaim_receipt","plan","member"}:
         from member_reclaim import receipt
         return receipt(store.db,request["reclaim_receipt"],request["plan"],request["member"])

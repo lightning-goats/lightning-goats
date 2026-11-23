@@ -1,6 +1,7 @@
 """Read-only CyberHerd page. Every HTTP request is fulfilled locally or blocked."""
 import json
 import base64
+import hashlib
 from datetime import datetime, timezone
 import mimetypes
 import os
@@ -62,7 +63,15 @@ class RosterBrowserTests(unittest.TestCase):
             self.auth_requests.append(event)
             route.fulfill(status=self.self_status,content_type='application/json',body=json.dumps({
                 'pubkey':event['pubkey'],'operator':False,'cycle':1,'revision':1,
+                'reward_preference':{'method':'lightning','revision':0},
                 'member':{'active':self.self_active,'banned':False,'amount_sats':'21','lifetime_sats':'21'}}))
+        elif url.path == "/api/v1/cyberherd/me/rewards":
+            event=json.loads(base64.b64decode(route.request.headers["authorization"][6:]))
+            tags=dict(event["tags"])
+            self.assertEqual((event["kind"],tags["u"],tags["method"]),(27235,route.request.url,"POST"))
+            self.assertEqual(tags["payload"],hashlib.sha256(route.request.post_data_buffer).hexdigest())
+            self.saved=route.request.post_data_json
+            route.fulfill(json={"method":self.saved["method"],"revision":self.saved["expected_revision"]+1})
         else:
             file = ROOT / url.path.lstrip("/")
             if url.netloc == "lightning-goats.com" and file.is_file() and file.resolve().is_relative_to(ROOT):
@@ -141,3 +150,21 @@ class RosterBrowserTests(unittest.TestCase):
         self.assertTrue(self.page.locator('#operator-link').is_hidden())
         self.assertTrue(all(method=='GET' for method,_ in self.requests))
         self.assertEqual(self.errors,[])
+
+    def test_member_consent_and_private_registration_use_signed_body(self):
+        self.enabled=True; self.auth_enabled=True; self.self_active=True; self.synthetic_signer()
+        self.page.goto(ORIGIN+"/cyberherd.html")
+        self.page.locator("#connect-nostr").click()
+        self.page.select_option("#reward-method","public_nutzap")
+        self.page.locator("#reward-preferences button").click()
+        self.assertFalse(hasattr(self,"saved"))
+        self.page.check("#reward-consent")
+        self.page.locator("#reward-preferences button").click()
+        self.page.wait_for_function("document.querySelector('#reward-feedback').textContent.includes('saved')")
+        self.assertEqual(self.saved,{"method":"public_nutzap","publish_recipient_and_amount":True,"expected_revision":0})
+        self.page.select_option("#reward-method","private_ecash")
+        self.page.fill("#reward-request","creqA-test-transport")
+        self.page.locator("#reward-preferences button").click()
+        self.page.wait_for_function("document.querySelector('#reward-request').value===''")
+        self.assertEqual(self.saved,{"method":"private_ecash","expected_revision":1,
+                                    "payment_request":"creqA-test-transport","publish_recipient_and_amount":False})

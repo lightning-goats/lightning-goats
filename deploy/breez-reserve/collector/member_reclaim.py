@@ -91,8 +91,9 @@ def authorize(db, rows, settings):
             WHERE r.id=? AND r.request_id=? AND r.plan_hash=? AND r.reserved_sats=? AND r.owner=?
             AND f.status IN ('confirmed','reconciled_fed')
             AND NOT EXISTS(SELECT 1 FROM cashu_payout_execution_claims c WHERE c.reservation_id=r.id AND c.member=?)
+            AND NOT EXISTS(SELECT 1 FROM member_ecash_execution_claims e WHERE e.reservation_id=r.id AND e.member=?)
             AND NOT EXISTS(SELECT 1 FROM reward_outcome_manifests m WHERE m.reservation_id=r.id)
-        """,(row["grant"],row["feed"],row["plan"],row["reserved"],bridge["reward_policy"]["owner"],row["member"])).fetchone()
+        """,(row["grant"],row["feed"],row["plan"],row["reserved"],bridge["reward_policy"]["owner"],row["member"],row["member"])).fetchone()
         if check:
             authorized.append(row)
     return authorized

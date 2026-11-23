@@ -54,7 +54,7 @@ def verify_legacy_upgrade():
             raise AssertionError("legacy writer could spend a direct allocation")
 
 
-def exercise(ppk, failed_members=False):
+def exercise(ppk, failed_members=False, ecash_members=False, worker_members=False):
     with TemporaryDirectory(prefix="lg-direct-") as raw:
         root = Path(raw)
         (root / "mint-seed").write_text(Mnemonic("english").generate(strength=128))
@@ -110,8 +110,15 @@ def exercise(ppk, failed_members=False):
                 else: raise AssertionError("invalid receiving key accepted")
                 fee=1 if ppk else 0
                 if binary := os.environ.get("LG_DIRECT_WORKER_TEST"):
-                    (root/"worker.json").write_text(json.dumps({"claim":claim,"recipient":request["recipient"],
-                                                              "payment_hash":payment_hash,"fee":fee}))
+                    terms = {"claim":claim,"recipient":request["recipient"],"payment_hash":payment_hash,"fee":fee}
+                    if worker_members:
+                        members = [PrivateKey(),PrivateKey()]
+                        terms["members"] = [{"pubkey":PrivateKey().public_key.format()[1:].hex(),
+                            "destination":{"method":"private_ecash","mint":MINT,"receiving_key":key.public_key.format().hex(),
+                                "request_digest":hashlib.sha256(key.public_key.format()).hexdigest(),
+                                "payment_id":"member-worker-test","transport_key":PrivateKey().public_key.format()[1:].hex(),
+                                "relays":["wss://relay.example.com"]}} for key in members]
+                    (root/"worker.json").write_text(json.dumps(terms))
                     class Handler(socketserver.BaseRequestHandler):
                         def handle(self):
                             local=ClaimStore(root)
@@ -155,6 +162,24 @@ def exercise(ppk, failed_members=False):
                     with ThreadPoolExecutor(2) as pool: results=list(pool.map(retry,range(2)))
                     fee=1 if ppk else 0
                     assert results==[{"state":"ready","amount_sat":18-fee,"fee_sat":fee}]*2
+                if worker_members:
+                    assert paths.count("/v1/swap")==3 and reserve.pay_attempts==0
+                    store=ClaimStore(root)
+                    for member,key in zip(terms["members"],members,strict=True):
+                        row = store.db.execute("SELECT token,amount_sat,fee_sat FROM member_ecash WHERE feed=?",
+                                               (f"member-ecash:{feed}:{member['pubkey']}",)).fetchone()
+                        assert row[1:]==(7-fee,fee)
+                        proofs = [p.model_dump(exclude_none=True) for p in TokenV3.deserialize(row[0]).proofs]
+                        assert sum(p["amount"] for p in proofs)==7-fee
+                        for p in proofs:
+                            assert json.loads(p["secret"])[1]["data"]==key.public_key.format().hex()
+                            p["witness"]=json.dumps({"signatures":[key.sign_schnorr(hashlib.sha256(p["secret"].encode()).digest()).hex()]})
+                        net=7-2*fee
+                        outs,_=new_outputs(keyset,[1<<i for i in range(net.bit_length()) if net & (1<<i)])
+                        expect(mint.post("/v1/swap",json={"inputs":proofs,"outputs":encode_outputs(outs)}))
+                    store.db.close()
+                    print("Verified normal worker, core and collector through two member payouts",flush=True)
+                    return
                 assert paths.count("/v1/swap")==1 and reserve.pay_attempts==0
                 store=ClaimStore(root)
                 assert store.db.execute("SELECT COUNT(*) FROM proof_disposition").fetchone()==(1,)
@@ -181,6 +206,102 @@ def exercise(ppk, failed_members=False):
                                             (feed,)).fetchone()==(32,)
                     print("Verified failed member batch, original funding, lost response and duplicate recovery", flush=True)
                     store.db.close()
+                    return
+                if ecash_members:
+                    grant = str(uuid4())
+                    sender_key = PrivateKey()
+                    for method in ("private_ecash","public_nutzap"):
+                        receiver, identity = PrivateKey(), PrivateKey()
+                        member_key = identity.public_key.format()[1:].hex()
+                        lock = receiver.public_key.format().hex()
+                        if method == "public_nutzap" and not lock.startswith("02"):
+                            receiver = PrivateKey.from_int(
+                                0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
+                                - int.from_bytes(receiver.secret, "big"))
+                            lock = receiver.public_key.format().hex()
+                        destination={"method":method,"mint":MINT,"receiving_key":lock}
+                        if method=="public_nutzap":
+                            destination.update(mint=MINT+"/",member=member_key,advertisement="ab"*32,
+                                token_relays=["wss://relay.example.com"],read_relays=["wss://read.example.com"])
+                        else:
+                            destination.update(request_digest="cd"*32,payment_id="reward",
+                                transport_key=member_key,relays=["wss://relay.example.com"])
+                        assignment = {"feed":feed,"grant":grant,"owner":sender_key.public_key.format()[1:].hex(),"member_key":member_key,"plan_hash":request["plan_hash"],
+                            "destination":destination,"gross":7,"reserved":14,"lots":request["lots"],
+                            "fee_limit":2,"minimum_net":5,"maximum_net":7}
+                        def send(terms):
+                            return dispatch_payout(store,MintOnly(),{"member_ecash":terms},keyset,{keyset:keys})
+                        try:
+                            send(assignment)
+                        except httpx.ReadTimeout:
+                            pass
+                        else:
+                            raise AssertionError("expected a lost member swap reply")
+                        store.db.close()
+                        store = ClaimStore(root)
+                        try:
+                            send({**assignment,"destination":{**destination,"receiving_key":PrivateKey().public_key.format().hex()}})
+                        except ValueError:
+                            pass
+                        else:
+                            raise AssertionError("changed member destination accepted")
+                        assert send(assignment) == send(assignment) == {"state":"ready","fee_sat":fee,"amount_sat":7-fee}
+                        row = store.db.execute("SELECT token FROM member_ecash WHERE feed=?",
+                            (f"member-ecash:{feed}:{member_key}",)).fetchone()
+                        proofs = [p.model_dump(exclude_none=True) for p in TokenV3.deserialize(row[0]).proofs]
+                        if method == "public_nutzap":
+                            from operator_delivery import public_reward_tags
+                            tags = public_reward_tags(row[0],7-fee,assignment)
+                            assert tags[:3] == [["p",member_key],["u",MINT+"/"],["unit","sat"]]
+                            proofs = [json.loads(value) for kind,value in tags if kind == "proof"]
+                            from member_publication import publication
+                            from operator_delivery import deliver_public_members
+                            import sqlite3
+                            digest = hashlib.sha256(json.dumps(assignment,ensure_ascii=False,sort_keys=True,separators=(",",":")).encode()).hexdigest()
+                            lookup = {"feed":feed,"member":member_key,"terms_hash":digest}
+                            draft = publication(store,lookup)
+                            assert not draft["signed"] and draft["unsigned"]["tags"] == tags
+                            event = dict(draft["unsigned"],pubkey=assignment["owner"])
+                            serialized = json.dumps([0,event["pubkey"],event["created_at"],9321,tags,""],separators=(",",":")).encode()
+                            event["id"] = hashlib.sha256(serialized).hexdigest()
+                            event["sig"] = sender_key.sign_schnorr(bytes.fromhex(event["id"])).hex()
+                            try:
+                                publication(store,{**lookup,"event":{**event,"pubkey":member_key}})
+                            except ValueError:
+                                pass
+                            else:
+                                raise AssertionError("accepted changed sender")
+                            assert publication(store,{**lookup,"event":event})["signed"]
+                            assert publication(store,lookup)["signed"]
+                            seen = {}
+                            def relay(url,signed):
+                                assert signed == event
+                                seen[url] = seen.get(url,0)+1
+                                return url in destination["read_relays"] or seen[url]==2
+                            for attempt in range(3):
+                                journal = sqlite3.connect(root/"public-outbox.sqlite")
+                                deliver_public_members(store.db,journal,relay)
+                                ack = journal.execute("SELECT ack_at FROM delivery").fetchone()[0]
+                                assert (ack is not None) == (attempt>0)
+                                journal.close()
+                            assert seen == {"wss://relay.example.com":2,"wss://read.example.com":1}
+                        assert sum(p["amount"] for p in proofs)==7-fee
+                        for p in proofs:
+                            assert p["dleq"] and json.loads(p["secret"])[1]["data"]==lock
+                            p["witness"]=json.dumps({"signatures":[receiver.sign_schnorr(hashlib.sha256(p["secret"].encode()).digest()).hex()]})
+                        net=7-2*fee
+                        outs,_=new_outputs(keyset,[1<<i for i in range(net.bit_length()) if net & (1<<i)])
+                        redemption={"inputs":proofs,"outputs":encode_outputs(outs)}
+                        expect(mint.post("/v1/swap",json=redemption))
+                        # An exact NUT-19 replay may return the original signatures.
+                        # Fresh outputs would constitute a second economic redemption.
+                        retry,_=new_outputs(keyset,[o.amount for o in outs])
+                        assert mint.post("/v1/swap",json={**redemption,"outputs":encode_outputs(retry)}).status_code>=400
+                    assert paths.count("/v1/swap")==3 and reserve.pay_attempts==0
+                    assert store.db.execute("SELECT COUNT(*) FROM operator_ecash").fetchone()==(1,)
+                    assert store.db.execute("SELECT COUNT(*) FROM member_ecash").fetchone()==(2,)
+                    store.db.close()
+                    print("Verified two member swaps, offline recovery and independent wallet redemption",flush=True)
                     return
                 member=store.reserve_payout(str(uuid4()),feed,"bb"*32,14,0,{claim:{"consumed_sats":32,"evidence_digest":evidence}})
                 assert sum(p["amount"] for p in member)==14
@@ -223,3 +344,6 @@ if __name__=="__main__":
     verify_legacy_upgrade()
     for rate in (0,100): exercise(rate)
     exercise(100, failed_members=True)
+    for rate in (0,100): exercise(rate, ecash_members=True)
+    if os.environ.get("LG_DIRECT_WORKER_TEST"):
+        for rate in (0,100): exercise(rate, worker_members=True)

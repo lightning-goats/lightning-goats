@@ -2,6 +2,21 @@
 use anyhow::{Context, Result, ensure};
 
 pub async fn strip_empty(transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>) -> Result<()> {
+    let has_members: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='member_ecash_execution_claims')",
+    )
+    .fetch_one(&mut **transaction)
+    .await?;
+    if has_members {
+        let empty: bool =
+            sqlx::query_scalar("SELECT NOT EXISTS(SELECT 1 FROM member_ecash_execution_claims)")
+                .fetch_one(&mut **transaction)
+                .await?;
+        ensure!(empty, "fixture contains member ecash authorizations");
+        sqlx::raw_sql("DROP TRIGGER member_invoice_after_ecash; DROP TRIGGER member_provider_after_ecash;
+            DROP TABLE member_ecash_execution_claims; DELETE FROM _sqlx_migrations WHERE version=39;")
+            .execute(&mut **transaction).await?;
+    }
     let direct: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='operator_p2pk_claims')",
     )

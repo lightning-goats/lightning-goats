@@ -1,5 +1,5 @@
 //! Purpose-limited NIP-46 broker. The payout UID can request only the exact
-//! generated 9734 for its frozen invoice intent. No arbitrary events or publish.
+//! generated 9734 or a 9321 reconstructed by the collector from an issued public reward.
 use super::invoice::{Document, Intent, Request, UnsignedZap};
 use crate::{nostr::NakClient, nostr_event::VerifiedEvent, private_ipc as ipc};
 use anyhow::{Context, Result, bail};
@@ -236,11 +236,30 @@ impl Store {
     }
     async fn prepare(&self, intent: &Intent, now: i64) -> Result<Option<String>> {
         self.policy.intent(intent)?;
+        let saved = self
+            .admit(
+                &intent.id().to_string(),
+                &serde_json::to_string(&intent.0)?,
+                intent.0.created_at,
+                now,
+            )
+            .await?;
+        if let Some(raw) = &saved {
+            Request::restore(intent.clone(), Some(raw.clone()))?;
+        }
+        Ok(saved)
+    }
+    async fn admit(
+        &self,
+        id: &str,
+        json: &str,
+        observed_at: i64,
+        now: i64,
+    ) -> Result<Option<String>> {
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        let json = serde_json::to_string(&intent.0)?;
         let saved: Option<String> =
             sqlx::query_scalar("SELECT document_json FROM signer_intents WHERE id=?")
-                .bind(intent.id().to_string())
+                .bind(id)
                 .fetch_optional(&mut *tx)
                 .await?;
         if let Some(saved) = saved {
@@ -252,7 +271,7 @@ impl Store {
                 sqlx::query_scalar("SELECT observed_at FROM signer_clock WHERE singleton=1")
                     .fetch_one(&mut *tx)
                     .await?;
-            if now < previous || now < intent.0.created_at || now - intent.0.created_at > 300 {
+            if now < previous || now < observed_at || now - observed_at > 300 {
                 bail!("new signing intent has stale/backward time");
             }
             let used: i64 =
@@ -264,7 +283,7 @@ impl Store {
                 bail!("signer admission rate exhausted");
             }
             sqlx::query("INSERT INTO signer_intents(id,document_json,created_at) VALUES(?,?,?)")
-                .bind(intent.id().to_string())
+                .bind(id)
                 .bind(json)
                 .bind(now)
                 .execute(&mut *tx)
@@ -276,12 +295,9 @@ impl Store {
         }
         let signed: Option<String> =
             sqlx::query_scalar("SELECT event_json FROM signer_results WHERE id=?")
-                .bind(intent.id().to_string())
+                .bind(id)
                 .fetch_optional(&mut *tx)
                 .await?;
-        if let Some(raw) = &signed {
-            Request::restore(intent.clone(), Some(raw.clone()))?;
-        }
         tx.commit().await?;
         Ok(signed)
     }
@@ -312,6 +328,68 @@ impl Store {
         tx.commit().await?;
         Ok(raw)
     }
+    async fn sign_member_reward<B: Backend>(
+        &self,
+        feed: uuid::Uuid,
+        member: &str,
+        terms_hash: &str,
+        backend: &B,
+        projection: (&Path, u32),
+    ) -> Result<()> {
+        crate::nostr_event::validate_public_key(member)?;
+        crate::nostr_event::validate_hex(terms_hash, 32)?;
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Projection {
+            owner: String,
+            amount_sats: u64,
+            unsigned: UnsignedZap,
+            signed: bool,
+        }
+        let (socket, peer_uid) = projection;
+        let mut lookup = serde_json::json!({"feed":feed,"member":member,"terms_hash":terms_hash});
+        let projected: Projection = ipc::request(socket, peer_uid, &lookup, 65536, 10).await?;
+        let event = projected.unsigned;
+        anyhow::ensure!(
+            projected.owner == self.policy.owner
+                && event.kind == 9321
+                && event.content.is_empty()
+                && event.tags.first() == Some(&vec!["p".to_owned(), member.to_owned()])
+                && projected.amount_sats > 0
+                && projected.amount_sats <= self.policy.max_net_sats,
+            "public reward outside signer scope"
+        );
+        if projected.signed {
+            return Ok(());
+        }
+        let now = crate::cyberherd::calendar::now()?;
+        let id = format!("member-ecash:{feed}:{member}");
+        let doc = serde_json::to_string(&(terms_hash, &event))?;
+        let saved = self.admit(&id, &doc, now, now).await?;
+        let raw = match saved {
+            Some(raw) => raw,
+            None => {
+                let signed = backend.sign(event.clone()).await?;
+                event.check_signed(&signed, &self.policy.owner)?;
+                let raw = serde_json::to_string(signed.event())?;
+                sqlx::query("INSERT INTO signer_results(id,event_json) VALUES(?,?) ON CONFLICT(id) DO NOTHING")
+                    .bind(&id).bind(&raw).execute(&self.pool).await?;
+                sqlx::query_scalar("SELECT event_json FROM signer_results WHERE id=?")
+                    .bind(&id)
+                    .fetch_one(&self.pool)
+                    .await?
+            }
+        };
+        let signed = VerifiedEvent::from_json(&raw)?;
+        event.check_signed(&signed, &self.policy.owner)?;
+        lookup["event"] = serde_json::to_value(signed.event())?;
+        let result: Projection = ipc::request(socket, peer_uid, &lookup, 65536, 10).await?;
+        anyhow::ensure!(
+            result.signed && result.unsigned == event && result.owner == self.policy.owner,
+            "public reward storage pending"
+        );
+        Ok(())
+    }
     async fn sign<B: Backend>(&self, intent: Intent, backend: &B) -> Result<String> {
         if let Some(raw) = self
             .prepare(&intent, crate::cyberherd::calendar::now()?)
@@ -341,12 +419,20 @@ impl Backend for NakClient {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "method", rename_all = "snake_case", deny_unknown_fields)]
 enum Call {
-    SignPayout { intent: Document },
+    SignPayout {
+        intent: Box<Document>,
+    },
+    SignMemberReward {
+        feed: uuid::Uuid,
+        member: String,
+        terms_hash: String,
+    },
 }
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "result", rename_all = "snake_case", deny_unknown_fields)]
 enum Reply {
     Signed { event_json: String },
+    MemberRewardStored,
     Rejected,
 }
 
@@ -392,13 +478,32 @@ impl Server {
                     )
                     .await
                     {
-                        Ok(Ok(Call::SignPayout { intent })) => match Intent::restore(intent) {
+                        Ok(Ok(Call::SignPayout { intent })) => match Intent::restore(*intent) {
                             Ok(intent) => match store.sign(intent, backend.as_ref()).await {
                                 Ok(event_json) => Reply::Signed { event_json },
                                 Err(_) => Reply::Rejected,
                             },
                             Err(_) => Reply::Rejected,
                         },
+                        Ok(Ok(Call::SignMemberReward {
+                            feed,
+                            member,
+                            terms_hash,
+                        })) => {
+                            match store
+                                .sign_member_reward(
+                                    feed,
+                                    &member,
+                                    &terms_hash,
+                                    backend.as_ref(),
+                                    (Path::new("/run/lightning-goats-member-publication.sock"), 0),
+                                )
+                                .await
+                            {
+                                Ok(()) => Reply::MemberRewardStored,
+                                Err(_) => Reply::Rejected,
+                            }
+                        }
                         _ => Reply::Rejected,
                     };
                     ipc::write(&mut stream, &reply, MAX_FRAME).await
@@ -420,12 +525,25 @@ impl Client {
         }
         Ok(Self { socket, peer_uid })
     }
+    pub async fn sign_member_reward(&self, terms: &super::cashu::MemberExecution) -> Result<()> {
+        let call = Call::SignMemberReward {
+            feed: terms.reservation.request_id,
+            member: terms.member.clone(),
+            terms_hash: terms.digest()?,
+        };
+        let reply: Reply = ipc::request(&self.socket, self.peer_uid, &call, MAX_FRAME, 65).await?;
+        anyhow::ensure!(
+            matches!(reply, Reply::MemberRewardStored),
+            "public reward signature pending"
+        );
+        Ok(())
+    }
     pub async fn sign(&self, intent: &Intent) -> Result<String> {
         let reply: Reply = ipc::request(
             &self.socket,
             self.peer_uid,
             &Call::SignPayout {
-                intent: intent.0.clone(),
+                intent: Box::new(intent.0.clone()),
             },
             MAX_FRAME,
             65,
@@ -436,7 +554,9 @@ impl Client {
                 Request::restore(intent.clone(), Some(event_json.clone()))?;
                 Ok(event_json)
             }
-            Reply::Rejected => bail!("outgoing signer rejected or could not sign frozen intent"),
+            Reply::MemberRewardStored | Reply::Rejected => {
+                bail!("outgoing signer rejected or could not sign frozen intent")
+            }
         }
     }
 }

@@ -42,6 +42,62 @@ impl Store {
         tx.commit().await?;
         Ok(())
     }
+    pub(crate) async fn reward_preference(
+        &self,
+        owner: &str,
+        member: &str,
+    ) -> Result<(String, i64)> {
+        Ok(sqlx::query_as(
+            "SELECT method,revision FROM member_reward_preferences WHERE owner=? AND member=?",
+        )
+        .bind(owner)
+        .bind(member)
+        .fetch_optional(&self.pool)
+        .await?
+        .unwrap_or_else(|| ("lightning".into(), 0)))
+    }
+
+    pub(crate) async fn set_reward_preference(
+        &self,
+        owner: &str,
+        auth: &Authorization,
+        now: i64,
+        expected: i64,
+        method: &str,
+        request: Option<&str>,
+    ) -> Result<Option<i64>> {
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        consume(&mut tx, auth, now).await?;
+        let snapshot = decode_snapshot(
+            &sqlx::query("SELECT * FROM owners WHERE owner=?")
+                .bind(owner)
+                .fetch_one(&mut *tx)
+                .await?,
+        )?;
+        if !snapshot.roster.members.contains_key(&auth.actor)
+            || snapshot.roster.banned.contains(&auth.actor)
+        {
+            bail!("membership required");
+        }
+        let revision: Option<i64> = sqlx::query_scalar(
+            "SELECT revision FROM member_reward_preferences WHERE owner=? AND member=?",
+        )
+        .bind(owner)
+        .bind(&auth.actor)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if revision.unwrap_or(0) != expected {
+            tx.commit().await?;
+            return Ok(None);
+        }
+        let next = expected
+            .checked_add(1)
+            .context("preference revision exhausted")?;
+        sqlx::query("INSERT INTO member_reward_preferences(owner,member,revision,method,payment_request) VALUES(?,?,?,?,?) ON CONFLICT(owner,member) DO UPDATE SET revision=excluded.revision,method=excluded.method,payment_request=excluded.payment_request")
+            .bind(owner).bind(&auth.actor).bind(next).bind(method).bind(request).execute(&mut *tx).await?;
+        tx.commit().await?;
+        Ok(Some(next))
+    }
     pub(crate) async fn operator_recorded(
         &self,
         owner: &str,

@@ -1,0 +1,12 @@
+[Unit]
+Description=Lightning Goats public nutzap signing projection
+
+[Socket]
+ListenStream=/run/lightning-goats-member-publication.sock
+SocketUser=root
+SocketGroup=cyberherd-signer
+SocketMode=0660
+RemoveOnStop=yes
+
+[Install]
+WantedBy=sockets.target

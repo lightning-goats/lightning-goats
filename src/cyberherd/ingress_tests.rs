@@ -2088,3 +2088,56 @@ async fn feeding_zap_notice_uses_consumed_credit_not_a_later_same_amount_donor()
     );
     assert_eq!(f.core.feed_credit_sats().await.unwrap(), 15);
 }
+
+#[tokio::test]
+async fn nutzap_destination_follows_signed_outbox_and_keeps_wallet_key_distinct() {
+    let now = 1000;
+    let member = public(2);
+    let wallet = public(3);
+    let mint = "https://mint.lightning-goats.com";
+    let tags = |key: &str| {
+        vec![
+            tag(&["relay", "wss://tokens.example.com"]),
+            tag(&["mint", "https://mint.lightning-goats.com/", "sat"]),
+            tag(&["pubkey", key]),
+        ]
+    };
+    let latest = signed(2, 10019, now, "", tags(&wallet));
+    let source = ProfileOutboxes {
+        base: RelayFixture {
+            events: vec![
+                signed(2, 10019, now - 2, "", tags(&public(4))),
+                signed(
+                    2,
+                    10002,
+                    now - 1,
+                    "",
+                    vec![tag(&["r", "wss://outbox.example.com", "write"])],
+                ),
+            ],
+            complete: 1,
+            saturated: false,
+            queries: Default::default(),
+        },
+        profiles: vec![latest.clone(), signed(4, 10019, now, "", tags(&public(5)))],
+        complete: true,
+        saturated: false,
+        hints: Default::default(),
+    };
+    let discovery = Discovery::new(source, 1).unwrap();
+    let destination = discovery
+        .nutzap_destination(&member, mint, now)
+        .await
+        .unwrap();
+    assert_eq!(destination.advertisement, latest.event().id);
+    assert_eq!(destination.receiving_key, format!("02{wallet}"));
+    assert_eq!(destination.member, member);
+    assert_eq!(destination.mint, format!("{mint}/"));
+    assert_eq!(destination.token_relays, ["wss://tokens.example.com/"]);
+    assert!(
+        discovery
+            .nutzap_destination(&member, "https://other.example.com", now)
+            .await
+            .is_err()
+    );
+}

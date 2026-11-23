@@ -38,6 +38,10 @@ def invoice(sats, *, memo=None, digest=None, key=None, created_at=None):
     tags = bolt11.Tags([
         bolt11.Tag(bolt11.TagChar.payment_hash, payment_hash),
         bolt11.Tag(bolt11.TagChar.payment_secret, "22" * 32),
+        bolt11.Tag(bolt11.TagChar.features, bolt11.Features.from_feature_list({
+            bolt11.Feature.payment_secret: bolt11.FeatureState.required,
+            bolt11.Feature.var_onion_optin: bolt11.FeatureState.required,
+        })),
         bolt11.Tag(bolt11.TagChar.expire_time, 900),
         bolt11.Tag(bolt11.TagChar.description_hash if digest else bolt11.TagChar.description, digest or memo),
     ])

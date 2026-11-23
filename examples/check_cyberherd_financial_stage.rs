@@ -326,7 +326,10 @@ mod tests {
         payout["policy"]["scope"]["epoch"] = epoch.into();
         payout["policy"]["scope"]["owner"] = owner.into();
         payout["funding_source"] = "retained_cashu".into();
-        payout["cashu_payout_socket"] = "/run/lightning-goats-project-payouts.sock".into();
+        payout.as_table_mut().unwrap().insert(
+            "cashu_payout_socket".into(),
+            "/run/lightning-goats-project-payouts.sock".into(),
+        );
         payout["policy"]["scope"]["provider"]["environment"] = "retained-cashu".into();
         payout["policy"]["scope"]["provider"]["account_id"] = epoch.into();
         payout["policy"]["scope"]["provider"]["credential_fingerprint"] = "11".repeat(32).into();

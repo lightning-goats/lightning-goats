@@ -149,10 +149,7 @@ async fn main() -> Result<()> {
     let cashu_receipts = config
         .cashu_receipts
         .clone()
-        .map(|c| {
-            let server = lightning_goats::cashu::receipt_server::Server::new(c, ledger.clone())?;
-            server.retain_mint("goats")
-        })
+        .map(|c| lightning_goats::cashu::receipt_server::Server::new(c, ledger.clone()))
         .transpose()?;
     let cashu_treasury = config
         .cashu_treasury

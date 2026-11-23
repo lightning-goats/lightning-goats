@@ -77,6 +77,9 @@ impl LedgerStore {
     ) -> Result<CashuImportResult> {
         let receipt = authenticated.receipt();
         let data = receipt.data();
+        let contact = lightning_goats_cashu_receipt::contact_fee::ContactTender::source_terms(
+            &data.source_ref,
+        )?;
         let digest = hex::encode(receipt.digest()?);
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let epoch: String =
@@ -91,6 +94,25 @@ impl LedgerStore {
         // Validate the authenticated registration even if an exact replay exists.
         // Current policy limits can be reduced/off without hiding prior receipts.
         policy.check_registration(authenticated)?;
+        let private_ack = || CashuImportResult {
+            retained_cashu: false,
+            acquisition_id: data.acquisition_id,
+            receipt_digest: digest.clone(),
+            event_seq: 0,
+            net_sats: data.net_sats,
+            original_feed_credit_sats: 0,
+        };
+        let previous_private:Option<String>=sqlx::query_scalar("SELECT receipt_digest FROM private_contact_cashu_receipts WHERE acquisition_id=? OR (wallet_instance=? AND evidence_digest=?)")
+            .bind(data.acquisition_id.to_string()).bind(data.wallet_instance.to_string()).bind(&data.acquisition_evidence_digest)
+            .fetch_optional(&mut *tx).await?;
+        if let Some(original) = previous_private {
+            ensure!(
+                contact.is_some() && original == digest,
+                "private receipt identity conflict"
+            );
+            tx.commit().await?;
+            return Ok(private_ack());
+        }
         let existing = sqlx::query(
             "SELECT * FROM cashu_receipt_inbox WHERE wallet_instance=? AND acquisition_id=?",
         )
@@ -132,12 +154,12 @@ impl LedgerStore {
             now >= 0 && previous.is_none_or(|last| now >= last),
             "Cashu import clock regressed"
         );
-        let used = sqlx::query("SELECT COUNT(*) AS count,COALESCE(SUM(l.delta_sats),0) AS sats FROM cashu_receipt_inbox i JOIN ledger_entries l ON l.id=i.ledger_entry_id WHERE i.accepted_at>=?")
+        let used = sqlx::query("SELECT COUNT(*)+(SELECT COUNT(*) FROM private_contact_cashu_receipts WHERE accepted_at>=?1) AS count,COALESCE(SUM(l.delta_sats),0) AS sats FROM cashu_receipt_inbox i JOIN ledger_entries l ON l.id=i.ledger_entry_id WHERE i.accepted_at>=?1")
             .bind(now.saturating_sub(86_400)).fetch_one(&mut *tx).await?;
         // Until a verified treasury allocation consumes custody, every acquired
         // sat remains exposure, including credit retired by the payment cap.
         let custody: i64 =
-            sqlx::query_scalar(concat!(include_str!("cashu/treasury_balances.sql"), "SELECT (SELECT COALESCE(SUM(net_sats),0) FROM cashu_receipt_inbox)-(SELECT COALESCE(SUM(input_sats-change_sats),0) FROM settled_sources)"))
+            sqlx::query_scalar(concat!(include_str!("cashu/treasury_balances.sql"), "SELECT (SELECT COALESCE(SUM(net_sats),0) FROM cashu_receipt_inbox)+(SELECT COALESCE(SUM(net_sats),0) FROM private_contact_cashu_receipts)-(SELECT COALESCE(SUM(input_sats-change_sats),0) FROM settled_sources)"))
                 .fetch_one(&mut *tx)
                 .await?;
         let limits = &policy.limits;
@@ -170,6 +192,35 @@ impl LedgerStore {
                 .maximum_custody_sats
                 .saturating_sub(to_u64(custody, "Cashu custody")?),
         };
+        if let Some((id, delivery)) = contact {
+            ensure!(
+                data.transport == "cashu"
+                    && data.net_sats >= lightning_goats_cashu_receipt::contact_fee::FEE_SATS,
+                "invalid contact custody receipt"
+            );
+            // Contact is subject to receipt-count and custody limits. It never uses feeder credit.
+            policy.check_new(
+                authenticated,
+                &RemainingBudget {
+                    credit_sats: u64::MAX,
+                    ..remaining
+                },
+            )?;
+            let inserted=sqlx::query("INSERT INTO private_contact_cashu_receipts(acquisition_id,delivery_id,wallet_instance,wallet_epoch,core_epoch,receipt_digest,evidence_digest,mint_id,net_sats,receive_fee_sats)
+                SELECT ?,t.delivery_id,?,?,?,?,?,?,?,? FROM private_contact_tenders t WHERE t.delivery_id=? AND t.contact_id=? AND t.state='reserved'
+                AND NOT EXISTS(SELECT 1 FROM cashu_receipt_inbox WHERE wallet_instance=? AND (acquisition_id=? OR evidence_digest=?))")
+                .bind(data.acquisition_id.to_string()).bind(data.wallet_instance.to_string()).bind(data.wallet_epoch.to_string()).bind(&epoch)
+                .bind(&digest).bind(&data.acquisition_evidence_digest).bind(&data.mint_id).bind(i64::try_from(data.net_sats)?).bind(i64::try_from(data.receive_fee_sats)?)
+                .bind(delivery.to_string()).bind(id.to_string()).bind(data.wallet_instance.to_string()).bind(data.acquisition_id.to_string()).bind(&data.acquisition_evidence_digest)
+                .execute(&mut *tx).await?;
+            ensure!(
+                inserted.rows_affected() == 1,
+                "missing original contact tender or conflicting receipt"
+            );
+            sqlx::query("INSERT INTO cashu_import_clock VALUES(1,?) ON CONFLICT(singleton) DO UPDATE SET last_seen=excluded.last_seen").bind(now).execute(&mut *tx).await?;
+            tx.commit().await?;
+            return Ok(private_ack());
+        }
         policy.check_new(authenticated, &remaining)?;
         let retained = retained_mint == Some(data.mint_id.as_str());
         let contribution = if retained {

@@ -1,5 +1,7 @@
 //! Separate fee-purpose state. No public event or feed/reward mutation.
+mod cashu;
 use anyhow::{Context, Result, bail};
+pub use cashu::ContactAction;
 use sqlx::Row as _;
 use uuid::Uuid;
 
@@ -60,7 +62,7 @@ impl LedgerStore {
 
     pub async fn contact_status(&self, id: Uuid, capability: &str) -> Result<Option<Status>> {
         let hash = capability_hash(capability)?;
-        let row=sqlx::query("SELECT CASE WHEN b.invoice IS NOT NULL THEN 'issued' ELSE i.state END AS state,COALESCE(r.invoice,b.invoice) AS invoice,f.contact_id AS paid,d.accepted_at FROM private_contact_intents i LEFT JOIN breez_project_invoices b ON b.id=i.id AND json_extract(b.intent,'$.purpose')='contact_fee' LEFT JOIN strike_receive_requests r ON r.receive_request_id=i.receive_request_id LEFT JOIN private_contact_fees f ON f.contact_id=i.id LEFT JOIN private_contact_delivery d ON d.contact_id=i.id WHERE i.id=? AND i.capability_hash=?")
+        let row=sqlx::query("SELECT CASE WHEN b.invoice IS NOT NULL THEN 'issued' ELSE i.state END AS state,COALESCE(r.invoice,b.invoice) AS invoice,f.contact_id AS paid,d.accepted_at FROM private_contact_intents i LEFT JOIN breez_project_invoices b ON b.id=i.id AND json_extract(b.intent,'$.purpose')='contact_fee' LEFT JOIN strike_receive_requests r ON r.receive_request_id=i.receive_request_id LEFT JOIN private_contact_entitlements f ON f.contact_id=i.id LEFT JOIN private_contact_delivery d ON d.contact_id=i.id WHERE i.id=? AND i.capability_hash=?")
             .bind(id.to_string()).bind(hash).fetch_optional(&self.pool).await?;
         row.map(|row| {
             let state = if row.try_get::<Option<i64>, _>("accepted_at")?.is_some() {
@@ -178,7 +180,7 @@ impl LedgerStore {
         }
         sqlx::query("INSERT INTO private_contact_fees(contact_id,receive_id,invoice_payment_hash,amount_msat) VALUES(?,?,?,?)")
             .bind(contact.to_string()).bind(receive.to_string()).bind(invoice_hash).bind(i64::try_from(amount_msat)?).execute(&mut *tx).await?;
-        sqlx::query("INSERT INTO private_contact_delivery(contact_id) VALUES(?)")
+        sqlx::query("INSERT INTO private_contact_delivery(contact_id) VALUES(?) ON CONFLICT(contact_id) DO NOTHING")
             .bind(contact.to_string())
             .execute(&mut *tx)
             .await?;

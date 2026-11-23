@@ -38,6 +38,7 @@ impl Acknowledgment {
             .iter()
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>();
+        let contact = crate::contact_fee::ContactTender::source_terms(&data.source_ref)?.is_some();
         ensure!(
             self.version == 1
                 && !core_epoch.is_nil()
@@ -47,7 +48,13 @@ impl Acknowledgment {
                 && self.result.acquisition_id == data.acquisition_id
                 && self.result.receipt_digest == digest
                 && self.result.net_sats == data.net_sats
-                && self.result.event_seq > 0
+                && if contact {
+                    self.result.event_seq == 0
+                        && self.result.original_feed_credit_sats == 0
+                        && !self.result.retained_cashu
+                } else {
+                    self.result.event_seq > 0
+                }
                 && self.result.event_seq <= i64::MAX as u64
                 && self.result.original_feed_credit_sats <= i64::MAX as u64,
             "core acknowledgment does not match receipt and registration"

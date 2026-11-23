@@ -41,14 +41,17 @@ class WafAcceptance(NginxAssemblyTests):
 
     def test_private_contact_body_and_status_are_not_logged(self):
         sentinel = "LG_PRIVATE_CONTACT_66d8af"
+        token = "cashuBLG_PRIVATE_NUT24_CONTACT_6387"
         body = json.dumps({"capability": sentinel, "reply_email": sentinel + "@example.org",
                            "envelope": {"content": "Ag" + "a" * 180}}).encode()
         status, _, _ = self.request("production", "/api/v1/contact", "POST", body,
-                                    {"Content-Type": "application/json", "Origin": "https://lightning-goats.com"})
+                                    {"Content-Type": "application/json", "X-Cashu": token})
         self.assertEqual(status, 200)
         self.assertEqual(self.backends["production"].bodies[-1], body)
+        self.assertEqual(self.backends["production"].calls[-1][2]["X-Cashu"],token)
         for file in self.root.rglob("*.log"):
             self.assertNotIn(sentinel, file.read_text(errors="replace"), str(file))
+            self.assertNotIn(token, file.read_text(errors="replace"), str(file))
 
     def test_exact_signed_body_and_headers(self):
         body = b'{ "id": "synthetic-private-body", "eventType": "receive-request.receive-completed" }\n'

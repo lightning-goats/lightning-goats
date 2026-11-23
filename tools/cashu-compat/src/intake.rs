@@ -294,6 +294,14 @@ pub(crate) fn ordinary_json_at(
         _ => receiver,
     };
     let total = validate_proofs(&payload.proofs, policy, keys, limits, receiver, false)?;
+    if lightning_goats_cashu_receipt::contact_fee::ContactTender::source_terms(source_ref)?
+        .is_some()
+    {
+        ensure!(
+            total >= lightning_goats_cashu_receipt::contact_fee::FEE_SATS,
+            "insufficient contact tender"
+        );
+    }
     ensure!(
         descriptors.checkout.is_none_or(|c| c.amount_sats <= total),
         "incorrect checkout tender"

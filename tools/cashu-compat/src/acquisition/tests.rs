@@ -995,6 +995,7 @@ async fn rotated_receivers_redeem_original_queued_and_in_window_proofs() -> Resu
             "old-qr-source",
             DescriptorAcceptance {
                 checkout: None,
+                contact_descriptor: None,
                 active: &[],
                 retired: &retired,
                 now,
@@ -1005,6 +1006,50 @@ async fn rotated_receivers_redeem_original_queued_and_in_window_proofs() -> Resu
             current,
         )
     };
+    let contact_proof = harness
+        .mint
+        .issue_amount(incoming(old, "contact").secret.to_string(), 128);
+    let token = cdk::nuts::Token::new(
+        mint.advertised_url.parse()?,
+        vec![contact_proof],
+        None,
+        CurrencyUnit::Sat,
+    );
+    let body = serde_json::to_vec(&token.to_string())?;
+    let source = format!(
+        "contact_fee:{}:{}",
+        Uuid::new_v4(),
+        lightning_goats_cashu_receipt::receive_status::http_delivery_id(&body)
+    );
+    let decode_contact = |now, contact_descriptor| {
+        ordinary_json_at(
+            &body,
+            &source,
+            DescriptorAcceptance {
+                checkout: None,
+                contact_descriptor,
+                active: &[],
+                retired: &retired,
+                now,
+            },
+            &registry,
+            &harness.keys,
+            &limits,
+            current,
+        )
+    };
+    assert!(decode_contact(199, None).is_err());
+    assert!(decode_contact(200, Some(old_descriptor.id())).is_err());
+    let contact = new_id(reopened.admit(&decode_contact(199, Some(old_descriptor.id()))?)?);
+    assert_eq!(
+        receipt(
+            reopened
+                .acquire_with_receivers(contact, |lock| keys.signing_key(lock))
+                .await?
+        )
+        .net_sats,
+        128
+    );
     assert!(decode_zap(200).is_err() && decode_qr(200).is_err());
     let late_zap = new_id(reopened.admit(&decode_zap(199)?)?);
     let old_qr = new_id(reopened.admit(&decode_qr(199)?)?);
@@ -1017,7 +1062,7 @@ async fn rotated_receivers_redeem_original_queued_and_in_window_proofs() -> Resu
         assert_eq!(verified.acquisition_id, id);
         assert_eq!(verified.net_sats, 8);
     }
-    assert_eq!(harness.mint.swap_attempts.load(Ordering::SeqCst), 3);
+    assert_eq!(harness.mint.swap_attempts.load(Ordering::SeqCst), 4);
     Ok(())
 }
 

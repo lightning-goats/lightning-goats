@@ -197,6 +197,7 @@ pub fn ordinary_json(
         source_ref,
         DescriptorAcceptance {
             checkout: None,
+            contact_descriptor: None,
             active: descriptors,
             retired: &[],
             now: 0,
@@ -210,6 +211,7 @@ pub fn ordinary_json(
 
 pub(crate) struct DescriptorAcceptance<'a> {
     pub checkout: Option<&'a lightning_goats_cashu_receipt::receive_status::FeedingCheckout>,
+    pub contact_descriptor: Option<&'a str>,
     pub active: &'a [String],
     pub retired: &'a [RetiredDescriptor],
     pub now: u64,
@@ -281,6 +283,8 @@ pub(crate) fn ordinary_json_at(
             "payment does not match checkout"
         );
         Some(checkout.descriptor_id.clone())
+    } else if let Some(id) = descriptors.contact_descriptor {
+        Some(id.to_owned())
     } else {
         payload.id
     };

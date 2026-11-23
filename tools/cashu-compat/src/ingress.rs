@@ -50,16 +50,23 @@ impl Intake<'_> {
         &self,
         body: &[u8],
         source_ref: &str,
-        checkout: Option<&lightning_goats_cashu_receipt::receive_status::FeedingCheckout>,
+        operation: &lightning_goats_cashu_receipt::receive_status::AdmitOperation,
     ) -> Result<ValidatedContribution> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
             .as_secs();
+        use lightning_goats_cashu_receipt::receive_status::AdmitOperation;
+        let (checkout, contact_descriptor) = match operation {
+            AdmitOperation::ContactFee(terms) => (None, Some(terms.descriptor_id.as_str())),
+            AdmitOperation::FeedingCheckout(terms) => (Some(terms), None),
+            AdmitOperation::OrdinaryAdmit => (None, None),
+        };
         ordinary_json_at(
             body,
             source_ref,
             DescriptorAcceptance {
                 checkout,
+                contact_descriptor,
                 active: self.descriptors,
                 retired: self.retired_descriptors,
                 now,
@@ -198,7 +205,8 @@ impl Intake<'_> {
                 result: status::AdmissionOutcome::Rejected,
             })
         };
-        let Ok(contribution) = self.ordinary(query.body.as_bytes(), &source, None) else {
+        let Ok(contribution) = self.ordinary(query.body.as_bytes(), &source, &query.operation)
+        else {
             return Ok(Some(rejected()?));
         };
         let checked = contribution.intake();
@@ -207,17 +215,6 @@ impl Intake<'_> {
             .cashu_mints()
             .find(|policy| policy.id == checked.mint_id)
             .ok_or_else(|| anyhow::anyhow!("mint unavailable"))?;
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)?
-            .as_secs();
-        if !self.descriptors.contains(&terms.descriptor_id)
-            && !self
-                .retired_descriptors
-                .iter()
-                .any(|d| d.accepts(&terms.descriptor_id, policy, now))
-        {
-            return Ok(Some(rejected()?));
-        }
         let transport = crate::transport::MintTransport::new(
             policy.advertised_url.parse()?,
             deadline,
@@ -255,15 +252,13 @@ impl Intake<'_> {
                 !is_content_id || query.delivery_id == http_delivery_id(body),
                 "invalid content-bound delivery ID"
             );
-            let (checkout, source_ref) = match &query.operation {
+            let source_ref = match &query.operation {
                 status::AdmitOperation::OrdinaryAdmit => {
-                    (None, format!("http:{}", query.delivery_id))
+                    format!("http:{}", query.delivery_id)
                 }
-                status::AdmitOperation::ContactFee(terms) => {
-                    (None, terms.source_ref(query.delivery_id))
-                }
+                status::AdmitOperation::ContactFee(terms) => terms.source_ref(query.delivery_id),
                 status::AdmitOperation::FeedingCheckout(terms) => {
-                    (Some(terms), terms.source_ref(query.delivery_id))
+                    terms.source_ref(query.delivery_id)
                 }
             };
             let mut journal = self
@@ -280,7 +275,7 @@ impl Intake<'_> {
             // after a descriptor expires. Only new admissions use today's policy.
             let id = match existing {
                 Some(id) => Some(id),
-                None => match self.ordinary(body, &source_ref, checkout) {
+                None => match self.ordinary(body, &source_ref, &query.operation) {
                     Err(_) => None,
                     Ok(contribution) => match journal.admit(&contribution.intake()) {
                         Ok(Admission::New(id) | Admission::Duplicate(id)) => Some(id),
@@ -361,7 +356,7 @@ impl Intake<'_> {
                 self.ordinary(
                     body.as_bytes(),
                     &format!("http:{}", request.delivery_id),
-                    None,
+                    &lightning_goats_cashu_receipt::receive_status::AdmitOperation::OrdinaryAdmit,
                 )?
             }
             Payload::Nutzap(body) => {

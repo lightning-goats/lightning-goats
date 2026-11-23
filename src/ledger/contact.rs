@@ -5,7 +5,9 @@ pub use cashu::ContactAction;
 use sqlx::Row as _;
 use uuid::Uuid;
 
-use super::{LedgerStore, StoredStrikeReceiveRequest};
+use super::LedgerStore;
+#[cfg(test)]
+use super::StoredStrikeReceiveRequest;
 use crate::contact::{FEE_MSAT, Intent, Status, capability_hash};
 
 pub struct ContactDelivery {
@@ -59,7 +61,12 @@ impl LedgerStore {
 
     /// Never expires into another provider creation: an interrupted claim is an
     /// unknown create outcome, not authority to create a replacement invoice.
-    pub async fn claim_contact_issuance(&self, id: Uuid, capability: &str) -> Result<Option<Uuid>> {
+    #[cfg(test)]
+    pub(crate) async fn claim_contact_issuance(
+        &self,
+        id: Uuid,
+        capability: &str,
+    ) -> Result<Option<Uuid>> {
         let hash = capability_hash(capability)?;
         let claim = Uuid::new_v4();
         let updated=sqlx::query("UPDATE private_contact_intents SET state='issuing',issuance_claim=? WHERE id=? AND capability_hash=? AND state='new'")
@@ -67,7 +74,12 @@ impl LedgerStore {
         Ok((updated.rows_affected() == 1).then_some(claim))
     }
 
-    pub async fn mark_contact_issuance_uncertain(&self, id: Uuid, claim: Uuid) -> Result<()> {
+    #[cfg(test)]
+    pub(crate) async fn mark_contact_issuance_uncertain(
+        &self,
+        id: Uuid,
+        claim: Uuid,
+    ) -> Result<()> {
         sqlx::query("UPDATE private_contact_intents SET state='uncertain' WHERE id=? AND issuance_claim=? AND state='issuing'")
             .bind(id.to_string()).bind(claim.to_string()).execute(&self.pool).await?;
         Ok(())
@@ -106,6 +118,7 @@ impl LedgerStore {
         .transpose()
     }
 
+    #[cfg(test)]
     pub(crate) async fn record_contact_invoice(
         &self,
         id: Uuid,

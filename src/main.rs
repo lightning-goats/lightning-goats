@@ -797,25 +797,13 @@ async fn contact_create(
         return contact_cashu::checkout(&state, &intent, id, &capability, &headers).await;
     }
     // No raw body, deserializer, capability or provider error enters diagnostics.
-    let result = match state.config.lnurl.wallet_backend {
-        lightning_goats::config::WalletBackend::Breez => {
-            let Some(collector) = &state.config.lnurl.breez_collector else {
-                return StatusCode::SERVICE_UNAVAILABLE.into_response();
-            };
-            state
-                .ledger
-                .create_breez_contact_invoice(collector, &intent, &capability)
-                .await
-        }
-        lightning_goats::config::WalletBackend::Strike => {
-            let Some(strike) = &state.strike else {
-                return StatusCode::SERVICE_UNAVAILABLE.into_response();
-            };
-            strike
-                .create_contact_invoice(&state.ledger, &intent, &capability)
-                .await
-        }
+    let Some(collector) = &state.config.lnurl.breez_collector else {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
+    let result = state
+        .ledger
+        .create_breez_contact_invoice(collector, &intent, &capability)
+        .await;
     match result {
         Ok(status) => private_response(
             StatusCode::OK,

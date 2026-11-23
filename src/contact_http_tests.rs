@@ -1,53 +1,57 @@
 //! Real HTTP -> native intent/invoice -> authoritative mock settlement; no workers.
 use super::*;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::{UnixListener, UnixStream},
+};
 
+#[allow(dead_code)]
 #[path = "../tests/support/invoices.rs"]
 mod invoice_fixture;
 #[path = "../tests/support/nostr.rs"]
 mod nostr_fixture;
 
-#[derive(Clone)]
-struct Provider {
+async fn serve_contact_collector(
+    listener: UnixListener,
+    id: uuid::Uuid,
     creates: Arc<AtomicUsize>,
-    paid: Arc<AtomicBool>,
-    request_id: uuid::Uuid,
-    receive_id: uuid::Uuid,
-    invoice: Arc<tokio::sync::Mutex<Option<(String, String)>>>,
-}
-async fn create_invoice(
-    State(p): State<Provider>,
-    Json(body): Json<serde_json::Value>,
-) -> Json<serde_json::Value> {
-    p.creates.fetch_add(1, Ordering::SeqCst);
-    assert_eq!(body["bolt11"]["amount"]["amount"], "0.00000100000");
-    assert_eq!(body["targetCurrency"], "BTC");
-    let hash = body["bolt11"]["descriptionHash"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    let invoice = invoice_fixture::invoice(100_000, &hash);
-    *p.invoice.lock().await = Some((hash.clone(), invoice.clone()));
-    Json(
-        serde_json::json!({"receiveRequestId":p.request_id,"targetCurrency":"BTC","bolt11":{"invoice":invoice,"descriptionHash":hash,"paymentHash":"22".repeat(32),"requestedAmount":{"amount":"0.00000100000","currency":"BTC"},"btcAmount":"0.00000100000"}}),
-    )
-}
-async fn read_invoice(State(p): State<Provider>) -> Json<serde_json::Value> {
-    let (hash, invoice) = p.invoice.lock().await.clone().unwrap();
-    Json(
-        serde_json::json!({"receiveRequestId":p.request_id,"targetCurrency":"BTC","bolt11":{"invoice":invoice,"descriptionHash":hash,"paymentHash":"22".repeat(32),"requestedAmount":{"amount":"0.00000100000","currency":"BTC"},"btcAmount":"0.00000100000"}}),
-    )
-}
-async fn read_receive(State(p): State<Provider>) -> Json<serde_json::Value> {
-    let (hash, invoice) = p.invoice.lock().await.clone().unwrap();
-    Json(
-        serde_json::json!({"items":[{"receiveRequestId":p.request_id,"receiveId":p.receive_id,
-        "state":if p.paid.load(Ordering::SeqCst){"COMPLETED"}else{"PENDING"},"type":"LIGHTNING",
-        "amountReceived":{"amount":"0.00000100000","currency":"BTC"},
-        "amountCredited":{"amount":"0.00000100000","currency":"BTC"},
-        "lightning":{"invoice":invoice,"descriptionHash":hash,"paymentHash":"22".repeat(32)}}]}),
-    )
+) {
+    for step in 0..3 {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let len = stream.read_u32().await.unwrap();
+        assert!(len <= 65536);
+        let mut data = vec![0; len as usize];
+        stream.read_exact(&mut data).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&data).unwrap();
+        let reply = if step == 0 {
+            assert_eq!(body["contact_id"], id.to_string());
+            creates.fetch_add(1, Ordering::SeqCst);
+            let commitment = body["description_hash"].as_str().unwrap();
+            let created = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap();
+            let invoice = invoice_fixture::invoice_with_expiry(
+                100_000,
+                commitment,
+                created,
+                [0x22; 32],
+                Duration::from_secs(900),
+            );
+            serde_json::json!({"invoice":invoice})
+        } else {
+            assert_eq!(body, serde_json::json!({"contact_claim_status":id}));
+            serde_json::json!({"request_id":id,"amount_sat":100,"payment_hash":"22".repeat(32),
+                "proof_digest":(step==2).then(||"ab".repeat(32))})
+        };
+        let data = serde_json::to_vec(&reply).unwrap();
+        stream
+            .write_u32(data.len().try_into().unwrap())
+            .await
+            .unwrap();
+        stream.write_all(&data).await.unwrap();
+    }
 }
 
 #[tokio::test]
@@ -59,33 +63,15 @@ async fn contact_http_rejects_bad_admission_and_only_authoritative_fee_queues_pr
     ))
     .await
     .unwrap();
-    let p = Provider {
-        creates: Arc::new(AtomicUsize::new(0)),
-        paid: Arc::new(AtomicBool::new(false)),
-        request_id: uuid::Uuid::new_v4(),
-        receive_id: uuid::Uuid::new_v4(),
-        invoice: Arc::new(tokio::sync::Mutex::new(None)),
+    let id = uuid::Uuid::new_v4();
+    let creates = Arc::new(AtomicUsize::new(0));
+    let socket = directory.path().join("collector.sock");
+    let listener = UnixListener::bind(&socket).unwrap();
+    let collector = lightning_goats::config::BreezCollectorConfig {
+        socket,
+        peer_uid: UnixStream::pair().unwrap().0.peer_cred().unwrap().uid(),
     };
-    let provider_app = Router::new()
-        .route("/v1/receive-requests", post(create_invoice))
-        .route(
-            &format!("/v1/receive-requests/{}", p.request_id),
-            get(read_invoice),
-        )
-        .route(
-            &format!("/v1/receive-requests/{}/receives", p.request_id),
-            get(read_receive),
-        )
-        .with_state(p.clone());
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let provider_url = format!("http://{}/", listener.local_addr().unwrap());
-    let provider_task =
-        tokio::spawn(async move { axum::serve(listener, provider_app).await.unwrap() });
-    let strike = StrikeRuntime::new(
-        lightning_goats::strike::StrikeClient::new(&provider_url, "fixture-receive-key".into())
-            .unwrap(),
-        lightning_goats::strike::StrikeWebhookVerifier::new("fixture-webhook".into()).unwrap(),
-    );
+    let provider_task = tokio::spawn(serve_contact_collector(listener, id, creates.clone()));
     let now = lightning_goats::cyberherd::calendar::now().unwrap() as u64;
     let recipient = nostr_fixture::signed(3, 1, now, "", vec![]).pubkey;
     let envelope = nostr_fixture::signed(
@@ -103,26 +89,24 @@ async fn contact_http_rejects_bad_admission_and_only_authoritative_fee_queues_pr
         recipient,
         inbox_relays: vec!["wss://relay.example.org".into()],
     });
+    config.strike = None;
+    config.lnurl.invoice_expiry_seconds = 900;
+    config.lnurl.wallet_backend = lightning_goats::config::WalletBackend::Breez;
+    config.lnurl.breez_collector = Some(collector.clone());
     config.validate().unwrap();
     let origin = config
         .lnurl
         .public_base_url
         .trim_end_matches('/')
         .to_owned();
-    let mut mint_config = config.lnurl.clone();
-    mint_config.invoice_expiry_seconds = 900;
-    mint_config.wallet_backend = lightning_goats::config::WalletBackend::Breez;
-    mint_config.breez_collector = Some(lightning_goats::config::BreezCollectorConfig {
-        socket: "/run/lightning-goats-project-invoices.sock".into(),
-        peer_uid: 0,
-    });
-    let lnurl = LnurlService::new(&mint_config, &config.lightning_address, ledger.clone()).unwrap();
+    let lnurl =
+        LnurlService::new(&config.lnurl, &config.lightning_address, ledger.clone()).unwrap();
     let state = AppState {
         cashu: None,
         config: Arc::new(config),
         ledger: ledger.clone(),
         gateway: GatewayClient::new("http://127.0.0.1:9/").unwrap(),
-        strike: Some(strike.clone()),
+        strike: None,
         lnurl,
         renderer: MessageRenderer::embedded().unwrap(),
         status_slots: Arc::new(tokio::sync::Semaphore::new(4)),
@@ -137,7 +121,6 @@ async fn contact_http_rejects_bad_admission_and_only_authoritative_fee_queues_pr
         .timeout(Duration::from_secs(5))
         .build()
         .unwrap();
-    let id = uuid::Uuid::new_v4();
     let capability = "ab".repeat(32);
     let body = serde_json::json!({"id":id,"capability":capability,"reply_email":"visitor@example.org","envelope":envelope});
     let request = |path: &str, value: &serde_json::Value| {
@@ -185,7 +168,7 @@ async fn contact_http_rejects_bad_admission_and_only_authoritative_fee_queues_pr
             .status(),
         StatusCode::FORBIDDEN
     );
-    assert_eq!(p.creates.load(Ordering::SeqCst), 0);
+    assert_eq!(creates.load(Ordering::SeqCst), 0);
 
     for _ in 0..2 {
         let response = request("/api/v1/contact", &body).send().await.unwrap();
@@ -196,7 +179,7 @@ async fn contact_http_rejects_bad_admission_and_only_authoritative_fee_queues_pr
         assert_eq!(result["fee_sats"], 100);
         assert!(!result.to_string().contains("visitor@example.org"));
     }
-    assert_eq!(p.creates.load(Ordering::SeqCst), 1);
+    assert_eq!(creates.load(Ordering::SeqCst), 1);
     let status = serde_json::json!({"id":id,"capability":capability});
     let wrong = serde_json::json!({"id":id,"capability":"cd".repeat(32)});
     assert_eq!(
@@ -207,22 +190,24 @@ async fn contact_http_rejects_bad_admission_and_only_authoritative_fee_queues_pr
             .status(),
         StatusCode::NOT_FOUND
     );
-    let event = lightning_goats::strike::StrikeCompletedReceiveEvent {
-        event_id: uuid::Uuid::new_v4(),
-        receive_request_id: p.request_id,
-        receive_id: p.receive_id,
-    };
-    assert!(strike.reconcile_and_credit(&ledger, &event).await.is_err());
-    assert!(ledger.reserve_contact_delivery().await.unwrap().is_none());
-    p.paid.store(true, Ordering::SeqCst);
-    assert_eq!(
-        strike.reconcile_and_credit(&ledger, &event).await.unwrap(),
-        lightning_goats::ledger::SettlementOutcome::ContactFeeAccepted
-    );
-    assert_eq!(
-        strike.reconcile_and_credit(&ledger, &event).await.unwrap(),
-        lightning_goats::ledger::SettlementOutcome::Duplicate
-    );
+    let db = sqlx::SqlitePool::connect(&format!(
+        "sqlite://{}",
+        directory.path().join("core.db").display()
+    ))
+    .await
+    .unwrap();
+    for paid in [false, true] {
+        sqlx::query("UPDATE breez_project_invoices SET next_poll=0 WHERE id=?")
+            .bind(id.to_string())
+            .execute(&db)
+            .await
+            .unwrap();
+        assert!(ledger.poll_breez_claim(&collector).await.unwrap());
+        if !paid {
+            assert!(ledger.reserve_contact_delivery().await.unwrap().is_none());
+        }
+    }
+    assert!(!ledger.poll_breez_claim(&collector).await.unwrap());
     let result: serde_json::Value = request("/api/v1/contact/status", &status)
         .send()
         .await
@@ -234,5 +219,5 @@ async fn contact_http_rejects_bad_admission_and_only_authoritative_fee_queues_pr
     assert_eq!(ledger.feed_credit_sats().await.unwrap(), 0);
     assert!(ledger.reserve_contact_delivery().await.unwrap().is_some());
     server.abort();
-    provider_task.abort();
+    provider_task.await.unwrap();
 }

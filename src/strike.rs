@@ -700,7 +700,8 @@ impl StrikeRuntime {
 
     /// Fixed private fee issuance. An uncertain create never receives a new
     /// provider request automatically, including across processes or restarts.
-    pub async fn create_contact_invoice(
+    #[cfg(test)]
+    async fn create_contact_invoice(
         &self,
         ledger: &LedgerStore,
         intent: &crate::contact::Intent,

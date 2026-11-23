@@ -1,0 +1,9 @@
+{
+  "scope": "Lost-response runner refuses earlier binaries lacking case-specific execution markers",
+  "expected_exit_code": 1,
+  "observed_exit_code": 1,
+  "result": "expected rejection",
+  "reason": "combined fixture completion marker missing",
+  "log_sha256": "207fea997d630a0fb76def60b096aa82a95817a0b180973c17c5ab66894b23e1",
+  "production_state_changed": false
+}

@@ -1,0 +1,8 @@
+{
+  "result": "fixture_setup_failure",
+  "reason": "Fresh isolated namespace loopback remained down; actual HTTP connection failed ENETUNREACH",
+  "original_runner_sha256": "7950eb096aab4d9dd6a825b5191ead50cc049085c7fb95491131cfd8c1805765",
+  "log": "Traceback (most recent call last):\n  File \"/home/linuxuser/lightning-goats/.worktrees/cashu-nutnovember-20261115/deploy/scripts/test-cashu-public-request-cross-uid.py\", line 123, in <module>\n    main()\n    ~~~~^^\n  File \"/home/linuxuser/lightning-goats/.worktrees/cashu-nutnovember-20261115/deploy/scripts/test-cashu-public-request-cross-uid.py\", line 107, in main\n    raise ValueError(\"core fixture failed: \" + (client.stdout + client.stderr)[-8192:])\nValueError: core fixture failed: \nrunning 1 test\ntest cashu::public_request::cross_uid_fixture::isolated_public_request_core_child ... FAILED\n\nfailures:\n\nfailures:\n    cashu::public_request::cross_uid_fixture::isolated_public_request_core_child\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 503 filtered out; finished in 0.24s\n\nError: error sending request for url (http://127.0.0.1:34427/api/v1/cashu/request)\n\nCaused by:\n    0: client error (Connect)\n    1: tcp connect error\n    2: Network is unreachable (os error 101)\n\n",
+  "correction": "Bring up only loopback after requiring root, fresh network namespace and exactly one lo interface",
+  "production_changed": false
+}

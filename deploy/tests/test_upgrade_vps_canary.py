@@ -30,10 +30,12 @@ class UpgradeTests(unittest.TestCase):
 
     @unittest.skipUnless(os.geteuid() == 0, "isolated root fixture runs separately in deployment CI")
     def test_disposable_root_prepare_apply_and_rollback(self):
-        # All host boundaries are redirected into this disposable /run tree.
+        # All host boundaries are redirected into this disposable fixture tree.
         # Service/account snapshot is a fixture; the file transaction and
         # non-root permission/help probes execute for real.
-        with tempfile.TemporaryDirectory(prefix="lg-upgrade-fixture-", dir="/run") as directory:
+        # This fixture executes restored programs as the runtime UID. Keep its
+        # executable carrier on the same disk-backed layout as installation.
+        with tempfile.TemporaryDirectory(prefix="lg-upgrade-fixture-", dir="/var/lib") as directory:
             root = Path(directory)
             root.chmod(0o755)
             config, state, binaries = [root / name for name in ["config", "state", "bin"]]

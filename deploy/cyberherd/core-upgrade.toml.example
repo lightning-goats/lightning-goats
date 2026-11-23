@@ -1,0 +1,10 @@
+# Pre-CyberHerd core only. Does not authorize migration, restore or activation.
+# Select actual source identity/path/unit before use; UID/GID zero are invalid.
+version = 1
+max_component_bytes = 8589934592
+
+[core]
+database = "/var/lib/lightning-goats/lightning-goats.db"
+uid = 0
+gid = 0
+unit = "lightning-goats-receive.service"

@@ -121,7 +121,7 @@ def rehearse(archive, source, daemon_user, gateway_user, launcher_factory=None):
     if daemon_user.pw_uid == gateway_user.pw_uid or daemon_user.pw_gid == gateway_user.pw_gid:
         raise ValueError("daemon and gateway must use distinct users and groups")
     os.umask(0o077)
-    with tempfile.TemporaryDirectory(prefix="lg-install-", dir="/run" if launcher_factory else None) as directory, ExitStack() as cleanup:
+    with tempfile.TemporaryDirectory(prefix="lg-install-", dir="/var/lib" if launcher_factory else None) as directory, ExitStack() as cleanup:
         root = Path(directory)
         root.chmod(0o755)
         extracted = root / "package"

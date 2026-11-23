@@ -1,0 +1,30 @@
+{
+  "source_commit": "189620bb870243cdbc3f251eba66208cf5b15d8f",
+  "checkout_commit": "f6388c414a9af11038cd7318297b5baf54b7bf8a",
+  "matching_source_and_checkout_tree": "9bf9594b26a6db6311a97e0d187b717190405aab",
+  "ci_run": "https://github.com/lightning-goats/lightning-goats/actions/runs/44194698004",
+  "deployment_run": "https://github.com/lightning-goats/lightning-goats/actions/runs/44194697843",
+  "all_ten_workflows_passed": true,
+  "artifact": {
+    "id": 14378911965,
+    "size_bytes": 19618,
+    "sha256": "1da60d279cc94747460ec2e35ece6720844ecba041f8652510d97d561fdcc796",
+    "members_reviewed": ["cashu-funded-rollback.json", "cashu-native-backup.json"]
+  },
+  "funded_rollback": {
+    "original_provider_evidence_compared": true,
+    "synthetic_strike_deposit_sats": 398,
+    "conversion_fee_sats": 2,
+    "synthetic_confirmed_feeds": 1,
+    "extra_transfer_credit_sats": 0,
+    "restored_core_startup_fenced": true,
+    "restored_wallet_writer_fenced": true
+  },
+  "archive_fixture": {
+    "authenticated_launcher": true,
+    "real_age_archive": true,
+    "staged_roles": 6,
+    "comparison_missing_evidence_refused": true
+  },
+  "scope": "Funded checkpoint comparison uses synthetic provider and gateway outcomes. The separate encrypted archive fixture uses initialized native databases. Live outcome verification and fence clearance remain unqualified."
+}

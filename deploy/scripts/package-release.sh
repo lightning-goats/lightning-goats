@@ -12,7 +12,7 @@ if [[ -n $(git -C "$REPO" status --porcelain --untracked-files=normal) ]]; then
     exit 1
 fi
 SOURCE=$(git -C "$REPO" rev-parse HEAD)
-EPOCH=$(git -C "$REPO" show -s --format=%ct HEAD)
+EPOCH=$(git -C "$REPO" show -s --format=%ct "$SOURCE")
 ARCHIVE="lightning-goats-${VERSION}-x86_64-linux-gnu.tar.gz"
 mkdir -- "$OUTPUT"
 STAGE=$(mktemp -d)
@@ -23,8 +23,9 @@ for binary in lightning-goatsd lightning-goatsctl lightning-goats-gateway; do
     install -m 0755 "$BIN_DIR/$binary" "$STAGE/$binary"
     install -m 0755 "$BIN_DIR/$binary" "$OUTPUT/$binary"
 done
-cp -R "$REPO/deploy" "$REPO/docs" "$REPO/web" "$STAGE/"
-cp "$REPO/AGENTS.md" "$REPO/Cargo.lock" "$STAGE/"
+git -C "$REPO" archive "$SOURCE" -- deploy docs web migrations vendor AGENTS.md Cargo.lock Cargo.toml |
+    tar -xf - -C "$STAGE"
+python3 -B "$STAGE/deploy/scripts/verify-sqlite-vendor.py" "$STAGE"
 {
     printf 'source_commit=%s\nversion=%s\ntarget=x86_64-unknown-linux-gnu\n' "$SOURCE" "$VERSION"
     rustc --version --verbose

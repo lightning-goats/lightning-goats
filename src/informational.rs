@@ -37,15 +37,6 @@ pub async fn run_informational_cycle(
     gateway: &GatewayClient,
     config: &InformationalConfig,
 ) -> Result<InformationalChoice> {
-    let safety = gateway
-        .feeder_safety()
-        .await
-        .context("trusted gateway safety unavailable for informational cycle")?;
-    if safety.override_enabled {
-        tracing::debug!("FeederOverride is ON; periodic overlay information suppressed");
-        return Ok(InformationalChoice::None);
-    }
-
     let cycle = current_cycle(config.interval_seconds)?;
     let choice = choose_for_cycle(cycle, config)?;
     match choice {

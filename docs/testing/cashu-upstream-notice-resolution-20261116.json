@@ -1,0 +1,11 @@
+{
+  "repository": "cashubtc/cdk",
+  "ref": "b2035a3525c98b22226926bdc20fa128a1351ae5",
+  "path": "LICENSE",
+  "provenance": "CDK published archive .cargo_vcs_info.json; vendored cdk archive SHA256 verified against existing verifier pin",
+  "provider": "connected GitHub fetch_file",
+  "result": "HTTP 404 Not Found",
+  "license_text_obtained": false,
+  "default_branch_substituted": false,
+  "missing_notice_entry_retained": true
+}

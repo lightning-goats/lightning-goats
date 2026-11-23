@@ -121,13 +121,13 @@ impl GatewayServerConfig {
         if self.feeder.ack_poll_milliseconds < 50 || self.feeder.ack_poll_milliseconds > 5_000 {
             bail!("gateway feeder.ack_poll_milliseconds must be between 50 and 5000");
         }
-        if self.feeder.min_feed_interval_seconds < 5
+        if self.feeder.min_feed_interval_seconds < 2
             || self.feeder.min_feed_interval_seconds > 86_400
         {
-            bail!("gateway feeder.min_feed_interval_seconds must be between 5 and 86400");
+            bail!("gateway feeder.min_feed_interval_seconds must be between 2 and 86400");
         }
-        if self.feeder.max_feeds_per_hour == 0 || self.feeder.max_feeds_per_hour > 60 {
-            bail!("gateway feeder.max_feeds_per_hour must be between 1 and 60");
+        if self.feeder.max_feeds_per_hour > 60 {
+            bail!("gateway feeder.max_feeds_per_hour must be 0 (unlimited) or between 1 and 60");
         }
         Ok(())
     }
@@ -182,6 +182,7 @@ impl TrustedGateway {
             .route("/healthz", get(healthz))
             .route("/v1/feeder/override", get(feeder_safety))
             .route("/v1/temperature", get(temperature))
+            .route("/v1/solar", get(solar))
             .route(
                 "/v1/feeder/request/{request_id}",
                 post(feed_request).get(feed_request_status),
@@ -209,6 +210,13 @@ async fn feeder_safety(State(state): State<GatewayState>) -> Response {
     }
 }
 
+async fn solar(State(state): State<GatewayState>) -> Response {
+    match state.openhab.solar_context().await {
+        Ok(context) => (StatusCode::OK, Json(context)).into_response(),
+        Err(error) => internal_failure("OpenHAB solar context unavailable", error),
+    }
+}
+
 async fn temperature(State(state): State<GatewayState>) -> Response {
     match state.openhab.temperature_f().await {
         Ok(temperature_f) => {
@@ -221,10 +229,14 @@ async fn temperature(State(state): State<GatewayState>) -> Response {
 async fn feed_request(
     AxumPath(request_id): AxumPath<Uuid>,
     State(state): State<GatewayState>,
+    headers: axum::http::HeaderMap,
 ) -> Response {
+    let pulse_notice = headers
+        .get("X-Goats-Pulse-Notice")
+        .is_some_and(|v| v == "1");
     match timeout(
         Duration::from_secs(140),
-        submit_feed_request(request_id, state),
+        submit_feed_request(request_id, state, pulse_notice),
     )
     .await
     {
@@ -249,7 +261,11 @@ async fn check_owner_coverage(state: &GatewayState, id: Uuid) -> Result<()> {
     Ok(())
 }
 
-async fn submit_feed_request(request_id: Uuid, state: GatewayState) -> Response {
+async fn submit_feed_request(
+    request_id: Uuid,
+    state: GatewayState,
+    pulse_notice: bool,
+) -> Response {
     if let Err(error) = check_owner_coverage(&state, request_id).await {
         return internal_failure("Owner replay coverage unavailable", error);
     }
@@ -301,7 +317,7 @@ async fn submit_feed_request(request_id: Uuid, state: GatewayState) -> Response 
         tracing::warn!(%error, "command outcome ambiguous after durable admission");
         return outcome_response(StatusCode::CONFLICT, request_id, FeedOutcome::Ambiguous);
     }
-    wait_for_ack(&state, request_id).await
+    wait_for_ack(&state, request_id, pulse_notice).await
 }
 
 async fn existing_response(
@@ -355,7 +371,7 @@ async fn handle_existing_pending(state: &GatewayState, request_id: Uuid) -> Resp
             }
             outcome_response(StatusCode::OK, request_id, FeedOutcome::Confirmed)
         }
-        Ok(OwnerOutcome::Absent | OwnerOutcome::Pending) => {
+        Ok(OwnerOutcome::Absent | OwnerOutcome::Pending | OwnerOutcome::PulseStarted) => {
             outcome_response(StatusCode::ACCEPTED, request_id, FeedOutcome::Pending)
         }
         Ok(OwnerOutcome::Rejected | OwnerOutcome::Ambiguous) => {
@@ -365,7 +381,7 @@ async fn handle_existing_pending(state: &GatewayState, request_id: Uuid) -> Resp
     }
 }
 
-async fn wait_for_ack(state: &GatewayState, request_id: Uuid) -> Response {
+async fn wait_for_ack(state: &GatewayState, request_id: Uuid, pulse_notice: bool) -> Response {
     let deadline = Instant::now() + state.ack_timeout;
     loop {
         match timeout_at(deadline, state.openhab.feeder_result(request_id)).await {
@@ -375,7 +391,14 @@ async fn wait_for_ack(state: &GatewayState, request_id: Uuid) -> Response {
                 }
                 return outcome_response(StatusCode::OK, request_id, FeedOutcome::Confirmed);
             }
-            Ok(Ok(OwnerOutcome::Absent | OwnerOutcome::Pending)) => {}
+            Ok(Ok(OwnerOutcome::PulseStarted)) if pulse_notice => {
+                return outcome_response(
+                    StatusCode::ACCEPTED,
+                    request_id,
+                    FeedOutcome::PulseStarted,
+                );
+            }
+            Ok(Ok(OwnerOutcome::Absent | OwnerOutcome::Pending | OwnerOutcome::PulseStarted)) => {}
             Ok(Ok(OwnerOutcome::Rejected | OwnerOutcome::Ambiguous)) | Ok(Err(_)) | Err(_) => {
                 return outcome_response(StatusCode::CONFLICT, request_id, FeedOutcome::Ambiguous);
             }
@@ -503,11 +526,19 @@ mod tests {
     #[test]
     fn rejects_unsafe_local_rate_configuration() {
         let mut interval_config = config();
-        interval_config.feeder.min_feed_interval_seconds = 0;
+        interval_config.feeder.min_feed_interval_seconds = 1;
         assert!(interval_config.validate().is_err());
         let mut rate_config = config();
-        rate_config.feeder.max_feeds_per_hour = 0;
+        rate_config.feeder.max_feeds_per_hour = 61;
         assert!(rate_config.validate().is_err());
+    }
+
+    #[test]
+    fn accepts_two_second_interval_without_hourly_cap() {
+        let mut config = config();
+        config.feeder.min_feed_interval_seconds = 2;
+        config.feeder.max_feeds_per_hour = 0;
+        config.validate().unwrap();
     }
 }
 

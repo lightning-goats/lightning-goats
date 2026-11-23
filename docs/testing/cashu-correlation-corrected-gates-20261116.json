@@ -1,0 +1,37 @@
+{
+  "result": "CASHU_CORRECTED_CORRELATION_GATES_PASSED",
+  "gates": {
+    "fmt": 0,
+    "clippy": 0,
+    "tests": 0,
+    "protocol_fmt": 0,
+    "protocol_clippy": 0,
+    "protocol_tests": 0,
+    "sqlite": 0,
+    "whitespace": 0,
+    "audit": 0
+  },
+  "tests": {
+    "passed": 648,
+    "failed": 0,
+    "ignored": 12
+  },
+  "source_inventory_sha256": "f610657d6fa36f1566ad5e0c7b802a7b77199599513133edef7a6030d552c62b",
+  "source_unchanged_during_gates": true,
+  "test_artifact_sha256": "263836de84deb33065593f877f2c0651c847414589cde6f52e9d6eecbea04a9f",
+  "source_sha256": {
+    "src/state_maintenance/cashu_correlations.rs": "b0c40dace2af8e7ec03452c45d647f001a54b1ffca075de67821006eb13fe444",
+    "src/state_maintenance/cashu_correlations/tests.rs": "e96c64e878d73f7fa89e264870b7836878539213c1cba3e08b78dc48661045f1",
+    "src/state_maintenance/database.rs": "afae97d8425648bc36bcab34d19461e245836654b3ae281117d5dbcd20a7c522",
+    "src/state_maintenance/mod.rs": "3d848e9b020a76a42de8717fdb4a49b50d760d2f8e1fede5f42485676473c0a7",
+    "src/bin/cyberherd-statectl.rs": "0c96625dcb3674a06aac3ea955bf465843cfede95c2ae6a76e2c7cc217e3eebc",
+    "deploy/scripts/test-cashu-correlation-review.py": "5e9bb4d2bb0ed3d0cd3a393d31a3923820aaaca87e461ac622c5ded56fa2ba9e"
+  },
+  "explicit_root_correlation": "cashu-correlation-root-result-20261116.json",
+  "existing_root_maintenance": "cashu-correlation-maintenance-regressions-20261116.json",
+  "initialized_combined_native": "cashu-empty-combined-native-backup-20261116.json",
+  "funded_restore_qualified": false,
+  "full_key_recovery_qualified": false,
+  "external_reconciliation_verified": false,
+  "production_changes": false
+}

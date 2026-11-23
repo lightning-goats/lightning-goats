@@ -1,0 +1,28 @@
+{
+  "result": "standalone_status_protocol_and_journal_passed",
+  "tests": 4,
+  "log": "\nrunning 4 tests\ntest capabilities_are_stable_private_retained_and_follow_only_durable_progress ... ok\ntest receive_status::tests::capability_is_random_and_bad_values_do_not_enter_error_messages ... ok\ntest receive_status::tests::ordinary_admission_has_an_independent_operation_and_exact_reply_scope ... ok\ntest receive_status::tests::status_queries_bind_exact_registration_and_nonce_without_echoing_capability ... ok\n\ntest result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s\n\n",
+  "source_sha256": {
+    ".artifacts/cashu-receive-status-draft/protocol.rs": "6faeb6100f414a644e25ca9875dd98e9e71086abf1242344560cf34060d601db",
+    ".artifacts/cashu-receive-status-draft/journal.rs": "a69d21f06e8e5cf7e225d8e8ea2342dd5f2cfdd68c6ae2d52531973c8045484a",
+    ".artifacts/cashu-receive-status-draft/schema.sql": "9643b3eab83188eb9c15de41d23627fd7d7d1302de0c9d31656351f147f4889e",
+    ".artifacts/cashu-receive-status-draft/journal-probe.rs": "98b2faaba738747817b449a54cf1109c18ffddd6074dd20522bc7888232e97e6"
+  },
+  "binary_sha256": "b07df13d43bfe1fad4d0cb6648d64b229a9be7261b57b634ad8e0b3a23c0d3de",
+  "scope": "Candidate protocol and real SQLite capability persistence against a minimal synthetic acquisition table; no active wallet/core changes",
+  "checks": [
+    "Random bounded capability format and coarse errors",
+    "Strict request version/registration/nonce and unknown-field bounds",
+    "Status replies do not echo capability",
+    "Capability retry and file reopen stability",
+    "Immutable retained mapping and unknown lookup without new records",
+    "Acquired/credited require durable evidence; held is not failure"
+  ],
+  "unqualified": [
+    "Actual journal schema/runtime integration",
+    "Listener kernel identity and registration dispatch",
+    "Public POST/status semantics, pause behavior and CORS",
+    "External sender/WAF behavior and complete financial no-mutation checks"
+  ],
+  "production_changed": false
+}

@@ -1,0 +1,4 @@
+# Pair with funding_source = "retained_cashu" after legacy payouts are reconciled.
+# The base unit's only encrypted credential is the Strike payout key.
+[Service]
+LoadCredentialEncrypted=

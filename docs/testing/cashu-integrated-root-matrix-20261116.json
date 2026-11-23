@@ -1,0 +1,48 @@
+{
+  "binary_sha256": "65eb1dd4409ec81e9b8654f337bd888c9572b1b67c9352ca6ac6f9edd028ce82",
+  "fixtures": {
+    "state_maintenance::reward_cutover_apply_tests::root_cutover_round_trip_preserves_four_journals_and_fences_live_checkpoints": {
+      "passed": true,
+      "marker": "ROOT_INITIAL_REWARD_CUTOVER_FIXTURE_VERIFIED"
+    },
+    "state_maintenance::inclusive_fee_upgrade::tests::root_inclusive_fee_upgrade_compares_private_images_and_retains_original_backup": {
+      "passed": true,
+      "marker": "ROOT_INCLUSIVE_FEE_UPGRADE_FIXTURE_VERIFIED"
+    },
+    "ledger::feed_cap::tests::root_retirement_preserves_runtime_owner_and_exact_paid_history": {
+      "passed": true,
+      "marker": "ROOT_CREDIT_RETIREMENT_FIXTURE_VERIFIED"
+    },
+    "payout::cost_recovery::tests::root_owned_approval_and_evidence_checks_are_real_filesystem_authority": {
+      "passed": true,
+      "marker": "ROOT_OWNERSHIP_FIXTURE_VERIFIED"
+    },
+    "state_maintenance::tests::root_four_journal_snapshot_preserves_wal_paid_pending_and_signed_state_and_blocks_restore_startup": {
+      "passed": true,
+      "marker": "ROOT_FOUR_JOURNAL_FIXTURE_VERIFIED"
+    },
+    "state_bootstrap::tests::root_offline_bootstrap_qualifies_three_actual_runtime_uids_and_refuses_replacing_journals": {
+      "passed": true,
+      "marker": "ROOT_OFFLINE_BOOTSTRAP_FIXTURE_VERIFIED"
+    },
+    "state_maintenance::legacy::tests::root_legacy_core_upgrade_preserves_wal_pending_receipts_epoch_signed_bytes_and_compares_migrated_copies": {
+      "passed": true,
+      "marker": "ROOT_LEGACY_CORE_UPGRADE_FIXTURE_VERIFIED"
+    },
+    "state_maintenance::contact_upgrade::tests::root_contact_upgrade_compares_private_images_and_retains_original_backup": {
+      "passed": true,
+      "marker": "ROOT_CONTACT_UPGRADE_FIXTURE_VERIFIED"
+    }
+  },
+  "scope": "direct pinned native fixtures in fresh netns; not remote CI",
+  "logs_sha256": {
+    "4.log": "a236a80d9c54fe907181c7cc91d1272cf374aacf6af10d68aad5ccef94593ea3",
+    "3.log": "3f683e62555820bb47afe458d70457a4714fb126dce12b899f65f8e94b7eda9f",
+    "1.log": "90883d4ece7fd7811b04183a8bfba91b0b1a018ad6626fd9095b764952c8317c",
+    "0.log": "a844798a63ad455f7affbb37cfeee5073738b2d2b2648c277b7273187258ac90",
+    "5.log": "cde3d5b04622960781b16ad761df5a5855fa283164de38b7431bf7e782ccb539",
+    "2.log": "2092a07d0b0df8f1a1fcbb605f8f75312fedf2f8f9a87b7aeeb33e036da59922",
+    "6.log": "8df1abe092be7e6fca9006930841e310dd0d459dbacd2e129f2abc2c5c76f05e",
+    "7.log": "491285c85fddd61d07c2ad31d4a761971c7e4f6754eb27a6c6797cb7962189e9"
+  }
+}

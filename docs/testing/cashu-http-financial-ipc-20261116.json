@@ -1,0 +1,97 @@
+{
+  "result": "CASHU_PUBLIC_HTTP_FINANCIAL_IPC_VERIFIED",
+  "normal": {
+    "artifacts_sha256": {
+      "core": "fd4de346e206c067a97d104d5f7174c0d53019d6e30349835c012ab63dd98306",
+      "wallet": "7d889a5ae3d9bc0d8df3fbadc348a465d2960102f75b033e0d5174ebaa825fd4"
+    },
+    "distinct_uid_ipc": true,
+    "distinct_uid_receipt_ipc": true,
+    "financial_result": {
+      "contributions": 3,
+      "conversion_fee_sats": 2,
+      "credit_sats": 0,
+      "new_transfer_credit_sats": 0,
+      "original_granted_credit_sats": 1000,
+      "receive_fees_sats": 2,
+      "retained_change_sats": 0,
+      "supplemental_native_sats": 0,
+      "synthetic_confirmed_feeds": 1,
+      "treasury_deposit_sats": 398
+    },
+    "http_intake": true,
+    "independent_sender": false,
+    "live_provider": false,
+    "lost_melt_reply": false,
+    "nonzero_fees": true,
+    "physical_actuation": false,
+    "result": "CASHU_COMBINED_SETTLEMENT_VERIFIED",
+    "returned_change": false,
+    "strike_before_wallet_report": false,
+    "tls_verified": false,
+    "treasury_ipc": true,
+    "wallet_recovery_while_paused": false
+  },
+  "lost_reply": {
+    "artifacts_sha256": {
+      "core": "fd4de346e206c067a97d104d5f7174c0d53019d6e30349835c012ab63dd98306",
+      "wallet": "7d889a5ae3d9bc0d8df3fbadc348a465d2960102f75b033e0d5174ebaa825fd4"
+    },
+    "distinct_uid_ipc": true,
+    "distinct_uid_receipt_ipc": true,
+    "financial_result": {
+      "contributions": 3,
+      "conversion_fee_sats": 2,
+      "credit_sats": 0,
+      "new_transfer_credit_sats": 0,
+      "original_granted_credit_sats": 1000,
+      "receive_fees_sats": 2,
+      "retained_change_sats": 0,
+      "supplemental_native_sats": 0,
+      "synthetic_confirmed_feeds": 1,
+      "treasury_deposit_sats": 398
+    },
+    "http_intake": true,
+    "independent_sender": false,
+    "live_provider": false,
+    "lost_melt_reply": true,
+    "nonzero_fees": true,
+    "physical_actuation": false,
+    "result": "CASHU_COMBINED_SETTLEMENT_VERIFIED",
+    "returned_change": false,
+    "strike_before_wallet_report": true,
+    "tls_verified": false,
+    "treasury_ipc": true,
+    "wallet_recovery_while_paused": true
+  },
+  "core_gates": {
+    "fmt": 0,
+    "clippy": 0,
+    "lib_build": 0,
+    "protocol_fmt": 0,
+    "protocol_clippy": 0,
+    "protocol_tests": 0,
+    "sqlite": 0,
+    "whitespace": 0,
+    "audit": 0
+  },
+  "wallet_gates": {
+    "fmt": 0,
+    "clippy": 0,
+    "tests": 0,
+    "vendor": 0
+  },
+  "core_build_only_not_full_test_rerun": true,
+  "wallet_native_passed": 166,
+  "wallet_ignored": 7,
+  "runner_sha256": "ce8a28f91e99c5767bc9266d45cfae2cace387f9af4a7cca34f9bdf048942dfe",
+  "source_manifests_sha256": {
+    "core": "8257a9b8dd05179a0d48832b4a67cac5a9e79c515c317899dddd5a60cf248ba0",
+    "wallet": "48c5503717632b6ea386a8b1195b02d01f906a9c77f7527201f80d42369b50fe"
+  },
+  "malformed_before_valid_rejected": true,
+  "stable_replay_capability": true,
+  "credited_status_after_credit_consumption": true,
+  "receipt_and_http_replay_after_credit_consumption": true,
+  "scope": "Actual public loopback HTTP and authenticated financial IPC with actual CDK, synthetic mint, mocked Strike and simulated feed confirmation. No independent sender, TLS, real relay/provider or physical acceptance."
+}

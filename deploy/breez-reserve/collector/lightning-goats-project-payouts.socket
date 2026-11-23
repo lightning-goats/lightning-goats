@@ -1,0 +1,12 @@
+[Unit]
+Description=Lightning Goats private Breez Cashu payout socket
+
+[Socket]
+ListenStream=/run/lightning-goats-project-payouts.sock
+SocketUser=root
+SocketGroup=cyberherd-payout
+SocketMode=0660
+RemoveOnStop=yes
+
+[Install]
+WantedBy=sockets.target

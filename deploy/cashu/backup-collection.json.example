@@ -1,0 +1,101 @@
+{
+  "version": 1,
+  "operator_exclusive": false,
+  "workers": {
+    "core": {
+      "unit": "lightning-goats-receive.service",
+      "uid": 0,
+      "gid": 0,
+      "state": "/var/lib/lightning-goats"
+    },
+    "membership": {
+      "unit": "cyberherd.service",
+      "uid": 0,
+      "gid": 0,
+      "state": "/var/lib/cyberherd"
+    },
+    "payout": {
+      "unit": "cyberherd-payout.service",
+      "uid": 0,
+      "gid": 0,
+      "state": "/var/lib/cyberherd-payout"
+    },
+    "signer": {
+      "unit": "cyberherd-signer.service",
+      "uid": 0,
+      "gid": 0,
+      "state": "/var/lib/cyberherd-signer"
+    },
+    "wallet": {
+      "unit": "lightning-goats-cashu.service",
+      "uid": 0,
+      "gid": 0,
+      "state": "/var/lib/lightning-goats-cashu"
+    },
+    "cashu_signer": {
+      "unit": "lightning-goats-cashu-signer.service",
+      "uid": 0,
+      "gid": 0,
+      "state": "/var/lib/lightning-goats-cashu-signer"
+    }
+  },
+  "native_policy": "/REPLACE/native-maintenance-policy.toml",
+  "core_config": "/REPLACE/core-config.toml",
+  "membership_config": "/REPLACE/membership-config.toml",
+  "payout_config": "/REPLACE/payout-config.toml",
+  "payout_signer_config": "/REPLACE/payout-signer-config.toml",
+  "wallet_config": "/REPLACE/wallet-config.json",
+  "cashu_signer_config": "/REPLACE/cashu-signer-config.json",
+  "cashu_client_source": "/REPLACE/protected-portable-cashu-client.hex",
+  "payout_client_source": "/REPLACE/protected-portable-payout-client.hex",
+  "historical_receiving_keys": [],
+  "extra_files": [],
+  "artifacts": {
+    "copy": {
+      "path": "/usr/local/bin/lightning-goats-cashu-statectl",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "statectl": {
+      "path": "/usr/local/bin/cyberherd-statectl",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "age": {
+      "path": "/usr/local/bin/age",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "tar": {
+      "path": "/usr/bin/tar",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  },
+  "runtime_artifacts": {
+    "core": {
+      "path": "/usr/local/bin/lightning-goatsd",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "membership": {
+      "path": "/usr/local/bin/cyberherdd",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "payout": {
+      "path": "/usr/local/bin/cyberherd-payoutd",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "signer": {
+      "path": "/usr/local/bin/cyberherd-signerd",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "wallet": {
+      "path": "/usr/local/bin/lightning-goats-cashud",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "cashu_signer": {
+      "path": "/usr/local/bin/lightning-goats-cashu-signerd",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  },
+  "recipient": "REPLACE_WITH_OPERATOR_CONTROLLED_AGE_RECIPIENT",
+  "component_bytes": 134217728,
+  "total_bytes": 1073741824,
+  "deadline_seconds": 300
+}

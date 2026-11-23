@@ -1,0 +1,48 @@
+{
+  "production_state_changed": false,
+  "scope": "read-only split output verification before atomic accounting increment",
+  "source_hashes_rechecked": true,
+  "source_snapshot_sha256": "0c690b3e648a92968070f20e1da35a83516123581a7a260733d077980ae19007",
+  "test_log_sha256": "446d6c910b3e87dc704f69474108feb012a782cd7dd24ebe9a920dfcf10a3ce6",
+  "results": [
+    {
+      "passed": 133,
+      "failed": 0,
+      "ignored": 5
+    },
+    {
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0
+    }
+  ],
+  "total_passed": 140,
+  "strict_clippy": "passed",
+  "format": "passed",
+  "vendor": "passed"
+}

@@ -1,0 +1,10 @@
+# Server context; root must contain the reviewed public-only web/nip05.json.
+# Exact location takes precedence over the general hidden-file deny rule.
+location = /.well-known/nostr.json {
+    limit_except GET { deny all; }
+    default_type application/json;
+    try_files /nip05.json =404;
+    add_header Access-Control-Allow-Origin "*" always;
+    add_header Cache-Control "public, max-age=300" always;
+    add_header X-Content-Type-Options nosniff always;
+}

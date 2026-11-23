@@ -1,0 +1,40 @@
+[Unit]
+Description=Lightning Goats Cashu mint (%i)
+After=lightning-goats-reserve@%i.service systemd-tmpfiles-setup.service
+Requires=lightning-goats-reserve@%i.service
+
+[Service]
+Type=simple
+User=lg-mint
+Group=lg-mint
+StateDirectory=lightning-goats-mint-%i
+StateDirectoryMode=0700
+LoadCredentialEncrypted=mint-seed:/etc/credstore.encrypted/lightning-goats-reserve/%i-mint-seed.cred
+LoadCredentialEncrypted=project-quote-token:/etc/credstore.encrypted/lightning-goats-reserve/%i-project-quote-token.cred
+EnvironmentFile=/etc/lightning-goats-reserve/mint-%i.env
+Environment=LG_RESERVE_NETWORK=%i
+Environment=LG_RESERVE_FUND_SOCKET=/run/lightning-goats-reserve/%i/funding/http.sock
+Environment=LG_MINT_SOCKET=/run/lightning-goats-reserve/%i/mint/http.sock
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONNOUSERSITE=1
+Environment=PYTHONPATH=/opt/lightning-goats-reserve/current/nutshell:/opt/lightning-goats-reserve/current/site-packages
+WorkingDirectory=/var/lib/lightning-goats-mint-%i
+ExecStart=/opt/lightning-goats-reserve/current/python/bin/python3.11 -m lg_mint
+Restart=on-failure
+RestartSec=15
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+CapabilityBoundingSet=
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX
+ReadWritePaths=/run/lightning-goats-reserve/%i/mint
+
+[Install]
+WantedBy=multi-user.target

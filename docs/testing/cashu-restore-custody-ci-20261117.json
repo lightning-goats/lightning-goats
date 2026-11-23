@@ -1,0 +1,33 @@
+{
+  "source_commit": "e321a586d3e7a4be146313b6b3b81b37d10747e3",
+  "checkout_commit": "357d6a053869771aa241dd2d4e7315ece8b0f68f",
+  "matching_source_and_checkout_tree": "bbaf886fd48d7ee1db4352cf3195e048e8ee5fce",
+  "ci_run": "https://github.com/lightning-goats/lightning-goats/actions/runs/44197651155",
+  "security_run": "https://github.com/lightning-goats/lightning-goats/actions/runs/44197650938",
+  "deployment_run": "https://github.com/lightning-goats/lightning-goats/actions/runs/44197650713",
+  "all_ten_workflows_passed": true,
+  "artifact": {
+    "id": 14379454089,
+    "size_bytes": 19689,
+    "sha256": "736304cf6f34bd54164886dae8d07526b6b95a6dd53843f55938941f6aaae664",
+    "member_sha256": {
+      "cashu-funded-rollback.json": "c472a7541da43df9ad3e4c28ca9c6a767404af77f0f5b65710f9d0e4d215bad7",
+      "cashu-native-backup.json": "3176b0c887e90888e02057d9a023e61c3077beb4d5100e56cb15a3b9d4868a7d"
+    }
+  },
+  "funded_rollback": {
+    "stale_unspent_custody_observed": true,
+    "restored_core_startup_fenced": true,
+    "restored_wallet_writer_fenced": true,
+    "synthetic_strike_deposit_sats": 398,
+    "new_transfer_credit_sats": 0,
+    "synthetic_confirmed_feeds": 1
+  },
+  "archive_fixture": {
+    "empty_custody_observed_by_native_statectl": true,
+    "empty_custody_compared_by_authenticated_launcher": true,
+    "staged_roles": 6,
+    "resume_authorized": false
+  },
+  "scope": "The funded fixture uses synthetic mint, Strike and feeder instances. The separate archive fixture observes an empty custody namespace without a mint lookup."
+}

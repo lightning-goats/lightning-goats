@@ -1,0 +1,23 @@
+# Server context. Alias discovery uses the canonical application's allowlist,
+# metadata, feed-credit pool and callback origin; no separate payment backend.
+location ~ "^/\.well-known/lnurlp/[a-z0-9._-]{1,64}$" {
+    limit_except GET { deny all; }
+    limit_req zone=lightning_goats_lnurl_discovery burst=20 nodelay;
+    proxy_pass http://lightning_goats_backend;
+    proxy_set_header Host lightning-goats.com;
+    proxy_set_header X-Forwarded-Proto https;
+    add_header Access-Control-Allow-Origin "*" always;
+    add_header Cache-Control no-store always;
+}
+location ~ "^/lnurlp/[a-z0-9._-]{1,64}/callback$" {
+    if ($request_method = HEAD) { return 405; }
+    limit_except GET { deny all; }
+    limit_req zone=lightning_goats_lnurl_invoice burst=6 nodelay;
+    proxy_pass http://lightning_goats_backend;
+    proxy_set_header Host lightning-goats.com;
+    proxy_set_header X-Forwarded-Proto https;
+    add_header Access-Control-Allow-Origin "*" always;
+    add_header Cache-Control no-store always;
+}
+location ~ "^/(api|lnurlp|rest|ws|nostrrelay|nostrnip5)(/|$)" { return 404; }
+location ~ "^/\.well-known/lnurlp(/|$)" { return 404; }

@@ -1,0 +1,89 @@
+{
+  "result": "CASHU_COMBINED_FINANCIAL_IPC_VERIFIED",
+  "normal": {
+    "artifacts_sha256": {
+      "core": "875dcf389c5999ba4690338bb229792b1572fedc06db40e73b307d5a5b8693e5",
+      "wallet": "ca0287e404188f044ec5284a223811cbc04d2af7eeaafc5e3f8a2a4926474d8e"
+    },
+    "distinct_uid_ipc": true,
+    "distinct_uid_receipt_ipc": true,
+    "financial_result": {
+      "contributions": 3,
+      "conversion_fee_sats": 2,
+      "credit_sats": 0,
+      "new_transfer_credit_sats": 0,
+      "original_granted_credit_sats": 1000,
+      "receive_fees_sats": 2,
+      "retained_change_sats": 0,
+      "supplemental_native_sats": 0,
+      "synthetic_confirmed_feeds": 1,
+      "treasury_deposit_sats": 398
+    },
+    "http_intake": false,
+    "live_provider": false,
+    "lost_melt_reply": false,
+    "nonzero_fees": true,
+    "physical_actuation": false,
+    "result": "CASHU_COMBINED_SETTLEMENT_VERIFIED",
+    "returned_change": false,
+    "strike_before_wallet_report": false,
+    "treasury_ipc": true,
+    "wallet_recovery_while_paused": false
+  },
+  "lost_reply": {
+    "artifacts_sha256": {
+      "core": "875dcf389c5999ba4690338bb229792b1572fedc06db40e73b307d5a5b8693e5",
+      "wallet": "ca0287e404188f044ec5284a223811cbc04d2af7eeaafc5e3f8a2a4926474d8e"
+    },
+    "distinct_uid_ipc": true,
+    "distinct_uid_receipt_ipc": true,
+    "financial_result": {
+      "contributions": 3,
+      "conversion_fee_sats": 2,
+      "credit_sats": 0,
+      "new_transfer_credit_sats": 0,
+      "original_granted_credit_sats": 1000,
+      "receive_fees_sats": 2,
+      "retained_change_sats": 0,
+      "supplemental_native_sats": 0,
+      "synthetic_confirmed_feeds": 1,
+      "treasury_deposit_sats": 398
+    },
+    "http_intake": false,
+    "live_provider": false,
+    "lost_melt_reply": true,
+    "nonzero_fees": true,
+    "physical_actuation": false,
+    "result": "CASHU_COMBINED_SETTLEMENT_VERIFIED",
+    "returned_change": false,
+    "strike_before_wallet_report": true,
+    "treasury_ipc": true,
+    "wallet_recovery_while_paused": true
+  },
+  "core_gates": {
+    "fmt": 0,
+    "clippy": 0,
+    "lib_build": 0,
+    "protocol_fmt": 0,
+    "protocol_clippy": 0,
+    "protocol_tests": 0,
+    "sqlite": 0,
+    "whitespace": 0,
+    "audit": 0
+  },
+  "wallet_gates": {
+    "fmt": 0,
+    "clippy": 0,
+    "tests": 0,
+    "vendor": 0
+  },
+  "core_build_only_not_full_test_rerun": true,
+  "wallet_native_passed": 166,
+  "wallet_ignored": 7,
+  "source_manifests_sha256": {
+    "core": "8d649a96fa1d28a0290b04b3c52997d4fe26b7f3fe865a3bacae041defed1b46",
+    "wallet": "61c9c5ce7e9bf55ff68865718d1acc2f2afddf8e83829a854b79d1718f93c3da"
+  },
+  "runner_sha256": "ba127d47a13258236ceaf9099995dd319b71967643e29340d35408d813c37845",
+  "scope": "Actual CDK acquisition and authenticated receipt/treasury sockets across distinct UIDs; synthetic mint, mocked Strike and simulated feed confirmation. No public HTTP, real providers or physical effects."
+}

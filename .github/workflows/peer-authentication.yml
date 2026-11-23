@@ -3,7 +3,7 @@ name: WireGuard peer authentication
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, fix/feeder-payment-cap-20261111]
 
 permissions:
   contents: read
@@ -15,7 +15,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install isolated network test tools
-        run: sudo apt-get update && sudo apt-get install -y wireguard-tools nftables iproute2 iputils-ping
+        run: |
+          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_OS bash deploy/scripts/configure-ci-apt-mirrors.sh
+          sudo apt-get update && sudo apt-get install -y wireguard-tools nftables iproute2 iputils-ping
       - name: Verify direct-peer source authentication and rollback
         run: sudo python3 deploy/scripts/verify-wireguard-peer-isolation.py > "$RUNNER_TEMP/PEER-AUTHENTICATION.json"
       - uses: actions/upload-artifact@v4

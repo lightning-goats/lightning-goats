@@ -171,7 +171,7 @@ mod cashu_treasury_tests {
                 }
                 let runtime = StrikeRuntime::new(
                     StrikeClient::new(&origin, state.api_key.into()).unwrap(),
-                    StrikeWebhookVerifier::new("synthetic-webhook".into()).unwrap(),
+
                 );
                 let worker = Worker::historical_fixture(
                     ledger.clone(),
@@ -230,7 +230,7 @@ mod cashu_treasury_tests {
             spawn_mock_on(listener, state.clone());
             let runtime = StrikeRuntime::new(
                 StrikeClient::new(&origin, state.api_key.into()).unwrap(),
-                StrikeWebhookVerifier::new("synthetic-webhook".into()).unwrap(),
+
             );
             Self {
                 _directory: directory,

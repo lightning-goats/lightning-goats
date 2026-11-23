@@ -1450,7 +1450,6 @@ dependencies = [
  "form_urlencoded",
  "futures-util",
  "hex",
- "hmac",
  "hyper",
  "hyper-util",
  "lightning-goats-cashu-receipt",

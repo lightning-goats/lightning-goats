@@ -35,7 +35,6 @@ clap = { version = "4", features = ["derive"] }
 futures-util = "0.3"
 form_urlencoded = "1"
 hex = "0.4"
-hmac = "0.12"
 hyper = { version = "1", features = ["server", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio", "service"] }
 lightning-invoice = { version = "0.34.1", features = ["std"] }

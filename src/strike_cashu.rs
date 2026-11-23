@@ -3,7 +3,7 @@
 use super::*;
 use crate::cashu::treasury::TREASURY_USER;
 use anyhow::ensure;
-use lightning_goats_cashu_receipt::treasury::{Destination, Intent, Issued, hex_digest};
+use lightning_goats_cashu_receipt::treasury::{Destination, Intent, hex_digest};
 use sha2::Digest;
 
 impl StrikeClient {
@@ -56,6 +56,10 @@ impl ReconciledStrikeReceive {
     }
 }
 
+#[cfg(test)]
+use lightning_goats_cashu_receipt::treasury::Issued;
+
+#[cfg(test)]
 impl StrikeRuntime {
     /// Read/adopt a known original provider resource after response/checkpoint
     /// loss. No invoice creation, replacement or wallet execution occurs here.

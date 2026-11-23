@@ -122,9 +122,7 @@ membership Nostr publication capability enabled. Optional
 [reward planning](architecture/cyberherd-reward-planning.md) freezes eligible
 confirmed-feeding plans before obtaining bounded core reservations.
 
-The operator-directed 2026-11-08 Strike restoration is recorded in
-[`deployment/strike-receive-restoration.md`](deployment/strike-receive-restoration.md),
-including exact API scopes, webhook staging, WAF and payment-only deployment.
+The [mint payment cutover runbook](deployment/mint-payment-boundary-cutover.md) records the production receiver and historical reconciliation inventory.
 The operator-supplied OBS layout and its current data/QR contracts are documented
 in [`deployment/obs-overlay-restoration.md`](deployment/obs-overlay-restoration.md).
 Local CLI grants and the 10-sat message threshold are documented in

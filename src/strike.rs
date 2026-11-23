@@ -1,7 +1,6 @@
 use std::{net::IpAddr, str::FromStr, time::Duration};
 
 use anyhow::{Context, Result, bail};
-use hmac::{Hmac, Mac};
 use reqwest::{Client, StatusCode, Url};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -16,14 +15,11 @@ use crate::{
     secrets::read_systemd_credential,
 };
 
-type HmacSha256 = Hmac<Sha256>;
-
 #[cfg(unix)]
 #[path = "strike_cashu.rs"]
 mod cashu_treasury;
 
 const STRIKE_SOURCE: &str = "strike";
-const COMPLETED_RECEIVE_EVENT: &str = "receive-request.receive-completed";
 
 #[derive(Clone)]
 pub struct StrikeClient {
@@ -32,28 +28,26 @@ pub struct StrikeClient {
     api_key: Zeroizing<String>,
 }
 
-#[derive(Clone)]
-pub struct StrikeWebhookVerifier {
-    secret: Zeroizing<String>,
-}
-
+#[cfg(test)]
 #[derive(Clone)]
 pub struct StrikeRuntime {
     client: StrikeClient,
-    verifier: StrikeWebhookVerifier,
-    #[cfg(test)]
     issuance_slots: std::sync::Arc<tokio::sync::Semaphore>,
 }
 
+#[cfg(test)]
 #[derive(Debug)]
 pub struct InvoiceCapacityError;
+#[cfg(test)]
 impl std::fmt::Display for InvoiceCapacityError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("Invoice service is busy; retry later")
     }
 }
+#[cfg(test)]
 impl std::error::Error for InvoiceCapacityError {}
 
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreatedStrikeReceiveRequest {
     pub receive_request_id: Uuid,
@@ -134,6 +128,7 @@ impl StrikeClient {
         })
     }
 
+    #[cfg(test)]
     pub async fn create_bolt11_receive_request(
         &self,
         amount_msat: u64,
@@ -149,6 +144,7 @@ impl StrikeClient {
         .await
     }
 
+    #[cfg(test)]
     async fn create_bolt11_receive_request_inner(
         &self,
         amount_msat: u64,
@@ -418,68 +414,13 @@ impl StrikeClient {
     }
 }
 
-impl StrikeWebhookVerifier {
-    pub fn new(secret: String) -> Result<Self> {
-        if secret.is_empty() {
-            bail!("Strike webhook secret is empty");
-        }
-        Ok(Self {
-            secret: Zeroizing::new(secret),
-        })
-    }
-
-    pub fn verify_signature(&self, body: &[u8], signature_hex: &str) -> Result<()> {
-        let signature = hex::decode(signature_hex.trim())
-            .context("Strike X-Webhook-Signature is not valid hex")?;
-        if signature.len() != 32 {
-            bail!("Strike X-Webhook-Signature must be 32 bytes");
-        }
-        let mut mac = HmacSha256::new_from_slice(self.secret.as_bytes())
-            .context("failed constructing Strike webhook HMAC")?;
-        mac.update(body);
-        mac.verify_slice(&signature)
-            .context("Strike webhook signature verification failed")
-    }
-
-    pub fn parse_completed_event(&self, body: &[u8]) -> Result<StrikeCompletedReceiveEvent> {
-        let event: WebhookEvent =
-            serde_json::from_slice(body).context("malformed Strike webhook JSON")?;
-        if event.event_type != COMPLETED_RECEIVE_EVENT {
-            bail!("unsupported Strike webhook event type {}", event.event_type);
-        }
-        if event.webhook_version != "v1" {
-            bail!(
-                "unsupported Strike webhook version {}",
-                event.webhook_version
-            );
-        }
-        Ok(StrikeCompletedReceiveEvent {
-            event_id: event.id,
-            receive_request_id: event.data.entity_id,
-            receive_id: event.data.receive_id,
-        })
-    }
-}
-
+#[cfg(test)]
 impl StrikeRuntime {
-    pub fn payout_reader(&self, account_id: Uuid) -> Result<crate::payout::outcome::Reader> {
-        crate::payout::outcome::Reader::new(self.client.clone(), account_id)
-    }
-    pub fn new(client: StrikeClient, verifier: StrikeWebhookVerifier) -> Self {
+    pub fn new(client: StrikeClient) -> Self {
         Self {
             client,
-            verifier,
-            #[cfg(test)]
             issuance_slots: std::sync::Arc::new(tokio::sync::Semaphore::new(4)),
         }
-    }
-
-    pub fn verify_webhook_signature(&self, body: &[u8], signature_hex: &str) -> Result<()> {
-        self.verifier.verify_signature(body, signature_hex)
-    }
-
-    pub fn parse_completed_event(&self, body: &[u8]) -> Result<StrikeCompletedReceiveEvent> {
-        self.verifier.parse_completed_event(body)
     }
 
     /// One bounded inbox item plus one scan page. Every path converges on the
@@ -546,15 +487,6 @@ impl StrikeRuntime {
             }
         }
         Ok(())
-    }
-
-    pub async fn run_recovery_worker(self, ledger: LedgerStore) -> Result<()> {
-        loop {
-            if let Err(error) = self.recovery_step(&ledger).await {
-                tracing::error!(%error,"Strike recovery will retry after storage failure");
-            }
-            tokio::time::sleep(Duration::from_secs(1)).await;
-        }
     }
 
     #[cfg(test)]
@@ -708,18 +640,31 @@ impl StrikeRuntime {
         result
     }
 
-    pub async fn reconcile_and_credit(
+    async fn reconcile_and_credit(
         &self,
         ledger: &LedgerStore,
         event: &StrikeCompletedReceiveEvent,
     ) -> Result<SettlementOutcome> {
+        self.client
+            .reconcile_original_receive(ledger, event.receive_request_id, event.receive_id)
+            .await
+    }
+}
+
+impl StrikeClient {
+    pub async fn reconcile_original_receive(
+        &self,
+        ledger: &LedgerStore,
+        request_id: Uuid,
+        receive_id: Uuid,
+    ) -> Result<SettlementOutcome> {
         let stored = ledger
-            .strike_receive_request(event.receive_request_id)
+            .strike_receive_request(request_id)
             .await?
             .with_context(|| {
                 format!(
                     "unknown Strike receiveRequestId {}; refusing credit",
-                    event.receive_request_id
+                    request_id
                 )
             })?;
         #[cfg(unix)]
@@ -727,11 +672,9 @@ impl StrikeRuntime {
             .cashu_treasury_for_receive(stored.receive_request_id)
             .await?;
         #[cfg(unix)]
-        #[cfg(unix)]
         if let Some(intent) = treasury {
             let receive = self
-                .client
-                .verify_cashu_treasury_receive(&intent, &stored, event.receive_id)
+                .verify_cashu_treasury_receive(&intent, &stored, receive_id)
                 .await?;
             return Ok(
                 if ledger
@@ -748,8 +691,7 @@ impl StrikeRuntime {
             bail!("treasury invoice omitted its immutable purpose binding");
         }
         let receive = self
-            .client
-            .reconcile_completed_receive(&stored, event.receive_id)
+            .reconcile_completed_receive(&stored, receive_id)
             .await?;
         let contact = ledger
             .contact_for_receive(stored.receive_request_id)
@@ -801,6 +743,7 @@ impl StrikeRuntime {
     }
 }
 
+#[cfg(test)]
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CreateReceiveRequestBody<'a> {
@@ -808,6 +751,7 @@ struct CreateReceiveRequestBody<'a> {
     target_currency: &'a str,
 }
 
+#[cfg(test)]
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CreateBolt11Request<'a> {
@@ -816,6 +760,7 @@ struct CreateBolt11Request<'a> {
     expiry_in_seconds: u64,
 }
 
+#[cfg(test)]
 #[derive(Debug, Serialize)]
 struct StrikeAmount<'a> {
     amount: String,
@@ -826,6 +771,7 @@ struct StrikeAmount<'a> {
 #[serde(rename_all = "camelCase")]
 pub struct ReceiveRequestResponse {
     receive_request_id: Uuid,
+    #[cfg(test)]
     #[serde(default)]
     created: Option<String>,
     #[serde(default)]
@@ -893,22 +839,6 @@ struct LightningReceive {
     #[serde(default)]
     description_hash: Option<String>,
     payment_hash: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct WebhookEvent {
-    id: Uuid,
-    event_type: String,
-    webhook_version: String,
-    data: WebhookEventData,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct WebhookEventData {
-    entity_id: Uuid,
-    receive_id: Uuid,
 }
 
 fn validate_provider_url(url: &Url) -> Result<()> {
@@ -1041,6 +971,7 @@ fn validate_decimal_evidence(value: &str) -> Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
 fn msat_to_btc_decimal(msat: u64) -> String {
     const MSAT_PER_BTC: u64 = 100_000_000_000;
     let whole = msat / MSAT_PER_BTC;
@@ -1274,12 +1205,6 @@ mod tests {
         (directory, ledger)
     }
 
-    fn signed_body(secret: &str, body: &[u8]) -> String {
-        let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).unwrap();
-        mac.update(body);
-        hex::encode(mac.finalize().into_bytes())
-    }
-
     fn contact_state(intent: &crate::contact::Intent) -> MockState {
         let mut state = state();
         state.description_hash = intent.description_hash.clone();
@@ -1296,10 +1221,7 @@ mod tests {
         let intent = crate::contact::tests::fixture();
         let state = contact_state(&intent);
         let base = spawn_mock(state.clone()).await;
-        let runtime = StrikeRuntime::new(
-            StrikeClient::new(&base, state.api_key.into()).unwrap(),
-            StrikeWebhookVerifier::new("fixture-webhook".into()).unwrap(),
-        );
+        let runtime = StrikeRuntime::new(StrikeClient::new(&base, state.api_key.into()).unwrap());
         let first = runtime
             .create_contact_invoice(&ledger, &intent, &"ab".repeat(32))
             .await
@@ -1357,10 +1279,8 @@ mod tests {
                 state.received_amount = Some(json!({"amount":"0.00000101","currency":"BTC"}));
             }
             let base = spawn_mock(state.clone()).await;
-            let runtime = StrikeRuntime::new(
-                StrikeClient::new(&base, state.api_key.into()).unwrap(),
-                StrikeWebhookVerifier::new("fixture-webhook".into()).unwrap(),
-            );
+            let runtime =
+                StrikeRuntime::new(StrikeClient::new(&base, state.api_key.into()).unwrap());
             runtime
                 .create_contact_invoice(&ledger, &intent, &"ab".repeat(32))
                 .await
@@ -1392,10 +1312,7 @@ mod tests {
         let mut state = contact_state(&intent);
         state.invoice = "lnbc-invalid-fixture".into();
         let base = spawn_mock(state.clone()).await;
-        let runtime = StrikeRuntime::new(
-            StrikeClient::new(&base, state.api_key.into()).unwrap(),
-            StrikeWebhookVerifier::new("fixture-webhook".into()).unwrap(),
-        );
+        let runtime = StrikeRuntime::new(StrikeClient::new(&base, state.api_key.into()).unwrap());
         assert!(
             runtime
                 .create_contact_invoice(&ledger, &intent, &"ab".repeat(32))
@@ -1418,18 +1335,12 @@ mod tests {
         assert_eq!(state.api_calls.load(Ordering::SeqCst), 1);
     }
 
-    fn webhook_body(state: &MockState) -> Vec<u8> {
-        serde_json::to_vec(&json!({
-            "id":"2aa19d2a-22eb-4868-8fad-8ad765491c3b",
-            "eventType":COMPLETED_RECEIVE_EVENT,
-            "webhookVersion":"v1",
-            "data": {
-                "entityId":state.receive_request_id,
-                "receiveId":state.receive_id
-            },
-            "created":"2026-09-07T17:01:00Z"
-        }))
-        .unwrap()
+    fn completed_event(state: &MockState) -> StrikeCompletedReceiveEvent {
+        StrikeCompletedReceiveEvent {
+            event_id: state.receive_id,
+            receive_request_id: state.receive_request_id,
+            receive_id: state.receive_id,
+        }
     }
 
     #[test]
@@ -1478,7 +1389,6 @@ mod tests {
         );
         let runtime = StrikeRuntime::new(
             StrikeClient::new(&spawn_mock(state.clone()).await, state.api_key.into()).unwrap(),
-            StrikeWebhookVerifier::new("secret".into()).unwrap(),
         );
         let (directory, ledger) = ledger().await;
         runtime
@@ -1492,9 +1402,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let event = runtime
-            .parse_completed_event(&webhook_body(&state))
-            .unwrap();
+        let event = completed_event(&state);
         runtime.reconcile_and_credit(&ledger, &event).await.unwrap();
         assert_eq!(
             runtime.reconcile_and_credit(&ledger, &event).await.unwrap(),
@@ -1542,7 +1450,6 @@ mod tests {
         assert!(crate::bolt11::verify_issuance_expiry(&parsed, 300).is_err());
         let runtime = StrikeRuntime::new(
             StrikeClient::new(&spawn_mock(state.clone()).await, state.api_key.into()).unwrap(),
-            StrikeWebhookVerifier::new("secret".into()).unwrap(),
         );
         let (_directory, ledger) = ledger().await;
         // Restore an invoice issued while valid; no new expired invoice is issued.
@@ -1560,12 +1467,7 @@ mod tests {
             .await
             .unwrap();
         runtime
-            .reconcile_and_credit(
-                &ledger,
-                &runtime
-                    .parse_completed_event(&webhook_body(&state))
-                    .unwrap(),
-            )
+            .reconcile_and_credit(&ledger, &completed_event(&state))
             .await
             .unwrap();
         assert_eq!(ledger.feed_credit_sats().await.unwrap(), 2340);
@@ -1586,7 +1488,6 @@ mod tests {
             state.credited_amount = credited;
             let runtime = StrikeRuntime::new(
                 StrikeClient::new(&spawn_mock(state.clone()).await, state.api_key.into()).unwrap(),
-                StrikeWebhookVerifier::new("secret".into()).unwrap(),
             );
             let (_dir, ledger) = ledger().await;
             runtime
@@ -1602,12 +1503,7 @@ mod tests {
                 .unwrap();
             assert!(
                 runtime
-                    .reconcile_and_credit(
-                        &ledger,
-                        &runtime
-                            .parse_completed_event(&webhook_body(&state))
-                            .unwrap()
-                    )
+                    .reconcile_and_credit(&ledger, &completed_event(&state))
                     .await
                     .is_err()
             );
@@ -1616,23 +1512,12 @@ mod tests {
         }
     }
 
-    #[test]
-    fn verifies_webhook_hmac_and_rejects_changes() {
-        let verifier = StrikeWebhookVerifier::new("secret".to_owned()).unwrap();
-        let body = br#"{"eventType":"receive-request.receive-completed"}"#;
-        let signature = signed_body("secret", body);
-        verifier.verify_signature(body, &signature).unwrap();
-        assert!(verifier.verify_signature(b"different", &signature).is_err());
-    }
-
     #[tokio::test]
     async fn create_persist_reconcile_credit_and_replay_is_idempotent() {
         let state = state();
         let base_url = spawn_mock(state.clone()).await;
-        let runtime = StrikeRuntime::new(
-            StrikeClient::new(&base_url, state.api_key.to_owned()).unwrap(),
-            StrikeWebhookVerifier::new("webhook-secret".to_owned()).unwrap(),
-        );
+        let runtime =
+            StrikeRuntime::new(StrikeClient::new(&base_url, state.api_key.to_owned()).unwrap());
         let (_directory, ledger) = ledger().await;
 
         let created = runtime
@@ -1648,10 +1533,7 @@ mod tests {
             .unwrap();
         assert_eq!(created.receive_request_id, state.receive_request_id);
 
-        let body = webhook_body(&state);
-        let signature = signed_body("webhook-secret", &body);
-        runtime.verify_webhook_signature(&body, &signature).unwrap();
-        let event = runtime.parse_completed_event(&body).unwrap();
+        let event = completed_event(&state);
         assert_eq!(
             runtime.reconcile_and_credit(&ledger, &event).await.unwrap(),
             SettlementOutcome::Credited {
@@ -1669,34 +1551,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn invalid_signature_causes_no_provider_or_ledger_activity() {
-        let state = state();
-        let calls = Arc::clone(&state.api_calls);
-        let base_url = spawn_mock(state.clone()).await;
-        let runtime = StrikeRuntime::new(
-            StrikeClient::new(&base_url, state.api_key.to_owned()).unwrap(),
-            StrikeWebhookVerifier::new("webhook-secret".to_owned()).unwrap(),
-        );
-        let (_directory, ledger) = ledger().await;
-        let body = webhook_body(&state);
-        assert!(
-            runtime
-                .verify_webhook_signature(&body, &"00".repeat(32))
-                .is_err()
-        );
-        assert_eq!(calls.load(Ordering::SeqCst), 0);
-        assert_eq!(ledger.feed_credit_sats().await.unwrap(), 0);
-    }
-
-    #[tokio::test]
     async fn incomplete_receive_fails_closed_without_credit() {
         let mut state = state();
         state.receive_state = "PENDING";
         let base_url = spawn_mock(state.clone()).await;
-        let runtime = StrikeRuntime::new(
-            StrikeClient::new(&base_url, state.api_key.to_owned()).unwrap(),
-            StrikeWebhookVerifier::new("secret".to_owned()).unwrap(),
-        );
+        let runtime =
+            StrikeRuntime::new(StrikeClient::new(&base_url, state.api_key.to_owned()).unwrap());
         let (_directory, ledger) = ledger().await;
         runtime
             .create_and_record_receive_request(
@@ -1778,7 +1638,6 @@ mod tests {
         state.page_padding = true;
         let runtime = StrikeRuntime::new(
             StrikeClient::new(&spawn_mock(state.clone()).await, state.api_key.into()).unwrap(),
-            StrikeWebhookVerifier::new("secret".into()).unwrap(),
         );
         let (directory, ledger) = ledger().await;
         runtime
@@ -1820,9 +1679,7 @@ mod tests {
         .unwrap();
         runtime.recovery_step(&restored).await.unwrap();
         assert_eq!(restored.feed_credit_sats().await.unwrap(), 2340);
-        let event = runtime
-            .parse_completed_event(&webhook_body(&state))
-            .unwrap();
+        let event = completed_event(&state);
         restored.enqueue_strike_event(&event).await.unwrap();
         restored.enqueue_strike_event(&event).await.unwrap();
         runtime.recovery_step(&restored).await.unwrap();
@@ -1837,7 +1694,6 @@ mod tests {
         let state = state();
         let runtime = StrikeRuntime::new(
             StrikeClient::new(&spawn_mock(state.clone()).await, state.api_key.into()).unwrap(),
-            StrikeWebhookVerifier::new("secret".into()).unwrap(),
         );
         let (directory, ledger) = ledger().await;
         runtime
@@ -1851,9 +1707,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let event = runtime
-            .parse_completed_event(&webhook_body(&state))
-            .unwrap();
+        let event = completed_event(&state);
         ledger.enqueue_strike_event(&event).await.unwrap();
         let mut conflict = event.clone();
         conflict.receive_id = Uuid::new_v4();
@@ -1921,7 +1775,6 @@ mod tests {
         let state = state();
         let runtime = StrikeRuntime::new(
             StrikeClient::new(&spawn_mock(state.clone()).await, state.api_key.into()).unwrap(),
-            StrikeWebhookVerifier::new("secret".into()).unwrap(),
         );
         let (_directory, ledger) = ledger().await;
         for user in [

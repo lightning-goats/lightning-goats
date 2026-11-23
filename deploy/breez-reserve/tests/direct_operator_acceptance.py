@@ -159,7 +159,7 @@ def exercise(ppk, failed_members=False):
                 store=ClaimStore(root)
                 assert store.db.execute("SELECT COUNT(*) FROM proof_disposition").fetchone()==(1,)
                 if failed_members:
-                    from member_reclaim import reclaim
+                    from member_reclaim import reclaim, receipt
                     failures = [dict(feed=feed, member=m*64, gross=7, fee_limit=7, plan=request["plan_hash"],
                                      recipient=request["recipient"], reserved=14) for m in ("1","2")]
                     try:
@@ -173,6 +173,9 @@ def exercise(ppk, failed_members=False):
                     result=reclaim(store,MintOnly(),list(reversed(failures)),keyset,{keyset:keys})
                     assert result==[{"state":"ready","amount_sat":14-fee,"fee_sat":fee}]
                     assert reclaim(store,MintOnly(),failures,keyset,{keyset:keys})==[]
+                    for row in failures:
+                        assert receipt(store.db,feed,request["plan_hash"],row["member"])==7
+                        assert receipt(store.db,feed,"cc"*32,row["member"]) is None
                     assert paths.count("/v1/swap")==2 and reserve.pay_attempts==0
                     assert store.db.execute("SELECT SUM(reserved_sat) FROM payout_claim_allocation WHERE feed_id=?",
                                             (feed,)).fetchone()==(32,)

@@ -48,7 +48,9 @@ def qualify(db, failures, policy):
     result = []
     for feed, member in sorted(failures):
         row = db.execute("""
-            SELECT g.id,g.plan_hash,r.gross_sats,g.reserved_sats FROM payout_grants g
+            SELECT g.id,g.plan_hash,r.gross_sats,g.reserved_sats,m.destination FROM payout_grants g
+            JOIN payout_intake_receipts t ON t.grant_id=g.id AND t.request_id=g.request_id AND t.plan_hash=g.plan_hash
+            JOIN payout_operator_methods m ON m.sequence=t.sequence AND m.method='p2pk'
             JOIN payout_rows r ON r.grant_id=g.id WHERE g.request_id=? AND r.member=?
             AND json_extract(g.qualification_json,'$.execution_provider')='cashu'
             AND (NOT EXISTS(SELECT 1 FROM payout_invoice_intents i WHERE i.grant_id=g.id AND i.member=r.member)
@@ -59,12 +61,17 @@ def qualify(db, failures, policy):
         """, (feed,member)).fetchone()
         if not row:
             continue
-        grant, plan, gross, reserved = row
+        grant, plan, gross, reserved, destination = row
+        wallet, frozen_mode, frozen_limit = json.loads(destination)
+        if wallet["mint"] != MINT:
+            continue
+        frozen_fee = gross if frozen_mode == "deduct_from_share" else frozen_limit
+        current_fee = gross if terms["fee_mode"] == "deduct_from_share" else terms["max_fee_sats"]
         if not 0 < gross <= reserved <= terms["max_sats_per_feed"]:
             continue
         result.append(dict(feed=feed, member=member, grant=grant, plan=plan, gross=gross,
-                           reserved=reserved, recipient=policy["operator_p2pk"]["recipient"],
-                           fee_limit=gross if terms["fee_mode"]=="deduct_from_share" else min(gross,terms["max_fee_sats"])))
+                           reserved=reserved, recipient=wallet["recipient"],
+                           fee_limit=min(gross, frozen_fee, current_fee)))
     return result
 
 
@@ -73,8 +80,11 @@ def authorize(db, rows, settings):
     if (settings["service"]["mode"] == "shadow" or not bridge["payout_execution_enabled"]
             or bridge["reward_policy"]["funding_source"] != "retained_cashu"):
         return []
+    cap = bridge["reward_policy"]["max_sats_per_feed"]
     authorized = []
     for row in rows:
+        if row["reserved"] > cap:
+            continue
         check = db.execute("""
             SELECT 1 FROM reward_reservations r JOIN operator_p2pk_claims o USING(request_id)
             JOIN feed_attempts f ON f.id=r.request_id
@@ -187,7 +197,11 @@ def main():
         with httpx.Client(base_url=MINT, timeout=15, trust_env=False, follow_redirects=False) as client:
             output = []
             for feed in sorted({r["feed"] for r in rows}):
-                output.extend(reclaim(store,client,[r for r in rows if r["feed"]==feed],os.environ["MINT_KEYSET"],keys))
+                try:
+                    group = [row for row in rows if row["feed"] == feed]
+                    output.extend(reclaim(store, client, group, os.environ["MINT_KEYSET"], keys))
+                except (ValueError, httpx.HTTPError):
+                    output.append({"state": "held", "reason": "collector_reconciliation"})
     print(json.dumps(output))
 
 

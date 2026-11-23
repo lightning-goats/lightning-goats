@@ -131,7 +131,12 @@ impl<R: Query> Worker<R> {
         let mut terms = BTreeMap::new();
         let mut fetch = Vec::new();
         for profile in &profiles {
-            if profile.address().is_none() {
+            if profile.address().is_none()
+                || profile
+                    .preference
+                    .as_ref()
+                    .is_some_and(|(_, method, _)| method != "lightning")
+            {
                 continue;
             }
             match self
@@ -162,6 +167,33 @@ impl<R: Query> Worker<R> {
             }
             return Ok(Step::RecipientsStaged);
         }
+        let mint = crate::cashu::treasury::PROJECT_MINT_ORIGIN;
+        let mut destinations = stream::iter(profiles.iter_mut().map(|read| async {
+            use super::rewards::EcashDestination;
+            read.ecash = match &read.preference {
+                None => None,
+                Some((_, method, None)) if method == "lightning" => None,
+                Some((_, method, None)) if method == "public_nutzap" => {
+                    Some(EcashDestination::PublicNutzap(
+                        self.discovery
+                            .nutzap_destination(read.pubkey(), mint, now)
+                            .await?,
+                    ))
+                }
+                Some((_, method, Some(text))) if method == "private_ecash" => {
+                    Some(EcashDestination::PrivateEcash(
+                        super::private_reward::PrivateDestination::from_request(text, mint)?,
+                    ))
+                }
+                _ => anyhow::bail!("invalid stored member reward method"),
+            };
+            Ok::<_, anyhow::Error>(())
+        }))
+        .buffer_unordered(4);
+        while let Some(resolved) = destinations.next().await {
+            resolved?;
+        }
+        drop(destinations);
         self.store
             .freeze_reward_plan(
                 &self.owner,

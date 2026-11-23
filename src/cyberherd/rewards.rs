@@ -75,6 +75,8 @@ pub struct ProfileRead {
     pub(crate) head_id: Option<String>,
     pub(crate) profile: Option<Profile>,
     pub(crate) observed_at: i64,
+    pub(crate) preference: Option<(i64, String, Option<String>)>,
+    pub(crate) ecash: Option<EcashDestination>,
 }
 
 impl ProfileRead {
@@ -103,6 +105,21 @@ pub enum Skip {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "method", rename_all = "snake_case", deny_unknown_fields)]
+pub enum EcashDestination {
+    PublicNutzap(super::discovery::NutzapDestination),
+    PrivateEcash(super::private_reward::PrivateDestination),
+}
+impl EcashDestination {
+    pub fn receiving_key(&self) -> &str {
+        match self {
+            Self::PublicNutzap(destination) => &destination.receiving_key,
+            Self::PrivateEcash(destination) => &destination.receiving_key,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Row {
     pub pubkey: String,
@@ -118,6 +135,8 @@ pub struct Row {
     pub net_sats: u64,
     pub gross_micro_percent_of_feed: u64,
     pub recipient: Option<Recipient>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ecash: Option<EcashDestination>,
     pub skip: Option<Skip>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub conversation: Option<super::conversation::MemberConversation>,
@@ -300,6 +319,7 @@ pub(super) fn build(
     let mut addresses: BTreeMap<String, usize> = BTreeMap::new();
     let mut callbacks: BTreeMap<String, usize> = BTreeMap::new();
     let mut weights = Vec::new();
+    let mut wallet_keys = BTreeMap::<String, usize>::new();
     for (key, member) in &snapshot.roster.members {
         if !member.active || snapshot.roster.banned.contains(key) {
             continue;
@@ -328,27 +348,39 @@ pub(super) fn build(
             net_sats: 0,
             gross_micro_percent_of_feed: 0,
             recipient: None,
+            ecash: read.ecash.clone(),
             skip: None,
             conversation: barrier.conversations.get(key).cloned(),
             score_basis: Some(snapshot.settings.minimum_sats.max(1)),
             zap_content: None,
             zap_wording: None,
         };
-        match &read.profile {
-            None => row.skip = Some(Skip::MissingProfile),
-            Some(profile) => match &profile.lud16 {
-                None => row.skip = Some(Skip::NoAddress),
-                Some(address) => {
-                    let identity = address_identity(address)?;
-                    if key == &snapshot.owner || operations.contains(&identity) {
-                        row.skip = Some(Skip::Operator);
-                    } else {
-                        *addresses.entry(identity).or_default() += 1;
-                    }
-                }
-            },
+        if let Some(destination) = &row.ecash {
+            anyhow::ensure!(
+                !funding_source.is_strike(),
+                "ecash rewards require retained funding"
+            );
+            *wallet_keys
+                .entry(destination.receiving_key().into())
+                .or_default() += 1;
         }
-        if row.skip.is_none() {
+        if key == &snapshot.owner {
+            row.skip = Some(Skip::Operator);
+        } else if let Some(address) = read.address() {
+            let identity = address_identity(address)?;
+            if operations.contains(&identity) {
+                row.skip = Some(Skip::Operator);
+            } else {
+                *addresses.entry(identity).or_default() += 1;
+            }
+        } else if row.ecash.is_none() {
+            row.skip = Some(if read.profile.is_some() {
+                Skip::NoAddress
+            } else {
+                Skip::MissingProfile
+            });
+        }
+        if row.skip.is_none() && row.ecash.is_none() {
             row.recipient = recipients
                 .get(key)
                 .context("recipient resolution missing")?
@@ -362,13 +394,18 @@ pub(super) fn build(
     }
     for row in &mut plan.rows {
         if row.skip.is_none() {
-            let identity = address_identity(
-                row.profile
+            let identity = row
+                .profile
+                .as_ref()
+                .and_then(|p| p.lud16.as_deref())
+                .map(address_identity)
+                .transpose()?;
+            if identity.is_some_and(|id| addresses[&id] > 1)
+                || row
+                    .ecash
                     .as_ref()
-                    .and_then(|p| p.lud16.as_deref())
-                    .context("missing payee")?,
-            )?;
-            if addresses[&identity] > 1 {
+                    .is_some_and(|d| wallet_keys[d.receiving_key()] > 1)
+            {
                 row.skip = Some(Skip::SharedAddress);
             } else if row
                 .recipient
@@ -417,6 +454,7 @@ pub(super) fn build(
             Some(Skip::PolicyMaximum)
         } else {
             match &row.recipient {
+                None if row.ecash.is_some() => None,
                 None => Some(Skip::RecipientUnavailable),
                 Some(r) if net * 1000 < r.min_msat => Some(Skip::RecipientMinimum),
                 Some(r) if net * 1000 > r.max_msat => Some(Skip::RecipientMaximum),
@@ -460,7 +498,7 @@ mod tests {
     proptest! {
         #[test]
         fn fee_and_rounding_budget_is_conserved_without_carry(
-            cashu in any::<bool>(), real in 0u64..1_000_001, percent in 0u8..=100, ceiling in 0u8..=100, cap in 0u64..100_001,
+            cashu in any::<bool>(), private in any::<bool>(), real in 0u64..1_000_001, percent in 0u8..=100, ceiling in 0u8..=100, cap in 0u64..100_001,
             bps in 0u16..=10_000, min_fee in 0u64..101, amount in 1u64..1_000_001,
         ) {
             let public=|n|crate::nostr_event::test_event(n,0,100,"{}",vec![]).pubkey;
@@ -477,7 +515,15 @@ mod tests {
             let allowance=Allowance{funding_source,epoch:binding.epoch,request_id:barrier.feeding.request_id,owner,funding,threshold_sats:1_000_000,
                 member_percent_ceiling:ceiling,max_sats_per_feed:cap,available_sats:i64::MAX as u64,policy_hash:"cd".repeat(32)};
             let planning=PlanningPolicy{fee_mode:crate::payout::inclusive_fees::Mode::FixedAllowance,fee_basis_points:bps,minimum_fee_sats:min_fee,minimum_net_sats:1,maximum_net_sats:i64::MAX as u64 / 1000,profile_max_age_seconds:3600,operation_addresses:vec![]};
-            let read=ProfileRead{pubkey:member.clone(),head_id:Some("ef".repeat(32)),profile:Some(profile),observed_at:100};
+            let mut read=ProfileRead{pubkey:member.clone(),head_id:Some("ef".repeat(32)),profile:Some(profile),observed_at:100,preference:None,ecash:None};
+            if cashu && private {
+                read.profile.as_mut().unwrap().lud16=None;
+                read.ecash=Some(EcashDestination::PrivateEcash(crate::cyberherd::private_reward::PrivateDestination{
+                    request_digest:"12".repeat(32),payment_id:Some("offline".into()),
+                    receiving_key:format!("02{}",public(3)),transport_key:public(4),
+                    relays:vec!["wss://relay.example.com/".into()],
+                }));
+            }
             let recipient=Recipient::parse("member@example.com",br#"{"tag":"payRequest","callback":"https://pay.example.com/member","minSendable":1,"maxSendable":1000000000000,"metadata":"[[\"text/plain\",\"Treats\"]]"}"#).unwrap();
             let plan=build(&barrier,&binding,&planning,Some(&allowance),&[read],&BTreeMap::from([(member,Some(recipient))]),100).unwrap();
             let budget=(real*u64::from(percent.min(ceiling))/100).min(cap);
@@ -487,6 +533,7 @@ mod tests {
             if budget==0 {prop_assert!(plan.rows.is_empty());}
             else {
                 let row=&plan.rows[0];
+                if cashu && private {prop_assert!(row.ecash.is_some() && row.recipient.is_none());}
                 prop_assert_eq!(row.gross_sats,budget);
                 prop_assert_eq!(row.net_sats+row.fee_limit_sats,plan.reserved_sats);
                 if row.skip.is_none() {

@@ -215,6 +215,7 @@ pub async fn run(config_path: &Path, approval_path: &Path, apply: bool) -> Resul
     let approval: Approval = load_approval(approval_path)?;
     approval.require_current()?;
     let config = load_config(config_path, &approval.config_sha256)?;
+    config.validate_common()?;
     let registration = Arc::new(
         config
             .cashu_receipts
@@ -244,12 +245,13 @@ pub async fn run(config_path: &Path, approval_path: &Path, apply: bool) -> Resul
             &ledger,
             &registration,
             &treasury.policy.destination,
-            StrikeClient::from_config(
-                config
+            async {
+                let original = config
                     .strike
                     .as_ref()
-                    .context("Strike reconciliation backend missing")?,
-            ),
+                    .context("original Strike receipt reader missing")?;
+                StrikeClient::from_config(original).await
+            },
             &client,
         )
         .await?;

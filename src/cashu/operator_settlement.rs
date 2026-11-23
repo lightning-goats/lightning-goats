@@ -61,7 +61,9 @@ impl Approval {
     }
     /// Hash and parse the same bounded bytes; never reopen a second config image.
     pub fn load_config(&self, path: &Path) -> Result<AppConfig> {
-        load_config(path, &self.config_sha256)
+        let config = load_config(path, &self.config_sha256)?;
+        config.validate()?;
+        Ok(config)
     }
     pub fn require_registration(&self, registration: &ReceiptPolicy) -> Result<()> {
         ensure!(
@@ -101,7 +103,6 @@ pub(super) fn load_config(path: &Path, expected_digest: &str) -> Result<AppConfi
     );
     let config: AppConfig = toml::from_str(std::str::from_utf8(&bytes)?)
         .map_err(|_| anyhow::anyhow!("invalid protected settlement configuration"))?;
-    config.validate_common()?;
     Ok(config)
 }
 

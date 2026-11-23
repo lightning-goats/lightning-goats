@@ -173,7 +173,7 @@ mod cashu_treasury_tests {
                     StrikeClient::new(&origin, state.api_key.into()).unwrap(),
                     StrikeWebhookVerifier::new("synthetic-webhook".into()).unwrap(),
                 );
-                let worker = Worker::new(
+                let worker = Worker::historical_fixture(
                     ledger.clone(),
                     runtime,
                     Arc::new(copy_registration(&registration)),
@@ -292,6 +292,34 @@ mod cashu_treasury_tests {
                 .await
                 .unwrap()
         }
+    }
+
+    #[tokio::test]
+    async fn project_worker_leaves_pre_cutover_treasury_reservations_with_their_original_destination() -> Result<()> {
+        use crate::cashu::treasury_worker::{Controls, Tick, Worker};
+        let f = Fixture::new(&[8], 0, 6, 2, unchanged).await;
+        let original = f.intent.digest()?;
+        let open = |policy: Policy| Worker::new(
+            f.ledger.clone(),
+            crate::config::BreezCollectorConfig {
+                socket: "/run/lightning-goats-project-invoices.sock".into(),
+                peer_uid: 0,
+            },
+            Arc::new(copy_registration(&f.registration)),
+            Arc::new(policy), PlanningOnly,
+            Controls { issue: true, deliver: true, inspect: true, maximum_attempts: 8, ..Default::default() },
+            Duration::from_secs(30),
+        );
+        assert!(open(f.policy.clone()).is_err());
+        let mut project = f.policy.clone();
+        project.destination.origin = crate::cashu::treasury::PROJECT_MINT_ORIGIN.into();
+        project.invoice_expiry_seconds = crate::config::HOME_INVOICE_EXPIRY_SECONDS;
+        assert_eq!(open(project)?.tick(1_800_000_000).await?, Tick::Idle);
+        assert_eq!(f.ledger.cashu_treasury_intent(f.intent.id).await?.unwrap().digest()?, original);
+        assert_eq!(f.count("cashu_treasury_work").await, 0);
+        assert_eq!(f.count("breez_project_invoices").await, 0);
+        assert_eq!(f.state.api_calls.load(Ordering::SeqCst), 0);
+        Ok(())
     }
 
     #[tokio::test]
@@ -594,7 +622,7 @@ mod cashu_treasury_tests {
                 .await;
                 let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
                 let registration = Arc::new(copy_registration(&f.registration));
-                let worker = Worker::new(
+                let worker = Worker::historical_fixture(
                     f.ledger.clone(),
                     f.runtime.clone(),
                     registration.clone(),
@@ -852,7 +880,7 @@ mod cashu_treasury_tests {
                 maximum_attempts: 1,
             };
             let now = crate::gateway::now_epoch().unwrap();
-            let worker = Worker::new(
+            let worker = Worker::historical_fixture(
                 f.ledger.clone(),
                 f.runtime.clone(),
                 registration.clone(),
@@ -911,7 +939,7 @@ mod cashu_treasury_tests {
                 lose_reply: std::sync::atomic::AtomicBool::new(false),
                 pending_replies: 2.into(),
             };
-            let worker = Worker::new(
+            let worker = Worker::historical_fixture(
                 reopened.clone(),
                 f.runtime.clone(),
                 registration,
@@ -1047,7 +1075,7 @@ mod cashu_treasury_tests {
             let registration = Arc::new(copy_registration(&f.registration));
             let policy = Arc::new(f.policy.clone());
             let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
-            let make_worker = |deliver, lose_reply| Worker::new(
+            let make_worker = |deliver, lose_reply| Worker::historical_fixture(
                 f.ledger.clone(),
                 f.runtime.clone(),
                 registration.clone(),

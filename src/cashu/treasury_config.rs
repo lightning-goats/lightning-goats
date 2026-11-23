@@ -63,7 +63,7 @@ impl Config {
         &self,
         receipts: &receipt_server::Config,
         ledger: LedgerStore,
-        backend: super::treasury_worker::InvoiceBackend,
+        collector: Option<&crate::config::BreezCollectorConfig>,
     ) -> Result<Option<Worker>> {
         self.validate(Some(receipts), None)?;
         if !(self.controls.plan
@@ -84,7 +84,11 @@ impl Config {
         let client = Client::new(self.socket.clone(), registration.clone(), deadline, 1)?;
         Ok(Some(Worker::new(
             ledger,
-            backend,
+            collector
+                .ok_or_else(|| {
+                    anyhow::anyhow!("treasury conversion requires project mint invoicing")
+                })?
+                .clone(),
             registration,
             Arc::new(self.policy.clone()),
             client,

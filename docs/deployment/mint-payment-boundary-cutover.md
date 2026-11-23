@@ -53,6 +53,22 @@ Enable that socket and restart the isolated delivery worker and updated signer b
 
 A public token-relay acknowledgement permits the member delivery receipt. Missing acknowledgements on other token or NIP-65 read relays retry the same signed event. For private delivery the worker publishes the original encrypted envelope to the frozen request's relays. Acknowledgement records relay acceptance. Recipient redemption requires separate evidence. Use an authenticated member who has opted in for a production payout test. Current acceptance evidence for member ecash comes from disposable wallets and relays.
 
+### Fixed-amount checkout in production, 2026-11-23 UTC
+
+The merged checkout revision is `424c8e44`. CI built the receiver and wallet from `31a20171`; the only source difference is the mixed-payment ledger regression. The installed process executables matched the verified release digests. The public index preserved its existing deployment customizations and loaded the new versioned checkout script.
+
+A live POST for the herd froze 968 sats with 32 sats of credit toward a 1,000-sat feeding. Repeating the same checkout ID returned byte-identical Lightning and Cashu payment options. The collector had one original project invoice and zero issued proofs for that intent when verified. The redacted checkout correlation is `1da2865d2d9b`. A viewer payment and confirmed feeding are separate acceptance steps. For recovery, retain the original checkout and quote journals. The pre-checkout binaries and web files are in the protected VPS directory `/var/backups/checkout-172-xbpkmubz`.
+
+### Treasury destination after direct-provider retirement
+
+Configure the treasury destination for the Goats mint and use the existing project collector socket. The production worker selects only reservations already bound to that mint and wallet epoch. Historical reservations retain their original destination, signed invoice, funding lots and payment hash. Read or reconcile them under their original identity. Changing the configured mint cannot turn an old reservation into a project quote or create an additional feeder credit.
+
+### VPS payout worker, 2026-11-23
+
+The VPS installed the CyberHerd payout worker and service unit from main commit `91ab30df2972c5780b11ec8b778e14c22f4736ef` (PR #175). The release verifier checked all 114 package files. After restart the running executable matched SHA-256 `caf2dc572d4c29dfffe26b1c62d78dc448469e66369467197943a1d8ced387ad`, with zero automatic restarts. The service used retained Cashu funding and had no Strike payout API key mounted.
+
+The ledger contained three historical Strike payment bindings before deployment. All three had a final completed payment record. The installer compared their original intent IDs, payment IDs and final states before and after restart and found them identical, with zero conflicts. The previous executable and unit are in `/var/backups/retire-direct-payout-175-7hqdl5c8` on the VPS. This release check involved no transfers. Live verification of a new opted-in member payout requires an eligible member and confirmed feeding.
+
 ### Member reward rollout, 2026-11-23 UTC
 
 Production runs the member payout release merged at `8729c347`. The staged package was built from `2fa5876a`. Its only difference from the merged tree is the mixed-feed regression test. The running core, membership, payout and signer executables each matched the packaged SHA-256 digest.
@@ -60,3 +76,9 @@ Production runs the member payout release merged at `8729c347`. The staged packa
 Maintenance stopped all 11 writer services, the three activation sockets and the reclaim timer. Eleven verified SQLite backups are under the root-only directory `/var/backups/member-rewards-169-smbv9f37` on the VPS. The upgrade retained all original rows in 88 core, 46 membership and 41 payout tables. Schema versions after startup were 39, 14 and 15 respectively. All 15 original units resumed. The new signer projection socket accepted its installed signer UID and refused an empty request. The delivery worker was active and the reclaim service last exited successfully.
 
 The public CyberHerd page and its versioned reward script returned HTTP 200. An unsigned POST to the member preference endpoint returned HTTP 401. The feeder reported 32 sats and zero feeds due. At rollout there were zero member preferences, zero new member dispositions and zero ready receipts. Live member ecash delivery still requires an explicitly opted-in recipient and a subsequent eligible feed. Do not backdate a preference or issue a replacement for a frozen allocation.
+
+### Paid contact rollout, 2026-11-23 UTC
+
+PR #173 deployed at main revision `e00e07e9`. The CI build `77648ce0` and merged revision shared Git tree `e931412826300feb8f39f8e6aeb1cfce452267f9`. The installer stopped 12 writer services, four activation sockets and the reclaim timer, verified 11 database backups and applied core migration 40. The migration preserved the original rows in all 89 tables, including private delivery row IDs. The previous programs, site files, configuration and journal backups are under `/var/backups/contact-173-a46dohbe`. All 17 units resumed. The running receiver and isolated wallet matched the packaged executable hashes.
+
+The public contact endpoint returned HTTP 402 with a single-use 100-sat request accepting the Goats mint and requiring in-band tender. The request bound the original contact ID. A malformed tender returned HTTP 400. Retrying returned the same request bytes. A read-only journal check found one challenge and zero entitlements, tender rows, deliveries or Lightning invoice intents for redacted correlation `7a5441c414ea`. The public page loaded the verified `contact-fee-24deed3bc630.js` script. The funded check requires an actual 100-sat tender for the contact, verification of one entitlement and one accepted delivery, and zero feeder credit. Contributions sent to the feeder exercise a separate payment purpose.

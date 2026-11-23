@@ -64,6 +64,13 @@ impl LedgerStore {
                 bail!("verified result row columns changed");
             }
             let result = match &row.disposition {
+                Disposition::OperatorReclaimed => {
+                    anyhow::ensure!(
+                        spent == row.gross_sats && held == 0,
+                        "operator reclaim cost changed"
+                    );
+                    Status::Failed
+                }
                 Disposition::CashuPaid {
                     amount_sats,
                     fee_sats,

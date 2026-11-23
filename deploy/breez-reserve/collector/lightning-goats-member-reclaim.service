@@ -1,0 +1,17 @@
+[Unit]
+Description=Reconcile failed CyberHerd shares to the operator Cashu wallet
+After=cyberherd-payout.service lightning-goats-receive.service
+Requisite=cyberherd-payout.service lightning-goats-receive.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/bash /opt/lightning-goats-member-reclaim/reclaim-members.sh
+EnvironmentFile=/etc/lightning-goats-project-collector/config.env
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ReadWritePaths=/var/lib/cyberherd-payout /var/lib/lightning-goats-project-collector
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK

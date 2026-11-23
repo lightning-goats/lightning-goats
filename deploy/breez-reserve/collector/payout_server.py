@@ -13,9 +13,12 @@ from claim_store import ClaimStore
 from collect import collect_acquisition, execute_payout
 from invoice_server import handle_request
 from operator_ecash import transfer
+from member_reclaim import receipt
 
 
 def dispatch_payout(store, client, request, keyset, keys):
+    if set(request) == {"reclaim_receipt","plan","member"}:
+        return receipt(store.db,request["reclaim_receipt"],request["plan"],request["member"])
     if set(request) == {"operator_ecash"}:
         return transfer(store, client, request["operator_ecash"], keyset, keys)
     return execute_payout(store, client, request, keyset, keys)

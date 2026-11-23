@@ -83,6 +83,26 @@ impl Store {
         Ok(())
     }
 
+    /// Serialize a definitive callback rejection against freezing an executable invoice.
+    pub(crate) async fn close_rejected_cashu(&self, grant: Uuid, member: &str) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        write_lock(&mut tx).await?;
+        let safe:bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM payout_grants g JOIN payout_rows r ON r.grant_id=g.id WHERE g.id=? AND r.member=?
+            AND json_extract(g.qualification_json,'$.execution_provider')='cashu'
+            AND NOT EXISTS(SELECT 1 FROM payout_invoice_intents i JOIN payout_invoices v ON v.intent_id=i.id WHERE i.grant_id=g.id AND i.member=r.member)
+            AND NOT EXISTS(SELECT 1 FROM payout_outcome_manifests m WHERE m.grant_id=g.id))")
+            .bind(grant.to_string()).bind(member).fetch_one(&mut *tx).await?;
+        anyhow::ensure!(
+            safe,
+            "validated or closed member payout cannot be reassigned"
+        );
+        sqlx::query("INSERT INTO payout_unsubmitted VALUES(?,?,?,unixepoch()) ON CONFLICT(grant_id,member) DO NOTHING")
+            .bind(grant.to_string()).bind(member).bind(serde_json::to_string(&UnsubmittedReason::Unavailable)?)
+            .execute(&mut *tx).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
     /// Freeze all rows once, only after every row is terminal or durably closed.
     /// This is an attestation, not permission to release a single reserved sat.
     pub async fn freeze_outcomes(&self, grant: Uuid, now: i64) -> Result<Header> {
@@ -95,10 +115,28 @@ impl Store {
         grant: Uuid,
         socket: &std::path::Path,
     ) -> Result<bool> {
-        let rows = sqlx::query("SELECT r.member,r.gross_sats,v.intent_id FROM payout_rows r LEFT JOIN payout_invoice_intents i ON i.grant_id=r.grant_id AND i.member=r.member LEFT JOIN payout_invoices v ON v.intent_id=i.id WHERE r.grant_id=? ORDER BY r.member")
+        let rows = sqlx::query("SELECT r.member,r.gross_sats,v.intent_id,g.request_id,g.plan_hash,c.reason FROM payout_rows r JOIN payout_grants g ON g.id=r.grant_id LEFT JOIN payout_unsubmitted c ON c.grant_id=r.grant_id AND c.member=r.member LEFT JOIN payout_invoice_intents i ON i.grant_id=r.grant_id AND i.member=r.member LEFT JOIN payout_invoices v ON v.intent_id=i.id WHERE r.grant_id=? ORDER BY r.member")
             .bind(grant.to_string()).fetch_all(&self.pool).await?;
         let mut paid = std::collections::BTreeMap::new();
         for row in rows {
+            if row.try_get::<Option<String>, _>("reason")?.is_some() {
+                let member: String = row.try_get("member")?;
+                let receipt: Option<i64> = crate::private_ipc::request(
+                    socket,
+                    0,
+                    &serde_json::json!({
+                    "reclaim_receipt":row.try_get::<String,_>("request_id")?,
+                    "plan":row.try_get::<String,_>("plan_hash")?,"member":member}),
+                    65536,
+                    20,
+                )
+                .await?;
+                if receipt != Some(row.try_get("gross_sats")?) {
+                    return Ok(false);
+                }
+                paid.insert(member, Disposition::OperatorReclaimed);
+                continue;
+            }
             let Some(id) = row.try_get::<Option<String>, _>("intent_id")? else {
                 return Ok(false);
             };
@@ -177,7 +215,9 @@ impl Store {
             .fetch_optional(&mut *tx)
             .await?;
             let disposition = if let Some(paid) = paid {
-                if closure.is_some() {
+                if closure.is_some()
+                    != matches!(paid.get(&member), Some(Disposition::OperatorReclaimed))
+                {
                     bail!("Cashu payout conflicts with unsubmitted closure");
                 }
                 paid.get(&member).context("missing Cashu receipt")?.clone()

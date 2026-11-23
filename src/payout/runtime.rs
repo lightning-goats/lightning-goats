@@ -246,6 +246,7 @@ impl Config {
         } else {
             (
                 RuntimeWorker::Cashu(Box::new(CashuWorker {
+                    reclaim_failed: self.operator_p2pk.is_some(),
                     collector_socket: self.cashu_payout_socket.clone(),
                     store: store.clone(),
                     core: core.clone(),

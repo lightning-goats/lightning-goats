@@ -29,6 +29,7 @@ impl LedgerStore {
         if matches!(
             packet.row.disposition,
             crate::payout::outcome::Disposition::CashuPaid { .. }
+                | crate::payout::outcome::Disposition::OperatorReclaimed
         ) {
             bail!("Cashu settlement requires collector verification");
         }
@@ -59,6 +60,16 @@ impl LedgerStore {
             return Ok(done);
         }
         validate_cursor(&mut tx, packet).await?;
+        if matches!(
+            packet.row.disposition,
+            crate::payout::outcome::Disposition::OperatorReclaimed
+        ) {
+            super::payout_execution::validate_outcome(&mut tx, packet).await?;
+            tx.commit().await?;
+            let verified =
+                crate::payout::outcome::VerifiedRow::from_reclaim(packet, collector).await?;
+            return self.commit_verified_outcome(&verified).await;
+        }
         let raw: String = sqlx::query_scalar("SELECT document_json FROM cashu_payout_execution_claims WHERE reservation_id=? AND member=?")
             .bind(packet.header.reservation.id.to_string()).bind(&packet.row.member).fetch_one(&mut *tx).await?;
         tx.commit().await?;
@@ -109,6 +120,7 @@ impl LedgerStore {
             let missing_cashu: bool = if matches!(
                 packet.row.disposition,
                 crate::payout::outcome::Disposition::CashuPaid { .. }
+                    | crate::payout::outcome::Disposition::OperatorReclaimed
             ) {
                 sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM cashu_payout_execution_claims c WHERE c.reservation_id=? AND NOT EXISTS(SELECT 1 FROM reward_outcome_rows r WHERE r.reservation_id=c.reservation_id AND r.member=c.member))").bind(packet.header.reservation.id.to_string()).fetch_one(&mut *tx).await?
             } else {

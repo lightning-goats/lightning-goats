@@ -443,6 +443,7 @@ async fn prepare_callback<F: InvoiceFetcher>(
 }
 
 pub(crate) struct CashuWorker {
+    pub reclaim_failed: bool,
     pub collector_socket: Option<std::path::PathBuf>,
     pub store: Store,
     pub core: Core,
@@ -450,6 +451,7 @@ pub(crate) struct CashuWorker {
     pub plans: crate::cyberherd::payout_bridge::Client,
 }
 struct MemberInvoiceFetcher<'a> {
+    reclaim: Option<(&'a Store, uuid::Uuid)>,
     plans: &'a crate::cyberherd::payout_bridge::Client,
     feed: uuid::Uuid,
     member: &'a str,
@@ -457,6 +459,12 @@ struct MemberInvoiceFetcher<'a> {
 impl InvoiceFetcher for MemberInvoiceFetcher<'_> {
     async fn fetch(&self, request: &Request) -> Result<ValidatedInvoice> {
         let result = request.fetch().await;
+        if let (Err(error), Some((store, grant))) = (&result, self.reclaim)
+            && (error.is::<super::invoice::DescriptionHashMismatch>()
+                || error.is::<super::invoice::RecipientRejected>())
+        {
+            store.close_rejected_cashu(grant, self.member).await?;
+        }
         if request.uses_primal_callback()
             && result
                 .as_ref()
@@ -480,6 +488,12 @@ impl CashuWorker {
             return Ok(Step::Idle);
         };
         let Some(member) = work.member else {
+            let Some(socket) = &self.collector_socket else {
+                return Ok(Step::Waiting);
+            };
+            if !self.store.freeze_cashu_outcomes(work.grant, socket).await? {
+                return Ok(Step::Waiting);
+            }
             return Ok(Step::Outcome(
                 self.store
                     .reconcile_outcomes(&self.core, work.grant)
@@ -552,6 +566,7 @@ impl CashuWorker {
             return Ok(Step::Waiting);
         }
         let fetcher = MemberInvoiceFetcher {
+            reclaim: self.reclaim_failed.then_some((&self.store, work.grant)),
             plans: &self.plans,
             feed: grant.request_id,
             member: &member,

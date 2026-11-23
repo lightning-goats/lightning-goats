@@ -189,6 +189,8 @@ impl Store {
             return Ok(old);
         }
         let request = load_request(&mut tx, &id.to_string(), &self.policy.scope.owner).await?;
+        let intent = load_intent(&mut tx, &id.to_string(), &self.policy.scope.owner).await?;
+        super::outcomes::ensure_open(&mut tx, intent.0.grant_id, &intent.0.member).await?;
         let verified = request.validate_invoice(invoice.encoded(), now)?;
         if verified != *invoice {
             bail!("outgoing invoice differs from frozen callback intent");

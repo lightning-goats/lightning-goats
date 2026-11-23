@@ -54,7 +54,7 @@ def verify_legacy_upgrade():
             raise AssertionError("legacy writer could spend a direct allocation")
 
 
-def exercise(ppk):
+def exercise(ppk, failed_members=False):
     with TemporaryDirectory(prefix="lg-direct-") as raw:
         root = Path(raw)
         (root / "mint-seed").write_text(Mnemonic("english").generate(strength=128))
@@ -158,6 +158,30 @@ def exercise(ppk):
                 assert paths.count("/v1/swap")==1 and reserve.pay_attempts==0
                 store=ClaimStore(root)
                 assert store.db.execute("SELECT COUNT(*) FROM proof_disposition").fetchone()==(1,)
+                if failed_members:
+                    from member_reclaim import reclaim, receipt
+                    failures = [dict(feed=feed, member=m*64, gross=7, fee_limit=7, plan=request["plan_hash"],
+                                     recipient=request["recipient"], reserved=14) for m in ("1","2")]
+                    try:
+                        reclaim(store,MintOnly(),failures,keyset,{keyset:keys})
+                    except httpx.ReadTimeout:
+                        pass
+                    else:
+                        raise AssertionError("lost reply fixture did not swap")
+                    store.db.close()
+                    store=ClaimStore(root)
+                    result=reclaim(store,MintOnly(),list(reversed(failures)),keyset,{keyset:keys})
+                    assert result==[{"state":"ready","amount_sat":14-fee,"fee_sat":fee}]
+                    assert reclaim(store,MintOnly(),failures,keyset,{keyset:keys})==[]
+                    for row in failures:
+                        assert receipt(store.db,feed,request["plan_hash"],row["member"])==7
+                        assert receipt(store.db,feed,"cc"*32,row["member"]) is None
+                    assert paths.count("/v1/swap")==2 and reserve.pay_attempts==0
+                    assert store.db.execute("SELECT SUM(reserved_sat) FROM payout_claim_allocation WHERE feed_id=?",
+                                            (feed,)).fetchone()==(32,)
+                    print("Verified failed member batch, original funding, lost response and duplicate recovery", flush=True)
+                    store.db.close()
+                    return
                 member=store.reserve_payout(str(uuid4()),feed,"bb"*32,14,0,{claim:{"consumed_sats":32,"evidence_digest":evidence}})
                 assert sum(p["amount"] for p in member)==14
                 store.db.close()
@@ -198,3 +222,4 @@ def exercise(ppk):
 if __name__=="__main__":
     verify_legacy_upgrade()
     for rate in (0,100): exercise(rate)
+    exercise(100, failed_members=True)

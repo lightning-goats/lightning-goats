@@ -17,6 +17,15 @@ impl std::fmt::Display for DescriptionHashMismatch {
 }
 impl std::error::Error for DescriptionHashMismatch {}
 
+#[derive(Debug)]
+pub(crate) struct RecipientRejected;
+impl std::fmt::Display for RecipientRejected {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("recipient rejected invoice request")
+    }
+}
+impl std::error::Error for RecipientRejected {}
+
 pub const MAX_INVOICE_RESPONSE: usize = 16_384;
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -274,6 +283,9 @@ fn response_invoice(raw: &[u8]) -> Result<String> {
     }
     let wire: Wire = serde_json::from_slice(raw)
         .map_err(|_| anyhow::anyhow!("invalid recipient invoice response"))?;
+    if wire.status.as_deref() == Some("ERROR") {
+        return Err(RecipientRejected.into());
+    }
     if wire.status.as_deref().is_some_and(|status| status != "OK") {
         bail!("recipient rejected invoice request");
     }

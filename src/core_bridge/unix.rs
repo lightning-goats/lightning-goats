@@ -317,9 +317,12 @@ async fn serve_one(
                 &resources.collector,
                 &resources.reader,
             ) {
-                (crate::payout::outcome::Disposition::CashuPaid { .. }, Some(collector), _) => {
-                    ledger.reconcile_cashu_outcome(packet, collector).await
-                }
+                (
+                    crate::payout::outcome::Disposition::CashuPaid { .. }
+                    | crate::payout::outcome::Disposition::OperatorReclaimed,
+                    Some(collector),
+                    _,
+                ) => ledger.reconcile_cashu_outcome(packet, collector).await,
                 (
                     crate::payout::outcome::Disposition::Payment { .. }
                     | crate::payout::outcome::Disposition::Unsubmitted { .. },

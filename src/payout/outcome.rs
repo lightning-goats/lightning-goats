@@ -21,6 +21,7 @@ pub enum UnsubmittedReason {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Disposition {
+    OperatorReclaimed,
     CashuPaid {
         disposition_id: Uuid,
         payment_hash: String,
@@ -116,8 +117,10 @@ impl Packet {
             bail!("invalid payout outcome row scope/amount");
         }
         next_hash(&self.before_hash, &self.row)?;
-        if matches!(self.row.disposition, Disposition::CashuPaid { .. })
-            != (self.header.scope.environment == "retained-cashu")
+        if matches!(
+            self.row.disposition,
+            Disposition::CashuPaid { .. } | Disposition::OperatorReclaimed
+        ) != (self.header.scope.environment == "retained-cashu")
         {
             bail!("settlement row differs from manifest provider");
         }
@@ -139,7 +142,7 @@ impl Packet {
                 }
                 Ok(None)
             }
-            Disposition::Unsubmitted { .. } => Ok(None),
+            Disposition::OperatorReclaimed | Disposition::Unsubmitted { .. } => Ok(None),
             Disposition::Payment {
                 binding_json,
                 state,
@@ -225,7 +228,10 @@ impl Reader {
     }
     pub(crate) async fn verify(&self, packet: &Packet) -> Result<VerifiedRow> {
         let binding = packet.validate()?;
-        if matches!(packet.row.disposition, Disposition::CashuPaid { .. }) {
+        if matches!(
+            packet.row.disposition,
+            Disposition::CashuPaid { .. } | Disposition::OperatorReclaimed
+        ) {
             bail!("Cashu outcome requires custody verification");
         }
         if packet.header.scope.account_id != self.account_id {
@@ -283,6 +289,28 @@ pub(crate) struct VerifiedRow {
     invoice_hash: Option<String>,
 }
 impl VerifiedRow {
+    pub async fn from_reclaim(
+        packet: &Packet,
+        collector: &crate::config::BreezCollectorConfig,
+    ) -> Result<Self> {
+        packet.validate()?;
+        let r = &packet.header.reservation;
+        let receipt: Option<u64> = crate::private_ipc::request(&collector.socket,collector.peer_uid,
+            &serde_json::json!({"reclaim_receipt":r.request_id,"plan":r.plan_hash,"member":packet.row.member}),65536,20).await?;
+        anyhow::ensure!(
+            matches!(packet.row.disposition, Disposition::OperatorReclaimed)
+                && receipt == Some(packet.row.gross_sats),
+            "missing operator reclaim receipt"
+        );
+        Ok(Self {
+            packet: packet.clone(),
+            spent: packet.row.gross_sats,
+            held: 0,
+            payment_id: None,
+            invoice_hash: None,
+        })
+    }
+
     pub async fn from_cashu(
         packet: &Packet,
         claim: &crate::payout::cashu::ExecutionRequest,

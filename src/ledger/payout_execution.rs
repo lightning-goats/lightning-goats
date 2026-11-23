@@ -410,6 +410,18 @@ pub(super) async fn validate_outcome(
             .fetch_one(&mut **tx)
             .await?;
     let policy: crate::reward_funding::RewardPolicy = serde_json::from_str(&policy)?;
+    if matches!(
+        packet.row.disposition,
+        crate::payout::outcome::Disposition::OperatorReclaimed
+    ) {
+        let claimed:bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM cashu_payout_execution_claims WHERE reservation_id=? AND member=?)")
+            .bind(packet.header.reservation.id.to_string()).bind(&packet.row.member).fetch_one(&mut **tx).await?;
+        anyhow::ensure!(
+            !policy.funding_source.is_strike() && !claimed,
+            "operator reclaim contradicts member execution"
+        );
+        return Ok(());
+    }
     if let crate::payout::outcome::Disposition::CashuPaid {
         disposition_id,
         payment_hash,

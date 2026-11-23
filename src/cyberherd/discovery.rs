@@ -27,6 +27,82 @@ pub struct Refresh {
     pub available: bool,
 }
 
+fn newest(a: &VerifiedEvent, b: &VerifiedEvent) -> std::cmp::Ordering {
+    a.event()
+        .created_at
+        .cmp(&b.event().created_at)
+        .then_with(|| b.event().id.cmp(&a.event().id))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NutzapDestination {
+    pub advertisement: String,
+    pub member: String,
+    pub mint: String,
+    pub receiving_key: String,
+    pub token_relays: Vec<String>,
+    pub read_relays: Vec<String>,
+}
+
+impl NutzapDestination {
+    fn from_event(
+        event: &VerifiedEvent,
+        member: &str,
+        project_mint: &str,
+        read_relays: Vec<String>,
+        now: i64,
+    ) -> Result<Self> {
+        event.require_not_future(now)?;
+        let signed = event.event();
+        anyhow::ensure!(
+            signed.kind == 10019 && signed.pubkey == member,
+            "wrong wallet advertisement"
+        );
+        let key = event
+            .singleton_tag("pubkey", true)?
+            .ok_or_else(|| anyhow::anyhow!("missing wallet lock key"))?;
+        let x_only = if key.len() == 66 {
+            key.strip_prefix("02")
+                .ok_or_else(|| anyhow::anyhow!("incompatible NIP-61 key"))?
+        } else {
+            key
+        };
+        crate::nostr_event::validate_public_key(x_only)?;
+        let mint = signed
+            .tags
+            .iter()
+            .find_map(|tag| match tag.as_slice() {
+                [name, url, units @ ..]
+                    if name == "mint"
+                        && url.trim_end_matches('/') == project_mint.trim_end_matches('/')
+                        && (units.is_empty() || units.iter().any(|u| u == "sat")) =>
+                {
+                    Some(url.clone())
+                }
+                _ => None,
+            })
+            .ok_or_else(|| anyhow::anyhow!("Goats mint sats are not advertised"))?;
+        let mut token_relays = BTreeSet::new();
+        for raw in event.tag_values("relay") {
+            token_relays
+                .insert(crate::public_network::validate_destination(raw, "wss")?.to_string());
+        }
+        anyhow::ensure!(
+            (1..=8).contains(&token_relays.len()),
+            "invalid token relay count"
+        );
+        Ok(Self {
+            advertisement: signed.id.clone(),
+            member: member.into(),
+            mint,
+            receiving_key: format!("02{x_only}"),
+            token_relays: token_relays.into_iter().collect(),
+            read_relays,
+        })
+    }
+}
+
 impl<R: Query> Discovery<R> {
     pub fn new(source: R, required_relays: usize) -> Result<Self> {
         if !(1..=8).contains(&required_relays) {
@@ -294,6 +370,54 @@ impl<R: Query> Discovery<R> {
             return Ok(None);
         }
         store.profile(owner, pubkey, now).await
+    }
+
+    /// Resolve an explicitly requested public reward destination. Outbox reads
+    /// include the latest advertisement even when the configured relays have
+    /// an older copy. A newer incompatible advertisement supersedes the old one.
+    pub async fn nutzap_destination(
+        &self,
+        member: &str,
+        project_mint: &str,
+        now: i64,
+    ) -> Result<NutzapDestination> {
+        crate::nostr_event::validate_public_key(member)?;
+        let mut query = filter(vec![10002, 10019]);
+        query.authors.push(member.to_owned());
+        query.until = Some(u64::try_from(now)?);
+        let (mut events, complete) = self.read(std::slice::from_ref(&query)).await;
+        anyhow::ensure!(complete, "member destination discovery incomplete");
+        let list = events
+            .iter()
+            .filter_map(|e| crate::relay_routing::RelayList::parse(e, member, now).ok())
+            .max_by(|a, b| newest(a.event(), b.event()));
+        if let Some(list) = &list
+            && !list.write.is_empty()
+        {
+            query.kinds = vec![10019];
+            let batch = self.source.query_hints(&list.write, &[query]).await?;
+            anyhow::ensure!(
+                !batch.saturated && !batch.completed_urls.is_empty(),
+                "member outbox discovery incomplete"
+            );
+            events.extend(batch.events);
+        }
+        let advertisement = events
+            .iter()
+            .filter(|e| {
+                e.event().kind == 10019
+                    && e.event().pubkey == member
+                    && e.require_not_future(now).is_ok()
+            })
+            .max_by(|a, b| newest(a, b))
+            .ok_or_else(|| anyhow::anyhow!("member has no signed wallet advertisement"))?;
+        NutzapDestination::from_event(
+            advertisement,
+            member,
+            project_mint,
+            list.map(|l| l.read).unwrap_or_default(),
+            now,
+        )
     }
 
     async fn read(&self, filters: &[Filter]) -> (Vec<VerifiedEvent>, bool) {

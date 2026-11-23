@@ -26,7 +26,7 @@ def tick(db, client, credential, request, keyset, batch, day, deliver=deliver_to
         if row is None:
             if db.execute("SELECT 1 FROM fee_batches WHERE day=?", (day,)).fetchone():
                 return
-            _, recipient, _ = destination(request)
+            _, recipient, _, _ = destination(request)
             row = (str(uuid4()), request, batch, json.dumps(prepare_outputs(batch, keyset, recipient=recipient)))
             db.execute("INSERT INTO fee_batches(day,id,request,amount,outputs) VALUES(?,?,?,?,?)", (day,*row))
     identity, frozen_request, amount, outputs = row
@@ -40,7 +40,7 @@ def tick(db, client, credential, request, keyset, batch, day, deliver=deliver_to
     payout = response.raise_for_status().json()
     if payout["id"] != identity:
         raise ValueError("fee conversion identity changed")
-    _, recipient, _ = destination(frozen_request)
+    _, recipient, _, _ = destination(frozen_request)
     if deliver(db, "mint-fee:" + identity, payout["token"], amount, recipient, frozen_request):
         with db:
             db.execute("UPDATE fee_batches SET delivered=1 WHERE id=?", (identity,))

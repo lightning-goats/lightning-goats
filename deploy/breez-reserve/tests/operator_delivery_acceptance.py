@@ -12,22 +12,28 @@ import tempfile
 import bech32
 import cbor2
 from coincurve import PrivateKey
+from cashu.core.nuts import nut18, nut26
 
 repo = Path(__file__).resolve().parents[3]
 collector = repo/"deploy/breez-reserve/collector"
 sys.path.insert(0, str(collector))
-from operator_delivery import MINT, deliver, publish
+from operator_delivery import MINT, deliver, destination, publish
 
 
 def run():
     key = PrivateKey()
-    lock = key.public_key.format().hex()
+    lock = PrivateKey().public_key.format().hex()
     url = b"wss://relay.example"
-    profile = bytes([0,32])+bytes.fromhex(lock[2:])+bytes([1,len(url)])+url
+    profile = bytes([0,32])+key.public_key.format()[1:]+bytes([1,len(url)])+url
     address = bech32.bech32_encode("nprofile",bech32.convertbits(profile,8,5,True))
     req = {"i":"fixture","u":"sat","nut10":{"k":"P2PK","d":lock},
            "t":[{"t":"nostr","a":address,"g":[["n","17"]]}]}
     encoded = "creqA"+base64.urlsafe_b64encode(cbor2.dumps(req)).decode()
+    bech = nut26.serialize(nut18.deserialize(encoded))
+    expected = ("fixture", lock, key.public_key.format()[1:].hex(), ["wss://relay.example"])
+    for representation in (encoded, bech.upper(), bech.lower()):
+        assert destination(representation) == expected
+
     proofs = [{"amount":8,"secret":json.dumps(["P2PK",{"nonce":"fixture-private-nonce","data":lock}])}]
     raw = json.dumps({"unit":"sat","token":[{"mint":MINT,"proofs":proofs}]})
     source = sqlite3.connect(":memory:")

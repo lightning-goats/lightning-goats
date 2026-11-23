@@ -11,7 +11,8 @@ import time
 from urllib.parse import urlsplit
 
 import bech32
-import cbor2
+from cashu.core.nuts import nut18
+from coincurve import PublicKey
 import websocket
 
 MINT = "https://mint.lightning-goats.com"
@@ -23,9 +24,9 @@ def decode64(text):
 
 
 def destination(text):
-    if not text.startswith("creqA") or len(text) > 8192:
+    if not isinstance(text, str) or not 5 < len(text) <= 8192:
         raise ValueError("invalid wallet payment request")
-    request = cbor2.loads(decode64(text[5:]))
+    request = nut18.deserialize(text).model_dump(exclude_none=True)
     lock = request["nut10"]
     if (request.get("u") != "sat" or request.get("a") is not None
             or request.get("s") or request.get("sm")
@@ -53,13 +54,15 @@ def destination(text):
                 raise ValueError("expected secure wallet relay")
             if url not in relays:
                 relays.append(url)
-    if (len(recipients) != 1 or len(recipients[0]) != 64 or lock["d"][:2] not in ("02","03")
-            or recipients[0] != lock["d"][2:] or not 1 <= len(relays) <= 8):
-        raise ValueError("wallet receiving and transport keys differ or missing relays")
-    return request.get("i"), lock["d"], relays
+    if (len(recipients) != 1 or len(recipients[0]) != 64 or not 1 <= len(relays) <= 8
+            or len(lock["d"]) != 66 or lock["d"][:2] not in ("02", "03")):
+        raise ValueError("invalid receiving key or Nostr transport")
+    wallet_key = PublicKey(bytes.fromhex(lock["d"])).format().hex()
+    PublicKey(bytes.fromhex("02" + recipients[0]))
+    return request.get("i"), wallet_key, recipients[0], relays
 
 
-def envelope(token, amount, request_id, lock, wrapper):
+def envelope(token, amount, request_id, lock, transport_key, wrapper):
     if not token.startswith("cashuA"):
         raise ValueError("unexpected operator token")
     decoded = json.loads(decode64(token[6:]))
@@ -74,7 +77,7 @@ def envelope(token, amount, request_id, lock, wrapper):
     payload = {"mint": MINT, "unit": "sat", "proofs": proofs}
     if request_id is not None:
         payload["id"] = request_id
-    result = subprocess.run(["/usr/bin/node", str(wrapper)], input=json.dumps({"recipient":lock[2:], "payload":payload}),
+    result = subprocess.run(["/usr/bin/node", str(wrapper)], input=json.dumps({"recipient":transport_key, "payload":payload}),
                             text=True, capture_output=True, timeout=12, check=True)
     return result.stdout
 
@@ -99,7 +102,6 @@ def publish(url, event):
 
 
 def deliver_token(journal, feed, token, amount, recipient, request, wrapper=HERE/"operator_wrap.cjs", send=publish):
-    rid, lock, relays = destination(request)
     journal.execute("CREATE TABLE IF NOT EXISTS delivery(feed TEXT PRIMARY KEY,token_hash TEXT NOT NULL,event TEXT NOT NULL,relays TEXT NOT NULL,ack_at INTEGER)")
     stamp = hashlib.sha256(token.encode()).hexdigest()
     with journal:
@@ -113,9 +115,10 @@ def deliver_token(journal, feed, token, amount, recipient, request, wrapper=HERE
             message, urls = row[1], json.loads(row[2])
         else:
             # Rotation applies to matching tokens only. Existing envelopes keep their route.
+            rid, lock, transport_key, relays = destination(request)
             if recipient != lock:
                 return False
-            message, urls = envelope(token, amount, rid, lock, wrapper), relays
+            message, urls = envelope(token, amount, rid, lock, transport_key, wrapper), relays
             journal.execute("INSERT INTO delivery VALUES(?,?,?,?,NULL)", (feed,stamp,message,json.dumps(urls)))
     event = json.loads(message)
     with ThreadPoolExecutor(max_workers=len(urls)) as pool:

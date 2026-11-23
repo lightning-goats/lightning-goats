@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install only the Strike receive-only API key. No webhook setup or API calls.
+# Install the read-only credential for reconciling historical Strike receipts.
 set +x
 set -euo pipefail
 umask 077
@@ -32,7 +32,7 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-echo 'Use the core key with partner.receive-request.create and partner.receive-request.read.'
+echo 'Use the historical receipt reader with partner.receive-request.read.'
 echo 'CyberHerd accounting also requires partner.payment.read; never add quote/execute/spend permissions.'
 if [[ -n $source_file ]]; then
     [[ -f $source_file && ! -L $source_file ]] || { echo 'Key source must be a regular file, not a symlink.' >&2; exit 1; }

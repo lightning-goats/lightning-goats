@@ -387,8 +387,7 @@ def run(installation, core_transaction, destination, create):
     templates['core'] = core_template.read_text()
     units, server, thread, cycles = [], None, None, []
     credentials = {r: {} for r in users}
-    keys = {'core': {'strike-api-key': b'SYNTHETIC-NO-PROVIDER-RECEIVE-KEY', 'strike-webhook-secret': b'SYNTHETIC-NO-REAL-WEBHOOK-SECRET'},
-            'cyberherd-signer': {'nostr-client-key': ('0' * 63 + '1').encode()}}
+    keys = {'cyberherd-signer': {'nostr-client-key': ('0' * 63 + '1').encode()}}
     counts = {'post': 0}
     account = str(uuid.uuid4())
     def add_unit(role, path, command, writes, creds, oneshot=False):
@@ -442,12 +441,17 @@ def run(installation, core_transaction, destination, create):
         core['service'] = {'listen': '127.0.0.1:18787', 'mode': 'shadow'}
         core['database']['url'] = 'sqlite://' + str(states['core'] / 'lightning-goats.db')
         core['gateway']['url'] = 'http://127.0.0.1:18789/'
+        for section in ('strike', 'contact', 'cashu', 'cashu_receipts', 'cashu_treasury'):
+            core.pop(section, None)
         core['lnurl'].pop('zap', None)
+        core['lnurl'].pop('breez_collector', None)
+        core['lnurl']['collector'] = {'socket': str(sockets['core'].parent / 'invoices.sock'),
+                                      'peer_uid': probe_user.pw_uid}
         core['informational'].update(interface_info_enabled=False, weather_enabled=False)
         core['nostr']['bunker_pubkey'] = OWNER; core['nostr']['nak_config_path'] = str(states['core'] / 'nak')
         core['core_bridge'] = {'socket': str(sockets['core']), 'peer_uid': users['cyberherd'].pw_uid,
             'group_gid': C.grp.getgrnam('cyberherd-bridge').gr_gid, 'payout_peer_uid': users['cyberherd-payout'].pw_uid,
-            'payout_execution_enabled': False, 'reward_policy': {'owner': OWNER, 'member_percent_ceiling': 0,
+            'payout_execution_enabled': False, 'payout_account_id': account, 'reward_policy': {'owner': OWNER, 'member_percent_ceiling': 0,
                                                                'max_sats_per_feed': 0, 'max_sats_per_24h': 0}}
         core_config = root / 'core.toml'; publish(core_config, toml_text(core).encode())
         worker_unit('core', core_config)
@@ -528,8 +532,7 @@ def run(installation, core_transaction, destination, create):
         C.command('/usr/bin/systemctl', 'daemon-reload')
         databases = {'core': 'lightning-goats.db', 'cyberherd': 'cyberherd.db', 'cyberherd-payout': 'payout.db', 'cyberherd-signer': 'signer.db'}
         policy = {'version': 1, 'owner': OWNER, 'epoch': epoch, 'max_component_bytes': 67108864,
-                  'provider': {'environment': 'strike-production', 'account_id': account,
-                               'credential_fingerprint': hashlib.sha256(SYNTHETIC_PAYOUT).hexdigest()}, 'components': {}}
+                  'provider': configs['cyberherd-payout']['policy']['scope']['provider'], 'components': {}}
         for role, component in [('core', 'core'), ('cyberherd', 'membership'), ('cyberherd-payout', 'payout'), ('cyberherd-signer', 'signer')]:
             policy['components'][component] = {'database': str(states[role] / databases[role]), 'uid': users[role].pw_uid,
                                                 'gid': users[role].pw_gid, 'unit': names[role]}

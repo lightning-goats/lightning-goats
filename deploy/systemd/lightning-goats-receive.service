@@ -1,5 +1,5 @@
 [Unit]
-Description=Lightning Goats Strike payments and feeder automation
+Description=Lightning Goats mint payments and feeder automation
 After=network-online.target lightning-goats-firewall.service
 Requires=lightning-goats-firewall.service
 Wants=network-online.target
@@ -19,7 +19,6 @@ ConfigurationDirectory=lightning-goats
 UMask=0077
 
 Environment=RUST_LOG=info
-# Receive/read-only Strike runtime credentials.
 # Initial install uses shadow mode; operator-approved canary enables gated feeding.
 # Both modes keep public Nostr signing disabled until separately configured.
 # No OpenHAB, CLN, or LNbits credential belongs on this host/service.

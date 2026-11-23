@@ -1,10 +1,9 @@
 # SERVER context only. Install as /etc/nginx/snippets/lightning-goats-production.conf.
 # Also install lightning-goats-http.conf once in http{}; see deployment-artifacts.md.
-# Production remains on HOLD pending the Phase 1 audit acceptance gates.
 
 # LUD-16 Lightning Address discovery. nginx deliberately forwards a generic
 # username path; lightning-goatsd owns the explicit allowlist and rejects any
-# user other than configured addresses before contacting Strike.
+# user other than configured addresses before requesting a mint invoice.
 location ~ "^/\.well-known/lnurlp/[a-z0-9._-]{1,64}$" {
     limit_except GET { deny all; }
     limit_req zone=lightning_goats_lnurl_discovery burst=20 nodelay;
@@ -16,8 +15,7 @@ location ~ "^/\.well-known/lnurlp/[a-z0-9._-]{1,64}$" {
     add_header Cache-Control "no-store" always;
 }
 
-# LUD-06 invoice callback. This is the endpoint which can create a Strike
-# receive request, so it uses a substantially tighter edge rate limit.
+# The LUD-06 callback creates a project mint invoice and has a separate rate limit.
 location ~ "^/lnurlp/[a-z0-9._-]{1,64}/callback$" {
     if ($request_method = HEAD) { return 405; }
     limit_except GET { deny all; }

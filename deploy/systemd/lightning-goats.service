@@ -18,7 +18,6 @@ ConfigurationDirectory=lightning-goats
 UMask=0077
 
 Environment=RUST_LOG=info
-# Receive/read-only Strike runtime credentials.
 # NIP-46 client credential; the Nostr signing key remains in the separate bunker.
 LoadCredentialEncrypted=nostr-client-key:/etc/credstore.encrypted/lightning-goats-nostr-client
 # No OpenHAB, CLN, or LNbits credential belongs on this host/service.

@@ -20,7 +20,31 @@ from operator_proofs import unblind
 from cashu.core.nuts import nut20
 
 
-def collect(store, client, request_id, pinned_keys):
+def quote_state(quote, quote_id, invoice, amount, *, batch=False):
+    if not isinstance(quote, dict) or quote.get("quote") != quote_id or quote.get("request") != invoice:
+        raise ValueError("project quote binding differs")
+    # Older single-quote responses can omit amount and unit. Their exact
+    # journaled BOLT11 was already verified at issuance.
+    if batch or "amount" in quote:
+        if type(quote.get("amount")) is not int or quote["amount"] != amount:
+            raise ValueError("project quote amount differs")
+    if (batch or "unit" in quote) and quote.get("unit") != "sat":
+        raise ValueError("project quote unit differs")
+    state = quote.get("state")
+    if "amount_paid" in quote or "amount_issued" in quote:
+        paid, issued = quote.get("amount_paid"), quote.get("amount_issued")
+        if type(paid) is not int or type(issued) is not int:
+            raise ValueError("incomplete project quote accounting")
+        derived = {(0, 0): "UNPAID", (amount, 0): "PAID", (amount, amount): "ISSUED"}.get((paid, issued))
+        if derived is None or (state is not None and state != derived):
+            raise ValueError("inconsistent project quote accounting")
+        state = derived
+    if state not in ("PAID", "ISSUED", "UNPAID"):
+        raise ValueError("unknown project quote state")
+    return state
+
+
+def collect(store, client, request_id, pinned_keys, *, observation=None):
     row = store.db.execute("""
         SELECT terms, material, invoice, payment_hash, proofs FROM project_claim
         WHERE id=? AND invoice IS NOT NULL
@@ -31,23 +55,22 @@ def collect(store, client, request_id, pinned_keys):
     if saved is not None:
         return True
     quote_id = "goats-" + request_id
-    quote = client.get(f"/v1/mint/quote/bolt11/{quote_id}").raise_for_status().json()
-    if quote["quote"] != quote_id or quote["request"] != invoice:
-        raise ValueError("project quote binding differs")
-    if quote["state"] == "UNPAID":
+    quote = observation if observation is not None else client.get(f"/v1/mint/quote/bolt11/{quote_id}").raise_for_status().json()
+    state = quote_state(quote, quote_id, invoice, json.loads(terms)["amount"])
+    if state == "UNPAID":
         store.schedule_unpaid(request_id, int(time.time()), bolt11.decode(invoice).expiry_time)
         return False
     material = json.loads(material)
     secrets = material["outputs"]
     outputs = [{k: item[k] for k in ("id", "amount", "B_")} for item in secrets]
-    if quote["state"] == "PAID":
+    if state == "PAID":
         signature = nut20.sign_mint_quote(
             quote_id, [BlindedMessage(**item) for item in outputs], material["owner"]
         )
         reply = client.post("/v1/mint/bolt11", json={
             "quote": quote_id, "outputs": outputs, "signature": signature,
         }).raise_for_status().json()
-    elif quote["state"] == "ISSUED":
+    elif state == "ISSUED":
         reply = client.post("/v1/restore", json={"outputs": outputs}).raise_for_status().json()
         if [o["B_"] for o in reply["outputs"]] != [o["B_"] for o in outputs]:
             raise ValueError("restore returned different project outputs")

@@ -451,23 +451,27 @@ class ClaimStore:
                 """, (disposition_id, claim, sum(p["amount"] for p in outputs)))
 
     def reserve_poll(self, now, lease_seconds):
-        """Claim one due invoice. An interrupted attempt becomes eligible after its lease."""
+        rows = self.reserve_polls(now, lease_seconds, 1)
+        return rows[0][0] if rows else None
+
+    def reserve_polls(self, now, lease_seconds, limit):
+        """Lease due quotes and their journal bindings in one writer transaction."""
+        if not 1 <= limit <= 32:
+            raise ValueError("invalid claim poll limit")
         if now < 0 or lease_seconds <= 0:
             raise ValueError("invalid claim poll lease")
         with self.write():
-            row = self.db.execute("""
-                SELECT c.id FROM project_claim c LEFT JOIN project_claim_poll p ON p.id=c.id
+            rows = self.db.execute("""
+                SELECT c.id,c.invoice,json_extract(c.terms,'$.amount') FROM project_claim c LEFT JOIN project_claim_poll p ON p.id=c.id
                 WHERE c.invoice IS NOT NULL AND c.proofs IS NULL
                   AND COALESCE(p.next_attempt,0)<=?
-                ORDER BY COALESCE(p.next_attempt,0), c.rowid LIMIT 1
-            """, (now,)).fetchone()
-            if row is None:
-                return None
-            self.db.execute("""
+                ORDER BY COALESCE(p.next_attempt,0), c.rowid LIMIT ?
+            """, (now, limit)).fetchall()
+            self.db.executemany("""
                 INSERT INTO project_claim_poll(id,next_attempt) VALUES (?,?)
                 ON CONFLICT(id) DO UPDATE SET next_attempt=excluded.next_attempt
-            """, (row[0], now + lease_seconds))
-            return row[0]
+            """, [(row[0], now + lease_seconds) for row in rows])
+            return rows
 
     def schedule_unpaid(self, request_id, now, expiry):
         """Keep checking expired invoices for a late authoritative settlement."""

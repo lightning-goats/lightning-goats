@@ -132,7 +132,7 @@ impl LedgerStore {
             now >= 0 && previous.is_none_or(|last| now >= last),
             "Cashu import clock regressed"
         );
-        let used = sqlx::query("SELECT COUNT(*) AS count,COALESCE(SUM(net_sats),0) AS sats FROM cashu_receipt_inbox WHERE accepted_at>=?")
+        let used = sqlx::query("SELECT COUNT(*) AS count,COALESCE(SUM(l.delta_sats),0) AS sats FROM cashu_receipt_inbox i JOIN ledger_entries l ON l.id=i.ledger_entry_id WHERE i.accepted_at>=?")
             .bind(now.saturating_sub(86_400)).fetch_one(&mut *tx).await?;
         // Until a verified treasury allocation consumes custody, every acquired
         // sat remains exposure, including credit retired by the payment cap.
@@ -171,22 +171,35 @@ impl LedgerStore {
                 .saturating_sub(to_u64(custody, "Cashu custody")?),
         };
         policy.check_new(authenticated, &remaining)?;
-        let amount = to_i64(data.net_sats, "Cashu net receipt")?;
+        let retained = retained_mint == Some(data.mint_id.as_str());
+        let contribution = if retained {
+            data.gross_sats
+        } else {
+            data.net_sats
+        };
+        ensure!(
+            contribution <= remaining.credit_sats,
+            "Cashu daily feeder credit limit exceeded"
+        );
+        let amount = to_i64(contribution, "Cashu contribution")?;
         let ledger_id = sqlx::query("INSERT INTO ledger_entries(entry_type,source_key,delta_sats,payment_source,payment_source_id,address_user,credit_pool) VALUES('CASHU_RECEIPT',?,?,?,?,'herd','herd')")
             .bind(source_key(receipt)).bind(amount).bind(&data.transport).bind(data.acquisition_id.to_string())
             .execute(&mut *tx).await?.last_insert_rowid();
-        let after = super::feed_cap::cap_new_credit(&mut tx, ledger_id, data.net_sats).await?;
+        let after = super::feed_cap::cap_new_credit(&mut tx, ledger_id, contribution).await?;
         // Intentionally narrow projection. The mint, balances, private evidence,
         // source event IDs and all proof/operation material stay private.
-        let event =
-            append_event_in_transaction(&mut tx, "payment_received", &public_event(receipt, after))
-                .await?;
+        let event = append_event_in_transaction(
+            &mut tx,
+            "payment_received",
+            &public_event(receipt, contribution, after),
+        )
+        .await?;
         sqlx::query("INSERT INTO cashu_receipt_inbox(wallet_instance,acquisition_id,wallet_epoch,core_epoch,mint_id,evidence_digest,receipt_digest,receipt_json,net_sats,ledger_entry_id,event_seq,original_feed_credit_sats,accepted_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)")
             .bind(data.wallet_instance.to_string()).bind(data.acquisition_id.to_string()).bind(data.wallet_epoch.to_string())
             .bind(&epoch).bind(&data.mint_id).bind(&data.acquisition_evidence_digest).bind(&digest)
-            .bind(String::from_utf8(receipt.encode()?)?).bind(amount).bind(ledger_id).bind(to_i64(event,"Cashu event")?)
+            .bind(String::from_utf8(receipt.encode()?)?).bind(to_i64(data.net_sats, "Cashu custody")?).bind(ledger_id).bind(to_i64(event,"Cashu event")?)
             .bind(to_i64(after,"Cashu credit after cap")?).bind(now).execute(&mut *tx).await?;
-        if retained_mint == Some(data.mint_id.as_str()) {
+        if retained {
             sqlx::query("INSERT INTO retained_cashu_lots(ledger_id) VALUES (?)")
                 .bind(ledger_id)
                 .execute(&mut *tx)
@@ -216,8 +229,8 @@ fn source_key(receipt: &WireReceipt) -> String {
         receipt.data().acquisition_id
     )
 }
-fn public_event(receipt: &WireReceipt, after: u64) -> serde_json::Value {
-    json!({"source":receipt.data().transport,"amount_sats":receipt.data().net_sats,
+fn public_event(receipt: &WireReceipt, contribution: u64, after: u64) -> serde_json::Value {
+    json!({"source":receipt.data().transport,"amount_sats":contribution,
         "feed_credit_sats":after,"address_user":"herd","credit_pool":"herd"})
 }
 
@@ -247,10 +260,16 @@ async fn verify_row(
         .fetch_one(&mut **tx)
         .await?;
     let data = receipt.data();
+    let contribution = to_u64(ledger.try_get("delta_sats")?, "Cashu contribution")?;
+    let retained: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM retained_cashu_lots WHERE ledger_id=?)")
+            .bind(row.try_get::<i64, _>("ledger_entry_id")?)
+            .fetch_one(&mut **tx)
+            .await?;
     ensure!(
         ledger.try_get::<String, _>("entry_type")? == "CASHU_RECEIPT"
             && ledger.try_get::<String, _>("source_key")? == source_key(receipt)
-            && ledger.try_get::<i64, _>("delta_sats")? == to_i64(data.net_sats, "receipt amount")?
+            && (contribution == data.net_sats || (retained && contribution == data.gross_sats))
             && ledger
                 .try_get::<Option<String>, _>("payment_source")?
                 .as_deref()
@@ -292,7 +311,7 @@ async fn verify_row(
     }
     ensure!(
         event.try_get::<String, _>("event_type")? == "payment_received"
-            && payload == public_event(receipt, after),
+            && payload == public_event(receipt, contribution, after),
         "Cashu receipt lost original public event"
     );
     Ok(CashuImportResult {

@@ -20,6 +20,22 @@ pub struct SocialEvent {
     embedded: Option<VerifiedEvent>,
 }
 
+fn is_like(content: &str, tags: &[Vec<String>]) -> bool {
+    if matches!(content, "" | "+") || emojis::get(content).is_some() {
+        return true;
+    }
+    // NIP-30 reactions reference a custom emoji declared in the signed event.
+    let Some(name) = content.strip_prefix(':').and_then(|s| s.strip_suffix(':')) else {
+        return false;
+    };
+    !name.is_empty()
+        && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        && tags.iter().any(|tag| {
+            matches!(tag.as_slice(),
+            [kind, shortcode, url, ..] if kind == "emoji" && shortcode == name && !url.is_empty())
+        })
+}
+
 impl SocialEvent {
     pub fn parse(event: VerifiedEvent, owner: &str, now: i64) -> Result<Option<Self>> {
         validate_public_key(owner)?;
@@ -28,7 +44,7 @@ impl SocialEvent {
         if signed.pubkey == owner || !matches!(signed.kind, 6 | 7 | 16) {
             return Ok(None);
         }
-        if signed.kind == 7 && !matches!(signed.content.as_str(), "" | "+") {
+        if signed.kind == 7 && !is_like(&signed.content, &signed.tags) {
             return Ok(None);
         }
         let event_id = if signed.kind == 7 {

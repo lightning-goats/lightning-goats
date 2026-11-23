@@ -79,7 +79,8 @@ impl<R: Query> Discovery<R> {
         scopes.extend(aliases.into_iter().map(|id| (false, id)));
         let mut cursors = Vec::new();
         for (coordinate, id) in scopes {
-            let key = super::ingress::hash(&("engagement-v2", cycle_start, coordinate, &id))?;
+            // Revisit the current cycle once to admit previously skipped emoji likes.
+            let key = super::ingress::hash(&("engagement-v3", cycle_start, coordinate, &id))?;
             let cursor = store.relay_window(owner, &key, cycle_start).await?;
             cursors.push((coordinate, id, key, cursor));
         }

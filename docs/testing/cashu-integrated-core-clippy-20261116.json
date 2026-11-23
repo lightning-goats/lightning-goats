@@ -1,0 +1,12 @@
+{
+  "gates": {
+    "fmt": 0,
+    "clippy": 0
+  },
+  "source_manifest_sha256": "859ca2a7ca9781c80fa8d215082b4f4f9a32ed6226e41499790899fc8430e145",
+  "clippy_log_sha256": "ecb031e6556172fb0a3708235a152410dee9d4bd60b59f996eebc14a78036441",
+  "source_unchanged_at_checkpoint": true,
+  "native_tests": "running; no final result yet",
+  "wallet_verifier": "queued session 79052 after exact core PID 2087088 exits",
+  "composition_checks": "not executed with final artifacts"
+}

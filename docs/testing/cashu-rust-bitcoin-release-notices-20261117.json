@@ -1,0 +1,150 @@
+{
+  "scope": "Reviewed release tags for archives omitting VCS and notice files",
+  "license_blob": "6ca207ef004cb69d03041e7e5c288a2be4968045",
+  "releases": [
+    {
+      "package": "base58ck@0.1.101",
+      "tag": "base58ck-0.1.101",
+      "tag_object": "5a381283da6d04302ab901226cee3e8b79e2a1c1",
+      "commit": "a010f1e9fd7752ee5e7ca60a909d32a58e0d3297",
+      "tree": "0d9c4a1243626e7c452b4f4652217581d98eaf66",
+      "github_reported_tag_signature_verified": true,
+      "recomputed_tree_hashes": true,
+      "source_members_matched": 6,
+      "shared_workspace_files": {},
+      "archive_sha256": "365c0acd5b2e8dd0111a46c4faea83fb3cfb6e39a49a7c73a06e090db7b2eff0"
+    },
+    {
+      "package": "bitcoin-internals@0.7.0",
+      "tag": "bitcoin-internals-0.7.0",
+      "tag_object": "7e0f8e4a926325c68e2613a6a00374f15c0311d6",
+      "commit": "a53101246ec046340d0127d520192d00d39d261d",
+      "tree": "e6d5ed1c699baa7c8f43e6fbc0b7357afb3a67a9",
+      "github_reported_tag_signature_verified": true,
+      "recomputed_tree_hashes": true,
+      "source_members_matched": 15,
+      "shared_workspace_files": {},
+      "archive_sha256": "e8bea3a9f0cfece4564e37cb49a38cc245ca5184719e50d7d0dda3268722c4e2"
+    },
+    {
+      "package": "bitcoin_hashes@1.2.0",
+      "tag": "bitcoin_hashes-1.2.0",
+      "tag_object": "70443c107b1f9886abfb8fc8f7acd4744dfd1d71",
+      "commit": "0f68fcb392512b5707529f864fb87882306e33d9",
+      "tree": "76ec9cdfbd4ff120f92a343ab1076c46f93a3616",
+      "github_reported_tag_signature_verified": true,
+      "recomputed_tree_hashes": true,
+      "source_members_matched": 38,
+      "shared_workspace_files": {
+        "include/array_newtype.rs": "include/array_newtype.rs",
+        "include/asref_push_bytes.rs": "include/asref_push_bytes.rs",
+        "include/decoder_newtype.rs": "include/decoder_newtype.rs",
+        "include/newtype.rs": "include/newtype.rs",
+        "include/u256.rs": "include/u256.rs"
+      },
+      "archive_sha256": "5304e53726dbe5f93141535e102ed97b5bf4714fbecefdda8f9fb98d7fdaff0e"
+    },
+    {
+      "package": "bitcoin-consensus-encoding@1.3.0",
+      "tag": "bitcoin-consensus-encoding-1.3.0",
+      "tag_object": "c82f877832a004c64d709c2f1cf4ed419f2add05",
+      "commit": "0cfc7908ff7c7c58e9c61c008c09cb2aeedb82cb",
+      "tree": "1432cb53e2ea02cc2de843a824a4d211d8185815",
+      "github_reported_tag_signature_verified": true,
+      "recomputed_tree_hashes": true,
+      "source_members_matched": 13,
+      "shared_workspace_files": {},
+      "archive_sha256": "9daa31138eb443d5751b207f3f64154e2bb09cd59960562ccc7a7112be38147f"
+    },
+    {
+      "package": "bitcoin-consensus-encoding@1.2.0",
+      "tag": "bitcoin-consensus-encoding-1.2.0",
+      "tag_object": "e2ad83f0eeb69399d938fafede285a26845ebef7",
+      "commit": "799d662e47f2842afcf65283fadc5e6042eec5fb",
+      "tree": "dac45302664bf0aea06afea707dbaf17ac640a70",
+      "github_reported_tag_signature_verified": true,
+      "recomputed_tree_hashes": true,
+      "source_members_matched": 13,
+      "shared_workspace_files": {},
+      "archive_sha256": "6712f9c6fd6785b3b270884e57c441c403dc5d7e19ca45368c97c7a1de3000ec"
+    },
+    {
+      "package": "bitcoin-internals@0.6.0",
+      "tag": "bitcoin-internals-0.6.0",
+      "tag_object": "44b1e6f8a15ba0cf6582ade2aea11c710e6a54c6",
+      "commit": "3812750b6824eb0374504d7e2fddd8e8528a2cda",
+      "tree": "01ec5e1fa970bc5e61238cee7a0378e9a42567ab",
+      "github_reported_tag_signature_verified": true,
+      "recomputed_tree_hashes": true,
+      "source_members_matched": 14,
+      "shared_workspace_files": {},
+      "archive_sha256": "d573f4cf32996a8dce612e4348cece65a241f1882ed594047c9ba348e8869fa5"
+    },
+    {
+      "package": "bitcoin-io@0.1.101",
+      "tag": "bitcoin-io-0.1.101",
+      "tag_object": "8298525df098aa009c1c204951d0635e74c3d902",
+      "commit": "a010f1e9fd7752ee5e7ca60a909d32a58e0d3297",
+      "tree": "0d9c4a1243626e7c452b4f4652217581d98eaf66",
+      "github_reported_tag_signature_verified": true,
+      "recomputed_tree_hashes": true,
+      "source_members_matched": 8,
+      "shared_workspace_files": {},
+      "archive_sha256": "bb5de036369d1ac59d3c1819ebc4d850f89466f5401c571a285b6ed564a4cb78"
+    },
+    {
+      "package": "bitcoin-units@0.1.101",
+      "tag": "bitcoin-units-0.1.101",
+      "tag_object": "a56bd6ffe20367f4b1a3538544b1a674a5ad4a9e",
+      "commit": "a010f1e9fd7752ee5e7ca60a909d32a58e0d3297",
+      "tree": "0d9c4a1243626e7c452b4f4652217581d98eaf66",
+      "github_reported_tag_signature_verified": true,
+      "recomputed_tree_hashes": true,
+      "source_members_matched": 15,
+      "shared_workspace_files": {
+        "include/decoder_newtype.rs": "include/decoder_newtype.rs"
+      },
+      "archive_sha256": "9cb95693f371d089a4b5b6fc41c6f3ea6e01ee8c15388335dfac8ea685173b51"
+    },
+    {
+      "package": "bitcoin_hashes@0.14.101",
+      "tag": "bitcoin_hashes-0.14.101",
+      "tag_object": "26e805faf5b3f7a627c321ffb4255be2fd9db652",
+      "commit": "a010f1e9fd7752ee5e7ca60a909d32a58e0d3297",
+      "tree": "0d9c4a1243626e7c452b4f4652217581d98eaf66",
+      "github_reported_tag_signature_verified": true,
+      "recomputed_tree_hashes": true,
+      "source_members_matched": 20,
+      "shared_workspace_files": {},
+      "archive_sha256": "bca4c7abb40c8817d77403c880988cfd484f23ab2365726afb2f798363e2c4a2"
+    },
+    {
+      "package": "bitcoin@0.32.102",
+      "tag": "bitcoin-0.32.102",
+      "tag_object": "9ff85f197bf53d2d4ed3f71a0d5f8717c069fbc7",
+      "commit": "ff5dc044d71a3ef8d59b29aa0328ffef9630d6d0",
+      "tree": "1aa0309b50845ceb7f3d5e7fd5bd486db36166f1",
+      "github_reported_tag_signature_verified": true,
+      "recomputed_tree_hashes": true,
+      "source_members_matched": 79,
+      "shared_workspace_files": {
+        "README.md": "README.md",
+        "include/decoder_newtype.rs": "include/decoder_newtype.rs"
+      },
+      "archive_sha256": "bb0ce8bd5baaa0d303a19915a6d93afed161f528654e42da2a7a97d05c59499a"
+    }
+  ],
+  "exported_packages": 462,
+  "missing_notices_before": 15,
+  "missing_notice_packages": [
+    "bitcoin-payment-instructions@0.7.1",
+    "hex_lit@0.1.1",
+    "lightning@0.2.8",
+    "lightning-invoice@0.34.1",
+    "possiblyrandom@0.2.1"
+  ],
+  "distribution_ready": false,
+  "strict_export_refused": true,
+  "supplement_tests_passed": 11,
+  "exported_index_sha256": "97a39b2626e99124c2f38195fc3a9fed508443b9bf80bec2232c987b8d4346d2"
+}

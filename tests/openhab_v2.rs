@@ -176,6 +176,7 @@ async fn notification_alone_pending_and_failed_receipts_never_confirm() {
     for (status, reason, expected) in [
         ("complete", "complete", OwnerOutcome::Ambiguous),
         ("accepted", "accepted", OwnerOutcome::Pending),
+        ("running", "pulse_started", OwnerOutcome::PulseStarted),
         (
             "failed",
             "completion_persist_uncertain",

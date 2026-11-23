@@ -1,0 +1,27 @@
+{
+  "binary_sha256": "da4a980c29db439bdc6580561749d1a775b5f6b74fe0e27d053a9fbf3fa39962",
+  "requests": {
+    "creqA": {
+      "descriptor_registered": false,
+      "encoding": "creqA",
+      "id": "lg1-f7987e44d7b44238deb2fc78cd75be1e",
+      "request": "creqAqWFpeCRsZzEtZjc5ODdlNDRkN2I0NDIzOGRlYjJmYzc4Y2Q3NWJlMWVhYfZhdWNzYXRhc_RhbYJ4GGh0dHBzOi8vbWludC1vbmUuZXhhbXBsZXgYaHR0cHM6Ly9taW50LXR3by5leGFtcGxlYm1w9GJzbYGhYm1uZmJvbHQxMWFkeCxMaWdodG5pbmcgR29hdHMg4oCUIHNoYXJlZCBoZXJkIGNvbnRyaWJ1dGlvbmF0gaJhdGRwb3N0YWF4IWh0dHBzOi8vbGlnaHRuaW5nLWdvYXRzLmV4YW1wbGUvYw==",
+      "service_started": false,
+      "status": "prepared",
+      "version": 1
+    },
+    "creqB": {
+      "descriptor_registered": false,
+      "encoding": "creqB",
+      "id": "lg1-f7987e44d7b44238deb2fc78cd75be1e",
+      "request": "CREQB1QYQZGMR8XYKKVDEE8QMK2DP5VSMKYDP5XGENSER9VGEXVCEH8P3KGDE4VFJNZEGRQQQSQPQQQYQQ2QQCDP68GURN8GHJ7MTFDE6Z6MMWV5HX27RPD4CXCEG9QQVXSAR5WPEN5TE0D45KUAPDW3MK7TN90PSK6URVV5RQQTZVD9NKSARWD9HXWGZ8DASHGUEQU2QFGGRNDPSHYETYYP5X2UNYYP3K7MN5WF5KYAT5D9HKUPCQ9QQSQQGPQGQZZ6R5W3C8XW309AKXJEMGW3HXJMN894NK7CT5WVHX27RPD4CXCEF0VVYSQQGQPGQQJQGQQE3X7MR5XYCSU8WWLZ",
+      "service_started": false,
+      "status": "prepared",
+      "version": 1
+    }
+  },
+  "result": "CASHU_REQUEST_CLI_VERIFIED",
+  "services_started": false,
+  "state_created": false,
+  "synthetic_only": true
+}

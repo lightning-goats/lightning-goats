@@ -1,0 +1,18 @@
+{
+  "result": "CASHU_BACKUP_STREAMING_REGRESSION_VERIFIED",
+  "before_fix_peak_python_bytes": 35811496,
+  "component_bytes": 33554432,
+  "after_fix_peak_python_bytes_below": 16777216,
+  "after_fix_tests_passed": 17,
+  "failed": 0,
+  "ignored": 0,
+  "stream_chunk_bytes": 1048576,
+  "descriptor_type_owner_links_mode_checked": true,
+  "file_identity_size_timestamps_and_sha256_checked": true,
+  "source_sha256": {
+    "deploy/scripts/verify-cashu-backup.py": "67144853dd56bdfbede3aa561e26f827d99394bfa4fe23aa42f86cd947e582f7",
+    "deploy/tests/test_cashu_backup_inventory.py": "92c5cc571569567b05cdb497e1e4f8cfbc7490f6dcb9fcc71633da4aecb80a79"
+  },
+  "coordinated_restore_qualified": false,
+  "production_changes": false
+}

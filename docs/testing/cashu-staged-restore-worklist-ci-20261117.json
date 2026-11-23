@@ -1,0 +1,39 @@
+{
+  "source_commit": "55fcc19ed96f058d657ac0504ef3c2dfe22a358a",
+  "checkout_commit": "4b8fdfb015440e0d164569e8d87a76a7dc8a5f3b",
+  "matching_source_and_checkout_tree": "b4b77a373be2847ce2d653248e10b0b3a55bce1f",
+  "ci_run": "https://github.com/lightning-goats/lightning-goats/actions/runs/44182651016",
+  "checks": {
+    "rust": 134390767420,
+    "cashu_wallet": 134390766899,
+    "cashu_cross_uid": 134394079568
+  },
+  "artifact": {
+    "id": 14374135356,
+    "bytes": 19511,
+    "sha256": "a9ada29ae7c815c7bf41c5ad443fd210c1042d3f01de7b39fe3735372c543384",
+    "members_reviewed": ["cashu-native-backup.json", "cashu-funded-rollback.json"]
+  },
+  "encrypted_restore_fixture": {
+    "actual_authenticated_launcher": true,
+    "real_age_archive": true,
+    "staged_roles": 6,
+    "committed_wal_preserved": true,
+    "worklist_source_and_page_bound": true,
+    "worklist_tampered_image_refused": true,
+    "archive_programs_executable": false
+  },
+  "funded_rollback_fixture": {
+    "lost_melt_reply": true,
+    "later_original_mint_strike_and_feeder_references_listed": true,
+    "restored_core_startup_fenced": true,
+    "restored_wallet_writer_fenced": true,
+    "treasury_deposit_sats": 398,
+    "conversion_fee_sats": 2,
+    "new_transfer_credit_sats": 0,
+    "synthetic_confirmed_feeds": 1
+  },
+  "external_reconciliation_verified": false,
+  "resume_authorized": false,
+  "scope": "The archive fixture uses initialized native journals and simulated service-status responses. A separate funded fixture uses copied journals, a simulated mint and Strike, and no physical actuation."
+}

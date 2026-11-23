@@ -1,134 +1,209 @@
-# Lightning Goats Documentation
+# Lightning Goats documentation
 
-**Production HOLD (2026-09-08 audit, carried forward 2026-09-10).** Earlier
-completion claims do not establish deployment readiness. Read
-[`deployment/audit-remediation.md`](deployment/audit-remediation.md) and the
-[`deployment artifact guide`](deployment/deployment-artifacts.md) first.
-The new VPS agent should follow
-[`new-vps-remediation-handoff.md`](deployment/new-vps-remediation-handoff.md).
+The [Cashu / Nut November implementation plan](planning/cashu-nutnovember-implementation-plan.md)
+authorizes isolated ordinary Cashu and NIP-61 implementation alongside Strike.
+See the [compatibility checkpoint](testing/cashu-compatibility.md) for actual progress;
+receiving, spending, deployment and physical activation remain separate.
+The [wallet/core boundary](architecture/cashu-wallet-boundary.md) records the
+current private receipt and physical source-selection contracts and open work.
+The [wallet development entry point](deployment/cashu-wallet-development.md)
+documents isolated configuration, initialization and runtime commands.
+The [protected operator controls](deployment/cashu-operator-controls.md) describe
+bounded settlement planning and original-acquisition ownership checks, with their
+qualification and recovery limits. The [offline seed tool](deployment/cashu-seed-provisioning.md)
+prepares private staging separately from runtime installation.
 
-## Parallel agent entry points
+The operator-directed CyberHerd port is now tracked in
+[`planning/cyberherd-implementation-plan.md`](planning/cyberherd-implementation-plan.md),
+including the updated explanation/code references and the explicit no-NIP-05 and
+confirmed-feeding reward rules. That request supersedes the older CyberHerd
+deferral in the historical delivery order below.
 
-**Home server (`10.8.0.6`):** start with
-[`home-gateway-agent-handoff.md`](deployment/home-gateway-agent-handoff.md).
-It covers the existing gateway installation, exact OpenHAB permission surface,
-project-specific token, isolated harmless canary, local weather, existing-owner
-contract/finality coordination, home-side UFW/WireGuard policy, tests, rollback,
-and the short status contract to return to the VPS agent. The home agent can
-finish independent canary work without enabling physical feeding.
+The optional [read-only CyberHerd roster and OBS state](architecture/cyberherd-public-roster.md)
+are disabled by default and add no financial or operator mutation capability.
+The approved current rollout now serves the [live leaderboard](testing/cyberherd-live-readonly-site-20261110.md),
+with operator controls. The separately approved
+[financial activation](testing/cyberherd-financial-activation-live-20261114.md)
+and [public messaging repair](testing/cyberherd-discovery-repair-live-20261114.md)
+now run all four services. Automatic CyberHerd replies under today's note are verified. The operator's
+[subsequent chat opt-out](testing/cyberherd-no-stream-chat-20261114.md) now disables
+CyberHerd stream chat while preserving Nostr notes and overlay messages. Older checkpoint
+paragraphs below describe their state at the time.
+[Nostr self-status sign-in](testing/cyberherd-self-read-public-live-20261111.md)
+is now public on the leaderboard. [Operator controls](architecture/cyberherd-operator-interface.md)
+now authorize the existing project messaging identity. The operator-requested
+[three-user capacity](testing/cyberherd-three-user-capacity-live-20261111.md)
+is verified through the signed API and public leaderboard. No financial or
+physical activation follows from operator authentication or self-status access.
 
-**New VPS:** continue with
-[`new-vps-remediation-handoff.md`](deployment/new-vps-remediation-handoff.md).
-Keep payment/nginx/site/VPS work separate from home-host changes. Coordinate
-shared source and API changes using pinned commits and focused PRs; do not
-exchange OpenHAB credentials or replay the already-integrated PR #56 stack.
-These host-specific entry points precede the generic reading order below.
+[Actual host network checks](testing/cyberherd-host-network-checkpoint-20261111.md)
+now verify kernel filters, the separate receive/CyberHerd private-network policies
+and public IPv4/IPv6 TLS without credentials, API requests or application restarts.
+They preserve the existing firewall and WireGuard forwarding setup.
 
-## Current Phase 1 source of truth
+The [four-role financial candidate checkpoint](testing/cyberherd-financial-candidate-checkpoint-20261111.md)
+passes exact native/root/systemd qualification, including a shared per-payment
+cap for ordinary Lightning and zaps. Separately installed VPS tools refuse a
+stored-allocation mismatch before creating any candidate; payout limits remain
+zero, outgoing roles remain masked and activation is still separate.
 
-Phase 1 is the migration from LNbits/Core Lightning to the standalone Strike-backed Lightning Goats architecture tracked in GitHub issue #6 and its child issues.
+The [native backlog review](testing/cyberherd-reward-backlog-checkpoint-20261111.md)
+now qualifies frozen feeding/plan/reservation classification from accepted backup
+copies, including pending intake and cursor lag. Actual historical-copy
+acceptance preserves live applications and grants no financial activation.
 
-Read these documents in this order:
+The [six-program maintenance checkpoint](testing/cyberherd-program-maintenance-checkpoint-20261111.md)
+qualifies a separate program-only transaction with fresh native backup/review,
+explicit resumption and pre-resumption program rollback. Actual VPS preparation
+passes without changing live applications. Applying financial configuration and
+activating payouts remain separate work.
 
-1. [`../AGENTS.md`](../AGENTS.md) — concise agent invariants and navigation.
-2. [`planning/phase1-execution-plan.md`](planning/phase1-execution-plan.md) — approved work order, milestones, and operator gates.
-3. [`architecture/phase1-strike-architecture.md`](architecture/phase1-strike-architecture.md) — target runtime/data-flow architecture.
-4. [`architecture/lightning-address-registry.md`](architecture/lightning-address-registry.md) — configured herd/goat addresses and shared feed-credit pool.
-5. [`architecture/weather-overlay.md`](architecture/weather-overlay.md) — legacy weather compatibility and sanitized overlay-only integration.
-6. [`security/phase1-threat-model.md`](security/phase1-threat-model.md) — trust boundaries and privilege model.
-7. [`security/openhab-feeder-gateway.md`](security/openhab-feeder-gateway.md) — required in-house OpenHAB/weather/physical-feeder security boundary.
-8. [`security/phase1-hardening-checklist.md`](security/phase1-hardening-checklist.md) — public edge, DNS, SSH, credentials, supply chain and operational value-at-risk controls.
-9. [`deployment/wireguard-topology.md`](deployment/wireguard-topology.md) — existing `10.8.0.0/24` topology, staging peer, and hub cutover plan.
-10. [`deployment/codex-vps-bootstrap.md`](deployment/codex-vps-bootstrap.md) — how to prepare the new VPS and Codex/deploy account safely.
-11. [`deployment/new-vps-staging.md`](deployment/new-vps-staging.md) — parallel staging procedure while the old VPS remains production.
-12. [`testing/phase1-verification-matrix.md`](testing/phase1-verification-matrix.md) — executable functional/security acceptance matrix.
-13. [`deployment/production-cutover.md`](deployment/production-cutover.md) — operator-gated DNS/WireGuard cutover and rollback procedure.
-14. [`architecture/cyberherd-phase2-boundary.md`](architecture/cyberherd-phase2-boundary.md) — interfaces Phase 1 must preserve for future CyberHerd work.
-15. [`implementation-status.md`](implementation-status.md) — current implementation/execution status.
+The [first financial transaction checkpoint](testing/cyberherd-financial-maintenance-checkpoint-20261111.md)
+now qualifies explicit configuration application/resumption on synthetic state,
+including native backlog gates, four systemd services and independent boundaries.
+Actual financial limits, provider/recipient acceptance and activation remain separate.
 
-## GitHub work queue
+[Explicit failed-payment cost review](architecture/cyberherd-failed-cost-recovery.md)
+now has a [485-test source checkpoint](testing/cyberherd-failed-cost-checkpoint-20261110.md).
+Provider failure alone never releases funds, and the legacy two-store restore
+helper refuses CyberHerd schemas. Whole-stack recovery and installation remain
+unfinished; no financial review or payout is activated by the source checkpoint.
 
-Core implementation:
+The [website WebLN/chat release](testing/website-payment-chat-checkpoint-20261110.md) is live with an invisible QR-sized target and authenticated zap display. The [private contact deployment](testing/private-contact-live-20261111.md) now serves free sender-bound Nostr DMs and the separate 100-sat email-contact fee. Native backup/configuration activation, protected static/WAF ingress and actual public desktop/mobile checks preserve paid state, flags and OBS artwork. Controlled real fee settlement and recipient-side observation remain required.
 
-- #6 — Phase 1 tracker
-- #7 — backend-neutral payment/ledger domain
-- #8 — receive-only Strike integration
-- #9 — native Lightning Address/LNURL-pay
-- #18 — configured `herd` + individual goat Lightning Address registry
-- #10 — Phase 1 message templates
-- #11 — Nostr + overlay event fan-out
-- #21 — weather overlay compatibility through the in-house gateway
-- #12 — CyberHerd-ready boundaries
-- #13 — remove CLN/LNbits runtime assumptions
+The [SQLite backport](security/sqlite-binding-backport.md) preserves Rust 1.88
+and SQLx 0.8.6 while using the patched engine. Its
+[486-test checkpoint](testing/cyberherd-sqlite-checkpoint-20261110.md) passes the
+dependency audit and native engine check. It does not update installed programs.
 
-Security/deployment:
+Native [four-journal maintenance](deployment/cyberherd-state-maintenance.md)
+provides offline snapshots, retention reports and startup-blocked restore staging.
+Its [491-test checkpoint](testing/cyberherd-state-maintenance-checkpoint-20261110.md)
+records verified source and inactive artifacts, without financial resumption authority.
 
-- #17 — narrow in-house OpenHAB/weather feeder gateway + WireGuard/UFW boundary
-- #14 — new VPS/nginx/WireGuard/credential hardening
-- #19 — domain/DNS, SSH, deployment provenance and operational Strike balance
-- #20 — public LNURL/webhook abuse controls
-- #15 — full verification matrix
-- #16 — production cutover/rollback
+The [overlay-stage preparer](deployment/cyberherd-overlay-stage.md) freezes
+native-zap, membership and loopback-view configuration for review. It preserves
+the existing receive/feed behavior, keeps payout ceilings zero and omits a
+membership Nostr signer. It implements no activation or service changes.
 
-## Existing WireGuard topology
+The separate [maintenance executor](deployment/cyberherd-overlay-maintenance.md)
+now has a passing [installed rehearsal and VPS execution plan](testing/cyberherd-overlay-maintenance-checkpoint-20261110.md).
+Its native backup/apply/resume/configuration-only rollback ran on synthetic
+state in isolated systemd services. The approved production attempt verified its backup, then refused an inherited
+timeout policy before startup. Recovery restored the original core. A bounded
+compatibility correction subsequently passed exact qualification, and a fresh
+approved transaction successfully started membership/overlay intake. The
+[live checkpoint](testing/cyberherd-live-overlay-stage-20261110.md) records the
+current native backup, six zap-capable addresses and public OBS roster readback.
+CyberHerd Nostr notes, rewards and payouts remain disabled.
 
-The project already uses:
+Fresh [offline journal initialization](deployment/cyberherd-offline-initialization.md)
+now has a [492-test source checkpoint](testing/cyberherd-bootstrap-checkpoint-20261110.md),
+including mandatory native subprocess checks under three distinct runtime UIDs.
+It uses no credentials and does not install or activate services.
 
-```text
-10.8.0.0/24
-```
+The [494-test checkpoint](testing/cyberherd-core-upgrade-checkpoint-20261110.md)
+qualifies [native legacy-core backup and migration comparison](deployment/cyberherd-core-upgrade.md)
+on separate copies. The actual paid-core upgrade transaction remains required.
 
-Known Phase 1 nodes:
+The [495-test checkpoint](testing/cyberherd-installation-checkpoint-20261110.md)
+also qualifies the [fresh disabled-role installer](deployment/cyberherd-inactive-installation.md)
+on a disposable systemd VM, with actual separate identities/masks/native journals.
+The live host and financial activation remain unchanged.
 
-```text
-10.8.0.1   current production VPS / WireGuard hub
-10.8.0.6   in-house OpenHAB + weather host
-```
+The native incoming zap/receipt contract is described in
+[`architecture/native-nip57.md`](architecture/native-nip57.md). It preserves
+ordinary LNURL payments and requires explicit feature activation.
 
-The new VPS gets a new WireGuard keypair and an unused temporary `10.8.0.x` address during staging. It must not claim `10.8.0.1` until the old hub is stopped during the operator-approved cutover. See `deployment/wireguard-topology.md`.
+The [separate CyberHerd intake worker](architecture/cyberherd-worker.md) now
+connects core events, authenticated discovery and ordered membership in source.
+It now runs in the approved overlay-only stage, with no provider-spend or
+membership Nostr publication capability enabled. Optional
+[reward planning](architecture/cyberherd-reward-planning.md) freezes eligible
+confirmed-feeding plans before obtaining bounded core reservations.
 
-## Phase 1 Lightning Addresses
+The operator-directed 2026-11-08 Strike restoration is recorded in
+[`deployment/strike-receive-restoration.md`](deployment/strike-receive-restoration.md),
+including exact API scopes, webhook staging, WAF and payment-only deployment.
+The operator-supplied OBS layout and its current data/QR contracts are documented
+in [`deployment/obs-overlay-restoration.md`](deployment/obs-overlay-restoration.md).
+Local CLI grants and the 10-sat message threshold are documented in
+[`deployment/operator-credits.md`](deployment/operator-credits.md).
+Paused credit retention, queued-feed messaging and confirmation-only debits are
+documented in [`deployment/paused-feeding-queue.md`](deployment/paused-feeding-queue.md).
+Household NIP-46 client preparation and the remaining signer/activation steps are
+recorded in [`deployment/household-nostr-bunker.md`](deployment/household-nostr-bunker.md).
 
-Required configured addresses:
+## Current payment scope — 2026-11-19
 
-```text
-herd@lightning-goats.com
-dexter@lightning-goats.com
-rowan@lightning-goats.com
-cosmo@lightning-goats.com
-newton@lightning-goats.com
-nova@lightning-goats.com
-```
+Strike-backed Lightning and Cashu are live. Start with the
+[delivery roadmap](planning/delivery-roadmap.md). Preserve applied migrations
+and paid state.
 
-All six use the same Phase 1 feeder credit pool while preserving recipient metadata. Nginx may route generic LNURL paths to the service, but arbitrary unconfigured users are not payable.
+[The parallel live pilot](deployment/parallel-live-pilot.md) remains the practical
+path for `herd@feeder.lightning-goats.com` alongside the old system. The operator
+sends manual payments, observes feeding and chooses the eventual established-address,
+DNS and Nostr-profile cutover. Older blanket HOLD/full-audit/sandbox-first language
+is historical, not a veto on unrelated safe pilot work. No plan is a claim that
+services are already installed or that live acceptance has happened.
 
-## OpenHAB/weather boundary
+## Short execution path
 
-The public VPS does **not** receive an OpenHAB API token and does not connect directly to the legacy weather service at `10.8.0.6:5000`.
+1. [Agent guide](../AGENTS.md), [delivery roadmap](planning/delivery-roadmap.md) and
+   [Lightning execution plan](planning/phase1-execution-plan.md).
+2. [VPS pilot runbook](deployment/new-vps-staging.md), with Lightning WAF acceptance
+   recorded in [#106](https://github.com/lightning-goats/lightning-goats/issues/106).
+3. [Verification matrix](testing/phase1-verification-matrix.md): selected-source
+   and actual pilot evidence, not a requirement to finish every future feature.
+4. [Cutover and rollback](deployment/production-cutover.md): explicit operator
+   public-address switch with all real paid state preserved.
 
-Physical feeder control and weather/status reads are mediated by the in-house Lightning Goats integration gateway described in `security/openhab-feeder-gateway.md`.
+Minimal Lightning includes real Nostr payment/feed messages and the actual OBS
+browser-source integration/progress, not just the public video page or backend
+WebSocket. Information/weather remain overlay-only; Lightning amounts show sats.
 
-The gateway:
+## Technical references
 
-- owns the dedicated OpenHAB integration credential;
-- implements the duplicate-safe feeder UUID request/ack path;
-- enforces/observes local OpenHAB safety gates;
-- reads legacy weather data locally from `/get_received_data`;
-- exposes only a sanitized read-only `/v1/weather` contract to `lightning-goatsd`.
+- [Strike architecture](architecture/phase1-strike-architecture.md) and
+  [address registry](architecture/lightning-address-registry.md).
+- [Gateway boundary](security/openhab-feeder-gateway.md),
+  [weather/overlay](architecture/weather-overlay.md),
+  [overlay stream](architecture/overlay-stream.md) and
+  [WireGuard topology](deployment/wireguard-topology.md).
+- HOME: [gateway handoff](deployment/home-gateway-agent-handoff.md),
+  [current feed limits](deployment/gateway-feed-limits.md) and
+  [2026-11-08 deployment evidence](testing/evidence/home-gateway-feeding-20261108.md).
+- VPS: [remediation handoff](deployment/new-vps-remediation-handoff.md).
+- [Deployment artifacts](deployment/deployment-artifacts.md),
+  [audit findings](deployment/audit-remediation.md),
+  [threat model](security/phase1-threat-model.md),
+  [hardening checklist](security/phase1-hardening-checklist.md) and
+  [implementation history](implementation-status.md).
 
-Weather messages are overlay-only.
+Apply the current roadmap before following older launch instructions
+in these references. Reuse existing reviewed work. Do not ignore an actual defect,
+waive a required code review, or report a mock as live evidence.
 
-## Legacy/historical documents
+## Payment architecture
 
-The following documents describe the **previous, superseded CLN/`clnaddress` migration architecture** and must not be used as the execution plan for the current Phase 1:
+[Future payment sources](architecture/phase1-strike-architecture.md#future-payment-sources)
+can use the same durable credit and feeder boundary through a source-specific
+receipt and credit policy.
 
-- `phase1-lnbits-rust-migration-plan.md`
-- `server-setup.md` where it assumes CLNRest/`clnaddress` production ingress or direct legacy OpenHAB integration
+[Native BTC receipt provenance](architecture/asset-credit-storage.md) documents
+the ledger records that support verified Strike receipts and their replay.
+[CyberHerd](architecture/cyberherd-phase2-boundary.md), new providers, broader site
+redesign and optional tools are not first-deliverable dependencies.
 
-They are retained temporarily as historical design context and may contain useful feeder/Nostr/overlay implementation rationale. When they conflict with the documents listed under **Current Phase 1 source of truth**, the current Strike-backed documentation wins.
+## Addresses, ownership and tracking
 
-## Phase 2
+Keep herd/dexter/rowan/cosmo/newton/nova configured with the common herd pool; the
+pilot edge may initially expose herd only. Both old and new payment services must
+respect one physical owner or only one dispatcher may be enabled. Keep separate
+pilot/old ledgers and preserve real pilot credit at cutover. Never put the OpenHAB
+token on the VPS. The old WireGuard hub stays `10.8.0.1` during the pilot.
 
-CyberHerd business logic is not part of Phase 1. See `architecture/cyberherd-phase2-boundary.md` for the intended seam and future service/module options.
-
-Future CyberHerd functionality must not bypass the in-house integration gateway or expand the receive-only `lightning-goatsd` credential into spend authority by default.
+#6 tracks migration; #15 observed acceptance; #16 cutover; #17 coordination;
+#21 records weather acceptance and #106 records WAF acceptance. Keep
+unfinished acceptance and roadmap issues open with current dispositions.
+Earlier CLN/clnaddress setup documents are historical, not new-runtime instructions.

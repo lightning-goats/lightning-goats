@@ -1,0 +1,3 @@
+# Unified-diff context preserves upstream Go tabs and blank context lines.
+# Keep the checksum-pinned patch byte-exact; check applied Go source separately.
+bounded-stdin.patch -whitespace

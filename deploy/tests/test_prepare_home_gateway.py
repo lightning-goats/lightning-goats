@@ -22,13 +22,13 @@ class HomePlanTests(unittest.TestCase):
         self.assertNotIn('IPAddressAllow=10.8.', unit)
         self.assertIn('CapabilityBoundingSet=\n', unit)
 
-    def test_production_preserves_owner_protocol_and_caps(self):
+    def test_production_preserves_owner_protocol_and_operator_selected_limits(self):
         files = home.generated_files(b'fixture')
         c = tomllib.loads(files['/etc/lightning-goats-gateway/config.toml'][0].decode())
         self.assertEqual(c['openhab']['protocol'], 'feeder_request_v1')
         self.assertEqual(c['openhab']['override_item'], 'FeederOverride')
-        self.assertEqual(c['feeder']['min_feed_interval_seconds'], 30)
-        self.assertEqual(c['feeder']['max_feeds_per_hour'], 10)
+        self.assertEqual(c['feeder']['min_feed_interval_seconds'], 2)
+        self.assertEqual(c['feeder']['max_feeds_per_hour'], 0)
         self.assertEqual(c['service']['listen'], '127.0.0.1:8789')
 
 class CanaryReadbackTests(unittest.TestCase):

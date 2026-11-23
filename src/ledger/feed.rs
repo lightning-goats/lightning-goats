@@ -51,7 +51,10 @@ impl LedgerStore {
             bail!("feeder threshold must be greater than zero");
         }
         let threshold_i64 = to_i64(threshold_sats, "threshold_sats")?;
-        let mut transaction = self.pool.begin().await?;
+        // This read/check/write sequence must acquire its writer position before
+        // observing credit or pending work. A deferred snapshot cannot safely
+        // upgrade after a concurrent funding/settlement transaction writes.
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
 
         if let Some(row) = sqlx::query(
             "SELECT id, status FROM feed_attempts WHERE status IN ('intent_committed', 'unknown') LIMIT 1",
@@ -79,6 +82,17 @@ impl LedgerStore {
             return Ok(None);
         }
 
+        let sources = super::feed_sources::select(
+            &mut transaction,
+            threshold_sats,
+            self.retained_wallet_epoch,
+        )
+        .await?;
+        if matches!(sources, super::feed_sources::Selection::Waiting) {
+            transaction.commit().await?;
+            return Ok(None);
+        }
+
         let id = Uuid::new_v4();
         sqlx::query(
             r#"
@@ -90,6 +104,10 @@ impl LedgerStore {
         .bind(threshold_i64)
         .execute(&mut *transaction)
         .await?;
+
+        if let super::feed_sources::Selection::Ready(plan, parts) = sources {
+            super::feed_sources::freeze(&mut transaction, id, plan, threshold_sats, &parts).await?;
+        }
 
         transaction.commit().await?;
         Ok(Some(id))
@@ -176,6 +194,17 @@ impl LedgerStore {
             bail!("invalid feeder cooldown");
         }
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        // A later refusal cannot undo this owner's correlated ON notification.
+        // Preserve the original attempt for positive confirmation or manual review.
+        let pulse_seen: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM event_log WHERE event_type='feeder_pulse_started' AND json_extract(payload_json,'$.feed_attempt_id')=?)",
+        )
+        .bind(id.to_string())
+        .fetch_one(&mut *tx)
+        .await?;
+        if pulse_seen {
+            bail!("gateway refusal contradicts recorded feeder pulse");
+        }
         let changed = sqlx::query("UPDATE feed_attempts SET status='reconciled_not_fed', resolved_at=unixepoch(), error=NULL WHERE id=? AND status IN ('intent_committed','unknown')")
             .bind(id.to_string()).execute(&mut *tx).await?;
         if changed.rows_affected() != 1 {
@@ -224,7 +253,8 @@ impl LedgerStore {
     }
 
     async fn resolve_as_fed(&self, id: Uuid, expected_status: &str) -> Result<()> {
-        let mut transaction = self.pool.begin().await?;
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let funding_enabled = super::reward_funding::prepare(&mut transaction).await?;
         let row =
             sqlx::query("SELECT threshold_sats FROM feed_attempts WHERE id = ? AND status = ?")
                 .bind(id.to_string())
@@ -258,7 +288,7 @@ impl LedgerStore {
         }
 
         let source_key = format!("feed:{id}");
-        sqlx::query(
+        let debit_id = sqlx::query(
             r#"
             INSERT INTO ledger_entries
                 (entry_type, source_key, delta_sats, feed_attempt_id)
@@ -269,23 +299,102 @@ impl LedgerStore {
         .bind(-threshold_i64)
         .bind(id.to_string())
         .execute(&mut *transaction)
-        .await?;
+        .await?
+        .last_insert_rowid();
 
         let feed_credit_sats = feed_credit_in_transaction(&mut transaction).await?;
-        append_event_in_transaction(
-            &mut transaction,
-            "feeder_confirmed",
-            &json!({
-                "feed_attempt_id": id,
-                "threshold_sats": threshold_sats,
-                "feed_credit_sats": feed_credit_sats
-            }),
+        // Message attribution only: remove the newest still-unspent credit to
+        // find the receipt that completed this FIFO threshold. A later payment
+        // during dispatch cannot replace the original funding contribution.
+        let triggering_credit = if super::feed_sources::frozen(&mut transaction, id).await? {
+            super::feed_sources::triggering_credit(&mut transaction, id).await?
+        } else {
+            triggering_credit(&mut transaction, debit_id, feed_credit_sats)
+                .await
+                .unwrap_or(None)
+        };
+        let mut payload = json!({
+            "feed_attempt_id": id,
+            "threshold_sats": threshold_sats,
+            "feed_credit_sats": feed_credit_sats
+        });
+        if let Some((credit_id, _)) = triggering_credit {
+            let first: bool = sqlx::query_scalar("SELECT NOT EXISTS(SELECT 1 FROM feeding_announcement_sources WHERE credit_ledger_id=?)")
+                .bind(credit_id).fetch_one(&mut *transaction).await?;
+            payload["announce_feeding"] = first.into();
+        }
+        if let Some((credit_id, amount)) = triggering_credit {
+            payload["triggering_credit_id"] = credit_id.into();
+            payload["triggering_payment_amount_sats"] = amount.into();
+        }
+        // Presentation availability can never prevent a financial confirmation.
+        if let Ok(Some(owner)) = sqlx::query_scalar::<_, String>(
+            "SELECT owner FROM feeding_notice_policy WHERE singleton=1",
         )
-        .await?;
+        .fetch_optional(&mut *transaction)
+        .await
+        {
+            payload["presentation_owner"] = owner.into();
+        }
+        let event_seq =
+            append_event_in_transaction(&mut transaction, "feeder_confirmed", &payload).await?;
+
+        if let Some((credit_id, _)) = triggering_credit {
+            sqlx::query("INSERT INTO feeding_announcement_sources(credit_ledger_id,first_event_seq) VALUES(?,?) ON CONFLICT(credit_ledger_id) DO NOTHING")
+                .bind(credit_id).bind(to_i64(event_seq,"first feeding announcement")?).execute(&mut *transaction).await?;
+        }
+        sqlx::query("INSERT INTO feed_event_sources(feed_attempt_id,event_seq) VALUES(?,?)")
+            .bind(id.to_string())
+            .bind(to_i64(event_seq, "feed event sequence")?)
+            .execute(&mut *transaction)
+            .await?;
+
+        if funding_enabled {
+            super::reward_funding::record_confirmation(
+                &mut transaction,
+                id,
+                debit_id,
+                threshold_sats,
+            )
+            .await?;
+        }
 
         transaction.commit().await?;
         Ok(())
     }
+}
+
+/// Read the source frozen at reservation time, or reconstruct pre-reservation history.
+pub(super) async fn confirmed_triggering_credit(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    id: Uuid,
+    debit: i64,
+    balance: u64,
+) -> Result<Option<(i64, u64)>> {
+    if super::core_schema_version(tx).await? >= 26 && super::feed_sources::frozen(tx, id).await? {
+        super::feed_sources::triggering_credit(tx, id).await
+    } else {
+        triggering_credit(tx, debit, balance).await
+    }
+}
+
+pub(super) async fn triggering_credit(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    debit_id: i64,
+    mut unspent_sats: u64,
+) -> Result<Option<(i64, u64)>> {
+    // Bounded, best-effort presentation lookup, with no schema or accounting
+    // mutation. Missing history never substitutes the threshold as a payment.
+    let rows = sqlx::query("SELECT id,delta_sats FROM ledger_entries WHERE id<? AND delta_sats>0 ORDER BY id DESC LIMIT 4096")
+        .bind(debit_id).fetch_all(&mut **transaction).await?;
+    for row in rows {
+        let amount = to_u64(row.try_get("delta_sats")?, "credit sats")?;
+        if unspent_sats < amount {
+            return Ok(Some((row.try_get("id")?, amount)));
+        }
+        unspent_sats -= amount;
+    }
+    Ok(None)
 }
 
 pub(super) async fn feed_credit_in_transaction(
@@ -335,6 +444,86 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn intent_waits_for_an_existing_writer_without_losing_credit_or_reusing_a_feed() {
+        use std::time::Duration;
+
+        let (_directory, store) = credited_store(1000).await;
+        // Warm all five connections so opening a new connection cannot stand
+        // in for waiting at the actual financial transaction boundary.
+        let mut connections = Vec::new();
+        for _ in 0..5 {
+            connections.push(store.pool.acquire().await.unwrap());
+        }
+        drop(connections);
+        let mut writer = store.pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
+        // Force a different WAL page while keeping the cooldown expired.
+        sqlx::query("UPDATE feeder_cooldown SET resume_after=1 WHERE singleton=1")
+            .execute(&mut *writer)
+            .await
+            .unwrap();
+
+        // Positive control: the old read-then-upgrade pattern really is busy,
+        // rather than a missing row, invalid UUID or synthetic mocked failure.
+        let mut deferred = store.pool.begin().await.unwrap();
+        let _: i64 =
+            sqlx::query_scalar("SELECT resume_after FROM feeder_cooldown WHERE singleton=1")
+                .fetch_one(&mut *deferred)
+                .await
+                .unwrap();
+        let error = sqlx::query(
+            "INSERT INTO feed_attempts(id,status,threshold_sats) VALUES(?,'intent_committed',1000)",
+        )
+        .bind(Uuid::new_v4().to_string())
+        .execute(&mut *deferred)
+        .await
+        .unwrap_err();
+        let sqlx::Error::Database(error) = error else {
+            panic!("expected native SQLite writer contention");
+        };
+        assert!(matches!(error.code().as_deref(), Some("5" | "517")));
+        deferred.rollback().await.unwrap();
+
+        let mut pending = Box::pin(store.begin_feed_attempt(1000));
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), pending.as_mut())
+                .await
+                .is_err(),
+            "intent should wait for the existing writer, not fail a snapshot upgrade"
+        );
+        writer.commit().await.unwrap();
+        let id = tokio::time::timeout(Duration::from_secs(5), pending)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(store.feed_credit_sats().await.unwrap(), 1000);
+        assert_eq!(
+            store.unresolved_feed_attempt().await.unwrap().unwrap().id,
+            id
+        );
+        assert!(store.begin_feed_attempt(1000).await.is_err());
+        store.confirm_feed_attempt(id).await.unwrap();
+        assert!(store.confirm_feed_attempt(id).await.is_err());
+        assert_eq!(store.feed_credit_sats().await.unwrap(), 0);
+        let debits: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM ledger_entries WHERE entry_type='FEED_DEBIT'")
+                .fetch_one(&store.pool)
+                .await
+                .unwrap();
+        assert_eq!(debits, 1);
+        assert_eq!(
+            store
+                .events_after(0, 100)
+                .await
+                .unwrap()
+                .iter()
+                .filter(|event| event.event_type == "feeder_confirmed")
+                .count(),
+            1
+        );
+    }
+
+    #[tokio::test]
     async fn two_confirmed_feed_attempts_leave_340_sats() {
         let (_directory, store) = credited_store(2_340).await;
 
@@ -347,6 +536,17 @@ mod tests {
         store.confirm_feed_attempt(second).await.unwrap();
         assert_eq!(store.feed_credit_sats().await.unwrap(), 340);
         assert!(store.begin_feed_attempt(1_000).await.unwrap().is_none());
+        for event in store
+            .events_after(0, 100)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.event_type == "feeder_confirmed")
+        {
+            let payload: serde_json::Value = serde_json::from_str(&event.payload_json).unwrap();
+            assert_eq!(payload["triggering_payment_amount_sats"], 2340);
+            assert_eq!(payload["threshold_sats"], 1000);
+        }
 
         let events = store.events_after(0, 100).await.unwrap();
         assert_eq!(
@@ -356,6 +556,83 @@ mod tests {
                 .count(),
             2
         );
+    }
+
+    #[tokio::test]
+    async fn triggering_payment_amount_survives_later_payment_confirmation_and_restart() {
+        let (directory, store) = credited_store(995).await;
+        let paid = |id: &str, sats: u64| SettledPayment {
+            source: "test".into(),
+            source_id: id.into(),
+            payment_hash: None,
+            address_user: "herd".into(),
+            credit_pool: "herd".into(),
+            amount_msat: sats * 1000,
+            settled_at: None,
+            context_json: None,
+        };
+        store.record_payment(&paid("trigger", 10)).await.unwrap();
+        let id = store.begin_feed_attempt(1000).await.unwrap().unwrap();
+        // Received after the original intent; this must not steal attribution.
+        store.record_payment(&paid("later", 200)).await.unwrap();
+        store.confirm_feed_attempt(id).await.unwrap();
+        assert_eq!(store.feed_credit_sats().await.unwrap(), 205);
+        let event = store
+            .events_after(0, 100)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|e| e.event_type == "feeder_confirmed")
+            .unwrap();
+        let payload: serde_json::Value = serde_json::from_str(&event.payload_json).unwrap();
+        assert_eq!(payload["triggering_payment_amount_sats"], 10);
+        assert_eq!(payload["threshold_sats"], 1000);
+        let text = crate::presentation::MessageRenderer::embedded()
+            .unwrap()
+            .render(&event, 1000)
+            .unwrap();
+        assert!(text.nostr_content.unwrap().contains("10 sats"));
+        assert!(text.overlay_message.unwrap().contains("10 sats"));
+        let reopened = LedgerStore::connect(&format!(
+            "sqlite://{}",
+            directory.path().join("lightning-goats.db").display()
+        ))
+        .await
+        .unwrap();
+        reopened
+            .record_payment(&paid("much-later", 2000))
+            .await
+            .unwrap();
+        let persisted = reopened
+            .events_after(event.seq - 1, 1)
+            .await
+            .unwrap()
+            .remove(0);
+        assert_eq!(persisted, event);
+    }
+
+    #[tokio::test]
+    async fn attribution_lookup_bound_never_blocks_confirmation_or_invents_an_amount() {
+        let (_directory, store) = credited_store(1000).await;
+        sqlx::query("WITH RECURSIVE credits(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM credits WHERE n<4097) INSERT INTO ledger_entries(entry_type,source_key,delta_sats) SELECT 'HERD_RECEIPT','synthetic-later:'||n,1 FROM credits")
+            .execute(&store.pool).await.unwrap();
+        let id = store.begin_feed_attempt(1000).await.unwrap().unwrap();
+        store.confirm_feed_attempt(id).await.unwrap();
+        assert_eq!(store.feed_credit_sats().await.unwrap(), 4097);
+        let event = store
+            .events_after(0, 100)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|e| e.event_type == "feeder_confirmed")
+            .unwrap();
+        let payload: serde_json::Value = serde_json::from_str(&event.payload_json).unwrap();
+        assert!(payload.get("triggering_payment_amount_sats").is_none());
+        let text = crate::presentation::MessageRenderer::embedded()
+            .unwrap()
+            .render(&event, 1000)
+            .unwrap();
+        assert!(text.nostr_content.unwrap().contains("have been fed"));
     }
 
     #[tokio::test]

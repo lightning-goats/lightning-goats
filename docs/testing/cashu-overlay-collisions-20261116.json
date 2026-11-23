@@ -1,0 +1,31 @@
+{
+  "result": "passed",
+  "tests": 44,
+  "failures": 0,
+  "source_sha256": {
+    "web/overlay.css": "b45d615195c867c139e60438c01ddbd655323a27c004502d1f50165f68eb8223",
+    "web/overlay.html": "c63f418ce92aa32a81ce2344617c188b673993e097470d83e72afd6f911e40f6",
+    "web/overlay.js": "e4a43627fd144666931373d8663dafca921b06b529dcbabf1e4ea518ba7d43ae",
+    "tests/website/test_browser.py": "8d894959f9c3fac2fe2228e933c44f0099e544c755d43ecf85458e567c755905",
+    "tests/website/test_contact.py": "328f97ef351f781b1a23e5489fcba6c0bb8b44565a85ef46f4b92e34156a02c4",
+    "tests/website/test_index_browser.py": "7529de336724370ab4f5b7e2de1fcddae4a593028a5036d6b173f3956e11274d",
+    "tests/website/test_operator.py": "e4b83dbbf601bb1619d409435c0a2e39deebf07e16979c631c25b2c54bbc16f2",
+    "tests/website/test_overlay.py": "af7452b1d5284cff1fafb0e50daa8846fcd55aefd21a8059d96d2ff09f7590a6",
+    "tests/website/test_roster.py": "5e473d1448d3038a7d9314af55470bc60faa94b3b1aa4e49287fe24fe1d80f9b",
+    "tests/website/fixtures/cashu-requests.json": "2381950ff9b32eb20edf672da46aa0f02f548e5ebfb046423be96602eb9ac285"
+  },
+  "command": "/home/linuxuser/lg-browser-venv/bin/python -m unittest discover -s tests/website -p 'test_*.py'",
+  "log": "............................................\n----------------------------------------------------------------------\nRan 44 tests in 331.201s\n\nOK\n",
+  "scope": [
+    "Existing website and overlay regressions",
+    "Both native-CDK encodings decoded byte-for-byte at 1080p/720p",
+    "Ten-member roster and five-goat cards with both QRs, long credit, paused/unknown banner, payment and feeder effects",
+    "Invalid metadata and Cashu/nutzap effects preserve Lightning QR and ledger state"
+  ],
+  "unqualified": [
+    "Backend snapshot descriptor producer",
+    "Real sender/phone interoperability",
+    "Production activation"
+  ],
+  "production_changed": false
+}

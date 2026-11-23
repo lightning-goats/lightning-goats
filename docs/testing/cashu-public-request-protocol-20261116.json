@@ -1,0 +1,13 @@
+{
+  "result": "passed",
+  "tests": 7,
+  "command": "cargo test --offline --locked -p lightning-goats-cashu-receipt",
+  "log": "   Compiling lightning-goats-cashu-receipt v0.1.0 (/home/linuxuser/lightning-goats/.worktrees/cashu-nutnovember-20261115/crates/cashu-receipt)\n    Finished `test` profile [unoptimized] target(s) in 9.24s\n     Running unittests src/lib.rs (/home/linuxuser/lightning-goats/target/debug/deps/lightning_goats_cashu_receipt-5e025863085d9e37)\n\nrunning 7 tests\ntest acknowledgment::tests::acknowledgment_binds_original_receipt_and_both_epochs ... ok\ntest ingress::tests::registration_and_strict_schema_precede_intake ... ok\ntest ingress::tests::replies_cannot_acknowledge_another_delivery_or_empty_acquisition ... ok\ntest public_request::tests::metadata_preserves_native_request_bytes_and_rejects_tokens_or_encoding_mismatch ... ok\ntest public_request::tests::metadata_reply_is_bound_to_registration_and_exact_query ... ok\ntest treasury::allocation_tests::conservation_does_not_allow_reassigning_deposit_coverage_between_donors ... ok\ntest treasury::allocation_tests::every_small_fee_change_partition_is_checked_without_rounding_or_writeoff ... ok\n\ntest result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s\n\n   Doc-tests lightning_goats_cashu_receipt\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n",
+  "source_sha256": {
+    "crates/cashu-receipt/src/public_request.rs": "7cdafc288616ceb5af6a5353497b50b7943e1bd1ead748b3c4a5fb87b33b73b3",
+    "crates/cashu-receipt/src/lib.rs": "bf731dba65a883afcfdc460023863bee61fa7528d2e98cd313435f95aea1cddd",
+    "tests/website/fixtures/cashu-requests.json": "bd9a3430e92a3d025ca6f70fd42ee132312c09868256a99c55e5f12911f279ac"
+  },
+  "scope": "Shared protocol registration/nonce, strict schema and public request byte-preservation tests; no cross-UID transport claim",
+  "production_changed": false
+}

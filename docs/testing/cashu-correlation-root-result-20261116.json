@@ -1,0 +1,34 @@
+{
+  "result": "CASHU_CORRECTED_ROOT_CORRELATION_REVIEW_PASSED",
+  "fixture_result": {
+    "cashu_wallet_verified": false,
+    "combined_restore_authorized": false,
+    "core_test_sha256": "263836de84deb33065593f877f2c0651c847414589cde6f52e9d6eecbea04a9f",
+    "current_schema_cashu_receipts": true,
+    "native_four_journal_checks": true,
+    "ordinary_restore_refused": true,
+    "result": "CASHU_FOUR_JOURNAL_CORRELATIONS_VERIFIED",
+    "resume_authorized": false,
+    "services_changed": false,
+    "test": "state_maintenance::cashu_correlations::tests::frozen_cashu_journals_preserve_native_correlations_without_restore_authority"
+  },
+  "source_sha256": {
+    "src/state_maintenance/cashu_correlations.rs": "b0c40dace2af8e7ec03452c45d647f001a54b1ffca075de67821006eb13fe444",
+    "src/state_maintenance/cashu_correlations/tests.rs": "e96c64e878d73f7fa89e264870b7836878539213c1cba3e08b78dc48661045f1",
+    "src/state_maintenance/database.rs": "afae97d8425648bc36bcab34d19461e245836654b3ae281117d5dbcd20a7c522",
+    "src/state_maintenance/mod.rs": "3d848e9b020a76a42de8717fdb4a49b50d760d2f8e1fede5f42485676473c0a7",
+    "src/bin/cyberherd-statectl.rs": "0c96625dcb3674a06aac3ea955bf465843cfede95c2ae6a76e2c7cc217e3eebc",
+    "deploy/scripts/test-cashu-correlation-review.py": "5e9bb4d2bb0ed3d0cd3a393d31a3923820aaaca87e461ac622c5ded56fa2ba9e"
+  },
+  "different_epoch_fixture": "separate legitimately initialized native membership journal; immutable triggers preserved",
+  "ordinary_four_journal_maintenance_still_refuses_cashu": true,
+  "input_bytes_unchanged_during_positive_review": true,
+  "malformed_scope_and_image_sets_refused": true,
+  "earlier_fixture_setup_failure": "cashu-correlation-fixture-failure-20261116.json",
+  "corrected_full_standard_gate": "cashu-correlation-corrected-gates-20261116.json",
+  "funded_restore_qualified": false,
+  "cashu_wallet_verified": false,
+  "restore_authorized": false,
+  "resume_authorized": false,
+  "production_changes": false
+}

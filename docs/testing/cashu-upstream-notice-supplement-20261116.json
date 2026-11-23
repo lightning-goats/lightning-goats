@@ -1,0 +1,30 @@
+{
+  "result": "CASHU_EXACT_UPSTREAM_NOTICE_SUPPLEMENT_EXPORTED",
+  "supplement_sha256": "d9eaa084ed5e12d1c7e3cdca32ed916e0cace49e13b8a765a92793ccbd12219f",
+  "inventory_sha256": "1ee129c9cc1600094b9bc411fe06946e933a934c9e856fca8b8cfcc56271db2c",
+  "export_index_sha256": "7da809f43bb5d19bdb0018b7d16ef0c02d3251e12bf4a4427e02353a96da9f6c",
+  "packages": 462,
+  "supplemented_packages": [
+    "cashu@0.18.3",
+    "cdk-common@0.18.3",
+    "cdk-http-client@0.18.3",
+    "cdk-signatory@0.18.3",
+    "cdk-sql-common@0.18.3",
+    "cdk-sqlite@0.18.3",
+    "valuable@0.1.1",
+    "lightning-invoice@0.34.2",
+    "lightning-macros@0.2.1",
+    "lightning-types@0.3.5",
+    "wasite@0.1.0",
+    "gloo-timers@0.3.0",
+    "cdk@0.18.3"
+  ],
+  "missing_notices": 17,
+  "validation_tests_passed": 10,
+  "distribution_ready": false,
+  "core_or_wallet_native_source_changed": false,
+  "export_version": "v8",
+  "incomplete_without_development_flag_refused": true,
+  "local_cdk_origin_verified": true,
+  "local_cdk_remains_local": true
+}

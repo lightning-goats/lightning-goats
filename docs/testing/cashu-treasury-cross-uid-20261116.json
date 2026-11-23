@@ -1,0 +1,14 @@
+{
+  "artifacts_sha256": {
+    "core-test": "f46950de73932aa39a3b4dd70fa04138d35150a4638661d659f556d45761f817",
+    "wallet-test": "98731f039f16b4be9b63ceb712327472697ed75e8a053e23c38ac0fe3854b380"
+  },
+  "core_uid": 60000,
+  "melt_requests": 0,
+  "paused_restart_replay": true,
+  "quote_requests": 0,
+  "result": "CASHU_TREASURY_CROSS_UID_VERIFIED",
+  "retained_instructions": 1,
+  "rogue_uid": 60002,
+  "wallet_uid": 60001
+}

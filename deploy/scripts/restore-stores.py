@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Restore a quiesced pair into a NEW private directory; never start services."""
+"""Restore a quiesced legacy pair into a NEW private directory; no CyberHerd or service start."""
 import argparse
 import hashlib
 import json
@@ -17,6 +17,17 @@ def check(connection, required):
     tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     if not required <= tables:
         raise ValueError("snapshot is missing required final-schema tables")
+
+
+def require_legacy_core(connection):
+    # This legacy two-store helper deliberately rotates the core overlay epoch.
+    # CyberHerd also binds financial/ingress authority to that epoch and has two
+    # additional independent journals. Rotating just core would strand or bypass
+    # retained cross-store evidence. Reject even an uninitialized new schema:
+    # this helper cannot establish that no external consumer has bound it.
+    tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if tables & {"reward_funding_state", "reward_reservations", "payout_execution_claims"}:
+        raise ValueError("CyberHerd requires consistent multi-journal recovery, not legacy epoch rotation")
 
 
 def restore(source, destination):
@@ -38,6 +49,8 @@ def restore(source, destination):
             raise ValueError("snapshot must contain regular daemon.db and gateway.db files")
         with sqlite3.connect(original.as_uri() + "?mode=ro", uri=True) as reader:
             check(reader, required)
+            if name == "daemon.db":
+                require_legacy_core(reader)
             with sqlite3.connect(destination / name) as writer:
                 reader.backup(writer)
                 check(writer, required)

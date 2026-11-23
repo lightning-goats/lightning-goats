@@ -1,0 +1,63 @@
+{
+  "scope": "atomic split proof/provenance reservation only; no mint execution",
+  "production_state_changed": false,
+  "focused_tests": {
+    "passed": 4,
+    "failed": 0,
+    "ignored": 0
+  },
+  "log_sha256": "11d86efe18973c7658862ed4b106e930eacb1c17808427382d9b8065b7144e91",
+  "source_snapshot_sha256": "939b4f4bff4db0d054ee14ec028e6fe73a6ef99a72c7b4fc24e780764c415dfa",
+  "source_hashes_rechecked": true,
+  "full_wallet_gates": "strict Clippy and full suite passed with synthetic fixture permissions",
+  "root_expiry_focused_tests": {
+    "passed": 3,
+    "failed": 0
+  },
+  "root_expiry_strict_clippy": "passed",
+  "root_expiry_full_suite": "queued/running",
+  "qualified_suite_results": [
+    {
+      "passed": 131,
+      "failed": 0,
+      "ignored": 5
+    },
+    {
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0
+    }
+  ],
+  "qualified_log_sha256": "e6b3825776eeadf37086db4a9ac174b4f146f61a8b171834fa4364d99d06e34e",
+  "restricted_run": {
+    "passed": 114,
+    "failed": 17,
+    "ignored": 5,
+    "limitations": "16 fixture permission errors and 1 socket timeout; unchanged source passed qualified rerun"
+  }
+}

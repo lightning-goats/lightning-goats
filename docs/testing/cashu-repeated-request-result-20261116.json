@@ -1,0 +1,198 @@
+{
+  "result": "CASHU_REUSABLE_REQUEST_MULTIPLE_ACQUISITIONS_VERIFIED",
+  "cases": {
+    "baseline-normal": {
+      "artifacts_sha256": {
+        "core": "ad8b28deeb9a2a115884acd5cd652c4bf3a24b24298d761ed3e2c0ef63946c64",
+        "wallet": "00566b26169ecd05ddebc4ac94c24fe3c7772147afec7550e77c703414562897"
+      },
+      "cashu_ts_offline_sender": true,
+      "distinct_uid_ipc": true,
+      "distinct_uid_receipt_ipc": true,
+      "financial_result": {
+        "contributions": 3,
+        "conversion_fee_sats": 2,
+        "credit_sats": 0,
+        "new_transfer_credit_sats": 0,
+        "original_granted_credit_sats": 1000,
+        "receive_fees_sats": 2,
+        "retained_change_sats": 0,
+        "supplemental_native_sats": 0,
+        "synthetic_confirmed_feeds": 1,
+        "treasury_deposit_sats": 398
+      },
+      "http_intake": true,
+      "independent_sender": false,
+      "live_provider": false,
+      "lost_melt_reply": false,
+      "nonzero_fees": true,
+      "physical_actuation": false,
+      "repeat_request": false,
+      "result": "CASHU_COMBINED_SETTLEMENT_VERIFIED",
+      "returned_change": false,
+      "sender_inventory": {
+        "bytes": 4549477,
+        "files": 285,
+        "manifest_sha256": "d6e43143902f1edde34f8526fcfa53d4da4a511b9431ae9ceb51f1d6f0afc68f"
+      },
+      "sender_node_sha256": "9d9f55f1f4497fe069d681020b728f77221c43b9a4e9576a89ff7cc537caf5cf",
+      "sender_script_sha256": "7a33eb819d4707d767cc7be89e6b7e87b47bfefef8eaf4a544fff2ce0be9fd26",
+      "strike_before_wallet_report": false,
+      "tls_verified": false,
+      "treasury_ipc": true,
+      "wallet_recovery_while_paused": false
+    },
+    "baseline-lost": {
+      "artifacts_sha256": {
+        "core": "ad8b28deeb9a2a115884acd5cd652c4bf3a24b24298d761ed3e2c0ef63946c64",
+        "wallet": "00566b26169ecd05ddebc4ac94c24fe3c7772147afec7550e77c703414562897"
+      },
+      "cashu_ts_offline_sender": true,
+      "distinct_uid_ipc": true,
+      "distinct_uid_receipt_ipc": true,
+      "financial_result": {
+        "contributions": 3,
+        "conversion_fee_sats": 2,
+        "credit_sats": 0,
+        "new_transfer_credit_sats": 0,
+        "original_granted_credit_sats": 1000,
+        "receive_fees_sats": 2,
+        "retained_change_sats": 0,
+        "supplemental_native_sats": 0,
+        "synthetic_confirmed_feeds": 1,
+        "treasury_deposit_sats": 398
+      },
+      "http_intake": true,
+      "independent_sender": false,
+      "live_provider": false,
+      "lost_melt_reply": true,
+      "nonzero_fees": true,
+      "physical_actuation": false,
+      "repeat_request": false,
+      "result": "CASHU_COMBINED_SETTLEMENT_VERIFIED",
+      "returned_change": false,
+      "sender_inventory": {
+        "bytes": 4549477,
+        "files": 285,
+        "manifest_sha256": "d6e43143902f1edde34f8526fcfa53d4da4a511b9431ae9ceb51f1d6f0afc68f"
+      },
+      "sender_node_sha256": "9d9f55f1f4497fe069d681020b728f77221c43b9a4e9576a89ff7cc537caf5cf",
+      "sender_script_sha256": "7a33eb819d4707d767cc7be89e6b7e87b47bfefef8eaf4a544fff2ce0be9fd26",
+      "strike_before_wallet_report": true,
+      "tls_verified": false,
+      "treasury_ipc": true,
+      "wallet_recovery_while_paused": true
+    },
+    "repeated-normal": {
+      "artifacts_sha256": {
+        "core": "ad8b28deeb9a2a115884acd5cd652c4bf3a24b24298d761ed3e2c0ef63946c64",
+        "wallet": "00566b26169ecd05ddebc4ac94c24fe3c7772147afec7550e77c703414562897"
+      },
+      "cashu_ts_offline_sender": true,
+      "distinct_uid_ipc": true,
+      "distinct_uid_receipt_ipc": true,
+      "financial_result": {
+        "contributions": 4,
+        "conversion_fee_sats": 3,
+        "credit_sats": 0,
+        "new_transfer_credit_sats": 0,
+        "original_granted_credit_sats": 1000,
+        "receive_fees_sats": 3,
+        "retained_change_sats": 0,
+        "supplemental_native_sats": 0,
+        "synthetic_confirmed_feeds": 1,
+        "treasury_deposit_sats": 397
+      },
+      "http_intake": true,
+      "independent_sender": false,
+      "live_provider": false,
+      "lost_melt_reply": false,
+      "nonzero_fees": true,
+      "physical_actuation": false,
+      "repeat_request": true,
+      "result": "CASHU_COMBINED_SETTLEMENT_VERIFIED",
+      "returned_change": false,
+      "sender_inventory": {
+        "bytes": 4549477,
+        "files": 285,
+        "manifest_sha256": "d6e43143902f1edde34f8526fcfa53d4da4a511b9431ae9ceb51f1d6f0afc68f"
+      },
+      "sender_node_sha256": "9d9f55f1f4497fe069d681020b728f77221c43b9a4e9576a89ff7cc537caf5cf",
+      "sender_script_sha256": "7a33eb819d4707d767cc7be89e6b7e87b47bfefef8eaf4a544fff2ce0be9fd26",
+      "strike_before_wallet_report": false,
+      "tls_verified": false,
+      "treasury_ipc": true,
+      "wallet_recovery_while_paused": false
+    },
+    "repeated-lost": {
+      "artifacts_sha256": {
+        "core": "ad8b28deeb9a2a115884acd5cd652c4bf3a24b24298d761ed3e2c0ef63946c64",
+        "wallet": "00566b26169ecd05ddebc4ac94c24fe3c7772147afec7550e77c703414562897"
+      },
+      "cashu_ts_offline_sender": true,
+      "distinct_uid_ipc": true,
+      "distinct_uid_receipt_ipc": true,
+      "financial_result": {
+        "contributions": 4,
+        "conversion_fee_sats": 3,
+        "credit_sats": 0,
+        "new_transfer_credit_sats": 0,
+        "original_granted_credit_sats": 1000,
+        "receive_fees_sats": 3,
+        "retained_change_sats": 0,
+        "supplemental_native_sats": 0,
+        "synthetic_confirmed_feeds": 1,
+        "treasury_deposit_sats": 397
+      },
+      "http_intake": true,
+      "independent_sender": false,
+      "live_provider": false,
+      "lost_melt_reply": true,
+      "nonzero_fees": true,
+      "physical_actuation": false,
+      "repeat_request": true,
+      "result": "CASHU_COMBINED_SETTLEMENT_VERIFIED",
+      "returned_change": false,
+      "sender_inventory": {
+        "bytes": 4549477,
+        "files": 285,
+        "manifest_sha256": "d6e43143902f1edde34f8526fcfa53d4da4a511b9431ae9ceb51f1d6f0afc68f"
+      },
+      "sender_node_sha256": "9d9f55f1f4497fe069d681020b728f77221c43b9a4e9576a89ff7cc537caf5cf",
+      "sender_script_sha256": "7a33eb819d4707d767cc7be89e6b7e87b47bfefef8eaf4a544fff2ce0be9fd26",
+      "strike_before_wallet_report": true,
+      "tls_verified": false,
+      "treasury_ipc": true,
+      "wallet_recovery_while_paused": true
+    }
+  },
+  "core_gates": {
+    "fmt": 0,
+    "clippy": 0,
+    "lib_build": 0,
+    "protocol_fmt": 0,
+    "protocol_clippy": 0,
+    "protocol_tests": 0,
+    "sqlite": 0,
+    "whitespace": 0,
+    "audit": 0
+  },
+  "wallet_gates": {
+    "fmt": 0,
+    "clippy": 0,
+    "tests": 0,
+    "vendor": 0
+  },
+  "core_build_only_not_full_test_rerun": true,
+  "wallet_native_passed": 166,
+  "wallet_ignored": 7,
+  "distinct_capabilities_for_distinct_payments": true,
+  "same_descriptor_id": true,
+  "all_capabilities_and_posts_replayed_after_consumption": true,
+  "source_manifests_sha256": {
+    "core": "5aa5f6e5db2e3caf311e54b79f0b8367bc736ff49a0f73a68945f7f9ea40a2fd",
+    "wallet": "88e4aae2666db2c63edaa4cb137b985da2e51a30ec946bf956ce4dd5a7d3abfb"
+  },
+  "runner_sha256": "264926c2d004012fd8a84eef700fbeeac274bbed4120899ca183b83b7b9d1f8b",
+  "scope": "SDK-assisted synthetic test sender; no end-user application, TLS, live relay/provider or physical actuation acceptance."
+}

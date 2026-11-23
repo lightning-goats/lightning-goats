@@ -1,0 +1,25 @@
+{
+  "source_commit": "6caaaf887f43469a33a13b2dd3947f5207a240e3",
+  "checkout_commit": "048f313fd31c069874fa38cc4c1888e5ebdf110b",
+  "matching_source_and_checkout_tree": "c92eb06044934687eb930549081a0147fdaebdc9",
+  "ci_run": "https://github.com/lightning-goats/lightning-goats/actions/runs/44203343527",
+  "deployment_run": "https://github.com/lightning-goats/lightning-goats/actions/runs/44203343322",
+  "security_run": "https://github.com/lightning-goats/lightning-goats/actions/runs/44203343357",
+  "all_ten_workflows_passed": true,
+  "artifact": {
+    "id": 14383520593,
+    "size_bytes": 19835,
+    "sha256": "87e1060407d809618cd9a9f28c7facb61125e3ead7412d9f5e970f90366dd5d7",
+    "member": "cashu-public-request-cross-uid.json",
+    "member_sha256": "15dbf4e8cc7bb35013e74d606d6b1274d6cac4ec21762cce60cdb7100f3e56a4"
+  },
+  "http_fixture": {
+    "exact_delivery_survives_retired_restart": true,
+    "new_body_with_expired_id_refused": true,
+    "acquisitions_created": 2,
+    "intake_sources_retained": 2,
+    "identical_http_retries_per_payment": 80,
+    "melt_requests": 0
+  },
+  "scope": "Synthetic HTTP and authenticated wallet IPC in a private network namespace, using the same receiving key across request rotation."
+}

@@ -217,6 +217,24 @@ Only after the transaction commits may downstream presentation or feeder process
 
 Presentation failure must not undo or duplicate the settlement.
 
+## Future payment sources
+
+Keep receipt verification at the payment-source boundary. Lightning uses
+`SettledPayment` for verified BTC settlement in millisatoshis. Cashu imports
+authenticated wallet receipts with mint and acquisition provenance. Both commit
+feed credit and a durable `payment_received` event atomically.
+
+A future source, such as a platform payment, defines its own authoritative
+receipt, stable source-scoped identity, and credit policy. Retain the source's
+verified amount and unit as provenance. The credit policy determines the sats
+eligible for the herd pool. Commit the receipt, any feed credit and its event
+together, and deduplicate retries by the original receipt identity. Keep
+provider-specific state and reconciliation behind that source's adapter.
+
+The ledger provides the durable credit and events used by the overlay and Nostr.
+The existing feeder flow determines when that credit can fund a feed, with the
+same funding checks, local safety controls and confirmation-only debits.
+
 ## Feeder flow
 
 The existing feeder-accounting invariant remains canonical:

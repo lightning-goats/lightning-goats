@@ -1,0 +1,10 @@
+[Unit]
+Description=Check operator fee conversion and retry pending wallet delivery
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=10min
+Unit=lightning-goats-operator-fees.service
+
+[Install]
+WantedBy=timers.target

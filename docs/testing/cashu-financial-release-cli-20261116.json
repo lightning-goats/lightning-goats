@@ -1,0 +1,15 @@
+{
+  "result": "CASHU_FINANCIAL_RELEASE_CLI_VERIFIED",
+  "cli_sha256": "701a39c2aff4e2b9fb387ffc3a0c83240054c5b636a1241cd04b7375c4b7d43c",
+  "runner_sha256": "0ef133f144a60c9ca625e5e259adb6f9800e4653d8ad8ca8aae457e717ca007f",
+  "active_service_refused": true,
+  "apply_once": true,
+  "preview_unchanged": true,
+  "runtime_uid": 60000,
+  "runtime_owner_retained": true,
+  "synthetic_systemctl": true,
+  "fresh_mount_and_network_namespaces": true,
+  "installed_systemd_acceptance": false,
+  "real_payment": false,
+  "physical_actuation": false
+}

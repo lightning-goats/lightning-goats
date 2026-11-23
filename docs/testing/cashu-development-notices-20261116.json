@@ -1,0 +1,11 @@
+{
+  "scope": "full locked graphs, including optional/target dependencies; development notice export",
+  "inventory_sha256": "a7b2c3a4d3dd1fc19cd06790956eac11bfe90ed2d2503ea8455e6aec2a6494b3",
+  "index_sha256": "116162869ad5ed882d4793914e41c2288ef9009a890b4b75b1eb8aa7ff8d2ccd",
+  "package_entries": 462,
+  "unique_verified_notice_texts": 239,
+  "package_entries_missing_notice_files": 34,
+  "all_exported_text_hashes_verified": true,
+  "default_incomplete_export_rejected": true,
+  "distribution_ready": false
+}

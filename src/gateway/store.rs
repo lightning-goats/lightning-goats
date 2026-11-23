@@ -69,6 +69,7 @@ impl GatewayStore {
     /// Serialize admission across every connection/process sharing this file.
     /// The write lock is released before any OpenHAB I/O. A pending reservation
     /// never expires: only authoritative reconciliation can release it.
+    /// A zero hourly cap disables only that cap, preserving all other checks.
     pub async fn begin_request(
         &self,
         request_id: Uuid,
@@ -78,7 +79,7 @@ impl GatewayStore {
     ) -> Result<BeginRequestOutcome> {
         let interval = i64::try_from(min_interval.as_secs())?;
         let cap = i64::try_from(max_per_hour)?;
-        if interval < 5 || cap < 1 {
+        if interval < 2 {
             bail!("invalid gateway safety limits");
         }
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
@@ -107,8 +108,8 @@ impl GatewayStore {
                 .fetch_one(&mut *tx)
                 .await?;
                 let delay: i64 = sqlx::query_scalar(
-                    "SELECT MAX(0, COALESCE((SELECT MAX(updated_at)+?-unixepoch() FROM feeder_requests),0), CASE WHEN (SELECT COUNT(*) FROM feeder_requests WHERE updated_at >= unixepoch()-3600) >= ? THEN COALESCE((SELECT MIN(updated_at)+3601-unixepoch() FROM feeder_requests WHERE updated_at >= unixepoch()-3600),0) ELSE 0 END)",
-                ).bind(interval).bind(cap).fetch_one(&mut *tx).await?;
+                    "SELECT MAX(0, COALESCE((SELECT MAX(updated_at)+?-unixepoch() FROM feeder_requests),0), CASE WHEN ? > 0 AND (SELECT COUNT(*) FROM feeder_requests WHERE updated_at >= unixepoch()-3600) >= ? THEN COALESCE((SELECT MIN(updated_at)+3601-unixepoch() FROM feeder_requests WHERE updated_at >= unixepoch()-3600),0) ELSE 0 END)",
+                ).bind(interval).bind(cap).bind(cap).fetch_one(&mut *tx).await?;
                 let refusal = if safety_refusal {
                     Some(FeedRefusal {
                         reason: RefusalReason::Safety,
@@ -235,6 +236,100 @@ mod tests {
         let directory = TempDir::new().unwrap();
         let url = format!("sqlite://{}", directory.path().join("gateway.db").display());
         (directory, GatewayStore::connect(&url).await.unwrap())
+    }
+
+    #[tokio::test]
+    async fn unlimited_hourly_admission_keeps_interval_safety_and_pending_across_reopen() {
+        let (directory, store) = store().await;
+        for _ in 0..61 {
+            sqlx::query("INSERT INTO feeder_requests(request_id,status,created_at,updated_at) VALUES (?, 'acknowledged', unixepoch()-3, unixepoch()-3)")
+                .bind(Uuid::new_v4().to_string()).execute(&store.pool).await.unwrap();
+        }
+        let interval = Duration::from_secs(2);
+        let first = Uuid::new_v4();
+        assert_eq!(
+            store
+                .begin_request(first, interval, 0, false)
+                .await
+                .unwrap(),
+            BeginRequestOutcome::New
+        );
+        store.mark_acknowledged(first).await.unwrap();
+        assert_eq!(
+            store
+                .begin_request(first, interval, 0, false)
+                .await
+                .unwrap(),
+            BeginRequestOutcome::Acknowledged
+        );
+        let too_soon = Uuid::new_v4();
+        assert!(matches!(
+            store
+                .begin_request(too_soon, interval, 0, false)
+                .await
+                .unwrap(),
+            BeginRequestOutcome::NotDispatched(FeedRefusal {
+                reason: RefusalReason::Capacity,
+                ..
+            })
+        ));
+        sqlx::query("UPDATE feeder_requests SET updated_at=unixepoch()-2")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let reopened = GatewayStore::connect(&format!(
+            "sqlite://{}",
+            directory.path().join("gateway.db").display()
+        ))
+        .await
+        .unwrap();
+        assert!(matches!(
+            reopened
+                .begin_request(Uuid::new_v4(), interval, 0, true)
+                .await
+                .unwrap(),
+            BeginRequestOutcome::NotDispatched(FeedRefusal {
+                reason: RefusalReason::Safety,
+                ..
+            })
+        ));
+        let second = Uuid::new_v4();
+        let third = Uuid::new_v4();
+        let (a, b) = tokio::join!(
+            store.begin_request(second, interval, 0, false),
+            reopened.begin_request(third, interval, 0, false)
+        );
+        let outcomes = [a.unwrap(), b.unwrap()];
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter(|o| matches!(o, BeginRequestOutcome::New))
+                .count(),
+            1
+        );
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter(|o| matches!(
+                    o,
+                    BeginRequestOutcome::NotDispatched(FeedRefusal {
+                        reason: RefusalReason::Unresolved,
+                        ..
+                    })
+                ))
+                .count(),
+            1
+        );
+        assert!(matches!(
+            reopened
+                .begin_request(too_soon, interval, 0, false)
+                .await
+                .unwrap(),
+            BeginRequestOutcome::NotDispatched(FeedRefusal {
+                reason: RefusalReason::Capacity,
+                ..
+            })
+        ));
     }
 
     #[tokio::test]

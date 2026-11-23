@@ -1,0 +1,109 @@
+{
+  "cases": {
+    "zero": {
+      "artifacts_sha256": {
+        "core": "65eb1dd4409ec81e9b8654f337bd888c9572b1b67c9352ca6ac6f9edd028ce82",
+        "wallet": "8c94483ca22a2c74b206de81a80ce95c8990cc2f0fa4ed5563bccd9fc92c9d19"
+      },
+      "distinct_uid_ipc": false,
+      "financial_result": {
+        "contributions": 3,
+        "credit_sats": 0,
+        "new_transfer_credit_sats": 0,
+        "synthetic_confirmed_feeds": 1,
+        "treasury_deposit_sats": 400
+      },
+      "live_provider": false,
+      "lost_melt_reply": false,
+      "nonzero_fees": false,
+      "physical_actuation": false,
+      "result": "CASHU_COMBINED_SETTLEMENT_VERIFIED",
+      "returned_change": false,
+      "strike_before_wallet_report": false,
+      "wallet_recovery_while_paused": false
+    },
+    "zero-lost": {
+      "artifacts_sha256": {
+        "core": "65eb1dd4409ec81e9b8654f337bd888c9572b1b67c9352ca6ac6f9edd028ce82",
+        "wallet": "8c94483ca22a2c74b206de81a80ce95c8990cc2f0fa4ed5563bccd9fc92c9d19"
+      },
+      "distinct_uid_ipc": false,
+      "financial_result": {
+        "contributions": 3,
+        "credit_sats": 0,
+        "new_transfer_credit_sats": 0,
+        "synthetic_confirmed_feeds": 1,
+        "treasury_deposit_sats": 400
+      },
+      "live_provider": false,
+      "lost_melt_reply": true,
+      "nonzero_fees": false,
+      "physical_actuation": false,
+      "result": "CASHU_COMBINED_SETTLEMENT_VERIFIED",
+      "returned_change": false,
+      "strike_before_wallet_report": true,
+      "wallet_recovery_while_paused": true
+    },
+    "change": {
+      "artifacts_sha256": {
+        "core": "65eb1dd4409ec81e9b8654f337bd888c9572b1b67c9352ca6ac6f9edd028ce82",
+        "wallet": "8c94483ca22a2c74b206de81a80ce95c8990cc2f0fa4ed5563bccd9fc92c9d19"
+      },
+      "distinct_uid_ipc": false,
+      "financial_result": {
+        "contributions": 4,
+        "conversion_fee_sats": 1,
+        "credit_sats": 1,
+        "new_transfer_credit_sats": 0,
+        "original_granted_credit_sats": 1000,
+        "receive_fees_sats": 2,
+        "retained_change_sats": 1,
+        "supplemental_native_sats": 1,
+        "synthetic_confirmed_feeds": 1,
+        "treasury_deposit_sats": 398
+      },
+      "live_provider": false,
+      "lost_melt_reply": false,
+      "nonzero_fees": true,
+      "physical_actuation": false,
+      "result": "CASHU_COMBINED_SETTLEMENT_VERIFIED",
+      "returned_change": true,
+      "strike_before_wallet_report": false,
+      "wallet_recovery_while_paused": false
+    },
+    "change-lost": {
+      "artifacts_sha256": {
+        "core": "65eb1dd4409ec81e9b8654f337bd888c9572b1b67c9352ca6ac6f9edd028ce82",
+        "wallet": "8c94483ca22a2c74b206de81a80ce95c8990cc2f0fa4ed5563bccd9fc92c9d19"
+      },
+      "distinct_uid_ipc": false,
+      "financial_result": {
+        "contributions": 4,
+        "conversion_fee_sats": 1,
+        "credit_sats": 1,
+        "new_transfer_credit_sats": 0,
+        "original_granted_credit_sats": 1000,
+        "receive_fees_sats": 2,
+        "retained_change_sats": 1,
+        "supplemental_native_sats": 1,
+        "synthetic_confirmed_feeds": 1,
+        "treasury_deposit_sats": 398
+      },
+      "live_provider": false,
+      "lost_melt_reply": true,
+      "nonzero_fees": true,
+      "physical_actuation": false,
+      "result": "CASHU_COMBINED_SETTLEMENT_VERIFIED",
+      "returned_change": true,
+      "strike_before_wallet_report": true,
+      "wallet_recovery_while_paused": true
+    }
+  },
+  "logs_sha256": {
+    "change-lost.log": "f5434dec8e064180c00829fcde69aac0ced97700c9923e545a3736a425582e05",
+    "zero.log": "ccb385ca7b2785ab174f61f56d2aaf381bda2ec6b5f38f79d9dd64c1368a914e",
+    "change.log": "33d0b5a0e106a703196fd633ab83e190d0b41ab5f2bfe803655b0e69fb64b471",
+    "zero-lost.log": "98c73730d78c5ec289df9ad355b6f22b9e0cbf40a2e46477ff3bd7ea2479af5d"
+  },
+  "scope": "real CDK synthetic mint/Strike and simulated confirmation; file rendezvous rather than distinct-UID financial IPC"
+}

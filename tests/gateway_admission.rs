@@ -37,6 +37,9 @@ async fn item(State(owner): State<Owner>, Path(item): Path<String>) -> String {
     }
     match item.as_str() {
         "FeederOverride" => "OFF".into(),
+        "Sun_SunPhaseName" => "DAYLIGHT".into(),
+        "Sun_Set_Start" => "2026-11-10T17:00:00-07:00".into(),
+        "Sun_DirectRadiation" => "0.5 W/m²".into(),
         "LightningGoatsCanaryRemoteEnabled" => "ON".into(),
         "LightningGoatsCanaryAck" => owner.ack.lock().unwrap().clone(),
         _ => "UNDEF".into(),
@@ -112,6 +115,17 @@ async fn gateway_protocol(
     index: usize,
     owner_v1: bool,
 ) -> (Process, String) {
+    gateway_limits(directory, owner_url, index, owner_v1, 5, 60).await
+}
+
+async fn gateway_limits(
+    directory: &impl AsRef<std::path::Path>,
+    owner_url: &str,
+    index: usize,
+    owner_v1: bool,
+    interval: i64,
+    hourly_cap: i64,
+) -> (Process, String) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     drop(listener);
@@ -124,6 +138,8 @@ async fn gateway_protocol(
     )
     .into();
     config["openhab"]["url"] = owner_url.into();
+    config["feeder"]["min_feed_interval_seconds"] = interval.into();
+    config["feeder"]["max_feeds_per_hour"] = hourly_cap.into();
     if owner_v1 {
         config["openhab"]["protocol"] = "feeder_request_v1".into();
     }
@@ -158,6 +174,80 @@ async fn gateway_protocol(
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     panic!("gateway did not start");
+}
+
+#[tokio::test]
+async fn two_second_unlimited_gateway_preserves_interval_and_replay_after_restart() {
+    let owner = Owner {
+        auto_ack: true,
+        ..Owner::default()
+    };
+    let (mock, owner_url) = mock_owner(owner.clone()).await;
+    let directory = TempDir::new().unwrap();
+    let (first, base) = gateway_limits(&directory, &owner_url, 1, false, 2, 0).await;
+    let pool = sqlx::SqlitePool::connect(&format!(
+        "sqlite://{}",
+        directory.path().join("gateway.db").display()
+    ))
+    .await
+    .unwrap();
+    for _ in 0..61 {
+        sqlx::query("INSERT INTO feeder_requests(request_id,status,created_at,updated_at) VALUES (?, 'acknowledged', unixepoch()-3, unixepoch()-3)")
+            .bind(Uuid::new_v4().to_string()).execute(&pool).await.unwrap();
+    }
+    let client = Client::new();
+    let id = Uuid::new_v4();
+    for _ in 0..2 {
+        let response = client
+            .post(format!("{base}/v1/feeder/request/{id}"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        assert_eq!(
+            response.json::<serde_json::Value>().await.unwrap()["status"],
+            "confirmed"
+        );
+    }
+    assert_eq!(owner.commands.lock().unwrap().len(), 1);
+    assert_eq!(
+        client
+            .post(format!("{base}/v1/feeder/request/{}", Uuid::new_v4()))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        429
+    );
+    assert_eq!(owner.commands.lock().unwrap().len(), 1);
+    drop(first);
+    let (_second, base) = gateway_limits(&directory, &owner_url, 2, false, 2, 0).await;
+    assert_eq!(
+        client
+            .post(format!("{base}/v1/feeder/request/{id}"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        200
+    );
+    assert_eq!(owner.commands.lock().unwrap().len(), 1);
+    // Advance only disposable fixture history to the two-second boundary.
+    sqlx::query("UPDATE feeder_requests SET updated_at=unixepoch()-2")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        client
+            .post(format!("{base}/v1/feeder/request/{}", Uuid::new_v4()))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        200
+    );
+    assert_eq!(owner.commands.lock().unwrap().len(), 2);
+    mock.abort();
 }
 
 #[tokio::test]
@@ -414,16 +504,24 @@ async fn daemon(directory: &impl AsRef<std::path::Path>, gateway_url: &str) -> P
     config["gateway"]["url"] = gateway_url.into();
     config["informational"]["interface_info_enabled"] = false.into();
     config["informational"]["weather_enabled"] = false.into();
-    let path = directory.as_ref().join("daemon.toml");
-    std::fs::write(&path, toml::to_string(&config).unwrap()).unwrap();
     for name in ["strike-api-key", "strike-webhook-secret"] {
         std::fs::write(directory.as_ref().join(name), "synthetic-mock-only").unwrap();
     }
+    launch_daemon(directory.as_ref(), address, &config).await
+}
+
+async fn launch_daemon(
+    directory: &std::path::Path,
+    address: std::net::SocketAddr,
+    config: &toml::Value,
+) -> Process {
+    let path = directory.join("daemon.toml");
+    std::fs::write(&path, toml::to_string(config).unwrap()).unwrap();
     let mut process = Process(
         Command::new(env!("CARGO_BIN_EXE_lightning-goatsd"))
             .arg("--config")
             .arg(path)
-            .env("CREDENTIALS_DIRECTORY", directory.as_ref())
+            .env("CREDENTIALS_DIRECTORY", directory)
             .env("TOKIO_WORKER_THREADS", "2")
             .stdout(Stdio::null())
             .stderr(Stdio::inherit())
@@ -444,6 +542,55 @@ async fn daemon(directory: &impl AsRef<std::path::Path>, gateway_url: &str) -> P
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     panic!("daemon startup timed out");
+}
+
+#[tokio::test]
+async fn breez_daemon_serves_discovery_without_strike_credentials() {
+    let directory = TempDir::new().unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    drop(listener);
+    let mut config: toml::Value =
+        toml::from_str(include_str!("../deploy/config.canary.toml.example")).unwrap();
+    config.as_table_mut().unwrap().remove("strike");
+    config["service"]["listen"] = address.to_string().into();
+    config["service"]["mode"] = "shadow".into();
+    config["gateway"]["url"] = "http://127.0.0.1:9/".into();
+    config["database"]["url"] =
+        format!("sqlite://{}", directory.path().join("daemon.db").display()).into();
+    let lnurl = config["lnurl"].as_table_mut().unwrap();
+    lnurl.insert("wallet_backend".into(), "breez".into());
+    lnurl.insert("invoice_expiry_seconds".into(), 900.into());
+    lnurl.insert(
+        "breez_collector".into(),
+        toml::toml! {
+            socket = "/run/lightning-goats/project.sock"
+            peer_uid = 1001
+        }
+        .into(),
+    );
+    let _daemon = launch_daemon(directory.path(), address, &config).await;
+    let client = Client::new();
+    let discovery: serde_json::Value = client
+        .get(format!("http://{address}/.well-known/lnurlp/herd"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(discovery["maxSendable"], 1_000_000_000);
+    assert_eq!(
+        client
+            .post(format!("http://{address}/api/v1/strike/webhook"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        404
+    );
 }
 
 async fn wait_credit(ledger: &lightning_goats::ledger::LedgerStore, sats: u64) {
@@ -638,7 +785,7 @@ async fn lost_rate_refusal_recovers_by_get_and_cooldown_survives_daemon_restart(
 mod invoices;
 
 #[tokio::test]
-async fn paired_store_restore_preserves_pending_identity_settlement_and_signed_bytes() {
+async fn legacy_paired_store_restore_preserves_pending_identity_settlement_and_signed_bytes() {
     use bitcoin::{
         hashes::{Hash, sha256},
         secp256k1::{Keypair, Message, Secp256k1, SecretKey},
@@ -727,17 +874,29 @@ async fn paired_store_restore_preserves_pending_identity_settlement_and_signed_b
     );
 
     // Quiesced, SQLite-consistent snapshots, including WAL state; never cp a live DB.
+    // The legacy restore rotates the core epoch and cannot restore CyberHerd.
+    // Construct the historical pre-CyberHerd schema explicitly while retaining
+    // this end-to-end pending-payment/feed/signed-byte recovery regression.
     let snapshots = TempDir::new().unwrap();
     for name in ["daemon.db", "gateway.db"] {
         let pool =
             sqlx::SqlitePool::connect(&format!("sqlite://{}", source.path().join(name).display()))
                 .await
                 .unwrap();
-        sqlx::query("VACUUM INTO ?")
-            .bind(snapshots.path().join(name).to_str().unwrap())
-            .execute(&pool)
-            .await
-            .unwrap();
+        if name == "daemon.db" {
+            legacy_core_snapshot(
+                &pool,
+                &source.path().join(name),
+                &snapshots.path().join(name),
+            )
+            .await;
+        } else {
+            sqlx::query("VACUUM INTO ?")
+                .bind(snapshots.path().join(name).to_str().unwrap())
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
         pool.close().await;
     }
     let parent = TempDir::new().unwrap();
@@ -843,6 +1002,112 @@ async fn paired_store_restore_preserves_pending_identity_settlement_and_signed_b
     mock.abort();
 }
 
+/// A test-only historical schema projection; never a production downgrade tool.
+async fn legacy_core_snapshot(
+    current: &sqlx::SqlitePool,
+    source: &std::path::Path,
+    destination: &std::path::Path,
+) {
+    for table in [
+        "reward_funding_state",
+        "reward_reservations",
+        "payout_execution_claims",
+    ] {
+        let count: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
+            .fetch_one(current)
+            .await
+            .unwrap();
+        assert_eq!(
+            count, 0,
+            "legacy fixture cannot discard active CyberHerd authority"
+        );
+    }
+    let historical = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(
+            sqlx::sqlite::SqliteConnectOptions::new()
+                .filename(destination)
+                .create_if_missing(true),
+        )
+        .await
+        .unwrap();
+    let mut migrations = sqlx::migrate::Migrator::new(std::path::Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/migrations"
+    )))
+    .await
+    .unwrap();
+    migrations
+        .migrations
+        .to_mut()
+        .retain(|migration| migration.version < 16);
+    migrations.run(&historical).await.unwrap();
+    let mut connection = historical.acquire().await.unwrap();
+    sqlx::query("ATTACH DATABASE ? AS historical_source")
+        .bind(source.to_str().unwrap())
+        .execute(&mut *connection)
+        .await
+        .unwrap();
+    sqlx::query("PRAGMA foreign_keys=OFF")
+        .execute(&mut *connection)
+        .await
+        .unwrap();
+    sqlx::query("PRAGMA recursive_triggers=OFF")
+        .execute(&mut *connection)
+        .await
+        .unwrap();
+    let tables: Vec<String> = sqlx::query_scalar("SELECT name FROM main.sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name<>'_sqlx_migrations' ORDER BY name")
+        .fetch_all(&mut *connection).await.unwrap();
+    for table in tables {
+        assert!(
+            table
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b == b'_' || b.is_ascii_digit())
+        );
+        // Singleton clock/default rows may already exist from schema installation.
+        // The original values belong in the historical snapshot, without deleting
+        // any retained production record: this destination is a fresh test store.
+        let columns: Vec<String> =
+            sqlx::query_scalar(&format!("SELECT name FROM pragma_table_info('{table}')"))
+                .fetch_all(&mut *connection)
+                .await
+                .unwrap();
+        assert!(columns.iter().all(|column| {
+            column
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b == b'_' || b.is_ascii_digit())
+        }));
+        let columns = columns.join(",");
+        sqlx::query(&format!(
+            "INSERT OR REPLACE INTO main.{table} ({columns}) SELECT {columns} FROM historical_source.{table}"
+        ))
+        .execute(&mut *connection)
+        .await
+        .unwrap();
+    }
+    sqlx::query("DELETE FROM main.sqlite_sequence")
+        .execute(&mut *connection)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO main.sqlite_sequence SELECT * FROM historical_source.sqlite_sequence")
+        .execute(&mut *connection)
+        .await
+        .unwrap();
+    sqlx::query("PRAGMA foreign_keys=ON")
+        .execute(&mut *connection)
+        .await
+        .unwrap();
+    assert!(
+        sqlx::query("PRAGMA foreign_key_check")
+            .fetch_optional(&mut *connection)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    drop(connection);
+    historical.close().await;
+}
+
 #[tokio::test]
 async fn owner_progress_denials_and_failure_never_resend_or_release_reservation() {
     let owner = Owner {
@@ -928,6 +1193,95 @@ async fn owner_progress_denials_and_failure_never_resend_or_release_reservation(
         .await
         .unwrap();
     assert_eq!(result["status"], "confirmed");
+    assert_eq!(owner.commands.lock().unwrap().len(), 1);
+    mock.abort();
+}
+
+#[tokio::test]
+async fn solar_route_is_sanitized_read_only_and_has_no_item_proxy_or_commands() {
+    let owner = Owner::default();
+    let (mock, owner_url) = mock_owner(owner.clone()).await;
+    let directory = TempDir::new().unwrap();
+    let (_gateway, base) = gateway(&directory, &owner_url, 1).await;
+    let client = Client::new();
+    let response = client.get(format!("{base}/v1/solar")).send().await.unwrap();
+    assert!(response.status().is_success());
+    let context: lightning_goats::gateway::SolarContext = response.json().await.unwrap();
+    assert!(context.fresh(lightning_goats::cyberherd::calendar::now().unwrap()));
+    assert_eq!(
+        context.phase,
+        Some(lightning_goats::gateway::SunPhase::Daylight)
+    );
+    assert_eq!(context.direct_milli_w_m2, Some(500));
+    assert!(context.sunset_at.is_some());
+    for path in [
+        "/v1/solar",
+        "/v1/solar/FeederOverride",
+        "/rest/items/FeederOverride",
+    ] {
+        assert!(
+            !client
+                .post(format!("{base}{path}"))
+                .body("ON")
+                .send()
+                .await
+                .unwrap()
+                .status()
+                .is_success()
+        );
+    }
+    assert!(owner.commands.lock().unwrap().is_empty());
+    mock.abort();
+}
+
+#[tokio::test]
+async fn pulse_is_visible_before_completion_without_spending_or_redispatch() {
+    let owner = Owner {
+        owner_v1: true,
+        ..Owner::default()
+    };
+    let (mock, url) = mock_owner(owner.clone()).await;
+    let dir = TempDir::new().unwrap();
+    let (_gateway, base) = gateway_protocol(&dir, &url, 1, true).await;
+    let ledger = credited(&dir, 1000).await;
+    let worker_ledger = ledger.clone();
+    let worker = tokio::spawn(async move {
+        lightning_goats::feeder::run_feed_step(
+            &worker_ledger,
+            &lightning_goats::gateway::GatewayClient::new(&base).unwrap(),
+            1000,
+            lightning_goats::config::RuntimeMode::Active,
+        )
+        .await
+        .unwrap()
+    });
+    tokio::time::timeout(Duration::from_secs(15), async {
+        let id = loop {
+            if let Some(id) = owner.commands.lock().unwrap().first().cloned() {
+                break id;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        };
+        *owner.ack.lock().unwrap() = owner_result(&id, "running", "pulse_started");
+        loop {
+            if ledger
+                .events_after(0, 100)
+                .await
+                .unwrap()
+                .iter()
+                .any(|e| e.event_type == "feeder_pulse_started")
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(ledger.feed_credit_sats().await.unwrap(), 1000);
+        *owner.ack.lock().unwrap() = owner_result(&id, "complete", "complete");
+        worker.await.unwrap();
+    })
+    .await
+    .unwrap();
+    assert_eq!(ledger.feed_credit_sats().await.unwrap(), 0);
     assert_eq!(owner.commands.lock().unwrap().len(), 1);
     mock.abort();
 }

@@ -1,0 +1,10 @@
+{
+  "test": "cashu::financial_release::tests::developer_owned_or_aliased_or_writable_approval_is_not_authority",
+  "binary_sha256": "b23d3f5eb9c89eec263566f8cda2d5c7fe78e9b9731fa6e97dec2d44c6b951cf",
+  "exit_code": 101,
+  "cause": "synchronous test calls private_ipc::uid using Tokio UnixStream::pair outside a runtime",
+  "focused_stdout": "\nrunning 1 test\ntest cashu::financial_release::tests::developer_owned_or_aliased_or_writable_approval_is_not_authority ... FAILED\n\nfailures:\n\nfailures:\n    cashu::financial_release::tests::developer_owned_or_aliased_or_writable_approval_is_not_authority\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 507 filtered out; finished in 0.00s\n\n",
+  "focused_stderr": "\nthread 'cashu::financial_release::tests::developer_owned_or_aliased_or_writable_approval_is_not_authority' panicked at /home/linuxuser/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.53.3/src/net/unix/stream.rs:922:18:\nthere is no reactor running, must be called from the context of a Tokio 1.x runtime\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n",
+  "correction": "staged async Tokio test; native correction not yet qualified",
+  "full_suite": "still running; do not treat this focused result as suite completion"
+}

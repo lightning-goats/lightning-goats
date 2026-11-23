@@ -1,0 +1,102 @@
+{
+  "artifacts_sha256": {
+    "core": "4ec3642187631d52cfb93e1ebc2babad6d4577795efee7d9bedd36c46ee4755e",
+    "wallet": "1b9a361bbe97a3e984118fe70429f8c8fec8e32f4121b19c6a3669180795ffbd"
+  },
+  "distinct_uid_ipc": false,
+  "financial_result": {
+    "contributions": 3,
+    "credit_sats": 0,
+    "new_transfer_credit_sats": 0,
+    "synthetic_confirmed_feeds": 1,
+    "treasury_deposit_sats": 400
+  },
+  "live_provider": false,
+  "lost_melt_reply": true,
+  "physical_actuation": false,
+  "result": "CASHU_COMBINED_SETTLEMENT_VERIFIED",
+  "strike_before_wallet_report": true,
+  "wallet_recovery_while_paused": true,
+  "core_full_gate_status": "passed; source hashes unchanged",
+  "wallet_gates": {
+    "fmt": 0,
+    "clippy": 0,
+    "tests": 0,
+    "vendor": 0
+  },
+  "wallet_test_results": [
+    "test result: ok. 148 passed; 0 failed; 6 ignored; 0 measured; 0 filtered out; finished in 77.42s",
+    "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s",
+    "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+    "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s",
+    "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s",
+    "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+  ],
+  "source_manifests_sha256": {
+    "core": "7c7cbcc1e23924e7af0e48337613190db22e9c3d30d2ce029f5e3477f7fd2c36",
+    "wallet": "763d620f68069ad7f0c5bc9c079f8405d7436e709ed558559161eee70360e717"
+  },
+  "limitations": [
+    "File rendezvous between native test artifacts; distinct-UID private IPC not composed here",
+    "Synthetic mint/Strike; no provider/physical actuation",
+    "Zero fees; combined nonzero fee/change case remains pending"
+  ],
+  "successful_reply_regression": {
+    "artifacts_sha256": {
+      "core": "4ec3642187631d52cfb93e1ebc2babad6d4577795efee7d9bedd36c46ee4755e",
+      "wallet": "1b9a361bbe97a3e984118fe70429f8c8fec8e32f4121b19c6a3669180795ffbd"
+    },
+    "distinct_uid_ipc": false,
+    "financial_result": {
+      "contributions": 3,
+      "credit_sats": 0,
+      "new_transfer_credit_sats": 0,
+      "synthetic_confirmed_feeds": 1,
+      "treasury_deposit_sats": 400
+    },
+    "live_provider": false,
+    "lost_melt_reply": false,
+    "physical_actuation": false,
+    "result": "CASHU_COMBINED_SETTLEMENT_VERIFIED",
+    "strike_before_wallet_report": false,
+    "wallet_recovery_while_paused": false
+  },
+  "wallet_source_hashes_unchanged": true,
+  "core_gates": {
+    "fmt": 0,
+    "clippy": 0,
+    "tests": 0,
+    "sqlite": 0,
+    "whitespace": 0,
+    "audit": 0
+  },
+  "core_test_results": [
+    "test result: ok. 493 passed; 0 failed; 9 ignored; 0 measured; 0 filtered out; finished in 764.71s",
+    "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+    "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 32.40s",
+    "test result: ok. 26 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 21.50s",
+    "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.52s",
+    "test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+    "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.28s",
+    "test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 43.91s",
+    "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s",
+    "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.75s",
+    "test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.27s",
+    "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.50s",
+    "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.24s",
+    "test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.15s",
+    "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.07s",
+    "test result: ok. 29 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 20.85s",
+    "test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.42s",
+    "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+  ],
+  "core_tests_passed": 636,
+  "core_tests_ignored": 10
+}

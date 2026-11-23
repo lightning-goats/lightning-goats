@@ -1,0 +1,189 @@
+{
+  "production_state_changed": false,
+  "scope": "core expiry correction and wallet original split-request binding, before subsequent output-verification edit",
+  "checks": {
+    "core": {
+      "source_hashes_rechecked": true,
+      "snapshot_sha256": "7e5211fdc8318a6916c8fdfe0a6735c226b8c7129e7414a693e49eda01889d3b",
+      "full_test_log_sha256": "658fc869da4cc3ceb6801cdfa52601c278b86598df672faca5c2ac62a411b473",
+      "suite_results": [
+        {
+          "passed": 484,
+          "failed": 0,
+          "ignored": 8
+        },
+        {
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 4,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 26,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 21,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 10,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 0,
+          "failed": 0,
+          "ignored": 1
+        },
+        {
+          "passed": 4,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 29,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 9,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "total_passed": 627,
+      "strict_clippy": "passed",
+      "format": "passed",
+      "vendor": "passed"
+    },
+    "wallet": {
+      "source_hashes_rechecked": true,
+      "snapshot_sha256": "ed7c3073609cc0173147ed9dae9dda37da0a14bc385f64ce74296cce27ab7e36",
+      "full_test_log_sha256": "2af94ab5d8df76b4ff3064eef7ff1378aa4d15ad47f4e0ff49e067bb3f103531",
+      "suite_results": [
+        {
+          "passed": 133,
+          "failed": 0,
+          "ignored": 5
+        },
+        {
+          "passed": 3,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "total_passed": 140,
+      "strict_clippy": "passed",
+      "format": "passed",
+      "vendor": "passed"
+    }
+  },
+  "wallet_initial_run": {
+    "passed": 132,
+    "failed": 1,
+    "ignored": 5,
+    "failure": "existing helper cancellation deadline elapsed; focused helper rerun and unchanged full suite passed; no timeout changes"
+  }
+}

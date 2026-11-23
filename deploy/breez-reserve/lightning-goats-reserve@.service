@@ -1,0 +1,37 @@
+[Unit]
+Description=Lightning Goats Breez Spark reserve (%i)
+After=network-online.target systemd-tmpfiles-setup.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lg-reserve
+Group=lg-reserve
+StateDirectory=lightning-goats-reserve-%i
+StateDirectoryMode=0700
+LoadCredentialEncrypted=reserve-seed:/etc/credstore.encrypted/lightning-goats-reserve/%i-seed.cred
+Environment=LG_RESERVE_NETWORK=%i
+Environment=LG_RESERVE_SPEND=no
+Environment=LG_RESERVE_RECEIVE_SOCKET=/run/lightning-goats-reserve/%i/receive/http.sock
+Environment=LG_RESERVE_FUND_SOCKET=/run/lightning-goats-reserve/%i/funding/http.sock
+EnvironmentFile=-/etc/lightning-goats-reserve/%i.env
+ExecStart=/opt/lightning-goats-reserve/current/bin/lightning-goats-reserve
+Restart=on-failure
+RestartSec=15
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+CapabilityBoundingSet=
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/run/lightning-goats-reserve/%i/receive /run/lightning-goats-reserve/%i/funding
+
+[Install]
+WantedBy=multi-user.target

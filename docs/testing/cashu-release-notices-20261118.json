@@ -1,0 +1,104 @@
+{
+  "scope": "Release matches and canonical license text coverage for the five missing entries in the locked notice inventory",
+  "releases": [
+    {
+      "package": "lightning-invoice@0.34.1",
+      "release_url": "https://github.com/lightningdevkit/rust-lightning/releases/tag/v0.2.5",
+      "tag": "v0.2.5",
+      "tag_object": "00d027e256895fb7fd92c7388982de4af7c5a1ad",
+      "commit": "5bc1dc84b3a1b084f84de4b7ece3d978b678d894",
+      "tree": "e87ea43d1325fc6cf83e0a6ab4aa7771f4aedbef",
+      "github_reported_tag_signature_verified": false,
+      "tree_objects_recomputed": 77,
+      "archive_sha256": "47d83bd798e04ab9eecc8bbef1fa17d3808859bcdc0406bd16c55d51c8834444",
+      "byte_matching_source_members": 9,
+      "compared_source_members": 9,
+      "manifest_difference": null,
+      "license_blobs": {
+        "LICENSE-MIT": "9d982a4d63256f23b8cc0854024d134e1140f4f3",
+        "LICENSE-APACHE": "261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64"
+      }
+    },
+    {
+      "package": "possiblyrandom@0.2.1",
+      "release_url": "https://github.com/lightningdevkit/rust-lightning/releases/tag/v0.2.5",
+      "tag": "v0.2.5",
+      "tag_object": "00d027e256895fb7fd92c7388982de4af7c5a1ad",
+      "commit": "5bc1dc84b3a1b084f84de4b7ece3d978b678d894",
+      "tree": "e87ea43d1325fc6cf83e0a6ab4aa7771f4aedbef",
+      "github_reported_tag_signature_verified": false,
+      "tree_objects_recomputed": 77,
+      "archive_sha256": "9c564dbf654befd49035528299f1208a40508f6e07efb11c163444e304e4484f",
+      "byte_matching_source_members": 2,
+      "compared_source_members": 2,
+      "manifest_difference": null,
+      "license_blobs": {
+        "LICENSE-MIT": "9d982a4d63256f23b8cc0854024d134e1140f4f3",
+        "LICENSE-APACHE": "261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64"
+      }
+    },
+    {
+      "package": "lightning@0.2.8",
+      "release_url": "https://github.com/lightningdevkit/rust-lightning/releases/tag/v0.2.8",
+      "tag": "v0.2.8",
+      "tag_object": "f0b3aeaafab0ee510ccdbcaf25597508f3c1d24b",
+      "commit": "254bc9687dd190375956ad790f87239b97ebd058",
+      "tree": "00eb3ff5ef51fc50e35af663c19608d4d9d377e8",
+      "github_reported_tag_signature_verified": false,
+      "tree_objects_recomputed": 77,
+      "archive_sha256": "1cb355abfb61d8ffe201cd5ce6b3e4304c9a897b05988ceed71987f9514fb642",
+      "byte_matching_source_members": 136,
+      "compared_source_members": 137,
+      "manifest_difference": {
+        "source_git_blob": "3e71877c9785d5908d12d7b49f396af41a1c7033",
+        "archive_git_blob": "e2f035bb06543a3815d5d9b1132e52c66fc62737",
+        "difference": "Three-line taproot-only git dependency stanza omitted from Cargo.toml.orig",
+        "omitted_bytes_sha256": "b4f1ad7c708f495eb7cf2c9be10a67dbb912051ca043bedc30c7ca88d919ee40"
+      },
+      "license_blobs": {
+        "LICENSE-MIT": "9d982a4d63256f23b8cc0854024d134e1140f4f3",
+        "LICENSE-APACHE": "261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64"
+      }
+    }
+  ],
+  "spdx_catalog": {
+    "release_url": "https://github.com/spdx/license-list-data/releases/tag/v3.29.0",
+    "tag": "v3.29.0",
+    "commit": "31ba1a50e5397e00a304dbadc76531740e89ee48",
+    "tree": "dc9f030bcb3744a0a351fad8eafb94015f4305fa",
+    "packages": [
+      {
+        "package": "bitcoin-payment-instructions@0.7.1",
+        "archive_sha256": "29f5b43b0e8338cd36ce7940bd6b8a007d54f1cbe25314ec3fbba566f870b085",
+        "archive_manifest_git_blob": "ec53fdf82f84939e8047a192b16070a8812a8e08",
+        "archive_reported_upstream_commit": "3d5400ff95373a78138c09f2e310c751cc7d2770",
+        "declared_license": "MIT OR Apache-2.0",
+        "catalog_license_id": "Apache-2.0",
+        "catalog_url": "https://github.com/spdx/license-list-data/blob/31ba1a50e5397e00a304dbadc76531740e89ee48/text/Apache-2.0.txt",
+        "catalog_git_blob": "137069b823873b8bcf42979bcf8e9371052d26a2",
+        "catalog_sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff",
+        "archive_notice_file_present": false
+      },
+      {
+        "package": "hex_lit@0.1.1",
+        "archive_sha256": "3011d1213f159867b13cfd6ac92d2cd5f1345762c63be3554e84092d85a50bbd",
+        "archive_manifest_git_blob": "7c04a4bbeabef5fcc10d53f1428e0aa44d9a4d09",
+        "archive_reported_upstream_commit": "a1b61585654a3280103a9622c272b2f8ba278a47",
+        "declared_license": "MITNFA",
+        "catalog_license_id": "MITNFA",
+        "catalog_url": "https://github.com/spdx/license-list-data/blob/31ba1a50e5397e00a304dbadc76531740e89ee48/text/MITNFA.txt",
+        "catalog_git_blob": "6d44edb3db0e68a518a0286ce5f8d78e9b565d1e",
+        "catalog_sha256": "d436716f7a05466f52443893079761c8a88f4967d0ef490fabc0a1c9ef1c3a1d",
+        "archive_notice_file_present": false
+      }
+    ]
+  },
+  "strict_export": {
+    "package_entries": 462,
+    "missing_notice_texts": 0,
+    "catalog_entries": 2,
+    "distribution_ready": false,
+    "exported_index_sha256": "267c4ea4fffbfc78b3a4fc3e9c2b8b58576499b6d760bf90225d9cffae7b9951",
+    "local_inventory_and_supplement_tests_passed": 15
+  }
+}

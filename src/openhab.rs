@@ -20,6 +20,7 @@ pub enum OwnerProtocol {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OwnerOutcome {
+    PulseStarted,
     Absent,
     Pending,
     Complete,
@@ -239,6 +240,21 @@ impl OpenHabClient {
         Ok(Some(parse_temperature_f(&state)?))
     }
 
+    /// Only these fixed, read-only Astro Items are exposed through the gateway.
+    pub async fn solar_context(&self) -> Result<crate::gateway::SolarContext> {
+        let (phase, sunset, radiation) = tokio::join!(
+            self.item_state("Sun_SunPhaseName"),
+            self.item_state("Sun_Set_Start"),
+            self.item_state("Sun_DirectRadiation"),
+        );
+        Ok(crate::gateway::SolarContext::parse(
+            phase.as_deref().ok(),
+            sunset.as_deref().ok(),
+            radiation.as_deref().ok(),
+            crate::gateway::now_epoch()?,
+        ))
+    }
+
     async fn item_state(&self, item: &str) -> Result<String> {
         self.item_state_bounded(item, 4096).await
     }
@@ -276,6 +292,16 @@ impl OpenHabClient {
             return parse_result_v2(&self.item_state(&self.ack_item).await?, request_id);
         };
         if entry.status == "accepted" {
+            // Only the correlated post-ON notification can advance presentation.
+            // The retained ledger still owns completion and reconciliation.
+            if let Ok(raw) = self.item_state(&self.ack_item).await
+                && matches!(
+                    parse_result_v2(&raw, request_id),
+                    Ok(OwnerOutcome::PulseStarted)
+                )
+            {
+                return Ok(OwnerOutcome::PulseStarted);
+            }
             return Ok(OwnerOutcome::Pending);
         }
         let completed_at = parse_v2_time(
@@ -484,7 +510,8 @@ fn parse_result_v2(raw: &str, expected: Uuid) -> Result<OwnerOutcome> {
     match (result.status.as_str(), result.reason.as_str()) {
         // Notification alone never certifies durable completion.
         ("complete", "complete") => Ok(OwnerOutcome::Ambiguous),
-        ("accepted", "accepted") | ("running", "pulse_started") => Ok(OwnerOutcome::Pending),
+        ("accepted", "accepted") => Ok(OwnerOutcome::Pending),
+        ("running", "pulse_started") => Ok(OwnerOutcome::PulseStarted),
         (
             "denied",
             "request_invalid"
@@ -548,9 +575,8 @@ fn parse_owner_result(raw: &str, expected: Uuid) -> Result<OwnerOutcome> {
     }
     match (result.status, result.reason.as_str()) {
         (OwnerStatus::Complete, "complete") => Ok(OwnerOutcome::Complete),
-        (OwnerStatus::Accepted, "accepted") | (OwnerStatus::Running, "pulse_started") => {
-            Ok(OwnerOutcome::Pending)
-        }
+        (OwnerStatus::Accepted, "accepted") => Ok(OwnerOutcome::Pending),
+        (OwnerStatus::Running, "pulse_started") => Ok(OwnerOutcome::PulseStarted),
         (
             OwnerStatus::Denied,
             "request_invalid"
@@ -707,6 +733,7 @@ mod tests {
             let id = Uuid::parse_str(case["result"]["requestId"].as_str().unwrap()).unwrap();
             let expected = match case["expected"].as_str().unwrap() {
                 "pending" => OwnerOutcome::Pending,
+                "pulse_started" => OwnerOutcome::PulseStarted,
                 "complete" => OwnerOutcome::Complete,
                 "rejected" => OwnerOutcome::Rejected,
                 "ambiguous" => OwnerOutcome::Ambiguous,

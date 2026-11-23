@@ -1,0 +1,14 @@
+{
+  "crypto_sign_calls": 2,
+  "external_network": false,
+  "financial_state_unchanged": true,
+  "lost_reply_replayed": true,
+  "restart_crypto_calls": 0,
+  "result": "CASHU_SIGNER_CROSS_UID_VERIFIED",
+  "retained_operations": 2,
+  "signer_uid": 60000,
+  "synthetic_crypto": true,
+  "unauthorized_uid": 60002,
+  "wallet_test_sha256": "4ee1d4b677f170ebe136631a982f4fd379152e42a4279665d2053746811db086",
+  "wallet_uid": 60001
+}

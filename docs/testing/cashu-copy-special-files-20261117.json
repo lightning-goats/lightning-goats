@@ -1,0 +1,39 @@
+{
+  "date": "2026-11-17",
+  "source_parent_commit": "b03724e4a967e31ea646bd8be49a8ac67040b246",
+  "source_files_sha256": {
+    "tools/cashu-compat/src/backup_copy.rs": "888e0ef7d1f59a2d4e99f5d9031281ffbee2c2b4888981cdadc568f2e18f2895",
+    "deploy/scripts/test-cashu-copy-normalization.py": "b0dfc092bb6d44572028b5a66ac8d8f95f298c05a54247d3698222a1b2edbe55"
+  },
+  "pre_fix": {
+    "native_marker_fifo_open_blocked": true,
+    "disposable_child_killed_after_seconds": 1,
+    "application_state_accessed": false
+  },
+  "correction": "Open frozen inputs with O_NONBLOCK before checking the descriptor metadata; retain O_NOFOLLOW, owner, mode, link, byte and identity checks.",
+  "bounded_regressions": {
+    "marker_fifo": "refused",
+    "raw_database_fifo": "refused",
+    "raw_wal_fifo": "refused",
+    "subprocess_deadline_seconds_per_case": 3
+  },
+  "native_fixture": {
+    "cli_sha256": "dcff902d29a9476430d1968084d4950fd8e91849c5d6e60eaecedd3f02ecc00a",
+    "committed_wal_included": true,
+    "engine": "3.54.1",
+    "implicit_rowids_and_signed_bytes_preserved": true,
+    "interrupted_stage_retained": true,
+    "live_financial_or_physical_operations": false,
+    "negative_cases": 24,
+    "positive_cases": 2,
+    "quiescence_or_restore_qualified": false,
+    "result": "CASHU_COPY_NORMALIZATION_VERIFIED"
+  },
+  "format": "passed",
+  "locked_all_target_all_feature_strict_clippy": "passed",
+  "selected_source_ci": "pending",
+  "limitations": [
+    "Disposable root-owned fixtures only; no installed state, services, keys or provider access.",
+    "This corrects the native copy primitive; coordinated encrypted collection and funded recovery remain unfinished."
+  ]
+}

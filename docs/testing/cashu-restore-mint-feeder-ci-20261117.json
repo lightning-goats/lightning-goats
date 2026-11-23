@@ -1,0 +1,33 @@
+{
+  "source_commit": "1d520771df2c505fe1b4e9a8cdb945a54a91a476",
+  "checkout_commit": "6cab8767c3ba5a9a46df3f74bfad3df95036725a",
+  "matching_source_and_checkout_tree": "24b9540830ffaceaf1031103b7df2ddd77e20129",
+  "ci_run": "https://github.com/lightning-goats/lightning-goats/actions/runs/44192550148",
+  "deployment_run": "https://github.com/lightning-goats/lightning-goats/actions/runs/44192550232",
+  "all_ten_workflows_passed": true,
+  "artifact": {
+    "id": 14378581036,
+    "size_bytes": 19586,
+    "sha256": "db62a6135b8db5b1d360bd2ab37d8f66a2a006c30f789cb59f70725ce4a0104e",
+    "members_reviewed": ["cashu-funded-rollback.json", "cashu-native-backup.json"]
+  },
+  "funded_rollback": {
+    "original_mint_quote_selected": true,
+    "original_feeder_status_verified": true,
+    "original_strike_receive_verified": true,
+    "restored_core_startup_fenced": true,
+    "restored_wallet_writer_fenced": true,
+    "synthetic_strike_deposit_sats": 398,
+    "conversion_fee_sats": 2,
+    "synthetic_confirmed_feeds": 1,
+    "extra_transfer_credit_sats": 0
+  },
+  "archive_fixture": {
+    "authenticated_launcher": true,
+    "real_age_archive": true,
+    "staged_roles": 6,
+    "unknown_mint_strike_and_feeder_origins_refused": true,
+    "committed_wal_preserved": true
+  },
+  "scope": "Synthetic mint, Strike and feeder; initialized native journals in the separate encrypted archive fixture. No live provider verification, physical actuation or recovery fence clearance."
+}

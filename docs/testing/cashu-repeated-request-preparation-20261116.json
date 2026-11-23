@@ -1,0 +1,21 @@
+{
+  "status": "implemented-native-qualification-pending",
+  "scenario": "600 native + 250 nutzap + two distinct 75-sat ordinary acquisitions to one reusable descriptor",
+  "expected_original_credit_sats": 1000,
+  "expected_receive_fee_sats": 3,
+  "expected_conversion_fee_sats": 3,
+  "expected_strike_deposit_sats": 397,
+  "expected_contributions": 4,
+  "expected_remaining_credit_sats": 0,
+  "expected_simulated_confirmed_feeds": 1,
+  "independent_capabilities_required": true,
+  "all_http_receipts_replayed_after_consumption": true,
+  "source_sha256": {
+    "src/strike_cashu_combined_fixture.rs": "e164eb5158a3380791629c178f008ba924e22b962ece97b7e5ae4e4c89e88772",
+    "tools/cashu-compat/src/acquisition/tests/core_settlement_fixture.rs": "9f981cd01778220d563eacc790b70c7cf0c9e7c83747e33133b99557e7718181",
+    "deploy/scripts/test-cashu-combined-settlement.py": "264926c2d004012fd8a84eef700fbeeac274bbed4120899ca183b83b7b9d1f8b"
+  },
+  "real_provider": false,
+  "physical_effects": false,
+  "native_pass_claimed": false
+}

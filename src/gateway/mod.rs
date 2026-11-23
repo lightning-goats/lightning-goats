@@ -1,6 +1,8 @@
 mod client;
 mod server;
+mod solar;
 mod store;
+pub use solar::{SolarContext, SunPhase};
 mod weather;
 
 pub use client::{

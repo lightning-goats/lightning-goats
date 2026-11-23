@@ -388,7 +388,6 @@ def run(installation, core_transaction, destination, create):
     units, server, thread, cycles = [], None, None, []
     credentials = {r: {} for r in users}
     keys = {'core': {'strike-api-key': b'SYNTHETIC-NO-PROVIDER-RECEIVE-KEY', 'strike-webhook-secret': b'SYNTHETIC-NO-REAL-WEBHOOK-SECRET'},
-            'cyberherd-payout': {'strike-payout-api-key': SYNTHETIC_PAYOUT},
             'cyberherd-signer': {'nostr-client-key': ('0' * 63 + '1').encode()}}
     counts = {'post': 0}
     account = str(uuid.uuid4())

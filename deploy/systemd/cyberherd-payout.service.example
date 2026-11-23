@@ -9,7 +9,6 @@ User=cyberherd-payout
 Group=cyberherd-payout
 SupplementaryGroups=cyberherd-bridge cyberherd-plans cyberherd-payout-signer
 ExecStart=/usr/local/bin/cyberherd-payoutd --config /etc/cyberherd-payout/config.toml
-LoadCredentialEncrypted=strike-payout-api-key:/etc/credstore.encrypted/cyberherd-strike-payout
 Restart=on-failure
 RestartSec=5s
 StateDirectory=cyberherd-payout

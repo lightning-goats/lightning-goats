@@ -14,8 +14,6 @@ mod execution_tests;
 mod intake_tests;
 #[path = "outcome_workflow_tests.rs"]
 mod outcome_workflow_tests;
-#[path = "worker_tests.rs"]
-mod worker_tests;
 
 fn now() -> i64 {
     crate::cyberherd::calendar::now().unwrap()
@@ -576,7 +574,14 @@ async fn wrong_currency_amount_fees_expiry_and_identity_never_create_execution_a
     let wrong = Sender::test_client(scope, KEY.into(), &w.origin);
     // Credential mismatch is checked independently; account mismatch against
     // an actual committed capability is covered by the provider's scope gate.
-    assert!(Sender::new(w.policy.scope.provider.clone(), "different-key".into()).is_err());
+    assert!(
+        Sender::test_client(
+            w.policy.scope.provider.clone(),
+            "different-key".into(),
+            &w.origin
+        )
+        .is_err()
+    );
     assert!(wrong.is_ok());
     assert!(wrong.unwrap().create_quote(&intent).await.is_err());
     assert!(w.mock.lock().unwrap().patch_ids.is_empty());

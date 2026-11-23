@@ -6,7 +6,7 @@ use super::{
 };
 use crate::{
     cyberherd::payout_bridge::AuthenticatedExport,
-    payout::provider::{QuoteDocument, QuoteIntent, QuoteRecord},
+    payout::provider::{QuoteDocument, QuoteIntent},
 };
 
 pub(crate) struct Work {
@@ -505,6 +505,7 @@ impl Store {
         Ok(false)
     }
 
+    #[cfg(test)]
     pub(crate) async fn take_work(&self, now: i64) -> Result<Option<Work>> {
         self.take_provider_work(now, "strike").await
     }
@@ -559,22 +560,6 @@ SELECT j.* FROM jobs j LEFT JOIN payout_worker_attempts a ON a.work_key=j.work_k
                 bail!("current quote scope changed");
             }
             Ok(QuoteIntent(doc))
-        })
-        .transpose()
-    }
-    pub(crate) async fn quote_terms(&self, id: Uuid) -> Result<Option<QuoteRecord>> {
-        let raw: Option<String> =
-            sqlx::query_scalar("SELECT document_json FROM payout_quote_records WHERE intent_id=?")
-                .bind(id.to_string())
-                .fetch_optional(&self.pool)
-                .await?;
-        raw.map(|raw| -> Result<_> {
-            let record: QuoteRecord = serde_json::from_str(&raw)?;
-            record.validate()?;
-            if record.request.id != id || record.request.scope != self.policy.scope.provider {
-                bail!("quote terms scope changed");
-            }
-            Ok(record)
         })
         .transpose()
     }

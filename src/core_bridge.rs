@@ -328,6 +328,7 @@ impl AuthenticatedExecutionLease {
     pub fn core_uid(&self) -> u32 {
         self.core_uid
     }
+    #[cfg(test)]
     pub(crate) fn require(
         &self,
         request: &crate::payout::execution::Request,

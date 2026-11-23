@@ -363,7 +363,7 @@ mod tests {
         let mut settled = payment(&format!("native-{marker}"), actual);
         settled.context_json = Some(json!({"receive_request_id":id.to_string()}).to_string());
         settled.settled_at = Some(now);
-        store.record_payment(&settled).await.unwrap();
+        store.record_reconciled_invoice(&settled, id).await.unwrap();
         (raw, now)
     }
 

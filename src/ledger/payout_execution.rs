@@ -137,6 +137,81 @@ impl LedgerStore {
         Ok((digest, now))
     }
 
+    pub(crate) async fn claim_member_ecash(
+        &self,
+        terms: &crate::payout::cashu::MemberExecution,
+        policy: &crate::reward_funding::RewardPolicy,
+        enabled: bool,
+    ) -> Result<(String, i64)> {
+        let r = &terms.reservation;
+        let digest = terms.digest()?;
+        if !enabled || policy.owner != r.owner || policy.funding_source.is_strike() {
+            bail!("member ecash execution disabled or funding changed");
+        }
+        let mut cursor = 0;
+        let mut offset = 0;
+        loop {
+            let page = self
+                .operator_funding_page(policy, r.epoch, r.request_id, cursor)
+                .await?;
+            let end = offset + page.allocations.len();
+            if page.reservation.as_ref() != Some(r)
+                || terms.lots.get(offset..end) != Some(page.allocations.as_slice())
+            {
+                bail!("member assignment differs from verified funding");
+            }
+            offset = end;
+            if !page.more {
+                break;
+            }
+            if page.through <= cursor {
+                bail!("member funding cursor did not advance");
+            }
+            cursor = page.through;
+        }
+        if offset != terms.lots.len() {
+            bail!("extra member funding lots");
+        }
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let id = r.id.to_string();
+        let row = sqlx::query("SELECT * FROM reward_reservations WHERE id=?")
+            .bind(&id)
+            .fetch_one(&mut *tx)
+            .await?;
+        let frozen: crate::reward_funding::RewardPolicy =
+            serde_json::from_str(&row.try_get::<String, _>("policy_json")?)?;
+        let funding = confirmed_funding(&mut tx, r.request_id)
+            .await?
+            .context("missing retained member funding")?;
+        let epoch: String =
+            sqlx::query_scalar("SELECT stream_id FROM overlay_identity WHERE singleton=1")
+                .fetch_one(&mut *tx)
+                .await?;
+        let now = budget_time(&mut tx, true).await?;
+        if decode_reservation(&row)? != *r
+            || epoch != r.epoch.to_string()
+            || frozen.funding_source != policy.funding_source
+            || funding.proof_hash != r.funding_hash
+            || r.reserved_sats > policy.budget(funding.retained_cashu_sats)?
+            || r.reserved_sats > frozen.budget(funding.retained_cashu_sats)?
+            || budget_usage(&mut tx, now).await? > policy.max_sats_per_24h
+        {
+            bail!("member ecash exceeds current or frozen funding policy");
+        }
+        let previous:Option<String>=sqlx::query_scalar("SELECT terms_hash FROM member_ecash_execution_claims WHERE reservation_id=? AND member=?")
+            .bind(&id).bind(&terms.member).fetch_optional(&mut *tx).await?;
+        match previous {
+            Some(saved) if saved != digest => bail!("member ecash retry changed terms"),
+            Some(_) => {}
+            None => {
+                sqlx::query("INSERT INTO member_ecash_execution_claims(reservation_id,member,gross_sats,terms_hash) VALUES(?,?,?,?)")
+                .bind(id).bind(&terms.member).bind(to_i64(terms.gross_sats,"member gross")?).bind(&digest).execute(&mut *tx).await?;
+            }
+        }
+        tx.commit().await?;
+        Ok((digest, now))
+    }
+
     /// Persist the original Cashu invoice before a collector may submit proofs.
     /// Historical matches still require fresh authority before another submission.
     pub async fn claim_cashu_execution(
@@ -410,11 +485,22 @@ pub(super) async fn validate_outcome(
             .fetch_one(&mut **tx)
             .await?;
     let policy: crate::reward_funding::RewardPolicy = serde_json::from_str(&policy)?;
+    if let crate::payout::outcome::Disposition::MemberEcash { terms_hash, .. } =
+        &packet.row.disposition
+    {
+        let claimed:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM member_ecash_execution_claims WHERE reservation_id=? AND member=? AND terms_hash=? AND gross_sats=?)")
+            .bind(packet.header.reservation.id.to_string()).bind(&packet.row.member).bind(terms_hash).bind(i64::try_from(packet.row.gross_sats)?).fetch_one(&mut **tx).await?;
+        anyhow::ensure!(
+            !policy.funding_source.is_strike() && claimed,
+            "missing original member ecash authorization"
+        );
+        return Ok(());
+    }
     if matches!(
         packet.row.disposition,
         crate::payout::outcome::Disposition::OperatorReclaimed
     ) {
-        let claimed:bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM cashu_payout_execution_claims WHERE reservation_id=? AND member=?)")
+        let claimed:bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM (SELECT reservation_id,member FROM cashu_payout_execution_claims UNION ALL SELECT reservation_id,member FROM member_ecash_execution_claims) WHERE reservation_id=? AND member=?)")
             .bind(packet.header.reservation.id.to_string()).bind(&packet.row.member).fetch_one(&mut **tx).await?;
         anyhow::ensure!(
             !policy.funding_source.is_strike() && !claimed,

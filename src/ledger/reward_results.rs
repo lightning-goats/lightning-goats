@@ -71,7 +71,12 @@ impl LedgerStore {
                     );
                     Status::Failed
                 }
-                Disposition::CashuPaid {
+                Disposition::MemberEcash {
+                    amount_sats,
+                    fee_sats,
+                    ..
+                }
+                | Disposition::CashuPaid {
                     amount_sats,
                     fee_sats,
                     ..

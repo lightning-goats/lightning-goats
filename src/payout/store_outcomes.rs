@@ -115,10 +115,21 @@ impl Store {
         grant: Uuid,
         socket: &std::path::Path,
     ) -> Result<bool> {
-        let rows = sqlx::query("SELECT r.member,r.gross_sats,v.intent_id,g.request_id,g.plan_hash,c.reason FROM payout_rows r JOIN payout_grants g ON g.id=r.grant_id LEFT JOIN payout_unsubmitted c ON c.grant_id=r.grant_id AND c.member=r.member LEFT JOIN payout_invoice_intents i ON i.grant_id=r.grant_id AND i.member=r.member LEFT JOIN payout_invoices v ON v.intent_id=i.id WHERE r.grant_id=? ORDER BY r.member")
+        let rows = sqlx::query("SELECT e.terms_hash,e.amount_sat,e.fee_sat,r.member,r.gross_sats,v.intent_id,g.request_id,g.plan_hash,c.reason FROM payout_rows r JOIN payout_grants g ON g.id=r.grant_id LEFT JOIN member_ecash_ready e ON e.grant_id=r.grant_id AND e.member=r.member LEFT JOIN payout_unsubmitted c ON c.grant_id=r.grant_id AND c.member=r.member LEFT JOIN payout_invoice_intents i ON i.grant_id=r.grant_id AND i.member=r.member LEFT JOIN payout_invoices v ON v.intent_id=i.id WHERE r.grant_id=? ORDER BY r.member")
             .bind(grant.to_string()).fetch_all(&self.pool).await?;
         let mut paid = std::collections::BTreeMap::new();
         for row in rows {
+            if let Some(terms_hash) = row.try_get::<Option<String>, _>("terms_hash")? {
+                paid.insert(
+                    row.try_get("member")?,
+                    Disposition::MemberEcash {
+                        terms_hash,
+                        amount_sats: u64::try_from(row.try_get::<i64, _>("amount_sat")?)?,
+                        fee_sats: u64::try_from(row.try_get::<i64, _>("fee_sat")?)?,
+                    },
+                );
+                continue;
+            }
             if row.try_get::<Option<String>, _>("reason")?.is_some() {
                 let member: String = row.try_get("member")?;
                 let receipt: Option<i64> = crate::private_ipc::request(

@@ -19,6 +19,14 @@ MAX_FRAME = 65536
 
 
 def create(request, store, client, token, keyset):
+    if set(request) == {"member_ecash_receipt","member","terms_hash"}:
+        disposition = f"member-ecash:{request['member_ecash_receipt']}:{request['member']}"
+        row = store.db.execute("""
+            SELECT m.amount_sat,m.fee_sat FROM member_ecash m JOIN proof_disposition p ON p.id=m.feed
+            WHERE m.feed=? AND m.token IS NOT NULL AND p.purpose='cyberherd_payout'
+            AND json_extract(p.binding,'$.assignment.terms_hash')=?
+        """,(disposition,request["terms_hash"])).fetchone()
+        return None if row is None else {"amount_sat":row[0], "fee_sat":row[1]}
     if set(request) == {"reclaim_receipt","plan","member"}:
         from member_reclaim import receipt
         return receipt(store.db,request["reclaim_receipt"],request["plan"],request["member"])

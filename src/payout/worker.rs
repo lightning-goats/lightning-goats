@@ -500,6 +500,32 @@ impl CashuWorker {
                     .await?,
             ));
         };
+        if let Some(terms) = self
+            .store
+            .member_ecash_assignment(work.grant, &member)
+            .await?
+        {
+            let Some(socket) = &self.collector_socket else {
+                return Ok(Step::Waiting);
+            };
+            if !policy.execution_enabled
+                || self.store.grant_fee_mode(work.grant).await? != policy.fee_mode
+            {
+                return Ok(Step::Waiting);
+            }
+            return match self.core.submit_member_ecash(&terms, socket).await? {
+                super::operator::DirectStatus::Ready {
+                    amount_sat,
+                    fee_sat,
+                } => {
+                    self.store
+                        .record_member_ecash_ready(&terms, amount_sat, fee_sat)
+                        .await?;
+                    Ok(Step::Observed)
+                }
+                super::operator::DirectStatus::Held { .. } => Ok(Step::Waiting),
+            };
+        }
         let intent = self.store.saved_invoice_intent(work.grant, &member).await?;
         let enabled = policy.execution_enabled
             && self.store.grant_fee_mode(work.grant).await? == policy.fee_mode;

@@ -1,5 +1,6 @@
 """Swap confirmed collector allocations into offline, recipient-only Cashu proofs."""
 import fcntl
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -45,7 +46,7 @@ def transfer(store, client, request, keyset, keys):
 
 def member_transfer(store, client, assignment, keyset, keys):
     fields = {"feed", "grant", "member_key", "plan_hash", "destination", "lots",
-              "gross", "reserved", "fee_limit", "minimum_net"}
+              "gross", "reserved", "fee_limit", "minimum_net", "maximum_net"}
     if set(assignment) != fields:
         raise ValueError("invalid member assignment")
     member = assignment["member_key"]
@@ -57,10 +58,10 @@ def member_transfer(store, client, assignment, keyset, keys):
             or destination.get("mint", "").rstrip("/") != MINT
             or destination["method"] == "public_nutzap" and destination.get("member") != member):
         raise ValueError("invalid member ecash destination")
-    gross, reserved, minimum = (assignment[k] for k in ("gross","reserved","minimum_net"))
+    gross, reserved, minimum, maximum = (assignment[k] for k in ("gross","reserved","minimum_net","maximum_net"))
     total = sum(a["consumed_sats"] for a in project_allocations(assignment["lots"]).values())
-    if (any(type(n) is not int for n in (gross, reserved, minimum))
-            or not 0 < minimum <= gross <= reserved <= total):
+    if (any(type(n) is not int for n in (gross, reserved, minimum, maximum))
+            or not 0 < minimum <= maximum <= gross <= reserved <= total):
         raise ValueError("member share exceeds its reservation")
     request = {"feed": feed, "mint": MINT, "recipient": destination["receiving_key"],
                "gross": gross, "member": total-gross, "plan_hash": assignment["plan_hash"],
@@ -68,8 +69,9 @@ def member_transfer(store, client, assignment, keyset, keys):
     # Feed/member, never a fresh retry ID. A changed grant or delivery identity
     # conflicts with the original binding even when it has the same lock key.
     disposition = f"member-ecash:{feed}:{member}"
-    terms = {"grant":grant, "member_key":member, "reserved":reserved,
-             "minimum_net":minimum, "destination":destination}
+    digest = hashlib.sha256(json.dumps(assignment, ensure_ascii=False, sort_keys=True, separators=(",",":")).encode()).hexdigest()
+    terms = {"terms_hash":digest, "grant":grant, "member_key":member, "reserved":reserved,
+             "minimum_net":minimum, "maximum_net":maximum, "destination":destination}
     return _transfer(store, client, request, keyset, keys, disposition, None, terms)
 
 
@@ -141,6 +143,17 @@ def _transfer(store, client, request, keyset, keys, disposition, failed_members,
                     return {"state":"held", "reason":"below_member_minimum"}
                 if amount <= 0 or fee > limit:
                     return {"state": "held", "reason": "no_payable_amount" if amount <= 0 else "fee_limit"}
+                if member_terms is not None and amount > member_terms["maximum_net"]:
+                    # Return unused fixed fee allowance to the original funding lots.
+                    refund = amount - member_terms["maximum_net"]
+                    amount -= refund
+                    for claim in sorted(spent):
+                        restore = min(spent[claim], refund)
+                        change[claim] += restore
+                        spent[claim] -= restore
+                        refund -= restore
+                        if refund == 0:
+                            break
                 outputs = [(None, o) for o in prepare_outputs(amount, keyset, recipient=recipient)]
                 for claim, sats in change.items():
                     outputs.extend((claim, output) for output in prepare_outputs(sats, keyset))
@@ -148,7 +161,7 @@ def _transfer(store, client, request, keyset, keys, disposition, failed_members,
                 db.executemany("INSERT INTO disposition_input VALUES (?,?)", [(p["secret"], disposition) for p in inputs])
                 db.executemany("INSERT INTO payout_claim_allocation VALUES (?,?,?,?,?)",
                                [(disposition, feed, claim, allocations[claim]["consumed_sats"], used)
-                                for claim, used in spent.items()])
+                                for claim, used in spent.items() if used])
                 db.execute(f"INSERT INTO {table}(feed,material,amount_sat,fee_sat) VALUES(?,?,?,?)",
                            (disposition, encode(outputs), amount, fee))
         proofs = recover_swap(

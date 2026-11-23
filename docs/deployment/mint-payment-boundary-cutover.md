@@ -28,3 +28,9 @@ One 1-sat BOLT11 from the live herd Lightning Address was decoded and verified a
 ### Live viewer Lightning settlement
 
 On 2026-11-23 the operator reported paying 1 sat from Strike by scanning the stream overlay. The herd invoice was created at 17:06:35 UTC. A read-only comparison of both production journals matched shortened payment hash `fb1f17b19c40`. The deployed collector (`d07a567`) recorded issued proofs totaling 1 sat. The application (`d039400`) recorded verified collection, one 1,000-msat herd settlement and one +1 sat HERD_RECEIPT in the shared herd pool. The invoice amount and the collected amount matched exactly. The sender's routing fee is outside these journals. The earlier terminal invoice remained uncollected with zero ledger entries when checked. A separate quote-only diagnostic for that invoice returned HTTP 400 from the Goats mint because its project quotes require an external Lightning payment.
+
+### Goats ecash contribution and collection fee
+
+At 17:31:48 UTC on 2026-11-23 the live wallet acquired 21 sats of Goats ecash (receipt prefix `e7ca7781`), paid a 1-sat receive fee, and retained 20 spendable sats. The receiver at `d039400` credited 20 sats and published that amount. The operator authorized a feeder-only adjustment. The unique adjustment `cashu-receive-fee-e7ca7781` added 1 sat once, taking the shared pool from 21 to 22 sats with zero feeds due. Keep that adjustment and the original event on replay. The payout funding lot is still 20 sats.
+
+Before rolling back gross contribution accounting, count retained receipts whose original ledger delta exceeds the acquired net amount. A pre-change receiver can read the old net-credit rows but cannot reconcile the newer gross-credit rows. Once any such row exists, use a rollback build that retains gross-or-net receipt verification and the original public event amount. Preserve the database, including funding lots, fee records and feeder adjustments.

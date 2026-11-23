@@ -202,7 +202,7 @@ def exercise(ppk, failed_members=False, ecash_members=False):
                                 transport_key=member_key,relays=["wss://relay.example.com"])
                         assignment = {"feed":feed,"grant":grant,"member_key":member_key,"plan_hash":request["plan_hash"],
                             "destination":destination,"gross":7,"reserved":14,"lots":request["lots"],
-                            "fee_limit":2,"minimum_net":5}
+                            "fee_limit":2,"minimum_net":5,"maximum_net":7}
                         def send(terms):
                             return dispatch_payout(store,MintOnly(),{"member_ecash":terms},keyset,{keyset:keys})
                         try:

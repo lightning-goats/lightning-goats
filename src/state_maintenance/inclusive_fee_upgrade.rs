@@ -8,7 +8,7 @@ use sqlx::sqlite::SqliteConnectOptions;
 use super::{Manifest, Operator, Policy, Role, database, files, legacy::rows};
 
 use super::contact_upgrade::{Definition, catalog};
-const FEE_TABLES: [&str; 12] = [
+const FEE_TABLES: [&str; 13] = [
     "payout_fee_observations",
     "payout_fee_probe_intents",
     "payout_fee_probe_callbacks",
@@ -16,6 +16,7 @@ const FEE_TABLES: [&str; 12] = [
     "payout_fee_probe_quotes",
     "payout_fee_promotions",
     "payout_operator_ecash_status",
+    "member_ecash_ready",
     "payout_operator_methods",
     "payout_operator_receipts",
     "payout_operator_invoices",
@@ -233,13 +234,14 @@ mod tests {
         // Fixture-only demotion of empty additive tables; no runtime command
         // can remove schema or migration records from an actual paid journal.
         sqlx::raw_sql(
-            "DROP TRIGGER check_operator_invoice_method; DROP TRIGGER bind_legacy_operator_method;",
+            "DROP TRIGGER bind_member_ecash_destination; DROP TRIGGER forbid_member_ecash_invoice; DROP TRIGGER forbid_member_ecash_invoice_closure; DROP TRIGGER check_operator_invoice_method; DROP TRIGGER bind_legacy_operator_method;",
         )
         .execute(&payout)
         .await
         .unwrap();
         for table in [
             "payout_operator_ecash_status",
+            "member_ecash_ready",
             "payout_operator_methods",
             "payout_operator_receipts",
             "payout_operator_invoices",

@@ -20,7 +20,7 @@ import uuid
 import sys
 
 ROLES = {'cyberherd': ('cyberherdd', 'cyberherd.db', 'nostr-client-key', 'cyberherd-nostr-client'),
-         'cyberherd-payout': ('cyberherd-payoutd', 'payout.db', 'strike-payout-api-key', 'cyberherd-strike-payout'),
+         'cyberherd-payout': ('cyberherd-payoutd', 'payout.db', None, None),
          'cyberherd-signer': ('cyberherd-signerd', 'signer.db', 'nostr-client-key', 'cyberherd-signer-client')}
 
 
@@ -40,9 +40,12 @@ s=dict(line.split(':',1) for line in pathlib.Path('/proc/self/status').read_text
 assert s['NoNewPrivs'].strip()=='1'
 assert all(int(s[name].strip(),16)==0 for name in ['CapEff','CapPrm','CapBnd','CapAmb'])
 assert os.readlink('/proc/self/ns/net')==c['namespace']
-cred=pathlib.Path(os.environ['CREDENTIALS_DIRECTORY'])
-assert sorted(p.name for p in cred.iterdir())==[c['credential_name']]
-assert hashlib.sha256((cred/c['credential_name']).read_bytes()).hexdigest()==c['credential_sha256']
+if c['credential_name'] is None:
+ assert not os.environ.get('CREDENTIALS_DIRECTORY')
+else:
+ cred=pathlib.Path(os.environ['CREDENTIALS_DIRECTORY'])
+ assert sorted(p.name for p in cred.iterdir())==[c['credential_name']]
+ assert hashlib.sha256((cred/c['credential_name']).read_bytes()).hexdigest()==c['credential_sha256']
 for target in c['immutable_paths']:
  try:
   fd=os.open(target,os.O_WRONLY|os.O_APPEND)
@@ -135,10 +138,9 @@ def main():
     try:
         for role, (binary, journal, credential_name, filename) in ROLES.items():
             state = Path('/var/lib') / role
-            cipher = Path('/etc/credstore.encrypted') / filename
-            if role == 'cyberherd-payout':
-                key = b'test-only-no-installed-spend-key'
-            else:
+            key = b''
+            if credential_name:
+                cipher = Path('/etc/credstore.encrypted') / filename
                 key = ('TEST-ONLY-NOT-A-REAL-NOSTR-CLIENT-' + role).encode()
                 assert not cipher.exists() and not cipher.is_symlink()
                 plain = root / (role + '.input')
@@ -150,11 +152,11 @@ def main():
             markers.extend([ready, result])
             config = {'role': role, 'uid': user.pw_uid, 'gid': user.pw_gid, 'groups': os.getgrouplist(role, user.pw_gid),
                       'namespace': os.readlink('/proc/self/ns/net'), 'credential_name': credential_name,
-                      'credential_sha256': hashlib.sha256(key).hexdigest(), 'state': str(state),
+                      'credential_sha256': hashlib.sha256(key).hexdigest() if credential_name else None, 'state': str(state),
                       'journal': str(journals[role]), 'foreign_journals': [str(path) for other, path in journals.items() if other != role],
                       'immutable_paths': [str(Path('/usr/local/bin') / binary), str(Path('/etc') / role / 'config.toml')],
                       'port': port, 'ready': str(ready), 'result': str(result), 'release': str(root / 'release'),
-                      'foreign_credentials': [str(Path('/run/credentials') / names[other] / ROLES[other][2]) for other in ROLES if other != role]}
+                      'foreign_credentials': [str(Path('/run/credentials') / names[other] / ROLES[other][2]) for other in ROLES if other != role and ROLES[other][2]]}
             path = root / (role + '.json')
             path.write_text(json.dumps(config));path.chmod(0o644)
             text = (Path('/usr/local/lib/systemd/system') / (role + '.service')).read_text()

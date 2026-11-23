@@ -45,7 +45,7 @@ C.verified_tool_identity = lambda: verified_tool_identity()
 I = helper('installed_qualification_roles', 'install-cyberherd-inactive.py')
 ROLES = {
     'cyberherd': ('cyberherdd', 'cyberherd.db', 'nostr-client-key', 'cyberherd-nostr-client'),
-    'cyberherd-payout': ('cyberherd-payoutd', 'payout.db', 'strike-payout-api-key', 'cyberherd-strike-payout'),
+    'cyberherd-payout': ('cyberherd-payoutd', 'payout.db', None, None),
     'cyberherd-signer': ('cyberherd-signerd', 'signer.db', 'nostr-client-key', 'cyberherd-signer-client'),
 }
 BIN = Path('/usr/local/bin')
@@ -65,9 +65,12 @@ s=dict(line.split(':',1) for line in pathlib.Path('/proc/self/status').read_text
 assert s['NoNewPrivs'].strip()=='1'
 assert all(int(s[name].strip(),16)==0 for name in ['CapEff','CapPrm','CapBnd','CapAmb'])
 assert os.readlink('/proc/self/ns/net')==c['namespace']
-cred=pathlib.Path(os.environ['CREDENTIALS_DIRECTORY'])
-assert sorted(p.name for p in cred.iterdir())==[c['credential_name']]
-assert hashlib.sha256((cred/c['credential_name']).read_bytes()).hexdigest()==c['credential_sha256']
+if c['credential_name'] is None:
+ assert not os.environ.get('CREDENTIALS_DIRECTORY')
+else:
+ cred=pathlib.Path(os.environ['CREDENTIALS_DIRECTORY'])
+ assert sorted(p.name for p in cred.iterdir())==[c['credential_name']]
+ assert hashlib.sha256((cred/c['credential_name']).read_bytes()).hexdigest()==c['credential_sha256']
 for target in c['immutable_paths']:
  try:fd=os.open(target,os.O_WRONLY|os.O_APPEND)
  except PermissionError:pass
@@ -250,11 +253,12 @@ def render_unit(text, role, probe, config, ciphertext, netns):
         raise ValueError('unreviewed namespace/environment in installed unit')
     text = once(text, expected, f'ExecStart=/usr/bin/python3 -I -S -B {probe} {config}')
     text = once(text, 'Restart=on-failure', 'Restart=no')
-    old = f'LoadCredentialEncrypted={credential}:/etc/credstore.encrypted/{filename}'
-    text = once(text, ('# ' if role == 'cyberherd' else '') + old,
-                f'LoadCredentialEncrypted={credential}:{ciphertext}')
+    if credential:
+        old = f'LoadCredentialEncrypted={credential}:/etc/credstore.encrypted/{filename}'
+        text = once(text, ('# ' if role == 'cyberherd' else '') + old,
+                    f'LoadCredentialEncrypted={credential}:{ciphertext}')
     # No installed credential path may survive into a probe unit.
-    if any(line.strip().startswith(('LoadCredential=', 'LoadCredentialEncrypted=')) and str(ciphertext) not in line for line in text.splitlines()):
+    if any(line.strip().startswith(('LoadCredential=', 'LoadCredentialEncrypted=')) and (not credential or str(ciphertext) not in line) for line in text.splitlines()):
         raise ValueError('unreviewed credential in probe unit')
     return once(text, '[Install]', f'NetworkNamespacePath={netns}\n\n[Install]')
 
@@ -313,22 +317,23 @@ def probes(before, destination):
             # Invalid synthetic tokens: never read a production credential.
             key = ('SYNTHETIC-NOT-A-REAL-CREDENTIAL-' + role).encode()
             cipher = destination / (role + '.synthetic.cred')
-            result = subprocess.run(['/usr/bin/systemd-creds', 'encrypt', '--with-key=host', '--name=' + credential, '-', str(cipher)],
-                                    input=key, capture_output=True, timeout=30, env={'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'})
-            if result.returncode:
-                raise ValueError('synthetic credential encryption failed; diagnostics withheld')
-            cipher.chmod(0o600)
+            if credential:
+                result = subprocess.run(['/usr/bin/systemd-creds', 'encrypt', '--with-key=host', '--name=' + credential, '-', str(cipher)],
+                                        input=key, capture_output=True, timeout=30, env={'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'})
+                if result.returncode:
+                    raise ValueError('synthetic credential encryption failed; diagnostics withheld')
+                cipher.chmod(0o600)
             state = STATE / role
             ready, output = (state / ('.qualification-' + kind + '-' + token) for kind in ('ready', 'result'))
             markers.extend([ready, output, Path(str(ready) + '.writing'), Path(str(output) + '.writing')])
             user = C.pwd.getpwnam(role)
             data = {'role': role, **before['runtime'][role], 'groups': os.getgrouplist(role, user.pw_gid),
                     'namespace': os.readlink(namespace_path), 'credential_name': credential,
-                    'credential_sha256': hashlib.sha256(key).hexdigest(), 'state': str(state), 'journal': str(state / journal),
+                    'credential_sha256': hashlib.sha256(key).hexdigest() if credential else None, 'state': str(state), 'journal': str(state / journal),
                     'foreign_paths': [str(STATE / other / ROLES[other][1]) for other in ROLES if other != role]
                         + [str(C.DATABASE), '/etc/credstore.encrypted'],
                     'immutable_paths': [str(BIN / binary), str(ETC / role / 'config.toml')],
-                    'foreign_credentials': [str(Path('/run/credentials') / names[other] / ROLES[other][2]) for other in ROLES if other != role],
+                    'foreign_credentials': [str(Path('/run/credentials') / names[other] / ROLES[other][2]) for other in ROLES if other != role and ROLES[other][2]],
                     'ready': str(ready), 'result': str(output), 'release': str(public / 'release'), 'port': port}
             config = public / (role + '.json')
             config.write_text(json.dumps(data))

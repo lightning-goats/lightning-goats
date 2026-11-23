@@ -68,6 +68,8 @@ class InstalledQualificationTests(unittest.TestCase):
             text = (SCRIPTS.parent / 'systemd' / (role + '.service.example')).read_text()
             result = q.render_unit(text, role, Path('/run/test/probe.py'), Path('/run/test/input.json'),
                                    Path('/private/synthetic.cred'), Path('/proc/123/ns/net'))
+            if role == 'cyberherd-payout':
+                self.assertNotIn('LoadCredentialEncrypted=', result)
             self.assertNotIn('/etc/credstore.encrypted/', result)
             self.assertIn('ExecStart=/usr/bin/python3 -I -S -B /run/test/probe.py /run/test/input.json', result)
             self.assertIn('NetworkNamespacePath=/proc/123/ns/net', result)

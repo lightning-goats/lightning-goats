@@ -83,11 +83,6 @@ impl Client {
         parse_quote(intent, status, &raw, crate::cyberherd::calendar::now()?)
     }
 
-    pub async fn probe_fee(&self, intent: &QuoteIntent) -> Result<FeeProbeReply> {
-        let (status, raw) = self.request_quote(intent).await?;
-        parse_fee_probe(intent, status, &raw, crate::cyberherd::calendar::now()?)
-    }
-
     async fn request_quote(&self, intent: &QuoteIntent) -> Result<(StatusCode, Vec<u8>)> {
         self.scope(&intent.0)?;
         let now = crate::cyberherd::calendar::now()?;
@@ -113,7 +108,7 @@ impl Client {
     pub async fn execute(
         &self,
         intent: &ExecuteIntent,
-        claim: &super::execution::AuthenticatedLease,
+        claim: &crate::payout::execution::AuthenticatedLease,
     ) -> Result<ExecutionObservation> {
         self.scope(&intent.quote.request)?;
         intent.quote.validate()?;

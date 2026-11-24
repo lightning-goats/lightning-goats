@@ -599,11 +599,8 @@
                             ></iframe>
                         </div>
 
-                        <a
-                            href="lightning:herd@lightning-goats.com"
-                            class="qr-code-overlay"
-                            aria-label="Feed the Goats"
-                        ></a>
+                        <button type="button" class="qr-code-overlay"
+                            aria-label="Feed the Goats"></button>
                         <button class="cashu-code-overlay" type="button" aria-label="Pay with Cashu"
                             data-bs-toggle="modal" data-bs-target="#cashuModal" hidden></button>
                     </div>
@@ -1772,10 +1769,8 @@
         elements.zapButton.addEventListener("click", () => {
             if (!paymentPending) showPayment("goal");
         });
-        document.querySelector(".qr-code-overlay").addEventListener("click", (event) => {
-            if (window.LightningGoatsSite?.paymentsEnabled !== true) return;
-            event.preventDefault();
-            if (!paymentPending) document.getElementById("feedLightningForm").requestSubmit();
+        document.querySelector(".qr-code-overlay").addEventListener("click", () => {
+            if (window.LightningGoatsSite?.paymentsEnabled === true) feedButton.click();
         });
         elements.zapCreateButton.disabled = window.LightningGoatsSite?.paymentsEnabled !== true;
         elements.zapAmount.addEventListener("input", () => {

@@ -110,6 +110,12 @@ class IndexBrowserTests(unittest.TestCase):
         elif path == "/lnurlp/herd/callback":
             self.invoices.append(route.request.url)
             route.fulfill(content_type="application/json", body=json.dumps({"pr": INVOICE}))
+        elif path == "/api/v1/status":
+            route.fulfill(json={"threshold_sats": 1000, "feed_credit_sats": 760})
+        elif path == "/api/v1/feeding/checkout":
+            creq = json.loads((Path(__file__).parent / "fixtures/cashu-requests.json").read_text())["requests"]["creqB"]["request"]
+            route.fulfill(json={"state": "ready", "amount_sats": 240, "invoice": INVOICE, "cashu": creq,
+                                "uri": f"bitcoin:?lightning={INVOICE}&creq={creq}"})
         elif path == "/api/v1/cyberherd":
             route.fulfill(status=503, content_type="application/json", body="{}")
         elif path == "/api/v1/cashu/request":
@@ -140,34 +146,36 @@ class IndexBrowserTests(unittest.TestCase):
           }}};
         """)
         self.open()
-        self.page.locator(".qr-code-overlay").click()
-        self.page.locator("#zapModal").wait_for(state="visible")
-        self.assertEqual(self.page.locator("#zapCreateButton").inner_text(), "Pay")
-        self.assertEqual(self.invoices, [])
-        self.pay()
-        self.assertEqual(len(self.invoices), 1)
+        hotspot = self.page.locator("button.qr-code-overlay")
+        self.assertIsNone(hotspot.get_attribute("href"))
+        self.page.evaluate("""window.feedClicks = 0; document.getElementById('feedLightningButton')
+            .addEventListener('click', () => window.feedClicks++)""")
+        hotspot.click()
+        self.assertEqual(self.page.evaluate("window.feedClicks"), 1)
+        self.page.locator("#finishLightning").click()
+        self.page.get_by_text("Check your wallet before retrying this invoice.").wait_for()
         self.assertEqual(self.page.evaluate("walletCalls"), ["enable", INVOICE])
-        self.assertIn("cancelled", self.page.locator("#zapStatus").inner_text())
-        self.assertEqual(self.page.locator("#zapInvoice").input_value(), INVOICE)
         self.page.evaluate("window.failPayment=false")
-        self.pay()
-        self.assertEqual(len(self.invoices), 1)
+        self.page.locator("#finishLightning").click()
+        self.page.get_by_text("Wallet reports payment sent.", exact=False).wait_for()
         self.assertEqual(self.page.evaluate("walletCalls"), ["enable", INVOICE, "enable", INVOICE])
-        self.assertIn("Waiting for confirmation", self.page.locator("#zapStatus").inner_text())
+        self.assertEqual(self.invoices, [])
         self.assertEqual(self.page.evaluate("window.publications || 0"), 0)
         self.assertEqual(self.errors, [])
 
     def test_permission_refusal_has_no_invoice_then_external_wallet_fallback(self):
         self.context.add_init_script("window.webln={async enable(){throw Error('refused')},async sendPayment(){throw Error('must not run')}}")
         self.open()
+        self.page.locator("#feedLightningAmount").fill("37")
         self.page.locator(".qr-code-overlay").click()
-        self.pay()
+        self.page.get_by_text("Payment could not be started.", exact=False).wait_for()
         self.assertEqual(self.invoices, [])
         self.page.evaluate("delete window.webln")
-        self.pay()
+        self.page.locator(".qr-code-overlay").click()
+        self.page.locator("#zapQr").wait_for(state="visible")
         self.assertEqual(len(self.invoices), 1)
+        self.assertEqual(urlsplit(self.invoices[0]).query, "amount=37000")
         self.assertEqual(self.page.locator("#zapWalletButton").get_attribute("href"), "lightning:" + INVOICE)
-        self.assertTrue(self.page.locator("#zapQr").is_visible())
         self.assertEqual(self.errors, [])
 
     def test_cashu_video_target_matches_stream_and_opens_case_sensitive_request(self):
@@ -215,7 +223,8 @@ class IndexBrowserTests(unittest.TestCase):
 
         self.page.route("**/api/v1/feeding/checkout", checkout)
         self.open()
-        self.page.get_by_role("button", name="Finish this feeding").click()
+        self.page.wait_for_function("document.getElementById('feedLightningAmount').value === '240'")
+        self.page.locator("#feedPanel").get_by_role("button", name="Feed the Goats", exact=True).click()
         self.page.locator("#finishRetry").click()
         image = self.page.locator("#finishQr")
         image.wait_for(state="visible")
@@ -268,7 +277,7 @@ class IndexBrowserTests(unittest.TestCase):
         panel = self.page.locator("#feedPanel").bounding_box()
         chat = self.page.locator(".chat-panel").bounding_box()
         self.assertLess(panel["y"] + panel["height"], chat["y"])
-        self.assertTrue(self.page.get_by_role("link", name="Send a Nutzap on Nostr").is_visible())
+        self.assertEqual(self.page.get_by_role("link", name="Send a Nutzap on Nostr").count(), 0)
         self.page.locator("#feedCashuButton").click()
         self.page.get_by_text("Cashu is temporarily unavailable. You can still pay with Lightning.", exact=True).wait_for()
         self.assertTrue(self.page.locator("#cashuRequestWrap").is_hidden())

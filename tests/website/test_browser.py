@@ -245,7 +245,7 @@ class WebsiteBrowserTests(unittest.TestCase):
         self.assertEqual(link.get_attribute("href"), "/leaderboard")
         self.assertEqual(self.page.locator("header a[href='/feed.html']").count(), 0)
         self.assertTrue(self.page.locator(".qr-code-overlay").is_visible())
-        self.assertEqual(self.page.locator(".qr-code-overlay").get_attribute("href"), "lightning:herd@lightning-goats.com")
+        self.assertIsNone(self.page.locator(".qr-code-overlay").get_attribute("href"))
         layer = self.page.locator(".qr-code-overlay")
         self.assertEqual(layer.evaluate("e=>getComputedStyle(e).opacity"), "0")
         self.assertEqual(layer.evaluate("e=>getComputedStyle(e).borderTopWidth"), "0px")

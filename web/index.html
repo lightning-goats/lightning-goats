@@ -189,8 +189,6 @@
         .feed-lightning-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
         #feedLightningAmount { width: 6.75rem; }
         #feedLightningStatus:empty { display: none; }
-        .feed-nutzap-link { color: var(--lg-yellow); }
-        .feed-nutzap-link:hover { color: #fff; }
         #cashuQr { display: block; margin: 0 auto 12px; max-width: 100%; height: auto; }
 
         .chat-panel {
@@ -604,7 +602,7 @@
                         <a
                             href="lightning:herd@lightning-goats.com"
                             class="qr-code-overlay"
-                            aria-label="Send Lightning to herd@lightning-goats.com"
+                            aria-label="Feed the Goats"
                         ></a>
                         <button class="cashu-code-overlay" type="button" aria-label="Pay with Cashu"
                             data-bs-toggle="modal" data-bs-target="#cashuModal" hidden></button>
@@ -616,15 +614,11 @@
                         <form id="feedLightningForm" class="feed-lightning-form">
                             <label for="feedLightningAmount">Amount (sats)</label>
                             <input id="feedLightningAmount" class="form-control" type="number"
-                                min="1" max="1000000" step="1" value="1000" inputmode="numeric" required>
-                            <button id="feedLightningButton" class="btn btn-warning" type="submit">Pay with Lightning</button>
+                                min="1" max="1000000" step="1" placeholder="Auto" inputmode="numeric">
+                            <button id="feedLightningButton" class="btn btn-warning" type="submit">Feed the Goats</button>
                         </form>
                         <button id="feedCashuButton" class="btn btn-outline-light" type="button"
                             data-bs-toggle="modal" data-bs-target="#cashuModal">Cashu</button>
-                        <button class="btn btn-warning" type="button" data-bs-toggle="modal"
-                            data-bs-target="#finishFeedingModal">Finish this feeding</button>
-                        <a class="feed-nutzap-link" target="_blank" rel="noopener noreferrer"
-                            href="https://njump.me/nevent1qqsz972laf2re3qs9mkuvcrwv240ekkn5k3s3zmqsclczycgzmqcrxspzemhxue69uhhyetvv9ujuurjd9kkzmpwdejhgqghwaehxw309aex2mrp0yhxzun50qhx6ctjddjhgq3qv60thnx0gz0wq3n6xdnq46y069l9x70xgmjp6lprdl6fv0eux6mqh70zpp">Send a Nutzap on Nostr</a>
                     </div>
                     <p id="feedLightningStatus" class="small mt-2" role="status"></p>
                 </section>
@@ -756,7 +750,7 @@
 
     <div class="modal fade" id="finishFeedingModal" tabindex="-1" aria-labelledby="finishTitle" aria-hidden="true">
         <div class="modal-dialog modal-dialog-centered"><div class="modal-content bg-dark text-light">
-            <div class="modal-header"><h5 id="finishTitle" class="modal-title">Finish this feeding</h5>
+            <div class="modal-header"><h5 id="finishTitle" class="modal-title">Feed the Goats</h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button></div>
             <div class="modal-body">
                 <label for="finishGoat">Credit this contribution to</label>
@@ -1781,7 +1775,7 @@
         document.querySelector(".qr-code-overlay").addEventListener("click", (event) => {
             if (window.LightningGoatsSite?.paymentsEnabled !== true) return;
             event.preventDefault();
-            if (!paymentPending) showPayment("herd");
+            if (!paymentPending) document.getElementById("feedLightningForm").requestSubmit();
         });
         elements.zapCreateButton.disabled = window.LightningGoatsSite?.paymentsEnabled !== true;
         elements.zapAmount.addEventListener("input", () => {
@@ -1789,7 +1783,21 @@
             displayInvoice(null);
             elements.zapStatus.textContent = "Choose an amount, then confirm in your wallet.";
         });
-        feedAmount.addEventListener("input", () => { feedPaymentStatus.textContent = ""; });
+        let customFeedAmount = false;
+        feedAmount.addEventListener("input", () => {
+            customFeedAmount = feedAmount.value !== "";
+            feedPaymentStatus.textContent = "";
+        });
+        if (window.LightningGoatsSite?.paymentsEnabled === true) {
+            fetch("/api/v1/status", { cache: "no-store", credentials: "omit" })
+                .then(response => response.ok ? response.json() : null)
+                .then(state => {
+                    if (!customFeedAmount && !feedAmount.value && Number.isSafeInteger(state?.threshold_sats) &&
+                        Number.isSafeInteger(state.feed_credit_sats) && state.threshold_sats > state.feed_credit_sats) {
+                        feedAmount.value = state.threshold_sats - state.feed_credit_sats;
+                    }
+                }).catch(() => {});
+        }
 
         async function payLightning(raw, target, status, fromFeedCard = false) {
             if (paymentPending || window.LightningGoatsSite?.paymentsEnabled !== true) return;
@@ -1850,7 +1858,12 @@
         });
         document.getElementById("feedLightningForm").addEventListener("submit", (event) => {
             event.preventDefault();
-            payLightning(feedAmount.value, "feed", feedPaymentStatus, true);
+            if (paymentPending) return;
+            if (customFeedAmount) {
+                payLightning(feedAmount.value, "feed", feedPaymentStatus, true);
+            } else {
+                bootstrap.Modal.getOrCreateInstance(document.getElementById("finishFeedingModal")).show();
+            }
         });
 
         elements.zapCopyButton.addEventListener("click", async () => {

@@ -39,6 +39,7 @@
             el("finishLightning").href = "lightning:" + result.invoice;
             el("finishCashu").href = "bitcoin:?creq=" + result.cashu;
             quote = result;
+            el("feedLightningAmount").value = result.amount_sats;
             status.textContent = `${result.amount_sats} sats remained when you opened checkout. Pay once with either option.`;
             el("finishChoices").hidden = false;
         } catch {
@@ -52,6 +53,25 @@
     modal.addEventListener("hidden.bs.modal", () => { id = undefined; quote = undefined; });
     el("finishGoat").addEventListener("change", open);
     el("finishRetry").addEventListener("click", load);
+    let walletPending = false;
+    el("finishLightning").addEventListener("click", async event => {
+        const wallet = window.LightningGoatsPayment.wallet();
+        if (!wallet) return;
+        event.preventDefault();
+        if (!quote || walletPending) return;
+        const selected = quote;
+        walletPending = true;
+        try {
+            await wallet.enable();
+            if (selected !== quote) return;
+            await wallet.sendPayment(selected.invoice);
+            if (selected === quote) el("finishStatus").textContent = "Wallet reports payment sent. Waiting for confirmation…";
+        } catch {
+            if (selected === quote) el("finishStatus").textContent = "Check your wallet before retrying this invoice.";
+        } finally {
+            walletPending = false;
+        }
+    });
     for (const [button, field] of [["copyFinishLightning", "invoice"], ["copyFinishCashu", "cashu"]]) {
         el(button).addEventListener("click", async () => {
             if (!quote) return;

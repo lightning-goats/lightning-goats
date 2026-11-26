@@ -20,14 +20,68 @@ millisecond time of the source update.
 curl --fail --silent --show-error http://10.8.0.6:8789/v1/btc-usd
 ```
 
-Deploy the reviewed OBS and static site assets and the updated display cache
-writer through the existing OBS release. Run its dry-run first and inspect
-the static root and backup paths before applying it.
+Stage the reviewed price assets from the verified core archive. The production
+site uses a later versioned release with its own payment script names and
+Lightning QR. Keep the active site's Nginx routes, site configuration and
+artwork when staging the new files.
 
 ```sh
-python3 deploy/scripts/deploy-obs-overlay.py "$CORE_ARCHIVE" "$SOURCE" "$CORE_SHA256"
-sudo systemctl start lightning-goats-display.service
-sudo -u lightning-goats jq '.market' /var/cache/lightning-goats-display/overlay-data.json
+SITE=/etc/nginx/conf.d/lightning-goats.com.conf
+ACTIVE_ROOT=$(sudo awk '$1=="root" {sub(/;$/, "", $2); print $2}' "$SITE")
+STAGING=$(mktemp -d /tmp/lg-priced-site.XXXXXX)
+python3 deploy/scripts/stage-feeding-cycle-site.py \
+  "$CORE_ARCHIVE" "$SOURCE" "$CORE_SHA256" "$ACTIVE_ROOT" "$STAGING/assets"
+```
+
+After the approved HOME gateway upgrade, install the cache writer and confirm a
+fresh OpenHAB observation before enabling cycle pricing. During the approved
+site cutover, clone the live static root, install the staged public assets into
+the clone, and change only the root directive. Keep the old static root and both
+original files in the protected backup for rollback.
+
+```sh
+set -euo pipefail
+CACHE_WRITER=/usr/local/libexec/lightning-goats/update-overlay-data.py
+NEW_ROOT=/var/www/lightning-goats-releases/"$SOURCE"
+BACKUP=$(sudo mktemp -d /var/backups/lightning-goats/priced-site.XXXXXX)
+test "$ACTIVE_ROOT" = "$(sudo awk '$1=="root" {sub(/;$/, "", $2); print $2}' "$SITE")"
+sudo test ! -e "$NEW_ROOT"
+sudo cp -a -- "$SITE" "$CACHE_WRITER" "$BACKUP/"
+sudo cp -a -- "$ACTIVE_ROOT" "$NEW_ROOT"
+for asset in "$STAGING"/assets/*; do
+    test "${asset##*/}" = update-overlay-data.py && continue
+    sudo install -o root -g root -m 0644 -- "$asset" "$NEW_ROOT/"
+done
+sudo install -o root -g root -m 0755 -- "$STAGING/assets/update-overlay-data.py" "$CACHE_WRITER"
+sudo restorecon -R "$NEW_ROOT" "$CACHE_WRITER"
+if ! sudo systemctl start lightning-goats-display.service || \
+   ! sudo -u lightning-goats jq -e '.market | select(.source == "OpenHAB BTC_USD_Price")' \
+     /var/cache/lightning-goats-display/overlay-data.json; then
+    sudo cp -a -- "$BACKUP/update-overlay-data.py" "$CACHE_WRITER"
+    sudo restorecon "$CACHE_WRITER"
+    sudo systemctl start lightning-goats-display.service
+    exit 1
+fi
+sudo python3 - "$SITE" "$ACTIVE_ROOT" "$NEW_ROOT" <<'PYTHON'
+from pathlib import Path
+import re
+import sys
+
+site, active, new = sys.argv[1:]
+file = Path(site)
+text = file.read_text()
+changed, count = re.subn(r'(?m)^([ \t]*root[ \t]+)' + re.escape(active) + r'([ \t]*;)$',
+                         lambda match: match[1] + new + match[2], text)
+if count != 1:
+    raise SystemExit("active static root changed")
+file.write_text(changed)
+PYTHON
+if ! sudo nginx -t || ! sudo systemctl reload nginx; then
+    sudo cp -a -- "$BACKUP/lightning-goats.com.conf" "$SITE"
+    sudo nginx -t
+    sudo systemctl reload nginx
+    exit 1
+fi
 ```
 
 The core polls that exact cache independently of payments. It rejects rates

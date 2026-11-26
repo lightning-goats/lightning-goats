@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Lightning Goats OBS overlay</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/overlay.css?v=12">
+  <link rel="stylesheet" href="/overlay.css?v=13">
   <script src="/vendor/qrcode.js" defer></script>
   <script src="/overlay.js?v=15" defer></script>
 </head>
@@ -25,7 +25,7 @@
       </a>
       <div id="lightning-label">Lightning</div>
       <div id="cashu-code" hidden><div id="cashu-image" role="img" aria-label="Cashu payment request QR"></div><span>Cashu</span></div>
-      <div id="connection" role="status">Connecting…</div>
+      <div id="connection" class="sr-only" role="status">Connecting…</div>
       <div id="feeding-state" role="status" aria-live="polite" hidden><span id="feeding-state-label"></span><span id="feeding-queue"></span></div>
     </div>
     <div id="sats-received-overlay" aria-live="polite"></div>

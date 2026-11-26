@@ -138,12 +138,15 @@ class OverlayBrowserTests(unittest.TestCase):
         self.snapshot(seq=4, cashu=valid)
         self.page.evaluate("window.mockSocket.close()")
         self.assertFalse(self.page.locator("#cashu-code").is_visible())
+        connection = self.page.locator("#connection")
+        self.assertIn("Disconnected", connection.text_content())
+        self.assertEqual(connection.evaluate("node => getComputedStyle(node).clipPath"), "inset(50%)")
         self.assertEqual(self.errors, [])
 
     def test_two_qrs_cards_long_status_and_payment_effects_do_not_collide(self):
         fixture = request_fixtures()["creqA"]
         def separated():
-            boxes = self.page.locator("#cashu-code, #top-left-container, #qr-code, #lightning-label, #connection, #feeding-state, #accordion-container, #sats-received-overlay, #feeder-triggered, #bottom-container").evaluate_all("nodes => nodes.filter(n=>n.getClientRects().length).map(n => {const r=n.getBoundingClientRect(); return {id:n.id,x:r.x,y:r.y,right:r.right,bottom:r.bottom};})")
+            boxes = self.page.locator("#cashu-code, #top-left-container, #qr-code, #lightning-label, #feeding-state, #accordion-container, #sats-received-overlay, #feeder-triggered, #bottom-container").evaluate_all("nodes => nodes.filter(n=>n.getClientRects().length && getComputedStyle(n).clipPath === 'none').map(n => {const r=n.getBoundingClientRect(); return {id:n.id,x:r.x,y:r.y,right:r.right,bottom:r.bottom};})")
             for i, a in enumerate(boxes):
                 self.assertGreaterEqual(a["x"], 0, a)
                 self.assertGreaterEqual(a["y"], 0, a)
@@ -188,6 +191,7 @@ class OverlayBrowserTests(unittest.TestCase):
             self.status_payload.update(mode="active", unresolved_feed_attempt="pending-fixture")
             self.page.clock.fast_forward(11000)
             self.page.wait_for_function("document.getElementById('feeding-state').dataset.state === 'pending'")
+            self.assertEqual(self.page.locator("#feeding-state").evaluate("node => getComputedStyle(node).clipPath"), "inset(50%)")
             self.assertTrue(self.page.locator("#cashu-code").is_visible())
             separated()
         self.assertEqual(self.errors, [])

@@ -61,7 +61,10 @@ pub(super) async fn snapshot(
     )
     .fetch_one(&mut **tx)
     .await?;
-    let queued = (credit / threshold).saturating_sub(u64::from(pending));
+    let funded = super::feed_cycles::goal(tx)
+        .await?
+        .map_or(credit / threshold, |goal| goal.funded_count);
+    let queued = funded.saturating_sub(u64::from(pending));
     Ok(Some(
         json!({"paused":paused,"reason":reason,"queued_feedings":queued,
         "awaiting_confirmation":pending,"observed_at":observed,"threshold_sats":threshold}),

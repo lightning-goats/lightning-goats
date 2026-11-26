@@ -29,7 +29,9 @@ impl LedgerStore {
         );
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let row = sqlx::query(
-            "SELECT state,threshold_sats,disposition FROM feed_financial_plans WHERE id=?",
+            "SELECT p.state,p.threshold_sats,p.disposition,c.target_sats AS cycle_target
+             FROM feed_financial_plans p LEFT JOIN feed_cycle_plans b ON b.plan_id=p.id
+             LEFT JOIN feed_cycles c ON c.id=b.cycle_id WHERE p.id=?",
         )
         .bind(id.to_string())
         .fetch_optional(&mut *tx)
@@ -39,6 +41,12 @@ impl LedgerStore {
             to_u64(row.try_get("threshold_sats")?, "financial threshold")? == threshold,
             "financial release threshold changed"
         );
+        if let Some(target) = row.try_get::<Option<i64>, _>("cycle_target")? {
+            ensure!(
+                to_u64(target, "locked cycle target")? == threshold,
+                "financial release differs from locked cycle target"
+            );
+        }
         let state: String = row.try_get("state")?;
         let disposition: Option<String> = row.try_get("disposition")?;
         if state == "released" && disposition.as_deref() == Some("operator_release") {

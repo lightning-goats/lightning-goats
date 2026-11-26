@@ -39,6 +39,13 @@ pub(super) fn tables_for_core(version: i64) -> impl Iterator<Item = &'static str
     CASHU_TABLES
         .into_iter()
         .chain([
+            "feed_cycle_plans",
+            "feed_cycle_attempts",
+            "feed_cycle_allocations",
+            "feed_cycle_pending",
+            "feed_cycles",
+            "feed_cycle_price",
+            "feed_cycle_policy",
             "private_contact_entitlements",
             "private_contact_requests",
             "private_contact_tenders",
@@ -58,6 +65,13 @@ pub(super) fn tables_for_core(version: i64) -> impl Iterator<Item = &'static str
             "breez_project_invoices",
         ])
         .filter(move |name| match *name {
+            "feed_cycle_plans"
+            | "feed_cycle_attempts"
+            | "feed_cycle_allocations"
+            | "feed_cycle_pending"
+            | "feed_cycles"
+            | "feed_cycle_price"
+            | "feed_cycle_policy" => version >= 41,
             "private_contact_entitlements"
             | "private_contact_requests"
             | "private_contact_tenders"

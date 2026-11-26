@@ -31,6 +31,8 @@ REQUIRED = BINARIES | {
     "migrations/0016_reward_funding.sql", "docs/architecture/cyberherd-reward-funding.md",
     "deploy/scripts/enable-feeding.py",
     "deploy/scripts/deploy-obs-overlay.py", "deploy/scripts/update-overlay-data.py",
+    "deploy/scripts/verify-feeding-cycles.py", "migrations/0041_feeding_cycles.sql",
+    "docs/deployment/usd-feeding-cycles.md",
     "deploy/systemd/lightning-goats-display-firewall.service",
     "deploy/systemd/lightning-goats-display.service", "deploy/systemd/lightning-goats-display.timer",
     "deploy/nftables/lightning-goats-display.nft.example", "web/vendor/qrcode.js",

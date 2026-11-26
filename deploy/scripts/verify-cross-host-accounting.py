@@ -105,12 +105,14 @@ def verify(database, baseline, completed, run_id):
         require(len(receipts) == 1 and receipts[0]['delta_sats'] == 2340 and receipts[0]['payment_source'] == 'synthetic-cross-host' and receipts[0]['payment_source_id'] == run_id, 'synthetic credit mismatch')
         debits = [row for row in entries if row['entry_type'] == 'FEED_DEBIT']
         require(len(entries) == 3 and len(debits) == 2, 'unexpected ledger entries')
-        require([row['feed_attempt_id'] for row in debits] == ids and all(row['delta_sats'] == -1000 and row['source_key'] == 'feed:' + row['feed_attempt_id'] for row in debits), 'debits do not match delivered UUIDs')
+        require([row['feed_attempt_id'] for row in debits] == ids and all(row['source_key'] == 'feed:' + row['feed_attempt_id'] for row in debits), 'debits do not match delivered UUIDs')
         require(sum(row['delta_sats'] for row in entries) == 340, 'remaining balance mismatch')
         attempts = rows(connection, 'SELECT id,status,threshold_sats FROM feed_attempts')
         confirmed = [row for row in attempts if row['status'] == 'confirmed']
         require({row['id'] for row in confirmed} == set(ids) and len(confirmed) == 2, 'confirmation identity mismatch')
-        require(all(row['threshold_sats'] == 1000 and row['status'] in ('confirmed','reconciled_not_fed') for row in attempts), 'unresolved or unexpected feed attempt')
+        require(all(row['threshold_sats'] == 1000 and row['status'] in ('confirmed','reconciled_not_fed') for row in attempts), 'unresolved or unexpected legacy fixture attempt')
+        targets = {row['id']: row['threshold_sats'] for row in confirmed}
+        require(all(row['delta_sats'] == -targets[row['feed_attempt_id']] for row in debits), 'debit differs from saved attempt target')
         require(not set(row['id'] for row in attempts if row['status'] == 'reconciled_not_fed').intersection(ids), 'refused UUID was delivered')
         events = rows(connection, 'SELECT seq,event_type,substr(payload_json,1,65537) AS payload_json FROM event_log ORDER BY seq')
         # Informational events may interleave, but financial events must retain
@@ -119,7 +121,7 @@ def verify(database, baseline, completed, run_id):
         require(financial_types == ['payment_received','feeder_confirmed','feeder_confirmed'], 'financial event chronology mismatch')
         feed_events = [json.loads(row['payload_json'], object_pairs_hook=unique_object) for row in events if row['event_type'] == 'feeder_confirmed']
         require([row['feed_attempt_id'] for row in feed_events] == ids, 'confirmation events do not match deliveries')
-        require([row['feed_credit_sats'] for row in feed_events] == running_balances[1:] and all(row['threshold_sats'] == 1000 for row in feed_events), 'confirmation event accounting mismatch')
+        require([row['feed_credit_sats'] for row in feed_events] == running_balances[1:] and all(row['threshold_sats'] == targets[row['feed_attempt_id']] for row in feed_events), 'confirmation event accounting mismatch')
         payment_events = [json.loads(row['payload_json'], object_pairs_hook=unique_object) for row in events if row['event_type'] == 'payment_received']
         require(len(payment_events) == 1, 'duplicate or missing payment event')
         payment_event = payment_events[0]

@@ -108,7 +108,10 @@ min_sendable_msat = 1000
 max_sendable_msat = 1000000000
 
 [feeder]
+# Legacy threshold used to grandfather outstanding funded and partial goals.
 threshold_sats = 1000
+# Enable after installing the HOME price route and verifying the protected cache.
+usd_cycle_pricing = false
 inter_feed_delay_seconds = 30
 
 # This is the ONLY trusted-side origin available to lightning-goatsd. The VPS

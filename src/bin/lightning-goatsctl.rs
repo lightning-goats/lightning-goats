@@ -457,9 +457,6 @@ async fn main() -> Result<()> {
             lightning_goats::payout::cost_recovery::require_protected_configuration(&args.config)?;
             let decision = lightning_goats::cashu::financial_release::Approval::load(approval)?;
             let config = AppConfig::load(&args.config)?;
-            if config.feeder.threshold_sats != decision.threshold_sats {
-                bail!("release threshold differs from protected configuration");
-            }
             lightning_goats::cashu::financial_release::require_stopped_core().await?;
             let ledger = LedgerStore::connect_existing_recovery(&config.database.url).await?;
             if ledger.overlay_stream_id().await? != decision.epoch {
@@ -669,7 +666,7 @@ async fn main() -> Result<()> {
             {
                 bail!("address must be a configured herd-pool Lightning Address username");
             }
-            if !dry_run {
+            if !dry_run && !config.feeder.usd_cycle_pricing {
                 ledger
                     .configure_feeder_credit_cap(config.feeder.threshold_sats)
                     .await?;
@@ -690,7 +687,8 @@ async fn main() -> Result<()> {
                 serde_json::json!({
                     "status":result.status.as_str(), "grant_id":id, "amount_sats":sats,
                     "feed_credit_at_grant_sats":result.feed_credit_sats,
-                    "feeds_due_at_grant":result.feed_credit_sats / config.feeder.threshold_sats,
+                    "feeds_due_at_grant":ledger.feed_goal().await?.map_or(
+                        result.feed_credit_sats / config.feeder.threshold_sats, |goal| goal.funded_count),
                     "payment_message_eligible":sats >= PAYMENT_MESSAGE_MIN_SATS,
                     "mode":config.service.mode.as_str(), "nostr_enabled":config.service.mode.nostr_enabled(),
                     "source":"operator_credit"
@@ -724,9 +722,30 @@ async fn main() -> Result<()> {
             println!("mode={}", config.service.mode.as_str());
             println!("payment_backend=cashu_mint");
             println!("feed_credit_sats={credit}");
-            println!("threshold_sats={threshold}");
-            println!("feeds_due={}", credit / threshold);
-            println!("remainder_sats={}", credit % threshold);
+            if let Some(goal) = ledger.feed_goal().await? {
+                println!("feeds_due={}", goal.funded_count);
+                println!("queued_feedings={}", goal.queued_count);
+                println!("unallocated_sats={}", goal.unallocated_sats);
+                if let Some(cycle) = goal.cycle {
+                    println!("feed_cycle_id={}", cycle.id);
+                    println!("threshold_sats={}", cycle.target_sats);
+                    println!("remainder_sats={}", cycle.credited_sats);
+                    println!("remaining_sats={}", cycle.remaining_sats);
+                    println!("price_source={}", cycle.source);
+                    println!("opened_at={}", cycle.opened_at);
+                    if let (Some(rate), Some(observed)) = (cycle.rate_usd, cycle.observed_at_ms) {
+                        println!("btc_usd={rate}");
+                        println!("observed_at_ms={observed}");
+                    }
+                } else {
+                    println!("feed_cycle_id=none");
+                    println!("Waiting for a BTC/USD price");
+                }
+            } else {
+                println!("threshold_sats={threshold}");
+                println!("feeds_due={}", credit / threshold);
+                println!("remainder_sats={}", credit % threshold);
+            }
             if let Some(attempt) = unresolved {
                 println!("unresolved_feed_attempt_id={}", attempt.id);
                 println!("unresolved_feed_attempt_status={:?}", attempt.status);

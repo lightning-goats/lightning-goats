@@ -93,14 +93,20 @@ pub(super) async fn select(
     threshold: u64,
     lots: &[Lot],
     epoch: Option<Uuid>,
+    cycle: Option<&str>,
 ) -> Result<Selection> {
     let pending =
-        sqlx::query("SELECT id,threshold_sats FROM feed_financial_plans WHERE state='pending'")
+        sqlx::query("SELECT p.id,p.threshold_sats,b.cycle_id FROM feed_financial_plans p LEFT JOIN feed_cycle_plans b ON b.plan_id=p.id WHERE p.state='pending'")
             .fetch_optional(&mut **tx)
             .await?;
     let mut waiting = None;
     if let Some(row) = pending {
         let id: Uuid = row.try_get::<String, _>("id")?.parse()?;
+        let bound: Option<String> = row.try_get("cycle_id")?;
+        ensure!(
+            cycle == bound.as_deref(),
+            "pending plan belongs to another cycle"
+        );
         if to_u64(row.try_get("threshold_sats")?, "financial threshold")? != threshold {
             release(tx, id, "threshold_changed").await?;
         } else {
@@ -130,6 +136,13 @@ pub(super) async fn select(
         .bind(to_i64(threshold, "financial threshold")?)
         .execute(&mut **tx)
         .await?;
+    if let Some(cycle) = cycle {
+        sqlx::query("INSERT INTO feed_cycle_plans VALUES(?,?)")
+            .bind(id.to_string())
+            .bind(cycle)
+            .execute(&mut **tx)
+            .await?;
+    }
     if let Some(original) = waiting {
         sqlx::query(
             "INSERT INTO feed_financial_supersessions(original_id,replacement_id) VALUES(?,?)",
@@ -217,7 +230,8 @@ mod tests {
             remaining: 1000,
             eligible: 1000,
         };
-        let Selection::Ready(id, allocation) = select(&mut tx, 1000, &[earlier], None).await?
+        let Selection::Ready(id, allocation) =
+            select(&mut tx, 1000, &[earlier], None, None).await?
         else {
             anyhow::bail!("the frozen sources cover the original plan");
         };

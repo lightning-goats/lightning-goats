@@ -48,7 +48,8 @@ pub(super) async fn capped_total(
         sqlx::query_scalar("SELECT threshold_sats FROM feeder_credit_policy WHERE singleton=1")
             .fetch_optional(&mut **tx)
             .await?;
-    let accepted = if let Some(threshold) = threshold {
+    let priced = super::feed_cycles::enabled(tx).await?;
+    let accepted = if let (false, Some(threshold)) = (priced, threshold) {
         let threshold = to_u64(threshold, "cap threshold")?;
         amount.min(
             threshold
@@ -74,6 +75,10 @@ pub(super) async fn cap_new_credit(
     credit_id: i64,
     amount: u64,
 ) -> Result<u64> {
+    if super::feed_cycles::enabled(tx).await? {
+        super::feed_cycles::add_credit(tx, credit_id, amount).await?;
+        return feed_credit_in_transaction(tx).await;
+    }
     let total = feed_credit_in_transaction(tx).await?;
     let before = total
         .checked_sub(amount)
@@ -297,6 +302,9 @@ impl LedgerStore {
                 retired_sats: expected,
                 feed_credit_sats: credit,
             });
+        }
+        if super::feed_cycles::enabled(&mut tx).await? {
+            bail!("legacy backlog correction cannot change allocated cycle credit");
         }
         let pending:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM feed_attempts WHERE status IN ('intent_committed','unknown'))")
             .fetch_one(&mut *tx).await?;

@@ -306,16 +306,30 @@ async fn local_ecash_funds_confirmed_feeding_and_only_legacy_lots_can_be_swept()
 
 #[tokio::test]
 async fn project_treasury_invoice_reopens_without_issuing_or_crediting_again() {
-    exercise_conversion_restart(false).await;
+    exercise_conversion_restart(false, false).await;
 }
 
 #[tokio::test]
 async fn project_invoice_local_nutzap_and_foreign_token_fund_one_confirmed_feed() {
-    exercise_conversion_restart(true).await;
+    exercise_conversion_restart(true, false).await;
 }
 
-async fn exercise_conversion_restart(mixed:bool) {
+#[tokio::test]
+async fn usd_feed_waits_for_original_foreign_melt_and_project_proofs() {
+    exercise_conversion_restart(true, true).await;
+}
+
+async fn exercise_conversion_restart(mixed:bool, priced: bool) {
     let (dir,url,ledger,mut registration)=fixture().await;
+    if priced {
+        ledger.initialize_feed_cycles(1000).await.unwrap();
+        let now = chrono::DateTime::<chrono::Utc>::from(std::time::SystemTime::now());
+        let body = json!({"market":{"source":crate::feeding_price::SOURCE,
+            "observed_at":now.to_rfc3339(),"price_usd_exact":"100000"}});
+        let observation = crate::feeding_price::Observation::from_cache(
+            &serde_json::to_vec(&body).unwrap(), now.timestamp_millis()).unwrap();
+        ledger.refresh_feed_price(&observation).await.unwrap();
+    }
     if mixed {
         // Start at the authenticated settlement boundary used by the normal poller.
         let id=Uuid::new_v4();
@@ -453,6 +467,11 @@ async fn exercise_conversion_restart(mixed:bool) {
     assert_eq!(range, (0, foreign_net as i64, intent.deposit_sats as i64));
     let feed = ledger.begin_feed_attempt(1000).await.unwrap().unwrap();
     ledger.confirm_feed_attempt(feed).await.unwrap();
+    if priced {
+        assert_eq!(count(&ledger, "feed_cycle_attempts").await, 1);
+        assert_eq!(count(&ledger, "feed_cycle_plans").await, 1);
+        assert_eq!(ledger.feed_goal().await.unwrap().unwrap().funded_count, 0);
+    }
     let mut tx = ledger.pool.begin().await.unwrap();
     let funding = crate::ledger::inspect_confirmed_reward_funding(&mut tx,feed).await.unwrap().unwrap();
     assert_eq!((funding.strike_sats, funding.retained_cashu_sats),(0,intent.deposit_sats+if mixed {849} else {0}));

@@ -19,6 +19,14 @@ live. Preserve paid history, the shared feeder controls and the
 [architecture for future payment sources](../architecture/phase1-strike-architecture.md#future-payment-sources).
 Any future source needs its own verified receipt and credit policy.
 
+## US$1 feeding cycles
+
+Price each shared feeding once from the OpenHAB `BTC_USD_Price` observation.
+The website's dual-rail Finish this feeding checkout consumes the ledger's
+locked cycle ID and remaining sats. The physical owner uses the funded
+cycle's target for its debit, independently of later price observations.
+Follow the [cycle deployment and verification runbook](../deployment/usd-feeding-cycles.md).
+
 ## Cashu — operator direction, 2026-11-15
 
 The [Nut November plan](cashu-nutnovember-implementation-plan.md) covers

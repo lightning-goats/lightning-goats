@@ -13,7 +13,10 @@ pub enum Checkout {
         threshold_sats: u64,
     },
     PendingFeed,
+    WaitingForPrice,
     Ready {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cycle_id: Option<Uuid>,
         amount_sats: u64,
         invoice: String,
         cashu: String,
@@ -40,6 +43,7 @@ impl LnurlService {
             let (intent, saved_invoice)=match quote {
                 FeedingQuote::Funded(credit_sats,threshold_sats)=>return Ok(Checkout::Funded{credit_sats,threshold_sats}),
                 FeedingQuote::Pending=>return Ok(Checkout::PendingFeed),
+                FeedingQuote::WaitingForPrice=>return Ok(Checkout::WaitingForPrice),
                 FeedingQuote::Prepared(intent,invoice)=>(intent,invoice),
             };
             let amount_sats=intent["amount_sat"].as_u64().context("invalid checkout amount")?;
@@ -48,7 +52,8 @@ impl LnurlService {
                 "description":intent["description"],"zap":false});
             let invoice=self.project_invoice(&self.collector,id,&payload,saved_invoice).await?;
             let uri=format!("bitcoin:?lightning={invoice}&creq={cashu}");
-            Ok(Checkout::Ready{amount_sats,invoice,cashu,uri})
+            let cycle_id = intent["checkout"]["cycle_id"].as_str().map(Uuid::parse_str).transpose()?;
+            Ok(Checkout::Ready{cycle_id,amount_sats,invoice,cashu,uri})
         }.await;
         self.ledger.finish_invoice_admission(admission).await?;
         result

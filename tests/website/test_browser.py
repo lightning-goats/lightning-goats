@@ -57,6 +57,7 @@ class WebsiteBrowserTests(unittest.TestCase):
         self.enabled = False
         self.herd_enabled = False
         self.mode = "success"
+        self.feeder_status = None
         self.page.on("pageerror", lambda error: self.errors.append(str(error)))
         self.context.route("**/*", self.route)
         self.context.route_web_socket("**/*", lambda socket: socket.close())
@@ -67,6 +68,9 @@ class WebsiteBrowserTests(unittest.TestCase):
         parsed = urlsplit(url)
         if url.startswith(ORIGIN + "/"):
             path = parsed.path
+            if path == "/api/v1/status" and self.feeder_status is not None:
+                route.fulfill(content_type="application/json", body=json.dumps(self.feeder_status))
+                return
             if path.startswith("/.well-known/lnurlp/"):
                 self.payments.append(url)
                 user = path.rsplit("/", 1)[1]
@@ -118,6 +122,37 @@ class WebsiteBrowserTests(unittest.TestCase):
 
     def wait_finished(self):
         self.page.wait_for_function("!document.getElementById('createInvoice').disabled")
+        self.assertEqual(self.errors, [])
+
+    def test_shared_funding_cycle_sets_remaining_amount_and_outage_label(self):
+        self.enabled = True
+        cycle = {"id": "fa139958-b166-4110-a53b-d8f64bc2bb80",
+                 "target_sats": 1250, "credited_sats": 760, "remaining_sats": 490}
+        self.feeder_status = {"feed_credit_sats": 2760, "threshold_sats": 1250,
+                              "feed_goal": {"cycle": cycle, "funded_count": 2, "queued_count": 1},
+                              "unresolved_feed_attempt": "5e77e05b-8573-41a7-a4d3-2f2cc81bfa7b"}
+        self.page.add_init_script("""
+            window.WebSocket = class {
+                static CONNECTING = 0;
+                static OPEN = 1;
+                static CLOSED = 3;
+                readyState = 0;
+                addEventListener() {}
+                removeEventListener() {}
+                send() {}
+                close() {}
+            };
+        """)
+        self.page.goto(ORIGIN + "/", wait_until="domcontentloaded", timeout=120000)
+        self.page.wait_for_function("document.querySelector('#feedLightningAmount').value === '490'")
+        self.assertIn("490 sats remaining of 1,250 sats", self.page.locator("#feedGoalProgress").inner_text())
+        self.assertIn("awaiting confirmation", self.page.locator("#feedGoalProgress").inner_text())
+
+        self.feeder_status["feed_goal"]["cycle"] = None
+        self.feeder_status["threshold_sats"] = None
+        self.page.reload(wait_until="domcontentloaded", timeout=120000)
+        self.page.wait_for_function("document.querySelector('#feedGoalProgress').textContent.includes('Waiting for a BTC/USD price')")
+        self.assertEqual(self.page.locator("#feedLightningAmount").input_value(), "")
         self.assertEqual(self.errors, [])
 
     def test_default_has_no_payment_or_legacy_requests(self):

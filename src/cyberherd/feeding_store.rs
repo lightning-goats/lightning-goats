@@ -403,6 +403,7 @@ mod tests {
                     source_seq: 1,
                     triggering_payment_amount_sats: Some(1000),
                     feed_credit_sats: 0,
+                    cycle: None,
                 },
                 goats: vec![],
             }),

@@ -9,7 +9,8 @@
     const logo = `/images/lightninggoatslogo1.png?v=${artworkVersion}`;
     const goats = new Map(["Dexter", "Rowan", "Cosmo", "Newton", "Nova"].map((name) => [name.toLowerCase(), name]));
     const timers = new Set(), animations = new Set();
-    let stream = null, seq = null, credit = 0, threshold = 1000;
+    let stream = null, seq = null, credit = 0, threshold = null;
+    let goal = null;
     let replaying = false, socket, retry = 500, reconnectTimer;
     let weatherTime = null, marketTime = null, statusTime = null;
     let displayedPulse = null, feedStateRevision = 0;
@@ -30,16 +31,33 @@
         animations.add(animation);
         animation.onfinish = animation.oncancel = () => animations.delete(animation);
     }
-    function queuedFeedings() { return Math.max(0, Math.floor(credit / threshold) - (awaitingConfirmation ? 1 : 0)); }
+    function validGoal(value) {
+        return value && integer(value.funded_count) && integer(value.unallocated_sats) &&
+            (value.cycle === null || (identity(value.cycle?.id) && integer(value.cycle.target_sats) &&
+                value.cycle.target_sats > 0 && integer(value.cycle.credited_sats) &&
+                integer(value.cycle.remaining_sats) && value.cycle.remaining_sats > 0 &&
+                value.cycle.remaining_sats === value.cycle.target_sats - value.cycle.credited_sats));
+    }
+    function queuedFeedings() {
+        const funded = goal ? goal.funded_count : threshold ? Math.floor(credit / threshold) : 0;
+        return Math.max(0, funded - (awaitingConfirmation ? 1 : 0));
+    }
+    function progress() {
+        if (!goal) return threshold ? Math.min(1, credit / threshold) : 0;
+        return goal.cycle ? goal.cycle.credited_sats / goal.cycle.target_sats : 0;
+    }
     function render() {
         el("credit").textContent = `${credit.toLocaleString()} ${credit === 1 ? "sat" : "sats"} credit`;
         const due = queuedFeedings();
         el("due").textContent = due ? `${due} feed${due === 1 ? "" : "s"} queued` : "";
-        el("sats_left").textContent = due
+        el("sats_left").textContent = goal
+            ? (goal.cycle ? `⚡ ${goal.cycle.remaining_sats.toLocaleString()} sats to fund the next feeding ⚡`
+                : "Waiting for a BTC/USD price")
+            : threshold === null ? "Waiting for feeder status" : due
             ? `⚡ ${due} feeding${due === 1 ? "" : "s"} queued · ${credit.toLocaleString()} sats credit ⚡`
             : awaitingConfirmation ? "⚡ Feeding awaiting confirmation · credit held ⚡"
             : `⚡${Math.max(0, threshold - credit).toLocaleString()} sats to go until the herd is fed again.⚡`;
-        const percent = Math.min(100, credit / threshold * 100);
+        const percent = progress() * 100;
         el("progress").setAttribute("aria-valuenow", String(Math.round(percent)));
         el("progress-percentage").textContent = `${Math.round(percent)}%`;
         if (!feeding && !activeMessages.length) el("progress-fill").style.width = `${percent}%`;
@@ -113,7 +131,7 @@
             }
             if (messageChanged) syncGoatCards();
             el("progress-percentage").style.opacity = activeMessages.length ? "0.18" : "1";
-            const natural = Math.min(1, credit / threshold) * width;
+            const natural = progress() * width;
             const edge = activeMessages.reduce((left, item) => Math.min(left, Math.max(0, item.x)), natural);
             el("progress-fill").style.transition = activeMessages.length ? "none" : "";
             el("progress-fill").style.width = `${edge}px`;
@@ -229,7 +247,7 @@
         const notice = el("sats-received-overlay");
         notice.textContent = `⚡ ${amount.toLocaleString()} ${amount === 1 ? "sat" : "sats"} ⚡`;
         notice.dataset.tier = ["spark", "zap", "boost", "surge", "goat"][tier];
-        notice.classList.toggle("near-trigger", credit / threshold >= .8);
+        notice.classList.toggle("near-trigger", progress() >= .8);
         notice.style.fontSize = `${sizes[tier]}px`;
         notice.style.padding = `${17 + tier * 4}px ${36 + tier * 10}px`;
         notice.style.display = "block";
@@ -300,13 +318,16 @@
             replaying = true; return;
         }
         if (data.type === "snapshot") {
-            if (data.version !== 1 || !identity(data.stream_id) || !integer(data.seq) || !integer(data.feed_credit_sats) || !integer(data.threshold_sats) || data.threshold_sats === 0) return resetConnection();
+            if (data.version !== 1 || !identity(data.stream_id) || !integer(data.seq) || !integer(data.feed_credit_sats) || (data.feed_goal === undefined
+                ? (!integer(data.threshold_sats) || data.threshold_sats === 0)
+                : !validGoal(data.feed_goal))) return resetConnection();
             if (data.stream_id === stream && data.seq < seq && !data.reset_reason) return;
             if (stream !== data.stream_id) displayedPulse = null;
             if (stream !== data.stream_id || data.reset_reason) clearPresentation();
             feedStateRevision++;
             connectedSince = integer(data.as_of) ? data.as_of : Math.floor(Date.now() / 1000);
             stream = data.stream_id; seq = data.seq; credit = data.feed_credit_sats; threshold = data.threshold_sats;
+            goal = data.feed_goal ?? null;
             awaitingConfirmation = typeof data.unresolved_feed_attempt === "string";
             if (data.cyberherd == null) clearMemberCards();
             else if (data.cyberherd !== undefined && !validRoster(data.cyberherd)) return resetConnection();
@@ -316,14 +337,22 @@
         if (!integer(data.seq) || seq === null || stream === null) return resetConnection();
         if (data.seq <= seq) return;
         if (data.seq !== seq + 1) return resetConnection();
-        if (typeof data.feeding?.awaiting_confirmation === "boolean" || ["feeder_pulse_started", "feeder_confirmed"].includes(data.source_type)) feedStateRevision++;
+        const attemptStarted = ["feeder_attempt_started", "feeder_pulse_started"].includes(data.source_type) ||
+            (data.source_type === "processing_error" && identity(data.feed_attempt_id));
+        const attemptResolved = ["feeder_confirmed", "feed_reconciled_not_fed", "feeder_not_dispatched"].includes(data.source_type);
+        if (typeof data.feeding?.awaiting_confirmation === "boolean" || attemptStarted || attemptResolved) feedStateRevision++;
         if (typeof data.feeding?.awaiting_confirmation === "boolean") awaitingConfirmation = data.feeding.awaiting_confirmation;
-        if (data.source_type === "feeder_confirmed") {
+        if (attemptStarted) {
+            awaitingConfirmation = true;
+            if (availability === "ready") setFeedingState("pending");
+        }
+        if (attemptResolved) {
             awaitingConfirmation = false;
             if (availability === "pending") setFeedingState("ready");
         }
-        if (data.source_type === "processing_error" && typeof data.feed_attempt_id === "string") awaitingConfirmation = true;
-        if (integer(data.feed_credit_sats)) { credit = data.feed_credit_sats; render(); }
+        if (validGoal(data.feed_goal)) goal = data.feed_goal;
+        if (integer(data.feed_credit_sats)) credit = data.feed_credit_sats;
+        if (validGoal(data.feed_goal) || integer(data.feed_credit_sats) || attemptStarted || attemptResolved) render();
         // Replays advance durable state without replaying announcements/effects.
         if (!replaying && data.type !== "event_skipped") {
             const kind = data.source_type || data.type;
@@ -395,15 +424,10 @@
             const data = await readJson("/overlay-data.json");
             if (data.weather) acceptWeather(data.weather);
             const market = data.market, observed = Date.parse(market?.observed_at);
-            if (fresh(observed) && (marketTime === null || observed >= marketTime) && typeof market.price_usd === "number" && Number.isFinite(market.price_usd) && market.price_usd > 0) {
+            if (fresh(observed) && (marketTime === null || observed >= marketTime) && market.source === "OpenHAB BTC_USD_Price" && typeof market.price_usd === "number" && Number.isFinite(market.price_usd) && market.price_usd > 0) {
                 marketTime = observed;
                 el("btc-price").textContent = `BTC: ${market.price_usd.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 })}`;
-                el("btc-price").title = "Indicative BTC/USD · CoinGecko · display only";
-                const change = market.change_24h_percent;
-                const valid = typeof change === "number" && Number.isFinite(change) && change >= -100 && change <= 10000;
-                el("btc-change").textContent = valid ? `(24h: ${change >= 0 ? "+" : ""}${change.toFixed(2)}%)` : "(24h: --)";
-                el("btc-change").classList.toggle("btc-change-positive", valid && change > 0);
-                el("btc-change").classList.toggle("btc-change-negative", valid && change < 0);
+                el("btc-price").title = "BTC/USD from OpenHAB";
             }
         } catch { /* Cached observations expire independently; money is unaffected. */ }
     }
@@ -504,7 +528,7 @@
         const now = new Date(); el("current-time").textContent = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
         el("current-time").dateTime = now.toISOString();
         if (weatherTime !== null && !fresh(weatherTime)) { weatherTime = null; el("current-temperature").textContent = "-- °F"; el("weather").textContent = ""; }
-        if (marketTime !== null && !fresh(marketTime)) { marketTime = null; el("btc-price").textContent = "BTC: --"; el("btc-change").textContent = "(24h: --)"; el("btc-change").classList.remove("btc-change-positive", "btc-change-negative"); }
+        if (marketTime !== null && !fresh(marketTime)) { marketTime = null; el("btc-price").textContent = "BTC: --"; }
         if (statusTime !== null && Date.now() - statusTime > 30000) setFeedingState("unknown");
     }
     if (new URLSearchParams(location.search).get("fit") === "1") {

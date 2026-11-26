@@ -59,12 +59,11 @@ An identity-specific nftables policy permits only the gateway's TCP 8789,
 local DNS and public egress; other private/loopback services are denied. The timer
 service requires this policy before starting.
 
-BTC/USD and its 24-hour change use CoinGecko's public
-[`simple/price` endpoint](https://docs.coingecko.com/reference/simple-price),
-with the provider's `last_updated_at`. Coinbase public stats returned 403 from
-this host and are not a runtime dependency. Prices are indicative display data;
-they do not set the feeder threshold, grant credit, convert funds or affect
-settlement. Missing/stale provider data becomes `--`, not a fabricated value.
+BTC/USD comes from the OpenHAB `BTC_USD_Price` item through
+`http://10.8.0.6:8789/v1/btc-usd`. The gateway reads the item's state and
+`lastStateUpdate` together over HOME loopback. The cache keeps the exact
+decimal and source timestamp for the ledger and a numeric display value
+for OBS. The display and core each enforce the observation freshness bounds.
 The only browser data paths are the same-origin cache, operational status and
 ordered overlay socket. Portraits may later use public HTTPS avatars.
 

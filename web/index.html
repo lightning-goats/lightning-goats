@@ -608,6 +608,7 @@
                 <section id="feedPanel" class="feed-panel" aria-labelledby="feedPanelTitle" hidden>
                     <h2 id="feedPanelTitle">Feed the Goats</h2>
                     <div class="feed-panel-actions">
+                        <p id="feedGoalProgress" class="small mb-2" aria-live="polite" hidden></p>
                         <form id="feedLightningForm" class="feed-lightning-form">
                             <label for="feedLightningAmount">Amount (sats)</label>
                             <input id="feedLightningAmount" class="form-control" type="number"
@@ -1783,15 +1784,33 @@
             customFeedAmount = feedAmount.value !== "";
             feedPaymentStatus.textContent = "";
         });
+        async function updateFeedGoal() {
+            try {
+                const response = await fetch("/api/v1/status", {cache: "no-store", credentials: "omit"});
+                if (!response.ok) return;
+                const state = await response.json();
+                const view = document.getElementById("feedGoalProgress");
+                if (state.feed_goal) {
+                    const cycle = state.feed_goal.cycle;
+                    const progress = cycle
+                        ? `${cycle.remaining_sats.toLocaleString()} sats remaining of ${cycle.target_sats.toLocaleString()} sats`
+                        : "Waiting for a BTC/USD price";
+                    const awaiting = Boolean(state.unresolved_feed_attempt);
+                    const queued = state.feed_goal.queued_count ?? Math.max(0, state.feed_goal.funded_count - Number(awaiting));
+                    view.textContent = [progress, queued ? `${queued} feeding${queued === 1 ? "" : "s"} queued` : "",
+                        awaiting ? "A feeding is awaiting confirmation" : ""].filter(Boolean).join(" · ");
+                    view.hidden = false;
+                    if (!customFeedAmount && document.activeElement !== feedAmount && !paymentPending)
+                        feedAmount.value = cycle?.remaining_sats ?? "";
+                } else if (!customFeedAmount && !feedAmount.value && Number.isSafeInteger(state.threshold_sats) &&
+                    Number.isSafeInteger(state.feed_credit_sats) && state.threshold_sats > state.feed_credit_sats) {
+                    feedAmount.value = state.threshold_sats - state.feed_credit_sats;
+                }
+            } catch { /* The last successful status remains visible. */ }
+        }
         if (window.LightningGoatsSite?.paymentsEnabled === true) {
-            fetch("/api/v1/status", { cache: "no-store", credentials: "omit" })
-                .then(response => response.ok ? response.json() : null)
-                .then(state => {
-                    if (!customFeedAmount && !feedAmount.value && Number.isSafeInteger(state?.threshold_sats) &&
-                        Number.isSafeInteger(state.feed_credit_sats) && state.threshold_sats > state.feed_credit_sats) {
-                        feedAmount.value = state.threshold_sats - state.feed_credit_sats;
-                    }
-                }).catch(() => {});
+            updateFeedGoal();
+            setInterval(updateFeedGoal, 15000);
         }
 
         async function payLightning(raw, target, status, fromFeedCard = false) {

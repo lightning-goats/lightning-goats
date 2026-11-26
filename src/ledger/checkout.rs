@@ -9,6 +9,7 @@ use uuid::Uuid;
 pub(crate) enum FeedingQuote {
     Funded(u64, u64),
     Pending,
+    WaitingForPrice,
     Prepared(Value, Option<String>),
 }
 
@@ -40,18 +41,29 @@ impl LedgerStore {
             tx.commit().await?;
             return Ok(FeedingQuote::Prepared(intent, invoice));
         }
-        let pending:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM feed_attempts WHERE status IN ('intent_committed','unknown'))").fetch_one(&mut *tx).await?;
-        if pending {
-            tx.commit().await?;
-            return Ok(FeedingQuote::Pending);
-        }
-        let (credit, threshold):(i64,i64)=sqlx::query_as("SELECT (SELECT COALESCE(SUM(delta_sats),0) FROM ledger_entries), threshold_sats FROM feeder_credit_policy WHERE singleton=1").fetch_one(&mut *tx).await?;
-        let credit = u64::try_from(credit)?;
-        let threshold = u64::try_from(threshold)?;
-        if credit >= threshold {
-            tx.commit().await?;
-            return Ok(FeedingQuote::Funded(credit, threshold));
-        }
+        let (credit, threshold, cycle_id) = if let Some(goal) =
+            super::feed_cycles::goal(&mut tx).await?
+        {
+            let Some(cycle) = goal.cycle else {
+                tx.commit().await?;
+                return Ok(FeedingQuote::WaitingForPrice);
+            };
+            (cycle.credited_sats, cycle.target_sats, Some(cycle.id))
+        } else {
+            let pending:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM feed_attempts WHERE status IN ('intent_committed','unknown'))").fetch_one(&mut *tx).await?;
+            if pending {
+                tx.commit().await?;
+                return Ok(FeedingQuote::Pending);
+            }
+            let (credit, threshold):(i64,i64)=sqlx::query_as("SELECT (SELECT COALESCE(SUM(delta_sats),0) FROM ledger_entries), threshold_sats FROM feeder_credit_policy WHERE singleton=1").fetch_one(&mut *tx).await?;
+            let credit = u64::try_from(credit)?;
+            let threshold = u64::try_from(threshold)?;
+            if credit >= threshold {
+                tx.commit().await?;
+                return Ok(FeedingQuote::Funded(credit, threshold));
+            }
+            (credit, threshold, None)
+        };
         let amount = threshold - credit;
         ensure!(
             bounds_msat.contains(
@@ -62,9 +74,12 @@ impl LedgerStore {
             "remaining amount outside invoice limits"
         );
         let request = crate::lnurl::checkout::fixed_request(descriptor, id, amount)?;
-        let intent = json!({"request_id":id,"user":user,"credit_pool":pool,"amount_sat":amount,
+        let mut intent = json!({"request_id":id,"user":user,"credit_pool":pool,"amount_sat":amount,
             "description":metadata,"zap":false,"checkout":{"descriptor_id":descriptor.id,"creq":request,
             "credit_sats":credit,"threshold_sats":threshold}});
+        if let Some(cycle_id) = cycle_id {
+            intent["checkout"]["cycle_id"] = json!(cycle_id);
+        }
         sqlx::query("INSERT INTO breez_project_invoices(id,intent) VALUES (?,?)")
             .bind(id.to_string())
             .bind(intent.to_string())
@@ -101,6 +116,15 @@ mod tests {
 
     #[tokio::test]
     async fn raced_quotes_freeze_the_remainder_without_reserving_credit() -> Result<()> {
+        exercise_checkout(false).await
+    }
+
+    #[tokio::test]
+    async fn priced_checkout_keeps_both_options_bound_after_the_cycle_fills() -> Result<()> {
+        exercise_checkout(true).await
+    }
+
+    async fn exercise_checkout(priced: bool) -> Result<()> {
         let root = tempfile::tempdir()?;
         let ledger = LedgerStore::connect(&format!(
             "sqlite://{}",
@@ -108,6 +132,28 @@ mod tests {
         ))
         .await?;
         ledger.configure_feeder_credit_cap(1000).await?;
+        let (amount, cycle_id) = if priced {
+            ledger.initialize_feed_cycles(1000).await?;
+            let now = chrono::DateTime::<chrono::Utc>::from(std::time::SystemTime::now());
+            let body = json!({"market":{"source":crate::feeding_price::SOURCE,
+                "observed_at":now.to_rfc3339(),"price_usd_exact":"80000"}});
+            let observation = crate::feeding_price::Observation::from_cache(
+                &serde_json::to_vec(&body)?,
+                now.timestamp_millis(),
+            )?;
+            ledger.refresh_feed_price(&observation).await?;
+            (
+                490,
+                ledger
+                    .feed_goal()
+                    .await?
+                    .unwrap()
+                    .cycle
+                    .map(|cycle| cycle.id),
+            )
+        } else {
+            (240, None)
+        };
         let grant = |amount| crate::ledger::OperatorCreditGrant {
             id: format!("test-{amount}"),
             amount_sats: amount,
@@ -152,20 +198,30 @@ mod tests {
                 anyhow::bail!("expected both offers")
             };
             let req: PaymentRequest = intent["checkout"]["creq"].as_str().unwrap().parse()?;
-            assert_eq!(req.amount, Some(240.into()));
+            assert_eq!(req.amount, Some(amount.into()));
+            assert_eq!(intent["checkout"]["cycle_id"], json!(cycle_id));
             assert_eq!(req.payment_id, Some(format!("lgf-{id}")));
             assert_eq!(req.single_use, Some(true));
             assert_eq!(req.mints, original.mints);
             assert_eq!(req.transports, original.transports);
-            assert_eq!(ledger.checkout_terms(id).await?.unwrap().amount_sats, 240);
+            assert_eq!(
+                ledger.checkout_terms(id).await?.unwrap().amount_sats,
+                amount
+            );
         }
         assert_eq!(ledger.feed_credit_sats().await?, 760);
         assert!(open(first, "nova").await.is_err());
-        ledger.grant_operator_credit(&grant(240), false).await?;
-        assert!(matches!(
-            open(Uuid::new_v4(), "dexter").await?,
-            FeedingQuote::Funded(1000, 1000)
-        ));
+        ledger.grant_operator_credit(&grant(amount), false).await?;
+        let next = open(Uuid::new_v4(), "dexter").await?;
+        if priced {
+            let FeedingQuote::Prepared(intent, _) = next else {
+                anyhow::bail!("next cycle was not offered");
+            };
+            assert_ne!(intent["checkout"]["cycle_id"], json!(cycle_id));
+            assert_eq!(intent["amount_sat"], 1250);
+        } else {
+            assert!(matches!(next, FeedingQuote::Funded(1000, 1000)));
+        }
         assert!(matches!(
             open(first, "dexter").await?,
             FeedingQuote::Prepared(_, None)

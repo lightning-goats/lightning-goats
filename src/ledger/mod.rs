@@ -27,6 +27,8 @@ mod events;
 mod failed_costs;
 mod feed;
 mod feed_cap;
+mod feed_cycles;
+pub use feed_cycles::{FeedCycle, FeedGoal, FeedProgress};
 mod feed_sources;
 mod financial_release;
 pub use feed_cap::CreditRetirementResult;
@@ -313,20 +315,20 @@ impl LedgerStore {
 
         let feed_credit_sats =
             feed_cap::cap_new_credit(&mut transaction, ledger_id, credited_sats).await?;
-        let event_seq = append_event_in_transaction(
-            &mut transaction,
-            "payment_received",
-            &json!({
-                "source": payment.source,
-                "source_id": payment.source_id,
-                "payment_hash": payment.payment_hash,
-                "address_user": payment.address_user,
-                "credit_pool": payment.credit_pool,
-                "amount_sats": credited_sats,
-                "feed_credit_sats": feed_credit_sats
-            }),
-        )
-        .await?;
+        let mut payload = json!({
+            "source": payment.source,
+            "source_id": payment.source_id,
+            "payment_hash": payment.payment_hash,
+            "address_user": payment.address_user,
+            "credit_pool": payment.credit_pool,
+            "amount_sats": credited_sats,
+            "feed_credit_sats": feed_credit_sats
+        });
+        if feed_cycles::funded_by(&mut transaction, ledger_id).await? {
+            payload["funded_cycle"] = true.into();
+        }
+        let event_seq =
+            append_event_in_transaction(&mut transaction, "payment_received", &payload).await?;
 
         credit::record_native_btc(&mut transaction, settlement_id, ledger_id, event_seq).await?;
         if let SettlementEvidence::MintClaim { invoice_id, .. }

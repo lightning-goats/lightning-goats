@@ -188,6 +188,7 @@ impl TrustedGateway {
                 post(feed_request).get(feed_request_status),
             )
             .route("/v1/weather", get(weather))
+            .route("/v1/btc-usd", get(btc_usd_price))
             .with_state(self.state.clone())
     }
 }
@@ -446,6 +447,16 @@ async fn lookup_feed_request(request_id: Uuid, state: GatewayState) -> Response 
         Ok(Some(status)) => existing_response(&state, request_id, status).await,
         Ok(None) => public_error(StatusCode::NOT_FOUND, "Unknown feeder request UUID"),
         Err(error) => internal_failure("Unable to read feeder request status", error),
+    }
+}
+
+async fn btc_usd_price(State(state): State<GatewayState>) -> Response {
+    match state.openhab.btc_usd_price().await {
+        Ok(market) => (StatusCode::OK, Json(market)).into_response(),
+        Err(error) => {
+            tracing::warn!(%error, "OpenHAB BTC/USD observation unavailable");
+            public_error(StatusCode::SERVICE_UNAVAILABLE, "BTC/USD price unavailable")
+        }
     }
 }
 

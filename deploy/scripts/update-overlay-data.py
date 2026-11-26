@@ -1,22 +1,24 @@
 #!/usr/bin/env python3
-"""Refresh presentation-only weather and BTC data. No financial credentials/state.
+"""Refresh weather and BTC observations without financial credentials or ledger access.
 
-Weather comes only from the approved narrow gateway. Market data is indicative;
-this process cannot set feed prices, credit payments, sign Nostr or actuate feeds.
+Weather comes only from the approved narrow gateway. The cache preserves the
+provider rate and timestamp. The core ledger makes any cycle pricing decision.
 """
 import argparse
 from datetime import datetime, timezone
+from decimal import Decimal
 import json
 import math
 import os
+import re
 from pathlib import Path
 import tempfile
 import time
 import urllib.request
 
 WEATHER_URL = "http://10.8.0.6:8789/v1/weather"
-MARKET_URL = ("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
-              "&include_24hr_change=true&include_last_updated_at=true")
+MARKET_URL = "http://10.8.0.6:8789/v1/btc-usd"
+MARKET_SOURCE = "OpenHAB BTC_USD_Price"
 MAX_BODY = 16384
 
 
@@ -74,16 +76,18 @@ def weather_payload(data, now):
 
 
 def market_payload(data, now):
-    quote = data["bitcoin"]
-    observed = number(quote.get("last_updated_at"), 0, 10**11)
-    fresh(observed, now)
-    result = {"price_usd": number(quote.get("usd"), 1, 10000000),
-              "observed_at": datetime.fromtimestamp(observed, timezone.utc).isoformat(),
-              "source": "CoinGecko"}
-    change = quote.get("usd_24h_change")
-    if change is not None:
-        result["change_24h_percent"] = number(change, -100, 10000)
-    return result
+    if not isinstance(data, dict) or data.get("source") != MARKET_SOURCE:
+        raise ValueError("unexpected BTC/USD source")
+    observed_at = data.get("observed_at")
+    fresh(epoch(observed_at), now)
+    rate = data.get("price_usd_exact")
+    if not isinstance(rate, str) or re.fullmatch(r"[0-9]{1,8}(?:\.[0-9]{1,18})?", rate) is None:
+        raise ValueError("invalid BTC/USD decimal")
+    price = Decimal(rate)
+    if not 1 <= price <= 10_000_000:
+        raise ValueError("BTC/USD price outside the supported range")
+    return {"price_usd": float(price), "price_usd_exact": rate,
+            "observed_at": observed_at, "source": MARKET_SOURCE}
 
 
 def main():

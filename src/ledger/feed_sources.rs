@@ -14,6 +14,8 @@ pub(super) enum Selection {
 // Cashu coverage requires both the independently verified destination receipt and
 // the authenticated wallet result. The furthest verified input covers gross
 // contribution credit. Spending fee change again cannot duplicate that input.
+// Unallocated credit must survive a price outage intact until its receipt's
+// cap is known. Only allocated credit can back a physical reservation.
 const SOURCE_COVERAGE: &str = "SELECT l.ledger_id,l.remaining_sats,
     CASE WHEN c.ledger_entry_id IS NULL OR (c.wallet_epoch != ?1
              AND c.core_epoch=(SELECT stream_id FROM overlay_identity WHERE singleton=1)
@@ -24,17 +26,20 @@ const SOURCE_COVERAGE: &str = "SELECT l.ledger_id,l.remaining_sats,
            (SELECT COALESCE(MAX(start_sats+input_sats),0) FROM cashu_funding_ranges WHERE ledger_id=l.ledger_id)
            -(SELECT COALESCE(SUM(p.sats),0) FROM feed_reward_funding_parts p WHERE p.ledger_id=l.ledger_id)))
     END AS eligible_sats
-    FROM reward_funding_lots l LEFT JOIN cashu_receipt_inbox c ON c.ledger_entry_id=l.ledger_id";
+    FROM (SELECT r.ledger_id,MAX(0,r.remaining_sats-COALESCE(p.sats,0)) AS remaining_sats
+          FROM reward_funding_lots r LEFT JOIN feed_cycle_pending p ON p.ledger_id=r.ledger_id) l
+    LEFT JOIN cashu_receipt_inbox c ON c.ledger_entry_id=l.ledger_id";
 
 pub(super) async fn select(
     tx: &mut Transaction<'_, Sqlite>,
     threshold: u64,
     epoch: Option<Uuid>,
+    cycle: Option<&str>,
 ) -> Result<Selection> {
     let cashu: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM cashu_receipt_inbox)")
         .fetch_one(&mut **tx)
         .await?;
-    if !cashu {
+    if !cashu && cycle.is_none() {
         return Ok(Selection::Legacy);
     }
     ensure!(
@@ -56,7 +61,7 @@ pub(super) async fn select(
             eligible: to_u64(row.try_get("eligible_sats")?, "available source credit")?,
         });
     }
-    financial::select(tx, threshold, &lots, epoch).await
+    financial::select(tx, threshold, &lots, epoch, cycle).await
 }
 
 mod financial;

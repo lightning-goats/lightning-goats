@@ -67,7 +67,10 @@ min_sendable_msat = 1000
 max_sendable_msat = 1000000000
 
 [feeder]
+# Fixed threshold for the legacy fixture and grandfathering of existing credit.
 threshold_sats = 1000
+# Select true after qualifying the HOME OpenHAB price path and cycle migration.
+usd_cycle_pricing = false
 inter_feed_delay_seconds = 30
 
 # This is the ONLY trusted-side origin available to lightning-goatsd. The VPS

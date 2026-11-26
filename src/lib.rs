@@ -24,6 +24,7 @@ pub mod cyberherd;
 pub mod domain;
 pub mod feeder;
 pub mod feeding_presentation;
+pub mod feeding_price;
 pub mod gateway;
 pub mod informational;
 pub mod ledger;

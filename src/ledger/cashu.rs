@@ -240,12 +240,12 @@ impl LedgerStore {
         let after = super::feed_cap::cap_new_credit(&mut tx, ledger_id, contribution).await?;
         // Intentionally narrow projection. The mint, balances, private evidence,
         // source event IDs and all proof/operation material stay private.
-        let event = append_event_in_transaction(
-            &mut tx,
-            "payment_received",
-            &public_event(receipt, &user, contribution, after),
-        )
-        .await?;
+        let mut payment_event = public_event(receipt, &user, contribution, after);
+        if super::feed_cycles::funded_by(&mut tx, ledger_id).await? {
+            payment_event["funded_cycle"] = true.into();
+        }
+        let event =
+            append_event_in_transaction(&mut tx, "payment_received", &payment_event).await?;
         sqlx::query("INSERT INTO cashu_receipt_inbox(wallet_instance,acquisition_id,wallet_epoch,core_epoch,mint_id,evidence_digest,receipt_digest,receipt_json,net_sats,ledger_entry_id,event_seq,original_feed_credit_sats,accepted_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)")
             .bind(data.wallet_instance.to_string()).bind(data.acquisition_id.to_string()).bind(data.wallet_epoch.to_string())
             .bind(&epoch).bind(&data.mint_id).bind(&data.acquisition_evidence_digest).bind(&digest)
@@ -383,6 +383,8 @@ async fn verify_row(
     // Validate the original financial projection even after that status changes.
     if let Some(fields) = payload.as_object_mut() {
         fields.remove("feeding");
+        fields.remove("feed_goal");
+        fields.remove("funded_cycle");
     }
     ensure!(
         event.try_get::<String, _>("event_type")? == "payment_received"

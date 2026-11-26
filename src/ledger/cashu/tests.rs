@@ -214,6 +214,15 @@ async fn concurrent_ack_loss_and_conflicting_replay_never_reset_credit_or_caps()
 
 #[tokio::test]
 async fn held_earlier_cashu_does_not_block_later_native_sources_or_reward_provenance() {
+    exercise_held_earlier_cashu(false).await;
+}
+
+#[tokio::test]
+async fn held_cashu_plan_preserves_its_grandfathered_cycle_and_independent_backing() {
+    exercise_held_earlier_cashu(true).await;
+}
+
+async fn exercise_held_earlier_cashu(priced: bool) {
     let (_dir, _url, store, policy) = fixture().await;
     let owner = crate::nostr_event::test_event(1, 1, 100, "", vec![]).pubkey;
     store.configure_feeding_notices(Some(&owner)).await.unwrap();
@@ -247,11 +256,32 @@ async fn held_earlier_cashu_does_not_block_later_native_sources_or_reward_proven
                 .is_err()
         );
     }
+    if priced {
+        store.initialize_feed_cycles(1000).await.unwrap();
+        assert_eq!(count(&store, "feed_cycle_plans").await, 1);
+    }
     let reopened = LedgerStore::connect(&_url).await.unwrap();
     assert!(reopened.begin_feed_attempt(1000).await.unwrap().is_none());
     assert_eq!(count(&reopened, "feed_financial_plans").await, 1);
     assert_eq!(count(&store, "cashu_treasury_intents").await, 0);
     lightning(&store, 600).await;
+    if priced {
+        assert!(store.begin_feed_attempt(1000).await.unwrap().is_none());
+        assert_eq!(
+            store.feed_goal().await.unwrap().unwrap().unallocated_sats,
+            600
+        );
+        let now = chrono::DateTime::<chrono::Utc>::from(std::time::SystemTime::now());
+        let cache = json!({"market":{"source":crate::feeding_price::SOURCE,
+            "observed_at":now.to_rfc3339(),"price_usd_exact":"100000"}});
+        let quote = crate::feeding_price::Observation::from_cache(
+            &serde_json::to_vec(&cache).unwrap(),
+            now.timestamp_millis(),
+        )
+        .unwrap();
+        store.refresh_feed_price(&quote).await.unwrap();
+    }
+
     sqlx::raw_sql("CREATE TRIGGER refuse_physical_parts BEFORE INSERT ON feed_source_parts BEGIN SELECT RAISE(ABORT,'fixture dispatch boundary'); END;")
         .execute(&store.pool).await.unwrap();
     assert!(store.begin_feed_attempt(1000).await.is_err());
@@ -343,7 +373,16 @@ async fn held_earlier_cashu_does_not_block_later_native_sources_or_reward_proven
         .expect("the confirmed feed must reach CyberHerd");
     assert_eq!(feeding.funding.as_ref(), Some(&funding));
     let notice = feeding.presentation.as_ref().unwrap();
-    assert_eq!(notice.triggering_payment_amount_sats, Some(600));
+    assert_eq!(
+        notice.triggering_payment_amount_sats,
+        Some(if priced { 400 } else { 600 })
+    );
+    if priced {
+        let cycle = notice.cycle.as_ref().unwrap();
+        assert_eq!(cycle.target_sats, 1000);
+        assert_eq!(cycle.next_remaining_sats, Some(300));
+        assert_eq!(count(&store, "feed_cycle_plans").await, 2);
+    }
     assert_eq!(notice.feed_credit_sats, 700);
     let cashu_remaining:i64=sqlx::query_scalar("SELECT l.remaining_sats FROM reward_funding_lots l JOIN cashu_receipt_inbox c ON c.ledger_entry_id=l.ledger_id")
         .fetch_one(&store.pool).await.unwrap();

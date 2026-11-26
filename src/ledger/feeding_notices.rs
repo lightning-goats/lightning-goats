@@ -134,12 +134,36 @@ pub(super) async fn export_proof(
         sqlx::query_scalar("SELECT stream_id FROM overlay_identity WHERE singleton=1")
             .fetch_one(&mut **tx)
             .await?;
+    let cycle = match value.get("feed_cycle_id").and_then(Value::as_str) {
+        Some(cycle) => {
+            let saved = super::feed_cycles::confirmed_cycle(tx, id).await?;
+            anyhow::ensure!(
+                saved.as_deref() == Some(cycle),
+                "feeding presentation cycle differs from debit"
+            );
+            let (_, _, user) = super::feed_cycles::triggering_credit(tx, cycle).await?;
+            anyhow::ensure!(
+                value["triggering_address_user"] == serde_json::json!(user),
+                "feeding presentation goat differs from triggering credit"
+            );
+            Some(crate::cyberherd::feeding_delivery::CyclePresentation {
+                id: cycle.parse()?,
+                target_sats: value["threshold_sats"]
+                    .as_u64()
+                    .context("missing completed cycle target")?,
+                next_remaining_sats: value["feed_goal"]["cycle"]["remaining_sats"].as_u64(),
+                triggering_address_user: user,
+            })
+        }
+        None => None,
+    };
     let proof = Proof {
         owner: owner.into(),
         identity: crate::cyberherd::ingress::hash(&(&epoch, owner, "feeding-announcement", key))?,
         source_seq: seq,
         triggering_payment_amount_sats: actual.map(|(_, amount)| amount),
         feed_credit_sats: credit,
+        cycle,
     };
     proof.validate()?;
     Ok(Some(proof))

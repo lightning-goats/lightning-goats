@@ -138,10 +138,10 @@ pub(super) async fn export_proof(
         Some(cycle) => {
             let saved = super::feed_cycles::confirmed_cycle(tx, id).await?;
             anyhow::ensure!(
-                saved.as_deref() == Some(cycle),
+                saved.as_ref().is_some_and(|(id, _)| id == cycle),
                 "feeding presentation cycle differs from debit"
             );
-            let (_, _, user) = super::feed_cycles::triggering_credit(tx, cycle).await?;
+            let user = super::feed_cycles::credit_address_user(tx, actual).await?;
             anyhow::ensure!(
                 value["triggering_address_user"] == serde_json::json!(user),
                 "feeding presentation goat differs from triggering credit"

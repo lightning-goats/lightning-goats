@@ -118,7 +118,8 @@ impl LedgerStore {
         .await?;
 
         if let Some(cycle) = cycle.as_deref() {
-            super::feed_cycles::bind_attempt(&mut transaction, &id.to_string(), cycle).await?;
+            super::feed_cycles::bind_attempt(&mut transaction, &id.to_string(), cycle, false)
+                .await?;
         }
 
         if let super::feed_sources::Selection::Ready(plan, parts) = sources {
@@ -331,8 +332,8 @@ impl LedgerStore {
         // find the receipt that completed this FIFO threshold. A later payment
         // during dispatch cannot replace the original funding contribution.
         let confirmed_cycle = super::feed_cycles::confirm(&mut transaction, id).await?;
-        let triggering_credit = if let Some(cycle) = &confirmed_cycle {
-            Some((cycle.credit_id, cycle.payment_sats))
+        let triggering_credit = if let Some((cycle, false)) = &confirmed_cycle {
+            Some(super::feed_cycles::triggering_credit(&mut transaction, cycle).await?)
         } else if super::feed_sources::frozen(&mut transaction, id).await? {
             super::feed_sources::triggering_credit(&mut transaction, id).await?
         } else {
@@ -345,9 +346,12 @@ impl LedgerStore {
             "threshold_sats": threshold_sats,
             "feed_credit_sats": feed_credit_sats
         });
-        if let Some(cycle) = confirmed_cycle {
-            payload["feed_cycle_id"] = cycle.id.into();
-            payload["triggering_address_user"] = json!(cycle.address_user);
+        if let Some((cycle, _)) = confirmed_cycle {
+            payload["feed_cycle_id"] = cycle.into();
+            payload["triggering_address_user"] = json!(
+                super::feed_cycles::credit_address_user(&mut transaction, triggering_credit)
+                    .await?
+            );
         }
         if let Some((credit_id, _)) = triggering_credit {
             let first: bool = sqlx::query_scalar("SELECT NOT EXISTS(SELECT 1 FROM feeding_announcement_sources WHERE credit_ledger_id=?)")
@@ -404,10 +408,11 @@ pub(super) async fn confirmed_triggering_credit(
 ) -> Result<Option<(i64, u64)>> {
     let schema = super::core_schema_version(tx).await?;
     if schema >= 41
-        && let Some(cycle) = super::feed_cycles::confirmed_cycle(tx, id).await?
+        && let Some((cycle, false)) = super::feed_cycles::confirmed_cycle(tx, id).await?
     {
-        let (ledger, amount, _) = super::feed_cycles::triggering_credit(tx, &cycle).await?;
-        return Ok(Some((ledger, amount)));
+        return Ok(Some(
+            super::feed_cycles::triggering_credit(tx, &cycle).await?,
+        ));
     }
     if schema >= 26 && super::feed_sources::frozen(tx, id).await? {
         super::feed_sources::triggering_credit(tx, id).await

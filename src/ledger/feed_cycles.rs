@@ -281,7 +281,7 @@ async fn seed_legacy_cycles(tx: &mut Transaction<'_, Sqlite>, legacy: u64, now: 
                 .fetch_one(&mut **tx)
                 .await?;
         ensure!(funded, "unresolved attempt has insufficient legacy funding");
-        bind_attempt(tx, &attempt, &first.to_string()).await?;
+        bind_attempt(tx, &attempt, &first.to_string(), true).await?;
     }
     // Pending plans already have their own original source reservation. They
     // belong to the first funded cycle that does not already have an attempt.
@@ -323,13 +323,15 @@ pub(super) async fn bind_attempt(
     tx: &mut Transaction<'_, Sqlite>,
     attempt: &str,
     cycle: &str,
+    migrated: bool,
 ) -> Result<()> {
     let matched = sqlx::query(
         "INSERT INTO feed_cycle_attempts
-         SELECT a.id,c.id FROM feed_attempts a,feed_cycles c
+         SELECT a.id,c.id,? FROM feed_attempts a,feed_cycles c
          WHERE a.id=? AND c.id=? AND a.threshold_sats=c.target_sats
            AND c.funded_at IS NOT NULL AND c.confirmed_attempt IS NULL",
     )
+    .bind(migrated)
     .bind(attempt)
     .bind(cycle)
     .execute(&mut **tx)
@@ -339,26 +341,20 @@ pub(super) async fn bind_attempt(
     Ok(())
 }
 
-pub(super) struct ConfirmedCycle {
-    pub id: String,
-    pub credit_id: i64,
-    pub payment_sats: u64,
-    pub address_user: Option<String>,
-}
-
 pub(super) async fn confirm(
     tx: &mut Transaction<'_, Sqlite>,
     attempt: Uuid,
-) -> Result<Option<ConfirmedCycle>> {
+) -> Result<Option<(String, bool)>> {
     if !enabled(tx).await? {
         return Ok(None);
     }
     let attempt = attempt.to_string();
-    let cycle: String =
-        sqlx::query_scalar("SELECT cycle_id FROM feed_cycle_attempts WHERE attempt_id=?")
-            .bind(&attempt)
-            .fetch_one(&mut **tx)
-            .await?;
+    let (cycle, migrated): (String, bool) = sqlx::query_as(
+        "SELECT cycle_id,migrated_attempt FROM feed_cycle_attempts WHERE attempt_id=?",
+    )
+    .bind(&attempt)
+    .fetch_one(&mut **tx)
+    .await?;
     let updated = sqlx::query(
         "UPDATE feed_cycles SET confirmed_attempt=? WHERE id=? AND confirmed_attempt IS NULL",
     )
@@ -368,38 +364,50 @@ pub(super) async fn confirm(
     .await?
     .rows_affected();
     ensure!(updated == 1, "funded cycle already confirmed");
-    let (credit_id, payment_sats, address_user) = triggering_credit(tx, &cycle).await?;
-    Ok(Some(ConfirmedCycle {
-        id: cycle,
-        credit_id,
-        payment_sats,
-        address_user,
-    }))
+    Ok(Some((cycle, migrated)))
 }
 
 pub(super) async fn confirmed_cycle(
     tx: &mut Transaction<'_, Sqlite>,
     attempt: Uuid,
-) -> Result<Option<String>> {
-    sqlx::query_scalar("SELECT id FROM feed_cycles WHERE confirmed_attempt=?")
-        .bind(attempt.to_string())
-        .fetch_optional(&mut **tx)
-        .await
-        .map_err(Into::into)
+) -> Result<Option<(String, bool)>> {
+    sqlx::query_as(
+        "SELECT c.id,a.migrated_attempt FROM feed_cycles c
+        JOIN feed_cycle_attempts a ON a.attempt_id=c.confirmed_attempt AND a.cycle_id=c.id
+        WHERE c.confirmed_attempt=?",
+    )
+    .bind(attempt.to_string())
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(Into::into)
 }
 
 pub(super) async fn triggering_credit(
     tx: &mut Transaction<'_, Sqlite>,
     cycle: &str,
-) -> Result<(i64, u64, Option<String>)> {
-    let (ledger, amount, user): (i64, i64, Option<String>) = sqlx::query_as(
-        "SELECT a.ledger_id,l.delta_sats,l.address_user FROM feed_cycle_allocations a
+) -> Result<(i64, u64)> {
+    let (ledger, amount): (i64, i64) = sqlx::query_as(
+        "SELECT a.ledger_id,l.delta_sats FROM feed_cycle_allocations a
          JOIN ledger_entries l ON l.id=a.ledger_id WHERE a.cycle_id=? ORDER BY a.ledger_id DESC LIMIT 1",
     )
     .bind(cycle)
     .fetch_one(&mut **tx)
     .await?;
-    Ok((ledger, to_u64(amount, "triggering payment")?, user))
+    Ok((ledger, to_u64(amount, "triggering payment")?))
+}
+
+pub(super) async fn credit_address_user(
+    tx: &mut Transaction<'_, Sqlite>,
+    credit: Option<(i64, u64)>,
+) -> Result<Option<String>> {
+    let Some((id, _)) = credit else {
+        return Ok(None);
+    };
+    sqlx::query_scalar("SELECT address_user FROM ledger_entries WHERE id=?")
+        .bind(id)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(Into::into)
 }
 
 pub(super) async fn funded_by(tx: &mut Transaction<'_, Sqlite>, ledger: i64) -> Result<bool> {

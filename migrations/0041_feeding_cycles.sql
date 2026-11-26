@@ -49,7 +49,8 @@ CREATE INDEX feed_cycle_contribution_history ON feed_cycle_allocations(ledger_id
 
 CREATE TABLE feed_cycle_attempts (
  attempt_id TEXT PRIMARY KEY REFERENCES feed_attempts(id),
- cycle_id TEXT NOT NULL REFERENCES feed_cycles(id)
+ cycle_id TEXT NOT NULL REFERENCES feed_cycles(id),
+ migrated_attempt INTEGER NOT NULL CHECK(migrated_attempt IN (0,1))
 ) STRICT;
 CREATE INDEX feed_cycle_attempt_history ON feed_cycle_attempts(cycle_id);
 

@@ -385,6 +385,8 @@ pub struct LightningAddressConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct FeederConfig {
+    #[serde(default)]
+    pub usd_cycle_pricing: bool,
     pub threshold_sats: u64,
     pub inter_feed_delay_seconds: u64,
 }
@@ -506,6 +508,7 @@ mod tests {
             },
             lightning_address: phase1_addresses(),
             feeder: FeederConfig {
+                usd_cycle_pricing: false,
                 threshold_sats: 1_000,
                 inter_feed_delay_seconds: 30,
             },

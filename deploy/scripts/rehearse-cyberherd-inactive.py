@@ -743,8 +743,8 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
         fee_acceptance = json.loads((fee_review / 'BACKUP-ACCEPTED.json').read_text())
         assert fee_acceptance['cashu_core_source'] is True
         assert fee_acceptance['original_verifier_used'] is False and fee_acceptance['native'] is None
-        assert fee_before['report']['rows']['core']['_sqlx_migrations'] == 40
-        assert fee_after['report']['rows']['core']['_sqlx_migrations'] == 40
+        assert fee_before['report']['rows']['core']['_sqlx_migrations'] == 41
+        assert fee_after['report']['rows']['core']['_sqlx_migrations'] == 41
         assert fee_before['report']['rows']['payout']['_sqlx_migrations'] == 7
         assert fee_after['report']['rows']['payout']['_sqlx_migrations'] == 14
         fee_resumed = json.loads(run(*launcher, '--cyberherd-program-maintenance', 'resume-inclusive-fees',
@@ -1016,8 +1016,10 @@ def contact_upgrade_maintenance(launcher, root, fixture_directory, core_archive,
                 'cashu_funding_ranges', 'feed_conversion_proceeds', 'collector_handoff_amounts',
                 'feed_acquisition_proceeds', 'operator_cashu_execution_claims', 'operator_p2pk_claims',
                 'member_ecash_execution_claims', 'private_contact_entitlements', 'private_contact_requests',
-                'private_contact_tenders', 'private_contact_cashu_receipts'} <= additions
-        assert len(additions) == 41
+                'private_contact_tenders', 'private_contact_cashu_receipts',
+                'feed_cycle_policy', 'feed_cycle_price', 'feed_cycles', 'feed_cycle_pending',
+                'feed_cycle_allocations', 'feed_cycle_attempts', 'feed_cycle_plans'} <= additions
+        assert len(additions) == 48
         assert cashu_migrated['core']['private_contact_entitlements'] == cashu_reference['core']['private_contact_fees']
         assert all(cashu_migrated['core'][table] == 0 for table in additions - {'private_contact_entitlements'})
         assert all(cashu_reference[role] == cashu_migrated[role] for role in ('membership', 'payout', 'signer'))

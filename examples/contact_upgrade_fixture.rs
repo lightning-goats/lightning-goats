@@ -16,7 +16,7 @@ use std::{os::unix::fs::MetadataExt as _, path::Path, time::Duration};
 const GUARD: &str = "/run/lightning-goats-contact-fixture/ALLOW";
 const ATTESTATION: &[u8] = b"LIGHTNING_GOATS_DISPOSABLE_CONTACT_UPGRADE_CI_v1\n";
 const DATABASE: &str = "/var/lib/lightning-goats/lightning-goats.db";
-const CURRENT_CORE_SCHEMA: usize = 40;
+const CURRENT_CORE_SCHEMA: usize = 41;
 
 fn isolated_fixture() -> Result<u32> {
     let uid = std::fs::metadata("/proc/self")?.uid();
@@ -532,6 +532,26 @@ mod tests {
         assert_eq!(time, 7);
         Ok(())
     }
+    #[tokio::test]
+    async fn initialized_funding_cycles_refuse_disposable_demotion() -> anyhow::Result<()> {
+        let pool = current_fixture().await?;
+        let mut tx = pool.begin().await?;
+        sqlx::query("INSERT INTO feed_cycle_policy VALUES(1,7,1000,0)")
+            .execute(&mut *tx)
+            .await?;
+        assert!(super::strip_empty_cashu_fixture(&mut tx).await.is_err());
+        let retained: i64 =
+            sqlx::query_scalar("SELECT initialized_at FROM feed_cycle_policy WHERE singleton=1")
+                .fetch_one(&mut *tx)
+                .await?;
+        assert_eq!(retained, 7);
+        let migrations: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations")
+            .fetch_one(&mut *tx)
+            .await?;
+        assert_eq!(usize::try_from(migrations)?, super::CURRENT_CORE_SCHEMA);
+        Ok(())
+    }
+
     #[test]
     fn disposable_drop_inventory_covers_every_cashu_migration_table() {
         let expected = include_str!("../migrations/0026_cashu_receipts.sql")

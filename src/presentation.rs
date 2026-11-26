@@ -164,7 +164,18 @@ impl MessageRenderer {
             .and_then(Value::as_str)
             .unwrap_or("herd");
         let goat = goat_for_event(event, Some(address_user));
-        let difference_message = difference_message(credit, threshold_sats);
+        let goal = payload.get("feed_goal");
+        let difference_message = goal.map_or_else(
+            || difference_message(credit, threshold_sats),
+            cycle_difference,
+        );
+        let remaining = match goal {
+            Some(goal) => goal["cycle"]["remaining_sats"].as_u64().map_or_else(
+                || "Waiting for a BTC/USD price".to_owned(),
+                |sats| sats.to_string(),
+            ),
+            None => remaining_sats(credit, threshold_sats).to_string(),
+        };
         if zap.is_some_and(|zap| {
             zap.amount_sats() != amount || event.event_type != "payment_received"
         }) {
@@ -177,12 +188,11 @@ impl MessageRenderer {
         };
 
         let mut overlay_values = common_values(amount, &difference_message, goat.name);
-        overlay_values.insert(
-            "difference".to_owned(),
-            remaining_sats(credit, threshold_sats).to_string(),
-        );
+        overlay_values.insert("difference".to_owned(), remaining.clone());
         let nostr_difference = if let Some(note) = pause_note {
-            if credit < threshold_sats {
+            if goal.is_some() {
+                format!("{note} {difference_message}")
+            } else if credit < threshold_sats {
                 format!(
                     "{note} Your sats are saved, with {} more needed to fund the next feeding.",
                     threshold_sats - credit
@@ -199,10 +209,7 @@ impl MessageRenderer {
             difference_message
         };
         let mut nostr_values = common_values(amount, &nostr_difference, goat.nostr_profile);
-        nostr_values.insert(
-            "difference".to_owned(),
-            remaining_sats(credit, threshold_sats).to_string(),
-        );
+        nostr_values.insert("difference".to_owned(), remaining);
 
         if let Some(zap) = zap {
             overlay_values.insert("name".into(), zap.overlay_name(None)?);
@@ -258,8 +265,20 @@ impl MessageRenderer {
             })
             .transpose()?;
         let credit = required_u64(payload, "feed_credit_sats")?;
-        let goat = goat_for_event(event, None);
-        let difference_message = difference_message(credit, threshold_sats);
+        let goat = goat_for_event(
+            event,
+            payload
+                .get("triggering_address_user")
+                .and_then(Value::as_str),
+        );
+        let difference_message = match payload.get("feed_goal") {
+            Some(goal) => format!(
+                "This feeding used {} sats. {}",
+                required_u64(payload, "threshold_sats")?,
+                cycle_difference(goal)
+            ),
+            None => difference_message(credit, threshold_sats),
+        };
         let template = if zap.is_some() {
             select_template(
                 &self.catalog.feeder_trigger_zap,
@@ -306,12 +325,27 @@ impl MessageRenderer {
         if catalog.category("feeder_trigger").is_none() {
             return Ok(None);
         }
-        let goat = goat_for_event(event, None);
+        let goat = goat_for_event(
+            event,
+            proof
+                .cycle
+                .as_ref()
+                .and_then(|cycle| cycle.triggering_address_user.as_deref()),
+        );
+        let difference = proof.cycle.as_ref().map_or_else(
+            || difference_message(proof.feed_credit_sats, threshold),
+            |cycle| {
+                let next = cycle.next_remaining_sats.map_or_else(
+                    || "Waiting for a BTC/USD price.".to_owned(),
+                    |sats| format!("{sats} sats until the next feeding is funded."),
+                );
+                format!("This feeding used {} sats. {next}", cycle.target_sats)
+            },
+        );
         if let Some(zap) = zap {
             if proof.triggering_payment_amount_sats != Some(zap.amount_sats()) {
                 bail!("feeding zap does not match its triggering payment");
             }
-            let difference = difference_message(proof.feed_credit_sats, threshold);
             let compose = |name: String, goat_name: &str| {
                 let mut values = common_values(zap.amount_sats(), &difference, goat_name);
                 values.insert("name".into(), name);
@@ -341,7 +375,6 @@ impl MessageRenderer {
                 },
             }));
         }
-        let difference = difference_message(proof.feed_credit_sats, threshold);
         let compose = |name: &str| -> Result<Option<String>> {
             if let Some(amount) = proof.triggering_payment_amount_sats {
                 catalog.render(
@@ -417,6 +450,9 @@ fn payment_funds_ready_feeding(
         || feeding["awaiting_confirmation"].as_bool() != Some(false)
     {
         return false;
+    }
+    if payload.contains_key("feed_goal") {
+        return payload.get("funded_cycle").and_then(Value::as_bool) == Some(true);
     }
     let Some(threshold) = feeding["threshold_sats"].as_u64().filter(|v| *v > 0) else {
         return false;
@@ -604,6 +640,13 @@ fn feeding_pause_note(value: Option<&Value>) -> Result<Option<String>> {
         ""
     };
     Ok(Some(format!("{prefix}{queue}{pending_note}")))
+}
+
+fn cycle_difference(goal: &Value) -> String {
+    match goal["cycle"]["remaining_sats"].as_u64() {
+        Some(sats) => format!("{sats} sats until the next feeding is funded."),
+        None => "Waiting for a BTC/USD price.".to_owned(),
+    }
 }
 
 fn remaining_sats(credit: u64, threshold: u64) -> u64 {

@@ -19,6 +19,7 @@ struct OverlaySnapshotState {
     feed_credit_sats: u64,
     unresolved_feed_attempt: Option<StoredFeedAttempt>,
     roster: Option<crate::cyberherd::view::Roster>,
+    feed_goal: Option<super::FeedGoal>,
 }
 
 impl LedgerStore {
@@ -71,7 +72,7 @@ impl LedgerStore {
             bail!("feeder threshold must be greater than zero");
         }
         let snapshot = self.overlay_snapshot_state().await?;
-        let message = serde_json::to_string(&json!({
+        let mut document = json!({
             "type": "snapshot",
             "cyberherd":snapshot.roster,
             "seq": snapshot.seq,
@@ -82,8 +83,16 @@ impl LedgerStore {
             "unresolved_feed_attempt": snapshot
                 .unresolved_feed_attempt
                 .map(|attempt| attempt.id.to_string())
-        }))
-        .context("failed serializing overlay snapshot")?;
+        });
+        if let Some(goal) = snapshot.feed_goal {
+            document["feeds_due"] = goal.funded_count.into();
+            document["threshold_sats"] = json!(goal.cycle.as_ref().map(|cycle| cycle.target_sats));
+            document["remainder_sats"] =
+                json!(goal.cycle.as_ref().map(|cycle| cycle.credited_sats));
+            document["feed_goal"] = json!(goal);
+        }
+        let message =
+            serde_json::to_string(&document).context("failed serializing overlay snapshot")?;
         Ok((snapshot.seq, message))
     }
 
@@ -139,12 +148,14 @@ impl LedgerStore {
                 Ok(packet.roster)
             })
             .transpose()?;
+        let feed_goal = super::feed_cycles::goal(&mut transaction).await?;
         transaction.commit().await?;
         Ok(OverlaySnapshotState {
             seq: to_u64(seq, "event sequence")?,
             feed_credit_sats: to_u64(credit, "feed credit")?,
             unresolved_feed_attempt,
             roster,
+            feed_goal,
         })
     }
 }
@@ -174,6 +185,18 @@ pub(super) async fn append_event_in_transaction<T: Serialize>(
                 tracing::warn!(%error,"feeding presentation context unavailable; durable event still commits")
             }
         }
+    }
+    if matches!(
+        event_type,
+        "payment_received"
+            | "operator_credit_added"
+            | "feeder_confirmed"
+            | "feeder_attempt_started"
+            | "feed_reconciled_not_fed"
+            | "feeder_not_dispatched"
+    ) && let Some(goal) = super::feed_cycles::goal(transaction).await?
+    {
+        value["feed_goal"] = json!(goal);
     }
     let payload_json = serde_json::to_string(&value).context("failed serializing durable event")?;
     let result = sqlx::query("INSERT INTO event_log (event_type, payload_json) VALUES (?, ?)")

@@ -110,28 +110,25 @@ impl LedgerStore {
                 feed_credit_sats: before,
             });
         }
-        let after = super::feed_cap::capped_total(&mut tx, before, grant.amount_sats).await?;
-        to_i64(after, "resulting feed credit")?;
+        let ledger_id = sqlx::query("INSERT INTO ledger_entries (entry_type,source_key,delta_sats,address_user,credit_pool) VALUES ('OPERATOR_CREDIT',?,?,?,'herd')")
+            .bind(format!("operator-credit:{}",grant.id)).bind(amount).bind(&grant.address_user)
+            .execute(&mut *tx).await?.last_insert_rowid();
+        let after = super::feed_cap::cap_new_credit(&mut tx, ledger_id, grant.amount_sats).await?;
         if dry_run {
-            tx.commit().await?;
+            tx.rollback().await?;
             return Ok(OperatorCreditResult {
                 status: OperatorCreditStatus::Preview,
                 feed_credit_sats: after,
             });
         }
-        let ledger_id = sqlx::query("INSERT INTO ledger_entries (entry_type,source_key,delta_sats,address_user,credit_pool) VALUES ('OPERATOR_CREDIT',?,?,?,'herd')")
-            .bind(format!("operator-credit:{}",grant.id)).bind(amount).bind(&grant.address_user)
-            .execute(&mut *tx).await?.last_insert_rowid();
-        let after = super::feed_cap::cap_new_credit(&mut tx, ledger_id, grant.amount_sats).await?;
-        let seq = append_event_in_transaction(
-            &mut tx,
-            "operator_credit_added",
-            &json!({
-                "source":"operator_credit", "grant_id":grant.id, "address_user":grant.address_user,
-                "credit_pool":"herd", "amount_sats":grant.amount_sats, "feed_credit_sats":after
-            }),
-        )
-        .await?;
+        let mut payload = json!({
+            "source":"operator_credit", "grant_id":grant.id, "address_user":grant.address_user,
+            "credit_pool":"herd", "amount_sats":grant.amount_sats, "feed_credit_sats":after
+        });
+        if super::feed_cycles::funded_by(&mut tx, ledger_id).await? {
+            payload["funded_cycle"] = true.into();
+        }
+        let seq = append_event_in_transaction(&mut tx, "operator_credit_added", &payload).await?;
         sqlx::query("INSERT INTO operator_credit_grants (grant_id,amount_sats,address_user,credit_pool,reason,ledger_entry_id,event_seq) VALUES (?,?,?,'herd',?,?,?)")
             .bind(&grant.id).bind(amount).bind(&grant.address_user).bind(&grant.reason).bind(ledger_id).bind(to_i64(seq,"event sequence")?)
             .execute(&mut *tx).await?;

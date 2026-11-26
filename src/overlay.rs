@@ -318,12 +318,13 @@ fn durable_event_message_with_zap(
         "payment_received" | "operator_credit_added"
     ) && presentation.overlay_type.is_none()
     {
-        return Ok(
-            json!({"type":"event_skipped", "source_type":event.event_type,
-            "seq":event.seq, "reason":"payment_below_message_minimum",
-            "feed_credit_sats":payload["feed_credit_sats"]})
-            .to_string(),
-        );
+        let mut skipped = json!({"type":"event_skipped", "source_type":event.event_type,
+          "seq":event.seq, "reason":"payment_below_message_minimum",
+          "feed_credit_sats":payload["feed_credit_sats"]});
+        if let Some(goal) = payload.get("feed_goal") {
+            skipped["feed_goal"] = goal.clone();
+        }
+        return Ok(skipped.to_string());
     }
     let object = payload
         .as_object_mut()

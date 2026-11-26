@@ -344,16 +344,30 @@ class OverlayBrowserTests(unittest.TestCase):
         self.assertEqual(self.page.locator("#credit").inner_text(),"502 sats credit")
         self.assertEqual(self.errors,[])
 
+    def test_priced_goal_tracks_allocation_separately_from_physical_queue(self):
+        cycle_id = "fa139958-b166-4110-a53b-d8f64bc2bb80"
+        goal = {"cycle": {"id": cycle_id, "target_sats": 1250, "credited_sats": 760,
+                          "remaining_sats": 490}, "funded_count": 2, "unallocated_sats": 0}
+        self.snapshot(credit=2760, threshold_sats=1250, feed_goal=goal,
+                      unresolved_feed_attempt=STREAM)
+        self.assertIn("490 sats", self.page.locator("#sats_left").inner_text())
+        self.assertEqual(self.page.locator("#due").inner_text(), "1 feed queued")
+        self.assertEqual(self.page.locator("#progress-percentage").inner_text(), "61%")
+
+        self.send({"type": "feed_goal_changed", "seq": 1,
+                   "feed_goal": {"cycle": None, "funded_count": 3, "unallocated_sats": 10}})
+        self.assertEqual(self.page.locator("#sats_left").inner_text(), "Waiting for a BTC/USD price · 2 feedings queued")
+        self.assertEqual(self.page.locator("#due").inner_text(), "2 feeds queued")
+        self.assertEqual(self.errors, [])
+
     def test_public_display_data_expires_and_status_cannot_overwrite_credit(self):
         self.snapshot(credit=2)
         observed = self.page.evaluate("new Date().toISOString()")
         self.display_payload = {"weather":{"observed_at":observed,"temperature_f":65.66},
-            "market":{"observed_at":observed,"price_usd":75000,"change_24h_percent":-2}}
+            "market":{"observed_at":observed,"price_usd":75000,"source":"OpenHAB BTC_USD_Price"}}
         self.page.clock.run_for(16000)
         self.assertEqual(self.page.locator("#current-temperature").inner_text(),"66 °F")
         self.assertEqual(self.page.locator("#btc-price").inner_text(),"BTC: $75,000")
-        self.assertEqual(self.page.locator("#btc-change").inner_text(),"(24h: -2.00%)")
-        self.assertIn("btc-change-negative",self.page.locator("#btc-change").get_attribute("class"))
         self.assertEqual(self.page.locator("#credit").inner_text(),"2 sats credit")
         self.page.clock.run_for(30000)
         self.assertIn("Paused", self.page.locator("#feeding-state").inner_text())

@@ -61,8 +61,10 @@ pub async fn run_feed_step(
         return apply_outcome(ledger, attempt.id, attempt.status, status).await;
     }
 
-    let credit = ledger.feed_credit_sats().await?;
-    let feeds_due = credit / threshold_sats;
+    let feeds_due = match ledger.feed_goal().await? {
+        Some(goal) => goal.funded_count,
+        None => ledger.feed_credit_sats().await? / threshold_sats,
+    };
     if feeds_due == 0 {
         return Ok(FeedWorkerStep::Idle);
     }

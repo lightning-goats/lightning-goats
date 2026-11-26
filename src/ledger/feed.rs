@@ -50,7 +50,6 @@ impl LedgerStore {
         if threshold_sats == 0 {
             bail!("feeder threshold must be greater than zero");
         }
-        let threshold_i64 = to_i64(threshold_sats, "threshold_sats")?;
         // This read/check/write sequence must acquire its writer position before
         // observing credit or pending work. A deferred snapshot cannot safely
         // upgrade after a concurrent funding/settlement transaction writes.
@@ -76,16 +75,29 @@ impl LedgerStore {
             transaction.commit().await?;
             return Ok(None);
         }
-        let credit = feed_credit_in_transaction(&mut transaction).await?;
-        if credit < threshold_sats {
-            transaction.commit().await?;
-            return Ok(None);
-        }
+        let mut cycle = None;
+        let threshold_sats = if super::feed_cycles::enabled(&mut transaction).await? {
+            let Some((id, target)) = super::feed_cycles::next_funded(&mut transaction).await?
+            else {
+                transaction.commit().await?;
+                return Ok(None);
+            };
+            cycle = Some(id);
+            to_u64(target, "funded cycle target")?
+        } else {
+            let credit = feed_credit_in_transaction(&mut transaction).await?;
+            if credit < threshold_sats {
+                transaction.commit().await?;
+                return Ok(None);
+            }
+            threshold_sats
+        };
 
         let sources = super::feed_sources::select(
             &mut transaction,
             threshold_sats,
             self.retained_wallet_epoch,
+            cycle.as_deref(),
         )
         .await?;
         if matches!(sources, super::feed_sources::Selection::Waiting) {
@@ -101,14 +113,27 @@ impl LedgerStore {
             "#,
         )
         .bind(id.to_string())
-        .bind(threshold_i64)
+        .bind(to_i64(threshold_sats, "attempt target")?)
         .execute(&mut *transaction)
         .await?;
+
+        if let Some(cycle) = cycle.as_deref() {
+            super::feed_cycles::bind_attempt(&mut transaction, &id.to_string(), cycle, false)
+                .await?;
+        }
 
         if let super::feed_sources::Selection::Ready(plan, parts) = sources {
             super::feed_sources::freeze(&mut transaction, id, plan, threshold_sats, &parts).await?;
         }
 
+        if cycle.is_some() {
+            append_event_in_transaction(
+                &mut transaction,
+                "feeder_attempt_started",
+                &json!({"feed_attempt_id":id}),
+            )
+            .await?;
+        }
         transaction.commit().await?;
         Ok(Some(id))
     }
@@ -306,7 +331,10 @@ impl LedgerStore {
         // Message attribution only: remove the newest still-unspent credit to
         // find the receipt that completed this FIFO threshold. A later payment
         // during dispatch cannot replace the original funding contribution.
-        let triggering_credit = if super::feed_sources::frozen(&mut transaction, id).await? {
+        let confirmed_cycle = super::feed_cycles::confirm(&mut transaction, id).await?;
+        let triggering_credit = if let Some((cycle, false)) = &confirmed_cycle {
+            Some(super::feed_cycles::triggering_credit(&mut transaction, cycle).await?)
+        } else if super::feed_sources::frozen(&mut transaction, id).await? {
             super::feed_sources::triggering_credit(&mut transaction, id).await?
         } else {
             triggering_credit(&mut transaction, debit_id, feed_credit_sats)
@@ -318,6 +346,13 @@ impl LedgerStore {
             "threshold_sats": threshold_sats,
             "feed_credit_sats": feed_credit_sats
         });
+        if let Some((cycle, _)) = confirmed_cycle {
+            payload["feed_cycle_id"] = cycle.into();
+            payload["triggering_address_user"] = json!(
+                super::feed_cycles::credit_address_user(&mut transaction, triggering_credit)
+                    .await?
+            );
+        }
         if let Some((credit_id, _)) = triggering_credit {
             let first: bool = sqlx::query_scalar("SELECT NOT EXISTS(SELECT 1 FROM feeding_announcement_sources WHERE credit_ledger_id=?)")
                 .bind(credit_id).fetch_one(&mut *transaction).await?;
@@ -371,7 +406,15 @@ pub(super) async fn confirmed_triggering_credit(
     debit: i64,
     balance: u64,
 ) -> Result<Option<(i64, u64)>> {
-    if super::core_schema_version(tx).await? >= 26 && super::feed_sources::frozen(tx, id).await? {
+    let schema = super::core_schema_version(tx).await?;
+    if schema >= 41
+        && let Some((cycle, false)) = super::feed_cycles::confirmed_cycle(tx, id).await?
+    {
+        return Ok(Some(
+            super::feed_cycles::triggering_credit(tx, &cycle).await?,
+        ));
+    }
+    if schema >= 26 && super::feed_sources::frozen(tx, id).await? {
         super::feed_sources::triggering_credit(tx, id).await
     } else {
         triggering_credit(tx, debit, balance).await

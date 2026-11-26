@@ -255,6 +255,38 @@ impl OpenHabClient {
         ))
     }
 
+    /// Fixed item and one response carrying both its state and last update.
+    /// A successful GET alone does not establish that the upstream rate is fresh.
+    pub(crate) async fn btc_usd_price(&self) -> Result<crate::feeding_price::Market> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct PriceItem {
+            name: String,
+            state: String,
+            last_state_update: i64,
+        }
+        let endpoint = self.base_url.join("rest/items/BTC_USD_Price")?;
+        let response = self
+            .client
+            .get(endpoint)
+            .header(reqwest::header::ACCEPT, "application/json")
+            .basic_auth(self.auth_token.as_str(), Some(""))
+            .send()
+            .await?
+            .error_for_status()?;
+        let body = crate::http::bounded_body(response, 4096).await?;
+        let item: PriceItem = serde_json::from_slice(&body)?;
+        anyhow::ensure!(
+            item.name == "BTC_USD_Price",
+            "unexpected OpenHAB price item"
+        );
+        crate::feeding_price::Market::from_openhab(
+            item.state,
+            item.last_state_update,
+            DateTime::<Utc>::from(SystemTime::now()).timestamp_millis(),
+        )
+    }
+
     async fn item_state(&self, item: &str) -> Result<String> {
         self.item_state_bounded(item, 4096).await
     }
@@ -635,6 +667,33 @@ mod tests {
             remote_enabled_item: "remote".into(),
             temperature_item: None,
         }
+    }
+
+    #[tokio::test]
+    async fn btc_price_reads_the_named_item_and_original_update_time() -> Result<()> {
+        use axum::{Json, Router, routing::get};
+        let observed = DateTime::<Utc>::from(SystemTime::now()).timestamp_millis() - 1000;
+        let app = Router::new().route(
+            "/rest/items/BTC_USD_Price",
+            get(move || async move {
+                Json(serde_json::json!({
+                    "name":"BTC_USD_Price","type":"Number","state":"90000",
+                    "lastStateUpdate":observed,"lastStateChange":observed - 120_000
+                }))
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let config = mock_config(format!("http://{}/", listener.local_addr()?));
+        let server = tokio::spawn(async move { axum::serve(listener, app).await });
+        let client = OpenHabClient::new(&config, "synthetic-token".into())?;
+        let market = client.btc_usd_price().await?;
+        let cache = serde_json::to_vec(&serde_json::json!({"market":market}))?;
+        let price = crate::feeding_price::Observation::from_cache(&cache, observed + 1000)?;
+        assert_eq!(price.target_sats(), 1112);
+        assert_eq!(price.observed_at_ms(), observed);
+        assert!(crate::feeding_price::Observation::from_cache(&cache, observed + 300_001).is_err());
+        server.abort();
+        Ok(())
     }
 
     #[tokio::test]

@@ -162,7 +162,7 @@ def main():
                 raise
         record = {"source": args.source, "archive_sha256": args.sha256,
                   "web_root": str(web), "backup": str(backup), "mode_preserved": config["service"]["mode"],
-                  "display_uid": user.pw_uid, "weather_source": "gateway /v1/weather", "market_source": "CoinGecko"}
+                  "display_uid": user.pw_uid, "weather_source": "gateway /v1/weather", "market_source": "gateway /v1/btc-usd (OpenHAB BTC_USD_Price)"}
         marker = Path("/etc/lightning-goats/OVERLAY-INSTALL.json")
         marker.write_text(json.dumps(record, indent=2) + "\n")
         marker.chmod(0o644)

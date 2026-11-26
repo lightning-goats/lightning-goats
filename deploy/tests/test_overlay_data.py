@@ -26,22 +26,24 @@ class OverlayDataTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 DATA.weather_payload({"observed_at": "2026-11-08T22:08:30Z", "temperature_f": value}, NOW)
 
-    def test_market_is_timestamped_usd_and_change_is_optional(self):
-        quote = {"bitcoin": {"last_updated_at": NOW, "usd": 74184, "usd_24h_change": -1.95}}
+    def test_market_preserves_exact_openhab_observation_for_server_pricing(self):
+        quote = {"source": DATA.MARKET_SOURCE, "observed_at": "2026-11-08T22:08:30.125Z",
+                 "price_usd_exact": "79999.999999999999999999"}
         result = DATA.market_payload(quote, NOW)
-        self.assertEqual(result["price_usd"], 74184)
-        self.assertEqual(result["change_24h_percent"], -1.95)
-        self.assertEqual(DATA.epoch(result["observed_at"]), NOW)
-        quote["bitcoin"]["usd_24h_change"] = None
-        self.assertNotIn("change_24h_percent", DATA.market_payload(quote, NOW))
+        self.assertEqual(result["price_usd_exact"], quote["price_usd_exact"])
+        self.assertEqual(result["price_usd"], 80000)
+        self.assertEqual(result["observed_at"], quote["observed_at"])
 
-    def test_market_stale_future_nonfinite_boolean_or_invalid_change_rejected(self):
-        for changes in ({"last_updated_at": NOW-301}, {"last_updated_at": NOW+31},
-                        {"usd": 0}, {"usd": True}, {"usd": float("nan")},
-                        {"usd_24h_change": -101}):
-            quote = {"last_updated_at": NOW, "usd": 74184, "usd_24h_change": -1.95, **changes}
+    def test_market_rejects_bad_source_timestamp_and_price(self):
+        for changes in ({"observed_at": "2020-01-01T00:00:00Z"},
+                        {"observed_at": "2030-01-01T00:00:00Z"},
+                        {"observed_at": None}, {"source": "unapproved"},
+                        {"price_usd_exact": "0"}, {"price_usd_exact": True},
+                        {"price_usd_exact": "NaN"}, {"price_usd_exact": "10000000.1"}):
+            quote = {"source": DATA.MARKET_SOURCE, "observed_at": "2026-11-08T22:08:30Z",
+                     "price_usd_exact": "74184", **changes}
             with self.subTest(changes=changes), self.assertRaises(ValueError):
-                DATA.market_payload({"bitcoin": quote}, NOW)
+                DATA.market_payload(quote, NOW)
 
     def test_only_fixed_read_only_origins_permitted(self):
         for url in ("http://10.8.0.6:8080/rest/items", "http://10.8.0.6:5000/weather", "https://example.com"):

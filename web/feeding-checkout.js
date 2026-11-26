@@ -22,9 +22,10 @@
             const result = await response.json();
             if (id !== current) return;
             const labels = {funded: "This feeding is already funded.", paused: "Feeding is paused.",
-                pending_feed: "A feeding is awaiting confirmation."};
+                pending_feed: "A feeding is awaiting confirmation.", waiting_for_price: "Waiting for a BTC/USD price"};
             if (Object.hasOwn(labels, result.state)) {
                 status.textContent = labels[result.state];
+                el("finishRetry").hidden = result.state !== "waiting_for_price";
                 return;
             }
             if (result.state !== "ready" || !Number.isSafeInteger(result.amount_sats) || result.amount_sats < 1 ||

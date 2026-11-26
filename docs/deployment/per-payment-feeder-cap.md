@@ -6,14 +6,18 @@ one feeding announcement. Separate physical confirmations remain separate durabl
 financial events and reward opportunities; repeated confirmations are not new
 payments. This corrects the uncapped queue and repeated announcement defects.
 
-A payment and its full receipt value remain in the paid journal. With a configured
-threshold, new payment credit can fund at most three additional thresholds after
-the already saved partial threshold. Excess is retired through a distinct audited
-`FEED_CREDIT_RETIRED` entry, never a physical `FEED_DEBIT` or refund. For example,
-70 saved sats plus a 34,031-sat payment allocate 3,000 sats to three feedings and
-retire 31,101 sats. Only actual confirmed delivery consumes those three thresholds.
-Smaller payments retain ordinary progress/remainders. Later payments retain their
-own capped credit; finishing one batch must not erase another donor's funds.
+A payment and its full receipt value remain in the paid journal. In
+[USD-priced cycle mode](usd-feeding-cycles.md), one payment can help fund
+three priced cycles including a partially funded cycle it finishes. If
+490 sats remain and the next two cycles each cost 1,000 sats, a 3,000-sat
+payment allocates 490, 1,000 and 1,000 sats. It retires 510 sats against
+the original receipt and leaves the fourth cycle untouched. A price outage
+defers allocation and preserves the same three-cycle entitlement. Only a
+confirmed physical outcome consumes each funded cycle.
+
+The following legacy procedure documents the fixed-threshold repair and its
+original rollout. Manual legacy backlog correction is fenced after cycle
+initialization to preserve locked allocations.
 
 Retirement consumes the exact original funding lot, without adding any physical
 feed or reward proof. Reopen/recovery checks retain original receipt provenance,

@@ -2,6 +2,35 @@
 use anyhow::{Context, Result, ensure};
 
 pub async fn strip_empty(transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>) -> Result<()> {
+    let cycles_v41: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM _sqlx_migrations WHERE version=41)")
+            .fetch_one(&mut **transaction)
+            .await?;
+    if cycles_v41 {
+        let tables = [
+            "feed_cycle_plans",
+            "feed_cycle_attempts",
+            "feed_cycle_allocations",
+            "feed_cycle_pending",
+            "feed_cycles",
+            "feed_cycle_price",
+            "feed_cycle_policy",
+        ];
+        for table in tables {
+            let used: bool = sqlx::query_scalar(&format!("SELECT EXISTS(SELECT 1 FROM {table})"))
+                .fetch_one(&mut **transaction)
+                .await?;
+            ensure!(!used, "fixture contains funding cycle state in {table}");
+        }
+        for table in tables {
+            sqlx::query(&format!("DROP TABLE {table}"))
+                .execute(&mut **transaction)
+                .await?;
+        }
+        sqlx::query("DELETE FROM _sqlx_migrations WHERE version=41")
+            .execute(&mut **transaction)
+            .await?;
+    }
     let contact_v40: bool =
         sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM _sqlx_migrations WHERE version=40)")
             .fetch_one(&mut **transaction)

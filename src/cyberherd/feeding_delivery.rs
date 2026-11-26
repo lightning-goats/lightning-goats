@@ -13,7 +13,18 @@ pub struct Proof {
     pub source_seq: u64,
     pub triggering_payment_amount_sats: Option<u64>,
     pub feed_credit_sats: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cycle: Option<CyclePresentation>,
 }
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct CyclePresentation {
+    pub id: Uuid,
+    pub target_sats: u64,
+    pub next_remaining_sats: Option<u64>,
+    pub triggering_address_user: Option<String>,
+}
+
 impl Proof {
     pub fn validate(&self) -> Result<()> {
         crate::nostr_event::validate_public_key(&self.owner)?;
@@ -24,6 +35,21 @@ impl Proof {
             || self
                 .triggering_payment_amount_sats
                 .is_some_and(|n| n == 0 || n > i64::MAX as u64)
+            || self.cycle.as_ref().is_some_and(|cycle| {
+                cycle.id.is_nil()
+                    || cycle.target_sats == 0
+                    || cycle.target_sats > i64::MAX as u64
+                    || cycle
+                        .next_remaining_sats
+                        .is_some_and(|n| n == 0 || n > i64::MAX as u64)
+                    || cycle.triggering_address_user.as_ref().is_some_and(|user| {
+                        user.is_empty()
+                            || user.len() > 63
+                            || !user
+                                .bytes()
+                                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+                    })
+            })
         {
             bail!("invalid confirmed-feeding presentation proof");
         }

@@ -43,6 +43,11 @@ struct Args {
     /// Serve local readiness and read-only ledger status for paused recovery.
     #[arg(long)]
     recovery_paused: bool,
+    /// Initialize funding cycles in an existing, stopped-writer ledger and exit.
+    #[arg(long, conflicts_with = "recovery_paused")]
+    initialize_feed_cycles_only: bool,
+    #[arg(long, requires = "initialize_feed_cycles_only")]
+    writers_stopped: bool,
 }
 
 #[derive(Clone)]
@@ -70,9 +75,11 @@ struct StatusResponse {
     lightning_address_users: Vec<String>,
     gateway_reachable: bool,
     feed_credit_sats: u64,
-    threshold_sats: u64,
+    threshold_sats: Option<u64>,
     feeds_due: u64,
-    remainder_sats: u64,
+    remainder_sats: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    feed_goal: Option<lightning_goats::ledger::FeedGoal>,
     unresolved_feed_attempt: Option<String>,
     feeder_override_active: Option<bool>,
     remote_feeding_enabled: Option<bool>,
@@ -100,13 +107,44 @@ async fn main() -> Result<()> {
         return paused_recovery::serve(&config).await;
     }
     let config = Arc::new(AppConfig::load(&args.config)?);
+    if args.initialize_feed_cycles_only {
+        anyhow::ensure!(
+            args.writers_stopped,
+            "explicit stopped-writer attestation required"
+        );
+        anyhow::ensure!(
+            config.feeder.usd_cycle_pricing,
+            "configuration must enable USD cycle pricing"
+        );
+        let ledger = LedgerStore::migrate_feeding_cycle_schema(&config.database.url).await?;
+        ledger
+            .initialize_feed_cycles(config.feeder.threshold_sats)
+            .await?;
+        let goal = ledger
+            .feed_goal()
+            .await?
+            .context("cycle initialization did not persist")?;
+        println!("{}", serde_json::to_string(&goal)?);
+        return Ok(());
+    }
     let mut ledger = LedgerStore::connect(&config.database.url).await?;
     if let Some(receipts) = &config.cashu_receipts {
         ledger = ledger.with_retained_wallet_epoch(receipts.wallet_epoch);
     }
-    ledger
-        .configure_feeder_credit_cap(config.feeder.threshold_sats)
-        .await?;
+    if config.feeder.usd_cycle_pricing {
+        ledger
+            .initialize_feed_cycles(config.feeder.threshold_sats)
+            .await?;
+        refresh_feed_price(&ledger).await?;
+    } else {
+        anyhow::ensure!(
+            ledger.feed_goal().await?.is_none(),
+            "this ledger requires usd_cycle_pricing; use paused recovery to inspect it"
+        );
+        ledger
+            .configure_feeder_credit_cap(config.feeder.threshold_sats)
+            .await?;
+    }
     ledger
         .configure_feeding_notices(
             config
@@ -199,6 +237,21 @@ async fn main() -> Result<()> {
                 config.lnurl.collector.clone(),
             ),
         )
+    });
+    let mut price_reader = tokio::spawn({
+        let enabled = config.feeder.usd_cycle_pricing;
+        let ledger = ledger.clone();
+        async move {
+            if !enabled {
+                return pending::<Result<()>>().await;
+            }
+            loop {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                if let Err(error) = refresh_feed_price(&ledger).await {
+                    tracing::warn!(%error, "unable to update the funding goal from the price cache");
+                }
+            }
+        }
     });
     let mut feeder = tokio::spawn(run_feed_worker(
         ledger.clone(),
@@ -312,6 +365,7 @@ async fn main() -> Result<()> {
         result = &mut server => task_exit("HTTP server", result),
         result = &mut breez_claims => task_exit("Breez claim recovery", result),
         result = &mut feeder => task_exit("feed worker", result),
+        result = &mut price_reader => task_exit("price reader", result),
         result = &mut informational => task_exit("informational worker", result),
         result = &mut solar_presentation => task_exit("solar presentation worker", result),
         result = &mut feeding_presentation => task_exit("feeding presentation worker", result),
@@ -326,6 +380,7 @@ async fn main() -> Result<()> {
     server.abort();
     breez_claims.abort();
     feeder.abort();
+    price_reader.abort();
     informational.abort();
     feeding_presentation.abort();
     solar_presentation.abort();
@@ -434,14 +489,16 @@ async fn feeding_checkout(
     let Ok(_slot) = state.status_slots.try_acquire() else {
         return StatusCode::TOO_MANY_REQUESTS.into_response();
     };
-    let Ok(safety) = state.gateway.feeder_safety().await else {
-        return StatusCode::SERVICE_UNAVAILABLE.into_response();
-    };
-    if !state.config.service.mode.feeder_enabled()
-        || safety.override_enabled
-        || !safety.remote_enabled
-    {
-        return Json(serde_json::json!({"state":"paused"})).into_response();
+    if !state.config.feeder.usd_cycle_pricing {
+        let Ok(safety) = state.gateway.feeder_safety().await else {
+            return StatusCode::SERVICE_UNAVAILABLE.into_response();
+        };
+        if !state.config.service.mode.feeder_enabled()
+            || safety.override_enabled
+            || !safety.remote_enabled
+        {
+            return Json(serde_json::json!({"state":"paused"})).into_response();
+        }
     }
     let Ok(Some(descriptor)) = wallet.public_request().await else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
@@ -460,26 +517,46 @@ async fn healthz() -> Json<HealthResponse> {
     Json(HealthResponse { status: "ok" })
 }
 
+async fn refresh_feed_price(ledger: &LedgerStore) -> Result<()> {
+    use lightning_goats::feeding_price::Observation;
+    let path = std::path::Path::new("/var/cache/lightning-goats-display/overlay-data.json");
+    let observation = Observation::read_cache(
+        path,
+        chrono::DateTime::<chrono::Utc>::from(std::time::SystemTime::now()).timestamp_millis(),
+    )
+    .await;
+    if let Ok(observation) = observation {
+        ledger.refresh_feed_price(&observation).await?;
+    }
+    Ok(())
+}
+
 async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse>, StatusCode> {
     let _permit = state
         .status_slots
         .clone()
         .try_acquire_owned()
         .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
-    let feed_credit_sats = state.ledger.feed_credit_sats().await.map_err(|error| {
-        tracing::error!(%error, "failed reading feed credit for status endpoint");
+    let progress = state.ledger.feed_progress().await.map_err(|error| {
+        tracing::error!(%error, "failed reading feeding progress for status endpoint");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
-    let unresolved_feed_attempt = state
-        .ledger
-        .unresolved_feed_attempt()
-        .await
-        .map_err(|error| {
-            tracing::error!(%error, "failed reading feed attempt for status endpoint");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?
-        .map(|attempt| attempt.id.to_string());
-    let threshold_sats = state.config.feeder.threshold_sats;
+    let feed_credit_sats = progress.credit_sats;
+    let unresolved_feed_attempt = progress.unresolved_attempt;
+    let feed_goal = progress.goal;
+    let legacy_threshold = state.config.feeder.threshold_sats;
+    let (threshold_sats, feeds_due, remainder_sats) = match &feed_goal {
+        Some(goal) => (
+            goal.cycle.as_ref().map(|cycle| cycle.target_sats),
+            goal.funded_count,
+            goal.cycle.as_ref().map(|cycle| cycle.credited_sats),
+        ),
+        None => (
+            Some(legacy_threshold),
+            feed_credit_sats / legacy_threshold,
+            Some(feed_credit_sats % legacy_threshold),
+        ),
+    };
 
     let (gateway_reachable, feeder_override_active, remote_feeding_enabled) =
         match state.gateway.feeder_safety().await {
@@ -508,8 +585,9 @@ async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse>, S
         gateway_reachable,
         feed_credit_sats,
         threshold_sats,
-        feeds_due: feed_credit_sats / threshold_sats,
-        remainder_sats: feed_credit_sats % threshold_sats,
+        feeds_due,
+        remainder_sats,
+        feed_goal,
         unresolved_feed_attempt,
         feeder_override_active,
         remote_feeding_enabled,

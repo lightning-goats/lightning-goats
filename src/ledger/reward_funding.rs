@@ -231,16 +231,7 @@ impl LedgerStore {
     /// remaining FIFO lots; never create a historical feed/reward opportunity.
     pub(crate) async fn initialize_reward_funding(&self) -> Result<()> {
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM reward_funding_state)")
-            .fetch_one(&mut *tx)
-            .await?;
-        if !exists {
-            let through: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(id),0) FROM ledger_entries")
-                .fetch_one(&mut *tx)
-                .await?;
-            sqlx::query("INSERT INTO reward_funding_state(singleton,bootstrap_through,last_ledger_id) VALUES(1,?,0)").bind(through).execute(&mut *tx).await?;
-        }
-        prepare(&mut tx).await?;
+        initialize(&mut tx).await?;
         tx.commit().await?;
         Ok(())
     }
@@ -458,6 +449,20 @@ async fn funding_parts(
         through = ledger_id;
     }
     Ok((parts, through, more))
+}
+
+pub(super) async fn initialize(tx: &mut Transaction<'_, Sqlite>) -> Result<()> {
+    let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM reward_funding_state)")
+        .fetch_one(&mut **tx)
+        .await?;
+    if !exists {
+        let through: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(id),0) FROM ledger_entries")
+            .fetch_one(&mut **tx)
+            .await?;
+        sqlx::query("INSERT INTO reward_funding_state(singleton,bootstrap_through,last_ledger_id) VALUES(1,?,0)").bind(through).execute(&mut **tx).await?;
+    }
+    prepare(tx).await?;
+    Ok(())
 }
 
 /// Sync only positive grants after activation. Every later debit must have

@@ -8,6 +8,8 @@ use serde::Serialize;
 struct Status {
     mode: &'static str,
     feed_credit_sats: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    feed_goal: Option<lightning_goats::ledger::FeedGoal>,
     unresolved_feed_attempt: Option<String>,
 }
 
@@ -16,6 +18,7 @@ impl Status {
         Ok(Self {
             mode: "recovery-paused",
             feed_credit_sats: ledger.feed_credit_sats().await?,
+            feed_goal: ledger.feed_goal().await?,
             unresolved_feed_attempt: ledger
                 .unresolved_feed_attempt()
                 .await?

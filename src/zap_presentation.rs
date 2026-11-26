@@ -278,6 +278,7 @@ mod tests {
             source_seq: 5,
             triggering_payment_amount_sats: Some(21),
             feed_credit_sats: 9,
+            cycle: None,
         };
         let profile = Profile {
             name: "Alice".into(),

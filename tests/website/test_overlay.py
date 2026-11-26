@@ -356,7 +356,7 @@ class OverlayBrowserTests(unittest.TestCase):
 
         self.send({"type": "feed_goal_changed", "seq": 1,
                    "feed_goal": {"cycle": None, "funded_count": 3, "unallocated_sats": 10}})
-        self.assertEqual(self.page.locator("#sats_left").inner_text(), "Waiting for a BTC/USD price")
+        self.assertEqual(self.page.locator("#sats_left").inner_text(), "Waiting for a BTC/USD price · 2 feedings queued")
         self.assertEqual(self.page.locator("#due").inner_text(), "2 feeds queued")
         self.assertEqual(self.errors, [])
 

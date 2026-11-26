@@ -50,9 +50,11 @@
         el("credit").textContent = `${credit.toLocaleString()} ${credit === 1 ? "sat" : "sats"} credit`;
         const due = queuedFeedings();
         el("due").textContent = due ? `${due} feed${due === 1 ? "" : "s"} queued` : "";
+        const pricedProgress = goal?.cycle
+            ? `⚡ ${goal.cycle.remaining_sats.toLocaleString()} sats to fund the next feeding ⚡`
+            : "Waiting for a BTC/USD price";
         el("sats_left").textContent = goal
-            ? (goal.cycle ? `⚡ ${goal.cycle.remaining_sats.toLocaleString()} sats to fund the next feeding ⚡`
-                : "Waiting for a BTC/USD price")
+            ? pricedProgress + (due ? ` · ${due} feeding${due === 1 ? "" : "s"} queued` : "")
             : threshold === null ? "Waiting for feeder status" : due
             ? `⚡ ${due} feeding${due === 1 ? "" : "s"} queued · ${credit.toLocaleString()} sats credit ⚡`
             : awaitingConfirmation ? "⚡ Feeding awaiting confirmation · credit held ⚡"

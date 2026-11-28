@@ -5,6 +5,7 @@ const USAGE: &str = "Usage: lightning-goats-cashu-statectl normalize-copy <priva
        lightning-goats-cashu-statectl verify-recovery-keys <private-stage>\n\
        lightning-goats-cashu-statectl observe-restored-mint <selection> <selection-sha256> <mint-url> <output>\n\
        lightning-goats-cashu-statectl observe-restored-custody <selection> <selection-sha256> <mint-url> <output>\n\
+       lightning-goats-cashu-statectl prepare-custody-repair <private-copy-directory> <plan-sha256>\n\
 Outputs private recovery evidence for separate operator review.";
 fn main() -> ExitCode {
     let args = std::env::args_os().skip(1).collect::<Vec<_>>();
@@ -13,6 +14,23 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
     let key_mode = args.len() == 2 && args[0] == "verify-recovery-keys";
+    if args.len() == 3 && args[0] == "prepare-custody-repair" {
+        let result = args[2].to_str().and_then(|expected| {
+            let receipt = lightning_goats_cashu_compat::custody_repair::prepare(
+                &PathBuf::from(&args[1]),
+                expected,
+            )
+            .ok()?;
+            serde_json::to_string(&receipt).ok()
+        });
+        return if let Some(receipt) = result {
+            println!("{receipt}");
+            ExitCode::SUCCESS
+        } else {
+            eprintln!("Custody repair preparation refused. Retain the original copy and evidence.");
+            ExitCode::from(1)
+        };
+    }
     let custody = args.len() == 5 && args[0] == "observe-restored-custody";
     if custody || args.len() == 5 && args[0] == "observe-restored-mint" {
         let result = (|| {

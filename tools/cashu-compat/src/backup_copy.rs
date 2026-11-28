@@ -79,6 +79,10 @@ pub(crate) struct Frozen {
     hash: String,
 }
 impl Frozen {
+    pub(crate) fn sha256(&self) -> &str {
+        &self.hash
+    }
+
     pub(crate) fn open(path: &Path, maximum: u64, empty: bool) -> Result<Self> {
         let fd = rustix::fs::open(
             path,
@@ -174,7 +178,7 @@ fn basename(name: &str, prefix: &str) -> bool {
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
 }
-fn integrity(connection: &Connection) -> Result<()> {
+pub(crate) fn integrity(connection: &Connection) -> Result<()> {
     ensure!(
         connection.query_row("PRAGMA integrity_check(1)", [], |r| r.get::<_, String>(0))? == "ok",
         "database copy integrity failed"

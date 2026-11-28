@@ -2,6 +2,7 @@
 use crate::service::Runtime;
 use anyhow::{Context, Result, ensure};
 use cdk::cdk_database::WalletDatabase;
+use cdk::nuts::{CurrencyUnit, State};
 use serde_json::{Value, json};
 use std::path::Path;
 use std::time::Duration;
@@ -29,12 +30,16 @@ async fn deliver(runtime: &Runtime, id: Uuid) -> Result<()> {
     let database: &(dyn WalletDatabase<cdk::cdk_database::Error> + Send + Sync) = database.as_ref();
     let owned = database.get_proofs_by_ys(ys.clone()).await?;
     ensure!(owned.len() == ys.len(), "missing original project proofs");
-    let mut expected: std::collections::BTreeSet<_> = ys.into_iter().collect();
+    let mut expected: std::collections::BTreeSet<_> = ys.iter().copied().collect();
     let mut sats = 0u64;
     let mut proofs = Vec::new();
     for info in owned {
         ensure!(
-            info.mint_url == derivation.mint_url && expected.remove(&info.proof.y()?),
+            info.mint_url == derivation.mint_url
+                && info.unit == CurrencyUnit::Sat
+                && matches!(info.state, State::Unspent | State::Spent)
+                && info.used_by_operation.is_none()
+                && expected.remove(&info.proof.y()?),
             "unexpected acquisition proof"
         );
         sats = sats
@@ -93,6 +98,9 @@ async fn deliver(runtime: &Runtime, id: Uuid) -> Result<()> {
     )
     .await?;
     ensure!(ack == confirmation, "core handoff acknowledgment differs");
+    // The collector swap consumes these inputs. Keep the rows so a retry after
+    // this update can send the same proofs and get the original acknowledgment.
+    database.update_proofs_state(ys, State::Spent).await?;
     runtime
         .journal
         .lock()

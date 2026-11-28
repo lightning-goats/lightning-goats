@@ -6,9 +6,9 @@ use rusqlite::{Connection, OpenFlags, TransactionBehavior, params};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     collections::BTreeSet,
-    fs::{File, OpenOptions},
+    fs::{File, OpenOptions, Permissions},
     io::{Read, Seek, SeekFrom, Write},
-    os::unix::fs::OpenOptionsExt,
+    os::unix::fs::{OpenOptionsExt, PermissionsExt},
     path::Path,
 };
 use uuid::Uuid;
@@ -292,6 +292,7 @@ pub fn prepare(directory: &Path, plan_sha256: &str) -> Result<Receipt> {
     }
     let work = tempfile::Builder::new()
         .prefix(".repair-")
+        .permissions(Permissions::from_mode(0o700))
         .tempdir_in(directory)?;
     let repaired = work.path().join(STORE);
     {

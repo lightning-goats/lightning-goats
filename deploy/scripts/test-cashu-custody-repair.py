@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 import sqlite3
+import stat
 import subprocess
 import tempfile
 
@@ -98,6 +99,7 @@ def main():
         assert report['retired_proofs'] == 1 and report['retired_sats'] == 7
         assert report['restore_authorized'] is False and report['resume_authorized'] is False
         result = good / 'repaired/mint-copy.sqlite'
+        assert stat.S_IMODE(result.parent.stat().st_mode) == 0o700
         assert digest(result) == report['repaired_sha256']
         verify_state(source, result)
         assert run(args.statectl, good, sha, True) == report

@@ -154,6 +154,9 @@ Use the [coordinated Cashu collector](cashu-backup-collection.md#coordinated-col
 [installation rehearsal](../../deploy/scripts/rehearse-install.py).
 The Cashu wallet and ledger need a coordinated checkpoint. Seed recovery
 and an ordinary four-journal snapshot are insufficient for this move.
+For mint-confirmed stale inputs from completed collector handoffs, use the
+[custody repair runbook](cashu-collector-custody-repair.md) before collecting a
+new checkpoint for cutover.
 
 ## 3. Cut over in the approved maintenance window
 

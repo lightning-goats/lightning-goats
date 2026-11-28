@@ -27,6 +27,14 @@ locked cycle ID and remaining sats. The physical owner uses the funded
 cycle's target for its debit, independently of later price observations.
 Follow the [cycle deployment and verification runbook](../deployment/usd-feeding-cycles.md).
 
+## Proposed HOME deployment
+
+The [stateful-services cutover plan](../deployment/home-stateful-cutover.md)
+keeps public Nginx and static presentation on the VPS while moving the Goats
+ledger, custody, and workers to HOME. Preserve existing public addresses and
+the mint boundary. Rehearse the coordinated checkpoint, proxy routes, outage
+behavior, and single-writer rollback before the operator approves cutover.
+
 ## Cashu — operator direction, 2026-11-15
 
 The [Nut November plan](cashu-nutnovember-implementation-plan.md) covers

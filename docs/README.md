@@ -1,5 +1,12 @@
 # Lightning Goats documentation
 
+The [HOME stateful-services cutover plan](deployment/home-stateful-cutover.md)
+proposes running the Goats ledger and workers beside the existing HOME mint
+with Nginx on the VPS as the public edge. The
+[HOME](deployment/home-stateful-agent-prompt.md) and
+[VPS](deployment/vps-edge-agent-prompt.md) prompts cover staging, coordinated
+state transfer, a single-writer cutover, and rollback.
+
 The [Cashu / Nut November implementation plan](planning/cashu-nutnovember-implementation-plan.md)
 authorizes isolated ordinary Cashu and NIP-61 implementation alongside Strike.
 See the [compatibility checkpoint](testing/cashu-compatibility.md) for actual progress;

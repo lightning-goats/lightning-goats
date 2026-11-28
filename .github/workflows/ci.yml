@@ -175,6 +175,14 @@ jobs:
           digest = hashlib.sha256(cli.read_bytes()).hexdigest()
           subprocess.run(['sudo', 'unshare', '--net', '--', 'python3', '-B', '../../deploy/scripts/test-cashu-copy-normalization.py', '--cli', str(cli), '--cli-sha256', digest], check=True)
           PYCODE
+      - name: Verify wallet-only custody repair on private copies
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture_parent="$(sudo mktemp -d /root/cashu-custody-fixture.XXXXXXXX)"
+          trap 'sudo rmdir "$fixture_parent"' EXIT
+          sudo unshare --net -- python3 -B ../../deploy/scripts/test-cashu-custody-repair.py \
+            --statectl "$PWD/target/debug/lightning-goats-cashu-statectl" --parent "$fixture_parent"
       - name: Verify offline reusable request preparation through the native CLI
         shell: bash
         run: |

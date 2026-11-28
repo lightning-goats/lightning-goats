@@ -30,7 +30,7 @@ async fn deliver(runtime: &Runtime, id: Uuid) -> Result<()> {
     let database: &(dyn WalletDatabase<cdk::cdk_database::Error> + Send + Sync) = database.as_ref();
     let owned = database.get_proofs_by_ys(ys.clone()).await?;
     ensure!(owned.len() == ys.len(), "missing original project proofs");
-    let mut expected: std::collections::BTreeSet<_> = ys.into_iter().collect();
+    let mut expected: std::collections::BTreeSet<_> = ys.iter().copied().collect();
     let mut sats = 0u64;
     let mut proofs = Vec::new();
     for info in owned {

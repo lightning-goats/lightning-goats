@@ -7,6 +7,13 @@ Work in `lightning-goats/lightning-goats` on the current agreed source. Read
 Own VPS traffic, static assets, source quiescence, backup, and the upstream switch.
 Coordinate with the [HOME agent](home-stateful-agent-prompt.md).
 
+Use [GitHub issue #184](https://github.com/lightning-goats/lightning-goats/issues/184)
+for migration coordination. Check it on startup, before and after shared work,
+at least every five minutes while waiting on the HOME agent or during cutover,
+and immediately before switching the public upstreams. Post verified readiness,
+blockers and handoffs with your revision, redacted evidence, and next action
+and owner. Explicitly acknowledge the HOME agent's handoffs in the issue.
+
 1. Inventory the running receiver, wallet, CyberHerd, collectors and delivery
    workers, protected configurations, durable stores, and their activation
    sockets, timers, helpers and recovery markers. Record the exact running
@@ -29,11 +36,12 @@ Coordinate with the [HOME agent](home-stateful-agent-prompt.md).
    physical UUIDs, and fence all source writers and activators. Make a fresh
    coordinated Cashu checkpoint plus any supplemental stores. Verify checksums,
    scope and off-HOME recovery copy before sending the approved encrypted
-   checkpoint to HOME. Preserve issued invoice and receipt identities and the
-   original VPS programs, journals and Nginx configuration.
-5. Wait for HOME's verified readiness and the operator's traffic-switch
-   decision. Verify the VPS fence again, validate the selected configuration
-   with `nginx -t`, and switch only the approved upstreams. Check route parity
+   checkpoint to HOME. Post the verified admission hold, writer fence, and
+   checkpoint handoff in issue #184. Preserve issued invoice and receipt
+   identities and the original VPS programs, journals and Nginx configuration.
+5. Acknowledge HOME's verified readiness in issue #184 and wait for the operator's
+   traffic-switch decision. Verify the VPS fence again, validate the selected
+   configuration with `nginx -t`, and switch only the approved upstreams. Check route parity
    and signed/protected paths, restart/reconnect behavior and the public
    maintenance path. Correlate the operator's live payment, gateway result,
    debit, new cycle and viewer progress with HOME evidence.

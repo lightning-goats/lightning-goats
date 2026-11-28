@@ -5,6 +5,39 @@ window, live traffic switch, and real payment or feeding checks. Start with the
 [HOME agent prompt](home-stateful-agent-prompt.md) and the
 [VPS agent prompt](vps-edge-agent-prompt.md).
 
+## Coordinate in GitHub issue #184
+
+Use [migration issue #184](https://github.com/lightning-goats/lightning-goats/issues/184)
+for decisions, blockers and handoffs between the HOME and VPS agents. Each
+agent checks it on startup, before starting work that affects the other host,
+after completing a shared step, and at least every five minutes while waiting
+on the other host or during the cutover window. Check again immediately before
+each write-authority or public-route switch. Keep status updates in the issue
+even if you discuss them locally in tmux.
+
+To read the issue from either host, run
+`gh issue view 184 --repo lightning-goats/lightning-goats --comments`.
+
+Post when a phase is ready, a blocker appears or clears, or the other agent
+needs to act. Include the role, UTC time, source revision or artifact identity,
+what was verified, what remains blocked, and the next action and owner. Reply
+to the specific handoff to acknowledge it. Report readiness only after verifying
+the named condition. An unchanged poll needs no new comment. Keep credentials,
+private host inventory and raw evidence in protected storage.
+
+| Handoff | Evidence to post |
+| --- | --- |
+| HOME to VPS before the rehearsal | Private ingress and route contract ready, with allowed and denied path checks. |
+| VPS to HOME after quiescence | Public admission held, VPS writers and activators fenced, and coordinated checkpoint verified. |
+| HOME to VPS before the edge switch | Checkpoint accepted, original operations reconciled, HOME state verified, and sole-writer status confirmed. |
+| VPS and HOME after activation | Edge route and browser smoke results, plus correlated live payment, cycle and feed evidence when available. |
+
+Issue comments record coordination and evidence. The operator retains authority
+for live activation, cutover, real payments and physical feeding. Before a shared
+step that depends on a handoff, confirm the other agent's acknowledgment and
+verify the actual host state. If the issue is unavailable, continue independent
+rehearsal and pause at the shared boundary until the operator can coordinate it.
+
 ## Target layout
 
 ```mermaid

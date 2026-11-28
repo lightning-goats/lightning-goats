@@ -34,6 +34,8 @@ keeps public Nginx and static presentation on the VPS while moving the Goats
 ledger, custody, and workers to HOME. Preserve existing public addresses and
 the mint boundary. Rehearse the coordinated checkpoint, proxy routes, outage
 behavior, and single-writer rollback before the operator approves cutover.
+Use [issue #184](https://github.com/lightning-goats/lightning-goats/issues/184)
+for HOME and VPS migration check-ins and handoffs.
 
 ## Cashu — operator direction, 2026-11-15
 

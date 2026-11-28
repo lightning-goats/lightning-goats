@@ -7,6 +7,13 @@ Work in `lightning-goats/lightning-goats` on the current agreed source. Read
 private ingress, runtime identities, and state proof. Coordinate the tested route
 and journal contracts with the [VPS agent](vps-edge-agent-prompt.md).
 
+Use [GitHub issue #184](https://github.com/lightning-goats/lightning-goats/issues/184)
+for migration coordination. Check it on startup, before and after shared work,
+at least every five minutes while waiting on the VPS agent or during cutover,
+and immediately before assuming HOME write authority. Post verified readiness,
+blockers and handoffs with your revision, redacted evidence, and next action
+and owner. Explicitly acknowledge the VPS agent's handoffs in the issue.
+
 1. Inventory the existing mint, reserve, feeder gateway, OpenHAB owner,
    price/weather source, WireGuard reachability, architecture and installed
    dependencies. Keep those existing service paths working. Verify capacity
@@ -29,15 +36,16 @@ and journal contracts with the [VPS agent](vps-edge-agent-prompt.md).
    privately accepted checkpoint with the exact schema verifier. Verify
    supplemental state outside the standard collector and the operator-owned
    off-HOME recovery copy. Keep writers fenced on any paid-state copy.
-5. Send the VPS agent the private upstream contract, redacted acceptance
-   results, destination inventory, and the exact checks needed before admitting
-   traffic. During the operator-approved handoff, receive and verify the fresh
+5. Post the redacted route-contract and destination readiness in issue #184,
+   with the checks needed before admitting traffic. Exchange protected details
+   through the approved private channel. During the operator-approved handoff,
+   acknowledge the VPS writer-fence and checkpoint update and verify the fresh
    checkpoint plus supplemental stores. Confirm the VPS writer fence before
    assuming write authority. Reconcile deposits, invoices, payout work and
    pending physical UUIDs with their originals.
-6. Return verified HOME health and state evidence before asking the VPS agent
-   to switch upstreams. Observe an approved live contribution and feeding with
-   the operator. If recovery is required after HOME writes, own the new fenced
+6. Post verified HOME health and sole-writer evidence in issue #184 before
+   handing off the upstream switch. Observe an approved live contribution and
+   feeding with the operator. If recovery is required after HOME writes, own the new fenced
    HOME checkpoint and reconcile it before any proposed move back.
 
 Initial handoff deliverables are checked-in configuration examples or staging
